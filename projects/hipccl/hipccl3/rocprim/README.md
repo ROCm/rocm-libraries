@@ -6,7 +6,7 @@ performant GPU-accelerated code on AMD ROCm platform.
 ## Requirements
 
 * Git
-* CMake (3.0.2 or later)
+* CMake (3.10.0 or later)
 * AMD [ROCm](https://rocm.github.io/install.html) platform (1.6.4 or later)
 
 Optional:
