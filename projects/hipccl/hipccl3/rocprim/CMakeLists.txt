@@ -55,6 +55,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Werror")
 # Build options
 option(BUILD_TEST "Build tests (requires googletest)" OFF)
 option(BUILD_BENCHMARK "Build benchmarks" OFF)
+option(BUILD_EXAMPLE "Build examples" OFF)
 
 # Get dependencies
 include(cmake/Dependencies.cmake)
@@ -67,11 +68,16 @@ add_subdirectory(library/rocprim)
 
 # Tests
 if(BUILD_TEST)
-    enable_testing()
-    add_subdirectory(test)
+  enable_testing()
+  add_subdirectory(test)
 endif()
 
 # Benchmarks
 if(BUILD_BENCHMARK)
-    add_subdirectory(benchmark)
+  add_subdirectory(benchmark)
+endif()
+
+# Examples
+if(BUILD_EXAMPLE)
+  add_subdirectory(example)
 endif()

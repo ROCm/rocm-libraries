@@ -55,7 +55,7 @@ build:rocm:
   script:
     - mkdir build
     - cd build
-    - cmake -DBUILD_TEST=ON -DDEPENDENCIES_FORCE_DOWNLOAD=ON ../.
+    - cmake -DBUILD_TEST=ON -DBUILD_EXAMPLE=ON -DBUILD_BENCHMARK=ON -DDEPENDENCIES_FORCE_DOWNLOAD=ON ../.
     - make -j16
   artifacts:
     paths:
