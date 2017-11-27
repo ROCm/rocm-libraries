@@ -20,49 +20,36 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-function(meta_add_rocprim_test TEST_NAME TEST_SOURCE ROCPRIM_TARGET)
-  get_filename_component(TEST_TARGET ${TEST_SOURCE} NAME_WE)
-  add_executable(${TEST_TARGET} ${TEST_SOURCE})
-  target_include_directories(${TEST_TARGET} SYSTEM
-    PUBLIC
-      ${GTEST_INCLUDE_DIRS}
-  )
-  target_link_libraries(${TEST_TARGET}
+function(meta_add_rocprim_benchmark BENCHMARK_SOURCE ROCPRIM_TARGET)
+  get_filename_component(BENCHMARK_TARGET ${BENCHMARK_SOURCE} NAME_WE)
+  add_executable(${BENCHMARK_TARGET} ${BENCHMARK_SOURCE})
+  target_link_libraries(${BENCHMARK_TARGET}
     PRIVATE
       ${ROCPRIM_TARGET}
-      ${GTEST_BOTH_LIBRARIES}
   )
   foreach(amdgpu_target ${AMDGPU_TARGETS})
-    target_link_libraries(${TEST_TARGET}
+    target_link_libraries(${BENCHMARK_TARGET}
       PRIVATE
         --amdgpu-target=${amdgpu_target}
     )
   endforeach()
-  set_target_properties(${TEST_TARGET}
+  set_target_properties(${BENCHMARK_TARGET}
     PROPERTIES
-      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test"
+      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmark"
   )
-  add_test(${TEST_NAME} ${TEST_TARGET})
 endfunction()
 
-function(add_rocprim_test TEST_NAME TEST_SOURCE)
-  meta_add_rocprim_test(${TEST_NAME} ${TEST_SOURCE} rocprim)
+function(add_rocprim_benchmark_hc BENCHMARK_NAME BENCHMARK_SOURCE)
+  meta_add_rocprim_benchmark(${BENCHMARK_NAME} ${BENCHMARK_SOURCE} rocprim_hc)
 endfunction()
 
-function(add_rocprim_test_hc TEST_NAME TEST_SOURCE)
-  meta_add_rocprim_test(${TEST_NAME} ${TEST_SOURCE} rocprim_hc)
-endfunction()
-
-function(add_rocprim_test_hip TEST_NAME TEST_SOURCE)
-  meta_add_rocprim_test(${TEST_NAME} ${TEST_SOURCE} rocprim_hip)
+function(add_rocprim_benchmark_hip BENCHMARK_NAME BENCHMARK_SOURCE)
+  meta_add_rocprim_benchmark(${BENCHMARK_NAME} ${BENCHMARK_SOURCE} rocprim_hip)
 endfunction()
 
 # ****************************************************************************
-# Tests
+# Benchmarks
 # ****************************************************************************
 
-# HC and HIP tests without including rocPRIM
-add_rocprim_test("hcc.device_apis" test_device_apis.cpp)
-
-# rocPRIM tests
-add_rocprim_test("rocprim.basics" test_rocprim_basics.cpp)
+# Example, remove after adding first benchmark
+# add_rocprim_benchmark_hc(benchmark_rocprim_hc.cpp)
