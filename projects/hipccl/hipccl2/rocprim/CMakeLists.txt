@@ -62,6 +62,9 @@ include(cmake/Dependencies.cmake)
 # AMD targets
 set(AMDGPU_TARGETS gfx803;gfx900 CACHE STRING "List of specific machine types for library to target")
 
+# rocPRIM library
+add_subdirectory(library/rocprim)
+
 # Tests
 if(BUILD_TEST)
     enable_testing()
