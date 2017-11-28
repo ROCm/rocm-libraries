@@ -25,14 +25,15 @@
 ///
 /// Header containing all rocPRIM API functions not related to HC and HIP APIs.
 
-#include "rocprim_version.hpp"
 #include "detail/config.hpp"
+#include "rocprim_version.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
 /// \brief Returns version of rocPRIM library.
 /// \return version of rocPRIM library
-unsigned int version()
+inline
+unsigned int version() [[hc]] [[cpu]]
 {
     return ROCPRIM_VERSION;
 }
