@@ -26,7 +26,7 @@
 // HC API
 #include <hcc/hc.hpp>
 
-#include "detail/config.hpp"
+#include "../detail/config.hpp"
 
 #include "thread.hpp"
 

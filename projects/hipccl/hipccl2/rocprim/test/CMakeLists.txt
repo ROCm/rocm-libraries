@@ -69,3 +69,4 @@ add_rocprim_test("rocprim.basics" test_rocprim_basics.cpp)
 
 # rocPRIM HC API tests
 add_rocprim_test_hc("rocprim.hc.intrinsics" test_rocprim_hc_intrinsics.cpp)
+add_rocprim_test_hc("rocprim.hc.warp_scan" test_rocprim_hc_warp_scan.cpp)
