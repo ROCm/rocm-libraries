@@ -28,9 +28,16 @@
 
 // HC API
 #include <hcc/hc.hpp>
+
 // HIP API
 #include <hip/hip_runtime.h>
 #define HIP_CHECK(x) ASSERT_EQ(x, hipSuccess)
+
+template<class T>
+T ax(const T a, const T x) [[hc]]
+{
+    return x * a;
+}
 
 TEST(HCTests, Saxpy)
 {
@@ -46,7 +53,7 @@ TEST(HCTests, Saxpy)
     hc::parallel_for_each(
         hc::extent<1>(N),
         [=](hc::index<1> i) [[hc]] {
-            av_y[i] = a * av_x[i] + av_y[i];
+            av_y[i] = ax(a, av_x[i]) + av_y[i];
         }
     );
 
@@ -64,7 +71,7 @@ void saxpy_kernel(const T * x, T * y, const T a, const size_t size)
     const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
     if(i < size)
     {
-        y[i] += a * x[i];
+        y[i] += ax(a, x[i]);
     }
 }
 
