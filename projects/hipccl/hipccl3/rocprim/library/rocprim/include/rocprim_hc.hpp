@@ -28,11 +28,20 @@
 // HC API
 #include <hcc/hc.hpp>
 
-#include "rocprim.hpp"
+#include "detail/config.hpp"
+
+#include "intrinsics.hpp"
+#include "rocprim_version.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
-// TODO
+/// \brief Returns version of rocPRIM library.
+/// \return version of rocPRIM library
+inline
+unsigned int version() [[hc]] [[cpu]]
+{
+    return ROCPRIM_VERSION;
+}
 
 END_ROCPRIM_NAMESPACE
 
