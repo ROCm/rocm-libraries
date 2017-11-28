@@ -28,7 +28,7 @@
 // HIP API
 #include <hip/hip_runtime.h>
 
-#include "rocprim.hpp"
+#include "rocprim_hc.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 

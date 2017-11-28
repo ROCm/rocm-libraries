@@ -23,21 +23,9 @@
 
 /// \file
 ///
-/// Header containing all rocPRIM API functions not related to HC and HIP APIs.
+/// Meta-header to include rocPRIM HC and HIP APIs.
 
-#include "detail/config.hpp"
-#include "rocprim_version.hpp"
-
-BEGIN_ROCPRIM_NAMESPACE
-
-/// \brief Returns version of rocPRIM library.
-/// \return version of rocPRIM library
-inline
-unsigned int version() [[hc]] [[cpu]]
-{
-    return ROCPRIM_VERSION;
-}
-
-END_ROCPRIM_NAMESPACE
+#include "rocprim_hc.hpp"
+#include "rocprim_hip.hpp"
 
 #endif // ROCPRIM_HPP_
