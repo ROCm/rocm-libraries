@@ -66,3 +66,6 @@ add_rocprim_test("hcc.device_apis" test_device_apis.cpp)
 
 # rocPRIM tests
 add_rocprim_test("rocprim.basics" test_rocprim_basics.cpp)
+
+# rocPRIM HC API tests
+add_rocprim_test_hc("rocprim.hc.intrinsics" test_rocprim_hc_intrinsics.cpp)
