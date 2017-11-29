@@ -75,3 +75,28 @@ if(BUILD_TEST)
   endif()
   find_package(GTest REQUIRED)
 endif()
+
+# Benchmark dependencies
+if(BUILD_BENCHMARK)
+  if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
+    find_package(benchmark QUIET)
+  endif()
+  
+  if(NOT benchmark_FOUND)
+    message(STATUS "Google Benchmark not found. Downloading and building Google Benchmark.")
+    # Download, build and install googlebenchmark library
+    set(GOOGLEBENCHMARK_ROOT ${CMAKE_CURRENT_BINARY_DIR}/googlebenchmark CACHE PATH "")
+    download_project(PROJ   googlebenchmark
+             GIT_REPOSITORY https://github.com/google/benchmark.git
+             GIT_TAG        master
+             INSTALL_DIR    ${GOOGLEBENCHMARK_ROOT}
+             CMAKE_ARGS     -DBENCHMARK_ENABLE_TESTING=OFF -DBUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
+             LOG_DOWNLOAD   TRUE
+             LOG_CONFIGURE  TRUE
+             LOG_BUILD      TRUE
+             LOG_INSTALL    TRUE
+             ${UPDATE_DISCONNECTED_IF_AVAILABLE}
+    )
+  endif()
+  find_package(benchmark REQUIRED CONFIG PATHS ${GOOGLEBENCHMARK_ROOT})
+endif()
