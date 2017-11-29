@@ -26,6 +26,7 @@ function(meta_add_rocprim_benchmark BENCHMARK_SOURCE ROCPRIM_TARGET)
   target_link_libraries(${BENCHMARK_TARGET}
     PRIVATE
       ${ROCPRIM_TARGET}
+      benchmark::benchmark
   )
   foreach(amdgpu_target ${AMDGPU_TARGETS})
     target_link_libraries(${BENCHMARK_TARGET}
@@ -39,12 +40,12 @@ function(meta_add_rocprim_benchmark BENCHMARK_SOURCE ROCPRIM_TARGET)
   )
 endfunction()
 
-function(add_rocprim_benchmark_hc BENCHMARK_NAME BENCHMARK_SOURCE)
-  meta_add_rocprim_benchmark(${BENCHMARK_NAME} ${BENCHMARK_SOURCE} rocprim_hc)
+function(add_rocprim_benchmark_hc BENCHMARK_SOURCE)
+  meta_add_rocprim_benchmark(${BENCHMARK_SOURCE} rocprim_hc)
 endfunction()
 
-function(add_rocprim_benchmark_hip BENCHMARK_NAME BENCHMARK_SOURCE)
-  meta_add_rocprim_benchmark(${BENCHMARK_NAME} ${BENCHMARK_SOURCE} rocprim_hip)
+function(add_rocprim_benchmark_hip BENCHMARK_SOURCE)
+  meta_add_rocprim_benchmark(${BENCHMARK_SOURCE} rocprim_hip)
 endfunction()
 
 # ****************************************************************************
@@ -52,4 +53,5 @@ endfunction()
 # ****************************************************************************
 
 # Example, remove after adding first benchmark
-# add_rocprim_benchmark_hc(benchmark_rocprim_hc.cpp)
+add_rocprim_benchmark_hc(benchmark_rocprim_hc.cpp)
+add_rocprim_benchmark_hip(benchmark_rocprim_hip.cpp)
