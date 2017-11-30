@@ -337,8 +337,10 @@ namespace cli {
 						current = associated;
 						associated->handled = true;
 					} else if (current == nullptr) {
-						error << no_default();
-						return false;
+                        current = find(_arguments[i]);
+                        // Code was commented out so cmdparser can ignore unknown options
+						// error << no_default();
+						// return false;
 					} else {
 						current->arguments.push_back(_arguments[i]);
 						current->handled = true;
