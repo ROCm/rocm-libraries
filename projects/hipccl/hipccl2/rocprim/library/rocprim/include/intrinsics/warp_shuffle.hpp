@@ -33,6 +33,8 @@
 /// \addtogroup collectivewarpmodule
 /// @{
 
+#include "thread.hpp"
+
 BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
