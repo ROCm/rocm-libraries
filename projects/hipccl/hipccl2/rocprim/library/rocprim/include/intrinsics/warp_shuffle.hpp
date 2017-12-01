@@ -28,6 +28,8 @@
 
 #include "detail/config.hpp"
 
+#include "thread.hpp"
+
 /// \addtogroup collectivewarpmodule
 /// @{
 
@@ -73,15 +75,6 @@ auto warp_shuffle_op(T input, ShuffleOp&& op) [[hc]]
 }
 
 } // end namespace detail
-
-/// \brief Returns number of threads in a warp.
-constexpr unsigned int warp_size() [[hc]] [[cpu]]
-{
-    // Using marco allows contexpr, but we may have to
-    // change it to hc::__wavesize() for safety
-    return __HSA_WAVEFRONT_SIZE__;
-    // return hc::__wavesize();
-}
 
 /// \brief Shuffle for any data type.
 ///
@@ -188,5 +181,5 @@ END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_INTRINSICS_WARP_SHUFFLE_HPP_
 
-/// @} 
+/// @}
 // end of group collectivewarpmodule
