@@ -22,11 +22,9 @@
 #define ROCPRIM_DETAIL_CONFIG_HPP_
 
 #define BEGIN_ROCPRIM_NAMESPACE \
-    namespace roc { \
-    namespace prim {
+    namespace rocprim {
 
 #define END_ROCPRIM_NAMESPACE \
-    } /* prim */ \
-    } /* roc */
+    } /* rocprim */
 
 #endif // ROCPRIM_DETAIL_CONFIG_HPP_
