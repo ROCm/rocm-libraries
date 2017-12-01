@@ -18,10 +18,31 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_INTRINSICS_HPP_
-#define ROCPRIM_INTRINSICS_HPP_
+#ifndef ROCPRIM_INTRINSICS_THREAD_HPP_
+#define ROCPRIM_INTRINSICS_THREAD_HPP_
 
-#include "intrinsics/thread.hpp"
-#include "intrinsics/warp_shuffle.hpp"
+// HC API
+#include <hcc/hc.hpp>
 
-#endif // ROCPRIM_INTRINSICS_WARP_SHUFFLE_HPP_
+#include "../detail/config.hpp"
+
+BEGIN_ROCPRIM_NAMESPACE
+
+/// \brief Returns number of threads in a warp.
+constexpr unsigned int warp_size() [[hc]] [[cpu]]
+{
+    // Using marco allows contexpr, but we may have to
+    // change it to hc::__wavesize() for safety
+    return __HSA_WAVEFRONT_SIZE__;
+    // return hc::__wavesize();
+}
+
+/// \brief Returns thread id in a warp.
+inline unsigned int lane_id() [[hc]]
+{
+    return hc::__lane_id();
+}
+
+END_ROCPRIM_NAMESPACE
+
+#endif // ROCPRIM_INTRINSICS_THREAD_HPP_
