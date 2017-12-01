@@ -28,10 +28,10 @@
 // rocPRIM
 #include <rocprim.hpp>
 
-namespace rocprim = roc::prim;
+namespace rp = rocprim;
 
 TEST(RocprimBasicsTests, GetVersion)
 {
-    auto version = rocprim::version();
+    auto version = rp::version();
     EXPECT_EQ(version, ROCPRIM_VERSION);
 }
