@@ -39,28 +39,20 @@ struct is_single_shuffleable {
     static const bool value = sizeof(T) <= sizeof(int);
 };
 
-} // end namespace detail
-
-constexpr unsigned int warp_size() [[hc]] [[cpu]]
-{
-    // Using marco allows contexpr, but we may have to
-    // change it to hc::__wavesize() for safety
-    return __HSA_WAVEFRONT_SIZE__;
-    // return hc::__wavesize();
-}
-
-template<class T>
+// For types that can be shuffled in one operation
+template<class T, class ShuffleOp>
 inline
-auto warp_shuffle_up(T input, const unsigned int delta, const int width = hc::__wavesize()) [[hc]]
+auto warp_shuffle_op(T input, ShuffleOp&& op) [[hc]]
     -> typename std::enable_if<detail::is_single_shuffleable<T>::value, T>::type
 {
     int * shfl_input = reinterpret_cast<int *>(&input);
-    return hc::__shfl_up(*shfl_input, delta, width);
+    return op(*shfl_input);
 }
 
-template<class T>
+// For types that need more than one shuffle operation
+template<class T, class ShuffleOp>
 inline
-auto warp_shuffle_up(T input, const unsigned int delta, const int width = hc::__wavesize()) [[hc]]
+auto warp_shuffle_op(T input, ShuffleOp&& op) [[hc]]
     -> typename std::enable_if<!detail::is_single_shuffleable<T>::value, T>::type
 {
     constexpr int shfl_values = (sizeof(T) + sizeof(int) - 1) / sizeof(int);
@@ -72,9 +64,121 @@ auto warp_shuffle_up(T input, const unsigned int delta, const int width = hc::__
     #pragma unroll
     for(int i = 0; i < shfl_values; i++)
     {
-        shfl_output[i] = hc::__shfl_up(shfl_input[i], delta, width);
+        shfl_output[i] = op(shfl_input[i]);
     }
     return output;
+}
+
+} // end namespace detail
+
+/// \brief Returns number of threads in a warp.
+constexpr unsigned int warp_size() [[hc]] [[cpu]]
+{
+    // Using marco allows contexpr, but we may have to
+    // change it to hc::__wavesize() for safety
+    return __HSA_WAVEFRONT_SIZE__;
+    // return hc::__wavesize();
+}
+
+/// \brief Shuffle for any data type.
+///
+/// Each thread in warp obtains \p input from <tt>src_lane</tt>-th thread
+/// in warp. If \p width is less than warp_size() then each subsection of the
+/// warp behaves as a separate entity with a starting logical lane id of 0.
+/// If \p src_lane is not in [0; \p width) range, the returned value is
+/// equal to \p input passed by the <tt>src_lane modulo width<tt> thread.
+///
+/// Note: The optional \p width parameter must be a power of 2; results are
+/// undefined if it is not a power of 2, or it is greater than warp_size().
+///
+/// \param input - input to pass to other threads
+/// \param src_lane - warp if of a thread whose \p input should be returned
+/// \param width - logical warp width
+template<class T>
+inline
+T warp_shuffle(T input, const int src_lane, const int width = warp_size()) [[hc]]
+{
+    return detail::warp_shuffle_op(
+        input,
+        [=](int v) -> int
+        {
+            return hc::__shfl(v, src_lane, width);
+        }
+    );
+}
+
+/// \brief Shuffle up for any data type.
+///
+/// <tt>i</tt>-th thread in warp obtains \p input from <tt>i-delta</tt>-th
+/// thread in warp. If \p <tt>i-delta</tt> is not in [0; \p width) range,
+/// thread's own \p input is returned.
+///
+/// Note: The optional \p width parameter must be a power of 2; results are
+/// undefined if it is not a power of 2, or it is greater than warp_size().
+///
+/// \param input - input to pass to other threads
+/// \param delta - offset for calulcating source lane id
+/// \param width - logical warp width
+template<class T>
+inline
+T warp_shuffle_up(T input, const unsigned int delta, const int width = warp_size()) [[hc]]
+{
+    return detail::warp_shuffle_op(
+        input,
+        [=](int v) -> int
+        {
+            return hc::__shfl_up(v, delta, width);
+        }
+    );
+}
+
+/// \brief Shuffle down for any data type.
+///
+/// <tt>i</tt>-th thread in warp obtains \p input from <tt>i+delta</tt>-th
+/// thread in warp. If \p <tt>i+delta</tt> is not in [0; \p width) range,
+/// thread's own \p input is returned.
+///
+/// Note: The optional \p width parameter must be a power of 2; results are
+/// undefined if it is not a power of 2, or it is greater than warp_size().
+///
+/// \param input - input to pass to other threads
+/// \param delta - offset for calulcating source lane id
+/// \param width - logical warp width
+template<class T>
+inline
+T warp_shuffle_down(T input, const unsigned int delta, const int width = warp_size()) [[hc]]
+{
+    return detail::warp_shuffle_op(
+        input,
+        [=](int v) -> int
+        {
+            return hc::__shfl_down(v, delta, width);
+        }
+    );
+}
+
+/// \brief Shuffle XOR for any data type.
+///
+/// <tt>i</tt>-th thread in warp obtains \p input from <tt>i^lane_mask</tt>-th
+/// thread in warp.
+///
+/// Note: The optional \p width parameter must be a power of 2; results are
+/// undefined if it is not a power of 2, or it is greater than warp_size().
+///
+/// \param input - input to pass to other threads
+/// \param lane_mask - mask used for calulcating source lane id
+/// \param width - logical warp width
+template<class T>
+inline
+T warp_shuffle_xor(T input, const int lane_mask, const int width = warp_size()) [[hc]]
+{
+    return detail::warp_shuffle_op(
+        input,
+        [=](int v) -> int
+        {
+            return hc::__shfl_xor(v, lane_mask, width);
+        }
+    );
 }
 
 END_ROCPRIM_NAMESPACE
