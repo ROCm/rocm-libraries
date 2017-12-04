@@ -25,70 +25,50 @@
 
 // Google Test
 #include <gtest/gtest.h>
-
 // HC API
 #include <hcc/hc.hpp>
-
 // rocPRIM
 #include <warp/warp_scan.hpp>
 
 #include "test_utils.hpp"
 
-// Custom big structure
-struct custom_struct
-{
-    short i;
-    double d;
-    float f;
-    unsigned int u;
-
-    ~custom_struct() [[cpu]] [[hc]]
-    {
-    }
-
-    custom_struct& operator+=(const custom_struct& rhs) [[cpu]] [[hc]]
-    {
-        this->i += rhs.i;
-        this->d += rhs.d;
-        this->f += rhs.f;
-        this->u += rhs.u;
-        return *this;
-    }
-};
-
-inline custom_struct operator+(custom_struct lhs,
-                             const custom_struct& rhs) [[cpu]] [[hc]]
-{
-    lhs += rhs;
-    return lhs;
-}
-
-inline bool operator==(const custom_struct& lhs, const custom_struct& rhs)
-{
-    return lhs.i == rhs.i && lhs.d == rhs.d
-        && lhs.f == rhs.f && lhs.u == rhs.u;
-}
-
 namespace rp = rocprim;
 
-TEST(RocprimWarpScanShuffleBasedTests, InclusiveScanInt)
-{
-    const size_t warp_size = rp::warp_size();
-    const size_t size = warp_size;
+template<typename WarpSizeWrapper>
+class RocprimWarpScanShuffleBasedTests : public ::testing::Test {
+public:
+    static constexpr unsigned int warp_size = WarpSizeWrapper::value;
+};
 
+TYPED_TEST_CASE(RocprimWarpScanShuffleBasedTests, WarpSizes);
+
+TYPED_TEST(RocprimWarpScanShuffleBasedTests, InclusiveScanInt)
+{
+    constexpr size_t warp_size = TestFixture::warp_size;
+    // Given warp size not supported
+    if(warp_size > rp::warp_size() || !rp::detail::is_power_of_two(warp_size))
+    {
+        return;
+    }
+
+    const size_t size = warp_size * 4;
     // Generate data
     std::vector<int> output = get_random_data<int>(size, -100, 100);
 
     // Calulcate expected results on host
-    std::vector<int> expected(size, 0);
-    for(size_t i = 0; i < output.size(); i++)
+    std::vector<int> expected(output.size(), 0);
+    for(size_t i = 0; i < output.size() / warp_size; i++)
     {
-        expected[i] = output[i] + expected[i > 0 ? i-1 : 0];
+        for(size_t j = 0; j < warp_size; j++)
+        {
+            auto idx = i * warp_size + j;
+            expected[idx] = output[idx] + expected[j > 0 ? idx-1 : idx];
+        }
     }
 
-    hc::array_view<int, 1> d_output(size, output.data());
+    hc::array_view<int, 1> d_output(output.size(), output.data());
     hc::parallel_for_each(
-        hc::extent<1>(size).tile(warp_size),
+        hc::extent<1>(output.size()).tile(warp_size),
         [=](hc::tiled_index<1> i) [[hc]]
         {
             int value = d_output[i];

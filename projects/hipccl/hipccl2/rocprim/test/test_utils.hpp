@@ -26,6 +26,10 @@
 #include <random>
 #include <type_traits>
 
+// Google Test
+#include <gtest/gtest.h>
+
+
 template<class T>
 inline auto get_random_data(size_t size, T min, T max)
     -> typename std::enable_if<std::is_integral<T>::value, std::vector<T>>::type
@@ -49,5 +53,20 @@ inline auto get_random_data(size_t size, T min, T max)
     std::generate(data.begin(), data.end(), [&]() { return distribution(gen); });
     return data;
 }
+
+template<unsigned int Value>
+struct uint_wrapper
+{
+    static constexpr unsigned int value = Value;
+};
+
+typedef ::testing::Types<
+    uint_wrapper<2U>,
+    uint_wrapper<4U>,
+    uint_wrapper<8U>,
+    uint_wrapper<16U>,
+    uint_wrapper<32U>,
+    uint_wrapper<64U>
+> WarpSizes;
 
 #endif // ROCPRIM_TEST_UTILS_HPP_
