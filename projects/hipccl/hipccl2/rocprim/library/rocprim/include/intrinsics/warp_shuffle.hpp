@@ -28,6 +28,9 @@
 
 #include "detail/config.hpp"
 
+/// \addtogroup collectivewarpmodule
+/// @{
+
 BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
@@ -184,3 +187,6 @@ T warp_shuffle_xor(T input, const int lane_mask, const int width = warp_size()) 
 END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_INTRINSICS_WARP_SHUFFLE_HPP_
+
+/// @} 
+// end of group collectivewarpmodule
