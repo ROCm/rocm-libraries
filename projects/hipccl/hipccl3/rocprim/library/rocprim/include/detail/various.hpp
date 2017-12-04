@@ -43,6 +43,11 @@ constexpr bool is_power_of_two(const T x)
     return (x > 0) && ((x & (x - 1)) == 0);
 }
 
+template<unsigned int WarpSize>
+struct is_warpsize_shuffleable {
+    static const bool value = detail::is_power_of_two(WarpSize);
+};
+
 } // end namespace detail
 END_ROCPRIM_NAMESPACE
 

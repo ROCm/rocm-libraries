@@ -34,19 +34,22 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
+namespace detail
+{
+
 template<
     class T,
-    unsigned int WarpSize = warp_size()
+    unsigned int WarpSize
 >
-class warp_scan
+class warp_scan_shuffle
 {
 public:
     static_assert(detail::is_power_of_two(WarpSize), "WarpSize must be power of 2");
 
     typedef detail::empty_type storage;
 
-    template<class BinaryFunction = ::rocprim::plus<T>>
-    T inclusive_scan(T thread_value, BinaryFunction scan_function = BinaryFunction()) [[hc]]
+    template<class BinaryFunction>
+    T inclusive_scan(T thread_value, BinaryFunction scan_function) [[hc]]
     {
         T value;
         #pragma unroll
@@ -59,13 +62,71 @@ public:
         return thread_value;
     }
 
+    template<class BinaryFunction>
+    T inclusive_scan(T thread_value,
+                     storage& temporary_storage,
+                     BinaryFunction scan_function) [[hc]]
+    {
+        (void) temporary_storage;
+        return inclusive_scan(thread_value, scan_function);
+    }
+};
+
+template<
+    class T,
+    unsigned int WarpSize
+>
+class warp_scan_shared_mem
+{
+public:
+    static_assert(
+        detail::is_power_of_two(WarpSize),
+        "warp_scan is not implemented for WarpSizes that are not power of two."
+    );
+
+    typedef detail::empty_type storage;
+};
+
+// Select warp_scan implementation based WarpSize
+template<class T, unsigned int WarpSize>
+struct select_warp_scan_impl
+{
+    typedef typename std::conditional<
+        // can we use shuffle-based implementation?
+        detail::is_warpsize_shuffleable<WarpSize>::value,
+        detail::warp_scan_shuffle<T, WarpSize>, // yes
+        detail::warp_scan_shared_mem<T, WarpSize> // no
+    >::type type;
+};
+
+} // end namespace detail
+
+/// \brief Parallel scan primitive for warp.
+template<
+    class T,
+    unsigned int WarpSize = warp_size()
+>
+class warp_scan : detail::select_warp_scan_impl<T, WarpSize>::type
+{
+    typedef typename detail::select_warp_scan_impl<T, WarpSize>::type base_type;
+
+public:
+    typedef typename base_type::storage storage;
+
+    template<class BinaryFunction = ::rocprim::plus<T>>
+    T inclusive_scan(T thread_value, BinaryFunction scan_function = BinaryFunction()) [[hc]]
+    {
+        return base_type::inclusive_scan(thread_value, scan_function);
+    }
+
     template<class BinaryFunction = ::rocprim::plus<T>>
     T inclusive_scan(T thread_value,
                      storage& temporary_storage,
                      BinaryFunction scan_function = BinaryFunction()) [[hc]]
     {
-        (void) temporary_storage;
-        return inclusive_scan(thread_value, scan_function);
+        return base_type::inclusive_scan(
+            thread_value, temporary_storage, scan_function
+        );
     }
 };
 
