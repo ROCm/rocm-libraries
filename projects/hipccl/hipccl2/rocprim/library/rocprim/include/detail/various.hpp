@@ -43,6 +43,22 @@ constexpr bool is_power_of_two(const T x)
     return (x > 0) && ((x & (x - 1)) == 0);
 }
 
+template<class T>
+constexpr T next_power_of_two(const T x, const T acc = 1)
+{
+    static_assert(std::is_unsigned<T>::value, "T must be unsigned type");
+    return acc >= x ? acc : next_power_of_two(x, 2 * acc);
+}
+
+// Select the minimal warp size for block of size block_size, it's
+// useful for blocks smaller than maximal warp size.
+template<class T>
+constexpr T get_min_warp_size(const T block_size, const T max_warp_size)
+{
+    static_assert(std::is_unsigned<T>::value, "T must be unsigned type");
+    return block_size >= max_warp_size ? max_warp_size : next_power_of_two(block_size);
+}
+
 template<unsigned int WarpSize>
 struct is_warpsize_shuffleable {
     static const bool value = detail::is_power_of_two(WarpSize);
