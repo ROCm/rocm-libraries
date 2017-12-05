@@ -69,4 +69,9 @@ typedef ::testing::Types<
     uint_wrapper<64U>
 > WarpSizes;
 
+size_t get_max_tile_size(hc::accelerator acc = hc::accelerator())
+{
+    return acc.get_max_tile_static_size();
+}
+
 #endif // ROCPRIM_TEST_UTILS_HPP_
