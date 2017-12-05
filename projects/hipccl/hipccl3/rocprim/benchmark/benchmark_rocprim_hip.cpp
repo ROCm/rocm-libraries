@@ -48,7 +48,7 @@ void saxpy_kernel(const T * x, T * y, const T a, const size_t size)
     }
 }
 
-void Saxpy_function(benchmark::State& state, size_t N) {
+void saxpy_function(benchmark::State& state, size_t N) {
     for (auto _ : state) {
         const float a = 100.0f;
         std::vector<float> x(N, 2.0f);
@@ -63,7 +63,7 @@ void Saxpy_function(benchmark::State& state, size_t N) {
             N * sizeof(float),
             hipMemcpyHostToDevice
         );
-        
+
         hipMemcpy(
             d_y, y.data(),
             N * sizeof(float),
@@ -77,13 +77,14 @@ void Saxpy_function(benchmark::State& state, size_t N) {
             dim3((N + 255)/256), dim3(256), 0, 0,
             d_x, d_y, a, N
         );
-        auto end   = std::chrono::high_resolution_clock::now();
-        
-        auto elapsed_seconds = 
+        hipDeviceSynchronize();
+        auto end = std::chrono::high_resolution_clock::now();
+
+        auto elapsed_seconds =
             std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-        
+
         state.SetIterationTime(elapsed_seconds.count());
-        
+
         hipPeekAtLastError();
 
         hipMemcpy(
@@ -104,16 +105,16 @@ int main(int argc, char *argv[])
     parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
     parser.set_optional<size_t>("trials", "trials", 20, "number of trials");
     parser.run_and_exit_if_error();
-    
+
+    benchmark::Initialize(&argc, argv);
+    const size_t size = parser.get<size_t>("size");
+
     hipDeviceProp_t devProp;
     hipGetDeviceProperties(&devProp, 0);
     std::cout << "Device name: " << devProp.name << std::endl;
-    
-    benchmark::Initialize(&argc, argv);
-    const size_t size = parser.get<size_t>("size");
-    benchmark::RegisterBenchmark("Saxpy_HC", Saxpy_function, size);
+
+    benchmark::RegisterBenchmark("Saxpy_HC", saxpy_function, size)->UseManualTime();
     benchmark::RunSpecifiedBenchmarks();
-    
 
     return 0;
 }

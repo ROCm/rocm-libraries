@@ -40,7 +40,7 @@
 const size_t DEFAULT_N = 100;
 #endif
 
-void Saxpy_function(benchmark::State& state, size_t N) {
+void saxpy_function(benchmark::State& state, hc::accelerator_view acc_view, size_t N) {
     for (auto _ : state) {
         const float a = 100.0f;
         std::vector<float> x(N, 2.0f);
@@ -48,21 +48,25 @@ void Saxpy_function(benchmark::State& state, size_t N) {
 
         hc::array_view<float, 1> av_x(N, x.data());
         hc::array_view<float, 1> av_y(N, y.data());
-        
+
+        av_x.synchronize_to(acc_view);
+        av_y.synchronize_to(acc_view);
+
         auto start = std::chrono::high_resolution_clock::now();
-        hc::parallel_for_each(
+        auto event = hc::parallel_for_each(
+            acc_view,
             hc::extent<1>(N),
-            [=](hc::index<1> i) [[hc]] {
+            [=](hc::index<1> i) [[hc]]
+            {
                 av_y[i] = a * av_x[i] + av_y[i];
             }
         );
+        event.wait();
+        auto end = std::chrono::high_resolution_clock::now();
 
-        av_y.synchronize();
-        auto end   = std::chrono::high_resolution_clock::now();
-        
-        auto elapsed_seconds = 
+        auto elapsed_seconds =
             std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-        
+
         state.SetIterationTime(elapsed_seconds.count());
     }
 }
@@ -73,16 +77,17 @@ int main(int argc, char *argv[])
     parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
     parser.set_optional<size_t>("trials", "trials", 20, "number of trials");
     parser.run_and_exit_if_error();
-    
-    hc::accelerator acc;
-    std::wstring_convert<std::codecvt_utf8<wchar_t>> conv;
-    std::cout << "Device name: " << conv.to_bytes(acc.get_description()) << std::endl;
-    
+
     benchmark::Initialize(&argc, argv);
     const size_t size = parser.get<size_t>("size");
-    benchmark::RegisterBenchmark("Saxpy_HC", Saxpy_function, size);
+
+    hc::accelerator acc;
+    auto acc_view = acc.get_default_view();
+    std::wstring_convert<std::codecvt_utf8<wchar_t>> conv;
+    std::cout << "Device name: " << conv.to_bytes(acc.get_description()) << std::endl;
+
+    benchmark::RegisterBenchmark("Saxpy_HC", saxpy_function, acc_view, size)->UseManualTime();
     benchmark::RunSpecifiedBenchmarks();
-    
 
     return 0;
 }
