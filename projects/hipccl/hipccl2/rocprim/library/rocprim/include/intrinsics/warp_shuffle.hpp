@@ -82,7 +82,7 @@ auto warp_shuffle_op(T input, ShuffleOp&& op) [[hc]]
 /// in warp. If \p width is less than warp_size() then each subsection of the
 /// warp behaves as a separate entity with a starting logical lane id of 0.
 /// If \p src_lane is not in [0; \p width) range, the returned value is
-/// equal to \p input passed by the <tt>src_lane modulo width<tt> thread.
+/// equal to \p input passed by the <tt>src_lane modulo width</tt> thread.
 ///
 /// Note: The optional \p width parameter must be a power of 2; results are
 /// undefined if it is not a power of 2, or it is greater than warp_size().
