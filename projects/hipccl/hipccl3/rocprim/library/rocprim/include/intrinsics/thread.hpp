@@ -43,6 +43,33 @@ inline unsigned int lane_id() [[hc]]
     return hc::__lane_id();
 }
 
+namespace detail
+{
+
+inline unsigned int flat_block_size() [[hc]]
+{
+    return hc_get_group_size(2) * hc_get_group_size(1) * hc_get_group_size(0);
+}
+
+inline unsigned int flat_thread_id() [[hc]]
+{
+    return (hc_get_group_size(2) * hc_get_group_size(1) * hc_get_workitem_id(2))
+        + (hc_get_group_size(0) * hc_get_workitem_id(1))
+        + hc_get_workitem_id(0);
+}
+
+inline unsigned int warp_id() [[hc]]
+{
+    return flat_thread_id()/::rocprim::warp_size();
+}
+
+inline void sync_all_threads() [[hc]]
+{
+    hc_barrier(CLK_LOCAL_MEM_FENCE);
+}
+
+} // end detail namespace
+
 END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_INTRINSICS_THREAD_HPP_
