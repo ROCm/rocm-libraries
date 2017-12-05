@@ -1,0 +1,10 @@
+/**
+@brief rocPRIM parallel primitives.
+@author
+@file
+*/
+
+/**
+ * \defgroup collectivemodule rocPRIM parallel primitives
+ * 
+ */
