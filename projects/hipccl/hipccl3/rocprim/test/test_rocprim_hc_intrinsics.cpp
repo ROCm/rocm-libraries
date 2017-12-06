@@ -278,3 +278,34 @@ TEST(RocprimIntrinsicsTests, WarpShuffleXor)
         EXPECT_EQ(output[i], expected[i]);
     }
 }
+
+TEST(RocprimIntrinsicsTests, WarpId)
+{
+    const size_t warp_size = rp::warp_size();
+    const size_t block_size = 4 * warp_size;
+    const size_t size = 16 * block_size;
+
+    std::vector<int> output(size);
+
+    // Calulcate expected results on host
+    std::vector<int> expected(output.size(), 0);
+    for(size_t i = 0; i < output.size(); i++)
+    {
+        expected[i] = (i%block_size)/warp_size;
+    }
+
+    hc::array_view<int, 1> d_output(output.size(), output.data());
+    hc::parallel_for_each(
+        hc::extent<1>(size).tile(block_size),
+        [=](hc::tiled_index<1> i) [[hc]]
+        {
+            d_output[i] = rp::warp_id();
+        }
+    );
+
+    d_output.synchronize();
+    for(int i = 0; i < output.size(); i++)
+    {
+        EXPECT_EQ(output[i], expected[i]);
+    }
+}
