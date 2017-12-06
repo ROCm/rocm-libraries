@@ -61,3 +61,4 @@ add_rocprim_benchmark_hc(benchmark_rocprim_hc.cpp)
 add_rocprim_benchmark_hip(benchmark_rocprim_hip.cpp)
 
 add_rocprim_benchmark(benchmark_rocprim_warp_scan.cpp)
+add_rocprim_benchmark(benchmark_rocprim_block_scan.cpp)
