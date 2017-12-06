@@ -21,6 +21,7 @@
 #ifndef ROCPRIM_INTRINSICS_HPP_
 #define ROCPRIM_INTRINSICS_HPP_
 
+#include "intrinsics/thread.hpp"
 #include "intrinsics/warp_shuffle.hpp"
 
 #endif // ROCPRIM_INTRINSICS_WARP_SHUFFLE_HPP_
