@@ -84,3 +84,62 @@ TYPED_TEST(RocprimWarpScanShuffleBasedTests, InclusiveScanInt)
         EXPECT_EQ(output[i], expected[i]);
     }
 }
+
+TYPED_TEST(RocprimWarpScanShuffleBasedTests, InclusiveScanReduceInt)
+{
+    constexpr size_t warp_size = TestFixture::warp_size;
+    // Given warp size not supported
+    if(warp_size > rp::warp_size() || !rp::detail::is_power_of_two(warp_size))
+    {
+        return;
+    }
+
+    const size_t size = warp_size * 4;
+    // Generate data
+    std::vector<int> output = get_random_data<int>(size, -100, 100);
+    std::vector<int> output_reductions(size / warp_size);
+
+    // Calulcate expected results on host
+    std::vector<int> expected(output.size(), 0);
+    std::vector<int> expected_reductions(output.size(), 0);
+    for(size_t i = 0; i < output.size() / warp_size; i++)
+    {
+        for(size_t j = 0; j < warp_size; j++)
+        {
+            auto idx = i * warp_size + j;
+            expected[idx] = output[idx] + expected[j > 0 ? idx-1 : idx];
+        }
+        expected_reductions[i] = expected[(i+1) * warp_size - 1];
+    }
+
+    hc::array_view<int, 1> d_output(output.size(), output.data());
+    hc::array_view<int, 1> d_output_r(
+        output_reductions.size(), output_reductions.data()
+    );
+    hc::parallel_for_each(
+        hc::extent<1>(output.size()).tile(warp_size),
+        [=](hc::tiled_index<1> i) [[hc]]
+        {
+            int value = d_output[i];
+            rp::warp_scan<int, warp_size> wscan;
+            auto result = wscan.inclusive_scan_reduce(value);
+            d_output[i] = result.scan;
+            if(i.local[0] == 0)
+            {
+                d_output_r[i.tile[0]] = result.reduction;
+            }
+        }
+    );
+
+    d_output.synchronize();
+    for(int i = 0; i < output.size(); i++)
+    {
+        EXPECT_EQ(output[i], expected[i]);
+    }
+
+    d_output_r.synchronize();
+    for(int i = 0; i < output_reductions.size(); i++)
+    {
+        EXPECT_EQ(output_reductions[i], expected_reductions[i]);
+    }
+}
