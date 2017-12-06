@@ -81,7 +81,7 @@ if(BUILD_BENCHMARK)
   if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
     find_package(benchmark QUIET)
   endif()
-  
+
   if(NOT benchmark_FOUND)
     message(STATUS "Google Benchmark not found. Downloading and building Google Benchmark.")
     # Download, build and install googlebenchmark library
@@ -90,7 +90,7 @@ if(BUILD_BENCHMARK)
              GIT_REPOSITORY https://github.com/google/benchmark.git
              GIT_TAG        master
              INSTALL_DIR    ${GOOGLEBENCHMARK_ROOT}
-             CMAKE_ARGS     -DBENCHMARK_ENABLE_TESTING=OFF -DBUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
+             CMAKE_ARGS     -DCMAKE_BUILD_TYPE=RELEASE -DBENCHMARK_ENABLE_TESTING=OFF -DBUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
              LOG_DOWNLOAD   TRUE
              LOG_CONFIGURE  TRUE
              LOG_BUILD      TRUE

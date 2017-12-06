@@ -48,10 +48,13 @@ function(add_rocprim_benchmark_hip BENCHMARK_SOURCE)
   meta_add_rocprim_benchmark(${BENCHMARK_SOURCE} rocprim_hip)
 endfunction()
 
+function(add_rocprim_benchmark BENCHMARK_SOURCE)
+  meta_add_rocprim_benchmark(${BENCHMARK_SOURCE} rocprim)
+endfunction()
+
 # ****************************************************************************
 # Benchmarks
 # ****************************************************************************
 
-# Example, remove after adding first benchmark
-add_rocprim_benchmark_hc(benchmark_rocprim_hc.cpp)
-add_rocprim_benchmark_hip(benchmark_rocprim_hip.cpp)
+add_rocprim_benchmark(benchmark_rocprim_warp_scan.cpp)
+add_rocprim_benchmark(benchmark_rocprim_block_scan.cpp)

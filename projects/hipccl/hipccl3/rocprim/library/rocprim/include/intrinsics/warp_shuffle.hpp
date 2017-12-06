@@ -26,10 +26,14 @@
 // HC API
 #include <hcc/hc.hpp>
 
-#include "detail/config.hpp"
+#include "../detail/config.hpp"
+
+#include "thread.hpp"
 
 /// \addtogroup collectivewarpmodule
 /// @{
+
+#include "thread.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -74,22 +78,13 @@ auto warp_shuffle_op(T input, ShuffleOp&& op) [[hc]]
 
 } // end namespace detail
 
-/// \brief Returns number of threads in a warp.
-constexpr unsigned int warp_size() [[hc]] [[cpu]]
-{
-    // Using marco allows contexpr, but we may have to
-    // change it to hc::__wavesize() for safety
-    return __HSA_WAVEFRONT_SIZE__;
-    // return hc::__wavesize();
-}
-
 /// \brief Shuffle for any data type.
 ///
 /// Each thread in warp obtains \p input from <tt>src_lane</tt>-th thread
 /// in warp. If \p width is less than warp_size() then each subsection of the
 /// warp behaves as a separate entity with a starting logical lane id of 0.
 /// If \p src_lane is not in [0; \p width) range, the returned value is
-/// equal to \p input passed by the <tt>src_lane modulo width<tt> thread.
+/// equal to \p input passed by the <tt>src_lane modulo width</tt> thread.
 ///
 /// Note: The optional \p width parameter must be a power of 2; results are
 /// undefined if it is not a power of 2, or it is greater than warp_size().
@@ -188,5 +183,5 @@ END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_INTRINSICS_WARP_SHUFFLE_HPP_
 
-/// @} 
+/// @}
 // end of group collectivewarpmodule
