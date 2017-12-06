@@ -28,6 +28,8 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
+// Sizes
+
 /// \brief Returns number of threads in a warp.
 constexpr unsigned int warp_size() [[hc]] [[cpu]]
 {
@@ -37,38 +39,58 @@ constexpr unsigned int warp_size() [[hc]] [[cpu]]
     // return hc::__wavesize();
 }
 
+inline unsigned int flat_block_size() [[hc]]
+{
+    return hc_get_group_size(2) * hc_get_group_size(1) * hc_get_group_size(0);
+}
+
+inline unsigned int flat_tile_size() [[hc]]
+{
+    return flat_block_size();
+}
+
+// IDs
+
 /// \brief Returns thread id in a warp.
 inline unsigned int lane_id() [[hc]]
 {
     return hc::__lane_id();
 }
 
-namespace detail
+/// \brief Returns flat thread id in a block (tile).
+inline unsigned int flat_block_thread_id() [[hc]]
 {
-
-inline unsigned int flat_block_size() [[hc]]
-{
-    return hc_get_group_size(2) * hc_get_group_size(1) * hc_get_group_size(0);
-}
-
-inline unsigned int flat_thread_id() [[hc]]
-{
-    return (hc_get_group_size(2) * hc_get_group_size(1) * hc_get_workitem_id(2))
-        + (hc_get_group_size(0) * hc_get_workitem_id(1))
+    return (hc_get_workitem_id(1) * hc_get_group_size(0) * hc_get_group_size(1))
+        + (hc_get_workitem_id(1) * hc_get_group_size(0))
         + hc_get_workitem_id(0);
 }
 
-inline unsigned int warp_id() [[hc]]
+/// \brief Returns flat thread id in a tile (block).
+inline unsigned int flat_tile_thread_id() [[hc]]
 {
-    return flat_thread_id()/::rocprim::warp_size();
+    return flat_block_thread_id();
 }
 
+/// \brief Returns warp id in the block (tile)
+inline unsigned int warp_id() [[hc]]
+{
+    return flat_block_thread_id()/warp_size();
+}
+
+inline unsigned int flat_block_id() [[hc]]
+{
+    return (hc_get_num_groups(2) * hc_get_num_groups(1) * hc_get_group_id(2))
+        + (hc_get_num_groups(0) * hc_get_group_id(1))
+        + hc_get_group_id(0);
+}
+
+// Sync
+
+/// \bried Synchronize all threads in a block (tile)
 inline void sync_all_threads() [[hc]]
 {
     hc_barrier(CLK_LOCAL_MEM_FENCE);
 }
-
-} // end detail namespace
 
 END_ROCPRIM_NAMESPACE
 

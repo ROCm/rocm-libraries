@@ -92,13 +92,13 @@ struct block_scan_warp_scan
 
         // Save the warp reduction result, that is the scan result
         // for last element in each warp
-        const unsigned int warp_id = ::rocprim::detail::warp_id();
+        const unsigned int warp_id = ::rocprim::warp_id();
         const unsigned int lane_id = ::rocprim::lane_id();
         if(lane_id == warp_size - 1)
         {
             storage.warp_scan_results[warp_id] = iscan_result;
         }
-        ::rocprim::detail::sync_all_threads();
+        ::rocprim::sync_all_threads();
 
         // Scan the warp reduction results
         if(lane_id < warps_no)
@@ -109,7 +109,7 @@ struct block_scan_warp_scan
             );
             storage.warp_scan_results[lane_id] = warp_prefix;
         }
-        ::rocprim::detail::sync_all_threads();
+        ::rocprim::sync_all_threads();
 
         // Calculate the final scan result for every thread
         if(warp_id != 0)
