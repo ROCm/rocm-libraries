@@ -18,12 +18,51 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_INTRINSICS_HPP_
-#define ROCPRIM_INTRINSICS_HPP_
+#ifndef ROCPRIM_INTRINSICS_PAIR_HPP_
+#define ROCPRIM_INTRINSICS_PAIR_HPP_
 
-#include "intrinsics/bit.hpp"
-#include "intrinsics/pair.hpp"
-#include "intrinsics/thread.hpp"
-#include "intrinsics/warp_shuffle.hpp"
+// HC API
+#include <hcc/hc.hpp>
 
-#endif // ROCPRIM_INTRINSICS_WARP_SHUFFLE_HPP_
+#include "../detail/config.hpp"
+
+BEGIN_ROCPRIM_NAMESPACE
+
+template<typename X, typename Y>
+struct Pair
+{
+    X x;
+    Y y;
+    
+    Pair() [[hc]]
+    {
+    }
+    
+    Pair(X key, Y value) [[hc]] : x(key), y(value) 
+    {
+    }
+    
+    bool operator==(const Pair<X, Y>& obj) const [[hc]]
+    {
+        return (x == obj.x) && (y == obj.y);
+    }
+    
+    bool operator!=(const Pair<X, Y>& obj) const [[hc]]
+    {
+        return !operator==(obj);
+    }
+    
+    bool operator<(const Pair<X, Y>& obj) const [[hc]]
+    {
+        return (x < obj.x);
+    }
+    
+    bool operator>(const Pair<X, Y>& obj) const [[hc]]
+    {
+        return (x > obj.x);
+    }
+};
+
+END_ROCPRIM_NAMESPACE
+
+#endif // ROCPRIM_INTRINSICS_PAIR_HPP_
