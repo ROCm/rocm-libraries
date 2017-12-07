@@ -41,9 +41,8 @@ template<
     class T,
     unsigned int WarpSize
 >
-class warp_scan_shuffle
+struct warp_scan_shuffle
 {
-public:
     static_assert(detail::is_power_of_two(WarpSize), "WarpSize must be power of 2");
 
     using storage_type = detail::empty_type;
@@ -58,7 +57,7 @@ public:
         for(unsigned int offset = 1; offset < WarpSize; offset *= 2)
         {
             value = warp_shuffle_up(output, offset, WarpSize);
-            unsigned int id = lane_id();
+            unsigned int id = detail::logical_lane_id<WarpSize>();
             if(id >= offset) output = scan_op(value, output);
         }
     }

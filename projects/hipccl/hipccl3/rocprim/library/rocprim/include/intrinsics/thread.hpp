@@ -92,6 +92,33 @@ inline void sync_all_threads() [[hc]]
     hc_barrier(CLK_LOCAL_MEM_FENCE);
 }
 
+namespace detail
+{
+    template<unsigned int LogicalWarpSize>
+    unsigned int logical_lane_id() [[hc]]
+    {
+        return lane_id() & (LogicalWarpSize-1); // same as land_id()%WarpSize
+    }
+
+    template<>
+    unsigned int logical_lane_id<warp_size()>() [[hc]]
+    {
+        return lane_id();
+    }
+
+    template<unsigned int LogicalWarpSize>
+    unsigned int logical_warp_id() [[hc]]
+    {
+        return lane_id()/LogicalWarpSize;
+    }
+
+    template<>
+    unsigned int logical_warp_id<warp_size()>() [[hc]]
+    {
+        return warp_id();
+    }
+}
+
 END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_INTRINSICS_THREAD_HPP_
