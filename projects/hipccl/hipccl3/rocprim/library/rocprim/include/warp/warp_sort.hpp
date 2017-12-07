@@ -50,21 +50,21 @@ private:
         T b = warp_shuffle_xor(a, mask, WarpSize);
         return sort_function(a, b) == dir ? b : a;
     }
-    
+
     template<int warp, class BinaryFunction>
     typename std::enable_if<!(WarpSize > warp), T>::type
     swap(const T a, int mask, int dir, BinaryFunction sort_function) [[hc]]
     {
         return a;
     }
-    
+
     template<int warp, class BinaryFunction>
     typename std::enable_if<(WarpSize > warp), T>::type
     swap(const T a, int mask, int dir, BinaryFunction sort_function) [[hc]]
     {
         return shuffle_swap(a, mask, dir, sort_function);
     }
-    
+
 public:
     static_assert(detail::is_power_of_two(WarpSize), "WarpSize must be power of 2");
 
@@ -74,76 +74,76 @@ public:
     T sort(T thread_value, BinaryFunction sort_function) [[hc]]
     {
         unsigned int id = lane_id();
-        thread_value = swap<2, BinaryFunction>(thread_value, 0x01, 
+        thread_value = swap<2, BinaryFunction>(thread_value, 0x01,
                                                get_bit(id, 1) ^ get_bit(id, 0),
                                                sort_function);
-        
-        thread_value = swap<4, BinaryFunction>(thread_value, 0x02, 
+
+        thread_value = swap<4, BinaryFunction>(thread_value, 0x02,
                                                get_bit(id, 2) ^ get_bit(id, 1),
                                                sort_function);
-        thread_value = swap<4, BinaryFunction>(thread_value, 0x01, 
+        thread_value = swap<4, BinaryFunction>(thread_value, 0x01,
                                                get_bit(id, 2) ^ get_bit(id, 0),
                                                sort_function);
-        
-        thread_value = swap<8, BinaryFunction>(thread_value, 0x04, 
+
+        thread_value = swap<8, BinaryFunction>(thread_value, 0x04,
                                                get_bit(id, 3) ^ get_bit(id, 2),
                                                sort_function);
-        thread_value = swap<8, BinaryFunction>(thread_value, 0x02, 
+        thread_value = swap<8, BinaryFunction>(thread_value, 0x02,
                                                get_bit(id, 3) ^ get_bit(id, 1),
                                                sort_function);
-        thread_value = swap<8, BinaryFunction>(thread_value, 0x01, 
+        thread_value = swap<8, BinaryFunction>(thread_value, 0x01,
                                                get_bit(id, 3) ^ get_bit(id, 0),
                                                sort_function);
-        
-        thread_value = swap<16, BinaryFunction>(thread_value, 0x08, 
+
+        thread_value = swap<16, BinaryFunction>(thread_value, 0x08,
                                                 get_bit(id, 4) ^ get_bit(id, 3),
                                                 sort_function);
-        thread_value = swap<16, BinaryFunction>(thread_value, 0x04, 
+        thread_value = swap<16, BinaryFunction>(thread_value, 0x04,
                                                 get_bit(id, 4) ^ get_bit(id, 2),
                                                 sort_function);
-        thread_value = swap<16, BinaryFunction>(thread_value, 0x02, 
+        thread_value = swap<16, BinaryFunction>(thread_value, 0x02,
                                                 get_bit(id, 4) ^ get_bit(id, 1),
                                                 sort_function);
-        thread_value = swap<16, BinaryFunction>(thread_value, 0x01, 
+        thread_value = swap<16, BinaryFunction>(thread_value, 0x01,
                                                 get_bit(id, 4) ^ get_bit(id, 0),
                                                 sort_function);
-        
-        thread_value = swap<32, BinaryFunction>(thread_value, 0x10, 
+
+        thread_value = swap<32, BinaryFunction>(thread_value, 0x10,
                                                 get_bit(id, 5) ^ get_bit(id, 4),
                                                 sort_function);
-        thread_value = swap<32, BinaryFunction>(thread_value, 0x08, 
+        thread_value = swap<32, BinaryFunction>(thread_value, 0x08,
                                                 get_bit(id, 5) ^ get_bit(id, 3),
                                                 sort_function);
-        thread_value = swap<32, BinaryFunction>(thread_value, 0x04, 
+        thread_value = swap<32, BinaryFunction>(thread_value, 0x04,
                                                 get_bit(id, 5) ^ get_bit(id, 2),
                                                 sort_function);
-        thread_value = swap<32, BinaryFunction>(thread_value, 0x02, 
+        thread_value = swap<32, BinaryFunction>(thread_value, 0x02,
                                                 get_bit(id, 5) ^ get_bit(id, 1),
                                                 sort_function);
-        thread_value = swap<32, BinaryFunction>(thread_value, 0x01, 
+        thread_value = swap<32, BinaryFunction>(thread_value, 0x01,
                                                 get_bit(id, 5) ^ get_bit(id, 0),
                                                 sort_function);
-        
-        thread_value = swap<32, BinaryFunction>(thread_value, 0x20, 
+
+        thread_value = swap<32, BinaryFunction>(thread_value, 0x20,
                                                 get_bit(id, 5),
                                                 sort_function);
-        thread_value = swap<16, BinaryFunction>(thread_value, 0x10, 
+        thread_value = swap<16, BinaryFunction>(thread_value, 0x10,
                                                 get_bit(id, 4),
                                                 sort_function);
-        thread_value = swap<8, BinaryFunction>(thread_value, 0x08, 
+        thread_value = swap<8, BinaryFunction>(thread_value, 0x08,
                                                get_bit(id, 3),
                                                sort_function);
-        thread_value = swap<4, BinaryFunction>(thread_value, 0x04, 
+        thread_value = swap<4, BinaryFunction>(thread_value, 0x04,
                                                get_bit(id, 2),
                                                sort_function);
-        thread_value = swap<2, BinaryFunction>(thread_value, 0x02, 
+        thread_value = swap<2, BinaryFunction>(thread_value, 0x02,
                                                get_bit(id, 1),
                                                sort_function);
-        
-        thread_value = shuffle_swap<BinaryFunction>(thread_value, 0x01, 
+
+        thread_value = shuffle_swap<BinaryFunction>(thread_value, 0x01,
                                                     get_bit(id, 0),
                                                     sort_function);
-        
+
         return thread_value;
     }
 
@@ -155,12 +155,12 @@ public:
         (void) temporary_storage;
         return sort(thread_value, sort_function);
     }
-    
+
     template<class BinaryFunction>
     T sort_by_key(T thread_key, T thread_value, BinaryFunction sort_function) [[hc]]
     {
         //unsigned int id = lane_id();
-                
+
         return thread_value;
     }
 
@@ -173,7 +173,7 @@ public:
         return sort_by_key(thread_key, thread_value, sort_function);
     }
 };
-    
+
 template<
     class T,
     unsigned int WarpSize
@@ -200,66 +200,57 @@ struct select_warp_sort_impl
         detail::warp_sort_shared_mem<T, WarpSize> // no
     >::type type;
 };
-    
+
 } // end namespace detail
 
 /// \brief Parallel sort primitive for warp.
 template<
     class T,
-    unsigned int WarpSize = warp_size()
+    unsigned int WarpSize = warp_size(),
+    class U = T
 >
 class warp_sort : detail::select_warp_sort_impl<T, WarpSize>::type
 {
     typedef typename detail::select_warp_sort_impl<T, WarpSize>::type base_type;
+    typedef typename detail::select_warp_sort_impl<Pair<T, U>, WarpSize>::type pair_type;
 
 public:
     typedef typename base_type::storage storage;
 
     template<class BinaryFunction = ::rocprim::less<T>>
-    T sort(T thread_value, BinaryFunction sort_function = BinaryFunction()) [[hc]]
+    void sort(T& thread_value, BinaryFunction sort_function = BinaryFunction()) [[hc]]
     {
-        return base_type::sort(thread_value, sort_function);
+        thread_value = base_type::sort(thread_value, sort_function);
     }
 
     template<class BinaryFunction = ::rocprim::less<T>>
-    T sort(T thread_value,
+    void sort(T& thread_value,
            storage& temporary_storage,
            BinaryFunction sort_function = BinaryFunction()) [[hc]]
     {
-        return base_type::sort(
+        thread_value = base_type::sort(
             thread_value, temporary_storage, sort_function
         );
     }
-};
-
-template<
-    class T,
-    class U,
-    unsigned int WarpSize = warp_size()
->
-class warp_sort_by_key : detail::select_warp_sort_impl<Pair<T, U>, WarpSize>::type
-{
-    typedef typename detail::select_warp_sort_impl<Pair<T, U>, WarpSize>::type base_type;
-
-public:
-    typedef typename base_type::storage storage;
 
     template<class BinaryFunction = ::rocprim::less<Pair<T, U>>>
-    void sort(T & thread_key, U & thread_value, BinaryFunction sort_function = BinaryFunction()) [[hc]]
+    void sort(T& thread_key, U& thread_value, BinaryFunction sort_function = BinaryFunction()) [[hc]]
     {
+        pair_type ptype;
         Pair<T, U> pair(thread_key, thread_value);
-        pair = base_type::sort(pair, sort_function);
+        pair = ptype.sort(pair, sort_function);
         thread_key = pair.x;
         thread_value = pair.y;
     }
 
     template<class BinaryFunction = ::rocprim::less<Pair<T, U>>>
-    void sort(T & thread_key, U & thread_value,
+    void sort(T& thread_key, U& thread_value,
            storage& temporary_storage,
            BinaryFunction sort_function = BinaryFunction()) [[hc]]
     {
+        pair_type ptype;
         Pair<T, U> pair(thread_key, thread_value);
-        pair = base_type::sort(
+        pair = ptype.sort(
             pair, temporary_storage, sort_function
         );
         thread_key = pair.x;

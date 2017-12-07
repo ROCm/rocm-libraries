@@ -52,14 +52,14 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortInt)
     {
         return;
     }
-    
+
     const size_t size = warp_size * 4;
     // Generate data
     std::vector<int> output = get_random_data<int>(size, -100, 100);
 
     // Calulcate expected results on host
     std::vector<int> expected(output);
-    
+
     for(size_t i = 0; i < output.size() / warp_size; i++)
     {
         std::sort(expected.begin() + (i * warp_size), expected.begin() + ((i + 1) * warp_size));
@@ -72,7 +72,7 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortInt)
         {
             int value = d_output[i];
             rp::warp_sort<int, warp_size> wsort;
-            value = wsort.sort(value);
+            wsort.sort(value);
             d_output[i] = value;
         }
     );
@@ -92,13 +92,13 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
     {
         return;
     }
-    
+
     const size_t size = warp_size * 4;
     // Generate data
     std::vector<int> output_key(size);
     std::iota(output_key.begin(), output_key.end(), 0);
     std::vector<int> output_value = get_random_data<int>(size, -100, 100);
-    
+
     // Combine vectors to form pairs with key and value
     std::vector<std::pair<int, int>> target(size);
     for (unsigned i = 0; i < target.size(); i++)
@@ -106,7 +106,7 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
 
     // Calulcate expected results on host
     std::vector<std::pair<int, int>> expected(target);
-    
+
     for(size_t i = 0; i < expected.size() / warp_size; i++)
     {
         std::sort(expected.begin() + (i * warp_size), expected.begin() + ((i + 1) * warp_size));
@@ -118,7 +118,7 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
         hc::extent<1>(output_key.size()).tile(warp_size),
         [=](hc::tiled_index<1> i) [[hc]]
         {
-            rp::warp_sort_by_key<int, int, warp_size> wsort;
+            rp::warp_sort<int, warp_size, int> wsort;
             wsort.sort(d_output_key[i], d_output_value[i]);
         }
     );
