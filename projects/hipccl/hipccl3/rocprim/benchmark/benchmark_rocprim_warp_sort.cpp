@@ -90,6 +90,39 @@ void benchmark_hc_warp_sort(benchmark::State& state, hc::accelerator_view acc_vi
     }
 }
 
+template<unsigned int WarpSize, unsigned int BlockSize>
+void benchmark_hc_warp_sort_by_key(benchmark::State& state, hc::accelerator_view acc_view, size_t N)
+{
+    const auto size = BlockSize * ((N + BlockSize - 1)/BlockSize);
+    for (auto _ : state)
+    {
+        std::vector<float> x(size, 1.0f);
+        hc::array_view<float, 1> av_x(size, x.data());
+        av_x.synchronize_to(acc_view);
+        acc_view.wait();
+
+        auto start = std::chrono::high_resolution_clock::now();
+        auto event = hc::parallel_for_each(
+            acc_view,
+            hc::extent<1>(size).tile(BlockSize),
+            [=](hc::tiled_index<1> i) [[hc]]
+            {
+                float value1 = av_x[i];
+                rp::warp_sort<float, WarpSize, float> wscan;
+                wscan.sort(value1, value1);
+                av_x[i] = value1;
+            }
+        );
+        event.wait();
+        auto end = std::chrono::high_resolution_clock::now();
+
+        auto elapsed_seconds =
+            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+
+        state.SetIterationTime(elapsed_seconds.count());
+    }
+}
+
 template<class T, unsigned int WarpSize>
 __global__
 void warp_sort_kernel(T * input)
@@ -123,6 +156,56 @@ void benchmark_hip_warp_sort(benchmark::State& state, hipStream_t stream, size_t
         auto start = std::chrono::high_resolution_clock::now();
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(warp_sort_kernel<float, WarpSize>),
+            dim3(size/BlockSize), dim3(BlockSize), 0, stream,
+            d_x
+        );
+        HIP_CHECK(hipDeviceSynchronize());
+        auto end = std::chrono::high_resolution_clock::now();
+
+        auto elapsed_seconds =
+            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+
+        state.SetIterationTime(elapsed_seconds.count());
+
+        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK(hipFree(d_x));
+    }
+}
+
+template<class T, unsigned int WarpSize>
+__global__
+void warp_sort_by_key_kernel(T * input)
+{
+    const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+
+    auto value = input[i];
+    rp::warp_sort<T, WarpSize, T> wscan;
+    wscan.sort(value, value);
+    input[i] = value;
+}
+
+template<unsigned int WarpSize, unsigned int BlockSize>
+void benchmark_hip_warp_sort_by_key(benchmark::State& state, hipStream_t stream, size_t N)
+{
+    const auto size = BlockSize * ((N + BlockSize - 1)/BlockSize);
+    for (auto _ : state)
+    {
+        std::vector<float> x(size, 1.0f);
+        float * d_x;
+        HIP_CHECK(hipMalloc(&d_x, size * sizeof(float)));
+        HIP_CHECK(
+            hipMemcpy(
+                d_x, x.data(),
+                size * sizeof(float),
+                hipMemcpyHostToDevice
+            )
+        );
+        HIP_CHECK(hipDeviceSynchronize());
+
+        auto start = std::chrono::high_resolution_clock::now();
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(warp_sort_by_key_kernel<float, WarpSize>),
             dim3(size/BlockSize), dim3(BlockSize), 0, stream,
             d_x
         );
@@ -176,8 +259,18 @@ int main(int argc, char *argv[])
             *acc_view, size // arguments for func
         ),
         benchmark::RegisterBenchmark(
+            "warp_sort_by_key_hc", // name
+            benchmark_hc_warp_sort_by_key<64, 256>, // func
+            *acc_view, size // arguments for func
+        ),
+        benchmark::RegisterBenchmark(
             "warp_sort_hip",
             benchmark_hip_warp_sort<64, 256>,
+            stream, size
+        ),
+        benchmark::RegisterBenchmark(
+            "warp_sort_by_key_hip",
+            benchmark_hip_warp_sort_by_key<64, 256>,
             stream, size
         )
     };
