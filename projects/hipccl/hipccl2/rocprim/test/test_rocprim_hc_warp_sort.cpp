@@ -1,0 +1,133 @@
+// MIT License
+//
+// Copyright (c) 2017 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+#include <algorithm>
+#include <iostream>
+#include <random>
+#include <vector>
+
+// Google Test
+#include <gtest/gtest.h>
+// HC API
+#include <hcc/hc.hpp>
+// rocPRIM
+#include <warp/warp_sort.hpp>
+
+#include "test_utils.hpp"
+
+namespace rp = rocprim;
+
+template<typename WarpSizeWrapper>
+class RocprimWarpSortShuffleBasedTests : public ::testing::Test {
+public:
+    static constexpr unsigned int warp_size = WarpSizeWrapper::value;
+};
+
+TYPED_TEST_CASE(RocprimWarpSortShuffleBasedTests, WarpSizes);
+
+TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortInt)
+{
+    constexpr size_t warp_size = TestFixture::warp_size;
+    // Given warp size not supported
+    if(warp_size > rp::warp_size() || !rp::detail::is_power_of_two(warp_size))
+    {
+        return;
+    }
+    
+    const size_t size = warp_size * 4;
+    // Generate data
+    std::vector<int> output = get_random_data<int>(size, -100, 100);
+
+    // Calulcate expected results on host
+    std::vector<int> expected(output);
+    
+    for(size_t i = 0; i < output.size() / warp_size; i++)
+    {
+        std::sort(expected.begin() + (i * warp_size), expected.begin() + ((i + 1) * warp_size));
+    }
+
+    hc::array_view<int, 1> d_output(output.size(), output.data());
+    hc::parallel_for_each(
+        hc::extent<1>(output.size()).tile(warp_size),
+        [=](hc::tiled_index<1> i) [[hc]]
+        {
+            int value = d_output[i];
+            rp::warp_sort<int, warp_size> wsort;
+            value = wsort.sort(value);
+            d_output[i] = value;
+        }
+    );
+
+    d_output.synchronize();
+    for(int i = 0; i < output.size(); i++)
+    {
+        EXPECT_EQ(output[i], expected[i]);
+    }
+}
+
+TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
+{
+    constexpr size_t warp_size = TestFixture::warp_size;
+    // Given warp size not supported
+    if(warp_size > rp::warp_size() || !rp::detail::is_power_of_two(warp_size))
+    {
+        return;
+    }
+    
+    const size_t size = warp_size * 4;
+    // Generate data
+    std::vector<int> output_key(size);
+    std::iota(output_key.begin(), output_key.end(), 0);
+    std::vector<int> output_value = get_random_data<int>(size, -100, 100);
+    
+    // Combine vectors to form pairs with key and value
+    std::vector<std::pair<int, int>> target(size);
+    for (unsigned i = 0; i < target.size(); i++)
+        target[i] = std::make_pair(output_key[i], output_value[i]);
+
+    // Calulcate expected results on host
+    std::vector<std::pair<int, int>> expected(target);
+    
+    for(size_t i = 0; i < expected.size() / warp_size; i++)
+    {
+        std::sort(expected.begin() + (i * warp_size), expected.begin() + ((i + 1) * warp_size));
+    }
+
+    hc::array_view<int, 1> d_output_key(output_key.size(), output_key.data());
+    hc::array_view<int, 1> d_output_value(output_value.size(), output_value.data());
+    hc::parallel_for_each(
+        hc::extent<1>(output_key.size()).tile(warp_size),
+        [=](hc::tiled_index<1> i) [[hc]]
+        {
+            rp::warp_sort_by_key<int, int, warp_size> wsort;
+            wsort.sort(d_output_key[i], d_output_value[i]);
+        }
+    );
+
+    d_output_key.synchronize();
+    d_output_value.synchronize();
+    for(int i = 0; i < expected.size(); i++)
+    {
+        EXPECT_EQ(d_output_key[i], expected[i].first);
+        EXPECT_EQ(d_output_value[i], expected[i].second);
+    }
+}
