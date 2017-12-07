@@ -80,45 +80,41 @@ class warp_scan : detail::select_warp_scan_impl<T, WarpSize>::type
 
 public:
     using storage_type = typename base_type::storage_type;
-    using scan_reduction_result_type = scan_reduction_type<T>;
 
     template<class BinaryFunction = ::rocprim::plus<T>>
-    T inclusive_scan(T thread_value,
-                     storage_type& storage,
-                     BinaryFunction scan_op = BinaryFunction()) [[hc]]
+    void inclusive_scan(T input,
+                        T& output,
+                        storage_type& storage,
+                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
     {
-        return base_type::inclusive_scan(
-            thread_value, storage, scan_op
-        );
+        base_type::inclusive_scan(input, output, storage, scan_op);
     }
 
     template<class BinaryFunction = ::rocprim::plus<T>>
-    T inclusive_scan(T thread_value, BinaryFunction scan_op = BinaryFunction()) [[hc]]
+    void inclusive_scan(T input,
+                        T& output,
+                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
     {
-        storage_type storage;
-        return base_type::inclusive_scan(thread_value, storage, scan_op);
+        base_type::inclusive_scan(input, output, scan_op);
     }
 
     template<class BinaryFunction = ::rocprim::plus<T>>
-    scan_reduction_result_type
-    inclusive_scan_reduce(T thread_value,
-                          storage_type& storage,
-                          BinaryFunction scan_op = BinaryFunction()) [[hc]]
+    void inclusive_scan(T input,
+                        T& output,
+                        T& reduction,
+                        storage_type& storage,
+                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
     {
-        return base_type::inclusive_scan_reduce(
-            thread_value, storage, scan_op
-        );
+        base_type::inclusive_scan(input, output, reduction, storage, scan_op);
     }
 
     template<class BinaryFunction = ::rocprim::plus<T>>
-    scan_reduction_result_type
-    inclusive_scan_reduce(T thread_value,
-                          BinaryFunction scan_op = BinaryFunction()) [[hc]]
+    void inclusive_scan(T input,
+                        T& output,
+                        T& reduction,
+                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
     {
-        storage_type storage;
-        return base_type::inclusive_scan_reduce(
-            thread_value, storage, scan_op
-        );
+        base_type::inclusive_scan(input, output, reduction, scan_op);
     }
 };
 

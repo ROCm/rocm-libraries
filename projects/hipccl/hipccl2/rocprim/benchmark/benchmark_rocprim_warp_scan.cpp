@@ -76,7 +76,7 @@ void benchmark_hc_warp_inclusive_scan(benchmark::State& state, hc::accelerator_v
             {
                 float value = av_x[i];
                 rp::warp_scan<float, WarpSize> wscan;
-                value = wscan.inclusive_scan(value);
+                wscan.inclusive_scan(value, value);
                 av_x[i] = value;
             }
         );
@@ -98,7 +98,7 @@ void warp_inclusive_scan_kernel(T * input)
 
     auto value = input[i];
     rp::warp_scan<T, WarpSize> wscan;
-    value = wscan.inclusive_scan(value);
+    wscan.inclusive_scan(value, value);
     input[i] = value;
 }
 
