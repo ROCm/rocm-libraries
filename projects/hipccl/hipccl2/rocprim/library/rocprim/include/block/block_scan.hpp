@@ -73,22 +73,21 @@ public:
     using storage_type = typename base_type::storage_type;
 
     template<class BinaryFunction = ::rocprim::plus<T>>
-    T inclusive_scan(T thread_value, BinaryFunction scan_op = BinaryFunction()) [[hc]]
+    void inclusive_scan(T input, T& output, BinaryFunction scan_op = BinaryFunction()) [[hc]]
     {
-        return base_type::inclusive_scan(thread_value, scan_op);
+        base_type::inclusive_scan(input, output, scan_op);
     }
 
     // Optionally we can add "count" parameter, so scan would be performed
     // only for the first count elements in the block. That gives runtime
     // option for a user to limit scan size.
     template<class BinaryFunction = ::rocprim::plus<T>>
-    T inclusive_scan(T thread_value,
-                     storage_type& temporary_storage,
-                     BinaryFunction scan_op = BinaryFunction()) [[hc]]
+    void inclusive_scan(T input,
+                        T& output,
+                        storage_type& storage,
+                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
     {
-        return base_type::inclusive_scan(
-            thread_value, temporary_storage, scan_op
-        );
+        base_type::inclusive_scan(input, output, storage, scan_op);
     }
 };
 

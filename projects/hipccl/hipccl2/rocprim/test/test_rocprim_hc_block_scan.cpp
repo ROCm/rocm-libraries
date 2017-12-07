@@ -65,7 +65,7 @@ TYPED_TEST(RocprimBlockScanShuffleBasedTests, InclusiveScanInt)
         return;
     }
 
-    const size_t size = block_size * 4;
+    const size_t size = block_size * 113;
     // Generate data
     std::vector<int> output = get_random_data<int>(size, -100, 100);
 
@@ -88,7 +88,7 @@ TYPED_TEST(RocprimBlockScanShuffleBasedTests, InclusiveScanInt)
         {
             int value = d_output[i];
             rp::block_scan<int, block_size> bscan;
-            value = bscan.inclusive_scan(value);
+            bscan.inclusive_scan(value, value);
             d_output[i] = value;
         }
     );

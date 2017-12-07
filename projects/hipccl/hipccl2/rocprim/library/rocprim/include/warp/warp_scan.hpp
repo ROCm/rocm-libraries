@@ -31,46 +31,14 @@
 
 #include "../intrinsics.hpp"
 #include "../functional.hpp"
+#include "../types.hpp"
+
+#include "detail/warp_scan_shuffle.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
 {
-
-template<
-    class T,
-    unsigned int WarpSize
->
-class warp_scan_shuffle
-{
-public:
-    static_assert(detail::is_power_of_two(WarpSize), "WarpSize must be power of 2");
-
-    using storage_type = detail::empty_type;
-
-    template<class BinaryFunction>
-    T inclusive_scan(T thread_value, BinaryFunction scan_op) [[hc]]
-    {
-        T value;
-        #pragma unroll
-        for(unsigned int offset = 1; offset < WarpSize; offset *= 2)
-        {
-            value = warp_shuffle_up(thread_value, offset, WarpSize);
-            unsigned int id = lane_id();
-            if(id >= offset) thread_value = scan_op(value, thread_value);
-        }
-        return thread_value;
-    }
-
-    template<class BinaryFunction>
-    T inclusive_scan(T thread_value,
-                     storage_type& temporary_storage,
-                     BinaryFunction scan_op) [[hc]]
-    {
-        (void) temporary_storage;
-        return inclusive_scan(thread_value, scan_op);
-    }
-};
 
 template<
     class T,
@@ -114,19 +82,39 @@ public:
     using storage_type = typename base_type::storage_type;
 
     template<class BinaryFunction = ::rocprim::plus<T>>
-    T inclusive_scan(T thread_value, BinaryFunction scan_op = BinaryFunction()) [[hc]]
+    void inclusive_scan(T input,
+                        T& output,
+                        storage_type& storage,
+                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
     {
-        return base_type::inclusive_scan(thread_value, scan_op);
+        base_type::inclusive_scan(input, output, storage, scan_op);
     }
 
     template<class BinaryFunction = ::rocprim::plus<T>>
-    T inclusive_scan(T thread_value,
-                     storage_type& temporary_storage,
-                     BinaryFunction scan_op = BinaryFunction()) [[hc]]
+    void inclusive_scan(T input,
+                        T& output,
+                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
     {
-        return base_type::inclusive_scan(
-            thread_value, temporary_storage, scan_op
-        );
+        base_type::inclusive_scan(input, output, scan_op);
+    }
+
+    template<class BinaryFunction = ::rocprim::plus<T>>
+    void inclusive_scan(T input,
+                        T& output,
+                        T& reduction,
+                        storage_type& storage,
+                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+    {
+        base_type::inclusive_scan(input, output, reduction, storage, scan_op);
+    }
+
+    template<class BinaryFunction = ::rocprim::plus<T>>
+    void inclusive_scan(T input,
+                        T& output,
+                        T& reduction,
+                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+    {
+        base_type::inclusive_scan(input, output, reduction, scan_op);
     }
 };
 
