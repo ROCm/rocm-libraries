@@ -41,8 +41,9 @@ template<
     class T,
     unsigned int WarpSize
 >
-struct warp_scan_shuffle
+class warp_scan_shuffle
 {
+public:
     static_assert(detail::is_power_of_two(WarpSize), "WarpSize must be power of 2");
 
     using storage_type = detail::empty_type;
@@ -67,14 +68,14 @@ struct warp_scan_shuffle
                         storage_type& storage, BinaryFunction scan_op) [[hc]]
     {
         (void) storage; // disables unused parameter warning
-        this->inclusive_scan(input, output, scan_op);
+        inclusive_scan(input, output, scan_op);
     }
 
     template<class BinaryFunction>
     void inclusive_scan(T input, T& output, T& reduction,
                         BinaryFunction scan_op) [[hc]]
     {
-        this->inclusive_scan(input, output, scan_op);
+        inclusive_scan(input, output, scan_op);
         // Broadcast value from the last thread in warp
         reduction = warp_shuffle(output, WarpSize-1, WarpSize);
     }
@@ -84,7 +85,93 @@ struct warp_scan_shuffle
                         storage_type& storage, BinaryFunction scan_op) [[hc]]
     {
         (void) storage;
-        this->inclusive_scan(input, output, reduction, scan_op);
+        inclusive_scan(input, output, reduction, scan_op);
+    }
+
+    template<class BinaryFunction>
+    void exclusive_scan(T input, T& output, T init, BinaryFunction scan_op) [[hc]]
+    {
+        inclusive_scan(input, output, scan_op);
+        // Convert inclusive scan result to exclusive
+        to_exclusive(output, output, init, scan_op);
+    }
+
+    template<class BinaryFunction>
+    void exclusive_scan(T input, T& output, T init,
+                        storage_type& storage, BinaryFunction scan_op) [[hc]]
+    {
+        (void) storage; // disables unused parameter warning
+        exclusive_scan(input, output, init, scan_op);
+    }
+
+    template<class BinaryFunction>
+    void exclusive_scan(T input, T& output, T init, T& reduction,
+                        BinaryFunction scan_op) [[hc]]
+    {
+        inclusive_scan(input, output, scan_op);
+        // Broadcast value from the last thread in warp
+        reduction = warp_shuffle(output, WarpSize-1, WarpSize);
+        // Convert inclusive scan result to exclusive
+        to_exclusive(output, output, init, scan_op);
+    }
+
+    template<class BinaryFunction>
+    void exclusive_scan(T input, T& output, T init, T& reduction,
+                        storage_type& storage, BinaryFunction scan_op) [[hc]]
+    {
+        (void) storage;
+        exclusive_scan(input, output, init, reduction, scan_op);
+    }
+
+    template<class BinaryFunction>
+    void scan(T input, T& inclusive_output, T& exclusive_output, T init,
+              BinaryFunction scan_op) [[hc]]
+    {
+        inclusive_scan(input, inclusive_output, scan_op);
+        // Convert inclusive scan result to exclusive
+        to_exclusive(inclusive_output, exclusive_output, init, scan_op);
+    }
+
+    template<class BinaryFunction>
+    void scan(T input, T& inclusive_output, T& exclusive_output, T init,
+              storage_type& storage, BinaryFunction scan_op) [[hc]]
+    {
+        (void) storage; // disables unused parameter warning
+        scan(input, inclusive_output, exclusive_output, init, scan_op);
+    }
+
+    template<class BinaryFunction>
+    void scan(T input, T& inclusive_output, T& exclusive_output, T init, T& reduction,
+              BinaryFunction scan_op) [[hc]]
+    {
+        inclusive_scan(input, inclusive_output, scan_op);
+        // Broadcast value from the last thread in warp
+        reduction = warp_shuffle(inclusive_output, WarpSize-1, WarpSize);
+        // Convert inclusive scan result to exclusive
+        to_exclusive(inclusive_output, exclusive_output, init, scan_op);
+    }
+
+    template<class BinaryFunction>
+    void scan(T input, T& inclusive_output, T& exclusive_output, T init, T& reduction,
+              storage_type& storage, BinaryFunction scan_op) [[hc]]
+    {
+        (void) storage;
+        scan(input, inclusive_output, exclusive_output, init, reduction, scan_op);
+    }
+
+private:
+
+    // Changes inclusive scan results to exclusive scan results
+    template<class BinaryFunction>
+    void to_exclusive(T inclusive_input, T& exclusive_output, T init,
+                      BinaryFunction scan_op) [[hc]]
+    {
+        // include init value in scan results
+        exclusive_output = scan_op(init, inclusive_input);
+        // get exclusive results
+        exclusive_output = warp_shuffle_up(exclusive_output, 1, WarpSize);
+        const unsigned int id = detail::logical_lane_id<WarpSize>();
+        exclusive_output = id == 0 ? init : exclusive_output;
     }
 };
 
