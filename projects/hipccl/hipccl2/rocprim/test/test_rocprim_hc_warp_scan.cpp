@@ -22,6 +22,7 @@
 
 #include <iostream>
 #include <vector>
+#include <algorithm>
 
 // Google Test
 #include <gtest/gtest.h>
@@ -44,35 +45,38 @@ TYPED_TEST_CASE(RocprimWarpScanShuffleBasedTests, WarpSizes);
 
 TYPED_TEST(RocprimWarpScanShuffleBasedTests, InclusiveScanInt)
 {
-    constexpr size_t warp_size = TestFixture::warp_size;
+    // logical warp side for warp primitive, execution warp size is always rp::warp_size()
+    constexpr size_t logical_warp_size = TestFixture::warp_size;
+    const size_t block_size = std::max<size_t>(rp::warp_size(), 4 * logical_warp_size);
+    const size_t size = block_size * 4;
+
     // Given warp size not supported
-    if(warp_size > rp::warp_size() || !rp::detail::is_power_of_two(warp_size))
+    if(logical_warp_size > rp::warp_size() || !rp::detail::is_power_of_two(logical_warp_size))
     {
         return;
     }
 
-    const size_t size = warp_size * 4;
     // Generate data
     std::vector<int> output = get_random_data<int>(size, -100, 100);
 
     // Calulcate expected results on host
     std::vector<int> expected(output.size(), 0);
-    for(size_t i = 0; i < output.size() / warp_size; i++)
+    for(size_t i = 0; i < output.size() / logical_warp_size; i++)
     {
-        for(size_t j = 0; j < warp_size; j++)
+        for(size_t j = 0; j < logical_warp_size; j++)
         {
-            auto idx = i * warp_size + j;
+            auto idx = i * logical_warp_size + j;
             expected[idx] = output[idx] + expected[j > 0 ? idx-1 : idx];
         }
     }
 
     hc::array_view<int, 1> d_output(output.size(), output.data());
     hc::parallel_for_each(
-        hc::extent<1>(output.size()).tile(warp_size),
+        hc::extent<1>(output.size()).tile(block_size),
         [=](hc::tiled_index<1> i) [[hc]]
         {
             int value = d_output[i];
-            rp::warp_scan<int, warp_size> wscan;
+            rp::warp_scan<int, logical_warp_size> wscan;
             wscan.inclusive_scan(value, value);
             d_output[i] = value;
         }
@@ -87,29 +91,32 @@ TYPED_TEST(RocprimWarpScanShuffleBasedTests, InclusiveScanInt)
 
 TYPED_TEST(RocprimWarpScanShuffleBasedTests, InclusiveScanReduceInt)
 {
-    constexpr size_t warp_size = TestFixture::warp_size;
+    // logical warp side for warp primitive, execution warp size is always rp::warp_size()
+    constexpr size_t logical_warp_size = TestFixture::warp_size;
+    const size_t block_size = std::max<size_t>(rp::warp_size(), 4 * logical_warp_size);
+    const size_t size = block_size * 4;
+
     // Given warp size not supported
-    if(warp_size > rp::warp_size() || !rp::detail::is_power_of_two(warp_size))
+    if(logical_warp_size > rp::warp_size() || !rp::detail::is_power_of_two(logical_warp_size))
     {
         return;
     }
 
-    const size_t size = warp_size * 4;
     // Generate data
     std::vector<int> output = get_random_data<int>(size, -100, 100);
-    std::vector<int> output_reductions(size / warp_size);
+    std::vector<int> output_reductions(size / logical_warp_size);
 
     // Calulcate expected results on host
     std::vector<int> expected(output.size(), 0);
     std::vector<int> expected_reductions(output.size(), 0);
-    for(size_t i = 0; i < output.size() / warp_size; i++)
+    for(size_t i = 0; i < output.size() / logical_warp_size; i++)
     {
-        for(size_t j = 0; j < warp_size; j++)
+        for(size_t j = 0; j < logical_warp_size; j++)
         {
-            auto idx = i * warp_size + j;
+            auto idx = i * logical_warp_size + j;
             expected[idx] = output[idx] + expected[j > 0 ? idx-1 : idx];
         }
-        expected_reductions[i] = expected[(i+1) * warp_size - 1];
+        expected_reductions[i] = expected[(i+1) * logical_warp_size - 1];
     }
 
     hc::array_view<int, 1> d_output(output.size(), output.data());
@@ -117,17 +124,17 @@ TYPED_TEST(RocprimWarpScanShuffleBasedTests, InclusiveScanReduceInt)
         output_reductions.size(), output_reductions.data()
     );
     hc::parallel_for_each(
-        hc::extent<1>(output.size()).tile(warp_size),
+        hc::extent<1>(output.size()).tile(block_size),
         [=](hc::tiled_index<1> i) [[hc]]
         {
             int value = d_output[i];
             int reduction;
-            rp::warp_scan<int, warp_size> wscan;
+            rp::warp_scan<int, logical_warp_size> wscan;
             wscan.inclusive_scan(value, value, reduction);
             d_output[i] = value;
-            if(i.local[0] == 0)
+            if(i.local[0]%logical_warp_size == 0)
             {
-                d_output_r[i.tile[0]] = reduction;
+                d_output_r[i.global[0]/logical_warp_size] = reduction;
             }
         }
     );
