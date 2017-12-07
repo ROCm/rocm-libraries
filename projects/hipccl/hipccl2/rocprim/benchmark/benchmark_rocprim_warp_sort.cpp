@@ -76,7 +76,7 @@ void benchmark_hc_warp_sort(benchmark::State& state, hc::accelerator_view acc_vi
             {
                 float value = av_x[i];
                 rp::warp_sort<float, WarpSize> wscan;
-                value = wscan.sort(value);
+                wscan.sort(value);
                 av_x[i] = value;
             }
         );
@@ -98,7 +98,7 @@ void warp_sort_kernel(T * input)
 
     auto value = input[i];
     rp::warp_sort<T, WarpSize> wscan;
-    value = wscan.sort(value);
+    wscan.sort(value);
     input[i] = value;
 }
 

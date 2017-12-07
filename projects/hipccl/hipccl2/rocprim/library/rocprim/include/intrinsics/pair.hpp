@@ -33,30 +33,30 @@ struct Pair
 {
     X x;
     Y y;
-    
+
     Pair() [[hc]]
     {
     }
-    
-    Pair(X key, Y value) [[hc]] : x(key), y(value) 
+
+    Pair(X key, Y value) [[hc]] : x(key), y(value)
     {
     }
-    
+
     bool operator==(const Pair<X, Y>& obj) const [[hc]]
     {
         return (x == obj.x) && (y == obj.y);
     }
-    
+
     bool operator!=(const Pair<X, Y>& obj) const [[hc]]
     {
         return !operator==(obj);
     }
-    
+
     bool operator<(const Pair<X, Y>& obj) const [[hc]]
     {
         return (x < obj.x);
     }
-    
+
     bool operator>(const Pair<X, Y>& obj) const [[hc]]
     {
         return (x > obj.x);
