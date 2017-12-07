@@ -116,6 +116,46 @@ public:
     {
         base_type::inclusive_scan(input, output, reduction, scan_op);
     }
+
+    template<class BinaryFunction = ::rocprim::plus<T>>
+    void exclusive_scan(T input,
+                        T& output,
+                        T init,
+                        storage_type& storage,
+                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+    {
+        base_type::exclusive_scan(input, output, init, storage, scan_op);
+    }
+
+    template<class BinaryFunction = ::rocprim::plus<T>>
+    void exclusive_scan(T input,
+                        T& output,
+                        T init,
+                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+    {
+        base_type::exclusive_scan(input, output, init, scan_op);
+    }
+
+    template<class BinaryFunction = ::rocprim::plus<T>>
+    void exclusive_scan(T input,
+                        T& output,
+                        T init,
+                        T& reduction,
+                        storage_type& storage,
+                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+    {
+        base_type::exclusive_scan(input, output, init, reduction, storage, scan_op);
+    }
+
+    template<class BinaryFunction = ::rocprim::plus<T>>
+    void exclusive_scan(T input,
+                        T& output,
+                        T init,
+                        T& reduction,
+                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+    {
+        base_type::exclusive_scan(input, output, init, reduction, scan_op);
+    }
 };
 
 END_ROCPRIM_NAMESPACE
