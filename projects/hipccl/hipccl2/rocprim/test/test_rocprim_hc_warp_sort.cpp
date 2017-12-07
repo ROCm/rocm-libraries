@@ -42,6 +42,12 @@ public:
     static constexpr unsigned int warp_size = WarpSizeWrapper::value;
 };
 
+template<class T>
+bool test(const T& a, const T& b) [[hc]]
+{
+    return a < b;
+}
+
 TYPED_TEST_CASE(RocprimWarpSortShuffleBasedTests, WarpSizes);
 
 TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortInt)
