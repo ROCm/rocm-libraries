@@ -25,13 +25,6 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-template<class T>
-struct scan_reduction_type
-{
-    T scan;
-    T reduction;
-};
-
 END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_TYPES_HPP_

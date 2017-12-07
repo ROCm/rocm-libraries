@@ -49,38 +49,43 @@ public:
     using storage_type = detail::empty_type;
 
     template<class BinaryFunction>
-    T inclusive_scan(T thread_value, storage_type& storage, BinaryFunction scan_op) [[hc]]
+    void inclusive_scan(T input, T& output, BinaryFunction scan_op) [[hc]]
     {
-        (void) storage; // disables unused parameter warning
+        output = input;
 
         T value;
         #pragma unroll
         for(unsigned int offset = 1; offset < WarpSize; offset *= 2)
         {
-            value = warp_shuffle_up(thread_value, offset, WarpSize);
+            value = warp_shuffle_up(output, offset, WarpSize);
             unsigned int id = lane_id();
-            if(id >= offset) thread_value = scan_op(value, thread_value);
+            if(id >= offset) output = scan_op(value, output);
         }
-        return thread_value;
     }
 
     template<class BinaryFunction>
-    scan_reduction_type<T>
-    inclusive_scan_reduce(T thread_value, storage_type& storage, BinaryFunction scan_op) [[hc]]
+    void inclusive_scan(T input, T& output,
+                        storage_type& storage, BinaryFunction scan_op) [[hc]]
     {
         (void) storage; // disables unused parameter warning
+        this->inclusive_scan(input, output, scan_op);
+    }
 
-        T value;
-        #pragma unroll
-        for(unsigned int offset = 1; offset < WarpSize; offset *= 2)
-        {
-            value = warp_shuffle_up(thread_value, offset, WarpSize);
-            unsigned int id = lane_id();
-            if(id >= offset) thread_value = scan_op(value, thread_value);
-        }
+    template<class BinaryFunction>
+    void inclusive_scan(T input, T& output, T& reduction,
+                        BinaryFunction scan_op) [[hc]]
+    {
+        this->inclusive_scan(input, output, scan_op);
         // Broadcast value from the last thread in warp
-        T reduction_value = warp_shuffle(thread_value, WarpSize-1, WarpSize);
-        return {thread_value, reduction_value};
+        reduction = warp_shuffle(output, WarpSize-1, WarpSize);
+    }
+
+    template<class BinaryFunction>
+    void inclusive_scan(T input, T& output, T& reduction,
+                        storage_type& storage, BinaryFunction scan_op) [[hc]]
+    {
+        (void) storage;
+        this->inclusive_scan(input, output, reduction, scan_op);
     }
 };
 

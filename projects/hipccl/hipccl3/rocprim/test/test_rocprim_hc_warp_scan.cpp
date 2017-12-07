@@ -73,7 +73,7 @@ TYPED_TEST(RocprimWarpScanShuffleBasedTests, InclusiveScanInt)
         {
             int value = d_output[i];
             rp::warp_scan<int, warp_size> wscan;
-            value = wscan.inclusive_scan(value);
+            wscan.inclusive_scan(value, value);
             d_output[i] = value;
         }
     );
@@ -121,12 +121,13 @@ TYPED_TEST(RocprimWarpScanShuffleBasedTests, InclusiveScanReduceInt)
         [=](hc::tiled_index<1> i) [[hc]]
         {
             int value = d_output[i];
+            int reduction;
             rp::warp_scan<int, warp_size> wscan;
-            auto result = wscan.inclusive_scan_reduce(value);
-            d_output[i] = result.scan;
+            wscan.inclusive_scan(value, value, reduction);
+            d_output[i] = value;
             if(i.local[0] == 0)
             {
-                d_output_r[i.tile[0]] = result.reduction;
+                d_output_r[i.tile[0]] = reduction;
             }
         }
     );

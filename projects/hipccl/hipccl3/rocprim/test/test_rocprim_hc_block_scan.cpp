@@ -88,7 +88,7 @@ TYPED_TEST(RocprimBlockScanShuffleBasedTests, InclusiveScanInt)
         {
             int value = d_output[i];
             rp::block_scan<int, block_size> bscan;
-            value = bscan.inclusive_scan(value);
+            bscan.inclusive_scan(value, value);
             d_output[i] = value;
         }
     );
