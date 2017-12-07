@@ -271,3 +271,157 @@ TYPED_TEST(RocprimWarpScanShuffleBasedTests, ExclusiveScanReduceInt)
         EXPECT_EQ(output_reductions[i], expected_reductions[i]);
     }
 }
+
+TYPED_TEST(RocprimWarpScanShuffleBasedTests, ScanInt)
+{
+    // logical warp side for warp primitive, execution warp size is always rp::warp_size()
+    constexpr size_t logical_warp_size = TestFixture::warp_size;
+    const size_t block_size = std::max<size_t>(rp::warp_size(), 4 * logical_warp_size);
+    const size_t size = block_size * 4;
+
+    // Given warp size not supported
+    if(logical_warp_size > rp::warp_size() || !rp::detail::is_power_of_two(logical_warp_size))
+    {
+        return;
+    }
+
+    // Generate data
+    std::vector<int> input = get_random_data<int>(size, -100, 100);
+    const int init = get_random_value(0, 100);
+
+    std::vector<int> i_output(input.size());
+    std::vector<int> e_output(input.size());
+
+    // Calulcate expected results on host
+    std::vector<int> e_expected(input.size(), 0);
+    std::vector<int> i_expected(input.size(), 0);
+    for(size_t i = 0; i < input.size() / logical_warp_size; i++)
+    {
+        for(size_t j = 0; j < logical_warp_size; j++)
+        {
+            auto idx = i * logical_warp_size + j;
+            i_expected[idx] = input[idx] + i_expected[j > 0 ? idx-1 : idx];
+        }
+
+        e_expected[i * logical_warp_size] = init;
+        for(size_t j = 1; j < logical_warp_size; j++)
+        {
+            auto idx = i * logical_warp_size + j;
+            e_expected[idx] = input[idx-1] + e_expected[idx-1];
+        }
+    }
+
+    hc::array_view<int, 1> d_input(input.size(), input.data());
+    hc::array_view<int, 1> d_i_output(i_output.size(), i_output.data());
+    hc::array_view<int, 1> d_e_output(e_output.size(), e_output.data());
+    hc::parallel_for_each(
+        hc::extent<1>(input.size()).tile(block_size),
+        [=](hc::tiled_index<1> i) [[hc]]
+        {
+            rp::warp_scan<int, logical_warp_size> wscan;
+
+            int input = d_input[i];
+            int i_output, e_output;
+            wscan.scan(input, i_output, e_output, init);
+            d_i_output[i] = i_output;
+            d_e_output[i] = e_output;
+        }
+    );
+
+    d_i_output.synchronize();
+    for(int i = 0; i < i_output.size(); i++)
+    {
+        EXPECT_EQ(i_output[i], i_expected[i]);
+    }
+
+    d_e_output.synchronize();
+    for(int i = 0; i < e_output.size(); i++)
+    {
+        EXPECT_EQ(e_output[i], e_expected[i]);
+    }
+}
+
+TYPED_TEST(RocprimWarpScanShuffleBasedTests, ScanReduceInt)
+{
+    // logical warp side for warp primitive, execution warp size is always rp::warp_size()
+    constexpr size_t logical_warp_size = TestFixture::warp_size;
+    const size_t block_size = std::max<size_t>(rp::warp_size(), 4 * logical_warp_size);
+    const size_t size = block_size * 4;
+
+    // Given warp size not supported
+    if(logical_warp_size > rp::warp_size() || !rp::detail::is_power_of_two(logical_warp_size))
+    {
+        return;
+    }
+
+    // Generate data
+    std::vector<int> input = get_random_data<int>(size, -100, 100);
+    const int init = get_random_value(0, 100);
+
+    std::vector<int> i_output(input.size());
+    std::vector<int> e_output(input.size());
+    std::vector<int> output_reductions(input.size() / logical_warp_size);
+
+    // Calulcate expected results on host
+    std::vector<int> e_expected(input.size(), 0);
+    std::vector<int> i_expected(input.size(), 0);
+    std::vector<int> expected_reductions(output_reductions.size(), 0);
+    for(size_t i = 0; i < input.size() / logical_warp_size; i++)
+    {
+        for(size_t j = 0; j < logical_warp_size; j++)
+        {
+            auto idx = i * logical_warp_size + j;
+            i_expected[idx] = input[idx] + i_expected[j > 0 ? idx-1 : idx];
+        }
+        expected_reductions[i] = i_expected[(i+1) * logical_warp_size - 1];
+
+        e_expected[i * logical_warp_size] = init;
+        for(size_t j = 1; j < logical_warp_size; j++)
+        {
+            auto idx = i * logical_warp_size + j;
+            e_expected[idx] = input[idx-1] + e_expected[idx-1];
+        }
+    }
+
+    hc::array_view<int, 1> d_input(input.size(), input.data());
+    hc::array_view<int, 1> d_i_output(i_output.size(), i_output.data());
+    hc::array_view<int, 1> d_e_output(e_output.size(), e_output.data());
+    hc::array_view<int, 1> d_output_r(
+        output_reductions.size(), output_reductions.data()
+    );
+    hc::parallel_for_each(
+        hc::extent<1>(input.size()).tile(block_size),
+        [=](hc::tiled_index<1> i) [[hc]]
+        {
+            rp::warp_scan<int, logical_warp_size> wscan;
+
+            int input = d_input[i];
+            int i_output, e_output, reduction;
+            wscan.scan(input, i_output, e_output, init, reduction);
+            d_i_output[i] = i_output;
+            d_e_output[i] = e_output;
+            if(i.local[0]%logical_warp_size == 0)
+            {
+                d_output_r[i.global[0]/logical_warp_size] = reduction;
+            }
+        }
+    );
+
+    d_i_output.synchronize();
+    for(int i = 0; i < i_output.size(); i++)
+    {
+        EXPECT_EQ(i_output[i], i_expected[i]);
+    }
+
+    d_e_output.synchronize();
+    for(int i = 0; i < e_output.size(); i++)
+    {
+        EXPECT_EQ(e_output[i], e_expected[i]);
+    }
+
+    d_output_r.synchronize();
+    for(int i = 0; i < output_reductions.size(); i++)
+    {
+        EXPECT_EQ(output_reductions[i], expected_reductions[i]);
+    }
+}
