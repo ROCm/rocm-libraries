@@ -171,12 +171,12 @@ int main(int argc, char *argv[])
     std::vector<benchmark::internal::Benchmark*> benchmarks =
     {
         benchmark::RegisterBenchmark(
-            "warp_inclusive_scan_hc", // name
+            "warp_sort_hc", // name
             benchmark_hc_warp_sort<64, 256>, // func
             *acc_view, size // arguments for func
         ),
         benchmark::RegisterBenchmark(
-            "warp_inclusive_scan_hip",
+            "warp_sort_hip",
             benchmark_hip_warp_sort<64, 256>,
             stream, size
         )
