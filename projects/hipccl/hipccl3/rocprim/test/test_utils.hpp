@@ -29,7 +29,6 @@
 // Google Test
 #include <gtest/gtest.h>
 
-
 template<class T>
 inline auto get_random_data(size_t size, T min, T max)
     -> typename std::enable_if<std::is_integral<T>::value, std::vector<T>>::type
@@ -52,6 +51,12 @@ inline auto get_random_data(size_t size, T min, T max)
     std::vector<T> data(size);
     std::generate(data.begin(), data.end(), [&]() { return distribution(gen); });
     return data;
+}
+
+template<class T>
+inline T get_random_value(T min, T max)
+{
+    return get_random_data(1, min, max)[0];
 }
 
 template<unsigned int Value>
