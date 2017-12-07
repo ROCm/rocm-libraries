@@ -22,7 +22,6 @@
 #define ROCPRIM_INTRINSICS_HPP_
 
 #include "intrinsics/bit.hpp"
-#include "intrinsics/pair.hpp"
 #include "intrinsics/thread.hpp"
 #include "intrinsics/warp_shuffle.hpp"
 
