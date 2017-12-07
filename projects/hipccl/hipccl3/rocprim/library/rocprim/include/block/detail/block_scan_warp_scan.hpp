@@ -64,16 +64,17 @@ struct block_scan_warp_scan
     };
 
     template<class BinaryFunction>
-    T inclusive_scan(T thread_value, BinaryFunction scan_op) [[hc]]
+    void inclusive_scan(T input, T& output, BinaryFunction scan_op) [[hc]]
     {
         tile_static storage_type storage;
-        return this->inclusive_scan(thread_value, storage, scan_op);
+        return this->inclusive_scan(input, output, storage, scan_op);
     }
 
     template<class BinaryFunction>
-    T inclusive_scan(T thread_value,
-                     storage_type& storage,
-                     BinaryFunction scan_op) [[hc]]
+    void inclusive_scan(T input,
+                        T& output,
+                        storage_type& storage,
+                        BinaryFunction scan_op) [[hc]]
     {
         warp_scan wscan;
         warp_prefix_scan wprefix_scan;
@@ -86,39 +87,37 @@ struct block_scan_warp_scan
         } local_storage;
 
         // Perform warp scan
-        auto iscan_result = wscan.inclusive_scan(
-            thread_value, local_storage.wscan, scan_op
+        wscan.inclusive_scan(
+            input, output, local_storage.wscan, scan_op
         );
 
         // Save the warp reduction result, that is the scan result
         // for last element in each warp
-        const unsigned int warp_id = ::rocprim::detail::warp_id();
+        const unsigned int warp_id = ::rocprim::warp_id();
         const unsigned int lane_id = ::rocprim::lane_id();
         if(lane_id == warp_size - 1)
         {
-            storage.warp_scan_results[warp_id] = iscan_result;
+            storage.warp_scan_results[warp_id] = output;
         }
-        ::rocprim::detail::sync_all_threads();
+        ::rocprim::sync_all_threads();
 
-        // Scan the warp reduction results
+        // // Scan the warp reduction results
         if(lane_id < warps_no)
         {
             auto warp_prefix = storage.warp_scan_results[lane_id];
-            warp_prefix = wprefix_scan.inclusive_scan(
-                warp_prefix, local_storage.wprefix_scan, scan_op
+            wprefix_scan.inclusive_scan(
+                warp_prefix, warp_prefix, local_storage.wprefix_scan, scan_op
             );
             storage.warp_scan_results[lane_id] = warp_prefix;
         }
-        ::rocprim::detail::sync_all_threads();
+        ::rocprim::sync_all_threads();
 
         // Calculate the final scan result for every thread
         if(warp_id != 0)
         {
             auto warp_prefix = storage.warp_scan_results[warp_id - 1];
-            iscan_result = scan_op(warp_prefix, iscan_result);
+            output = scan_op(warp_prefix, output);
         }
-
-        return iscan_result;
     }
 };
 

@@ -76,7 +76,7 @@ void benchmark_hc_block_inclusive_scan(benchmark::State& state, hc::accelerator_
             {
                 float value = av_x[i];
                 rp::block_scan<float, BlockSize> bscan;
-                value = bscan.inclusive_scan(value);
+                bscan.inclusive_scan(value, value);
                 av_x[i] = value;
             }
         );
@@ -98,7 +98,7 @@ void block_inclusive_scan_kernel(T * input)
 
     auto value = input[i];
     rp::block_scan<T, BlockSize> bscan;
-    value = bscan.inclusive_scan(value);
+    bscan.inclusive_scan(value, value);
     input[i] = value;
 }
 
