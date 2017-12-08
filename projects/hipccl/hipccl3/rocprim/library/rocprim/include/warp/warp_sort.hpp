@@ -83,7 +83,8 @@ public:
     typedef typename base_type::storage_type storage_type;
 
     template<class BinaryFunction = ::rocprim::less<Key>>
-    void sort(Key& thread_key, BinaryFunction compare_function = BinaryFunction()) [[hc]]
+    void sort(Key& thread_key, 
+              BinaryFunction compare_function = BinaryFunction()) [[hc]]
     {
         base_type::sort(thread_key, compare_function);
     }
@@ -99,7 +100,9 @@ public:
     }
 
     template<class BinaryFunction = ::rocprim::less<Key>>
-    void sort(Key& thread_key, Value& thread_value, BinaryFunction compare_function = BinaryFunction()) [[hc]]
+    void sort(Key& thread_key, 
+              Value& thread_value, 
+              BinaryFunction compare_function = BinaryFunction()) [[hc]]
     {
         base_type::sort(
             thread_key, thread_value, compare_function
@@ -107,7 +110,8 @@ public:
     }
 
     template<class BinaryFunction = ::rocprim::less<Key>>
-    void sort(Key& thread_key, Value& thread_value,
+    void sort(Key& thread_key, 
+              Value& thread_value,
               storage_type& storage,
               BinaryFunction compare_function = BinaryFunction()) [[hc]]
     {
