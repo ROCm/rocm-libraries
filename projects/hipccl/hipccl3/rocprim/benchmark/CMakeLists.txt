@@ -58,3 +58,4 @@ endfunction()
 
 add_rocprim_benchmark(benchmark_rocprim_warp_scan.cpp)
 add_rocprim_benchmark(benchmark_rocprim_block_scan.cpp)
+add_rocprim_benchmark(benchmark_rocprim_warp_sort.cpp)
