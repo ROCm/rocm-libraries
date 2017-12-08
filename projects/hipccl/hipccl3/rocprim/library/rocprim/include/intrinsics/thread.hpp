@@ -60,7 +60,7 @@ inline unsigned int lane_id() [[hc]]
 /// \brief Returns flat thread id in a block (tile).
 inline unsigned int flat_block_thread_id() [[hc]]
 {
-    return (hc_get_workitem_id(1) * hc_get_group_size(0) * hc_get_group_size(1))
+    return (hc_get_workitem_id(2) * hc_get_group_size(1) * hc_get_group_size(0))
         + (hc_get_workitem_id(1) * hc_get_group_size(0))
         + hc_get_workitem_id(0);
 }
@@ -79,8 +79,8 @@ inline unsigned int warp_id() [[hc]]
 
 inline unsigned int flat_block_id() [[hc]]
 {
-    return (hc_get_num_groups(2) * hc_get_num_groups(1) * hc_get_group_id(2))
-        + (hc_get_num_groups(0) * hc_get_group_id(1))
+    return (hc_get_group_id(2) * hc_get_num_groups(1) * hc_get_num_groups(0))
+        + (hc_get_group_id(1) * hc_get_num_groups(0))
         + hc_get_group_id(0);
 }
 
