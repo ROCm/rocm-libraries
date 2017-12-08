@@ -18,11 +18,22 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_INTRINSICS_HPP_
-#define ROCPRIM_INTRINSICS_HPP_
+#ifndef ROCPRIM_INTRINSICS_BIT_HPP_
+#define ROCPRIM_INTRINSICS_BIT_HPP_
 
-#include "intrinsics/bit.hpp"
-#include "intrinsics/thread.hpp"
-#include "intrinsics/warp_shuffle.hpp"
+// HC API
+#include <hcc/hc.hpp>
 
-#endif // ROCPRIM_INTRINSICS_WARP_SHUFFLE_HPP_
+#include "../detail/config.hpp"
+
+BEGIN_ROCPRIM_NAMESPACE
+
+/// \brief Returns a single bit at 'i' from 'x'
+inline int get_bit(int x, int i) [[hc]]
+{
+    return (x >> i) & 1;
+}
+
+END_ROCPRIM_NAMESPACE
+
+#endif // ROCPRIM_INTRINSICS_BIT_HPP_
