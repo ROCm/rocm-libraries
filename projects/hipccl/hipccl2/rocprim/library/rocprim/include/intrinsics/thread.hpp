@@ -86,8 +86,8 @@ inline unsigned int flat_block_id() [[hc]]
 
 // Sync
 
-/// \bried Synchronize all threads in a block (tile)
-inline void sync_all_threads() [[hc]]
+/// \brief Synchronize all threads in a block (tile)
+inline void syncthreads() [[hc]]
 {
     hc_barrier(CLK_LOCAL_MEM_FENCE);
 }
