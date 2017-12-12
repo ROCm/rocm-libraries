@@ -61,6 +61,11 @@ struct block_scan_warp_scan
     struct storage_type
     {
         T warp_scan_results[warps_no];
+        union
+        {
+            typename warp_scan::storage_type wscan;
+            typename warp_prefix_scan::storage_type wprefix_scan;
+        };
     };
 
     template<class BinaryFunction>
@@ -76,19 +81,9 @@ struct block_scan_warp_scan
                         storage_type& storage,
                         BinaryFunction scan_op) [[hc]]
     {
-        warp_scan wscan;
-        warp_prefix_scan wprefix_scan;
-
-        // Allocate storage required by used wrap_scan primitives
-        tile_static union
-        {
-            typename warp_scan::storage_type wscan;
-            typename warp_prefix_scan::storage_type wprefix_scan;
-        } local_storage;
-
         // Perform warp scan
-        wscan.inclusive_scan(
-            input, output, local_storage.wscan, scan_op
+        warp_scan().inclusive_scan(
+            input, output, storage.wscan, scan_op
         );
 
         // Save the warp reduction result, that is the scan result
@@ -99,18 +94,18 @@ struct block_scan_warp_scan
         {
             storage.warp_scan_results[warp_id] = output;
         }
-        ::rocprim::sync_all_threads();
+        ::rocprim::syncthreads();
 
         // // Scan the warp reduction results
         if(lane_id < warps_no)
         {
             auto warp_prefix = storage.warp_scan_results[lane_id];
-            wprefix_scan.inclusive_scan(
-                warp_prefix, warp_prefix, local_storage.wprefix_scan, scan_op
+            warp_prefix_scan().inclusive_scan(
+                warp_prefix, warp_prefix, storage.wprefix_scan, scan_op
             );
             storage.warp_scan_results[lane_id] = warp_prefix;
         }
-        ::rocprim::sync_all_threads();
+        ::rocprim::syncthreads();
 
         // Calculate the final scan result for every thread
         if(warp_id != 0)
