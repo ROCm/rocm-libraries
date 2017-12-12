@@ -75,8 +75,8 @@ void benchmark_hc_warp_sort(benchmark::State& state, hc::accelerator_view acc_vi
             [=](hc::tiled_index<1> i) [[hc]]
             {
                 float value = av_x[i];
-                rp::warp_sort<float, WarpSize> wscan;
-                wscan.sort(value);
+                rp::warp_sort<float, WarpSize> wsort;
+                wsort.sort(value);
                 av_x[i] = value;
             }
         );
@@ -108,8 +108,8 @@ void benchmark_hc_warp_sort_by_key(benchmark::State& state, hc::accelerator_view
             [=](hc::tiled_index<1> i) [[hc]]
             {
                 float value1 = av_x[i];
-                rp::warp_sort<float, WarpSize, float> wscan;
-                wscan.sort(value1, value1);
+                rp::warp_sort<float, WarpSize, float> wsort;
+                wsort.sort(value1, value1);
                 av_x[i] = value1;
             }
         );
@@ -130,8 +130,8 @@ void warp_sort_kernel(T * input)
     const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
 
     auto value = input[i];
-    rp::warp_sort<T, WarpSize> wscan;
-    wscan.sort(value);
+    rp::warp_sort<T, WarpSize> wsort;
+    wsort.sort(value);
     input[i] = value;
 }
 
@@ -180,8 +180,8 @@ void warp_sort_by_key_kernel(T * input)
     const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
 
     auto value = input[i];
-    rp::warp_sort<T, WarpSize, T> wscan;
-    wscan.sort(value, value);
+    rp::warp_sort<T, WarpSize, T> wsort;
+    wsort.sort(value, value);
     input[i] = value;
 }
 

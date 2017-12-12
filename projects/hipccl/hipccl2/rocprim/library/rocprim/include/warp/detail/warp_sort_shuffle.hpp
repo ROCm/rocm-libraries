@@ -75,7 +75,7 @@ private:
     template<class KV, class BinaryFunction>
     void bitonic_sort(KV& val, BinaryFunction compare_function) [[hc]]
     {
-        unsigned int id = lane_id();
+        unsigned int id = detail::logical_lane_id<WarpSize>();
         val = swap<2, KV, BinaryFunction>(val, 0x01,
                                          get_bit(id, 1) ^ get_bit(id, 0),
                                          compare_function);
@@ -158,12 +158,12 @@ public:
     template<class BinaryFunction>
     void sort(Key& thread_value, BinaryFunction compare_function) [[hc]]
     {
+        // sort by value only
         bitonic_sort<Key>(thread_value, compare_function);
     }
 
     template<class BinaryFunction>
-    void sort(Key& thread_value,
-              storage_type& storage,
+    void sort(Key& thread_value, storage_type& storage, 
               BinaryFunction compare_function) [[hc]]
     {
         (void) storage;
@@ -173,7 +173,9 @@ public:
     template<class BinaryFunction>
     void sort(Key& thread_key, Value& thread_value, BinaryFunction compare_function) [[hc]]
     {
+        // initialize key and value to a struct
         key_value_type kv = {thread_key, thread_value};
+        // pass a custom compare_function to compare key only (sort_by_key)
         bitonic_sort<key_value_type>(
             kv,
             [&compare_function](const key_value_type& kv1, const key_value_type& kv2) [[hc]]
@@ -186,8 +188,7 @@ public:
     }
 
     template<class BinaryFunction>
-    void sort(Key& thread_key, Value& thread_value,
-              storage_type& storage,
+    void sort(Key& thread_key, Value& thread_value, storage_type& storage,
               BinaryFunction compare_function) [[hc]]
     {
         (void) storage;
