@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_BLOCK_BLOCK_LOAD_HPP_
-#define ROCPRIM_BLOCK_BLOCK_LOAD_HPP_
+#ifndef ROCPRIM_BLOCK_BLOCK_STORE_HPP_
+#define ROCPRIM_BLOCK_BLOCK_STORE_HPP_
 
 #include <type_traits>
 
@@ -35,68 +35,47 @@
 /// \addtogroup collectiveblockmodule
 /// @{
 
-#include "detail/block_load_blocked.hpp"
-
 BEGIN_ROCPRIM_NAMESPACE
 
 template<
-    class Input,
+    class Output,
     int ItemsPerThread,
-    class InputIterator
+    class OutputIterator
 >
-void block_load_direct_blocked(int thread_id, InputIterator block_iter,
+void block_store_direct_blocked(int thread_id, OutputIterator block_iter,
                                Input (&items)[ItemsPerThread]) [[hc]]
 {
-    InputIterator thread_iter = block_iter + (thread_id * ItemsPerThread);
+    OutputIterator thread_iter = block_iter + (thread_id * ItemsPerThread);
     #pragma unroll
     for (int item = 0; item < ItemsPerThread; item++)
     {
-        items[item] = thread_iter[item];
+        thread_iter[item] = items[item];
     }
 }
 
 template<
-    class Input,
+    class Output,
     int ItemsPerThread,
-    class InputIterator
+    class OutputIterator
 >
-void block_load_direct_blocked(int thread_id, InputIterator block_iter,
+void block_store_direct_blocked(int thread_id, OutputIterator block_iter,
                                Input (&items)[ItemsPerThread],
                                int valid) [[hc]]
 {
-    InputIterator thread_iter = block_iter + (thread_id * ItemsPerThread);
+    OutputIterator thread_iter = block_iter + (thread_id * ItemsPerThread);
     #pragma unroll
     for (int item = 0; item < ItemsPerThread; item++)
     {
         if ((thread_id * ItemsPerThread) + item < valid)
         {
-            items[item] = thread_iter[item];
+            thread_iter[item] = items[item];
         }
     }
 }
-
-template<
-    class Input,
-    class Default,
-    int ItemsPerThread,
-    class InputIterator
->
-void block_load_direct_blocked(int thread_id, InputIterator block_iter,
-                               Input (&items)[ItemsPerThread],
-                               int valid, Default out_of_bounds) [[hc]]
-{
-    #pragma unroll
-    for (int item = 0; item < ItemsPerThread; item++)
-        items[item] = out_of_bounds;
-
-    block_load_direct_blocked(thread_id, block_iter, items, valid);
-}
-
-
 
 END_ROCPRIM_NAMESPACE
 
 /// @}
 // end of group collectiveblockmodule
 
-#endif // ROCPRIM_BLOCK_BLOCK_LOAD_HPP_
+#endif // ROCPRIM_BLOCK_BLOCK_STORE_HPP_
