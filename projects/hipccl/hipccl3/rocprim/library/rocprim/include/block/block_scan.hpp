@@ -65,7 +65,7 @@ template<
     unsigned int BlockSize,
     block_scan_algorithm Algorithm = block_scan_algorithm::using_warp_scan
 >
-class block_scan : detail::select_block_scan_impl<Algorithm>::template type<T, BlockSize>
+class block_scan : private detail::select_block_scan_impl<Algorithm>::template type<T, BlockSize>
 {
     using base_type = typename detail::select_block_scan_impl<Algorithm>::template type<T, BlockSize>;
 public:
@@ -108,6 +108,54 @@ public:
     template<class BinaryFunction = ::rocprim::plus<T>>
     void inclusive_scan(T input,
                         T& output,
+                        T& reduction,
+                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+    {
+        base_type::inclusive_scan(input, output, reduction, scan_op);
+    }
+
+    template<
+        unsigned int ItemsPerThread,
+        class BinaryFunction = ::rocprim::plus<T>
+    >
+    void inclusive_scan(T (&input)[ItemsPerThread],
+                        T (&output)[ItemsPerThread],
+                        storage_type& storage,
+                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+    {
+        base_type::inclusive_scan(input, output, storage, scan_op);
+    }
+
+    template<
+        unsigned int ItemsPerThread,
+        class BinaryFunction = ::rocprim::plus<T>
+    >
+    void inclusive_scan(T (&input)[ItemsPerThread],
+                        T (&output)[ItemsPerThread],
+                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+    {
+        base_type::inclusive_scan(input, output, scan_op);
+    }
+
+    template<
+        unsigned int ItemsPerThread,
+        class BinaryFunction = ::rocprim::plus<T>
+    >
+    void inclusive_scan(T (&input)[ItemsPerThread],
+                        T (&output)[ItemsPerThread],
+                        storage_type& storage,
+                        T& reduction,
+                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+    {
+        base_type::inclusive_scan(input, output, reduction, storage, scan_op);
+    }
+
+    template<
+        unsigned int ItemsPerThread,
+        class BinaryFunction = ::rocprim::plus<T>
+    >
+    void inclusive_scan(T (&input)[ItemsPerThread],
+                        T (&output)[ItemsPerThread],
                         T& reduction,
                         BinaryFunction scan_op = BinaryFunction()) [[hc]]
     {
