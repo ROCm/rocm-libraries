@@ -72,12 +72,6 @@ public:
     static constexpr block_scan_algorithm algorithm = Algorithm;
     using storage_type = typename base_type::storage_type;
 
-    template<class BinaryFunction = ::rocprim::plus<T>>
-    void inclusive_scan(T input, T& output, BinaryFunction scan_op = BinaryFunction()) [[hc]]
-    {
-        base_type::inclusive_scan(input, output, scan_op);
-    }
-
     // Optionally we can add "count" parameter, so scan would be performed
     // only for the first count elements in the block. That gives runtime
     // option for a user to limit scan size.
@@ -88,6 +82,76 @@ public:
                         BinaryFunction scan_op = BinaryFunction()) [[hc]]
     {
         base_type::inclusive_scan(input, output, storage, scan_op);
+    }
+
+    template<class BinaryFunction = ::rocprim::plus<T>>
+    void inclusive_scan(T input,
+                        T& output,
+                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+    {
+        base_type::inclusive_scan(input, output, scan_op);
+    }
+
+    // Optionally we can add "count" parameter, so scan would be performed
+    // only for the first count elements in the block. That gives runtime
+    // option for a user to limit scan size.
+    template<class BinaryFunction = ::rocprim::plus<T>>
+    void inclusive_scan(T input,
+                        T& output,
+                        T& reduction,
+                        storage_type& storage,
+                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+    {
+        base_type::inclusive_scan(input, output, reduction, storage, scan_op);
+    }
+
+    template<class BinaryFunction = ::rocprim::plus<T>>
+    void inclusive_scan(T input,
+                        T& output,
+                        T& reduction,
+                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+    {
+        base_type::inclusive_scan(input, output, reduction, scan_op);
+    }
+
+    template<class BinaryFunction = ::rocprim::plus<T>>
+    void exclusive_scan(T input,
+                        T& output,
+                        T init,
+                        storage_type& storage,
+                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+    {
+        base_type::exclusive_scan(input, output, init, storage, scan_op);
+    }
+
+    template<class BinaryFunction = ::rocprim::plus<T>>
+    void exclusive_scan(T input,
+                        T& output,
+                        T init,
+                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+    {
+        base_type::exclusive_scan(input, output, init, scan_op);
+    }
+
+    template<class BinaryFunction = ::rocprim::plus<T>>
+    void exclusive_scan(T input,
+                        T& output,
+                        T init,
+                        T& reduction,
+                        storage_type& storage,
+                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+    {
+        base_type::exclusive_scan(input, output, init, reduction, storage, scan_op);
+    }
+
+    template<class BinaryFunction = ::rocprim::plus<T>>
+    void exclusive_scan(T input,
+                        T& output,
+                        T init,
+                        T& reduction,
+                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+    {
+        base_type::exclusive_scan(input, output, init, reduction, scan_op);
     }
 };
 
