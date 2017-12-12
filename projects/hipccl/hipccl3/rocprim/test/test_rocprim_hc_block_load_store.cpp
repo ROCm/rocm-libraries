@@ -29,14 +29,16 @@
 #include <hcc/hc.hpp>
 // rocPRIM
 #include <block/block_load.hpp>
+#include <block/block_store.hpp>
 #include <iterator/input_iterator.hpp>
+#include <iterator/output_iterator.hpp>
 
 #include "test_utils.hpp"
 
 namespace rp = rocprim;
 
 template<typename BlockSizeWrapper>
-class RocprimBlockLoadTests : public ::testing::Test {
+class RocprimBlockLoadStoreTests : public ::testing::Test {
 public:
     static constexpr unsigned int block_size = BlockSizeWrapper::value;
 };
@@ -46,12 +48,16 @@ typedef ::testing::Types<
     uint_wrapper<128U>,
     uint_wrapper<256U>,
     uint_wrapper<512U>,
-    uint_wrapper<1024U>
+    uint_wrapper<1024U>,
+    uint_wrapper<65U>,
+    uint_wrapper<37U>,
+    uint_wrapper<162U>,
+    uint_wrapper<255U>
 > BlockSizes;
 
-TYPED_TEST_CASE(RocprimBlockLoadTests, BlockSizes);
+TYPED_TEST_CASE(RocprimBlockLoadStoreTests, BlockSizes);
 
-TYPED_TEST(RocprimBlockLoadTests, LoadDirectBlocked)
+TYPED_TEST(RocprimBlockLoadStoreTests, LoadStoreDirectBlocked)
 {
     hc::accelerator acc;
 
@@ -63,6 +69,7 @@ TYPED_TEST(RocprimBlockLoadTests, LoadDirectBlocked)
     }
 
     const size_t size = block_size * 113;
+    const size_t items_per_thread = 16;
     // Generate data
     std::vector<int> output = get_random_data<int>(size, -100, 100);
     std::vector<int> output2(output.size(), 0);
@@ -74,20 +81,19 @@ TYPED_TEST(RocprimBlockLoadTests, LoadDirectBlocked)
     hc::array_view<int, 1> d_output2(output2.size(), output2.data());
     hc::parallel_for_each(
         acc.get_default_view(),
-        hc::extent<1>(output.size() / 16).tile(block_size),
+        hc::extent<1>(output.size()).tile(block_size),
         [=](hc::tiled_index<1> i) [[hc]]
         {
-            int t[16];
+            int t[items_per_thread];
             int idx = i.global[0];
-            int offset = idx * 16;
-            rp::block_load_direct_blocked<int, 16>(
-                idx, rp::input_iterator<int>(d_output.data()), t, 
-                size);
-            #pragma unroll
-            for (int item = 0; item < 16; item++)
-            {
-                d_output2[item + offset] = t[item];
-            }
+            rp::block_load_direct_blocked<int, items_per_thread>(
+                idx, 
+                rp::input_iterator<int>(d_output.data()), 
+                t, size);
+            rp::block_store_direct_blocked<int, items_per_thread>(
+                idx, 
+                rp::output_iterator<int>(d_output2.data()), 
+                t, size);
         }
     );
 

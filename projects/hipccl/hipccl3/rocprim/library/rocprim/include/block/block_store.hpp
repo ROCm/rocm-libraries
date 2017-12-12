@@ -43,9 +43,10 @@ template<
     class OutputIterator
 >
 void block_store_direct_blocked(int thread_id, OutputIterator block_iter,
-                               Input (&items)[ItemsPerThread]) [[hc]]
+                               Output (&items)[ItemsPerThread]) [[hc]]
 {
-    OutputIterator thread_iter = block_iter + (thread_id * ItemsPerThread);
+    int offset = thread_id * ItemsPerThread;
+    OutputIterator thread_iter = block_iter + offset;
     #pragma unroll
     for (int item = 0; item < ItemsPerThread; item++)
     {
@@ -59,14 +60,15 @@ template<
     class OutputIterator
 >
 void block_store_direct_blocked(int thread_id, OutputIterator block_iter,
-                               Input (&items)[ItemsPerThread],
+                               Output (&items)[ItemsPerThread],
                                int valid) [[hc]]
 {
-    OutputIterator thread_iter = block_iter + (thread_id * ItemsPerThread);
+    int offset = thread_id * ItemsPerThread;
+    OutputIterator thread_iter = block_iter + offset;
     #pragma unroll
     for (int item = 0; item < ItemsPerThread; item++)
     {
-        if ((thread_id * ItemsPerThread) + item < valid)
+        if (item + offset < valid)
         {
             thread_iter[item] = items[item];
         }

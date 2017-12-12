@@ -47,7 +47,8 @@ template<
 void block_load_direct_blocked(int thread_id, InputIterator block_iter,
                                Input (&items)[ItemsPerThread]) [[hc]]
 {
-    InputIterator thread_iter = block_iter + (thread_id * ItemsPerThread);
+    int offset = thread_id * ItemsPerThread;
+    InputIterator thread_iter = block_iter + offset;
     #pragma unroll
     for (int item = 0; item < ItemsPerThread; item++)
     {
@@ -64,11 +65,12 @@ void block_load_direct_blocked(int thread_id, InputIterator block_iter,
                                Input (&items)[ItemsPerThread],
                                int valid) [[hc]]
 {
-    InputIterator thread_iter = block_iter + (thread_id * ItemsPerThread);
+    int offset = thread_id * ItemsPerThread;
+    InputIterator thread_iter = block_iter + offset;
     #pragma unroll
     for (int item = 0; item < ItemsPerThread; item++)
     {
-        if ((thread_id * ItemsPerThread) + item < valid)
+        if (item + offset < valid)
         {
             items[item] = thread_iter[item];
         }
