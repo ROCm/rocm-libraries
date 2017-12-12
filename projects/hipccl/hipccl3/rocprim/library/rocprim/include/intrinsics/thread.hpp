@@ -30,7 +30,9 @@ BEGIN_ROCPRIM_NAMESPACE
 
 // Sizes
 
-/// \brief Returns number of threads in a warp.
+/// \brief Returns a number of threads in a hardware warp.
+///
+/// It is constant for a device.
 constexpr unsigned int warp_size() [[hc]] [[cpu]]
 {
     // Using marco allows contexpr, but we may have to
@@ -39,11 +41,13 @@ constexpr unsigned int warp_size() [[hc]] [[cpu]]
     // return hc::__wavesize();
 }
 
+/// \brief Returns flat size of a multidimensional block (tile).
 inline unsigned int flat_block_size() [[hc]]
 {
     return hc_get_group_size(2) * hc_get_group_size(1) * hc_get_group_size(0);
 }
 
+/// \brief Returns flat size of a multidimensional tile (block).
 inline unsigned int flat_tile_size() [[hc]]
 {
     return flat_block_size();
@@ -51,13 +55,13 @@ inline unsigned int flat_tile_size() [[hc]]
 
 // IDs
 
-/// \brief Returns thread id in a warp.
+/// \brief Returns thread identifier in a warp.
 inline unsigned int lane_id() [[hc]]
 {
     return hc::__lane_id();
 }
 
-/// \brief Returns flat thread id in a block (tile).
+/// \brief Returns flat (linear, 1D) thread identifier in a multidimensional block (tile).
 inline unsigned int flat_block_thread_id() [[hc]]
 {
     return (hc_get_workitem_id(2) * hc_get_group_size(1) * hc_get_group_size(0))
@@ -65,18 +69,19 @@ inline unsigned int flat_block_thread_id() [[hc]]
         + hc_get_workitem_id(0);
 }
 
-/// \brief Returns flat thread id in a tile (block).
+/// \brief Returns flat (linear, 1D) thread identifier in a multidimensional tile (block).
 inline unsigned int flat_tile_thread_id() [[hc]]
 {
     return flat_block_thread_id();
 }
 
-/// \brief Returns warp id in the block (tile)
+/// \brief Returns warp id in a block (tile).
 inline unsigned int warp_id() [[hc]]
 {
     return flat_block_thread_id()/warp_size();
 }
 
+/// \brief Returns flat (linear, 1D) block identifier in a multidimensional grid.
 inline unsigned int flat_block_id() [[hc]]
 {
     return (hc_get_group_id(2) * hc_get_num_groups(1) * hc_get_num_groups(0))
@@ -86,14 +91,16 @@ inline unsigned int flat_block_id() [[hc]]
 
 // Sync
 
-/// \bried Synchronize all threads in a block (tile)
-inline void sync_all_threads() [[hc]]
+/// \brief Synchronize all threads in a block (tile)
+inline void syncthreads() [[hc]]
 {
     hc_barrier(CLK_LOCAL_MEM_FENCE);
 }
 
 namespace detail
 {
+    // Return thread id in a "logical warp", which can be smaller
+    // than a hardware warp size.
     template<unsigned int LogicalWarpSize>
     unsigned int logical_lane_id() [[hc]]
     {
@@ -106,10 +113,11 @@ namespace detail
         return lane_id();
     }
 
+    // Return id of "logical warp" in a block
     template<unsigned int LogicalWarpSize>
     unsigned int logical_warp_id() [[hc]]
     {
-        return lane_id()/LogicalWarpSize;
+        return flat_block_thread_id()/LogicalWarpSize;
     }
 
     template<>
