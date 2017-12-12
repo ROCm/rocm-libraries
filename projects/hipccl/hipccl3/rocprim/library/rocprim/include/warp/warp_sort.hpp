@@ -32,6 +32,9 @@
 #include "../intrinsics.hpp"
 #include "../functional.hpp"
 
+/// \addtogroup collectivewarpmodule
+/// @{
+
 #include "detail/warp_sort_shuffle.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -69,7 +72,77 @@ struct select_warp_sort_impl
 
 } // end namespace detail
 
-/// \brief Parallel sort primitive for warp.
+/// \brief The warp_sort class provides warp-wide methods for computing a parallel 
+/// sort of items across thread warps. This class currently implements parallel
+/// bitonic sort, and only accepts warp sizes that are powers of two.
+///
+/// \tparam Key Data type for parameter Key
+/// \tparam WarpSize [optional] The number of threads in a warp
+/// \tparam Value [optional] Data type for parameter Value. By default, it's empty_type
+///
+/// \par Overview
+/// * \p WarpSize must be power of two.
+/// * \p WarpSize must be equal to or less than the size of hardware warp (see
+/// rocprim::warp_size()). If it is less, sort is performed separatly within groups
+/// determined by WarpSize.
+/// For example, if \p WarpSize is 4, hardware warp is 64, sort will be performed in logical
+/// warps grouped like this: `{ {0, 1, 2, 3}, {4, 5, 6, 7 }, ..., {60, 61, 62, 63} }`
+/// (thread is represented here by its id within hardware warp).
+/// * Accepts custom compare_functions for sorting across a warp.
+/// * Number of threads executing warp_sort's function must be a multiple of \p WarpSize;
+///
+/// \par Example:
+/// \parblock
+/// Every thread within the warp uses the warp_sort class by first specializing the 
+/// warp_sort type, and instantiating an object that will be used to invoke a 
+/// member function.
+/// 
+/// \b HIP: \n
+/// \code{.cpp}
+/// __global__ void ExampleKernel(...)
+/// {
+///     const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+///     
+///     int value = input[i];
+///     rocprim::warp_sort<int, 64> wsort;
+///     wsort.sort(value);
+///     input[i] = value;
+/// }
+/// \endcode
+///
+/// \b HC: \n
+/// \code{.cpp}
+/// hc::parallel_for_each(
+///     hc::extent<1>(...).tile(block_size),
+///     [=](hc::tiled_index<1> i) [[hc]]
+///     {
+///         int value = ...;
+///         rocprim::warp_sort<int, 64> wsort;
+///         wsort.sort(value);
+///         ...
+///     }
+/// );
+/// \endcode
+///
+/// Below is a snippet demonstrating how to pass a custom compare function:
+/// \code{.cpp}
+/// bool customCompare(const int& a, const int& b) [[hc]]
+/// {
+///     return a < b;
+/// }
+/// ...
+/// hc::parallel_for_each(
+///     hc::extent<1>(...).tile(block_size),
+///     [=](hc::tiled_index<1> i) [[hc]]
+///     {
+///         int value = ...;
+///         rocprim::warp_sort<int, warpsize> wsort;
+///         wsort.sort(value, customCompare);
+///         ...
+///     }
+/// );
+/// \endcode
+/// \endparblock
 template<
     class Key,
     unsigned int WarpSize = warp_size(),
@@ -80,14 +153,65 @@ class warp_sort : detail::select_warp_sort_impl<Key, WarpSize, Value>::type
     typedef typename detail::select_warp_sort_impl<Key, WarpSize, Value>::type base_type;
 
 public:
+    /// \brief Struct used to allocate a temporary memory that is required for thread
+    /// communication during operations provided by related parallel primitive.
+    ///
+    /// Depending on the implemention the operations exposed by parallel primitive may
+    /// require a temporary storage for thread communication. The storage should be allocated
+    /// using keywords \p __shared__ in HIP or \p tile_static in HC. It can be aliased to
+    /// an externally allocated memory, or be a part of a union with other storage types
+    /// to increase shared memory reusability.
     typedef typename base_type::storage_type storage_type;
 
+    /// \brief Warp sort for any data type.
+    ///
+    /// \tparam BinaryFunction - type of binary function used for sort. Default type
+    /// is rocprim::less<T>.
+    ///
+    /// \param thread_key - input/output to pass to other threads
+    /// \param compare_function - binary operation function object that will be used for sort.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
+    /// <tt>const &</tt>, but function object must not modify the objects passed to it.
     template<class BinaryFunction = ::rocprim::less<Key>>
-    void sort(Key& thread_key, BinaryFunction compare_function = BinaryFunction()) [[hc]]
+    void sort(Key& thread_key, 
+              BinaryFunction compare_function = BinaryFunction()) [[hc]]
     {
         base_type::sort(thread_key, compare_function);
     }
-
+    
+    /// \brief Warp sort for any data type using temporary storage.
+    ///
+    /// \tparam BinaryFunction - type of binary function used for sort. Default type
+    /// is rocprim::less<T>.
+    ///
+    /// \param thread_key - input/output to pass to other threads
+    /// \param storage - temporary storage for inputs
+    /// \param compare_function - binary operation function object that will be used for sort.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
+    /// <tt>const &</tt>, but function object must not modify the objects passed to it.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
+    /// universal rocprim::syncthreads().
+    ///
+    /// \par Example.
+    /// \code{.cpp}
+    /// hc::parallel_for_each(
+    ///     hc::extent<1>(...).tile(block_size),
+    ///     [=](hc::tiled_index<1> i) [[hc]]
+    ///     {
+    ///         int value = ...;
+    ///         using warp_sort_int = rp::warp_sort<int, 64>;
+    ///         warp_sort_int wsort;
+    ///         tile_static typename warp_sort_int::storage_type storage;
+    ///         wsort.sort(value, storage);
+    ///         ...
+    ///     }
+    /// );
+    /// \endcode
     template<class BinaryFunction = ::rocprim::less<Key>>
     void sort(Key& thread_key,
               storage_type& storage,
@@ -97,17 +221,66 @@ public:
             thread_key, storage, compare_function
         );
     }
-
+    
+    /// \brief Warp sort by key for any data type.
+    ///
+    /// \tparam BinaryFunction - type of binary function used for sort. Default type
+    /// is rocprim::less<T>.
+    ///
+    /// \param thread_key - input/output key to pass to other threads
+    /// \param thread_value - input/output value to pass to other threads
+    /// \param compare_function - binary operation function object that will be used for sort.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
+    /// <tt>const &</tt>, but function object must not modify the objects passed to it.
     template<class BinaryFunction = ::rocprim::less<Key>>
-    void sort(Key& thread_key, Value& thread_value, BinaryFunction compare_function = BinaryFunction()) [[hc]]
+    void sort(Key& thread_key, 
+              Value& thread_value, 
+              BinaryFunction compare_function = BinaryFunction()) [[hc]]
     {
         base_type::sort(
             thread_key, thread_value, compare_function
         );
     }
 
+    /// \brief Warp sort by key for any data type using temporary storage.
+    ///
+    /// \tparam BinaryFunction - type of binary function used for sort. Default type
+    /// is rocprim::less<T>.
+    ///
+    /// \param thread_key - input/output key to pass to other threads
+    /// \param thread_value - input/output value to pass to other threads
+    /// \param storage - temporary storage for inputs
+    /// \param compare_function - binary operation function object that will be used for sort.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
+    /// <tt>const &</tt>, but function object must not modify the objects passed to it.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
+    /// universal rocprim::syncthreads().
+    ///
+    /// \par Example.
+    /// \code{.cpp}
+    /// hc::array_view<int, 1> d_output(...);
+    /// hc::parallel_for_each(
+    ///     hc::extent<1>(...).tile(block_size),
+    ///     [=](hc::tiled_index<1> i) [[hc]]
+    ///     {
+    ///         int value = ...;
+    ///         using warp_sort_int = rp::warp_sort<int, 64>;
+    ///         warp_sort_int wsort;
+    ///         tile_static typename warp_sort_int::storage_type storage;
+    ///         wsort.sort(key, value, storage);
+    ///         ...
+    ///     }
+    /// );
+    /// d_output.synchronize();
+    /// \endcode
     template<class BinaryFunction = ::rocprim::less<Key>>
-    void sort(Key& thread_key, Value& thread_value,
+    void sort(Key& thread_key, 
+              Value& thread_value,
               storage_type& storage,
               BinaryFunction compare_function = BinaryFunction()) [[hc]]
     {
@@ -118,5 +291,8 @@ public:
 };
 
 END_ROCPRIM_NAMESPACE
+
+/// @}
+// end of group collectivewarpmodule
 
 #endif // ROCPRIM_WARP_WARP_SORT_HPP_

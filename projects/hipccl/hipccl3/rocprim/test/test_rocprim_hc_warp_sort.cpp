@@ -52,32 +52,35 @@ TYPED_TEST_CASE(RocprimWarpSortShuffleBasedTests, WarpSizes);
 
 TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortInt)
 {
-    constexpr size_t warp_size = TestFixture::warp_size;
+    // logical warp side for warp primitive, execution warp size is always rp::warp_size()
+    constexpr size_t logical_warp_size = TestFixture::warp_size;
+    const size_t block_size = std::max<size_t>(rp::warp_size(), 4 * logical_warp_size);
+    const size_t size = block_size * 4;
+    
     // Given warp size not supported
-    if(warp_size > rp::warp_size() || !rp::detail::is_power_of_two(warp_size))
+    if(logical_warp_size > rp::warp_size() || !rp::detail::is_power_of_two(logical_warp_size))
     {
         return;
     }
 
-    const size_t size = warp_size * 4;
     // Generate data
     std::vector<int> output = get_random_data<int>(size, -100, 100);
 
     // Calulcate expected results on host
     std::vector<int> expected(output);
 
-    for(size_t i = 0; i < output.size() / warp_size; i++)
+    for(size_t i = 0; i < output.size() / logical_warp_size; i++)
     {
-        std::sort(expected.begin() + (i * warp_size), expected.begin() + ((i + 1) * warp_size));
+        std::sort(expected.begin() + (i * logical_warp_size), expected.begin() + ((i + 1) * logical_warp_size));
     }
 
     hc::array_view<int, 1> d_output(output.size(), output.data());
     hc::parallel_for_each(
-        hc::extent<1>(output.size()).tile(warp_size),
+        hc::extent<1>(output.size()).tile(block_size),
         [=](hc::tiled_index<1> i) [[hc]]
         {
             int value = d_output[i];
-            rp::warp_sort<int, warp_size> wsort;
+            rp::warp_sort<int, logical_warp_size> wsort;
             wsort.sort(value);
             d_output[i] = value;
         }
@@ -92,14 +95,17 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortInt)
 
 TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
 {
-    constexpr size_t warp_size = TestFixture::warp_size;
+    // logical warp side for warp primitive, execution warp size is always rp::warp_size()
+    constexpr size_t logical_warp_size = TestFixture::warp_size;
+    const size_t block_size = std::max<size_t>(rp::warp_size(), 4 * logical_warp_size);
+    const size_t size = block_size * 4;
+    
     // Given warp size not supported
-    if(warp_size > rp::warp_size() || !rp::detail::is_power_of_two(warp_size))
+    if(logical_warp_size > rp::warp_size() || !rp::detail::is_power_of_two(logical_warp_size))
     {
         return;
     }
 
-    const size_t size = warp_size * 4;
     // Generate data
     std::vector<int> output_key(size);
     std::iota(output_key.begin(), output_key.end(), 0);
@@ -113,18 +119,18 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
     // Calulcate expected results on host
     std::vector<std::pair<int, int>> expected(target);
 
-    for(size_t i = 0; i < expected.size() / warp_size; i++)
+    for(size_t i = 0; i < expected.size() / logical_warp_size; i++)
     {
-        std::sort(expected.begin() + (i * warp_size), expected.begin() + ((i + 1) * warp_size));
+        std::sort(expected.begin() + (i * logical_warp_size), expected.begin() + ((i + 1) * logical_warp_size));
     }
 
     hc::array_view<int, 1> d_output_key(output_key.size(), output_key.data());
     hc::array_view<int, 1> d_output_value(output_value.size(), output_value.data());
     hc::parallel_for_each(
-        hc::extent<1>(output_key.size()).tile(warp_size),
+        hc::extent<1>(output_key.size()).tile(block_size),
         [=](hc::tiled_index<1> i) [[hc]]
         {
-            rp::warp_sort<int, warp_size, int> wsort;
+            rp::warp_sort<int, logical_warp_size, int> wsort;
             wsort.sort(d_output_key[i], d_output_value[i]);
         }
     );
