@@ -99,3 +99,187 @@ TYPED_TEST(RocprimBlockScanShuffleBasedTests, InclusiveScanInt)
         EXPECT_EQ(output[i], expected[i]);
     }
 }
+
+TYPED_TEST(RocprimBlockScanShuffleBasedTests, InclusiveScanReduceInt)
+{
+    hc::accelerator acc;
+
+    constexpr size_t block_size = TestFixture::block_size;
+    // Given block size not supported
+    if(block_size > get_max_tile_size(acc))
+    {
+        return;
+    }
+
+    const size_t size = block_size * 113;
+    // Generate data
+    std::vector<int> output = get_random_data<int>(size, -100, 100);
+    std::vector<int> output_reductions(size / block_size);
+
+    // Calulcate expected results on host
+    std::vector<int> expected(output.size(), 0);
+    std::vector<int> expected_reductions(output_reductions.size(), 0);
+    for(size_t i = 0; i < output.size() / block_size; i++)
+    {
+        for(size_t j = 0; j < block_size; j++)
+        {
+            auto idx = i * block_size + j;
+            expected[idx] = output[idx] + expected[j > 0 ? idx-1 : idx];
+        }
+        expected_reductions[i] = expected[(i+1) * block_size - 1];
+    }
+
+    hc::array_view<int, 1> d_output(output.size(), output.data());
+    hc::array_view<int, 1> d_output_r(
+        output_reductions.size(), output_reductions.data()
+    );
+    hc::parallel_for_each(
+        acc.get_default_view(),
+        hc::extent<1>(output.size()).tile(block_size),
+        [=](hc::tiled_index<1> i) [[hc]]
+        {
+            int value = d_output[i];
+            int reduction;
+            rp::block_scan<int, block_size> bscan;
+            bscan.inclusive_scan(value, value, reduction);
+            d_output[i] = value;
+            if(i.local[0] == 0)
+            {
+                d_output_r[i.tile[0]] = reduction;
+            }
+        }
+    );
+
+    d_output.synchronize();
+    for(int i = 0; i < output.size(); i++)
+    {
+        EXPECT_EQ(output[i], expected[i]);
+    }
+
+    d_output_r.synchronize();
+    for(int i = 0; i < output_reductions.size(); i++)
+    {
+        EXPECT_EQ(output_reductions[i], expected_reductions[i]);
+    }
+}
+
+TYPED_TEST(RocprimBlockScanShuffleBasedTests, ExclusiveScanInt)
+{
+    hc::accelerator acc;
+
+    constexpr size_t block_size = TestFixture::block_size;
+    // Given block size not supported
+    if(block_size > get_max_tile_size(acc))
+    {
+        return;
+    }
+
+    const size_t size = block_size * 113;
+    // Generate data
+    std::vector<int> output = get_random_data<int>(size, -100, 100);
+    const int init = get_random_value(0, 100);
+
+    // Calulcate expected results on host
+    std::vector<int> expected(output.size(), 0);
+    for(size_t i = 0; i < output.size() / block_size; i++)
+    {
+        expected[i * block_size] = init;
+        for(size_t j = 1; j < block_size; j++)
+        {
+            auto idx = i * block_size + j;
+            expected[idx] = output[idx-1] + expected[idx-1];
+        }
+    }
+
+    hc::array_view<int, 1> d_output(output.size(), output.data());
+    hc::parallel_for_each(
+        acc.get_default_view(),
+        hc::extent<1>(output.size()).tile(block_size),
+        [=](hc::tiled_index<1> i) [[hc]]
+        {
+            int value = d_output[i];
+            rp::block_scan<int, block_size> bscan;
+            bscan.exclusive_scan(value, value, init);
+            d_output[i] = value;
+        }
+    );
+
+    d_output.synchronize();
+    for(int i = 0; i < output.size(); i++)
+    {
+        EXPECT_EQ(output[i], expected[i]);
+    }
+}
+
+TYPED_TEST(RocprimBlockScanShuffleBasedTests, ExclusiveScanReduceInt)
+{
+    hc::accelerator acc;
+
+    constexpr size_t block_size = TestFixture::block_size;
+    // Given block size not supported
+    if(block_size > get_max_tile_size(acc))
+    {
+        return;
+    }
+
+    const size_t size = block_size * 113;
+    // Generate data
+    std::vector<int> output = get_random_data<int>(size, -100, 100);
+    const int init = get_random_value(0, 100);
+
+    // Output reduce results
+    std::vector<int> output_reductions(size / block_size);
+
+    // Calulcate expected results on host
+    std::vector<int> expected(output.size(), 0);
+    std::vector<int> expected_reductions(output_reductions.size(), 0);
+    for(size_t i = 0; i < output.size() / block_size; i++)
+    {
+        expected[i * block_size] = init;
+        for(size_t j = 1; j < block_size; j++)
+        {
+            auto idx = i * block_size + j;
+            expected[idx] = output[idx-1] + expected[idx-1];
+        }
+
+        expected_reductions[i] = 0;
+        for(size_t j = 0; j < block_size; j++)
+        {
+            auto idx = i * block_size + j;
+            expected_reductions[i] += output[idx];
+        }
+    }
+
+    hc::array_view<int, 1> d_output(output.size(), output.data());
+    hc::array_view<int, 1> d_output_r(
+        output_reductions.size(), output_reductions.data()
+    );
+    hc::parallel_for_each(
+        acc.get_default_view(),
+        hc::extent<1>(output.size()).tile(block_size),
+        [=](hc::tiled_index<1> i) [[hc]]
+        {
+            int value = d_output[i];
+            int reduction;
+            rp::block_scan<int, block_size> bscan;
+            bscan.exclusive_scan(value, value, init, reduction);
+            d_output[i] = value;
+            if(i.local[0] == 0)
+            {
+                d_output_r[i.tile[0]] = reduction;
+            }
+        }
+    );
+
+    d_output.synchronize();
+    for(int i = 0; i < output.size(); i++)
+    {
+        EXPECT_EQ(output[i], expected[i]);
+    }
+
+    d_output_r.synchronize();
+    for(int i = 0; i < output_reductions.size(); i++)
+    {
+        EXPECT_EQ(output_reductions[i], expected_reductions[i]);
+    }
+}
