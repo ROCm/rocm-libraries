@@ -43,8 +43,8 @@ struct custom_struct
     float f;
     unsigned int u;
 
-    custom_struct() [[cpu]] [[hc]] = default;
-    ~custom_struct() [[cpu]] [[hc]] = default;
+    custom_struct() [[cpu]] [[hc]] {};
+    ~custom_struct() [[cpu]] [[hc]] {};
 
     custom_struct& operator+=(const custom_struct& rhs) [[cpu]] [[hc]]
     {
