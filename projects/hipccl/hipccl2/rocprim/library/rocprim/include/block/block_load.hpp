@@ -21,54 +21,52 @@
 #ifndef ROCPRIM_BLOCK_BLOCK_LOAD_HPP_
 #define ROCPRIM_BLOCK_BLOCK_LOAD_HPP_
 
-#include <type_traits>
-
 // HC API
 #include <hcc/hc.hpp>
+#include <hcc/hc_short_vector.hpp>
 
 #include "../detail/config.hpp"
 #include "../detail/various.hpp"
 
 #include "../intrinsics.hpp"
 #include "../functional.hpp"
+#include "../types.hpp"
 
 /// \addtogroup collectiveblockmodule
 /// @{
 
-#include "detail/block_load_blocked.hpp"
-
 BEGIN_ROCPRIM_NAMESPACE
 
 template<
-    class Input,
-    int ItemsPerThread,
-    class InputIterator
+    class IteratorT,
+    class T,
+    unsigned int ItemsPerThread
 >
-void block_load_direct_blocked(int thread_id, InputIterator block_iter,
-                               Input (&items)[ItemsPerThread]) [[hc]]
+void block_load_direct_blocked(int flat_id, IteratorT block_iter,
+                               T (&items)[ItemsPerThread]) [[hc]]
 {
-    int offset = thread_id * ItemsPerThread;
-    InputIterator thread_iter = block_iter + offset;
+    int offset = flat_id * ItemsPerThread;
+    IteratorT thread_iter = block_iter + offset;
     #pragma unroll
-    for (int item = 0; item < ItemsPerThread; item++)
+    for (unsigned int item = 0; item < ItemsPerThread; item++)
     {
         items[item] = thread_iter[item];
     }
 }
 
 template<
-    class Input,
-    int ItemsPerThread,
-    class InputIterator
+    class IteratorT,
+    class T,
+    unsigned int ItemsPerThread
 >
-void block_load_direct_blocked(int thread_id, InputIterator block_iter,
-                               Input (&items)[ItemsPerThread],
+void block_load_direct_blocked(int flat_id, IteratorT block_iter,
+                               T (&items)[ItemsPerThread],
                                int valid) [[hc]]
 {
-    int offset = thread_id * ItemsPerThread;
-    InputIterator thread_iter = block_iter + offset;
+    int offset = flat_id * ItemsPerThread;
+    IteratorT thread_iter = block_iter + offset;
     #pragma unroll
-    for (int item = 0; item < ItemsPerThread; item++)
+    for (unsigned int item = 0; item < ItemsPerThread; item++)
     {
         if (item + offset < valid)
         {
@@ -78,23 +76,60 @@ void block_load_direct_blocked(int thread_id, InputIterator block_iter,
 }
 
 template<
-    class Input,
-    class Default,
-    int ItemsPerThread,
-    class InputIterator
+    class IteratorT,
+    class T,
+    unsigned int ItemsPerThread,
+    class Default
 >
-void block_load_direct_blocked(int thread_id, InputIterator block_iter,
-                               Input (&items)[ItemsPerThread],
+void block_load_direct_blocked(int flat_id, IteratorT block_iter,
+                               T (&items)[ItemsPerThread],
                                int valid, Default out_of_bounds) [[hc]]
 {
     #pragma unroll
-    for (int item = 0; item < ItemsPerThread; item++)
+    for (unsigned int item = 0; item < ItemsPerThread; item++)
         items[item] = out_of_bounds;
 
-    block_load_direct_blocked(thread_id, block_iter, items, valid);
+    block_load_direct_blocked(flat_id, block_iter, items, valid);
 }
 
+template<
+    class T,
+    int ItemsPerThread
+>
+typename std::enable_if<detail::is_vectorizable<T, ItemsPerThread>()>::type
+block_load_direct_blocked_vectorized(int flat_id, T* block_iter,
+                                     T (&items)[ItemsPerThread]) [[hc]]
+{
+    typedef typename detail::match_vector_type<T, ItemsPerThread>::type Vector;
+    constexpr unsigned int vectors_per_thread = (sizeof(T) * ItemsPerThread) / sizeof(Vector);
+    Vector vector_items[vectors_per_thread];
 
+    Vector* vector_ptr = reinterpret_cast<Vector*>(block_iter) +
+                         (flat_id * vectors_per_thread);
+
+    #pragma unroll
+    for (unsigned int item = 0; item < vectors_per_thread; item++)
+    {
+        vector_items[item] = *(vector_ptr + item);
+    }
+
+    #pragma unroll
+    for (unsigned int item = 0; item < ItemsPerThread; item++)
+    {
+        items[item] = *(reinterpret_cast<T*>(vector_items) + item);
+    }
+}
+
+template<
+    class T,
+    int ItemsPerThread
+>
+typename std::enable_if<!detail::is_vectorizable<T, ItemsPerThread>()>::type
+block_load_direct_blocked_vectorized(int flat_id, T* block_iter,
+                                     T (&items)[ItemsPerThread]) [[hc]]
+{
+    block_load_direct_blocked(flat_id, block_iter, items);
+}
 
 END_ROCPRIM_NAMESPACE
 

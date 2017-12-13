@@ -30,8 +30,6 @@
 // rocPRIM
 #include <block/block_load.hpp>
 #include <block/block_store.hpp>
-#include <iterator/input_iterator.hpp>
-#include <iterator/output_iterator.hpp>
 
 #include "test_utils.hpp"
 
@@ -86,14 +84,59 @@ TYPED_TEST(RocprimBlockLoadStoreTests, LoadStoreDirectBlocked)
         {
             int t[items_per_thread];
             int idx = i.global[0];
-            rp::block_load_direct_blocked<int, items_per_thread>(
+            rp::block_load_direct_blocked(
                 idx, 
-                rp::input_iterator<int>(d_output.data()), 
+                d_output.data(), 
                 t, size);
-            rp::block_store_direct_blocked<int, items_per_thread>(
+            rp::block_store_direct_blocked(
                 idx, 
-                rp::output_iterator<int>(d_output2.data()), 
+                d_output2.data(), 
                 t, size);
+        }
+    );
+
+    d_output.synchronize();
+    d_output2.synchronize();
+    for(int i = 0; i < output2.size(); i++)
+    {
+        EXPECT_EQ(output2[i], expected[i]);
+    }
+}
+
+TYPED_TEST(RocprimBlockLoadStoreTests, LoadStoreDirectBlockedVectorized)
+{
+    hc::accelerator acc;
+
+    constexpr size_t block_size = TestFixture::block_size;
+    // Given block size not supported or block size is not a power of 2
+    if(block_size > get_max_tile_size(acc) || (block_size & (block_size - 1)) != 0)
+    {
+        return;
+    }
+
+    const size_t size = block_size * 113;
+    const size_t items_per_thread = 32;
+    const size_t vector_size = size / items_per_thread;
+    // Generate data
+    std::vector<float> output = get_random_data<float>(size, -100, 100);
+    std::vector<float> output2(output.size(), 0);
+
+    // Calculate expected results on host
+    std::vector<float> expected(output);
+
+    hc::array_view<float, 1> d_output(output.size(), output.data());
+    hc::array_view<float, 1> d_output2(output2.size(), output2.data());
+    hc::parallel_for_each(
+        acc.get_default_view(),
+        hc::extent<1>(vector_size).tile(block_size),
+        [=](hc::tiled_index<1> i) [[hc]]
+        {
+            float t[items_per_thread];
+            float idx = i.global[0];
+            rp::block_load_direct_blocked_vectorized(
+                idx, d_output.data(), t);
+            rp::block_store_direct_blocked_vectorized(
+                idx, d_output2.data(), t);
         }
     );
 

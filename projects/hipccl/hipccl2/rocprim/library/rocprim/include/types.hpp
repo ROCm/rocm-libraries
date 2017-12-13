@@ -21,10 +21,60 @@
 #ifndef ROCPRIM_TYPES_HPP_
 #define ROCPRIM_TYPES_HPP_
 
+#include <type_traits>
+
 #include "detail/config.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
+namespace detail
+{
 
+#define DEFINE_VECTOR_TYPE(base) \
+\
+struct base##1 \
+{ \
+    base x; \
+} __attribute__((aligned(sizeof(base) * 1))); \
+\
+struct base##2 \
+{ \
+    base x, y; \
+} __attribute__((aligned(sizeof(base) * 2))); \
+\
+struct base##4 \
+{ \
+    base x, y, w, z; \
+} __attribute__((aligned(sizeof(base) * 4))); \
+
+DEFINE_VECTOR_TYPE(char);
+DEFINE_VECTOR_TYPE(int);
+DEFINE_VECTOR_TYPE(short);
+
+template <class T, unsigned int NumElements> 
+struct make_vector_type
+{
+    using type = void;
+};
+
+#define DEFINE_MAKE_VECTOR_TYPE(base, suffix) \
+\
+template<> \
+struct make_vector_type<base, suffix> \
+{ \
+    using type = base##suffix; \
+};
+
+DEFINE_MAKE_VECTOR_TYPE(char, 1);
+DEFINE_MAKE_VECTOR_TYPE(char, 2);
+DEFINE_MAKE_VECTOR_TYPE(char, 4);
+DEFINE_MAKE_VECTOR_TYPE(int, 1);
+DEFINE_MAKE_VECTOR_TYPE(int, 2);
+DEFINE_MAKE_VECTOR_TYPE(int, 4);
+DEFINE_MAKE_VECTOR_TYPE(short, 1);
+DEFINE_MAKE_VECTOR_TYPE(short, 2);
+DEFINE_MAKE_VECTOR_TYPE(short, 4);
+
+} // end namespace detail
 END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_TYPES_HPP_
