@@ -45,29 +45,17 @@ inline
 T warp_shuffle_op(T input, ShuffleOp&& op) [[hc]]
 {
     constexpr int words_no = (sizeof(T) + sizeof(int) - 1) / sizeof(int);
-    union shfl_output_type
-    {
-        static_assert(
-            std::is_trivially_default_constructible<T>::value
-                && std::is_trivially_destructible<T>::value,
-            "T must be trivially default constructible and trivially destructible"
-        );
 
-        int words[words_no];
-        T value;
-        shfl_output_type() [[hc]] = default;
-        ~shfl_output_type() [[hc]] = default;
-    };
-
-    int * shfl_input  = reinterpret_cast<int *>(&input);
-    shfl_output_type shfl_output;
+    int * shfl_input = reinterpret_cast<int *>(&input);
+    int shfl_output_words[words_no];
+    T * shlf_output = reinterpret_cast<T*>(shfl_output_words);
 
     #pragma unroll
     for(int i = 0; i < words_no; i++)
     {
-        shfl_output.words[i] = op(shfl_input[i]);
+        shfl_output_words[i] = op(shfl_input[i]);
     }
-    return shfl_output.value;
+    return *shlf_output;
 }
 
 } // end namespace detail
