@@ -22,6 +22,7 @@
 
 #include <iostream>
 #include <vector>
+#include <cmath>
 
 // Google Test
 #include <gtest/gtest.h>
@@ -42,9 +43,8 @@ struct custom_struct
     float f;
     unsigned int u;
 
-    ~custom_struct() [[cpu]] [[hc]]
-    {
-    }
+    custom_struct() [[cpu]] [[hc]] = default;
+    ~custom_struct() [[cpu]] [[hc]] = default;
 
     custom_struct& operator+=(const custom_struct& rhs) [[cpu]] [[hc]]
     {
@@ -71,7 +71,7 @@ inline bool operator==(const custom_struct& lhs, const custom_struct& rhs)
 
 namespace rp = rocprim;
 
-TEST(RocprimIntrinsicsTests, WarpShuffleUp)
+TEST(RocprimIntrinsicsTests, WarpShuffleUpInt)
 {
     const size_t warp_size = rp::warp_size();
     const size_t size = warp_size;
@@ -104,6 +104,72 @@ TEST(RocprimIntrinsicsTests, WarpShuffleUp)
     }
 }
 
+TEST(RocprimIntrinsicsTests, WarpShuffleUpChar)
+{
+    const size_t warp_size = rp::warp_size();
+    const size_t size = warp_size;
+
+    // Generate data
+    std::vector<char> output = get_random_data<char>(size, -2, 2);
+
+    // Calulcate expected results on host
+    std::vector<char> expected(size, 0);
+    for(size_t i = 0; i < output.size(); i++)
+    {
+        expected[i] = output[i > 0 ? i-1 : 0] + output[i];
+    }
+
+    hc::array_view<char, 1> d_output(size, output.data());
+    hc::parallel_for_each(
+        hc::extent<1>(size).tile(warp_size),
+        [=](hc::tiled_index<1> i) [[hc]]
+        {
+            char value = d_output[i];
+            value += rp::warp_shuffle_up(value, 1, warp_size);
+            d_output[i] = value;
+        }
+    );
+
+    d_output.synchronize();
+    for(char i = 0; i < output.size(); i++)
+    {
+        EXPECT_EQ(output[i], expected[i]);
+    }
+}
+
+TEST(RocprimIntrinsicsTests, WarpShuffleUpFloat)
+{
+    const size_t warp_size = rp::warp_size();
+    const size_t size = warp_size;
+
+    // Generate data
+    std::vector<float> output = get_random_data<float>(size, -100, 100);
+
+    // Calulcate expected results on host
+    std::vector<float> expected(size, 0);
+    for(size_t i = 0; i < output.size(); i++)
+    {
+        expected[i] = output[i > 0 ? i-1 : 0] + output[i];
+    }
+
+    hc::array_view<float, 1> d_output(size, output.data());
+    hc::parallel_for_each(
+        hc::extent<1>(size).tile(warp_size),
+        [=](hc::tiled_index<1> i) [[hc]]
+        {
+            float value = d_output[i];
+            value += rp::warp_shuffle_up(value, 1, warp_size);
+            d_output[i] = value;
+        }
+    );
+
+    d_output.synchronize();
+    for(size_t i = 0; i < output.size(); i++)
+    {
+        EXPECT_NEAR(output[i], expected[i], std::abs(0.01f * expected[i]));
+    }
+}
+
 TEST(RocprimIntrinsicsTests, WarpShuffleUpDouble)
 {
     const size_t warp_size = rp::warp_size();
@@ -133,7 +199,7 @@ TEST(RocprimIntrinsicsTests, WarpShuffleUpDouble)
     d_output.synchronize();
     for(size_t i = 0; i < output.size(); i++)
     {
-        EXPECT_EQ(output[i], expected[i]);
+        EXPECT_NEAR(output[i], expected[i], std::abs(0.01 * expected[i]));
     }
 }
 
