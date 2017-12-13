@@ -24,6 +24,7 @@
 #include <type_traits>
 
 #include "config.hpp"
+#include "../types.hpp"
 
 // TODO: Refactor when it gets crowded
 
@@ -42,7 +43,7 @@ constexpr bool is_power_of_two(const T x)
     static_assert(std::is_integral<T>::value, "T must be integer type");
     return (x > 0) && ((x & (x - 1)) == 0);
 }
-
+    
 template<class T>
 constexpr T next_power_of_two(const T x, const T acc = 1)
 {
@@ -63,6 +64,44 @@ template<unsigned int WarpSize>
 struct is_warpsize_shuffleable {
     static const bool value = detail::is_power_of_two(WarpSize);
 };
+    
+template<class T, unsigned int N>
+struct match_vector_type
+{
+    static constexpr unsigned int size = sizeof(T) * N;
+    using vector_base_type =
+        typename std::conditional<
+            sizeof(T) >= 4,
+            int,
+            typename std::conditional<
+                sizeof(T) >= 2,
+                short,
+                char
+            >::type
+        >::type;
+
+    using vector_4 = typename make_vector_type<vector_base_type, 4>::type;
+    using vector_2 = typename make_vector_type<vector_base_type, 2>::type;
+    using vector_1 = typename make_vector_type<vector_base_type, 1>::type;
+
+    using type =
+        typename std::conditional<
+            size % sizeof(vector_4) == 0,
+            vector_4,
+            typename std::conditional<
+                size % sizeof(vector_2) == 0,
+                vector_2,
+                vector_1
+            >::type
+        >::type;
+};
+    
+template<class T, unsigned int Items>
+inline constexpr bool is_vectorizable() [[hc]] [[cpu]]
+{
+    return (Items % 2 == 0) && 
+           (sizeof(T) < sizeof(typename match_vector_type<T, Items>::type));
+}
 
 } // end namespace detail
 END_ROCPRIM_NAMESPACE

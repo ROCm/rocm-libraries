@@ -28,7 +28,19 @@
 BEGIN_ROCPRIM_NAMESPACE
 
 template<class T>
-void swap(T& a, T& b)
+inline constexpr T max(const T& a, const T& b) [[hc]] [[cpu]]
+{
+    return a < b ? b : a;
+}
+
+template<class T>
+inline constexpr T min(const T& a, const T& b) [[hc]] [[cpu]]
+{
+    return a < b ? a : b;
+}
+
+template<class T>
+void swap(T& a, T& b) [[hc]] [[cpu]]
 {
     T c = a;
     a = b;
