@@ -40,40 +40,22 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-// Checks whether an object of type T can be shuffled in single shuffle operation
-template<class T>
-struct is_single_shuffleable {
-    static const bool value = sizeof(T) <= sizeof(int);
-};
-
-// For types that can be shuffled in one operation
 template<class T, class ShuffleOp>
 inline
-auto warp_shuffle_op(T input, ShuffleOp&& op) [[hc]]
-    -> typename std::enable_if<detail::is_single_shuffleable<T>::value, T>::type
+T warp_shuffle_op(T input, ShuffleOp&& op) [[hc]]
 {
+    constexpr int words_no = (sizeof(T) + sizeof(int) - 1) / sizeof(int);
+
     int * shfl_input = reinterpret_cast<int *>(&input);
-    return op(*shfl_input);
-}
-
-// For types that need more than one shuffle operation
-template<class T, class ShuffleOp>
-inline
-auto warp_shuffle_op(T input, ShuffleOp&& op) [[hc]]
-    -> typename std::enable_if<!detail::is_single_shuffleable<T>::value, T>::type
-{
-    constexpr int shfl_values = (sizeof(T) + sizeof(int) - 1) / sizeof(int);
-    T output;
-
-    int * shfl_input  = reinterpret_cast<int *>(&input);
-    int * shfl_output = reinterpret_cast<int *>(&output);
+    int shfl_output_words[words_no];
+    T * shlf_output = reinterpret_cast<T*>(shfl_output_words);
 
     #pragma unroll
-    for(int i = 0; i < shfl_values; i++)
+    for(int i = 0; i < words_no; i++)
     {
-        shfl_output[i] = op(shfl_input[i]);
+        shfl_output_words[i] = op(shfl_input[i]);
     }
-    return output;
+    return *shlf_output;
 }
 
 } // end namespace detail
