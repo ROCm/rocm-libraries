@@ -35,18 +35,18 @@
 
 #include "test_utils.hpp"
 
-// Custom big structure
-struct custom_struct
+// Custom structure
+struct custom
 {
     short i;
     double d;
     float f;
     unsigned int u;
 
-    custom_struct() [[cpu]] [[hc]] {};
-    ~custom_struct() [[cpu]] [[hc]] {};
+    custom() [[cpu]] [[hc]] {};
+    ~custom() [[cpu]] [[hc]] {};
 
-    custom_struct& operator+=(const custom_struct& rhs) [[cpu]] [[hc]]
+    custom& operator+=(const custom& rhs) [[cpu]] [[hc]]
     {
         this->i += rhs.i;
         this->d += rhs.d;
@@ -56,17 +56,52 @@ struct custom_struct
     }
 };
 
-inline custom_struct operator+(custom_struct lhs,
-                             const custom_struct& rhs) [[cpu]] [[hc]]
+inline custom operator+(custom lhs,
+                        const custom& rhs) [[cpu]] [[hc]]
 {
     lhs += rhs;
     return lhs;
 }
 
-inline bool operator==(const custom_struct& lhs, const custom_struct& rhs)
+inline bool operator==(const custom& lhs, const custom& rhs)
 {
     return lhs.i == rhs.i && lhs.d == rhs.d
         && lhs.f == rhs.f && lhs.u == rhs.u;
+}
+
+
+// Custom structure aligned to 16 bytes
+struct custom_16aligned
+{
+    int i;
+    unsigned int u;
+    float f;
+
+    custom_16aligned() [[cpu]] [[hc]] {};
+    ~custom_16aligned() [[cpu]] [[hc]] {};
+
+    custom_16aligned& operator+=(const custom_16aligned& rhs) [[cpu]] [[hc]]
+    {
+        this->i += rhs.i;
+        this->u += rhs.u;
+        this->f += rhs.f;
+        return *this;
+    }
+} __attribute__((aligned(16)));;
+
+inline
+custom_16aligned operator+(custom_16aligned lhs,
+                           const custom_16aligned& rhs) [[cpu]] [[hc]]
+{
+    lhs += rhs;
+    return lhs;
+}
+
+inline
+bool operator==(const custom_16aligned& lhs,
+                const custom_16aligned& rhs)
+{
+    return lhs.i == rhs.i && lhs.f == rhs.f && lhs.u == rhs.u;
 }
 
 namespace rp = rocprim;
@@ -210,7 +245,7 @@ TEST(RocprimIntrinsicsTests, WarpShuffleUpCustomStruct)
 
     // Generate data
     std::vector<double> random_data = get_random_data<double>(4 * size, -100, 100);
-    std::vector<custom_struct> output(size);
+    std::vector<custom> output(size);
     for(size_t i = 0; i < 4 * output.size(); i+=4)
     {
         output[i/4].i = random_data[i];
@@ -220,18 +255,58 @@ TEST(RocprimIntrinsicsTests, WarpShuffleUpCustomStruct)
     }
 
     // Calulcate expected results on host
-    std::vector<custom_struct> expected(size);
+    std::vector<custom> expected(size);
     for(size_t i = 0; i < output.size(); i++)
     {
         expected[i] = output[i > 0 ? i-1 : 0] + output[i];
     }
 
-    hc::array_view<custom_struct, 1> d_output(size, output.data());
+    hc::array_view<custom, 1> d_output(size, output.data());
     hc::parallel_for_each(
         hc::extent<1>(size).tile(warp_size),
         [=](hc::tiled_index<1> i) [[hc]]
         {
-            custom_struct value = d_output[i];
+            custom value = d_output[i];
+            value += rp::warp_shuffle_up(value, 1, warp_size);
+            d_output[i] = value;
+        }
+    );
+
+    d_output.synchronize();
+    for(size_t i = 0; i < output.size(); i++)
+    {
+        EXPECT_EQ(output[i], expected[i]);
+    }
+}
+
+TEST(RocprimIntrinsicsTests, WarpShuffleUpCustomAlignedStruct)
+{
+    const size_t warp_size = rp::warp_size();
+    const size_t size = warp_size;
+
+    // Generate data
+    std::vector<double> random_data = get_random_data<double>(3 * size, -100, 100);
+    std::vector<custom_16aligned> output(size);
+    for(size_t i = 0; i < 3 * output.size(); i+=3)
+    {
+        output[i/3].i = random_data[i];
+        output[i/3].u = random_data[i+1];
+        output[i/3].f = random_data[i+2];
+    }
+
+    // Calulcate expected results on host
+    std::vector<custom_16aligned> expected(size);
+    for(size_t i = 0; i < output.size(); i++)
+    {
+        expected[i] = output[i > 0 ? i-1 : 0] + output[i];
+    }
+
+    hc::array_view<custom_16aligned, 1> d_output(size, output.data());
+    hc::parallel_for_each(
+        hc::extent<1>(size).tile(warp_size),
+        [=](hc::tiled_index<1> i) [[hc]]
+        {
+            custom_16aligned value = d_output[i];
             value += rp::warp_shuffle_up(value, 1, warp_size);
             d_output[i] = value;
         }
