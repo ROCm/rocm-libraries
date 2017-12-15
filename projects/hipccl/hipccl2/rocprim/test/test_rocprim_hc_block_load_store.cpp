@@ -22,11 +22,13 @@
 
 #include <iostream>
 #include <vector>
+#include <type_traits>
 
 // Google Test
 #include <gtest/gtest.h>
 // HC API
 #include <hcc/hc.hpp>
+#include <hcc/hc_short_vector.hpp>
 // rocPRIM
 #include <block/block_load.hpp>
 #include <block/block_store.hpp>
@@ -35,10 +37,31 @@
 
 namespace rp = rocprim;
 
+template<
+    class T,
+    class U,
+    unsigned int ItemsPerThread,
+    bool Expected
+>
+struct params
+{
+    using type = T;
+    using vector_type = U;
+    static constexpr unsigned int items_per_thread = ItemsPerThread;
+    static constexpr bool expected = Expected;
+};
+
+
 template<typename BlockSizeWrapper>
 class RocprimBlockLoadStoreTests : public ::testing::Test {
 public:
     static constexpr unsigned int block_size = BlockSizeWrapper::value;
+};
+
+template<class Params>
+class RocprimVectorizationTests : public ::testing::Test {
+public:
+    using params = Params;
 };
 
 typedef ::testing::Types<
@@ -53,7 +76,53 @@ typedef ::testing::Types<
     uint_wrapper<255U>
 > BlockSizes;
 
+typedef ::testing::Types<
+    params<int, rp::detail::int4, 3, false>,
+    params<int, rp::detail::int4, 4, true>,
+    params<int, rp::detail::int4, 7, false>,
+    params<int, rp::detail::int4, 8, true>,
+    params<int, rp::detail::int4, 11, false>,
+    params<int, rp::detail::int4, 16, true>,
+
+    params<char, rp::detail::char4, 3, false>,
+    params<char, rp::detail::char4, 4, true>,
+    params<char, rp::detail::char4, 7, false>,
+    params<char, rp::detail::char4, 8, true>,
+    params<char, rp::detail::char4, 11, false>,
+    params<char, rp::detail::char4, 16, true>,
+    
+    params<short, rp::detail::short4, 3, false>,
+    params<short, rp::detail::short4, 4, true>,
+    params<short, rp::detail::short4, 7, false>,
+    params<short, rp::detail::short4, 8, true>,
+    params<short, rp::detail::short4, 11, false>,
+    params<short, rp::detail::short4, 16, true>,
+    
+    params<float, rp::detail::int4, 3, false>,
+    params<float, rp::detail::int4, 4, true>,
+    params<float, rp::detail::int4, 7, false>,
+    params<float, rp::detail::int4, 8, true>,
+    params<float, rp::detail::int4, 11, false>,
+    params<float, rp::detail::int4, 16, true>,
+    
+    params<hc::short_vector::int2, rp::detail::int4, 3, false>,
+    params<hc::short_vector::int2, rp::detail::int4, 4, true>,
+    params<hc::short_vector::int2, rp::detail::int4, 7, false>,
+    params<hc::short_vector::int2, rp::detail::int4, 8, true>,
+    params<hc::short_vector::int2, rp::detail::int4, 11, false>,
+    params<hc::short_vector::int2, rp::detail::int4, 16, true>,
+    
+    params<hc::short_vector::float2, rp::detail::int4, 3, false>,
+    params<hc::short_vector::float2, rp::detail::int4, 4, true>,
+    params<hc::short_vector::float2, rp::detail::int4, 7, false>,
+    params<hc::short_vector::float2, rp::detail::int4, 8, true>,
+    params<hc::short_vector::float2, rp::detail::int4, 11, false>,
+    params<hc::short_vector::float2, rp::detail::int4, 16, true>
+> Params;
+
+
 TYPED_TEST_CASE(RocprimBlockLoadStoreTests, BlockSizes);
+TYPED_TEST_CASE(RocprimVectorizationTests, Params);
 
 TYPED_TEST(RocprimBlockLoadStoreTests, LoadStoreDirectBlocked)
 {
@@ -147,3 +216,24 @@ TYPED_TEST(RocprimBlockLoadStoreTests, LoadStoreDirectBlockedVectorized)
         EXPECT_EQ(output2[i], expected[i]);
     }
 }
+
+TYPED_TEST(RocprimVectorizationTests, IsVectorizable)
+{
+    using T = typename TestFixture::params::type;
+    constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
+    constexpr bool expected = TestFixture::params::expected;
+    bool output = rp::detail::is_vectorizable<T, items_per_thread>();
+    EXPECT_EQ(output, expected);
+}
+
+TYPED_TEST(RocprimVectorizationTests, MatchVectorType)
+{
+    using T = typename TestFixture::params::type;
+    using U = typename TestFixture::params::vector_type;
+    constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
+    constexpr bool expected = TestFixture::params::expected;
+    typedef typename rp::detail::match_vector_type<T, items_per_thread>::type Vector;
+    bool output = std::is_same<Vector, U>::value;
+    EXPECT_EQ(output, expected);
+}
+
