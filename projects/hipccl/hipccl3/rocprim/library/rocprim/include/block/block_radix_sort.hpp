@@ -89,7 +89,7 @@ template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread
 >
-struct block_bit_plus_scan
+class block_bit_plus_scan
 {
     // Select warp size
     static constexpr unsigned int warp_size =
@@ -97,17 +97,20 @@ struct block_bit_plus_scan
     // Number of warps in block
     static constexpr unsigned int warps_no = (BlockSize + warp_size - 1) / warp_size;
 
-    static constexpr unsigned int prefix_scan_warp_size =
+    static constexpr unsigned int prefix_scan_size =
         detail::next_power_of_two(warps_no * ItemsPerThread);
     // TODO use block_scan for such cases?
-    static_assert(prefix_scan_warp_size <= ::rocprim::warp_size(),
+    static_assert(prefix_scan_size <= ::rocprim::warp_size(),
         "ItemsPerThread is too large for the current BlockSize");
 
-    using prefix_scan = ::rocprim::warp_scan<T, prefix_scan_warp_size>;
+    using prefix_scan = ::rocprim::warp_scan<T, prefix_scan_size>;
+
+public:
 
     struct storage_type
     {
-        T warp_scan_results[warps_no * ItemsPerThread];
+        T scan_results[warps_no * ItemsPerThread];
+        typename prefix_scan::storage_type prefix_scan;
     };
 
     void exclusive_scan(const T (& input)[ItemsPerThread],
@@ -115,7 +118,7 @@ struct block_bit_plus_scan
                         T& reduction) [[hc]]
     {
         tile_static storage_type storage;
-        return this->exclusive_scan(input, output, reduction, storage);
+        return exclusive_scan(input, output, reduction, storage);
     }
 
     void exclusive_scan(const T (& input)[ItemsPerThread],
@@ -125,6 +128,9 @@ struct block_bit_plus_scan
     {
         const unsigned int lane_id = ::rocprim::lane_id();
         const unsigned int warp_id = ::rocprim::warp_id();
+        const unsigned int current_warp_size = (warp_id == warps_no - 1)
+            ? (BlockSize % warp_size > 0 ? BlockSize % warp_size : warp_size)
+            : warp_size;
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
@@ -133,10 +139,10 @@ struct block_bit_plus_scan
 
             // Save the warp reduction result, that is the scan result
             // for last element in each warp including its value
-            if(lane_id == warp_size - 1 || (warp_id == warps_no - 1 && lane_id == BlockSize % warp_size - 1))
+            if(lane_id == current_warp_size - 1)
             {
-                const unsigned int warp_prefix_id = warp_id * ItemsPerThread + i;
-                storage.warp_scan_results[warp_prefix_id] = output[i] + input[i];
+                const unsigned int prefix_id = warp_id * ItemsPerThread + i;
+                storage.scan_results[prefix_id] = output[i] + input[i];
             }
         }
         ::rocprim::syncthreads();
@@ -144,14 +150,15 @@ struct block_bit_plus_scan
         // Scan the warp reduction results
         if(warp_id == 0)
         {
-            const unsigned int warp_prefix_id = lane_id;
+            const unsigned int prefix_id = lane_id;
             // TODO what about small BlockSize and large ItemsPerThread? Not enough active lanes
             // to scan all values
-            if(warp_prefix_id < warps_no * ItemsPerThread)
+            if(prefix_id < warps_no * ItemsPerThread)
             {
-                auto warp_prefix = storage.warp_scan_results[warp_prefix_id];
-                prefix_scan().inclusive_scan(warp_prefix, warp_prefix, ::rocprim::plus<T>());
-                storage.warp_scan_results[warp_prefix_id] = warp_prefix;
+                auto prefix = storage.scan_results[prefix_id];
+                ::rocprim::plus<T> plus;
+                prefix_scan().inclusive_scan(prefix, prefix, storage.prefix_scan, plus);
+                storage.scan_results[prefix_id] = prefix;
             }
         }
         ::rocprim::syncthreads();
@@ -159,16 +166,16 @@ struct block_bit_plus_scan
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             // Calculate the final scan result for every thread
-            const unsigned int warp_prefix_id = warp_id * ItemsPerThread + i;
-            if(warp_prefix_id != 0)
+            const unsigned int prefix_id = warp_id * ItemsPerThread + i;
+            if(prefix_id != 0)
             {
-                auto warp_prefix = storage.warp_scan_results[warp_prefix_id - 1];
-                output[i] = warp_prefix + output[i];
+                auto prefix = storage.scan_results[prefix_id - 1];
+                output[i] = prefix + output[i];
             }
         }
 
         // Get the final inclusive reduction result
-        reduction = storage.warp_scan_results[warps_no * ItemsPerThread - 1];
+        reduction = storage.scan_results[warps_no * ItemsPerThread - 1];
     }
 };
 
@@ -183,9 +190,13 @@ template<
 >
 class block_radix_sort
 {
-public:
+    static constexpr unsigned int radix_size = 1 << RadixBits;
+
     using key_codec = ::rocprim::detail::radix_key_codec<Key>;
     using bit_key_type = typename key_codec::bit_key_type;
+
+    using buckets = detail::buckets<unsigned int, radix_size>;
+    using block_bit_plus_scan = detail::block_bit_plus_scan<buckets, BlockSize, ItemsPerThread>;
 
     // Select warp size
     static constexpr unsigned int warp_size =
@@ -193,9 +204,12 @@ public:
     // Number of warps in block
     static constexpr unsigned int warps_no = (BlockSize + warp_size - 1) / warp_size;
 
+public:
+
     struct storage_type
     {
         bit_key_type bit_keys[BlockSize * ItemsPerThread];
+        typename block_bit_plus_scan::storage_type block_bit_plus_scan;
     };
 
     void sort(Key (& keys)[ItemsPerThread],
@@ -218,10 +232,7 @@ public:
         }
         ::rocprim::syncthreads();
 
-        constexpr unsigned int radix_size = 1 << RadixBits;
-        using buckets = detail::buckets<unsigned int, radix_size>;
-
-        detail::block_bit_plus_scan<buckets, BlockSize, ItemsPerThread> scan;
+        block_bit_plus_scan scan;
 
         const unsigned int lane_id = ::rocprim::lane_id();
         const unsigned int warp_id = ::rocprim::warp_id();
@@ -229,7 +240,6 @@ public:
             ? (BlockSize % warp_size > 0 ? BlockSize % warp_size : warp_size)
             : warp_size;
 
-        #pragma unroll 1
         for(unsigned int bit = begin_bit; bit < end_bit; bit += RadixBits)
         {
             bit_key_type bit_keys[ItemsPerThread];
@@ -237,10 +247,15 @@ public:
             buckets positions[ItemsPerThread];
             buckets counts;
 
-            const unsigned int radix_mask = ::rocprim::min(radix_size, 1u << (end_bit - bit)) - 1;
+            // Handle cases when (end_bit - bit) is not divisible by RadixBits, i.e. the last
+            // iteration has a shorter mask.
+            const unsigned int radix_mask = (1u << ::rocprim::min(RadixBits, end_bit - bit)) - 1;
+
             for(unsigned int i = 0; i < ItemsPerThread; i++)
             {
-                const bit_key_type bit_key = storage.bit_keys[warp_id * warp_size * ItemsPerThread + i * current_warp_size + lane_id];
+                const bit_key_type bit_key = storage.bit_keys[
+                    warp_id * warp_size * ItemsPerThread + i * current_warp_size + lane_id
+                ];
                 bit_keys[i] = bit_key;
                 const unsigned int radix = (bit_key >> bit) & radix_mask;
                 for(unsigned int r = 0; r < radix_size; r++)
@@ -248,7 +263,7 @@ public:
                     banks[i][r] = radix == r;
                 }
             }
-            scan.exclusive_scan(banks, positions, counts);
+            scan.exclusive_scan(banks, positions, counts, storage.block_bit_plus_scan);
 
             // Prefix sum of counts to compute starting positions of keys of each radix value
             unsigned int prefix = 0;
@@ -279,9 +294,6 @@ public:
             keys[i] = key_codec::decode(storage.bit_keys[thread_id * ItemsPerThread + i]);
         }
     }
-
-private:
-
 };
 
 END_ROCPRIM_NAMESPACE
