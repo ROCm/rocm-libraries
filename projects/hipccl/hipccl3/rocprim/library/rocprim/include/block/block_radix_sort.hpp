@@ -102,6 +102,10 @@ class block_bit_plus_scan
     // TODO use block_scan for such cases?
     static_assert(prefix_scan_size <= ::rocprim::warp_size(),
         "ItemsPerThread is too large for the current BlockSize");
+    // TODO what about small BlockSize and large ItemsPerThread? Not enough active lanes
+    // to scan all values
+    static_assert(warps_no * ItemsPerThread <= BlockSize,
+        "ItemsPerThread is too large for the current BlockSize");
 
     using prefix_scan = ::rocprim::warp_scan<T, prefix_scan_size>;
 
@@ -151,8 +155,6 @@ public:
         if(warp_id == 0)
         {
             const unsigned int prefix_id = lane_id;
-            // TODO what about small BlockSize and large ItemsPerThread? Not enough active lanes
-            // to scan all values
             if(prefix_id < warps_no * ItemsPerThread)
             {
                 auto prefix = storage.scan_results[prefix_id];
@@ -190,6 +192,7 @@ template<
 >
 class block_radix_sort
 {
+    static constexpr bool with_values = !std::is_same<Value, detail::empty_type>::value;
     static constexpr unsigned int radix_size = 1 << RadixBits;
 
     using key_codec = ::rocprim::detail::radix_key_codec<Key>;
@@ -204,9 +207,16 @@ class block_radix_sort
     // Number of warps in block
     static constexpr unsigned int warps_no = (BlockSize + warp_size - 1) / warp_size;
 
+    struct storage_type_with_values
+    {
+        Value values[BlockSize * ItemsPerThread];
+    };
+    struct storage_type_without_values { };
+
 public:
 
     struct storage_type
+        : std::conditional<with_values, storage_type_with_values, storage_type_without_values>::type
     {
         bit_key_type bit_keys[BlockSize * ItemsPerThread];
         typename block_bit_plus_scan::storage_type block_bit_plus_scan;
@@ -225,7 +235,8 @@ public:
               unsigned int begin_bit = 0,
               unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
     {
-        sort<false>(keys, storage, begin_bit, end_bit);
+        detail::empty_type * values = nullptr;
+        sort_impl<false>(keys, values, storage, begin_bit, end_bit);
     }
 
     void sort_desc(Key (&keys)[ItemsPerThread],
@@ -241,32 +252,75 @@ public:
                    unsigned int begin_bit = 0,
                    unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
     {
-        sort<true>(keys, storage, begin_bit, end_bit);
+        detail::empty_type * values = nullptr;
+        sort_impl<true>(keys, values, storage, begin_bit, end_bit);
     }
 
-private:
-
-    template<bool Descending>
+    template<bool WithValues = with_values>
     void sort(Key (&keys)[ItemsPerThread],
+              typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
+              unsigned int begin_bit = 0,
+              unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+    {
+        tile_static storage_type storage;
+        sort(keys, values, storage, begin_bit, end_bit);
+    }
+
+    template<bool WithValues = with_values>
+    void sort(Key (&keys)[ItemsPerThread],
+              typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
               storage_type& storage,
               unsigned int begin_bit = 0,
               unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
     {
-        const unsigned int thread_id = ::rocprim::flat_block_thread_id();
-        for(unsigned int i = 0; i < ItemsPerThread; i++)
-        {
-            const bit_key_type bit_key = key_codec::encode(keys[i]);
-            storage.bit_keys[thread_id * ItemsPerThread + i] = (Descending ? ~bit_key : bit_key);
-        }
-        ::rocprim::syncthreads();
+        sort_impl<false>(keys, values, storage, begin_bit, end_bit);
+    }
 
-        block_bit_plus_scan scan;
+    template<bool WithValues = with_values>
+    void sort_desc(Key (&keys)[ItemsPerThread],
+                   typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
+                   unsigned int begin_bit = 0,
+                   unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+    {
+        tile_static storage_type storage;
+        sort_desc(keys, values, storage, begin_bit, end_bit);
+    }
 
+    template<bool WithValues = with_values>
+    void sort_desc(Key (&keys)[ItemsPerThread],
+                   typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
+                   storage_type& storage,
+                   unsigned int begin_bit = 0,
+                   unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+    {
+        sort_impl<true>(keys, values, storage, begin_bit, end_bit);
+    }
+
+private:
+
+    template<bool Descending, class SortedValue>
+    void sort_impl(Key (&keys)[ItemsPerThread],
+                   SortedValue * values,
+                   storage_type& storage,
+                   unsigned int begin_bit = 0,
+                   unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+    {
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
         const unsigned int lane_id = ::rocprim::lane_id();
         const unsigned int warp_id = ::rocprim::warp_id();
         const unsigned int current_warp_size = (warp_id == warps_no - 1)
             ? (BlockSize % warp_size > 0 ? BlockSize % warp_size : warp_size)
             : warp_size;
+
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            bit_key_type bit_key = key_codec::encode(keys[i]);
+            bit_key = (Descending ? ~bit_key : bit_key);
+            store(storage, flat_id * ItemsPerThread + i, bit_key, values[i]);
+        }
+        ::rocprim::syncthreads();
+
+        block_bit_plus_scan scan;
 
         for(unsigned int bit = begin_bit; bit < end_bit; bit += RadixBits)
         {
@@ -281,10 +335,10 @@ private:
 
             for(unsigned int i = 0; i < ItemsPerThread; i++)
             {
-                const bit_key_type bit_key = storage.bit_keys[
-                    warp_id * warp_size * ItemsPerThread + i * current_warp_size + lane_id
-                ];
-                bit_keys[i] = bit_key;
+                const unsigned int from_position =
+                    warp_id * warp_size * ItemsPerThread + i * current_warp_size + lane_id;
+                load(bit_keys[i], values[i], storage, from_position);
+                const bit_key_type bit_key = bit_keys[i];
                 const unsigned int radix = (bit_key >> bit) & radix_mask;
                 for(unsigned int r = 0; r < radix_size; r++)
                 {
@@ -307,21 +361,59 @@ private:
             {
                 const bit_key_type bit_key = bit_keys[i];
                 const unsigned int radix = (bit_key >> bit) & radix_mask;
-                unsigned int position = 0;
+                unsigned int to_position = 0;
                 for(unsigned int r = 0; r < radix_size; r++)
                 {
-                    position = radix == r ? (counts[r] + positions[i][r]) : position;
+                    to_position = radix == r ? (counts[r] + positions[i][r]) : to_position;
                 }
-                storage.bit_keys[position] = bit_key;
+                store(storage, to_position, bit_key, values[i]);
             }
             ::rocprim::syncthreads();
         }
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            const bit_key_type bit_key = storage.bit_keys[thread_id * ItemsPerThread + i];
-            keys[i] = key_codec::decode(Descending ? ~bit_key : bit_key);
+            bit_key_type bit_key;
+            load(bit_key, values[i], storage, flat_id * ItemsPerThread + i);
+            bit_key = (Descending ? ~bit_key : bit_key);
+            keys[i] = key_codec::decode(bit_key);
         }
+    }
+
+    template<class SortedValue>
+    void store(storage_type& storage,
+               unsigned int i,
+               const bit_key_type &bit_key,
+               const SortedValue &value) [[hc]]
+    {
+        storage.bit_keys[i] = bit_key;
+        storage.values[i] = value;
+    }
+
+    void store(storage_type& storage,
+               unsigned int i,
+               const bit_key_type &bit_key,
+               const detail::empty_type &value) [[hc]]
+    {
+        storage.bit_keys[i] = bit_key;
+    }
+
+    template<class SortedValue>
+    void load(bit_key_type &bit_key,
+              SortedValue &value,
+              const storage_type& storage,
+              unsigned int i) [[hc]]
+    {
+        bit_key = storage.bit_keys[i];
+        value = storage.values[i];
+    }
+
+    void load(bit_key_type &bit_key,
+              detail::empty_type &value,
+              const storage_type& storage,
+              unsigned int i) [[hc]]
+    {
+        bit_key = storage.bit_keys[i];
     }
 };
 

@@ -98,12 +98,15 @@ struct radix_key_codec_floating
 template<class Key, class Enable = void>
 struct radix_key_codec
 {
-    static_assert(sizeof(Key) == 0, "Only integral and floating point types supported as radix sort keys");
+    static_assert(sizeof(Key) == 0,
+        "Only integral (except bool) and floating point types supported as radix sort keys");
 };
 
 template<class Key>
-struct radix_key_codec<Key, typename std::enable_if<std::is_integral<Key>::value>::type>
-    : radix_key_codec_integral<Key, typename std::make_unsigned<Key>::type> { };
+struct radix_key_codec<
+    Key,
+    typename std::enable_if<std::is_integral<Key>::value && !std::is_same<bool, Key>::value>::type
+> : radix_key_codec_integral<Key, typename std::make_unsigned<Key>::type> { };
 
 template<>
 struct radix_key_codec<float> : radix_key_codec_floating<float, unsigned int> { };
