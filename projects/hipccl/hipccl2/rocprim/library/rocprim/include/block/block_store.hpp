@@ -32,11 +32,26 @@
 #include "../functional.hpp"
 #include "../types.hpp"
 
+BEGIN_ROCPRIM_NAMESPACE
+
 /// \addtogroup collectiveblockmodule
 /// @{
 
-BEGIN_ROCPRIM_NAMESPACE
-
+/// \brief Stores a blocked arrangement of items in memory to thread block.
+///
+/// Block arrangement is assumed to be (block-threads * \p ItemsPerThread) items
+/// across a thread block. Each thread uses a \p flat_id to store a range of 
+/// \p ItemsPerThread \p items to the thread block.
+///
+/// \tparam IteratorT - [inferred] an iterator type for input (can be a simple
+/// pointer
+/// \tparam T - [inferred] the data type
+/// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+/// each thread
+///
+/// \param flat_id - a flat 1D thread identifier for the calling thread
+/// \param block_iter - the input iterator from the thread block to store to
+/// \param items - array that data is stored to thread block
 template<
     class IteratorT,
     class T,
@@ -54,6 +69,23 @@ void block_store_direct_blocked(int flat_id, IteratorT block_iter,
     }
 }
 
+/// \brief Stores a blocked arrangement of items in memory to thread block,
+/// which is guarded by range \p valid.
+///
+/// Block arrangement is assumed to be (block-threads * \p ItemsPerThread) items
+/// across a thread block. Each thread uses a \p flat_id to store a range of 
+/// \p ItemsPerThread \p items to the thread block.
+///
+/// \tparam IteratorT - [inferred] an iterator type for input (can be a simple
+/// pointer
+/// \tparam T - [inferred] the data type
+/// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+/// each thread
+///
+/// \param flat_id - a flat 1D thread identifier for the calling thread
+/// \param block_iter - the input iterator from the thread block to store to
+/// \param items - array that data is stored to thread block
+/// \param valid - maximum range of valid numbers to store
 template<
     class IteratorT,
     class T,
@@ -75,6 +107,27 @@ void block_store_direct_blocked(int flat_id, IteratorT block_iter,
     }
 }
 
+/// \brief Stores a blocked arrangement of items in memory to thread block.
+///
+/// Block arrangement is assumed to be (block-threads * \p ItemsPerThread) items
+/// across a thread block. Each thread uses a \p flat_id to store a range of 
+/// \p ItemsPerThread \p items to the thread block.
+///
+/// The input offset (\p block_iter + offset) must be quad-item aligned.
+///
+/// The following conditions will prevent vectorization and switch to default
+/// block_load_direct_blocked:
+/// * \p ItemsPerThread is odd.
+/// * The datatype \p T is not a primitive or a HC/HIP vector type (e.g. int2, 
+/// int4, etc.
+///
+/// \tparam T - [inferred] the data type
+/// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+/// each thread
+///
+/// \param flat_id - a flat 1D thread identifier for the calling thread
+/// \param block_iter - the input iterator from the thread block to load from
+/// \param items - array that data is loaded to
 template<
     class T,
     int ItemsPerThread
@@ -110,9 +163,9 @@ block_store_direct_blocked_vectorized(int flat_id, T* block_iter,
     block_store_direct_blocked(flat_id, block_iter, items);
 }
 
-END_ROCPRIM_NAMESPACE
-
 /// @}
 // end of group collectiveblockmodule
+
+END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_BLOCK_BLOCK_STORE_HPP_

@@ -29,12 +29,8 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
+// Define vector types that will be used by rocPRIM internally.
 #define DEFINE_VECTOR_TYPE(base) \
-\
-struct base##1 \
-{ \
-    base x; \
-} __attribute__((aligned(sizeof(base) * 1))); \
 \
 struct base##2 \
 { \
@@ -50,10 +46,29 @@ DEFINE_VECTOR_TYPE(char);
 DEFINE_VECTOR_TYPE(int);
 DEFINE_VECTOR_TYPE(short);
 
+// Takes a scalar type T and matches to a vector type based on NumElements.
 template <class T, unsigned int NumElements> 
 struct make_vector_type
 {
     using type = void;
+};
+    
+template <> 
+struct make_vector_type<char, 1>
+{
+    using type = char;
+};
+    
+template <> 
+struct make_vector_type<int, 1>
+{
+    using type = int;
+};
+    
+template <> 
+struct make_vector_type<short, 1>
+{
+    using type = short;
 };
 
 #define DEFINE_MAKE_VECTOR_TYPE(base, suffix) \
@@ -64,13 +79,10 @@ struct make_vector_type<base, suffix> \
     using type = base##suffix; \
 };
 
-DEFINE_MAKE_VECTOR_TYPE(char, 1);
 DEFINE_MAKE_VECTOR_TYPE(char, 2);
 DEFINE_MAKE_VECTOR_TYPE(char, 4);
-DEFINE_MAKE_VECTOR_TYPE(int, 1);
 DEFINE_MAKE_VECTOR_TYPE(int, 2);
 DEFINE_MAKE_VECTOR_TYPE(int, 4);
-DEFINE_MAKE_VECTOR_TYPE(short, 1);
 DEFINE_MAKE_VECTOR_TYPE(short, 2);
 DEFINE_MAKE_VECTOR_TYPE(short, 4);
 
