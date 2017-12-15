@@ -163,6 +163,45 @@ block_store_direct_blocked_vectorized(int flat_id, T* block_iter,
     block_store_direct_blocked(flat_id, block_iter, items);
 }
 
+template<
+    unsigned int BlockSize,
+    class IteratorT,
+    class T,
+    unsigned int ItemsPerThread
+>
+void block_store_direct_striped(int flat_id, IteratorT block_iter,
+                                T (&items)[ItemsPerThread]) [[hc]]
+{
+    IteratorT thread_iter = block_iter + flat_id;
+    #pragma unroll
+    for (unsigned int item = 0; item < ItemsPerThread; item++)
+    {
+         thread_iter[item * BlockSize] = items[item];
+    }
+}
+
+template<
+    unsigned int BlockSize,
+    class IteratorT,
+    class T,
+    unsigned int ItemsPerThread
+>
+void block_store_direct_striped(int flat_id, IteratorT block_iter,
+                                T (&items)[ItemsPerThread],
+                                int valid) [[hc]]
+{
+    IteratorT thread_iter = block_iter + flat_id;
+    #pragma unroll
+    for (unsigned int item = 0; item < ItemsPerThread; item++)
+    {
+        unsigned int offset = item * BlockSize;
+        if (flat_id + offset < valid)
+        {
+             thread_iter[offset] = items[item];
+        }
+    }
+}
+
 /// @}
 // end of group collectiveblockmodule
 

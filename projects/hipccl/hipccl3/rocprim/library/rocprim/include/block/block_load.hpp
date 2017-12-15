@@ -203,7 +203,62 @@ block_load_direct_blocked_vectorized(int flat_id, T* block_iter,
     block_load_direct_blocked(flat_id, block_iter, items);
 }
 
+template<
+    unsigned int BlockSize,
+    class IteratorT,
+    class T,
+    unsigned int ItemsPerThread
+>
+void block_load_direct_striped(int flat_id, IteratorT block_iter,
+                               T (&items)[ItemsPerThread]) [[hc]]
+{
+    IteratorT thread_iter = block_iter + flat_id;
+    #pragma unroll
+    for (unsigned int item = 0; item < ItemsPerThread; item++)
+    {
+        items[item] = thread_iter[item * BlockSize];
+    }
+}
 
+template<
+    unsigned int BlockSize,
+    class IteratorT,
+    class T,
+    unsigned int ItemsPerThread
+>
+void block_load_direct_striped(int flat_id, IteratorT block_iter,
+                               T (&items)[ItemsPerThread],
+                               int valid) [[hc]]
+{
+    IteratorT thread_iter = block_iter + flat_id;
+    #pragma unroll
+    for (unsigned int item = 0; item < ItemsPerThread; item++)
+    {
+        unsigned int offset = item * BlockSize;
+        if (flat_id + offset < valid)
+        {
+            items[item] = thread_iter[offset];
+        }
+    }
+}
+
+template<
+    unsigned int BlockSize,
+    class IteratorT,
+    class T,
+    unsigned int ItemsPerThread,
+    class Default
+>
+void block_load_direct_striped(int flat_id, IteratorT block_iter,
+                               T (&items)[ItemsPerThread],
+                               int valid, Default out_of_bounds) [[hc]]
+{
+    #pragma unroll
+    for (unsigned int item = 0; item < ItemsPerThread; item++)
+        items[item] = out_of_bounds;
+
+    block_load_direct_striped(flat_id, block_iter, items, valid);
+}
 
 END_ROCPRIM_NAMESPACE
 
