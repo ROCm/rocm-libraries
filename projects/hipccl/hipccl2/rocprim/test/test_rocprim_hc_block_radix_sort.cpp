@@ -25,6 +25,7 @@
 #include <iostream>
 #include <type_traits>
 #include <vector>
+#include <utility>
 
 // Google Test
 #include <gtest/gtest.h>
@@ -38,16 +39,18 @@
 namespace rp = rocprim;
 
 template<
-    class T,
+    class Key,
+    class Value,
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
     bool Descending = false,
     unsigned int StartBit = 0,
-    unsigned int EndBit = sizeof(T) * 8
+    unsigned int EndBit = sizeof(Key) * 8
 >
 struct params
 {
-    using type = T;
+    using key_type = Key;
+    using value_type = Value;
     static constexpr unsigned int block_size = BlockSize;
     static constexpr unsigned int items_per_thread = ItemsPerThread;
     static constexpr bool descending = Descending;
@@ -63,43 +66,43 @@ public:
 
 typedef ::testing::Types<
     // Power of 2 Blocksize
-    params<unsigned int, 64U, 1>,
-    params<int, 128U, 1>,
-    params<unsigned int, 256U, 1>,
-    params<unsigned short, 1024U, 1, true>,
+    params<unsigned int, int, 64U, 1>,
+    params<int, int, 128U, 1>,
+    params<unsigned int, int, 256U, 1>,
+    params<unsigned short, char, 1024U, 1, true>,
 
     // Non-power of 2 Blocksize
-    params<double, 65U, 1>,
-    params<float, 37U, 1>,
-    params<long long, 510U, 1, true>,
-    params<unsigned int, 162U, 1>,
-    params<unsigned char, 255U, 1>,
+    params<double, unsigned int, 65U, 1>,
+    params<float, int, 37U, 1>,
+    params<long long, char, 510U, 1, true>,
+    params<unsigned int, long long, 162U, 1>,
+    params<unsigned char, float, 255U, 1>,
 
     // Power of 2 Blocksize and ItemsPerThread > 1
-    params<float, 64U, 2, true>,
-    params<int, 1024U, 4>,
-    params<unsigned short, 256U, 7>,
+    params<float, char, 64U, 2, true>,
+    params<int, short, 128U, 4>,
+    params<unsigned short, char, 256U, 7>,
 
     // Non-power of 2 Blocksize and ItemsPerThread > 1
-    params<double, 33U, 5>,
-    params<char, 464U, 2>,
-    params<unsigned short, 100U, 3>,
-    params<short, 234U, 9>,
+    params<double, int, 33U, 5>,
+    params<char, double, 464U, 2>,
+    params<unsigned short, int, 100U, 3>,
+    params<short, int, 234U, 9>,
 
     // StartBits and EndBits
-    params<unsigned long long, 64U, 1, false, 8, 20>,
-    params<unsigned short, 102U, 3, true, 4, 10>,
-    params<unsigned int, 162U, 2, true, 3, 12>
+    params<unsigned long long, char, 64U, 1, false, 8, 20>,
+    params<unsigned short, int, 102U, 3, true, 4, 10>,
+    params<unsigned int, short, 162U, 2, true, 3, 12>
 > Params;
 
 TYPED_TEST_CASE(RocprimBlockRadixSort, Params);
 
-template<class T, bool Descending, unsigned int StartBit, unsigned int EndBit>
-struct comparator
+template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
+struct key_comparator
 {
-    static_assert(std::is_unsigned<T>::value, "Test supports start and bits only for unsigned integers");
+    static_assert(std::is_unsigned<Key>::value, "Test supports start and bits only for unsigned integers");
 
-    bool operator()(const T& lhs, const T& rhs)
+    bool operator()(const Key& lhs, const Key& rhs)
     {
         auto mask = (1ull << (EndBit - StartBit)) - 1;
         auto l = (static_cast<unsigned long long>(lhs) >> StartBit) & mask;
@@ -108,12 +111,21 @@ struct comparator
     }
 };
 
-template<class T, bool Descending>
-struct comparator<T, Descending, 0, sizeof(T) * 8>
+template<class Key, bool Descending>
+struct key_comparator<Key, Descending, 0, sizeof(Key) * 8>
 {
-    bool operator()(const T& lhs, const T& rhs)
+    bool operator()(const Key& lhs, const Key& rhs)
     {
         return Descending ? (rhs < lhs) : (lhs < rhs);
+    }
+};
+
+template<class Key, class Value, bool Descending, unsigned int StartBit, unsigned int EndBit>
+struct key_value_comparator
+{
+    bool operator()(const std::pair<Key, Value>& lhs, const std::pair<Key, Value>& rhs)
+    {
+        return key_comparator<Key, Descending, StartBit, EndBit>()(lhs.first, rhs.first);
     }
 };
 
@@ -121,7 +133,7 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeys)
 {
     hc::accelerator acc;
 
-    using T = typename TestFixture::params::type;
+    using Key = typename TestFixture::params::key_type;
     constexpr size_t block_size = TestFixture::params::block_size;
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
     constexpr bool descending = TestFixture::params::descending;
@@ -136,38 +148,38 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeys)
 
     const size_t size = items_per_block * 1134;
     // Generate data
-    std::vector<T> output;
-    if(std::is_floating_point<T>::value)
-        output = get_random_data<T>(size, (T)-1000, (T)+1000);
+    std::vector<Key> key_output;
+    if(std::is_floating_point<Key>::value)
+        key_output = get_random_data<Key>(size, (Key)-1000, (Key)+1000);
     else
-        output = get_random_data<T>(size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+        key_output = get_random_data<Key>(size, std::numeric_limits<Key>::min(), std::numeric_limits<Key>::max());
 
     // Calulcate expected results on host
-    std::vector<T> expected(output);
-    for(size_t i = 0; i < output.size() / items_per_block; i++)
+    std::vector<Key> expected(key_output);
+    for(size_t i = 0; i < size / items_per_block; i++)
     {
         std::stable_sort(
             expected.begin() + (i * items_per_block),
             expected.begin() + ((i + 1) * items_per_block),
-            comparator<T, descending, start_bit, end_bit>()
+            key_comparator<Key, descending, start_bit, end_bit>()
         );
     }
 
-    hc::array_view<T, 1> d_output(output.size(), output.data());
+    hc::array_view<Key, 1> d_key_output(size, key_output.data());
     hc::parallel_for_each(
         acc.get_default_view(),
-        hc::extent<1>(output.size() / items_per_thread).tile(block_size),
+        hc::extent<1>(size / items_per_thread).tile(block_size),
         [=](hc::tiled_index<1> idx) [[hc]]
         {
             const unsigned int thread_id = idx.global[0];
 
-            T keys[items_per_thread];
+            Key keys[items_per_thread];
             for(unsigned int i = 0; i < items_per_thread; i++)
             {
-                keys[i] = d_output[thread_id * items_per_thread + i];
+                keys[i] = d_key_output[thread_id * items_per_thread + i];
             }
 
-            rp::block_radix_sort<T, block_size, items_per_thread> bsort;
+            rp::block_radix_sort<Key, block_size, items_per_thread> bsort;
             if(descending)
                 bsort.sort_desc(keys, start_bit, end_bit);
             else
@@ -175,14 +187,104 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeys)
 
             for(unsigned int i = 0; i < items_per_thread; i++)
             {
-                d_output[thread_id * items_per_thread + i] = keys[i];
+                d_key_output[thread_id * items_per_thread + i] = keys[i];
             }
         }
     );
 
-    d_output.synchronize();
-    for(size_t i = 0; i < output.size(); i++)
+    d_key_output.synchronize();
+    for(size_t i = 0; i < size; i++)
     {
-        ASSERT_EQ(output[i], expected[i]);
+        ASSERT_EQ(key_output[i], expected[i]);
+    }
+}
+
+TYPED_TEST(RocprimBlockRadixSort, SortKeysValues)
+{
+    hc::accelerator acc;
+
+    using Key = typename TestFixture::params::key_type;
+    using Value = typename TestFixture::params::value_type;
+    constexpr size_t block_size = TestFixture::params::block_size;
+    constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
+    constexpr bool descending = TestFixture::params::descending;
+    constexpr unsigned int start_bit = TestFixture::params::start_bit;
+    constexpr unsigned int end_bit = TestFixture::params::end_bit;
+    constexpr size_t items_per_block = block_size * items_per_thread;
+    // Given block size not supported
+    if(block_size > get_max_tile_size(acc))
+    {
+        return;
+    }
+
+    const size_t size = items_per_block * 1134;
+    // Generate data
+    std::vector<Key> key_output;
+    if(std::is_floating_point<Key>::value)
+        key_output = get_random_data<Key>(size, (Key)-1000, (Key)+1000);
+    else
+        key_output = get_random_data<Key>(size, std::numeric_limits<Key>::min(), std::numeric_limits<Key>::max());
+
+    std::vector<Value> value_output;
+    if(std::is_floating_point<Value>::value)
+        value_output = get_random_data<Value>(size, (Value)-1000, (Value)+1000);
+    else
+        value_output = get_random_data<Value>(size, std::numeric_limits<Value>::min(), std::numeric_limits<Value>::max());
+
+    using key_value = std::pair<Key, Value>;
+
+    // Calulcate expected results on host
+    std::vector<key_value> expected(size);
+    for(size_t i = 0; i < size; i++)
+    {
+        expected[i] = key_value(key_output[i], value_output[i]);
+    }
+
+    for(size_t i = 0; i < size / items_per_block; i++)
+    {
+        std::stable_sort(
+            expected.begin() + (i * items_per_block),
+            expected.begin() + ((i + 1) * items_per_block),
+            key_value_comparator<Key, Value, descending, start_bit, end_bit>()
+        );
+    }
+
+    hc::array_view<Key, 1> d_key_output(size, key_output.data());
+    hc::array_view<Value, 1> d_value_output(size, value_output.data());
+    hc::parallel_for_each(
+        acc.get_default_view(),
+        hc::extent<1>(size / items_per_thread).tile(block_size),
+        [=](hc::tiled_index<1> idx) [[hc]]
+        {
+            const unsigned int thread_id = idx.global[0];
+
+            Key keys[items_per_thread];
+            Value values[items_per_thread];
+            for(unsigned int i = 0; i < items_per_thread; i++)
+            {
+                keys[i] = d_key_output[thread_id * items_per_thread + i];
+                values[i] = d_value_output[thread_id * items_per_thread + i];
+            }
+
+            rp::block_radix_sort<Key, block_size, items_per_thread, Value> bsort;
+            if(descending)
+                bsort.sort_desc(keys, values, start_bit, end_bit);
+            else
+                bsort.sort(keys, values, start_bit, end_bit);
+
+            for(unsigned int i = 0; i < items_per_thread; i++)
+            {
+                d_key_output[thread_id * items_per_thread + i] = keys[i];
+                d_value_output[thread_id * items_per_thread + i] = values[i];
+            }
+        }
+    );
+
+    d_key_output.synchronize();
+    d_value_output.synchronize();
+    for(size_t i = 0; i < size; i++)
+    {
+        ASSERT_EQ(key_output[i], expected[i].first);
+        ASSERT_EQ(value_output[i], expected[i].second);
     }
 }
