@@ -64,7 +64,9 @@ template<unsigned int WarpSize>
 struct is_warpsize_shuffleable {
     static const bool value = detail::is_power_of_two(WarpSize);
 };
-    
+
+// Selects an appropriate vector_type based on the input T and size N.
+// The byte size is calculated and used to select an appropriate vector_type.
 template<class T, unsigned int N>
 struct match_vector_type
 {
@@ -95,7 +97,8 @@ struct match_vector_type
             >::type
         >::type;
 };
-    
+
+// Checks if Items is odd and ensures that size of T is smaller than vector_type.
 template<class T, unsigned int Items>
 inline constexpr bool is_vectorizable() [[hc]] [[cpu]]
 {
