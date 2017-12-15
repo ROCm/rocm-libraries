@@ -47,9 +47,9 @@ struct radix_key_codec_integral<Key, BitKey, typename std::enable_if<std::is_uns
         return *reinterpret_cast<bit_key_type *>(&key);
     }
 
-    static key_type decode(bit_key_type key_bits) [[hc]]
+    static key_type decode(bit_key_type bit_key) [[hc]]
     {
-        return *reinterpret_cast<key_type *>(&key_bits);
+        return *reinterpret_cast<key_type *>(&bit_key);
     }
 };
 
@@ -66,10 +66,10 @@ struct radix_key_codec_integral<Key, BitKey, typename std::enable_if<std::is_sig
         return sign_bit ^ *reinterpret_cast<bit_key_type *>(&key);
     }
 
-    static key_type decode(bit_key_type key_bits) [[hc]]
+    static key_type decode(bit_key_type bit_key) [[hc]]
     {
-        key_bits ^= sign_bit;
-        return *reinterpret_cast<key_type *>(&key_bits);
+        bit_key ^= sign_bit;
+        return *reinterpret_cast<key_type *>(&bit_key);
     }
 };
 
@@ -83,15 +83,15 @@ struct radix_key_codec_floating
 
     static bit_key_type encode(key_type key) [[hc]]
     {
-        bit_key_type key_bits = *reinterpret_cast<bit_key_type *>(&key);
-        key_bits ^= (sign_bit & key_bits) == 0 ? sign_bit : bit_key_type(-1);
-        return key_bits;
+        bit_key_type bit_key = *reinterpret_cast<bit_key_type *>(&key);
+        bit_key ^= (sign_bit & bit_key) == 0 ? sign_bit : bit_key_type(-1);
+        return bit_key;
     }
 
-    static key_type decode(bit_key_type key_bits) [[hc]]
+    static key_type decode(bit_key_type bit_key) [[hc]]
     {
-        key_bits ^= (sign_bit & key_bits) == 0 ? bit_key_type(-1) : sign_bit;
-        return *reinterpret_cast<key_type *>(&key_bits);
+        bit_key ^= (sign_bit & bit_key) == 0 ? bit_key_type(-1) : sign_bit;
+        return *reinterpret_cast<key_type *>(&bit_key);
     }
 };
 

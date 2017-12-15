@@ -113,16 +113,16 @@ public:
         typename prefix_scan::storage_type prefix_scan;
     };
 
-    void exclusive_scan(const T (& input)[ItemsPerThread],
-                        T (& output)[ItemsPerThread],
+    void exclusive_scan(const T (&input)[ItemsPerThread],
+                        T (&output)[ItemsPerThread],
                         T& reduction) [[hc]]
     {
         tile_static storage_type storage;
         return exclusive_scan(input, output, reduction, storage);
     }
 
-    void exclusive_scan(const T (& input)[ItemsPerThread],
-                        T (& output)[ItemsPerThread],
+    void exclusive_scan(const T (&input)[ItemsPerThread],
+                        T (&output)[ItemsPerThread],
                         T& reduction,
                         storage_type& storage) [[hc]]
     {
@@ -212,7 +212,7 @@ public:
         typename block_bit_plus_scan::storage_type block_bit_plus_scan;
     };
 
-    void sort(Key (& keys)[ItemsPerThread],
+    void sort(Key (&keys)[ItemsPerThread],
               unsigned int begin_bit = 0,
               unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
     {
@@ -220,7 +220,34 @@ public:
         sort(keys, storage, begin_bit, end_bit);
     }
 
-    void sort(Key (& keys)[ItemsPerThread],
+    void sort(Key (&keys)[ItemsPerThread],
+              storage_type& storage,
+              unsigned int begin_bit = 0,
+              unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+    {
+        sort<false>(keys, storage, begin_bit, end_bit);
+    }
+
+    void sort_desc(Key (&keys)[ItemsPerThread],
+                   unsigned int begin_bit = 0,
+                   unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+    {
+        tile_static storage_type storage;
+        sort_desc(keys, storage, begin_bit, end_bit);
+    }
+
+    void sort_desc(Key (&keys)[ItemsPerThread],
+                   storage_type& storage,
+                   unsigned int begin_bit = 0,
+                   unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+    {
+        sort<true>(keys, storage, begin_bit, end_bit);
+    }
+
+private:
+
+    template<bool Descending>
+    void sort(Key (&keys)[ItemsPerThread],
               storage_type& storage,
               unsigned int begin_bit = 0,
               unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
@@ -228,7 +255,8 @@ public:
         const unsigned int thread_id = ::rocprim::flat_block_thread_id();
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            storage.bit_keys[thread_id * ItemsPerThread + i] = key_codec::encode(keys[i]);
+            const bit_key_type bit_key = key_codec::encode(keys[i]);
+            storage.bit_keys[thread_id * ItemsPerThread + i] = (Descending ? ~bit_key : bit_key);
         }
         ::rocprim::syncthreads();
 
@@ -291,7 +319,8 @@ public:
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            keys[i] = key_codec::decode(storage.bit_keys[thread_id * ItemsPerThread + i]);
+            const bit_key_type bit_key = storage.bit_keys[thread_id * ItemsPerThread + i];
+            keys[i] = key_codec::decode(Descending ? ~bit_key : bit_key);
         }
     }
 };

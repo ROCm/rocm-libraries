@@ -41,6 +41,7 @@ template<
     class T,
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
+    bool Descending = false,
     unsigned int StartBit = 0,
     unsigned int EndBit = sizeof(T) * 8
 >
@@ -49,6 +50,7 @@ struct params
     using type = T;
     static constexpr unsigned int block_size = BlockSize;
     static constexpr unsigned int items_per_thread = ItemsPerThread;
+    static constexpr bool descending = Descending;
     static constexpr unsigned int start_bit = StartBit;
     static constexpr unsigned int end_bit = EndBit;
 };
@@ -64,17 +66,17 @@ typedef ::testing::Types<
     params<unsigned int, 64U, 1>,
     params<int, 128U, 1>,
     params<unsigned int, 256U, 1>,
-    params<unsigned short, 1024U, 1>,
+    params<unsigned short, 1024U, 1, true>,
 
     // Non-power of 2 Blocksize
     params<double, 65U, 1>,
     params<float, 37U, 1>,
-    params<long long, 510U, 1>,
+    params<long long, 510U, 1, true>,
     params<unsigned int, 162U, 1>,
     params<unsigned char, 255U, 1>,
 
     // Power of 2 Blocksize and ItemsPerThread > 1
-    params<float, 64U, 2>,
+    params<float, 64U, 2, true>,
     params<int, 1024U, 4>,
     params<unsigned short, 256U, 7>,
 
@@ -85,13 +87,14 @@ typedef ::testing::Types<
     params<short, 234U, 9>,
 
     // StartBits and EndBits
-    params<unsigned long long, 64U, 1, 8, 20>,
-    params<unsigned int, 162U, 2, 3, 12>
+    params<unsigned long long, 64U, 1, false, 8, 20>,
+    params<unsigned short, 102U, 3, true, 4, 10>,
+    params<unsigned int, 162U, 2, true, 3, 12>
 > Params;
 
 TYPED_TEST_CASE(RocprimBlockRadixSort, Params);
 
-template<class T, unsigned int StartBit, unsigned int EndBit>
+template<class T, bool Descending, unsigned int StartBit, unsigned int EndBit>
 struct comparator
 {
     static_assert(std::is_unsigned<T>::value, "Test supports start and bits only for unsigned integers");
@@ -99,18 +102,18 @@ struct comparator
     bool operator()(const T& lhs, const T& rhs)
     {
         auto mask = (1ull << (EndBit - StartBit)) - 1;
-        auto l = static_cast<unsigned long long>(lhs);
-        auto r = static_cast<unsigned long long>(rhs);
-        return ((l >> StartBit) & mask) < ((r >> StartBit) & mask);
+        auto l = (static_cast<unsigned long long>(lhs) >> StartBit) & mask;
+        auto r = (static_cast<unsigned long long>(rhs) >> StartBit) & mask;
+        return Descending ? (r < l) : (l < r);
     }
 };
 
-template<class T>
-struct comparator<T, 0, sizeof(T) * 8>
+template<class T, bool Descending>
+struct comparator<T, Descending, 0, sizeof(T) * 8>
 {
     bool operator()(const T& lhs, const T& rhs)
     {
-        return lhs < rhs;
+        return Descending ? (rhs < lhs) : (lhs < rhs);
     }
 };
 
@@ -121,6 +124,7 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeys)
     using T = typename TestFixture::params::type;
     constexpr size_t block_size = TestFixture::params::block_size;
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
+    constexpr bool descending = TestFixture::params::descending;
     constexpr unsigned int start_bit = TestFixture::params::start_bit;
     constexpr unsigned int end_bit = TestFixture::params::end_bit;
     constexpr size_t items_per_block = block_size * items_per_thread;
@@ -145,7 +149,7 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeys)
         std::stable_sort(
             expected.begin() + (i * items_per_block),
             expected.begin() + ((i + 1) * items_per_block),
-            comparator<T, start_bit, end_bit>()
+            comparator<T, descending, start_bit, end_bit>()
         );
     }
 
@@ -164,7 +168,10 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeys)
             }
 
             rp::block_radix_sort<T, block_size, items_per_thread> bsort;
-            bsort.sort(keys, start_bit, end_bit);
+            if(descending)
+                bsort.sort_desc(keys, start_bit, end_bit);
+            else
+                bsort.sort(keys, start_bit, end_bit);
 
             for(unsigned int i = 0; i < items_per_thread; i++)
             {
