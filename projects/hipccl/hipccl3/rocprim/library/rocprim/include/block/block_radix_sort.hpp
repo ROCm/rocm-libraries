@@ -83,11 +83,7 @@ struct buckets
 template<class T>
 void warp_bit_plus_exlusive_scan(const T input, T& output) [[hc]]
 {
-    const unsigned long long mask = hc::__ballot(input);
-    int c;
-    c = hc::__amdgcn_mbcnt_lo(static_cast<int>(mask), 0);
-    c = hc::__amdgcn_mbcnt_hi(static_cast<int>(mask >> 32), c);
-    output = c;
+    output = ::rocprim::masked_bit_count(::rocprim::ballot(input));
 }
 
 template<class T, unsigned int Size>
@@ -102,7 +98,7 @@ void warp_bit_plus_exlusive_scan(const buckets<T, Size>& input, buckets<T, Size>
 template<class T>
 void warp_bit_plus_reduce(const T input, T& output) [[hc]]
 {
-    output = hc::__activelanecount_u32_b1(input);
+    output = ::rocprim::bit_count(::rocprim::ballot(input));
 }
 
 template<class T, unsigned int Size>
