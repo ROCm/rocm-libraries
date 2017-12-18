@@ -23,6 +23,7 @@
 
 #include "intrinsics/bit.hpp"
 #include "intrinsics/thread.hpp"
+#include "intrinsics/warp.hpp"
 #include "intrinsics/warp_shuffle.hpp"
 
 #endif // ROCPRIM_INTRINSICS_WARP_SHUFFLE_HPP_

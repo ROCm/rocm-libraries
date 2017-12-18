@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_INTRINSICS_BIT_HPP_
-#define ROCPRIM_INTRINSICS_BIT_HPP_
+#ifndef ROCPRIM_INTRINSICS_WARP_HPP_
+#define ROCPRIM_INTRINSICS_WARP_HPP_
 
 // HC API
 #include <hcc/hc.hpp>
@@ -28,30 +28,30 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// \brief Returns a single bit at 'i' from 'x'
-inline int get_bit(int x, int i) [[hc]]
+/// Evaluate predicate for all active work-items in the warp and return an integer
+/// whose <tt>i</tt>-th bit is set if and only if \p predicate is <tt>true</tt>
+/// for the <tt>i</tt>-th thread of the warp and the <tt>i</tt>-th thread is active.
+///
+/// \param predicate - input to be evaluated for all active lanes
+inline
+unsigned long long ballot(bool predicate) [[hc]]
 {
-    return (x >> i) & 1;
+    return hc::__ballot(predicate);
 }
 
-/// \brief Bit count
+/// \brief Masked bit count
 ///
-/// Returns the number of bit of \p x set.
+/// For each thread, this function returns the number of active threads which
+/// have <tt>i</tt>-th bit of \p x set and come before the current thread.
 inline
-unsigned int bit_count(unsigned int x) [[hc]]
+unsigned int masked_bit_count(unsigned long long x) [[hc]]
 {
-    return hc::__popcount_u32_b32(x);
-}
-
-/// \brief Bit count
-///
-/// Returns the number of bit of \p x set.
-inline
-unsigned int bit_count(unsigned long long x) [[hc]]
-{
-    return hc::__popcount_u32_b64(x);
+    int c;
+    c = hc::__amdgcn_mbcnt_lo(static_cast<int>(x), 0);
+    c = hc::__amdgcn_mbcnt_hi(static_cast<int>(x >> 32), c);
+    return c;
 }
 
 END_ROCPRIM_NAMESPACE
 
-#endif // ROCPRIM_INTRINSICS_BIT_HPP_
+#endif // ROCPRIM_INTRINSICS_WARP_HPP_
