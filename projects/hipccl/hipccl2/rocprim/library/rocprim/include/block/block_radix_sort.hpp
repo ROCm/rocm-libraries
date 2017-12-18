@@ -203,7 +203,9 @@ class block_radix_sort
     using key_codec = ::rocprim::detail::radix_key_codec<Key>;
     using bit_key_type = typename key_codec::bit_key_type;
 
-    using buckets = detail::buckets<unsigned int, radix_size>;
+    // The last radix value does not have its own bucket and hence no scan is performed, because
+    // its value can be calculated based on all other values
+    using buckets = detail::buckets<unsigned int, radix_size - 1>;
     using block_bit_plus_scan = detail::block_bit_plus_scan<buckets, BlockSize, ItemsPerThread>;
 
     // Select warp size
@@ -345,7 +347,7 @@ private:
                 load(bit_keys[i], values[i], storage, from_position);
                 const bit_key_type bit_key = bit_keys[i];
                 const unsigned int radix = (bit_key >> bit) & radix_mask;
-                for(unsigned int r = 0; r < radix_size; r++)
+                for(unsigned int r = 0; r < radix_size - 1; r++)
                 {
                     banks[i][r] = radix == r;
                 }
@@ -353,12 +355,13 @@ private:
             scan.exclusive_scan(banks, positions, counts, storage.block_bit_plus_scan);
 
             // Prefix sum of counts to compute starting positions of keys of each radix value
-            unsigned int prefix = 0;
-            for(unsigned int r = 0; r < radix_size; r++)
+            buckets starts;
+            unsigned int last_start = 0;
+            for(unsigned int r = 0; r < radix_size - 1; r++)
             {
                 const unsigned int c = counts[r];
-                counts[r] = prefix;
-                prefix += c;
+                starts[r] = last_start;
+                last_start += c;
             }
             // Scatter keys to computed positions considering starting positions of their
             // radix values
@@ -367,10 +370,19 @@ private:
                 const bit_key_type bit_key = bit_keys[i];
                 const unsigned int radix = (bit_key >> bit) & radix_mask;
                 unsigned int to_position = 0;
-                for(unsigned int r = 0; r < radix_size; r++)
+                unsigned int last_position = 0;
+                for(unsigned int r = 0; r < radix_size - 1; r++)
                 {
-                    to_position = radix == r ? (counts[r] + positions[i][r]) : to_position;
+                    to_position = radix == r ? (starts[r] + positions[i][r]) : to_position;
+                    last_position += positions[i][r];
                 }
+                // Calculate position for the last radix value based on positions of
+                // all other previous values
+                const unsigned int from_position =
+                    warp_id * warp_size * ItemsPerThread + i * current_warp_size + lane_id;
+                to_position = radix == radix_size - 1
+                    ? (last_start + from_position - last_position)
+                    : to_position;
                 store(storage, to_position, bit_key, values[i]);
             }
             ::rocprim::syncthreads();
