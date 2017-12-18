@@ -143,8 +143,8 @@ public:
     >
     void inclusive_scan(T (&input)[ItemsPerThread],
                         T (&output)[ItemsPerThread],
-                        storage_type& storage,
                         T& reduction,
+                        storage_type& storage,
                         BinaryFunction scan_op = BinaryFunction()) [[hc]]
     {
         base_type::inclusive_scan(input, output, reduction, storage, scan_op);
