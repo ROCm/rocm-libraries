@@ -257,7 +257,71 @@ void block_load_direct_striped(int flat_id, IteratorT block_iter,
     for (unsigned int item = 0; item < ItemsPerThread; item++)
         items[item] = out_of_bounds;
 
-    block_load_direct_striped(flat_id, block_iter, items, valid);
+    block_load_direct_striped<BlockSize>(flat_id, block_iter, items, valid);
+}
+
+template<
+    unsigned int WarpSize = warp_size(),
+    class IteratorT,
+    class T,
+    unsigned int ItemsPerThread
+>
+void block_load_direct_warp_striped(int flat_id, IteratorT block_iter,
+                                    T (&items)[ItemsPerThread]) [[hc]]
+{
+    unsigned int thread_id = detail::logical_lane_id<WarpSize>();
+    unsigned int warp_id = flat_id / WarpSize;
+    unsigned int warp_offset = warp_id * WarpSize * ItemsPerThread;
+    
+    IteratorT thread_iter = block_iter + thread_id + warp_offset;
+    #pragma unroll
+    for (unsigned int item = 0; item < ItemsPerThread; item++)
+    {
+        items[item] = thread_iter[item * WarpSize];
+    }
+}
+
+template<
+    unsigned int WarpSize = warp_size(),
+    class IteratorT,
+    class T,
+    unsigned int ItemsPerThread
+>
+void block_load_direct_warp_striped(int flat_id, IteratorT block_iter,
+                                    T (&items)[ItemsPerThread],
+                                    int valid) [[hc]]
+{
+    unsigned int thread_id = detail::logical_lane_id<WarpSize>();
+    unsigned int warp_id = flat_id / WarpSize;
+    unsigned int warp_offset = warp_id * WarpSize * ItemsPerThread;
+    
+    IteratorT thread_iter = block_iter + thread_id + warp_offset;
+    #pragma unroll
+    for (unsigned int item = 0; item < ItemsPerThread; item++)
+    {
+        if (warp_offset + thread_id + (item * WarpSize) < valid)
+        {
+            items[item] = thread_iter[item * WarpSize];
+        }
+    }
+}
+
+template<
+    unsigned int WarpSize = warp_size(),
+    class IteratorT,
+    class T,
+    unsigned int ItemsPerThread,
+    class Default
+>
+void block_load_direct_warp_striped(int flat_id, IteratorT block_iter,
+                                    T (&items)[ItemsPerThread],
+                                    int valid, Default out_of_bounds) [[hc]]
+{
+    #pragma unroll
+    for (unsigned int item = 0; item < ItemsPerThread; item++)
+        items[item] = out_of_bounds;
+
+    block_load_direct_warp_striped<WarpSize>(flat_id, block_iter, items, valid);
 }
 
 END_ROCPRIM_NAMESPACE

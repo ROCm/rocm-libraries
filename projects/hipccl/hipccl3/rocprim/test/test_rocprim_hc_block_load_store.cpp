@@ -222,6 +222,102 @@ TYPED_TEST(RocprimBlockLoadStoreTests, LoadStoreDirectBlockedVectorized)
     }
 }
 
+TYPED_TEST(RocprimBlockLoadStoreTests, LoadStoreDirectStriped)
+{
+    hc::accelerator acc;
+
+    constexpr size_t block_size = TestFixture::block_size;
+    // Given block size not supported
+    if(block_size > get_max_tile_size(acc))
+    {
+        return;
+    }
+
+    const size_t size = block_size * 113;
+    const size_t items_per_thread = 16;
+    // Generate data
+    std::vector<int> output = get_random_data<int>(size, -100, 100);
+    std::vector<int> output2(output.size(), 0);
+
+    // Calculate expected results on host
+    std::vector<int> expected(output);
+    
+    hc::array_view<int, 1> d_output(output.size(), output.data());
+    hc::array_view<int, 1> d_output2(output2.size(), output2.data());
+    hc::parallel_for_each(
+        acc.get_default_view(),
+        hc::extent<1>(output.size()).tile(block_size),
+        [=](hc::tiled_index<1> i) [[hc]]
+        {
+            int t[items_per_thread];
+            int idx = i.global[0];
+            rp::block_load_direct_striped<block_size>(
+                idx, 
+                d_output.data(), 
+                t, size);
+            rp::block_store_direct_striped<block_size>(
+                idx, 
+                d_output2.data(), 
+                t, size);
+        }
+    );
+
+    d_output.synchronize();
+    d_output2.synchronize();
+    for(int i = 0; i < output2.size(); i++)
+    {
+        EXPECT_EQ(output2[i], expected[i]);
+    }
+}
+
+TYPED_TEST(RocprimBlockLoadStoreTests, LoadStoreDirectWarpStriped)
+{
+    hc::accelerator acc;
+
+    constexpr size_t block_size = TestFixture::block_size;
+    // Given block size not supported
+    if(block_size > get_max_tile_size(acc) || (block_size & (block_size - 1)) != 0)
+    {
+        return;
+    }
+
+    const size_t size = block_size * 113;
+    const size_t items_per_thread = 16;
+    // Generate data
+    std::vector<int> output = get_random_data<int>(size, -100, 100);
+    std::vector<int> output2(output.size(), 0);
+
+    // Calculate expected results on host
+    std::vector<int> expected(output);
+    
+    hc::array_view<int, 1> d_output(output.size(), output.data());
+    hc::array_view<int, 1> d_output2(output2.size(), output2.data());
+    hc::parallel_for_each(
+        acc.get_default_view(),
+        hc::extent<1>(output.size()).tile(block_size),
+        [=](hc::tiled_index<1> i) [[hc]]
+        {
+            int t[items_per_thread];
+            int idx = i.global[0];
+            rp::block_load_direct_warp_striped(
+                idx, 
+                d_output.data(), 
+                t, size);
+            rp::block_store_direct_warp_striped(
+                idx, 
+                d_output2.data(), 
+                t, size);
+        }
+    );
+
+    d_output.synchronize();
+    d_output2.synchronize();
+    for(int i = 0; i < output2.size(); i++)
+    {
+        EXPECT_EQ(output2[i], expected[i]);
+    }
+}
+
 TYPED_TEST(RocprimVectorizationTests, IsVectorizable)
 {
     using T = typename TestFixture::params::type;

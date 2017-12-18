@@ -202,6 +202,52 @@ void block_store_direct_striped(int flat_id, IteratorT block_iter,
     }
 }
 
+template<
+    unsigned int WarpSize = warp_size(),
+    class IteratorT,
+    class T,
+    unsigned int ItemsPerThread
+>
+void block_store_direct_warp_striped(int flat_id, IteratorT block_iter,
+                                     T (&items)[ItemsPerThread]) [[hc]]
+{
+    unsigned int thread_id = detail::logical_lane_id<WarpSize>();
+    unsigned int warp_id = flat_id / WarpSize;
+    unsigned int warp_offset = warp_id * WarpSize * ItemsPerThread;
+    
+    IteratorT thread_iter = block_iter + thread_id + warp_offset;
+    #pragma unroll
+    for (unsigned int item = 0; item < ItemsPerThread; item++)
+    {
+        thread_iter[item * WarpSize] = items[item];
+    }
+}
+
+template<
+    unsigned int WarpSize = warp_size(),
+    class IteratorT,
+    class T,
+    unsigned int ItemsPerThread
+>
+void block_store_direct_warp_striped(int flat_id, IteratorT block_iter,
+                                     T (&items)[ItemsPerThread],
+                                     int valid) [[hc]]
+{
+    unsigned int thread_id = detail::logical_lane_id<WarpSize>();
+    unsigned int warp_id = flat_id / WarpSize;
+    unsigned int warp_offset = warp_id * WarpSize * ItemsPerThread;
+    
+    IteratorT thread_iter = block_iter + thread_id + warp_offset;
+    #pragma unroll
+    for (unsigned int item = 0; item < ItemsPerThread; item++)
+    {
+        if (warp_offset + thread_id + (item * WarpSize) < valid)
+        {
+            thread_iter[item * WarpSize] = items[item];
+        }
+    }
+}
+
 /// @}
 // end of group collectiveblockmodule
 
