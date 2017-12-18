@@ -96,9 +96,17 @@ void benchmark_block_radix_sort(benchmark::State& state, hipStream_t stream, siz
 
     std::vector<T> input;
     if(std::is_floating_point<T>::value)
+    {
         input = get_random_data<T>(size, (T)-1000, (T)+1000);
+    }
     else
-        input = get_random_data<T>(size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+    {
+        input = get_random_data<T>(
+            size,
+            std::numeric_limits<T>::min(),
+            std::numeric_limits<T>::max()
+        );
+    }
     T * d_input;
     T * d_output;
     HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
