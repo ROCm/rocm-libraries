@@ -124,7 +124,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScan)
     d_output.synchronize();
     for(size_t i = 0; i < output.size(); i++)
     {
-        EXPECT_EQ(output[i], expected[i]);
+        ASSERT_EQ(output[i], expected[i]);
     }
 }
 
@@ -182,13 +182,13 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanReduce)
     d_output.synchronize();
     for(size_t i = 0; i < output.size(); i++)
     {
-        EXPECT_EQ(output[i], expected[i]);
+        ASSERT_EQ(output[i], expected[i]);
     }
 
     d_output_r.synchronize();
     for(size_t i = 0; i < output_reductions.size(); i++)
     {
-        EXPECT_EQ(output_reductions[i], expected_reductions[i]);
+        ASSERT_EQ(output_reductions[i], expected_reductions[i]);
     }
 }
 
@@ -237,7 +237,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScan)
     d_output.synchronize();
     for(size_t i = 0; i < output.size(); i++)
     {
-        EXPECT_EQ(output[i], expected[i]);
+        ASSERT_EQ(output[i], expected[i]);
     }
 }
 
@@ -304,13 +304,13 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanReduce)
     d_output.synchronize();
     for(size_t i = 0; i < output.size(); i++)
     {
-        EXPECT_EQ(output[i], expected[i]);
+        ASSERT_EQ(output[i], expected[i]);
     }
 
     d_output_r.synchronize();
     for(size_t i = 0; i < output_reductions.size(); i++)
     {
-        EXPECT_EQ(output_reductions[i], expected_reductions[i]);
+        ASSERT_EQ(output_reductions[i], expected_reductions[i]);
     }
 }
 
@@ -401,7 +401,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScan)
     d_output.synchronize();
     for(size_t i = 0; i < output.size(); i++)
     {
-        EXPECT_NEAR(
+        ASSERT_NEAR(
             output[i], expected[i],
             static_cast<T>(0.05) * expected[i]
         );
@@ -481,7 +481,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScanReduce)
     d_output.synchronize();
     for(size_t i = 0; i < output.size(); i++)
     {
-        EXPECT_NEAR(
+        ASSERT_NEAR(
             output[i], expected[i],
             static_cast<T>(0.05) * expected[i]
         );
@@ -490,7 +490,170 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScanReduce)
     d_output_r.synchronize();
     for(size_t i = 0; i < output_reductions.size(); i++)
     {
-        EXPECT_NEAR(
+        ASSERT_NEAR(
+            output_reductions[i], expected_reductions[i],
+            static_cast<T>(0.05) * expected_reductions[i]
+        );
+    }
+}
+
+TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScan)
+{
+    using T = typename TestFixture::type;
+    constexpr size_t block_size = TestFixture::block_size;
+    constexpr size_t items_per_thread = TestFixture::items_per_thread;
+
+    hc::accelerator acc;
+    // Given block size not supported
+    if(block_size > get_max_tile_size(acc))
+    {
+        return;
+    }
+
+    const size_t items_per_block = block_size * items_per_thread;
+    const size_t size = items_per_block * 1;
+    // Generate data
+    std::vector<T> output = get_random_data<T>(size, 2, 200);
+    const T init = get_random_value(0, 100);
+
+    // Calulcate expected results on host
+    std::vector<T> expected(output.size(), 0);
+    for(size_t i = 0; i < output.size() / items_per_block; i++)
+    {
+        expected[i * items_per_block] = init;
+        for(size_t j = 1; j < items_per_block; j++)
+        {
+            auto idx = i * items_per_block + j;
+            expected[idx] = output[idx-1] + expected[idx-1];
+        }
+    }
+
+    // global/grid size
+    const size_t global_size = output.size()/items_per_thread;
+    hc::array_view<T, 1> d_output(output.size(), output.data());
+    hc::parallel_for_each(
+        acc.get_default_view(),
+        hc::extent<1>(global_size).tile(block_size),
+        [=](hc::tiled_index<1> i) [[hc]]
+        {
+            size_t idx = i.global[0] * items_per_thread;
+
+            // load
+            T in_out[items_per_thread];
+            for(unsigned int j = 0; j < items_per_thread; j++)
+            {
+                in_out[j] = d_output[idx + j];
+            }
+
+            rp::block_scan<T, block_size> bscan;
+            bscan.exclusive_scan(in_out, in_out, init);
+
+            // store
+            for(unsigned int j = 0; j < items_per_thread; j++)
+            {
+                d_output[idx + j] = in_out[j];
+            }
+        }
+    );
+
+    d_output.synchronize();
+    for(size_t i = 0; i < output.size(); i++)
+    {
+        ASSERT_NEAR(
+            output[i], expected[i],
+            static_cast<T>(0.05) * expected[i]
+        );
+    }
+}
+
+TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScanReduce)
+{
+    using T = typename TestFixture::type;
+    constexpr size_t block_size = TestFixture::block_size;
+    constexpr size_t items_per_thread = TestFixture::items_per_thread;
+
+    hc::accelerator acc;
+    // Given block size not supported
+    if(block_size > get_max_tile_size(acc))
+    {
+        return;
+    }
+
+    const size_t items_per_block = block_size * items_per_thread;
+    const size_t size = items_per_block * 1;
+    // Generate data
+    std::vector<T> output = get_random_data<T>(size, 2, 200);
+
+    // Output reduce results
+    std::vector<T> output_reductions(size / block_size);
+    const T init = get_random_value(0, 100);
+
+    // Calulcate expected results on host
+    std::vector<T> expected(output.size(), 0);
+    std::vector<T> expected_reductions(output_reductions.size(), 0);
+    for(size_t i = 0; i < output.size() / items_per_block; i++)
+    {
+        expected[i * items_per_block] = init;
+        for(size_t j = 1; j < items_per_block; j++)
+        {
+            auto idx = i * items_per_block + j;
+            expected[idx] = output[idx-1] + expected[idx-1];
+        }
+        for(size_t j = 0; j < items_per_block; j++)
+        {
+            expected_reductions[i] += output[i * items_per_block + j];
+        }
+    }
+
+    // global/grid size
+    const size_t global_size = output.size()/items_per_thread;
+    hc::array_view<T, 1> d_output(output.size(), output.data());
+    hc::array_view<T, 1> d_output_r(
+        output_reductions.size(), output_reductions.data()
+    );
+    hc::parallel_for_each(
+        acc.get_default_view(),
+        hc::extent<1>(global_size).tile(block_size),
+        [=](hc::tiled_index<1> i) [[hc]]
+        {
+            size_t idx = i.global[0] * items_per_thread;
+
+            // load
+            T in_out[items_per_thread];
+            for(unsigned int j = 0; j < items_per_thread; j++)
+            {
+                in_out[j] = d_output[idx + j];
+            }
+
+            rp::block_scan<T, block_size> bscan;
+            T reduction;
+            bscan.exclusive_scan(in_out, in_out, init, reduction);
+
+            // store
+            for(unsigned int j = 0; j < items_per_thread; j++)
+            {
+                d_output[idx + j] = in_out[j];
+            }
+            if(i.local[0] == 0)
+            {
+                d_output_r[i.tile[0]] = reduction;
+            }
+        }
+    );
+
+    d_output.synchronize();
+    for(size_t i = 0; i < output.size(); i++)
+    {
+        ASSERT_NEAR(
+            output[i], expected[i],
+            static_cast<T>(0.05) * expected[i]
+        );
+    }
+
+    d_output_r.synchronize();
+    for(size_t i = 0; i < output_reductions.size(); i++)
+    {
+        ASSERT_NEAR(
             output_reductions[i], expected_reductions[i],
             static_cast<T>(0.05) * expected_reductions[i]
         );
