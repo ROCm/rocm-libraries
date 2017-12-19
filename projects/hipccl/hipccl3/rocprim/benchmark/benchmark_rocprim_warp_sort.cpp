@@ -65,9 +65,7 @@ void benchmark_hc_warp_sort(benchmark::State& state, hc::accelerator_view acc_vi
     // Make sure size is a multiple of BlockSize
     const auto size = BlockSize * ((N + BlockSize - 1)/BlockSize);
     // Allocate and fill memory
-    std::vector<T> input(size);
-    std::iota(input.begin(), input.end(), 0);
-    std::shuffle(input.begin(), input.end(), std::mt19937{std::random_device{}()});
+    std::vector<T> input = get_random_data<T>(size, T(0), T(10000));
     std::vector<T> output(size, -1.0f);
     hc::array_view<T, 1> av_input(size, input.data());
     hc::array_view<T, 1> av_output(size, output.data());
@@ -107,9 +105,7 @@ void benchmark_hc_warp_sort_by_key(benchmark::State& state, hc::accelerator_view
     // Make sure size is a multiple of BlockSize
     const auto size = BlockSize * ((N + BlockSize - 1)/BlockSize);
     // Allocate and fill memory
-    std::vector<T> input(size);
-    std::iota(input.begin(), input.end(), 0);
-    std::shuffle(input.begin(), input.end(), std::mt19937{std::random_device{}()});
+    std::vector<T> input = get_random_data<T>(size, T(0), T(10000));
     std::vector<T> output(size, -1.0f);
     hc::array_view<T, 1> av_input(size, input.data());
     hc::array_view<T, 1> av_output(size, output.data());
@@ -140,7 +136,10 @@ void benchmark_hc_warp_sort_by_key(benchmark::State& state, hc::accelerator_view
 
         state.SetIterationTime(elapsed_seconds.count());
     }
-    state.SetBytesProcessed(state.iterations() * size * sizeof(T));
+    state.SetBytesProcessed(
+        // include both key and value
+        state.iterations() * size * (sizeof(T) + sizeof(T))
+    );
     state.SetItemsProcessed(state.iterations() * size);
 }
 
@@ -162,9 +161,7 @@ void benchmark_hip_warp_sort(benchmark::State& state, hipStream_t stream, size_t
     // Make sure size is a multiple of BlockSize
     const auto size = BlockSize * ((N + BlockSize - 1)/BlockSize);
     // Allocate and fill memory
-    std::vector<T> input(size);
-    std::iota(input.begin(), input.end(), 0);
-    std::shuffle(input.begin(), input.end(), std::mt19937{std::random_device{}()});
+    std::vector<T> input = get_random_data<T>(size, T(0), T(10000));
     T * d_input;
     T * d_output;
     HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
@@ -221,9 +218,7 @@ void benchmark_hip_warp_sort_by_key(benchmark::State& state, hipStream_t stream,
     // Make sure size is a multiple of BlockSize
     const auto size = BlockSize * ((N + BlockSize - 1)/BlockSize);
     // Allocate and fill memory
-    std::vector<T> input(size);
-    std::iota(input.begin(), input.end(), 0);
-    std::shuffle(input.begin(), input.end(), std::mt19937{std::random_device{}()});
+    std::vector<T> input = get_random_data<T>(size, T(0), T(10000));
     T * d_input;
     T * d_output;
     HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
@@ -254,7 +249,10 @@ void benchmark_hip_warp_sort_by_key(benchmark::State& state, hipStream_t stream,
             std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
         state.SetIterationTime(elapsed_seconds.count());
     }
-    state.SetBytesProcessed(state.iterations() * size * sizeof(T));
+    state.SetBytesProcessed(
+        // include both key and value
+        state.iterations() * size * (sizeof(T) + sizeof(T))
+    );
     state.SetItemsProcessed(state.iterations() * size);
 
     HIP_CHECK(hipFree(d_input));
