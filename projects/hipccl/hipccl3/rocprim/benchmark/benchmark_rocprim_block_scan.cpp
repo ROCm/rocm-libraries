@@ -57,87 +57,100 @@ const size_t DEFAULT_N = 1024 * 1024 * 128;
 
 namespace rp = rocprim;
 
-template<unsigned int BlockSize>
+template<class T, unsigned int BlockSize>
 void benchmark_hc_block_inclusive_scan(benchmark::State& state, hc::accelerator_view acc_view, size_t N)
 {
+    // Make sure size is a multiple of BlockSize
     const auto size = BlockSize * ((N + BlockSize - 1)/BlockSize);
+    // Allocate and fill memory
+    std::vector<T> input(size, 1.0f);
+    std::vector<T> output(size, -1.0f);
+    hc::array_view<T, 1> av_input(size, input.data());
+    hc::array_view<T, 1> av_output(size, output.data());
+    av_input.synchronize_to(acc_view);
+    av_output.synchronize_to(acc_view);
+    acc_view.wait();
+
     for (auto _ : state)
     {
-        std::vector<float> x(size, 1.0f);
-        hc::array_view<float, 1> av_x(size, x.data());
-        av_x.synchronize_to(acc_view);
-        acc_view.wait();
-
         auto start = std::chrono::high_resolution_clock::now();
         auto event = hc::parallel_for_each(
             acc_view,
             hc::extent<1>(size).tile(BlockSize),
             [=](hc::tiled_index<1> i) [[hc]]
             {
-                float value = av_x[i];
-                rp::block_scan<float, BlockSize> bscan;
+                T value = av_input[i];
+                rp::block_scan<T, BlockSize> bscan;
                 bscan.inclusive_scan(value, value);
-                av_x[i] = value;
+                av_output[i] = value;
             }
         );
         event.wait();
-        auto end = std::chrono::high_resolution_clock::now();
 
+        auto end = std::chrono::high_resolution_clock::now();
         auto elapsed_seconds =
             std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
 
         state.SetIterationTime(elapsed_seconds.count());
     }
+    state.SetBytesProcessed(state.iterations() * size * sizeof(T));
+    state.SetItemsProcessed(state.iterations() * size);
 }
 
 template<class T, unsigned int BlockSize>
 __global__
-void block_inclusive_scan_kernel(T * input)
+void block_inclusive_scan_kernel(const T* input, T* output)
 {
     const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
 
     auto value = input[i];
     rp::block_scan<T, BlockSize> bscan;
     bscan.inclusive_scan(value, value);
-    input[i] = value;
+    output[i] = value;
 }
 
-template<unsigned int BlockSize>
+template<class T, unsigned int BlockSize>
 void benchmark_hip_block_inclusive_scan(benchmark::State& state, hipStream_t stream, size_t N)
 {
+    // Make sure size is a multiple of BlockSize
     const auto size = BlockSize * ((N + BlockSize - 1)/BlockSize);
+    // Allocate and fill memory
+    std::vector<T> input(size, 1.0f);
+    T * d_input;
+    T * d_output;
+    HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
+    HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
+    HIP_CHECK(
+        hipMemcpy(
+            d_input, input.data(),
+            size * sizeof(T),
+            hipMemcpyHostToDevice
+        )
+    );
+    HIP_CHECK(hipDeviceSynchronize());
+
     for (auto _ : state)
     {
-        std::vector<float> x(size, 1.0f);
-        float * d_x;
-        HIP_CHECK(hipMalloc(&d_x, size * sizeof(float)));
-        HIP_CHECK(
-            hipMemcpy(
-                d_x, x.data(),
-                size * sizeof(float),
-                hipMemcpyHostToDevice
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
-
         auto start = std::chrono::high_resolution_clock::now();
         hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(block_inclusive_scan_kernel<float, BlockSize>),
+            HIP_KERNEL_NAME(block_inclusive_scan_kernel<T, BlockSize>),
             dim3(size/BlockSize), dim3(BlockSize), 0, stream,
-            d_x
+            d_input, d_output
         );
+        HIP_CHECK(hipPeekAtLastError());
         HIP_CHECK(hipDeviceSynchronize());
-        auto end = std::chrono::high_resolution_clock::now();
 
+        auto end = std::chrono::high_resolution_clock::now();
         auto elapsed_seconds =
             std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
 
         state.SetIterationTime(elapsed_seconds.count());
-
-        HIP_CHECK(hipPeekAtLastError());
-        HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipFree(d_x));
     }
+    state.SetBytesProcessed(state.iterations() * size * sizeof(T));
+    state.SetItemsProcessed(state.iterations() * size);
+
+    HIP_CHECK(hipFree(d_input));
+    HIP_CHECK(hipFree(d_output));
 }
 
 int main(int argc, char *argv[])
@@ -172,12 +185,12 @@ int main(int argc, char *argv[])
     {
         benchmark::RegisterBenchmark(
             "block_inclusive_scan_hc", // name
-            benchmark_hc_block_inclusive_scan<256>, // func
+            benchmark_hc_block_inclusive_scan<float, 256>, // func
             *acc_view, size // arguments for func
         ),
         benchmark::RegisterBenchmark(
             "block_inclusive_scan_hip",
-            benchmark_hip_block_inclusive_scan<256>,
+            benchmark_hip_block_inclusive_scan<float, 256>,
             stream, size
         )
     };
