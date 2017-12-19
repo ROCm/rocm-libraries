@@ -133,6 +133,11 @@ public:
     struct storage_type
     {
         T warp_prefixes[warps_no];
+        // ---------- Shared memory optimisation ----------
+        // Since warp_scan_prefix_type has logical warp size that is powers of two, then we know
+        // this warp scan will use shuffle operations and thus not require shared memory.
+        // Otherwise, we you need to add following member to the struct:
+        // typename warp_scan_prefix_type::storage_type prefix_scan;
     };
 
     void exclusive_scan(const T (&input)[ItemsPerThread],
@@ -159,8 +164,7 @@ public:
             if(lane_id < warps_no)
             {
                 T prefix = storage.warp_prefixes[lane_id];
-                ::rocprim::plus<T> plus;
-                warp_scan_prefix_type().inclusive_scan(prefix, prefix, plus);
+                warp_scan_prefix_type().inclusive_scan(prefix, prefix, ::rocprim::plus<T>());
                 storage.warp_prefixes[lane_id] = prefix;
             }
         }
@@ -189,7 +193,7 @@ template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread = 1,
     class Value = detail::empty_type,
-    unsigned int RadixBits = 2
+    unsigned int RadixBits = 1
 >
 class block_radix_sort
 {
