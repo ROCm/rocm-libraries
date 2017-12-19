@@ -18,40 +18,42 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_INTRINSICS_BIT_HPP_
-#define ROCPRIM_INTRINSICS_BIT_HPP_
+#ifndef ROCPRIM_BENCHMARK_UTILS_HPP_
+#define ROCPRIM_BENCHMARK_UTILS_HPP_
 
-// HC API
-#include <hcc/hc.hpp>
+#include <algorithm>
+#include <vector>
+#include <random>
+#include <type_traits>
 
-#include "../detail/config.hpp"
-
-BEGIN_ROCPRIM_NAMESPACE
-
-/// \brief Returns a single bit at 'i' from 'x'
-inline int get_bit(int x, int i) [[hc]]
+template<class T>
+inline auto get_random_data(size_t size, T min, T max)
+    -> typename std::enable_if<std::is_integral<T>::value, std::vector<T>>::type
 {
-    return (x >> i) & 1;
+    std::random_device rd;
+    std::default_random_engine gen(rd());
+    std::uniform_int_distribution<T> distribution(min, max);
+    std::vector<T> data(size);
+    std::generate(data.begin(), data.end(), [&]() { return distribution(gen); });
+    return data;
 }
 
-/// \brief Bit count
-///
-/// Returns the number of bit of \p x set.
-inline
-unsigned int bit_count(unsigned int x) [[hc]]
+template<class T>
+inline auto get_random_data(size_t size, T min, T max)
+    -> typename std::enable_if<std::is_floating_point<T>::value, std::vector<T>>::type
 {
-    return hc::__popcount_u32_b32(x);
+    std::random_device rd;
+    std::default_random_engine gen(rd());
+    std::uniform_real_distribution<T> distribution(min, max);
+    std::vector<T> data(size);
+    std::generate(data.begin(), data.end(), [&]() { return distribution(gen); });
+    return data;
 }
 
-/// \brief Bit count
-///
-/// Returns the number of bit of \p x set.
-inline
-unsigned int bit_count(unsigned long long x) [[hc]]
+template<class T>
+inline T get_random_value(T min, T max)
 {
-    return hc::__popcount_u32_b64(x);
+    return get_random_data(1, min, max)[0];
 }
 
-END_ROCPRIM_NAMESPACE
-
-#endif // ROCPRIM_INTRINSICS_BIT_HPP_
+#endif // ROCPRIM_BENCHMARK_UTILS_HPP_
