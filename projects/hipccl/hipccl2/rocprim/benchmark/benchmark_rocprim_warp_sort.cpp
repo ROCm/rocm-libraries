@@ -65,7 +65,9 @@ void benchmark_hc_warp_sort(benchmark::State& state, hc::accelerator_view acc_vi
     // Make sure size is a multiple of BlockSize
     const auto size = BlockSize * ((N + BlockSize - 1)/BlockSize);
     // Allocate and fill memory
-    std::vector<T> input(size, 1.0f);
+    std::vector<T> input(size);
+    std::iota(input.begin(), input.end(), 0);
+    std::shuffle(input.begin(), input.end(), std::mt19937{std::random_device{}()});
     std::vector<T> output(size, -1.0f);
     hc::array_view<T, 1> av_input(size, input.data());
     hc::array_view<T, 1> av_output(size, output.data());
@@ -105,7 +107,9 @@ void benchmark_hc_warp_sort_by_key(benchmark::State& state, hc::accelerator_view
     // Make sure size is a multiple of BlockSize
     const auto size = BlockSize * ((N + BlockSize - 1)/BlockSize);
     // Allocate and fill memory
-    std::vector<T> input(size, 1.0f);
+    std::vector<T> input(size);
+    std::iota(input.begin(), input.end(), 0);
+    std::shuffle(input.begin(), input.end(), std::mt19937{std::random_device{}()});
     std::vector<T> output(size, -1.0f);
     hc::array_view<T, 1> av_input(size, input.data());
     hc::array_view<T, 1> av_output(size, output.data());
@@ -121,10 +125,11 @@ void benchmark_hc_warp_sort_by_key(benchmark::State& state, hc::accelerator_view
             hc::extent<1>(size).tile(BlockSize),
             [=](hc::tiled_index<1> i) [[hc]]
             {
-                T value = av_input[i];
+                T key = av_input[i];
+                T value = key + 1;
                 rp::warp_sort<T, WarpSize, T> wsort;
-                wsort.sort(value, value);
-                av_output[i] = value;
+                wsort.sort(key, value);
+                av_output[i] = key + value;
             }
         );
         event.wait();
@@ -157,19 +162,9 @@ void benchmark_hip_warp_sort(benchmark::State& state, hipStream_t stream, size_t
     // Make sure size is a multiple of BlockSize
     const auto size = BlockSize * ((N + BlockSize - 1)/BlockSize);
     // Allocate and fill memory
-    std::vector<T> input;
-    if(std::is_floating_point<T>::value)
-    {
-        input = get_random_data<T>(size, (T)-1000, (T)+1000);
-    }
-    else
-    {
-        input = get_random_data<T>(
-            size,
-            std::numeric_limits<T>::min(),
-            std::numeric_limits<T>::max()
-        );
-    }
+    std::vector<T> input(size);
+    std::iota(input.begin(), input.end(), 0);
+    std::shuffle(input.begin(), input.end(), std::mt19937{std::random_device{}()});
     T * d_input;
     T * d_output;
     HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
@@ -213,10 +208,11 @@ void warp_sort_by_key_kernel(const T* input, T* output)
 {
     const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
 
-    auto value = input[i];
+    auto key = input[i];
+    auto value = key + 1;
     rp::warp_sort<T, WarpSize, T> wsort;
-    wsort.sort(value, value);
-    output[i] = value;
+    wsort.sort(key, value);
+    output[i] = key + value;
 }
 
 template<class T, unsigned int WarpSize, unsigned int BlockSize>
@@ -225,19 +221,9 @@ void benchmark_hip_warp_sort_by_key(benchmark::State& state, hipStream_t stream,
     // Make sure size is a multiple of BlockSize
     const auto size = BlockSize * ((N + BlockSize - 1)/BlockSize);
     // Allocate and fill memory
-    std::vector<T> input;
-    if(std::is_floating_point<T>::value)
-    {
-        input = get_random_data<T>(size, (T)-1000, (T)+1000);
-    }
-    else
-    {
-        input = get_random_data<T>(
-            size,
-            std::numeric_limits<T>::min(),
-            std::numeric_limits<T>::max()
-        );
-    }
+    std::vector<T> input(size);
+    std::iota(input.begin(), input.end(), 0);
+    std::shuffle(input.begin(), input.end(), std::mt19937{std::random_device{}()});
     T * d_input;
     T * d_output;
     HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
@@ -331,6 +317,7 @@ int main(int argc, char *argv[])
     for(auto& b : benchmarks)
     {
         b->UseManualTime();
+        b->Unit(benchmark::kMillisecond);
     }
 
     // Force number of iterations
