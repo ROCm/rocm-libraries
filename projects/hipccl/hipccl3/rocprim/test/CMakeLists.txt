@@ -68,8 +68,9 @@ add_rocprim_test("hcc.device_apis" test_device_apis.cpp)
 add_rocprim_test("rocprim.basics" test_rocprim_basics.cpp)
 
 # rocPRIM HC API tests
+add_rocprim_test_hc("rocprim.hc.block_load_store" test_rocprim_hc_block_load_store.cpp)
+add_rocprim_test_hc("rocprim.hc.block_radix_sort" test_rocprim_hc_block_radix_sort.cpp)
+add_rocprim_test_hc("rocprim.hc.block_scan" test_rocprim_hc_block_scan.cpp)
 add_rocprim_test_hc("rocprim.hc.intrinsics" test_rocprim_hc_intrinsics.cpp)
 add_rocprim_test_hc("rocprim.hc.warp_scan" test_rocprim_hc_warp_scan.cpp)
-add_rocprim_test_hc("rocprim.hc.block_scan" test_rocprim_hc_block_scan.cpp)
 add_rocprim_test_hc("rocprim.hc.warp_sort" test_rocprim_hc_warp_sort.cpp)
-add_rocprim_test_hc("rocprim.hc.block_load_store" test_rocprim_hc_block_load_store.cpp)
