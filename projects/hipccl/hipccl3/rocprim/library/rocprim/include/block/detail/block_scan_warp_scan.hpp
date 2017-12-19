@@ -236,6 +236,78 @@ public:
         );
     }
 
+    template<unsigned int ItemsPerThread, class BinaryFunction>
+    void exclusive_scan(T (&input)[ItemsPerThread],
+                        T (&output)[ItemsPerThread],
+                        T init,
+                        storage_type& storage,
+                        BinaryFunction scan_op) [[hc]]
+    {
+        // Reduce thread items
+        T thread_input = input[0];
+        #pragma unroll
+        for(unsigned int i = 1; i < ItemsPerThread; i++)
+        {
+            thread_input = scan_op(thread_input, input[i]);
+        }
+
+        // Scan of reduced values to get prefixes
+        const auto flat_tid = ::rocprim::flat_block_thread_id();
+        this->exclusive_scan_(
+            flat_tid,
+            thread_input, thread_input, // input, output
+            init,
+            storage,
+            scan_op
+        );
+
+        // Include init value
+        T prev = input[0];
+        T exclusive = flat_tid == 0 ? init : thread_input;
+        output[0] = exclusive;
+        #pragma unroll
+        for(unsigned int i = 1; i < ItemsPerThread; i++)
+        {
+            exclusive = scan_op(exclusive, prev);
+            prev = output[i];
+            output[i] = exclusive;
+        }
+    }
+
+    template<unsigned int ItemsPerThread, class BinaryFunction>
+    void exclusive_scan(T (&input)[ItemsPerThread],
+                        T (&output)[ItemsPerThread],
+                        T init,
+                        BinaryFunction scan_op) [[hc]]
+    {
+        tile_static storage_type storage;
+        this->exclusive_scan(input, output, init, storage, scan_op);
+    }
+
+    template<unsigned int ItemsPerThread, class BinaryFunction>
+    void exclusive_scan(T (&input)[ItemsPerThread],
+                        T (&output)[ItemsPerThread],
+                        T init,
+                        T& reduction,
+                        storage_type& storage,
+                        BinaryFunction scan_op) [[hc]]
+    {
+        this->exclusive_scan(input, output, init, storage, scan_op);
+        // Save reduction result
+        reduction = storage.warp_prefixes[warps_no_ - 1];
+    }
+
+    template<unsigned int ItemsPerThread, class BinaryFunction>
+    void exclusive_scan(T (&input)[ItemsPerThread],
+                        T (&output)[ItemsPerThread],
+                        T init,
+                        T& reduction,
+                        BinaryFunction scan_op) [[hc]]
+    {
+        tile_static storage_type storage;
+        this->exclusive_scan(input, output, init, reduction, storage, scan_op);
+    }
+
 private:
     template<class BinaryFunction>
     void inclusive_scan_(const unsigned int flat_tid,
