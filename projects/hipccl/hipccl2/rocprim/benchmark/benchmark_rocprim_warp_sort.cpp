@@ -33,6 +33,8 @@
 // CmdParser
 #include "cmdparser.hpp"
 
+#include "benchmark_utils.hpp"
+
 // HC API
 #include <hcc/hc.hpp>
 // HIP API
@@ -57,170 +59,220 @@ const size_t DEFAULT_N = 1024 * 1024 * 128;
 
 namespace rp = rocprim;
 
-template<unsigned int WarpSize, unsigned int BlockSize>
+template<class T, unsigned int WarpSize, unsigned int BlockSize>
 void benchmark_hc_warp_sort(benchmark::State& state, hc::accelerator_view acc_view, size_t N)
 {
+    // Make sure size is a multiple of BlockSize
     const auto size = BlockSize * ((N + BlockSize - 1)/BlockSize);
+    // Allocate and fill memory
+    std::vector<T> input(size, 1.0f);
+    std::vector<T> output(size, -1.0f);
+    hc::array_view<T, 1> av_input(size, input.data());
+    hc::array_view<T, 1> av_output(size, output.data());
+    av_input.synchronize_to(acc_view);
+    av_output.synchronize_to(acc_view);
+    acc_view.wait();
+
     for (auto _ : state)
     {
-        std::vector<float> x(size, 1.0f);
-        hc::array_view<float, 1> av_x(size, x.data());
-        av_x.synchronize_to(acc_view);
-        acc_view.wait();
-
         auto start = std::chrono::high_resolution_clock::now();
         auto event = hc::parallel_for_each(
             acc_view,
             hc::extent<1>(size).tile(BlockSize),
             [=](hc::tiled_index<1> i) [[hc]]
             {
-                float value = av_x[i];
-                rp::warp_sort<float, WarpSize> wsort;
+                T value = av_input[i];
+                rp::warp_sort<T, WarpSize> wsort;
                 wsort.sort(value);
-                av_x[i] = value;
+                av_output[i] = value;
             }
         );
         event.wait();
-        auto end = std::chrono::high_resolution_clock::now();
 
+        auto end = std::chrono::high_resolution_clock::now();
         auto elapsed_seconds =
             std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
 
         state.SetIterationTime(elapsed_seconds.count());
     }
+    state.SetBytesProcessed(state.iterations() * size * sizeof(T));
+    state.SetItemsProcessed(state.iterations() * size);
 }
 
-template<unsigned int WarpSize, unsigned int BlockSize>
+template<class T, unsigned int WarpSize, unsigned int BlockSize>
 void benchmark_hc_warp_sort_by_key(benchmark::State& state, hc::accelerator_view acc_view, size_t N)
 {
+    // Make sure size is a multiple of BlockSize
     const auto size = BlockSize * ((N + BlockSize - 1)/BlockSize);
+    // Allocate and fill memory
+    std::vector<T> input(size, 1.0f);
+    std::vector<T> output(size, -1.0f);
+    hc::array_view<T, 1> av_input(size, input.data());
+    hc::array_view<T, 1> av_output(size, output.data());
+    av_input.synchronize_to(acc_view);
+    av_output.synchronize_to(acc_view);
+    acc_view.wait();
+
     for (auto _ : state)
     {
-        std::vector<float> x(size, 1.0f);
-        hc::array_view<float, 1> av_x(size, x.data());
-        av_x.synchronize_to(acc_view);
-        acc_view.wait();
-
         auto start = std::chrono::high_resolution_clock::now();
         auto event = hc::parallel_for_each(
             acc_view,
             hc::extent<1>(size).tile(BlockSize),
             [=](hc::tiled_index<1> i) [[hc]]
             {
-                float value1 = av_x[i];
-                rp::warp_sort<float, WarpSize, float> wsort;
-                wsort.sort(value1, value1);
-                av_x[i] = value1;
+                T value = av_input[i];
+                rp::warp_sort<T, WarpSize, T> wsort;
+                wsort.sort(value, value);
+                av_output[i] = value;
             }
         );
         event.wait();
-        auto end = std::chrono::high_resolution_clock::now();
 
+        auto end = std::chrono::high_resolution_clock::now();
         auto elapsed_seconds =
             std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
 
         state.SetIterationTime(elapsed_seconds.count());
     }
+    state.SetBytesProcessed(state.iterations() * size * sizeof(T));
+    state.SetItemsProcessed(state.iterations() * size);
 }
 
 template<class T, unsigned int WarpSize>
 __global__
-void warp_sort_kernel(T * input)
+void warp_sort_kernel(const T* input, T* output)
 {
     const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
 
     auto value = input[i];
     rp::warp_sort<T, WarpSize> wsort;
     wsort.sort(value);
-    input[i] = value;
+    output[i] = value;
 }
 
-template<unsigned int WarpSize, unsigned int BlockSize>
+template<class T, unsigned int WarpSize, unsigned int BlockSize>
 void benchmark_hip_warp_sort(benchmark::State& state, hipStream_t stream, size_t N)
 {
+    // Make sure size is a multiple of BlockSize
     const auto size = BlockSize * ((N + BlockSize - 1)/BlockSize);
-    for (auto _ : state)
+    // Allocate and fill memory
+    std::vector<T> input;
+    if(std::is_floating_point<T>::value)
     {
-        std::vector<float> x(size, 1.0f);
-        float * d_x;
-        HIP_CHECK(hipMalloc(&d_x, size * sizeof(float)));
-        HIP_CHECK(
-            hipMemcpy(
-                d_x, x.data(),
-                size * sizeof(float),
-                hipMemcpyHostToDevice
-            )
+        input = get_random_data<T>(size, (T)-1000, (T)+1000);
+    }
+    else
+    {
+        input = get_random_data<T>(
+            size,
+            std::numeric_limits<T>::min(),
+            std::numeric_limits<T>::max()
         );
-        HIP_CHECK(hipDeviceSynchronize());
+    }
+    T * d_input;
+    T * d_output;
+    HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
+    HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
+    HIP_CHECK(
+        hipMemcpy(
+            d_input, input.data(),
+            size * sizeof(T),
+            hipMemcpyHostToDevice
+        )
+    );
+    HIP_CHECK(hipDeviceSynchronize());
 
+    for(auto _ : state)
+    {
         auto start = std::chrono::high_resolution_clock::now();
+
         hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(warp_sort_kernel<float, WarpSize>),
+            HIP_KERNEL_NAME(warp_sort_kernel<T, WarpSize>),
             dim3(size/BlockSize), dim3(BlockSize), 0, stream,
-            d_x
+            d_input, d_output
         );
-        HIP_CHECK(hipDeviceSynchronize());
-        auto end = std::chrono::high_resolution_clock::now();
-
-        auto elapsed_seconds =
-            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-
-        state.SetIterationTime(elapsed_seconds.count());
-
         HIP_CHECK(hipPeekAtLastError());
         HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipFree(d_x));
+
+        auto end = std::chrono::high_resolution_clock::now();
+        auto elapsed_seconds =
+            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+        state.SetIterationTime(elapsed_seconds.count());
     }
+    state.SetBytesProcessed(state.iterations() * size * sizeof(T));
+    state.SetItemsProcessed(state.iterations() * size);
+
+    HIP_CHECK(hipFree(d_input));
+    HIP_CHECK(hipFree(d_output));
 }
 
 template<class T, unsigned int WarpSize>
 __global__
-void warp_sort_by_key_kernel(T * input)
+void warp_sort_by_key_kernel(const T* input, T* output)
 {
     const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
 
     auto value = input[i];
     rp::warp_sort<T, WarpSize, T> wsort;
     wsort.sort(value, value);
-    input[i] = value;
+    output[i] = value;
 }
 
-template<unsigned int WarpSize, unsigned int BlockSize>
+template<class T, unsigned int WarpSize, unsigned int BlockSize>
 void benchmark_hip_warp_sort_by_key(benchmark::State& state, hipStream_t stream, size_t N)
 {
+    // Make sure size is a multiple of BlockSize
     const auto size = BlockSize * ((N + BlockSize - 1)/BlockSize);
-    for (auto _ : state)
+    // Allocate and fill memory
+    std::vector<T> input;
+    if(std::is_floating_point<T>::value)
     {
-        std::vector<float> x(size, 1.0f);
-        float * d_x;
-        HIP_CHECK(hipMalloc(&d_x, size * sizeof(float)));
-        HIP_CHECK(
-            hipMemcpy(
-                d_x, x.data(),
-                size * sizeof(float),
-                hipMemcpyHostToDevice
-            )
+        input = get_random_data<T>(size, (T)-1000, (T)+1000);
+    }
+    else
+    {
+        input = get_random_data<T>(
+            size,
+            std::numeric_limits<T>::min(),
+            std::numeric_limits<T>::max()
         );
-        HIP_CHECK(hipDeviceSynchronize());
+    }
+    T * d_input;
+    T * d_output;
+    HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
+    HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
+    HIP_CHECK(
+        hipMemcpy(
+            d_input, input.data(),
+            size * sizeof(T),
+            hipMemcpyHostToDevice
+        )
+    );
+    HIP_CHECK(hipDeviceSynchronize());
 
+    for(auto _ : state)
+    {
         auto start = std::chrono::high_resolution_clock::now();
+
         hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(warp_sort_by_key_kernel<float, WarpSize>),
+            HIP_KERNEL_NAME(warp_sort_by_key_kernel<T, WarpSize>),
             dim3(size/BlockSize), dim3(BlockSize), 0, stream,
-            d_x
+            d_input, d_output
         );
-        HIP_CHECK(hipDeviceSynchronize());
-        auto end = std::chrono::high_resolution_clock::now();
-
-        auto elapsed_seconds =
-            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-
-        state.SetIterationTime(elapsed_seconds.count());
-
         HIP_CHECK(hipPeekAtLastError());
         HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipFree(d_x));
+
+        auto end = std::chrono::high_resolution_clock::now();
+        auto elapsed_seconds =
+            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+        state.SetIterationTime(elapsed_seconds.count());
     }
+    state.SetBytesProcessed(state.iterations() * size * sizeof(T));
+    state.SetItemsProcessed(state.iterations() * size);
+
+    HIP_CHECK(hipFree(d_input));
+    HIP_CHECK(hipFree(d_output));
 }
 
 int main(int argc, char *argv[])
@@ -255,22 +307,22 @@ int main(int argc, char *argv[])
     {
         benchmark::RegisterBenchmark(
             "warp_sort_hc", // name
-            benchmark_hc_warp_sort<64, 256>, // func
+            benchmark_hc_warp_sort<float, 64, 256>, // func
             *acc_view, size // arguments for func
         ),
         benchmark::RegisterBenchmark(
             "warp_sort_by_key_hc", // name
-            benchmark_hc_warp_sort_by_key<64, 256>, // func
+            benchmark_hc_warp_sort_by_key<float, 64, 256>, // func
             *acc_view, size // arguments for func
         ),
         benchmark::RegisterBenchmark(
             "warp_sort_hip",
-            benchmark_hip_warp_sort<64, 256>,
+            benchmark_hip_warp_sort<float, 64, 256>,
             stream, size
         ),
         benchmark::RegisterBenchmark(
             "warp_sort_by_key_hip",
-            benchmark_hip_warp_sort_by_key<64, 256>,
+            benchmark_hip_warp_sort_by_key<float, 64, 256>,
             stream, size
         )
     };
