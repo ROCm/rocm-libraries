@@ -89,35 +89,35 @@ typedef ::testing::Types<
     params<char, rp::detail::char4, 8, true>,
     params<char, char, 11, false>,
     params<char, rp::detail::char4, 16, true>,
-    
+
     params<short, short, 3, false>,
     params<short, rp::detail::short4, 4, true>,
     params<short, short, 7, false>,
     params<short, rp::detail::short4, 8, true>,
     params<short, short, 11, false>,
     params<short, rp::detail::short4, 16, true>,
-    
+
     params<float, int, 3, false>,
     params<float, rp::detail::int4, 4, true>,
     params<float, int, 7, false>,
     params<float, rp::detail::int4, 8, true>,
     params<float, int, 11, false>,
     params<float, rp::detail::int4, 16, true>,
-    
+
     params<hc::short_vector::int2, rp::detail::int2, 3, false>,
     params<hc::short_vector::int2, rp::detail::int4, 4, true>,
     params<hc::short_vector::int2, rp::detail::int2, 7, false>,
     params<hc::short_vector::int2, rp::detail::int4, 8, true>,
     params<hc::short_vector::int2, rp::detail::int2, 11, false>,
     params<hc::short_vector::int2, rp::detail::int4, 16, true>,
-    
+
     params<hc::short_vector::float2, rp::detail::int2, 3, false>,
     params<hc::short_vector::float2, rp::detail::int4, 4, true>,
     params<hc::short_vector::float2, rp::detail::int2, 7, false>,
     params<hc::short_vector::float2, rp::detail::int4, 8, true>,
     params<hc::short_vector::float2, rp::detail::int2, 11, false>,
     params<hc::short_vector::float2, rp::detail::int4, 16, true>,
-    
+
     params<hc::short_vector::char4, int, 3, false>,
     params<hc::short_vector::char4, rp::detail::int4, 4, true>,
     params<hc::short_vector::char4, int, 7, false>,
@@ -157,14 +157,17 @@ TYPED_TEST(RocprimBlockLoadStoreTests, LoadStoreDirectBlocked)
         [=](hc::tiled_index<1> i) [[hc]]
         {
             int t[items_per_thread];
-            int idx = i.global[0];
+            int idx = i.local[0];
+            int block_offset =  i.tile[0] * block_size;
+            // It's possible to use global thread id instead of a pointer offset
+            // to move the pointer forward
             rp::block_load_direct_blocked(
-                idx, 
-                d_output.data(), 
+                idx,
+                d_output.data() + block_offset,
                 t, size);
             rp::block_store_direct_blocked(
-                idx, 
-                d_output2.data(), 
+                idx,
+                d_output2.data() + block_offset,
                 t, size);
         }
     );
@@ -173,7 +176,7 @@ TYPED_TEST(RocprimBlockLoadStoreTests, LoadStoreDirectBlocked)
     d_output2.synchronize();
     for(int i = 0; i < output2.size(); i++)
     {
-        EXPECT_EQ(output2[i], expected[i]);
+        ASSERT_EQ(output2[i], expected[i]);
     }
 }
 
@@ -188,9 +191,8 @@ TYPED_TEST(RocprimBlockLoadStoreTests, LoadStoreDirectBlockedVectorized)
         return;
     }
 
-    const size_t size = block_size * 113;
     const size_t items_per_thread = 32;
-    const size_t vector_size = size / items_per_thread;
+    const size_t size = items_per_thread * block_size * 113;
     // Generate data
     std::vector<float> output = get_random_data<float>(size, -100, 100);
     std::vector<float> output2(output.size(), 0);
@@ -202,15 +204,20 @@ TYPED_TEST(RocprimBlockLoadStoreTests, LoadStoreDirectBlockedVectorized)
     hc::array_view<float, 1> d_output2(output2.size(), output2.data());
     hc::parallel_for_each(
         acc.get_default_view(),
-        hc::extent<1>(vector_size).tile(block_size),
+        hc::extent<1>(size).tile(block_size),
         [=](hc::tiled_index<1> i) [[hc]]
         {
             float t[items_per_thread];
-            float idx = i.global[0];
+            float idx = i.local[0];
+            int block_offset =  i.tile[0] * block_size;
+            // It's possible to use global thread id instead of a pointer offset
+            // to move the pointer forward
             rp::block_load_direct_blocked_vectorized(
-                idx, d_output.data(), t);
+                idx, d_output.data() + block_offset,
+                t);
             rp::block_store_direct_blocked_vectorized(
-                idx, d_output2.data(), t);
+                idx, d_output2.data() + block_offset,
+                t);
         }
     );
 
@@ -218,7 +225,109 @@ TYPED_TEST(RocprimBlockLoadStoreTests, LoadStoreDirectBlockedVectorized)
     d_output2.synchronize();
     for(int i = 0; i < output2.size(); i++)
     {
-        EXPECT_EQ(output2[i], expected[i]);
+        ASSERT_EQ(output2[i], expected[i]);
+    }
+}
+
+TYPED_TEST(RocprimBlockLoadStoreTests, LoadStoreDirectStriped)
+{
+    hc::accelerator acc;
+
+    constexpr size_t block_size = TestFixture::block_size;
+    // Given block size not supported
+    if(block_size > get_max_tile_size(acc))
+    {
+        return;
+    }
+
+    const size_t size = block_size * 113;
+    const size_t items_per_thread = 16;
+    // Generate data
+    std::vector<int> output = get_random_data<int>(size, -100, 100);
+    std::vector<int> output2(output.size(), 0);
+
+    // Calculate expected results on host
+    std::vector<int> expected(output);
+
+    hc::array_view<int, 1> d_output(output.size(), output.data());
+    hc::array_view<int, 1> d_output2(output2.size(), output2.data());
+    hc::parallel_for_each(
+        acc.get_default_view(),
+        hc::extent<1>(output.size()).tile(block_size),
+        [=](hc::tiled_index<1> i) [[hc]]
+        {
+            int t[items_per_thread];
+            int idx = i.local[0];
+            int block_offset =  i.tile[0] * block_size;
+            // It's possible to use global thread id instead of a pointer offset
+            // to move the pointer forward
+            rp::block_load_direct_striped<block_size>(
+                idx,
+                d_output.data() + block_offset,
+                t, size);
+            rp::block_store_direct_striped<block_size>(
+                idx,
+                d_output2.data() + block_offset,
+                t, size);
+        }
+    );
+
+    d_output.synchronize();
+    d_output2.synchronize();
+    for(int i = 0; i < output2.size(); i++)
+    {
+        ASSERT_EQ(output2[i], expected[i]);
+    }
+}
+
+TYPED_TEST(RocprimBlockLoadStoreTests, LoadStoreDirectWarpStriped)
+{
+    hc::accelerator acc;
+
+    constexpr size_t block_size = TestFixture::block_size;
+    // Given block size not supported
+    if(block_size > get_max_tile_size(acc) || (block_size & (block_size - 1)) != 0)
+    {
+        return;
+    }
+
+    const size_t size = block_size * 113;
+    const size_t items_per_thread = 16;
+    // Generate data
+    std::vector<int> output = get_random_data<int>(size, -100, 100);
+    std::vector<int> output2(output.size(), 0);
+
+    // Calculate expected results on host
+    std::vector<int> expected(output);
+
+    hc::array_view<int, 1> d_output(output.size(), output.data());
+    hc::array_view<int, 1> d_output2(output2.size(), output2.data());
+    hc::parallel_for_each(
+        acc.get_default_view(),
+        hc::extent<1>(output.size()).tile(block_size),
+        [=](hc::tiled_index<1> i) [[hc]]
+        {
+            int t[items_per_thread];
+            int idx = i.local[0];
+            int block_offset =  i.tile[0] * block_size;
+            // It's possible to use global thread id instead of a pointer offset
+            // to move the pointer forward
+            rp::block_load_direct_warp_striped(
+                idx,
+                d_output.data() + block_offset,
+                t, size);
+            rp::block_store_direct_warp_striped(
+                idx,
+                d_output2.data() + block_offset,
+                t, size);
+        }
+    );
+
+    d_output.synchronize();
+    d_output2.synchronize();
+    for(int i = 0; i < output2.size(); i++)
+    {
+        ASSERT_EQ(output2[i], expected[i]);
     }
 }
 
@@ -228,7 +337,7 @@ TYPED_TEST(RocprimVectorizationTests, IsVectorizable)
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
     constexpr bool should_be_vectorized = TestFixture::params::should_be_vectorized;
     bool output = rp::detail::is_vectorizable<T, items_per_thread>();
-    EXPECT_EQ(output, should_be_vectorized);
+    ASSERT_EQ(output, should_be_vectorized);
 }
 
 TYPED_TEST(RocprimVectorizationTests, MatchVectorType)
