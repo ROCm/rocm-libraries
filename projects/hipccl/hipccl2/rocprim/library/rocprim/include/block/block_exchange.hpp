@@ -169,30 +169,12 @@ public:
     }
 
     template<class U, class Offset>
-    void scatter_to_striped(const T (&input)[ItemsPerThread],
-                            U (&output)[ItemsPerThread],
-                            const Offset (&ranks)[ItemsPerThread]) [[hc]]
-    {
-        tile_static storage_type storage;
-        scatter_to_striped(input, output, storage);
-    }
-
-    template<class U, class Offset>
-    void scatter_to_striped(const T (&input)[ItemsPerThread],
-                            U (&output)[ItemsPerThread],
-                            const Offset (&ranks)[ItemsPerThread],
-                            storage_type& storage) [[hc]]
-    {
-
-    }
-
-    template<class U, class Offset>
     void scatter_to_blocked(const T (&input)[ItemsPerThread],
                             U (&output)[ItemsPerThread],
                             const Offset (&ranks)[ItemsPerThread]) [[hc]]
     {
         tile_static storage_type storage;
-        scatter_to_blocked(input, output, storage);
+        scatter_to_blocked(input, output, ranks, storage);
     }
 
     template<class U, class Offset>
@@ -201,7 +183,117 @@ public:
                             const Offset (&ranks)[ItemsPerThread],
                             storage_type& storage) [[hc]]
     {
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
 
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            const Offset rank = ranks[i];
+            storage.buffer[rank] = input[i];
+        }
+        ::rocprim::syncthreads();
+
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            output[i] = storage.buffer[flat_id * ItemsPerThread + i];
+        }
+    }
+
+    template<class U, class Offset>
+    void scatter_to_striped(const T (&input)[ItemsPerThread],
+                            U (&output)[ItemsPerThread],
+                            const Offset (&ranks)[ItemsPerThread]) [[hc]]
+    {
+        tile_static storage_type storage;
+        scatter_to_striped(input, output, ranks, storage);
+    }
+
+    template<class U, class Offset>
+    void scatter_to_striped(const T (&input)[ItemsPerThread],
+                            U (&output)[ItemsPerThread],
+                            const Offset (&ranks)[ItemsPerThread],
+                            storage_type& storage) [[hc]]
+    {
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            const Offset rank = ranks[i];
+            storage.buffer[rank] = input[i];
+        }
+        ::rocprim::syncthreads();
+
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            output[i] = storage.buffer[i * BlockSize + flat_id];
+        }
+    }
+
+    template<class U, class Offset>
+    void scatter_to_striped_guarded(const T (&input)[ItemsPerThread],
+                                    U (&output)[ItemsPerThread],
+                                    const Offset (&ranks)[ItemsPerThread]) [[hc]]
+    {
+        tile_static storage_type storage;
+        scatter_to_striped_guarded(input, output, ranks, storage);
+    }
+
+    template<class U, class Offset>
+    void scatter_to_striped_guarded(const T (&input)[ItemsPerThread],
+                                    U (&output)[ItemsPerThread],
+                                    const Offset (&ranks)[ItemsPerThread],
+                                    storage_type& storage) [[hc]]
+    {
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            const Offset rank = ranks[i];
+            if(rank >= 0)
+            {
+                storage.buffer[rank] = input[i];
+            }
+        }
+        ::rocprim::syncthreads();
+
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            output[i] = storage.buffer[i * BlockSize + flat_id];
+        }
+    }
+
+    template<class U, class Offset, class ValidFlag>
+    void scatter_to_striped_flagged(const T (&input)[ItemsPerThread],
+                                    U (&output)[ItemsPerThread],
+                                    const Offset (&ranks)[ItemsPerThread],
+                                    const ValidFlag (&is_valid)[ItemsPerThread]) [[hc]]
+    {
+        tile_static storage_type storage;
+        scatter_to_striped_flagged(input, output, ranks, is_valid, storage);
+    }
+
+    template<class U, class Offset, class ValidFlag>
+    void scatter_to_striped_flagged(const T (&input)[ItemsPerThread],
+                                    U (&output)[ItemsPerThread],
+                                    const Offset (&ranks)[ItemsPerThread],
+                                    const ValidFlag (&is_valid)[ItemsPerThread],
+                                    storage_type& storage) [[hc]]
+    {
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            const Offset rank = ranks[i];
+            if(is_valid[i])
+            {
+                storage.buffer[rank] = input[i];
+            }
+        }
+        ::rocprim::syncthreads();
+
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            output[i] = storage.buffer[i * BlockSize + flat_id];
+        }
     }
 
 private:
