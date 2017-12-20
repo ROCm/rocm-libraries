@@ -39,39 +39,6 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-namespace detail
-{
-
-template<
-    class Key,
-    unsigned int WarpSize,
-    class Value
->
-class warp_sort_shared_mem
-{
-public:
-    static_assert(
-        detail::is_power_of_two(WarpSize),
-        "warp_sort is not implemented for WarpSizes that are not power of two."
-    );
-
-    typedef detail::empty_type storage;
-};
-
-// Select warp_sort implementation based WarpSize
-template<class Key, unsigned int WarpSize, class Value>
-struct select_warp_sort_impl
-{
-    typedef typename std::conditional<
-        // can we use shuffle-based implementation?
-        detail::is_warpsize_shuffleable<WarpSize>::value,
-        detail::warp_sort_shuffle<Key, WarpSize, Value>, // yes
-        detail::warp_sort_shared_mem<Key, WarpSize, Value> // no
-    >::type type;
-};
-
-} // end namespace detail
-
 /// \brief The warp_sort class provides warp-wide methods for computing a parallel 
 /// sort of items across thread warps. This class currently implements parallel
 /// bitonic sort, and only accepts warp sizes that are powers of two.
@@ -148,9 +115,9 @@ template<
     unsigned int WarpSize = warp_size(),
     class Value = detail::empty_type
 >
-class warp_sort : detail::select_warp_sort_impl<Key, WarpSize, Value>::type
+class warp_sort : detail::warp_sort_shuffle<Key, WarpSize, Value>
 {
-    typedef typename detail::select_warp_sort_impl<Key, WarpSize, Value>::type base_type;
+    typedef typename detail::warp_sort_shuffle<Key, WarpSize, Value> base_type;
 
 public:
     /// \brief Struct used to allocate a temporary memory that is required for thread
