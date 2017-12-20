@@ -1,0 +1,177 @@
+// Copyright (c) 2017 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
+#ifndef ROCPRIM_BLOCK_BLOCK_EXCHANGE_HPP_
+#define ROCPRIM_BLOCK_BLOCK_EXCHANGE_HPP_
+
+// HC API
+#include <hcc/hc.hpp>
+#include <hcc/hc_short_vector.hpp>
+
+#include "../detail/config.hpp"
+#include "../detail/various.hpp"
+
+#include "../intrinsics.hpp"
+#include "../functional.hpp"
+#include "../types.hpp"
+
+BEGIN_ROCPRIM_NAMESPACE
+
+template<
+    class T,
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread
+>
+class block_exchange
+{
+
+public:
+
+    struct storage_type
+    {
+        T buffer[BlockSize * ItemsPerThread];
+    };
+
+    template<class U>
+    void blocked_to_striped(const T (&input)[ItemsPerThread],
+                            U (&output)[ItemsPerThread]) [[hc]]
+    {
+        tile_static storage_type storage;
+        blocked_to_striped(input, output, storage);
+    }
+
+    template<class U>
+    void blocked_to_striped(const T (&input)[ItemsPerThread],
+                            U (&output)[ItemsPerThread],
+                            storage_type& storage) [[hc]]
+    {
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            storage.buffer[flat_id * ItemsPerThread + i] = input[i];
+        }
+        ::rocprim::syncthreads();
+
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            output[i] = storage.buffer[i * BlockSize + flat_id];
+        }
+    }
+
+    template<class U>
+    void striped_to_blocked(const T (&input)[ItemsPerThread],
+                            U (&output)[ItemsPerThread]) [[hc]]
+    {
+        tile_static storage_type storage;
+        striped_to_blocked(input, output, storage);
+    }
+
+    template<class U>
+    void striped_to_blocked(const T (&input)[ItemsPerThread],
+                            U (&output)[ItemsPerThread],
+                            storage_type& storage) [[hc]]
+    {
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            storage.buffer[i * BlockSize + flat_id] = input[i];
+        }
+        ::rocprim::syncthreads();
+
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            output[i] = storage.buffer[flat_id * ItemsPerThread + i];
+        }
+    }
+
+    template<class U>
+    void blocked_to_warp_striped(const T (&input)[ItemsPerThread],
+                                 U (&output)[ItemsPerThread]) [[hc]]
+    {
+        tile_static storage_type storage;
+        blocked_to_warp_striped(input, output, storage);
+    }
+
+    template<class U>
+    void blocked_to_warp_striped(const T (&input)[ItemsPerThread],
+                                 U (&output)[ItemsPerThread],
+                                 storage_type& storage) [[hc]]
+    {
+
+    }
+
+    template<class U>
+    void warp_striped_to_blocked(const T (&input)[ItemsPerThread],
+                                 U (&output)[ItemsPerThread]) [[hc]]
+    {
+        tile_static storage_type storage;
+        warp_striped_to_blocked(input, output, storage);
+    }
+
+    template<class U>
+    void warp_striped_to_blocked(const T (&input)[ItemsPerThread],
+                                 U (&output)[ItemsPerThread],
+                                 storage_type& storage) [[hc]]
+    {
+
+    }
+
+    template<class U, class Offset>
+    void scatter_to_striped(const T (&input)[ItemsPerThread],
+                            U (&output)[ItemsPerThread],
+                            const Offset (&ranks)[ItemsPerThread]) [[hc]]
+    {
+        tile_static storage_type storage;
+        scatter_to_striped(input, output, storage);
+    }
+
+    template<class U, class Offset>
+    void scatter_to_striped(const T (&input)[ItemsPerThread],
+                            U (&output)[ItemsPerThread],
+                            const Offset (&ranks)[ItemsPerThread],
+                            storage_type& storage) [[hc]]
+    {
+
+    }
+
+    template<class U, class Offset>
+    void scatter_to_blocked(const T (&input)[ItemsPerThread],
+                            U (&output)[ItemsPerThread],
+                            const Offset (&ranks)[ItemsPerThread]) [[hc]]
+    {
+        tile_static storage_type storage;
+        scatter_to_blocked(input, output, storage);
+    }
+
+    template<class U, class Offset>
+    void scatter_to_blocked(const T (&input)[ItemsPerThread],
+                            U (&output)[ItemsPerThread],
+                            const Offset (&ranks)[ItemsPerThread],
+                            storage_type& storage) [[hc]]
+    {
+
+    }
+};
+
+END_ROCPRIM_NAMESPACE
+
+#endif // ROCPRIM_BLOCK_BLOCK_EXCHANGE_HPP_
