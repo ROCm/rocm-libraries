@@ -34,6 +34,8 @@
 #include <block/block_load.hpp>
 #include <block/block_store.hpp>
 
+#include <detail/various.hpp>
+
 #include "test_utils.hpp"
 
 namespace rp = rocprim;
@@ -79,6 +81,7 @@ typedef ::testing::Types<
 // params<int, int, 128, 4>
 
     // Power of 2 BlockSize and ItemsPerThread = 1 (no rearrangement)
+    params<int, int, 128, 4>,
     params<int, long long, 64, 1>,
     params<unsigned long long, unsigned long long, 128, 1>,
     params<short, dummy<int>, 256, 1>,
@@ -117,20 +120,23 @@ TYPED_TEST(RocprimBlockExchangeTests, BlockedToStriped)
     const size_t size = items_per_block * 113;
     // Generate data
     std::vector<type> input(size);
-    std::iota(input.begin(), input.end(), 0);
+    std::vector<output_type> expected(size);
     std::vector<output_type> output(size, output_type(0));
 
-    // Calculate expected results on host
-    std::vector<output_type> expected(size);
+    // Calculate input and expected results on host
+    std::vector<type> values(size);
+    std::iota(values.begin(), values.end(), 0);
     for(size_t bi = 0; bi < size / items_per_block; bi++)
     {
         for(size_t ti = 0; ti < block_size; ti++)
         {
             for(size_t ii = 0; ii < items_per_thread; ii++)
             {
-                const size_t src = bi * items_per_block + ii * block_size + ti;
-                const size_t dst = bi * items_per_block + ti * items_per_thread + ii;
-                expected[dst] = input[src];
+                const size_t offset = bi * items_per_block;
+                const size_t dst = offset + ti * items_per_thread + ii;
+                const size_t src = offset + ii * block_size + ti;
+                input[src] = values[src];
+                expected[dst] = values[src];
             }
         }
     }
@@ -181,21 +187,23 @@ TYPED_TEST(RocprimBlockExchangeTests, StripedToBlocked)
     const size_t size = items_per_block * 113;
     // Generate data
     std::vector<type> input(size);
-    std::iota(input.begin(), input.end(), 0);
+    std::vector<output_type> expected(size);
     std::vector<output_type> output(size, output_type(0));
 
-    // Calculate expected results on host
-    std::vector<output_type> expected(size);
-
+    // Calculate input and expected results on host
+    std::vector<type> values(size);
+    std::iota(values.begin(), values.end(), 0);
     for(size_t bi = 0; bi < size / items_per_block; bi++)
     {
         for(size_t ti = 0; ti < block_size; ti++)
         {
             for(size_t ii = 0; ii < items_per_thread; ii++)
             {
-                const size_t dst = bi * items_per_block + ii * block_size + ti;
-                const size_t src = bi * items_per_block + ti * items_per_thread + ii;
-                expected[dst] = input[src];
+                const size_t offset = bi * items_per_block;
+                const size_t dst = offset + ti * items_per_thread + ii;
+                const size_t src = offset + ii * block_size + ti;
+                input[dst] = values[src];
+                expected[src] = values[src];
             }
         }
     }
@@ -216,6 +224,162 @@ TYPED_TEST(RocprimBlockExchangeTests, StripedToBlocked)
 
             rp::block_exchange<type, block_size, items_per_thread> exchange;
             exchange.striped_to_blocked(input, output);
+
+            rp::block_store_direct_blocked(lid, d_output.data() + block_offset, output);
+        }
+    );
+
+    d_output.synchronize();
+    for(int i = 0; i < size; i++)
+    {
+        ASSERT_EQ(output[i], expected[i]);
+    }
+}
+
+TYPED_TEST(RocprimBlockExchangeTests, BlockedToWarpStriped)
+{
+    hc::accelerator acc;
+
+    using type = typename TestFixture::params::type;
+    using output_type = typename TestFixture::params::output_type;
+    constexpr size_t block_size = TestFixture::params::block_size;
+    constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
+    constexpr size_t items_per_block = block_size * items_per_thread;
+    // Given block size not supported
+    if(block_size > get_max_tile_size(acc))
+    {
+        return;
+    }
+
+    const size_t size = items_per_block * 113;
+    // Generate data
+    std::vector<type> input(size);
+    std::vector<output_type> expected(size);
+    std::vector<output_type> output(size, output_type(0));
+
+    constexpr size_t warp_size =
+        ::rocprim::detail::get_min_warp_size(block_size, size_t(::rocprim::warp_size()));
+    constexpr size_t warps_no = (block_size + warp_size - 1) / warp_size;
+    constexpr size_t items_per_warp = warp_size * items_per_thread;
+
+    // Calculate input and expected results on host
+    std::vector<type> values(size);
+    std::iota(values.begin(), values.end(), 0);
+    for(size_t bi = 0; bi < size / items_per_block; bi++)
+    {
+        for(size_t wi = 0; wi < warps_no; wi++)
+        {
+            const size_t current_warp_size = wi == warps_no - 1
+                ? (block_size % warp_size != 0 ? block_size % warp_size : warp_size)
+                : warp_size;
+            for(size_t li = 0; li < current_warp_size; li++)
+            {
+                for(size_t ii = 0; ii < items_per_thread; ii++)
+                {
+                    const size_t offset = bi * items_per_block + wi * items_per_warp;
+                    const size_t dst = offset + li * items_per_thread + ii;
+                    const size_t src = offset + ii * current_warp_size + li;
+                    input[src] = values[src];
+                    expected[dst] = values[src];
+                }
+            }
+        }
+    }
+
+    hc::array_view<type, 1> d_input(size, input.data());
+    hc::array_view<output_type, 1> d_output(size, output.data());
+    hc::parallel_for_each(
+        acc.get_default_view(),
+        hc::extent<1>(size / items_per_thread).tile(block_size),
+        [=](hc::tiled_index<1> idx) [[hc]]
+        {
+            const unsigned int lid = idx.local[0];
+            const unsigned int block_offset = idx.tile[0] * items_per_block;
+
+            type input[items_per_thread];
+            output_type output[items_per_thread];
+            rp::block_load_direct_blocked(lid, d_input.data() + block_offset, input);
+
+            rp::block_exchange<type, block_size, items_per_thread> exchange;
+            exchange.blocked_to_warp_striped(input, output);
+
+            rp::block_store_direct_blocked(lid, d_output.data() + block_offset, output);
+        }
+    );
+
+    d_output.synchronize();
+    for(int i = 0; i < size; i++)
+    {
+        ASSERT_EQ(output[i], expected[i]);
+    }
+}
+
+TYPED_TEST(RocprimBlockExchangeTests, WarpStripedToBlocked)
+{
+    hc::accelerator acc;
+
+    using type = typename TestFixture::params::type;
+    using output_type = typename TestFixture::params::output_type;
+    constexpr size_t block_size = TestFixture::params::block_size;
+    constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
+    constexpr size_t items_per_block = block_size * items_per_thread;
+    // Given block size not supported
+    if(block_size > get_max_tile_size(acc))
+    {
+        return;
+    }
+
+    const size_t size = items_per_block * 113;
+    // Generate data
+    std::vector<type> input(size);
+    std::vector<output_type> expected(size);
+    std::vector<output_type> output(size, output_type(0));
+
+    constexpr size_t warp_size =
+        ::rocprim::detail::get_min_warp_size(block_size, size_t(::rocprim::warp_size()));
+    constexpr size_t warps_no = (block_size + warp_size - 1) / warp_size;
+    constexpr size_t items_per_warp = warp_size * items_per_thread;
+
+    // Calculate input and expected results on host
+    std::vector<type> values(size);
+    std::iota(values.begin(), values.end(), 0);
+    for(size_t bi = 0; bi < size / items_per_block; bi++)
+    {
+        for(size_t wi = 0; wi < warps_no; wi++)
+        {
+            const size_t current_warp_size = wi == warps_no - 1
+                ? (block_size % warp_size != 0 ? block_size % warp_size : warp_size)
+                : warp_size;
+            for(size_t li = 0; li < current_warp_size; li++)
+            {
+                for(size_t ii = 0; ii < items_per_thread; ii++)
+                {
+                    const size_t offset = bi * items_per_block + wi * items_per_warp;
+                    const size_t dst = offset + li * items_per_thread + ii;
+                    const size_t src = offset + ii * current_warp_size + li;
+                    input[dst] = values[src];
+                    expected[src] = values[src];
+                }
+            }
+        }
+    }
+
+    hc::array_view<type, 1> d_input(size, input.data());
+    hc::array_view<output_type, 1> d_output(size, output.data());
+    hc::parallel_for_each(
+        acc.get_default_view(),
+        hc::extent<1>(size / items_per_thread).tile(block_size),
+        [=](hc::tiled_index<1> idx) [[hc]]
+        {
+            const unsigned int lid = idx.local[0];
+            const unsigned int block_offset = idx.tile[0] * items_per_block;
+
+            type input[items_per_thread];
+            output_type output[items_per_thread];
+            rp::block_load_direct_blocked(lid, d_input.data() + block_offset, input);
+
+            rp::block_exchange<type, block_size, items_per_thread> exchange;
+            exchange.warp_striped_to_blocked(input, output);
 
             rp::block_store_direct_blocked(lid, d_output.data() + block_offset, output);
         }
