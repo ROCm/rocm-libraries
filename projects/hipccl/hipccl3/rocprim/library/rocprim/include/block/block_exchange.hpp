@@ -41,6 +41,11 @@ template<
 >
 class block_exchange
 {
+    // Select warp size
+    static constexpr unsigned int warp_size =
+        detail::get_min_warp_size(BlockSize, ::rocprim::warp_size());
+    // Number of warps in block
+    static constexpr unsigned int warps_no = (BlockSize + warp_size - 1) / warp_size;
 
 public:
 
@@ -116,7 +121,21 @@ public:
                                  U (&output)[ItemsPerThread],
                                  storage_type& storage) [[hc]]
     {
+        constexpr unsigned int items_per_warp = warp_size * ItemsPerThread;
+        const unsigned int lane_id = ::rocprim::lane_id();
+        const unsigned int warp_id = ::rocprim::warp_id();
+        const unsigned int current_warp_size = get_current_warp_size();
+        const unsigned int offset = warp_id * items_per_warp;
 
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            storage.buffer[offset + lane_id * ItemsPerThread + i] = input[i];
+        }
+
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            output[i] = storage.buffer[offset + i * current_warp_size + lane_id];
+        }
     }
 
     template<class U>
@@ -132,7 +151,21 @@ public:
                                  U (&output)[ItemsPerThread],
                                  storage_type& storage) [[hc]]
     {
+        constexpr unsigned int items_per_warp = warp_size * ItemsPerThread;
+        const unsigned int lane_id = ::rocprim::lane_id();
+        const unsigned int warp_id = ::rocprim::warp_id();
+        const unsigned int current_warp_size = get_current_warp_size();
+        const unsigned int offset = warp_id * items_per_warp;
 
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            storage.buffer[offset + i * current_warp_size + lane_id] = input[i];
+        }
+
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            output[i] = storage.buffer[offset + lane_id * ItemsPerThread + i];
+        }
     }
 
     template<class U, class Offset>
@@ -169,6 +202,16 @@ public:
                             storage_type& storage) [[hc]]
     {
 
+    }
+
+private:
+
+    unsigned int get_current_warp_size() const [[hc]]
+    {
+        const unsigned int warp_id = ::rocprim::warp_id();
+        return (warp_id == warps_no - 1)
+            ? (BlockSize % warp_size > 0 ? BlockSize % warp_size : warp_size)
+            : warp_size;
     }
 };
 
