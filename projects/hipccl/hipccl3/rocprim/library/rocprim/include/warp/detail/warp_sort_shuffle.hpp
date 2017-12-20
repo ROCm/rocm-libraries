@@ -45,106 +45,72 @@ template<
 class warp_sort_shuffle
 {
 private:
-    struct key_value_type
+    template<int warp, class BinaryFunction>
+    typename std::enable_if<!(WarpSize > warp)>::type
+    swap(Key& k, Value& v, int mask, int dir, BinaryFunction compare_function) [[hc]]
     {
-        Key k;
-        Value v;
-    };
-
-    template<class KV, class BinaryFunction>
-    KV shuffle_swap(const KV a, int mask, int dir, BinaryFunction compare_function) [[hc]]
-    {
-        KV b = warp_shuffle_xor(a, mask, WarpSize);
-        return compare_function(a, b) == dir ? b : a;
     }
 
-    template<int warp, class KV, class BinaryFunction>
-    typename std::enable_if<!(WarpSize > warp), KV>::type
-    swap(const KV a, int mask, int dir, BinaryFunction compare_function) [[hc]]
+    template<int warp, class BinaryFunction>
+    typename std::enable_if<(WarpSize > warp)>::type
+    swap(Key& k, Value& v, int mask, int dir, BinaryFunction compare_function) [[hc]]
     {
-        return a;
+        Key k1 = warp_shuffle_xor(k, mask, WarpSize);
+        Value v1 = warp_shuffle_xor(v, mask, WarpSize);
+        const bool k_is_less_than_k1 = compare_function(k, k1) ;
+        k = k_is_less_than_k1 == dir ? k1 : k;
+        v = k_is_less_than_k1 == dir ? v1 : v;
     }
 
-    template<int warp, class KV, class BinaryFunction>
-    typename std::enable_if<(WarpSize > warp), KV>::type
-    swap(const KV a, int mask, int dir, BinaryFunction compare_function) [[hc]]
+    template<int warp, class BinaryFunction>
+    typename std::enable_if<!(WarpSize > warp)>::type
+    swap(Key& k, int mask, int dir, BinaryFunction compare_function) [[hc]]
     {
-        return shuffle_swap<KV>(a, mask, dir, compare_function);
     }
 
-    template<class KV, class BinaryFunction>
-    void bitonic_sort(KV& val, BinaryFunction compare_function) [[hc]]
+    template<int warp, class BinaryFunction>
+    typename std::enable_if<(WarpSize > warp)>::type
+    swap(Key& k, int mask, int dir, BinaryFunction compare_function) [[hc]]
     {
+        Key k1 = warp_shuffle_xor(k, mask, WarpSize);
+        k = compare_function(k, k1) == dir ? k1 : k;
+    }
+
+    template<class BinaryFunction, class... KeyValue>
+    void bitonic_sort(BinaryFunction compare_function, KeyValue&... kv) [[hc]]
+    {
+        static_assert(
+            sizeof...(KeyValue) < 3,
+            "KeyValue parameter pack can 1 or 2 elements (key, or key and value)"
+        );
+
         unsigned int id = detail::logical_lane_id<WarpSize>();
-        val = swap<2, KV, BinaryFunction>(val, 0x01,
-                                         get_bit(id, 1) ^ get_bit(id, 0),
-                                         compare_function);
+        swap<2,  BinaryFunction>(kv..., 1, get_bit(id, 1) ^ get_bit(id, 0), compare_function);
 
-        val = swap<4, KV, BinaryFunction>(val, 0x02,
-                                         get_bit(id, 2) ^ get_bit(id, 1),
-                                         compare_function);
-        val = swap<4, KV, BinaryFunction>(val, 0x01,
-                                         get_bit(id, 2) ^ get_bit(id, 0),
-                                         compare_function);
+        swap<4,  BinaryFunction>(kv..., 2, get_bit(id, 2) ^ get_bit(id, 1), compare_function);
+        swap<4,  BinaryFunction>(kv..., 1, get_bit(id, 2) ^ get_bit(id, 0), compare_function);
 
-        val = swap<8, KV, BinaryFunction>(val, 0x04,
-                                         get_bit(id, 3) ^ get_bit(id, 2),
-                                         compare_function);
-        val = swap<8, KV, BinaryFunction>(val, 0x02,
-                                         get_bit(id, 3) ^ get_bit(id, 1),
-                                         compare_function);
-        val = swap<8, KV, BinaryFunction>(val, 0x01,
-                                         get_bit(id, 3) ^ get_bit(id, 0),
-                                         compare_function);
+        swap<8,  BinaryFunction>(kv..., 4, get_bit(id, 3) ^ get_bit(id, 2), compare_function);
+        swap<8,  BinaryFunction>(kv..., 2, get_bit(id, 3) ^ get_bit(id, 1), compare_function);
+        swap<8,  BinaryFunction>(kv..., 1, get_bit(id, 3) ^ get_bit(id, 0), compare_function);
 
-        val = swap<16, KV, BinaryFunction>(val, 0x08,
-                                          get_bit(id, 4) ^ get_bit(id, 3),
-                                          compare_function);
-        val = swap<16, KV, BinaryFunction>(val, 0x04,
-                                          get_bit(id, 4) ^ get_bit(id, 2),
-                                          compare_function);
-        val = swap<16, KV, BinaryFunction>(val, 0x02,
-                                          get_bit(id, 4) ^ get_bit(id, 1),
-                                          compare_function);
-        val = swap<16, KV, BinaryFunction>(val, 0x01,
-                                          get_bit(id, 4) ^ get_bit(id, 0),
-                                          compare_function);
+        swap<16, BinaryFunction>(kv..., 8, get_bit(id, 4) ^ get_bit(id, 3), compare_function);
+        swap<16, BinaryFunction>(kv..., 4, get_bit(id, 4) ^ get_bit(id, 2), compare_function);
+        swap<16, BinaryFunction>(kv..., 2, get_bit(id, 4) ^ get_bit(id, 1), compare_function);
+        swap<16, BinaryFunction>(kv..., 1, get_bit(id, 4) ^ get_bit(id, 0), compare_function);
 
-        val = swap<32, KV, BinaryFunction>(val, 0x10,
-                                          get_bit(id, 5) ^ get_bit(id, 4),
-                                          compare_function);
-        val = swap<32, KV, BinaryFunction>(val, 0x08,
-                                          get_bit(id, 5) ^ get_bit(id, 3),
-                                          compare_function);
-        val = swap<32, KV, BinaryFunction>(val, 0x04,
-                                          get_bit(id, 5) ^ get_bit(id, 2),
-                                          compare_function);
-        val = swap<32, KV, BinaryFunction>(val, 0x02,
-                                          get_bit(id, 5) ^ get_bit(id, 1),
-                                          compare_function);
-        val = swap<32, KV, BinaryFunction>(val, 0x01,
-                                          get_bit(id, 5) ^ get_bit(id, 0),
-                                          compare_function);
+        swap<32, BinaryFunction>(kv..., 16, get_bit(id, 5) ^ get_bit(id, 4), compare_function);
+        swap<32, BinaryFunction>(kv..., 8,  get_bit(id, 5) ^ get_bit(id, 3), compare_function);
+        swap<32, BinaryFunction>(kv..., 4,  get_bit(id, 5) ^ get_bit(id, 2), compare_function);
+        swap<32, BinaryFunction>(kv..., 2,  get_bit(id, 5) ^ get_bit(id, 1), compare_function);
+        swap<32, BinaryFunction>(kv..., 1,  get_bit(id, 5) ^ get_bit(id, 0), compare_function);
 
-        val = swap<32, KV, BinaryFunction>(val, 0x20,
-                                          get_bit(id, 5),
-                                          compare_function);
-        val = swap<16, KV, BinaryFunction>(val, 0x10,
-                                          get_bit(id, 4),
-                                          compare_function);
-        val = swap<8, KV, BinaryFunction>(val, 0x08,
-                                         get_bit(id, 3),
-                                         compare_function);
-        val = swap<4, KV, BinaryFunction>(val, 0x04,
-                                         get_bit(id, 2),
-                                         compare_function);
-        val = swap<2, KV, BinaryFunction>(val, 0x02,
-                                         get_bit(id, 1),
-                                         compare_function);
-
-        val = swap<0, KV, BinaryFunction>(val, 0x01,
-                                         get_bit(id, 0),
-                                         compare_function);
+        swap<32, BinaryFunction>(kv..., 32, get_bit(id, 5), compare_function);
+        swap<16, BinaryFunction>(kv..., 16, get_bit(id, 4), compare_function);
+        swap<8,  BinaryFunction>(kv..., 8,  get_bit(id, 3), compare_function);
+        swap<4,  BinaryFunction>(kv..., 4,  get_bit(id, 2), compare_function);
+        swap<2,  BinaryFunction>(kv..., 2,  get_bit(id, 1), compare_function);
+        swap<0,  BinaryFunction>(kv..., 1,  get_bit(id, 0), compare_function);
     }
 
 public:
@@ -159,11 +125,11 @@ public:
     void sort(Key& thread_value, BinaryFunction compare_function) [[hc]]
     {
         // sort by value only
-        bitonic_sort<Key>(thread_value, compare_function);
+        bitonic_sort(compare_function, thread_value);
     }
 
     template<class BinaryFunction>
-    void sort(Key& thread_value, storage_type& storage, 
+    void sort(Key& thread_value, storage_type& storage,
               BinaryFunction compare_function) [[hc]]
     {
         (void) storage;
@@ -171,28 +137,18 @@ public:
     }
 
     template<class BinaryFunction>
-    void sort(Key& thread_key, Value& thread_value, BinaryFunction compare_function) [[hc]]
+    void sort(Key& thread_key, Value& thread_value,
+              BinaryFunction compare_function) [[hc]]
     {
-        // initialize key and value to a struct
-        key_value_type kv = {thread_key, thread_value};
-        // pass a custom compare_function to compare key only (sort_by_key)
-        bitonic_sort<key_value_type>(
-            kv,
-            [&compare_function](const key_value_type& kv1, const key_value_type& kv2) [[hc]]
-            {
-                return compare_function(kv1.k, kv2.k);
-            }
-        );
-        thread_key = kv.k;
-        thread_value = kv.v;
+        bitonic_sort(compare_function, thread_key, thread_value);
     }
 
     template<class BinaryFunction>
-    void sort(Key& thread_key, Value& thread_value, storage_type& storage,
-              BinaryFunction compare_function) [[hc]]
+    void sort(Key& thread_key, Value& thread_value,
+              storage_type& storage, BinaryFunction compare_function) [[hc]]
     {
         (void) storage;
-        return sort(thread_key, thread_value, compare_function);
+        return sort(compare_function, thread_key, thread_value);
     }
 };
 

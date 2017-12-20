@@ -56,7 +56,7 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortInt)
     constexpr size_t logical_warp_size = TestFixture::warp_size;
     const size_t block_size = std::max<size_t>(rp::warp_size(), 4 * logical_warp_size);
     const size_t size = block_size * 4;
-    
+
     // Given warp size not supported
     if(logical_warp_size > rp::warp_size() || !rp::detail::is_power_of_two(logical_warp_size))
     {
@@ -99,7 +99,7 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
     constexpr size_t logical_warp_size = TestFixture::warp_size;
     const size_t block_size = std::max<size_t>(rp::warp_size(), 4 * logical_warp_size);
     const size_t size = block_size * 4;
-    
+
     // Given warp size not supported
     if(logical_warp_size > rp::warp_size() || !rp::detail::is_power_of_two(logical_warp_size))
     {
@@ -109,6 +109,7 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
     // Generate data
     std::vector<int> output_key(size);
     std::iota(output_key.begin(), output_key.end(), 0);
+    std::shuffle(output_key.begin(), output_key.end(), std::mt19937{std::random_device{}()});
     std::vector<int> output_value = get_random_data<int>(size, -100, 100);
 
     // Combine vectors to form pairs with key and value
