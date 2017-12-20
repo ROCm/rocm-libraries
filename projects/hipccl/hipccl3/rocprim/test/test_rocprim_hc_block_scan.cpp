@@ -192,6 +192,82 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanReduce)
     }
 }
 
+TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanPrefixCallback)
+{
+    using T = typename TestFixture::type;
+    constexpr size_t block_size = TestFixture::block_size;
+
+    hc::accelerator acc;
+    // Given block size not supported
+    if(block_size > get_max_tile_size(acc))
+    {
+        return;
+    }
+
+    const size_t size = block_size * 113;
+    // Generate data
+    std::vector<T> output = get_random_data<T>(size, 2, 200);
+    std::vector<T> output_block_prefixes(size / block_size);
+    T block_prefix = get_random_value<T>(0, 100);
+
+    // Calulcate expected results on host
+    std::vector<T> expected(output.size(), 0);
+    std::vector<T> expected_block_prefixes(output_block_prefixes.size(), 0);
+    for(size_t i = 0; i < output.size() / block_size; i++)
+    {
+        expected[i * block_size] = block_prefix;
+        for(size_t j = 0; j < block_size; j++)
+        {
+            auto idx = i * block_size + j;
+            expected[idx] = output[idx] + expected[j > 0 ? idx-1 : idx];
+        }
+        expected_block_prefixes[i] = expected[(i+1) * block_size - 1];
+    }
+
+    hc::array_view<T, 1> d_output(output.size(), output.data());
+    hc::array_view<T, 1> d_output_bp(
+        output_block_prefixes.size(), output_block_prefixes.data()
+    );
+    hc::parallel_for_each(
+        acc.get_default_view(),
+        hc::extent<1>(output.size()).tile(block_size),
+        [=](hc::tiled_index<1> i) [[hc]]
+        {
+            T prefix_value = block_prefix;
+            auto prefix_callback = [&prefix_value](T reduction)
+            {
+                T prefix = prefix_value;
+                prefix_value += reduction;
+                return prefix;
+            };
+
+            T value = d_output[i];
+
+            using bscan_t = rp::block_scan<T, block_size>;
+            tile_static typename bscan_t::storage_type storage;
+            bscan_t().inclusive_scan(value, value, prefix_callback, storage);
+
+            d_output[i] = value;
+            if(i.local[0] == 0)
+            {
+                d_output_bp[i.tile[0]] = prefix_value;
+            }
+        }
+    );
+
+    d_output.synchronize();
+    for(size_t i = 0; i < output.size(); i++)
+    {
+        ASSERT_EQ(output[i], expected[i]);
+    }
+
+    d_output_bp.synchronize();
+    for(size_t i = 0; i < output_block_prefixes.size(); i++)
+    {
+        ASSERT_EQ(output_block_prefixes[i], expected_block_prefixes[i]);
+    }
+}
+
 TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScan)
 {
     using T = typename TestFixture::type;
@@ -207,7 +283,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScan)
     const size_t size = block_size * 113;
     // Generate data
     std::vector<T> output = get_random_data<T>(size, 2, 200);
-    const T init = get_random_value(0, 100);
+    const T init = get_random_value<T>(0, 100);
 
     // Calulcate expected results on host
     std::vector<T> expected(output.size(), 0);
@@ -255,7 +331,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanReduce)
     const size_t size = block_size * 113;
     // Generate data
     std::vector<T> output = get_random_data<T>(size, 2, 200);
-    const T init = get_random_value(0, 100);
+    const T init = get_random_value<T>(0, 100);
 
     // Output reduce results
     std::vector<T> output_reductions(size / block_size);
@@ -314,6 +390,90 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanReduce)
     }
 }
 
+TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanPrefixCallback)
+{
+    using T = typename TestFixture::type;
+    constexpr size_t block_size = TestFixture::block_size;
+
+    hc::accelerator acc;
+    if(block_size > get_max_tile_size(acc))
+    {
+        return;
+    }
+
+    const size_t size = block_size * 113;
+    // Generate data
+    std::vector<T> output = get_random_data<T>(size, 2, 200);
+    const T init = get_random_value<T>(0, 100);
+    const T block_prefix = get_random_value<T>(0, 100);
+
+    // Output block prefixes
+    std::vector<T> output_block_prefixes(size / block_size);
+
+    // Calulcate expected results on host
+    std::vector<T> expected(output.size(), 0);
+    std::vector<T> expected_block_prefixes(output_block_prefixes.size(), 0);
+    for(size_t i = 0; i < output.size() / block_size; i++)
+    {
+        expected[i * block_size] = block_prefix + init;
+        for(size_t j = 1; j < block_size; j++)
+        {
+            auto idx = i * block_size + j;
+            expected[idx] = output[idx-1] + expected[idx-1];
+        }
+
+        expected_block_prefixes[i] = block_prefix;
+        for(size_t j = 0; j < block_size; j++)
+        {
+            auto idx = i * block_size + j;
+            expected_block_prefixes[i] += output[idx];
+        }
+    }
+
+    hc::array_view<T, 1> d_output(output.size(), output.data());
+    hc::array_view<T, 1> d_output_bp(
+        output_block_prefixes.size(), output_block_prefixes.data()
+    );
+    hc::parallel_for_each(
+        acc.get_default_view(),
+        hc::extent<1>(output.size()).tile(block_size),
+        [=](hc::tiled_index<1> i) [[hc]]
+        {
+            T prefix_value = block_prefix;
+            auto prefix_callback = [&prefix_value](T reduction)
+            {
+                T prefix = prefix_value;
+                prefix_value += reduction;
+                return prefix;
+            };
+
+            T value = d_output[i];
+
+            using bscan_t = rp::block_scan<T, block_size>;
+            tile_static typename bscan_t::storage_type storage;
+            bscan_t().exclusive_scan(value, value, init, prefix_callback, storage);
+
+            d_output[i] = value;
+            if(i.local[0] == 0)
+            {
+                d_output_bp[i.tile[0]] = prefix_value;
+            }
+        }
+    );
+
+    d_output.synchronize();
+    for(size_t i = 0; i < output.size(); i++)
+    {
+        ASSERT_EQ(output[i], expected[i]);
+    }
+
+    d_output_bp.synchronize();
+    for(size_t i = 0; i < output_block_prefixes.size(); i++)
+    {
+        ASSERT_EQ(output_block_prefixes[i], expected_block_prefixes[i]);
+    }
+}
+
 // ---------------------------------------------------------
 // Test for scan ops taking array of values as input
 // ---------------------------------------------------------
@@ -355,7 +515,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScan)
     }
 
     const size_t items_per_block = block_size * items_per_thread;
-    const size_t size = items_per_block * 1;
+    const size_t size = items_per_block * 37;
     // Generate data
     std::vector<T> output = get_random_data<T>(size, 2, 200);
 
@@ -422,7 +582,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScanReduce)
     }
 
     const size_t items_per_block = block_size * items_per_thread;
-    const size_t size = items_per_block * 1;
+    const size_t size = items_per_block * 37;
     // Generate data
     std::vector<T> output = get_random_data<T>(size, 2, 200);
 
@@ -497,6 +657,103 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScanReduce)
     }
 }
 
+TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScanPrefixCallback)
+{
+    using T = typename TestFixture::type;
+    constexpr size_t block_size = TestFixture::block_size;
+    constexpr size_t items_per_thread = TestFixture::items_per_thread;
+
+    hc::accelerator acc;
+    // Given block size not supported
+    if(block_size > get_max_tile_size(acc))
+    {
+        return;
+    }
+
+    const size_t items_per_block = block_size * items_per_thread;
+    const size_t size = items_per_block * 37;
+    // Generate data
+    std::vector<T> output = get_random_data<T>(size, 2, 200);
+    std::vector<T> output_block_prefixes(size / block_size);
+    T block_prefix = get_random_value<T>(0, 100);
+
+    // Calulcate expected results on host
+    std::vector<T> expected(output.size(), 0);
+    std::vector<T> expected_block_prefixes(output_block_prefixes.size(), 0);
+    for(size_t i = 0; i < output.size() / items_per_block; i++)
+    {
+        expected[i * items_per_block] = block_prefix;
+        for(size_t j = 0; j < items_per_block; j++)
+        {
+            auto idx = i * items_per_block + j;
+            expected[idx] = output[idx] + expected[j > 0 ? idx-1 : idx];
+        }
+        expected_block_prefixes[i] = expected[(i+1) * items_per_block - 1];
+    }
+
+    // global/grid size
+    const size_t global_size = output.size()/items_per_thread;
+    hc::array_view<T, 1> d_output(output.size(), output.data());
+    hc::array_view<T, 1> d_output_bp(
+        output_block_prefixes.size(), output_block_prefixes.data()
+    );
+    hc::parallel_for_each(
+        acc.get_default_view(),
+        hc::extent<1>(global_size).tile(block_size),
+        [=](hc::tiled_index<1> i) [[hc]]
+        {
+            T prefix_value = block_prefix;
+            auto prefix_callback = [&prefix_value](T reduction)
+            {
+                T prefix = prefix_value;
+                prefix_value += reduction;
+                return prefix;
+            };
+
+            size_t idx = i.global[0] * items_per_thread;
+
+            // load
+            T in_out[items_per_thread];
+            for(unsigned int j = 0; j < items_per_thread; j++)
+            {
+                in_out[j] = d_output[idx + j];
+            }
+
+            using bscan_t = rp::block_scan<T, block_size>;
+            tile_static typename bscan_t::storage_type storage;
+            bscan_t().inclusive_scan(in_out, in_out, prefix_callback, storage);
+
+            // store
+            for(unsigned int j = 0; j < items_per_thread; j++)
+            {
+                d_output[idx + j] = in_out[j];
+            }
+            if(i.local[0] == 0)
+            {
+                d_output_bp[i.tile[0]] = prefix_value;
+            }
+        }
+    );
+
+    d_output.synchronize();
+    for(size_t i = 0; i < output.size(); i++)
+    {
+        ASSERT_NEAR(
+            output[i], expected[i],
+            static_cast<T>(0.05) * expected[i]
+        );
+    }
+
+    d_output_bp.synchronize();
+    for(size_t i = 0; i < output_block_prefixes.size(); i++)
+    {
+        ASSERT_NEAR(
+            output_block_prefixes[i], expected_block_prefixes[i],
+            static_cast<T>(0.05) * expected_block_prefixes[i]
+        );
+    }
+}
+
 TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScan)
 {
     using T = typename TestFixture::type;
@@ -511,10 +768,10 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScan)
     }
 
     const size_t items_per_block = block_size * items_per_thread;
-    const size_t size = items_per_block * 1;
+    const size_t size = items_per_block * 37;
     // Generate data
     std::vector<T> output = get_random_data<T>(size, 2, 200);
-    const T init = get_random_value(0, 100);
+    const T init = get_random_value<T>(0, 100);
 
     // Calulcate expected results on host
     std::vector<T> expected(output.size(), 0);
@@ -580,13 +837,13 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScanReduce)
     }
 
     const size_t items_per_block = block_size * items_per_thread;
-    const size_t size = items_per_block * 1;
+    const size_t size = items_per_block * 37;
     // Generate data
     std::vector<T> output = get_random_data<T>(size, 2, 200);
 
     // Output reduce results
     std::vector<T> output_reductions(size / block_size);
-    const T init = get_random_value(0, 100);
+    const T init = get_random_value<T>(0, 100);
 
     // Calulcate expected results on host
     std::vector<T> expected(output.size(), 0);
@@ -656,6 +913,104 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScanReduce)
         ASSERT_NEAR(
             output_reductions[i], expected_reductions[i],
             static_cast<T>(0.05) * expected_reductions[i]
+        );
+    }
+}
+
+TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScanPrefixCallback)
+{
+    using T = typename TestFixture::type;
+    constexpr size_t block_size = TestFixture::block_size;
+    constexpr size_t items_per_thread = TestFixture::items_per_thread;
+
+    hc::accelerator acc;
+    // Given block size not supported
+    if(block_size > get_max_tile_size(acc))
+    {
+        return;
+    }
+
+    const size_t items_per_block = block_size * items_per_thread;
+    const size_t size = items_per_block * 37;
+    // Generate data
+    std::vector<T> output = get_random_data<T>(size, 2, 200);
+    std::vector<T> output_block_prefixes(size / block_size);
+    T init = get_random_value<T>(0, 100);
+    T block_prefix = get_random_value<T>(0, 100);
+
+    // Calulcate expected results on host
+    std::vector<T> expected(output.size(), 0);
+    std::vector<T> expected_block_prefixes(output_block_prefixes.size(), 0);
+    for(size_t i = 0; i < output.size() / items_per_block; i++)
+    {
+        expected[i * items_per_block] = init + block_prefix;
+        for(size_t j = 1; j < items_per_block; j++)
+        {
+            auto idx = i * items_per_block + j;
+            expected[idx] = output[idx-1] + expected[idx-1];
+        }
+        expected_block_prefixes[i] = expected[(i+1) * items_per_block - 1];
+    }
+
+    // global/grid size
+    const size_t global_size = output.size()/items_per_thread;
+    hc::array_view<T, 1> d_output(output.size(), output.data());
+    hc::array_view<T, 1> d_output_bp(
+        output_block_prefixes.size(), output_block_prefixes.data()
+    );
+    hc::parallel_for_each(
+        acc.get_default_view(),
+        hc::extent<1>(global_size).tile(block_size),
+        [=](hc::tiled_index<1> i) [[hc]]
+        {
+            T prefix_value = block_prefix;
+            auto prefix_callback = [&prefix_value](T reduction)
+            {
+                T prefix = prefix_value;
+                prefix_value += reduction;
+                return prefix;
+            };
+
+            size_t idx = i.global[0] * items_per_thread;
+
+            // load
+            T in_out[items_per_thread];
+            for(unsigned int j = 0; j < items_per_thread; j++)
+            {
+                in_out[j] = d_output[idx + j];
+            }
+
+            using bscan_t = rp::block_scan<T, block_size>;
+            tile_static typename bscan_t::storage_type storage;
+            bscan_t().exclusive_scan(in_out, in_out, init, prefix_callback, storage);
+
+            // store
+            for(unsigned int j = 0; j < items_per_thread; j++)
+            {
+                d_output[idx + j] = in_out[j];
+            }
+            if(i.local[0] == 0)
+            {
+                d_output_bp[i.tile[0]] = prefix_value;
+            }
+        }
+    );
+
+    d_output.synchronize();
+    for(size_t i = 0; i < output.size(); i++)
+    {
+        ASSERT_NEAR(
+            output[i], expected[i],
+            static_cast<T>(0.05) * expected[i]
+        );
+    }
+
+    d_output_bp.synchronize();
+    for(size_t i = 0; i < output_block_prefixes.size(); i++)
+    {
+        ASSERT_NEAR(
+            output_block_prefixes[i], expected_block_prefixes[i],
+            static_cast<T>(0.05) * expected_block_prefixes[i]
         );
     }
 }
