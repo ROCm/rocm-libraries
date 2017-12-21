@@ -164,28 +164,32 @@ void block_load_direct_blocked(int flat_id,
 /// * The datatype \p T is not a primitive or a HC/HIP vector type (e.g. int2,
 /// int4, etc.
 ///
-/// \tparam T - [inferred] the data type
+/// \tparam T - [inferred] the input data type
+/// \tparam U - [inferred] the output data type
 /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
 /// each thread
+///
+/// The type \p T must be such that it can be implicitly converted to \p U.
 ///
 /// \param flat_id - a local flat 1D thread id in a block (tile) for the calling thread
 /// \param block_input - the input iterator from the thread block to load from
 /// \param items - array that data is loaded to
 template<
     class T,
-    int ItemsPerThread
+    class U,
+    unsigned int ItemsPerThread
 >
 typename std::enable_if<detail::is_vectorizable<T, ItemsPerThread>()>::type
 block_load_direct_blocked_vectorized(int flat_id,
                                      T* block_input,
-                                     T (&items)[ItemsPerThread]) [[hc]]
+                                     U (&items)[ItemsPerThread]) [[hc]]
 {
-    typedef typename detail::match_vector_type<T, ItemsPerThread>::type Vector;
-    constexpr unsigned int vectors_per_thread = (sizeof(T) * ItemsPerThread) / sizeof(Vector);
-    Vector vector_items[vectors_per_thread];
+    typedef typename detail::match_vector_type<T, ItemsPerThread>::type vector_type;
+    constexpr unsigned int vectors_per_thread = (sizeof(T) * ItemsPerThread) / sizeof(vector_type);
+    vector_type vector_items[vectors_per_thread];
 
-    Vector* vector_ptr = reinterpret_cast<Vector*>(block_input) +
-                         (flat_id * vectors_per_thread);
+    const vector_type* vector_ptr = reinterpret_cast<const vector_type*>(block_input) +
+        (flat_id * vectors_per_thread);
 
     #pragma unroll
     for (unsigned int item = 0; item < vectors_per_thread; item++)
@@ -202,12 +206,13 @@ block_load_direct_blocked_vectorized(int flat_id,
 
 template<
     class T,
-    int ItemsPerThread
+    class U,
+    unsigned int ItemsPerThread
 >
 typename std::enable_if<!detail::is_vectorizable<T, ItemsPerThread>()>::type
 block_load_direct_blocked_vectorized(int flat_id,
                                      T* block_input,
-                                     T (&items)[ItemsPerThread]) [[hc]]
+                                     U (&items)[ItemsPerThread]) [[hc]]
 {
     block_load_direct_blocked(flat_id, block_input, items);
 }
@@ -336,7 +341,7 @@ void block_load_direct_striped(int flat_id,
 /// across a thread block. Each thread uses a \p flat_id to load a range of
 /// \p ItemsPerThread into \p items.
 ///
-/// * The number of threads in the block must be a multiple of \p WarpSize. 
+/// * The number of threads in the block must be a multiple of \p WarpSize.
 /// * The default \p WarpSize is a hardware warpsize and is an optimal value.
 /// * \p WarpSize must be a power of two and equal or less than the size of
 ///   hardware warp.
@@ -363,8 +368,8 @@ void block_load_direct_warp_striped(int flat_id,
                                     IteratorT block_input,
                                     T (&items)[ItemsPerThread]) [[hc]]
 {
-    static_assert(detail::is_power_of_two(WarpSize) && WarpSize <= warp_size(), 
-                 "WarpSize must be a power of two and equal or less" 
+    static_assert(detail::is_power_of_two(WarpSize) && WarpSize <= warp_size(),
+                 "WarpSize must be a power of two and equal or less"
                  "than the size of hardware warp.");
     unsigned int thread_id = detail::logical_lane_id<WarpSize>();
     unsigned int warp_id = flat_id / WarpSize;
@@ -385,7 +390,7 @@ void block_load_direct_warp_striped(int flat_id,
 /// across a thread block. Each thread uses a \p flat_id to load a range of
 /// \p ItemsPerThread into \p items.
 ///
-/// * The number of threads in the block must be a multiple of \p WarpSize. 
+/// * The number of threads in the block must be a multiple of \p WarpSize.
 /// * The default \p WarpSize is a hardware warpsize and is an optimal value.
 /// * \p WarpSize must be a power of two and equal or less than the size of
 ///   hardware warp.
@@ -414,8 +419,8 @@ void block_load_direct_warp_striped(int flat_id,
                                     T (&items)[ItemsPerThread],
                                     int valid) [[hc]]
 {
-    static_assert(detail::is_power_of_two(WarpSize) && WarpSize <= warp_size(), 
-                 "WarpSize must be a power of two and equal or less" 
+    static_assert(detail::is_power_of_two(WarpSize) && WarpSize <= warp_size(),
+                 "WarpSize must be a power of two and equal or less"
                  "than the size of hardware warp.");
     unsigned int thread_id = detail::logical_lane_id<WarpSize>();
     unsigned int warp_id = flat_id / WarpSize;
@@ -441,7 +446,7 @@ void block_load_direct_warp_striped(int flat_id,
 /// across a thread block. Each thread uses a \p flat_id to load a range of
 /// \p ItemsPerThread into \p items.
 ///
-/// * The number of threads in the block must be a multiple of \p WarpSize. 
+/// * The number of threads in the block must be a multiple of \p WarpSize.
 /// * The default \p WarpSize is a hardware warpsize and is an optimal value.
 /// * \p WarpSize must be a power of two and equal or less than the size of
 ///   hardware warp.
@@ -474,8 +479,8 @@ void block_load_direct_warp_striped(int flat_id,
                                     int valid,
                                     Default out_of_bounds) [[hc]]
 {
-    static_assert(detail::is_power_of_two(WarpSize) && WarpSize <= warp_size(), 
-                 "WarpSize must be a power of two and equal or less" 
+    static_assert(detail::is_power_of_two(WarpSize) && WarpSize <= warp_size(),
+                 "WarpSize must be a power of two and equal or less"
                  "than the size of hardware warp.");
     #pragma unroll
     for (unsigned int item = 0; item < ItemsPerThread; item++)
