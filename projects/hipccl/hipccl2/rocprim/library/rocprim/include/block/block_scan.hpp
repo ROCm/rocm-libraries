@@ -39,7 +39,8 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \brief Available algorithms for block_scan primitive.
 enum class block_scan_algorithm
 {
-    using_warp_scan
+    using_warp_scan,
+    default_algorithm = using_warp_scan
 };
 
 namespace detail
@@ -63,18 +64,14 @@ struct select_block_scan_impl<block_scan_algorithm::using_warp_scan>
 template<
     class T,
     unsigned int BlockSize,
-    block_scan_algorithm Algorithm = block_scan_algorithm::using_warp_scan
+    block_scan_algorithm Algorithm = block_scan_algorithm::default_algorithm
 >
 class block_scan : private detail::select_block_scan_impl<Algorithm>::template type<T, BlockSize>
 {
     using base_type = typename detail::select_block_scan_impl<Algorithm>::template type<T, BlockSize>;
 public:
-    static constexpr block_scan_algorithm algorithm = Algorithm;
     using storage_type = typename base_type::storage_type;
 
-    // Optionally we can add "count" parameter, so scan would be performed
-    // only for the first count elements in the block. That gives runtime
-    // option for a user to limit scan size.
     template<class BinaryFunction = ::rocprim::plus<T>>
     void inclusive_scan(T input,
                         T& output,
@@ -92,9 +89,6 @@ public:
         base_type::inclusive_scan(input, output, scan_op);
     }
 
-    // Optionally we can add "count" parameter, so scan would be performed
-    // only for the first count elements in the block. That gives runtime
-    // option for a user to limit scan size.
     template<class BinaryFunction = ::rocprim::plus<T>>
     void inclusive_scan(T input,
                         T& output,
@@ -115,6 +109,19 @@ public:
     }
 
     template<
+        class PrefixCallback,
+        class BinaryFunction = ::rocprim::plus<T>
+    >
+    void inclusive_scan(T input,
+                        T& output,
+                        PrefixCallback& prefix_callback,
+                        storage_type& storage,
+                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+    {
+        base_type::inclusive_scan(input, output, prefix_callback, storage, scan_op);
+    }
+
+    template<
         unsigned int ItemsPerThread,
         class BinaryFunction = ::rocprim::plus<T>
     >
@@ -160,6 +167,20 @@ public:
                         BinaryFunction scan_op = BinaryFunction()) [[hc]]
     {
         base_type::inclusive_scan(input, output, reduction, scan_op);
+    }
+
+    template<
+        unsigned int ItemsPerThread,
+        class PrefixCallback,
+        class BinaryFunction = ::rocprim::plus<T>
+    >
+    void inclusive_scan(T (&input)[ItemsPerThread],
+                        T (&output)[ItemsPerThread],
+                        PrefixCallback& prefix_callback,
+                        storage_type& storage,
+                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+    {
+        base_type::inclusive_scan(input, output, prefix_callback, storage, scan_op);
     }
 
     template<class BinaryFunction = ::rocprim::plus<T>>
@@ -200,6 +221,87 @@ public:
                         BinaryFunction scan_op = BinaryFunction()) [[hc]]
     {
         base_type::exclusive_scan(input, output, init, reduction, scan_op);
+    }
+
+    template<
+        class PrefixCallback,
+        class BinaryFunction = ::rocprim::plus<T>
+    >
+    void exclusive_scan(T input,
+                        T& output,
+                        T init,
+                        PrefixCallback& prefix_callback,
+                        storage_type& storage,
+                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+    {
+        base_type::exclusive_scan(input, output, init, prefix_callback, storage, scan_op);
+    }
+
+    template<
+        unsigned int ItemsPerThread,
+        class BinaryFunction = ::rocprim::plus<T>
+    >
+    void exclusive_scan(T (&input)[ItemsPerThread],
+                        T (&output)[ItemsPerThread],
+                        T init,
+                        storage_type& storage,
+                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+    {
+        base_type::exclusive_scan(input, output, init, storage, scan_op);
+    }
+
+    template<
+        unsigned int ItemsPerThread,
+        class BinaryFunction = ::rocprim::plus<T>
+    >
+    void exclusive_scan(T (&input)[ItemsPerThread],
+                        T (&output)[ItemsPerThread],
+                        T init,
+                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+    {
+        base_type::exclusive_scan(input, output, init, scan_op);
+    }
+
+    template<
+        unsigned int ItemsPerThread,
+        class BinaryFunction = ::rocprim::plus<T>
+    >
+    void exclusive_scan(T (&input)[ItemsPerThread],
+                        T (&output)[ItemsPerThread],
+                        T init,
+                        T& reduction,
+                        storage_type& storage,
+                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+    {
+        base_type::exclusive_scan(input, output, init, reduction, storage, scan_op);
+    }
+
+    template<
+        unsigned int ItemsPerThread,
+        class BinaryFunction = ::rocprim::plus<T>
+    >
+    void exclusive_scan(T (&input)[ItemsPerThread],
+                        T (&output)[ItemsPerThread],
+                        T init,
+                        T& reduction,
+                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+    {
+        base_type::exclusive_scan(input, output, init, reduction, scan_op);
+    }
+
+    template<
+        unsigned int ItemsPerThread,
+        class PrefixCallback,
+        class BinaryFunction = ::rocprim::plus<T>
+    >
+    void exclusive_scan(T (&input)[ItemsPerThread],
+                        T (&output)[ItemsPerThread],
+                        T init,
+                        PrefixCallback& prefix_callback,
+                        storage_type& storage,
+                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+    {
+        base_type::exclusive_scan(input, output, init, prefix_callback, storage, scan_op);
     }
 };
 
