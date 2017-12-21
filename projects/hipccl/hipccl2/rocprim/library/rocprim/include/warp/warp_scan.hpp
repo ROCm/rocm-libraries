@@ -34,6 +34,7 @@
 #include "../types.hpp"
 
 #include "detail/warp_scan_shuffle.hpp"
+#include "detail/warp_scan_shared_mem.hpp"
 
 /// \addtogroup collectivewarpmodule
 /// @{
@@ -42,21 +43,6 @@ BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
 {
-
-template<
-    class T,
-    unsigned int WarpSize
->
-class warp_scan_shared_mem
-{
-public:
-    static_assert(
-        detail::is_power_of_two(WarpSize),
-        "warp_scan is not implemented for WarpSizes that are not power of two."
-    );
-
-    typedef detail::empty_type storage;
-};
 
 // Select warp_scan implementation based WarpSize
 template<class T, unsigned int WarpSize>
@@ -82,7 +68,6 @@ struct select_warp_scan_impl
 /// separatly within groups determined by WarpSize.
 ///
 /// \par Overview
-/// * \p WarpSize must be power of two.
 /// * \p WarpSize must be equal to or less than the size of hardware warp (see
 /// rocprim::warp_size()). If it is less, scan is performed separatly within groups
 /// determined by WarpSize. \n
@@ -94,6 +79,7 @@ struct select_warp_scan_impl
 /// associative. When used with non-associative functions the results may be non-deterministic
 /// and/or vary in precision.
 /// * Number of threads executing warp_scan's function must be a multiple of \p WarpSize;
+/// * All threads from a logical warp must be in the same hardware warp.
 ///
 /// \par Examples
 /// \parblock
