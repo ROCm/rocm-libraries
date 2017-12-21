@@ -58,11 +58,11 @@ template<
     class T,
     unsigned int ItemsPerThread
 >
-void block_load_direct_blocked(int flat_id,
+void block_load_direct_blocked(unsigned int flat_id,
                                IteratorT block_input,
                                T (&items)[ItemsPerThread]) [[hc]]
 {
-    int offset = flat_id * ItemsPerThread;
+    unsigned int offset = flat_id * ItemsPerThread;
     IteratorT thread_iter = block_input + offset;
     #pragma unroll
     for (unsigned int item = 0; item < ItemsPerThread; item++)
@@ -93,12 +93,12 @@ template<
     class T,
     unsigned int ItemsPerThread
 >
-void block_load_direct_blocked(int flat_id,
+void block_load_direct_blocked(unsigned int flat_id,
                                IteratorT block_input,
                                T (&items)[ItemsPerThread],
-                               int valid) [[hc]]
+                               unsigned int valid) [[hc]]
 {
-    int offset = flat_id * ItemsPerThread;
+    unsigned int offset = flat_id * ItemsPerThread;
     IteratorT thread_iter = block_input + offset;
     #pragma unroll
     for (unsigned int item = 0; item < ItemsPerThread; item++)
@@ -136,15 +136,17 @@ template<
     unsigned int ItemsPerThread,
     class Default
 >
-void block_load_direct_blocked(int flat_id,
+void block_load_direct_blocked(unsigned int flat_id,
                                IteratorT block_input,
                                T (&items)[ItemsPerThread],
-                               int valid,
+                               unsigned int valid,
                                Default out_of_bounds) [[hc]]
 {
     #pragma unroll
     for (unsigned int item = 0; item < ItemsPerThread; item++)
+    {
         items[item] = out_of_bounds;
+    }
 
     block_load_direct_blocked(flat_id, block_input, items, valid);
 }
@@ -180,7 +182,7 @@ template<
     unsigned int ItemsPerThread
 >
 typename std::enable_if<detail::is_vectorizable<T, ItemsPerThread>()>::type
-block_load_direct_blocked_vectorized(int flat_id,
+block_load_direct_blocked_vectorized(unsigned int flat_id,
                                      T* block_input,
                                      U (&items)[ItemsPerThread]) [[hc]]
 {
@@ -210,7 +212,7 @@ template<
     unsigned int ItemsPerThread
 >
 typename std::enable_if<!detail::is_vectorizable<T, ItemsPerThread>()>::type
-block_load_direct_blocked_vectorized(int flat_id,
+block_load_direct_blocked_vectorized(unsigned int flat_id,
                                      T* block_input,
                                      U (&items)[ItemsPerThread]) [[hc]]
 {
@@ -240,7 +242,7 @@ template<
     class T,
     unsigned int ItemsPerThread
 >
-void block_load_direct_striped(int flat_id,
+void block_load_direct_striped(unsigned int flat_id,
                                IteratorT block_input,
                                T (&items)[ItemsPerThread]) [[hc]]
 {
@@ -276,10 +278,10 @@ template<
     class T,
     unsigned int ItemsPerThread
 >
-void block_load_direct_striped(int flat_id,
+void block_load_direct_striped(unsigned int flat_id,
                                IteratorT block_input,
                                T (&items)[ItemsPerThread],
-                               int valid) [[hc]]
+                               unsigned int valid) [[hc]]
 {
     IteratorT thread_iter = block_input + flat_id;
     #pragma unroll
@@ -321,15 +323,17 @@ template<
     unsigned int ItemsPerThread,
     class Default
 >
-void block_load_direct_striped(int flat_id,
+void block_load_direct_striped(unsigned int flat_id,
                                IteratorT block_input,
                                T (&items)[ItemsPerThread],
-                               int valid,
+                               unsigned int valid,
                                Default out_of_bounds) [[hc]]
 {
     #pragma unroll
     for (unsigned int item = 0; item < ItemsPerThread; item++)
+    {
         items[item] = out_of_bounds;
+    }
 
     block_load_direct_striped<BlockSize>(flat_id, block_input, items, valid);
 }
@@ -364,7 +368,7 @@ template<
     class T,
     unsigned int ItemsPerThread
 >
-void block_load_direct_warp_striped(int flat_id,
+void block_load_direct_warp_striped(unsigned int flat_id,
                                     IteratorT block_input,
                                     T (&items)[ItemsPerThread]) [[hc]]
 {
@@ -414,10 +418,10 @@ template<
     class T,
     unsigned int ItemsPerThread
 >
-void block_load_direct_warp_striped(int flat_id,
+void block_load_direct_warp_striped(unsigned int flat_id,
                                     IteratorT block_input,
                                     T (&items)[ItemsPerThread],
-                                    int valid) [[hc]]
+                                    unsigned int valid) [[hc]]
 {
     static_assert(detail::is_power_of_two(WarpSize) && WarpSize <= warp_size(),
                  "WarpSize must be a power of two and equal or less"
@@ -473,10 +477,10 @@ template<
     unsigned int ItemsPerThread,
     class Default
 >
-void block_load_direct_warp_striped(int flat_id,
+void block_load_direct_warp_striped(unsigned int flat_id,
                                     IteratorT block_input,
                                     T (&items)[ItemsPerThread],
-                                    int valid,
+                                    unsigned int valid,
                                     Default out_of_bounds) [[hc]]
 {
     static_assert(detail::is_power_of_two(WarpSize) && WarpSize <= warp_size(),
@@ -484,7 +488,9 @@ void block_load_direct_warp_striped(int flat_id,
                  "than the size of hardware warp.");
     #pragma unroll
     for (unsigned int item = 0; item < ItemsPerThread; item++)
+    {
         items[item] = out_of_bounds;
+    }
 
     block_load_direct_warp_striped<WarpSize>(flat_id, block_input, items, valid);
 }
