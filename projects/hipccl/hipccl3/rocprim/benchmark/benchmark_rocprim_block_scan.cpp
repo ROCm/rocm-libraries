@@ -57,11 +57,12 @@ const size_t DEFAULT_N = 1024 * 1024 * 128;
 
 namespace rp = rocprim;
 
-template<class T, unsigned int BlockSize>
+template<class T, unsigned int BlockSize, unsigned int ItemsPerThread>
 void benchmark_hc_block_inclusive_scan(benchmark::State& state, hc::accelerator_view acc_view, size_t N)
 {
     // Make sure size is a multiple of BlockSize
-    const auto size = BlockSize * ((N + BlockSize - 1)/BlockSize);
+    constexpr auto items_per_block = BlockSize * ItemsPerThread;
+    const auto size = items_per_block * ((N + items_per_block - 1)/items_per_block);
     // Allocate and fill memory
     std::vector<T> input(size, 1.0f);
     std::vector<T> output(size, -1.0f);
@@ -71,18 +72,28 @@ void benchmark_hc_block_inclusive_scan(benchmark::State& state, hc::accelerator_
     av_output.synchronize_to(acc_view);
     acc_view.wait();
 
+    const auto grid_size = size / ItemsPerThread;
     for (auto _ : state)
     {
         auto start = std::chrono::high_resolution_clock::now();
         auto event = hc::parallel_for_each(
             acc_view,
-            hc::extent<1>(size).tile(BlockSize),
+            hc::extent<1>(grid_size).tile(BlockSize),
             [=](hc::tiled_index<1> i) [[hc]]
             {
-                T value = av_input[i];
+                T values[ItemsPerThread];
+                for(unsigned int k = 0; k < ItemsPerThread; k++)
+                {
+                    values[k] = av_input[i.global[0] * ItemsPerThread + k];
+                }
+
                 rp::block_scan<T, BlockSize> bscan;
-                bscan.inclusive_scan(value, value);
-                av_output[i] = value;
+                bscan.inclusive_scan(values, values);
+
+                for(unsigned int k = 0; k < ItemsPerThread; k++)
+                {
+                    av_output[i.global[0] * ItemsPerThread + k] = values[k];
+                }
             }
         );
         event.wait();
@@ -97,23 +108,33 @@ void benchmark_hc_block_inclusive_scan(benchmark::State& state, hc::accelerator_
     state.SetItemsProcessed(state.iterations() * size);
 }
 
-template<class T, unsigned int BlockSize>
+template<class T, unsigned int BlockSize, unsigned int ItemsPerThread>
 __global__
 void block_inclusive_scan_kernel(const T* input, T* output)
 {
     const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
 
-    auto value = input[i];
+    T values[ItemsPerThread];
+    for(unsigned int k = 0; k < ItemsPerThread; k++)
+    {
+        values[k] = input[i * ItemsPerThread + k];
+    }
+
     rp::block_scan<T, BlockSize> bscan;
-    bscan.inclusive_scan(value, value);
-    output[i] = value;
+    bscan.inclusive_scan(values, values);
+
+    for(unsigned int k = 0; k < ItemsPerThread; k++)
+    {
+        output[i * ItemsPerThread + k] = values[k];
+    }
 }
 
-template<class T, unsigned int BlockSize>
+template<class T, unsigned int BlockSize, unsigned int ItemsPerThread>
 void benchmark_hip_block_inclusive_scan(benchmark::State& state, hipStream_t stream, size_t N)
 {
     // Make sure size is a multiple of BlockSize
-    const auto size = BlockSize * ((N + BlockSize - 1)/BlockSize);
+    constexpr auto items_per_block = BlockSize * ItemsPerThread;
+    const auto size = items_per_block * ((N + items_per_block - 1)/items_per_block);
     // Allocate and fill memory
     std::vector<T> input(size, 1.0f);
     T * d_input;
@@ -133,8 +154,8 @@ void benchmark_hip_block_inclusive_scan(benchmark::State& state, hipStream_t str
     {
         auto start = std::chrono::high_resolution_clock::now();
         hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(block_inclusive_scan_kernel<T, BlockSize>),
-            dim3(size/BlockSize), dim3(BlockSize), 0, stream,
+            HIP_KERNEL_NAME(block_inclusive_scan_kernel<T, BlockSize, ItemsPerThread>),
+            dim3(size/items_per_block), dim3(BlockSize), 0, stream,
             d_input, d_output
         );
         HIP_CHECK(hipPeekAtLastError());
@@ -184,13 +205,43 @@ int main(int argc, char *argv[])
     std::vector<benchmark::internal::Benchmark*> benchmarks =
     {
         benchmark::RegisterBenchmark(
-            "block_inclusive_scan_hc", // name
-            benchmark_hc_block_inclusive_scan<float, 256>, // func
+            "block_inclusive_scan_hc<float, 256, 1>", // name
+            benchmark_hc_block_inclusive_scan<float, 256, 1>, // func
             *acc_view, size // arguments for func
         ),
         benchmark::RegisterBenchmark(
-            "block_inclusive_scan_hip",
-            benchmark_hip_block_inclusive_scan<float, 256>,
+            "block_inclusive_scan_hip<float, 256, 1>",
+            benchmark_hip_block_inclusive_scan<float, 256, 1>,
+            stream, size
+        ),
+        benchmark::RegisterBenchmark(
+            "block_inclusive_scan_hip<double, 256, 1>",
+            benchmark_hip_block_inclusive_scan<double, 256, 1>,
+            stream, size
+        ),
+        benchmark::RegisterBenchmark(
+            "block_inclusive_scan_hip<double, 256, 8>",
+            benchmark_hip_block_inclusive_scan<double, 256, 8>,
+            stream, size
+        ),
+        benchmark::RegisterBenchmark(
+            "block_inclusive_scan_hip<int, 256, 16>",
+            benchmark_hip_block_inclusive_scan<int, 256, 16>,
+            stream, size
+        ),
+        benchmark::RegisterBenchmark(
+            "block_inclusive_scan_hip<int, 256, 8>",
+            benchmark_hip_block_inclusive_scan<int, 256, 8>,
+            stream, size
+        ),
+        benchmark::RegisterBenchmark(
+            "block_inclusive_scan_hip<int, 256, 4>",
+            benchmark_hip_block_inclusive_scan<int, 256, 4>,
+            stream, size
+        ),
+        benchmark::RegisterBenchmark(
+            "block_inclusive_scan_hip<int, 256, 2>",
+            benchmark_hip_block_inclusive_scan<int, 256, 2>,
             stream, size
         )
     };
