@@ -25,6 +25,7 @@
 #include <hcc/hc.hpp>
 
 #include "../detail/config.hpp"
+#include "../detail/various.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -99,12 +100,19 @@ inline void syncthreads() [[hc]]
 
 namespace detail
 {
-    // Return thread id in a "logical warp", which can be smaller
-    // than a hardware warp size.
+    // Return thread id in a "logical warp", which can be smaller than a hardware warp size.
     template<unsigned int LogicalWarpSize>
-    unsigned int logical_lane_id() [[hc]]
+    auto logical_lane_id() [[hc]]
+        -> typename std::enable_if<detail::is_power_of_two(LogicalWarpSize), unsigned int>::type
     {
         return lane_id() & (LogicalWarpSize-1); // same as land_id()%WarpSize
+    }
+
+    template<unsigned int LogicalWarpSize>
+    auto logical_lane_id() [[hc]]
+        -> typename std::enable_if<!detail::is_power_of_two(LogicalWarpSize), unsigned int>::type
+    {
+        return lane_id()%LogicalWarpSize;
     }
 
     template<>

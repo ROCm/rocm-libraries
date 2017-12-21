@@ -53,20 +53,21 @@ class block_scan_warp_scan
 
     // typedef of warp_scan primitive that will be used to perform warp-level
     // inclusive/exclusive scan operations on input values.
-    using warp_scan_input_type = ::rocprim::warp_scan<T, warp_size_>;
+    // warp_scan_shuffle is an implementation of warp_scan that does not need storage,
+    // but requires logical warp size to be a power of two.
+    using warp_scan_input_type = ::rocprim::detail::warp_scan_shuffle<T, warp_size_>;
     // typedef of warp_scan primtive that will be used to get prefix values for
-    // each warp (scanned carry-outs from warps before it)
-    using warp_scan_prefix_type = ::rocprim::warp_scan<T, detail::next_power_of_two(warps_no_)>;
+    // each warp (scanned carry-outs from warps before it).
+    using warp_scan_prefix_type = ::rocprim::detail::warp_scan_shuffle<T, detail::next_power_of_two(warps_no_)>;
 
 public:
     struct storage_type
     {
         T warp_prefixes[warps_no_];
         // ---------- Shared memory optimisation ----------
-        // Since warp_scan_input and warp_scan_prefix have logical warp sizes that are
-        // powers of two, then we know both warp scan will use shuffle operations and thus
-        // not require shared memory. Otherwise, we you need to add following union to
-        // this struct:
+        // Since warp_scan_input and warp_scan_prefix are typedef of warp_scan_shuffle,
+        // we don't need to allocate any temporary memory for them.
+        // If we just use warp_scan, we would need to add following union to this struct:
         // union
         // {
         //     typename warp_scan_input::storage_type wscan[warps_no_];

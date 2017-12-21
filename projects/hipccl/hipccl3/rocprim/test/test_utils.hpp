@@ -65,15 +65,6 @@ struct uint_wrapper
     static constexpr unsigned int value = Value;
 };
 
-typedef ::testing::Types<
-    uint_wrapper<2U>,
-    uint_wrapper<4U>,
-    uint_wrapper<8U>,
-    uint_wrapper<16U>,
-    uint_wrapper<32U>,
-    uint_wrapper<64U>
-> WarpSizes;
-
 size_t get_max_tile_size(hc::accelerator acc = hc::accelerator())
 {
     return acc.get_max_tile_static_size();

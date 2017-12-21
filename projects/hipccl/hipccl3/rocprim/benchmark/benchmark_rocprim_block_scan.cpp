@@ -250,6 +250,7 @@ int main(int argc, char *argv[])
     for(auto& b : benchmarks)
     {
         b->UseManualTime();
+        b->Unit(benchmark::kMillisecond);
     }
 
     // Force number of iterations
