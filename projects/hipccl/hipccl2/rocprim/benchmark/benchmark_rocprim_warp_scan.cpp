@@ -80,8 +80,11 @@ void benchmark_hc_warp_inclusive_scan(benchmark::State& state, hc::accelerator_v
             [=](hc::tiled_index<1> i) [[hc]]
             {
                 T value = av_input[i];
-                rp::warp_scan<T, WarpSize> wscan;
-                wscan.inclusive_scan(value, value);
+
+                using wscan_t = rp::warp_scan<T, WarpSize>;
+                tile_static typename wscan_t::storage_type storage;
+                wscan_t().inclusive_scan(value, value, storage);
+
                 av_output[i] = value;
             }
         );
@@ -104,8 +107,11 @@ void warp_inclusive_scan_kernel(const T* input, T* output)
     const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
 
     auto value = input[i];
-    rp::warp_scan<T, WarpSize> wscan;
-    wscan.inclusive_scan(value, value);
+
+    using wscan_t = rp::warp_scan<T, WarpSize>;
+    tile_static typename wscan_t::storage_type storage;
+    wscan_t().inclusive_scan(value, value, storage);
+
     output[i] = value;
 }
 
@@ -199,6 +205,7 @@ int main(int argc, char *argv[])
     for(auto& b : benchmarks)
     {
         b->UseManualTime();
+        b->Unit(benchmark::kMillisecond);
     }
 
     // Force number of iterations

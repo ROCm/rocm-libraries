@@ -37,22 +37,41 @@
 namespace rp = rocprim;
 
 template<typename WarpSizeWrapper>
-class RocprimWarpScanShuffleBasedTests : public ::testing::Test {
+class RocprimWarpScanTests : public ::testing::Test {
 public:
     static constexpr unsigned int warp_size = WarpSizeWrapper::value;
 };
 
-TYPED_TEST_CASE(RocprimWarpScanShuffleBasedTests, WarpSizes);
+typedef ::testing::Types<
+    // shuffle based scan
+    uint_wrapper<2U>,
+    uint_wrapper<4U>,
+    uint_wrapper<8U>,
+    uint_wrapper<16U>,
+    uint_wrapper<32U>,
+    uint_wrapper<64U>,
+    // shared memory scan
+    uint_wrapper<3U>,
+    uint_wrapper<7U>,
+    uint_wrapper<15U>,
+    uint_wrapper<37U>,
+    uint_wrapper<61U>
+> WarpSizes;
 
-TYPED_TEST(RocprimWarpScanShuffleBasedTests, InclusiveScanInt)
+TYPED_TEST_CASE(RocprimWarpScanTests, WarpSizes);
+
+TYPED_TEST(RocprimWarpScanTests, InclusiveScanInt)
 {
     // logical warp side for warp primitive, execution warp size is always rp::warp_size()
     constexpr size_t logical_warp_size = TestFixture::warp_size;
-    const size_t block_size = std::max<size_t>(rp::warp_size(), 4 * logical_warp_size);
+    constexpr size_t block_size =
+        rp::detail::is_power_of_two(logical_warp_size)
+            ? rp::max<size_t>(rp::warp_size(), logical_warp_size * 4)
+            : (rp::warp_size()/logical_warp_size) * logical_warp_size;
     const size_t size = block_size * 4;
 
     // Given warp size not supported
-    if(logical_warp_size > rp::warp_size() || !rp::detail::is_power_of_two(logical_warp_size))
+    if(logical_warp_size > rp::warp_size())
     {
         return;
     }
@@ -76,9 +95,15 @@ TYPED_TEST(RocprimWarpScanShuffleBasedTests, InclusiveScanInt)
         hc::extent<1>(output.size()).tile(block_size),
         [=](hc::tiled_index<1> i) [[hc]]
         {
+            constexpr unsigned int warps_no = block_size/logical_warp_size;
+            const unsigned int warp_id = rp::detail::logical_warp_id<logical_warp_size>();
+
             int value = d_output[i];
-            rp::warp_scan<int, logical_warp_size> wscan;
-            wscan.inclusive_scan(value, value);
+
+            using wscan_t = rp::warp_scan<int, logical_warp_size>;
+            tile_static typename wscan_t::storage_type storage[warps_no];
+            wscan_t().inclusive_scan(value, value, storage[warp_id]);
+
             d_output[i] = value;
         }
     );
@@ -86,19 +111,22 @@ TYPED_TEST(RocprimWarpScanShuffleBasedTests, InclusiveScanInt)
     d_output.synchronize();
     for(int i = 0; i < output.size(); i++)
     {
-        EXPECT_EQ(output[i], expected[i]);
+        ASSERT_EQ(output[i], expected[i]);
     }
 }
 
-TYPED_TEST(RocprimWarpScanShuffleBasedTests, InclusiveScanReduceInt)
+TYPED_TEST(RocprimWarpScanTests, InclusiveScanReduceInt)
 {
     // logical warp side for warp primitive, execution warp size is always rp::warp_size()
     constexpr size_t logical_warp_size = TestFixture::warp_size;
-    const size_t block_size = std::max<size_t>(rp::warp_size(), 4 * logical_warp_size);
+    constexpr size_t block_size =
+        rp::detail::is_power_of_two(logical_warp_size)
+            ? rp::max<size_t>(rp::warp_size(), logical_warp_size * 4)
+            : (rp::warp_size()/logical_warp_size) * logical_warp_size;
     const size_t size = block_size * 4;
 
     // Given warp size not supported
-    if(logical_warp_size > rp::warp_size() || !rp::detail::is_power_of_two(logical_warp_size))
+    if(logical_warp_size > rp::warp_size())
     {
         return;
     }
@@ -128,10 +156,16 @@ TYPED_TEST(RocprimWarpScanShuffleBasedTests, InclusiveScanReduceInt)
         hc::extent<1>(output.size()).tile(block_size),
         [=](hc::tiled_index<1> i) [[hc]]
         {
+            constexpr unsigned int warps_no = block_size/logical_warp_size;
+            const unsigned int warp_id = rp::detail::logical_warp_id<logical_warp_size>();
+
             int value = d_output[i];
             int reduction;
-            rp::warp_scan<int, logical_warp_size> wscan;
-            wscan.inclusive_scan(value, value, reduction);
+
+            using wscan_t = rp::warp_scan<int, logical_warp_size>;
+            tile_static typename wscan_t::storage_type storage[warps_no];
+            wscan_t().inclusive_scan(value, value, reduction, storage[warp_id]);
+
             d_output[i] = value;
             if(i.local[0]%logical_warp_size == 0)
             {
@@ -153,15 +187,18 @@ TYPED_TEST(RocprimWarpScanShuffleBasedTests, InclusiveScanReduceInt)
     }
 }
 
-TYPED_TEST(RocprimWarpScanShuffleBasedTests, ExclusiveScanInt)
+TYPED_TEST(RocprimWarpScanTests, ExclusiveScanInt)
 {
     // logical warp side for warp primitive, execution warp size is always rp::warp_size()
     constexpr size_t logical_warp_size = TestFixture::warp_size;
-    const size_t block_size = std::max<size_t>(rp::warp_size(), 4 * logical_warp_size);
+    constexpr size_t block_size =
+        rp::detail::is_power_of_two(logical_warp_size)
+            ? rp::max<size_t>(rp::warp_size(), logical_warp_size * 4)
+            : (rp::warp_size()/logical_warp_size) * logical_warp_size;
     const size_t size = block_size * 4;
 
     // Given warp size not supported
-    if(logical_warp_size > rp::warp_size() || !rp::detail::is_power_of_two(logical_warp_size))
+    if(logical_warp_size > rp::warp_size())
     {
         return;
     }
@@ -187,9 +224,15 @@ TYPED_TEST(RocprimWarpScanShuffleBasedTests, ExclusiveScanInt)
         hc::extent<1>(in_out_array.size()).tile(block_size),
         [=](hc::tiled_index<1> i) [[hc]]
         {
+            constexpr unsigned int warps_no = block_size/logical_warp_size;
+            const unsigned int warp_id = rp::detail::logical_warp_id<logical_warp_size>();
+
             int value = d_in_out_array[i];
-            rp::warp_scan<int, logical_warp_size> wscan;
-            wscan.exclusive_scan(value, value, init);
+
+            using wscan_t = rp::warp_scan<int, logical_warp_size>;
+            tile_static typename wscan_t::storage_type storage[warps_no];
+            wscan_t().exclusive_scan(value, value, init, storage[warp_id]);
+
             d_in_out_array[i] = value;
         }
     );
@@ -201,15 +244,18 @@ TYPED_TEST(RocprimWarpScanShuffleBasedTests, ExclusiveScanInt)
     }
 }
 
-TYPED_TEST(RocprimWarpScanShuffleBasedTests, ExclusiveScanReduceInt)
+TYPED_TEST(RocprimWarpScanTests, ExclusiveScanReduceInt)
 {
     // logical warp side for warp primitive, execution warp size is always rp::warp_size()
     constexpr size_t logical_warp_size = TestFixture::warp_size;
-    const size_t block_size = std::max<size_t>(rp::warp_size(), 4 * logical_warp_size);
+    constexpr size_t block_size =
+        rp::detail::is_power_of_two(logical_warp_size)
+            ? rp::max<size_t>(rp::warp_size(), logical_warp_size * 4)
+            : (rp::warp_size()/logical_warp_size) * logical_warp_size;
     const size_t size = block_size * 4;
 
     // Given warp size not supported
-    if(logical_warp_size > rp::warp_size() || !rp::detail::is_power_of_two(logical_warp_size))
+    if(logical_warp_size > rp::warp_size())
     {
         return;
     }
@@ -248,10 +294,16 @@ TYPED_TEST(RocprimWarpScanShuffleBasedTests, ExclusiveScanReduceInt)
         hc::extent<1>(in_out_array.size()).tile(block_size),
         [=](hc::tiled_index<1> i) [[hc]]
         {
+            constexpr unsigned int warps_no = block_size/logical_warp_size;
+            const unsigned int warp_id = rp::detail::logical_warp_id<logical_warp_size>();
+
             int value = d_in_out_array[i];
             int reduction;
-            rp::warp_scan<int, logical_warp_size> wscan;
-            wscan.exclusive_scan(value, value, init, reduction);
+
+            using wscan_t = rp::warp_scan<int, logical_warp_size>;
+            tile_static typename wscan_t::storage_type storage[warps_no];
+            wscan_t().exclusive_scan(value, value, init, reduction, storage[warp_id]);
+
             d_in_out_array[i] = value;
             if(i.local[0]%logical_warp_size == 0)
             {
@@ -273,15 +325,18 @@ TYPED_TEST(RocprimWarpScanShuffleBasedTests, ExclusiveScanReduceInt)
     }
 }
 
-TYPED_TEST(RocprimWarpScanShuffleBasedTests, ScanInt)
+TYPED_TEST(RocprimWarpScanTests, ScanInt)
 {
     // logical warp side for warp primitive, execution warp size is always rp::warp_size()
     constexpr size_t logical_warp_size = TestFixture::warp_size;
-    const size_t block_size = std::max<size_t>(rp::warp_size(), 4 * logical_warp_size);
+    constexpr size_t block_size =
+        rp::detail::is_power_of_two(logical_warp_size)
+            ? rp::max<size_t>(rp::warp_size(), logical_warp_size * 4)
+            : (rp::warp_size()/logical_warp_size) * logical_warp_size;
     const size_t size = block_size * 4;
 
     // Given warp size not supported
-    if(logical_warp_size > rp::warp_size() || !rp::detail::is_power_of_two(logical_warp_size))
+    if(logical_warp_size > rp::warp_size())
     {
         return;
     }
@@ -319,11 +374,16 @@ TYPED_TEST(RocprimWarpScanShuffleBasedTests, ScanInt)
         hc::extent<1>(input.size()).tile(block_size),
         [=](hc::tiled_index<1> i) [[hc]]
         {
-            rp::warp_scan<int, logical_warp_size> wscan;
+            constexpr unsigned int warps_no = block_size/logical_warp_size;
+            const unsigned int warp_id = rp::detail::logical_warp_id<logical_warp_size>();
 
             int input = d_input[i];
             int i_output, e_output;
-            wscan.scan(input, i_output, e_output, init);
+
+            using wscan_t = rp::warp_scan<int, logical_warp_size>;
+            tile_static typename wscan_t::storage_type storage[warps_no];
+            wscan_t().scan(input, i_output, e_output, init, storage[warp_id]);
+
             d_i_output[i] = i_output;
             d_e_output[i] = e_output;
         }
@@ -342,15 +402,18 @@ TYPED_TEST(RocprimWarpScanShuffleBasedTests, ScanInt)
     }
 }
 
-TYPED_TEST(RocprimWarpScanShuffleBasedTests, ScanReduceInt)
+TYPED_TEST(RocprimWarpScanTests, ScanReduceInt)
 {
     // logical warp side for warp primitive, execution warp size is always rp::warp_size()
     constexpr size_t logical_warp_size = TestFixture::warp_size;
-    const size_t block_size = std::max<size_t>(rp::warp_size(), 4 * logical_warp_size);
+    constexpr size_t block_size =
+        rp::detail::is_power_of_two(logical_warp_size)
+            ? rp::max<size_t>(rp::warp_size(), logical_warp_size * 4)
+            : (rp::warp_size()/logical_warp_size) * logical_warp_size;
     const size_t size = block_size * 4;
 
     // Given warp size not supported
-    if(logical_warp_size > rp::warp_size() || !rp::detail::is_power_of_two(logical_warp_size))
+    if(logical_warp_size > rp::warp_size())
     {
         return;
     }
@@ -394,11 +457,16 @@ TYPED_TEST(RocprimWarpScanShuffleBasedTests, ScanReduceInt)
         hc::extent<1>(input.size()).tile(block_size),
         [=](hc::tiled_index<1> i) [[hc]]
         {
-            rp::warp_scan<int, logical_warp_size> wscan;
+            constexpr unsigned int warps_no = block_size/logical_warp_size;
+            const unsigned int warp_id = rp::detail::logical_warp_id<logical_warp_size>();
 
             int input = d_input[i];
             int i_output, e_output, reduction;
-            wscan.scan(input, i_output, e_output, init, reduction);
+
+            using wscan_t = rp::warp_scan<int, logical_warp_size>;
+            tile_static typename wscan_t::storage_type storage[warps_no];
+            wscan_t().scan(input, i_output, e_output, init, reduction, storage[warp_id]);
+
             d_i_output[i] = i_output;
             d_e_output[i] = e_output;
             if(i.local[0]%logical_warp_size == 0)
@@ -427,15 +495,18 @@ TYPED_TEST(RocprimWarpScanShuffleBasedTests, ScanReduceInt)
     }
 }
 
-TYPED_TEST(RocprimWarpScanShuffleBasedTests, ScanReduceFloat)
+TYPED_TEST(RocprimWarpScanTests, ScanReduceFloat)
 {
     // logical warp side for warp primitive, execution warp size is always rp::warp_size()
     constexpr size_t logical_warp_size = TestFixture::warp_size;
-    const size_t block_size = std::max<size_t>(rp::warp_size(), 4 * logical_warp_size);
+    constexpr size_t block_size =
+        rp::detail::is_power_of_two(logical_warp_size)
+            ? rp::max<size_t>(rp::warp_size(), logical_warp_size * 4)
+            : (rp::warp_size()/logical_warp_size) * logical_warp_size;
     const size_t size = block_size * 4;
 
     // Given warp size not supported
-    if(logical_warp_size > rp::warp_size() || !rp::detail::is_power_of_two(logical_warp_size))
+    if(logical_warp_size > rp::warp_size())
     {
         return;
     }
@@ -479,11 +550,16 @@ TYPED_TEST(RocprimWarpScanShuffleBasedTests, ScanReduceFloat)
         hc::extent<1>(input.size()).tile(block_size),
         [=](hc::tiled_index<1> i) [[hc]]
         {
-            rp::warp_scan<float, logical_warp_size> wscan;
+            constexpr unsigned int warps_no = block_size/logical_warp_size;
+            const unsigned int warp_id = rp::detail::logical_warp_id<logical_warp_size>();
 
             float input = d_input[i];
             float i_output, e_output, reduction;
-            wscan.scan(input, i_output, e_output, init, reduction);
+
+            using wscan_t = rp::warp_scan<float, logical_warp_size>;
+            tile_static typename wscan_t::storage_type storage[warps_no];
+            wscan_t().scan(input, i_output, e_output, init, reduction, storage[warp_id]);
+
             d_i_output[i] = i_output;
             d_e_output[i] = e_output;
             if(i.local[0]%logical_warp_size == 0)

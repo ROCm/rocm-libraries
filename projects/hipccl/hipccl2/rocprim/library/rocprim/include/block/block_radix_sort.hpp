@@ -126,7 +126,9 @@ class block_bit_plus_scan
 
     // typedef of warp_scan primtive that will be used to get prefix values for
     // each warp (scanned carry-outs from warps before it)
-    using warp_scan_prefix_type = ::rocprim::warp_scan<T, detail::next_power_of_two(warps_no)>;
+    // warp_scan_shuffle is an implementation of warp_scan that does not need storage,
+    // but requires logical warp size to be a power of two.
+    using warp_scan_prefix_type = ::rocprim::detail::warp_scan_shuffle<T, detail::next_power_of_two(warps_no)>;
 
 public:
 
@@ -134,10 +136,8 @@ public:
     {
         T warp_prefixes[warps_no];
         // ---------- Shared memory optimisation ----------
-        // Since warp_scan_prefix_type has logical warp size that is powers of two, then we know
-        // this warp scan will use shuffle operations and thus not require shared memory.
-        // Otherwise, we you need to add following member to the struct:
-        // typename warp_scan_prefix_type::storage_type prefix_scan;
+        // Since we use warp_scan_shuffle for warp scan, we don't need to allocate
+        // any temporaty memory for it.
     };
 
     void exclusive_scan(const T (&input)[ItemsPerThread],
