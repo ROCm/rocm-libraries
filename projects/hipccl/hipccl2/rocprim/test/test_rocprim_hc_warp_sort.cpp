@@ -48,6 +48,15 @@ bool test(const T& a, const T& b) [[hc]]
     return a < b;
 }
 
+typedef ::testing::Types<
+    uint_wrapper<2U>,
+    uint_wrapper<4U>,
+    uint_wrapper<8U>,
+    uint_wrapper<16U>,
+    uint_wrapper<32U>,
+    uint_wrapper<64U>
+> WarpSizes;
+
 TYPED_TEST_CASE(RocprimWarpSortShuffleBasedTests, WarpSizes);
 
 TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortInt)
