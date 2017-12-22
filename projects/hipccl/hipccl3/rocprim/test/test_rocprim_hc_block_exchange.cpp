@@ -86,6 +86,8 @@ typedef ::testing::Types<
     params<long long, long long, 512, 1>,
 
     // Power of 2 BlockSize and ItemsPerThread > 1
+    params<int, int, 64, 2>,
+    params<long long, long long, 256, 4>,
     params<int, int, 512, 5>,
     params<short, dummy<float>, 128, 7>,
     params<int, int, 128, 3>,

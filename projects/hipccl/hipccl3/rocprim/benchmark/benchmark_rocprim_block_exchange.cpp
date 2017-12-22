@@ -79,6 +79,7 @@ struct blocked_to_striped
         T output[ItemsPerThread];
         rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
 
+        #pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
@@ -86,7 +87,7 @@ struct blocked_to_striped
 
             for(unsigned int i = 0; i < ItemsPerThread; i++)
             {
-                input[i] = output[i] + ((i + trial) % 2 == 0 ? +trial : -trial);
+                input[i] = output[i] + 1;
             }
         }
 
@@ -112,6 +113,7 @@ struct striped_to_blocked
         T output[ItemsPerThread];
         rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
 
+        #pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
@@ -119,7 +121,7 @@ struct striped_to_blocked
 
             for(unsigned int i = 0; i < ItemsPerThread; i++)
             {
-                input[i] = output[i] + ((i + trial) % 2 == 0 ? +trial : -trial);
+                input[i] = output[i] + 1;
             }
         }
 
@@ -145,6 +147,7 @@ struct blocked_to_warp_striped
         T output[ItemsPerThread];
         rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
 
+        #pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
@@ -152,7 +155,7 @@ struct blocked_to_warp_striped
 
             for(unsigned int i = 0; i < ItemsPerThread; i++)
             {
-                input[i] = output[i] + ((i + trial) % 2 == 0 ? +trial : -trial);
+                input[i] = output[i] + 1;
             }
         }
 
@@ -178,6 +181,7 @@ struct warp_striped_to_blocked
         T output[ItemsPerThread];
         rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
 
+        #pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
@@ -185,7 +189,7 @@ struct warp_striped_to_blocked
 
             for(unsigned int i = 0; i < ItemsPerThread; i++)
             {
-                input[i] = output[i] + ((i + trial) % 2 == 0 ? +trial : -trial);
+                input[i] = output[i] + 1;
             }
         }
 
@@ -211,23 +215,18 @@ struct scatter_to_blocked
         T output[ItemsPerThread];
         unsigned int ranks[ItemsPerThread];
         rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
+        rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, ranks);
 
+        #pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
-            for(unsigned int i = 0; i < ItemsPerThread; i++)
-            {
-                ranks[i] = trial % 2 == 0
-                    ? (ItemsPerThread - 1 - i) * BlockSize + lid
-                    : (BlockSize - 1 - lid) * ItemsPerThread + i;
-                ranks[i] = ItemsPerThread * BlockSize - 1 - ranks[i];
-            }
-
             rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
             exchange.scatter_to_blocked(input, output, ranks);
 
             for(unsigned int i = 0; i < ItemsPerThread; i++)
             {
-                input[i] = output[i] + ((i + trial) % 2 == 0 ? +trial : -trial);
+                input[i] = output[i] + 1;
+                ranks[i] = ItemsPerThread * BlockSize - 1 - ranks[i];
             }
         }
 
@@ -253,23 +252,18 @@ struct scatter_to_striped
         T output[ItemsPerThread];
         unsigned int ranks[ItemsPerThread];
         rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
+        rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, ranks);
 
+        #pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
-            for(unsigned int i = 0; i < ItemsPerThread; i++)
-            {
-                ranks[i] = trial % 2 == 0
-                    ? (ItemsPerThread - 1 - i) * BlockSize + lid
-                    : (BlockSize - 1 - lid) * ItemsPerThread + i;
-                ranks[i] = ItemsPerThread * BlockSize - 1 - ranks[i];
-            }
-
             rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
             exchange.scatter_to_striped(input, output, ranks);
 
             for(unsigned int i = 0; i < ItemsPerThread; i++)
             {
-                input[i] = output[i] + ((i + trial) % 2 == 0 ? +trial : -trial);
+                input[i] = output[i] + 1;
+                ranks[i] = ItemsPerThread * BlockSize - 1 - ranks[i];
             }
         }
 
@@ -289,7 +283,15 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     constexpr auto items_per_block = BlockSize * ItemsPerThread;
     const auto size = items_per_block * ((N + items_per_block - 1)/items_per_block);
 
-    std::vector<T> input = get_random_data<T>(size, (T)0, (T)1000);
+    std::vector<T> input(size);
+    // Fill input with ranks (for scatter operations)
+    std::mt19937 gen;
+    for(size_t bi = 0; bi < size / items_per_block; bi++)
+    {
+        auto block_ranks = input.begin() + bi * items_per_block;
+        std::iota(block_ranks, block_ranks + items_per_block, 0);
+        std::shuffle(block_ranks, block_ranks + items_per_block, gen);
+    }
     T * d_input;
     T * d_output;
     HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
@@ -320,7 +322,8 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
             std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
         state.SetIterationTime(elapsed_seconds.count());
     }
-    state.SetBytesProcessed(state.iterations() * Trials * size * sizeof(T));
+    // Measure bandwidth of reading and writing
+    state.SetBytesProcessed(state.iterations() * Trials * size * 2 * sizeof(T));
     state.SetItemsProcessed(state.iterations() * Trials * size);
 
     HIP_CHECK(hipFree(d_input));
@@ -337,6 +340,11 @@ void add_benchmarks(const std::string& name,
     std::vector<benchmark::internal::Benchmark*> bs =
     {
         benchmark::RegisterBenchmark(
+            n("<int, 256, 1>").c_str(),
+            run_benchmark<K, int, 256, 1>,
+            stream, size
+        ),
+        benchmark::RegisterBenchmark(
             n("<int, 256, 2>").c_str(),
             run_benchmark<K, int, 256, 2>,
             stream, size
@@ -352,6 +360,11 @@ void add_benchmarks(const std::string& name,
             stream, size
         ),
         benchmark::RegisterBenchmark(
+            n("<int, 256, 6>").c_str(),
+            run_benchmark<K, int, 256, 6>,
+            stream, size
+        ),
+        benchmark::RegisterBenchmark(
             n("<int, 256, 7>").c_str(),
             run_benchmark<K, int, 256, 7>,
             stream, size
@@ -362,6 +375,11 @@ void add_benchmarks(const std::string& name,
             stream, size
         ),
 
+        benchmark::RegisterBenchmark(
+            n("<long long, 256, 1>").c_str(),
+            run_benchmark<K, long long, 256, 1>,
+            stream, size
+        ),
         benchmark::RegisterBenchmark(
             n("<long long, 256, 2>").c_str(),
             run_benchmark<K, long long, 256, 2>,
@@ -375,6 +393,11 @@ void add_benchmarks(const std::string& name,
         benchmark::RegisterBenchmark(
             n("<long long, 256, 4>").c_str(),
             run_benchmark<K, long long, 256, 4>,
+            stream, size
+        ),
+        benchmark::RegisterBenchmark(
+            n("<long long, 256, 6>").c_str(),
+            run_benchmark<K, long long, 256, 6>,
             stream, size
         ),
         benchmark::RegisterBenchmark(
