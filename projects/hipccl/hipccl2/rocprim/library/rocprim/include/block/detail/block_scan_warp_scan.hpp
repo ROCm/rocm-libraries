@@ -83,7 +83,7 @@ public:
                         storage_type& storage,
                         BinaryFunction scan_op) [[hc]]
     {
-        this->inclusive_scan_(
+        this->inclusive_scan_impl(
             ::rocprim::flat_block_thread_id(),
             input, output, storage, scan_op
         );
@@ -129,7 +129,7 @@ public:
     {
         const auto flat_tid = ::rocprim::flat_block_thread_id();
         const auto warp_id = ::rocprim::warp_id();
-        this->inclusive_scan_(flat_tid, input, output, storage, scan_op);
+        this->inclusive_scan_impl(flat_tid, input, output, storage, scan_op);
         // Include block prefix (this operation overwrites storage.warp_prefixes[0])
         this->include_block_prefix(
             flat_tid, warp_id,
@@ -155,7 +155,7 @@ public:
 
         // Scan of reduced values to get prefixes
         const auto flat_tid = ::rocprim::flat_block_thread_id();
-        this->exclusive_scan_(
+        this->exclusive_scan_impl(
             flat_tid,
             thread_input, thread_input, // input, output
             storage,
@@ -224,7 +224,7 @@ public:
 
         // Scan of reduced values to get prefixes
         const auto flat_tid = ::rocprim::flat_block_thread_id();
-        this->exclusive_scan_(
+        this->exclusive_scan_impl(
             flat_tid,
             thread_input, thread_input, // input, output
             storage,
@@ -257,7 +257,7 @@ public:
                         storage_type& storage,
                         BinaryFunction scan_op) [[hc]]
     {
-        this->exclusive_scan_(
+        this->exclusive_scan_impl(
             ::rocprim::flat_block_thread_id(),
             input, output, init, storage, scan_op
         );
@@ -313,7 +313,7 @@ public:
     {
         const auto flat_tid = ::rocprim::flat_block_thread_id();
         const auto warp_id = ::rocprim::warp_id();
-        this->exclusive_scan_(
+        this->exclusive_scan_impl(
             flat_tid, input, output, init, storage, scan_op
         );
         // Include block prefix (this operation overwrites storage.warp_prefixes[0])
@@ -342,7 +342,7 @@ public:
 
         // Scan of reduced values to get prefixes
         const auto flat_tid = ::rocprim::flat_block_thread_id();
-        this->exclusive_scan_(
+        this->exclusive_scan_impl(
             flat_tid,
             thread_input, thread_input, // input, output
             init,
@@ -419,7 +419,7 @@ public:
 
         // Scan of reduced values to get prefixes
         const auto flat_tid = ::rocprim::flat_block_thread_id();
-        this->exclusive_scan_(
+        this->exclusive_scan_impl(
             flat_tid,
             thread_input, thread_input, // input, output
             init,
@@ -450,11 +450,11 @@ public:
 
 private:
     template<class BinaryFunction>
-    void inclusive_scan_(const unsigned int flat_tid,
-                         T input,
-                         T& output,
-                         storage_type& storage,
-                         BinaryFunction scan_op) [[hc]]
+    void inclusive_scan_impl(const unsigned int flat_tid,
+                             T input,
+                             T& output,
+                             storage_type& storage,
+                             BinaryFunction scan_op) [[hc]]
     {
         // Perform warp scan
         warp_scan_input_type().inclusive_scan(
@@ -464,7 +464,7 @@ private:
 
         // i-th warp will have its prefix stored in storage.warp_prefixes[i-1]
         const auto warp_id = ::rocprim::warp_id();
-        this->calculate_warp_prefixes_(flat_tid, warp_id, output, storage, scan_op);
+        this->calculate_warp_prefixes(flat_tid, warp_id, output, storage, scan_op);
 
         // Use warp prefix to calculate the final scan results for every thread
         if(warp_id != 0)
@@ -475,12 +475,12 @@ private:
     }
 
     template<class BinaryFunction>
-    void exclusive_scan_(const unsigned int flat_tid,
-                         T input,
-                         T& output,
-                         T init,
-                         storage_type& storage,
-                         BinaryFunction scan_op) [[hc]]
+    void exclusive_scan_impl(const unsigned int flat_tid,
+                             T input,
+                             T& output,
+                             T init,
+                             storage_type& storage,
+                             BinaryFunction scan_op) [[hc]]
     {
         // Perform warp scan on input values
         warp_scan_input_type().inclusive_scan(
@@ -491,7 +491,7 @@ private:
         // i-th warp will have its prefix stored in storage.warp_prefixes[i-1]
         const auto warp_id = ::rocprim::warp_id();
         const auto lane_id = ::rocprim::lane_id();
-        this->calculate_warp_prefixes_(flat_tid, warp_id, output, storage, scan_op);
+        this->calculate_warp_prefixes(flat_tid, warp_id, output, storage, scan_op);
 
         // Include initial value in warp prefixes, and fix warp prefixes
         // for exclusive scan (first warp prefix is init)
@@ -509,11 +509,11 @@ private:
 
     // Exclusive scan with unknown initial value
     template<class BinaryFunction>
-    void exclusive_scan_(const unsigned int flat_tid,
-                         T input,
-                         T& output,
-                         storage_type& storage,
-                         BinaryFunction scan_op) [[hc]]
+    void exclusive_scan_impl(const unsigned int flat_tid,
+                             T input,
+                             T& output,
+                             storage_type& storage,
+                             BinaryFunction scan_op) [[hc]]
     {
         // Perform warp scan on input values
         warp_scan_input_type().inclusive_scan(
@@ -524,7 +524,7 @@ private:
         // i-th warp will have its prefix stored in storage.warp_prefixes[i-1]
         const auto warp_id = ::rocprim::warp_id();
         const auto lane_id = ::rocprim::lane_id();
-        this->calculate_warp_prefixes_(flat_tid, warp_id, output, storage, scan_op);
+        this->calculate_warp_prefixes(flat_tid, warp_id, output, storage, scan_op);
 
         // Use warp prefix to calculate the final scan results for every thread
         T warp_prefix;
@@ -539,11 +539,11 @@ private:
 
     // i-th warp will have its prefix stored in storage.warp_prefixes[i-1]
     template<class BinaryFunction>
-    void calculate_warp_prefixes_(const unsigned int flat_tid,
-                                  const unsigned int warp_id,
-                                  T inclusive_input,
-                                  storage_type& storage,
-                                  BinaryFunction scan_op) [[hc]]
+    void calculate_warp_prefixes(const unsigned int flat_tid,
+                                 const unsigned int warp_id,
+                                 T inclusive_input,
+                                 storage_type& storage,
+                                 BinaryFunction scan_op) [[hc]]
     {
         // Save the warp reduction result, that is the scan result
         // for last element in each warp
