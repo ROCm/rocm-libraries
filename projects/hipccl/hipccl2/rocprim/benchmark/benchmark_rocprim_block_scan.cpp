@@ -143,41 +143,54 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     HIP_CHECK(hipFree(d_output));
 }
 
-std::string create_benchmark_name(std::string name_template,
-                                  const unsigned int ipt)
-{
-    std::vector<char> buffer(name_template.size() + 100);
-    std::snprintf(buffer.data(), buffer.size(), name_template.c_str(), ipt);
-    std::string result = buffer.data();
-    return result;
-}
-
 // IPT - items per thread
-#define CREATE_BENCHMARK(IPT) \
+#define CREATE_BENCHMARK(T, BS, IPT) \
     benchmark::RegisterBenchmark( \
-        create_benchmark_name(benchmark_name_template, IPT).c_str(), \
-        run_benchmark<Benchmark, T, BlockSize, IPT>, \
+        (std::string("block_scan<"#T", "#BS", "#IPT", " + algorithm_name + ">.") + method_name).c_str(), \
+        run_benchmark<Benchmark, T, BS, IPT>, \
         stream, size \
     )
 
-template<
-    class Benchmark,
-    class T,
-    unsigned int BlockSize
->
+template<class Benchmark>
 void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                    const std::string& benchmark_name_template,
+                    const std::string& method_name,
+                    const std::string& algorithm_name,
                     hipStream_t stream,
                     size_t size)
 {
     std::vector<benchmark::internal::Benchmark*> new_benchmarks =
     {
-        CREATE_BENCHMARK(1),
-        CREATE_BENCHMARK(2),
-        CREATE_BENCHMARK(3),
-        CREATE_BENCHMARK(4),
-        CREATE_BENCHMARK(8),
-        CREATE_BENCHMARK(16)
+        CREATE_BENCHMARK(float, 256, 1),
+        CREATE_BENCHMARK(float, 256, 2),
+        CREATE_BENCHMARK(float, 256, 3),
+        CREATE_BENCHMARK(float, 256, 4),
+        CREATE_BENCHMARK(float, 256, 8),
+        CREATE_BENCHMARK(float, 256, 11),
+        CREATE_BENCHMARK(float, 256, 16),
+
+        CREATE_BENCHMARK(int, 256, 1),
+        CREATE_BENCHMARK(int, 256, 2),
+        CREATE_BENCHMARK(int, 256, 3),
+        CREATE_BENCHMARK(int, 256, 4),
+        CREATE_BENCHMARK(int, 256, 8),
+        CREATE_BENCHMARK(int, 256, 11),
+        CREATE_BENCHMARK(int, 256, 16),
+
+        CREATE_BENCHMARK(int, 320, 1),
+        CREATE_BENCHMARK(int, 320, 2),
+        CREATE_BENCHMARK(int, 320, 3),
+        CREATE_BENCHMARK(int, 320, 4),
+        CREATE_BENCHMARK(int, 320, 8),
+        CREATE_BENCHMARK(int, 320, 11),
+        CREATE_BENCHMARK(int, 320, 16),
+
+        CREATE_BENCHMARK(double, 256, 1),
+        CREATE_BENCHMARK(double, 256, 2),
+        CREATE_BENCHMARK(double, 256, 3),
+        CREATE_BENCHMARK(double, 256, 4),
+        CREATE_BENCHMARK(double, 256, 8),
+        CREATE_BENCHMARK(double, 256, 11),
+        CREATE_BENCHMARK(double, 256, 16),
     };
     benchmarks.insert(benchmarks.end(), new_benchmarks.begin(), new_benchmarks.end());
 }
@@ -204,29 +217,15 @@ int main(int argc, char *argv[])
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
-
     // using_warp_scan
     using inclusive_scan_uws_t = inclusive_scan<rocprim::block_scan_algorithm::using_warp_scan>;
-    add_benchmarks<inclusive_scan_uws_t, float, 256>(
-        benchmarks, "block_scan.inclusive_scan<float, 256, %u>", stream, size
+    add_benchmarks<inclusive_scan_uws_t>(
+        benchmarks, "inclusive_scan", "using_warp_scan", stream, size
     );
-    add_benchmarks<inclusive_scan_uws_t, int, 256>(
-        benchmarks, "block_scan.inclusive_scan<int, 256, %u>", stream, size
-    );
-    add_benchmarks<inclusive_scan_uws_t, double, 256>(
-        benchmarks, "block_scan.inclusive_scan<double, 256, %u>", stream, size
-    );
-
     // reduce then scan
     using inclusive_scan_rts_t = inclusive_scan<rocprim::block_scan_algorithm::reduce_then_scan>;
-    add_benchmarks<inclusive_scan_rts_t, float, 256>(
-        benchmarks, "block_scan.inclusive_scan<float, 256, %u>", stream, size
-    );
-    add_benchmarks<inclusive_scan_rts_t, int, 256>(
-        benchmarks, "block_scan.inclusive_scan<int, 256, %u>", stream, size
-    );
-    add_benchmarks<inclusive_scan_rts_t, double, 256>(
-        benchmarks, "block_scan.inclusive_scan<double, 256, %u>", stream, size
+    add_benchmarks<inclusive_scan_rts_t>(
+        benchmarks, "inclusive_scan", "reduce_then_scan", stream, size
     );
 
     // Use manual timing
