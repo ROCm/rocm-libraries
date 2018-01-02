@@ -33,6 +33,8 @@
 #include <hcc/hc.hpp>
 // rocPRIM
 #include <block/block_radix_sort.hpp>
+#include <block/block_load.hpp>
+#include <block/block_store.hpp>
 
 #include "test_utils.hpp"
 
@@ -184,13 +186,11 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeys)
         hc::extent<1>(size / items_per_thread).tile(block_size),
         [=](hc::tiled_index<1> idx) [[hc]]
         {
-            const unsigned int thread_id = idx.global[0];
+            const unsigned int lid = idx.local[0];
+            const unsigned int block_offset = idx.tile[0] * items_per_block;
 
             key_type keys[items_per_thread];
-            for(unsigned int i = 0; i < items_per_thread; i++)
-            {
-                keys[i] = d_key_output[thread_id * items_per_thread + i];
-            }
+            rp::block_load_direct_blocked(lid, d_key_output.data() + block_offset, keys);
 
             rp::block_radix_sort<key_type, block_size, items_per_thread> bsort;
             if(descending)
@@ -198,10 +198,7 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeys)
             else
                 bsort.sort(keys, start_bit, end_bit);
 
-            for(unsigned int i = 0; i < items_per_thread; i++)
-            {
-                d_key_output[thread_id * items_per_thread + i] = keys[i];
-            }
+            rp::block_store_direct_blocked(lid, d_key_output.data() + block_offset, keys);
         }
     );
 
@@ -285,15 +282,13 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeysValues)
         hc::extent<1>(size / items_per_thread).tile(block_size),
         [=](hc::tiled_index<1> idx) [[hc]]
         {
-            const unsigned int thread_id = idx.global[0];
+            const unsigned int lid = idx.local[0];
+            const unsigned int block_offset = idx.tile[0] * items_per_block;
 
             key_type keys[items_per_thread];
             value_type values[items_per_thread];
-            for(unsigned int i = 0; i < items_per_thread; i++)
-            {
-                keys[i] = d_key_output[thread_id * items_per_thread + i];
-                values[i] = d_value_output[thread_id * items_per_thread + i];
-            }
+            rp::block_load_direct_blocked(lid, d_key_output.data() + block_offset, keys);
+            rp::block_load_direct_blocked(lid, d_value_output.data() + block_offset, values);
 
             rp::block_radix_sort<key_type, block_size, items_per_thread, value_type> bsort;
             if(descending)
@@ -301,11 +296,8 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeysValues)
             else
                 bsort.sort(keys, values, start_bit, end_bit);
 
-            for(unsigned int i = 0; i < items_per_thread; i++)
-            {
-                d_key_output[thread_id * items_per_thread + i] = keys[i];
-                d_value_output[thread_id * items_per_thread + i] = values[i];
-            }
+            rp::block_store_direct_blocked(lid, d_key_output.data() + block_offset, keys);
+            rp::block_store_direct_blocked(lid, d_value_output.data() + block_offset, values);
         }
     );
 
