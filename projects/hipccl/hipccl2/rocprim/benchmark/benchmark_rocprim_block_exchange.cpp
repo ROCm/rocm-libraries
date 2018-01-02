@@ -76,22 +76,16 @@ struct blocked_to_striped
         const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
 
         T input[ItemsPerThread];
-        T output[ItemsPerThread];
         rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
 
         #pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
-            exchange.blocked_to_striped(input, output);
-
-            for(unsigned int i = 0; i < ItemsPerThread; i++)
-            {
-                input[i] = output[i] + 1;
-            }
+            exchange.blocked_to_striped(input, input);
         }
 
-        rp::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, output);
+        rp::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, input);
     }
 };
 
@@ -110,22 +104,16 @@ struct striped_to_blocked
         const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
 
         T input[ItemsPerThread];
-        T output[ItemsPerThread];
         rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
 
         #pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
-            exchange.striped_to_blocked(input, output);
-
-            for(unsigned int i = 0; i < ItemsPerThread; i++)
-            {
-                input[i] = output[i] + 1;
-            }
+            exchange.striped_to_blocked(input, input);
         }
 
-        rp::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, output);
+        rp::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, input);
     }
 };
 
@@ -144,22 +132,16 @@ struct blocked_to_warp_striped
         const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
 
         T input[ItemsPerThread];
-        T output[ItemsPerThread];
         rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
 
         #pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
-            exchange.blocked_to_warp_striped(input, output);
-
-            for(unsigned int i = 0; i < ItemsPerThread; i++)
-            {
-                input[i] = output[i] + 1;
-            }
+            exchange.blocked_to_warp_striped(input, input);
         }
 
-        rp::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, output);
+        rp::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, input);
     }
 };
 
@@ -178,22 +160,16 @@ struct warp_striped_to_blocked
         const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
 
         T input[ItemsPerThread];
-        T output[ItemsPerThread];
         rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
 
         #pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
-            exchange.warp_striped_to_blocked(input, output);
-
-            for(unsigned int i = 0; i < ItemsPerThread; i++)
-            {
-                input[i] = output[i] + 1;
-            }
+            exchange.warp_striped_to_blocked(input, input);
         }
 
-        rp::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, output);
+        rp::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, input);
     }
 };
 
@@ -212,7 +188,6 @@ struct scatter_to_blocked
         const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
 
         T input[ItemsPerThread];
-        T output[ItemsPerThread];
         unsigned int ranks[ItemsPerThread];
         rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
         rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, ranks);
@@ -221,16 +196,10 @@ struct scatter_to_blocked
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
-            exchange.scatter_to_blocked(input, output, ranks);
-
-            for(unsigned int i = 0; i < ItemsPerThread; i++)
-            {
-                input[i] = output[i] + 1;
-                ranks[i] = ItemsPerThread * BlockSize - 1 - ranks[i];
-            }
+            exchange.scatter_to_blocked(input, input, ranks);
         }
 
-        rp::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, output);
+        rp::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, input);
     }
 };
 
@@ -249,7 +218,6 @@ struct scatter_to_striped
         const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
 
         T input[ItemsPerThread];
-        T output[ItemsPerThread];
         unsigned int ranks[ItemsPerThread];
         rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
         rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, ranks);
@@ -258,21 +226,15 @@ struct scatter_to_striped
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
-            exchange.scatter_to_striped(input, output, ranks);
-
-            for(unsigned int i = 0; i < ItemsPerThread; i++)
-            {
-                input[i] = output[i] + 1;
-                ranks[i] = ItemsPerThread * BlockSize - 1 - ranks[i];
-            }
+            exchange.scatter_to_striped(input, input, ranks);
         }
 
-        rp::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, output);
+        rp::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, input);
     }
 };
 
 template<
-    class K,
+    class Benchmark,
     class T,
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
@@ -310,7 +272,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
         auto start = std::chrono::high_resolution_clock::now();
 
         hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(K::template kernel<T, BlockSize, ItemsPerThread, Trials>),
+            HIP_KERNEL_NAME(Benchmark::template kernel<T, BlockSize, ItemsPerThread, Trials>),
             dim3(size/items_per_block), dim3(BlockSize), 0, stream,
             d_input, d_output
         );
@@ -322,94 +284,42 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
             std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
         state.SetIterationTime(elapsed_seconds.count());
     }
-    // Measure bandwidth of reading and writing
-    state.SetBytesProcessed(state.iterations() * Trials * size * 2 * sizeof(T));
+    state.SetBytesProcessed(state.iterations() * Trials * size * sizeof(T));
     state.SetItemsProcessed(state.iterations() * Trials * size);
 
     HIP_CHECK(hipFree(d_input));
     HIP_CHECK(hipFree(d_output));
 }
 
-template<class K>
+#define CREATE_BENCHMARK(T, BS, IPT) \
+benchmark::RegisterBenchmark( \
+    (std::string("block_exchange<" #T ", " #BS ", " #IPT ">.") + name).c_str(), \
+    run_benchmark<Benchmark, T, BS, IPT>, \
+    stream, size \
+)
+
+template<class Benchmark>
 void add_benchmarks(const std::string& name,
                     std::vector<benchmark::internal::Benchmark*>& benchmarks,
                     hipStream_t stream,
                     size_t size)
 {
-    auto n = [=](const std::string& x) { return std::string("block_exchange") + x + "." + name; };
     std::vector<benchmark::internal::Benchmark*> bs =
     {
-        benchmark::RegisterBenchmark(
-            n("<int, 256, 1>").c_str(),
-            run_benchmark<K, int, 256, 1>,
-            stream, size
-        ),
-        benchmark::RegisterBenchmark(
-            n("<int, 256, 2>").c_str(),
-            run_benchmark<K, int, 256, 2>,
-            stream, size
-        ),
-        benchmark::RegisterBenchmark(
-            n("<int, 256, 3>").c_str(),
-            run_benchmark<K, int, 256, 3>,
-            stream, size
-        ),
-        benchmark::RegisterBenchmark(
-            n("<int, 256, 4>").c_str(),
-            run_benchmark<K, int, 256, 4>,
-            stream, size
-        ),
-        benchmark::RegisterBenchmark(
-            n("<int, 256, 6>").c_str(),
-            run_benchmark<K, int, 256, 6>,
-            stream, size
-        ),
-        benchmark::RegisterBenchmark(
-            n("<int, 256, 7>").c_str(),
-            run_benchmark<K, int, 256, 7>,
-            stream, size
-        ),
-        benchmark::RegisterBenchmark(
-            n("<int, 256, 8>").c_str(),
-            run_benchmark<K, int, 256, 8>,
-            stream, size
-        ),
-
-        benchmark::RegisterBenchmark(
-            n("<long long, 256, 1>").c_str(),
-            run_benchmark<K, long long, 256, 1>,
-            stream, size
-        ),
-        benchmark::RegisterBenchmark(
-            n("<long long, 256, 2>").c_str(),
-            run_benchmark<K, long long, 256, 2>,
-            stream, size
-        ),
-        benchmark::RegisterBenchmark(
-            n("<long long, 256, 3>").c_str(),
-            run_benchmark<K, long long, 256, 3>,
-            stream, size
-        ),
-        benchmark::RegisterBenchmark(
-            n("<long long, 256, 4>").c_str(),
-            run_benchmark<K, long long, 256, 4>,
-            stream, size
-        ),
-        benchmark::RegisterBenchmark(
-            n("<long long, 256, 6>").c_str(),
-            run_benchmark<K, long long, 256, 6>,
-            stream, size
-        ),
-        benchmark::RegisterBenchmark(
-            n("<long long, 256, 7>").c_str(),
-            run_benchmark<K, long long, 256, 7>,
-            stream, size
-        ),
-        benchmark::RegisterBenchmark(
-            n("<long long, 256, 8>").c_str(),
-            run_benchmark<K, long long, 256, 8>,
-            stream, size
-        ),
+        CREATE_BENCHMARK(int, 256, 1),
+        CREATE_BENCHMARK(int, 256, 2),
+        CREATE_BENCHMARK(int, 256, 3),
+        CREATE_BENCHMARK(int, 256, 4),
+        CREATE_BENCHMARK(int, 256, 6),
+        CREATE_BENCHMARK(int, 256, 7),
+        CREATE_BENCHMARK(int, 256, 8),
+        CREATE_BENCHMARK(long long, 256, 1),
+        CREATE_BENCHMARK(long long, 256, 2),
+        CREATE_BENCHMARK(long long, 256, 3),
+        CREATE_BENCHMARK(long long, 256, 4),
+        CREATE_BENCHMARK(long long, 256, 6),
+        CREATE_BENCHMARK(long long, 256, 7),
+        CREATE_BENCHMARK(long long, 256, 8),
     };
 
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());

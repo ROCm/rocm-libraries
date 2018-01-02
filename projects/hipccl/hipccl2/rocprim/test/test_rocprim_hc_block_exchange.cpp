@@ -23,6 +23,7 @@
 #include <iostream>
 #include <numeric>
 #include <vector>
+#include <tuple>
 #include <type_traits>
 
 // Google Test
@@ -66,15 +67,17 @@ struct dummy
     T x;
     T y;
 
-    dummy() [[hc]] [[cpu]]
-    { }
+    dummy() [[hc]] [[cpu]] = default;
 
     template<class U>
     dummy(U a) [[hc]] [[cpu]]
         : x(a + 1), y(a * 2)
     { }
 
-    bool operator==(const dummy &b) const { return x == b.x && y == b.y; }
+    bool operator==(const dummy& rhs) const
+    {
+        return std::tie(x, y) == std::tie(rhs.x, rhs.y);
+    }
 };
 
 typedef ::testing::Types<
