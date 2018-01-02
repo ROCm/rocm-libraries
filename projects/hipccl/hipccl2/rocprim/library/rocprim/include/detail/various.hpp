@@ -43,7 +43,7 @@ constexpr bool is_power_of_two(const T x)
     static_assert(std::is_integral<T>::value, "T must be integer type");
     return (x > 0) && ((x & (x - 1)) == 0);
 }
-    
+
 template<class T>
 constexpr T next_power_of_two(const T x, const T acc = 1)
 {
@@ -102,8 +102,15 @@ struct match_vector_type
 template<class T, unsigned int Items>
 inline constexpr bool is_vectorizable() [[hc]] [[cpu]]
 {
-    return (Items % 2 == 0) && 
+    return (Items % 2 == 0) &&
            (sizeof(T) < sizeof(typename match_vector_type<T, Items>::type));
+}
+
+// Returns the number of LDS (local data share) banks.
+constexpr unsigned int get_lds_banks_no()
+{
+    // Currently all devices supported by ROCm have 32 banks (4 bytes each)
+    return 32;
 }
 
 } // end namespace detail
