@@ -23,7 +23,6 @@
 
 // HC API
 #include <hcc/hc.hpp>
-#include <hcc/hc_short_vector.hpp>
 
 #include "../detail/config.hpp"
 #include "../detail/various.hpp"
@@ -52,15 +51,15 @@ class block_exchange
     // (all exchanges from/to blocked).
     static constexpr bool has_bank_conflicts =
         ItemsPerThread >= 2 && ::rocprim::detail::is_power_of_two(ItemsPerThread);
-    static constexpr unsigned int banks = 32;
-    static constexpr unsigned int extra_items =
-        has_bank_conflicts ? (BlockSize * ItemsPerThread / banks) : 0;
+    static constexpr unsigned int banks_no = ::rocprim::detail::get_lds_banks_no();
+    static constexpr unsigned int bank_conflicts_padding =
+        has_bank_conflicts ? (BlockSize * ItemsPerThread / banks_no) : 0;
 
 public:
 
     struct storage_type
     {
-        T buffer[BlockSize * ItemsPerThread + extra_items];
+        T buffer[BlockSize * ItemsPerThread + bank_conflicts_padding];
     };
 
     template<class U>
@@ -319,7 +318,7 @@ private:
     unsigned int index(unsigned int n) [[hc]]
     {
         // Move every 32-bank wide "row" (32 banks * 4 bytes) by one item
-        return has_bank_conflicts ? (n + n / banks) : n;
+        return has_bank_conflicts ? (n + n / banks_no) : n;
     }
 };
 
