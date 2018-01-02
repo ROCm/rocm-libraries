@@ -55,13 +55,20 @@ class block_scan_reduce_then_scan
         detail::get_min_warp_size(BlockSize, ::rocprim::warp_size());
     using warp_scan_prefix_type = ::rocprim::detail::warp_scan_shuffle<T, warp_size_>;
 
+    // Minimize LDS bank conflicts
+    static constexpr unsigned int banks_no_ = ::rocprim::detail::get_lds_banks_no();
+    static constexpr bool has_bank_conflicts_ =
+        ::rocprim::detail::is_power_of_two(thread_reduction_size_) && thread_reduction_size_ > 1;
+    static constexpr unsigned int bank_conflicts_padding =
+        has_bank_conflicts_ ? (warp_size_ * thread_reduction_size_ / banks_no_) : 0;
+
 public:
 
     struct storage_type
     {
         // volatile allows not using barrier to sync threads when
         // threads array is accessed only by threads from the same warp.
-        volatile T threads[BlockSize];
+        volatile T threads[warp_size_ * thread_reduction_size_ + bank_conflicts_padding];
     };
 
     template<class BinaryFunction>
@@ -91,7 +98,7 @@ public:
                         BinaryFunction scan_op) [[hc]]
     {
         this->inclusive_scan(input, output, storage, scan_op);
-        reduction = storage.threads[BlockSize - 1];
+        reduction = storage.threads[index(BlockSize - 1)];
     }
 
     template<class BinaryFunction>
@@ -118,7 +125,7 @@ public:
         this->include_block_prefix(
             flat_tid, warp_id,
             output /* as input */, output,
-            storage.threads[BlockSize - 1], // block reduction
+            storage.threads[index(BlockSize - 1)], // block reduction
             prefix_callback_op, storage, scan_op
         );
     }
@@ -174,7 +181,7 @@ public:
     {
         this->inclusive_scan(input, output, storage, scan_op);
         // Save reduction result
-        reduction = storage.threads[BlockSize - 1];
+        reduction = storage.threads[index(BlockSize - 1)];
     }
 
     template<unsigned int ItemsPerThread, class BinaryFunction>
@@ -218,7 +225,7 @@ public:
         // this operation overwrites storage.threads[0]
         T block_prefix = this->get_block_prefix(
             flat_tid, ::rocprim::warp_id(),
-            storage.threads[BlockSize - 1], // block reduction
+            storage.threads[index(BlockSize - 1)], // block reduction
             prefix_callback_op, storage
         );
 
@@ -268,7 +275,7 @@ public:
             flat_tid, input, output, init, storage, scan_op
         );
         // Save reduction result
-        reduction = storage.threads[BlockSize - 1];
+        reduction = storage.threads[index(BlockSize - 1)];
     }
 
     template<class BinaryFunction>
@@ -296,7 +303,7 @@ public:
             flat_tid, input, output, init, storage, scan_op
         );
         // Get reduction result
-        T reduction = storage.threads[BlockSize - 1];
+        T reduction = storage.threads[index(BlockSize - 1)];
         // Include block prefix (this operation overwrites storage.threads[0])
         this->include_block_prefix(
             flat_tid, warp_id,
@@ -364,7 +371,7 @@ public:
     {
         this->exclusive_scan(input, output, init, storage, scan_op);
         // Save reduction result
-        reduction = storage.threads[BlockSize - 1];
+        reduction = storage.threads[index(BlockSize - 1)];
     }
 
     template<unsigned int ItemsPerThread, class BinaryFunction>
@@ -411,7 +418,7 @@ public:
         // this operation overwrites storage.warp_prefixes[0]
         T block_prefix = this->get_block_prefix(
             flat_tid, ::rocprim::warp_id(),
-            storage.threads[BlockSize - 1], // block reduction
+            storage.threads[index(BlockSize - 1)], // block reduction
             prefix_callback_op, storage
         );
 
@@ -443,8 +450,8 @@ private:
     {
         // Calculate inclusive scan,
         // result for each thread is stored in storage.threads[flat_tid]
-        this->inclusive_scan_base(flat_tid, input, output, storage, scan_op);
-        output = storage.threads[flat_tid];
+        this->inclusive_scan_base(flat_tid, input, storage, scan_op);
+        output = storage.threads[index(flat_tid)];
     }
 
     // Calculates inclusive scan results and stores them in storage.threads,
@@ -452,17 +459,18 @@ private:
     template<class BinaryFunction>
     void inclusive_scan_base(const unsigned int flat_tid,
                              T input,
-                             T& output,
                              storage_type& storage,
                              BinaryFunction scan_op) [[hc]]
     {
-        storage.threads[flat_tid] = input;
+        storage.threads[index(flat_tid)] = input;
         ::rocprim::syncthreads();
-        if(flat_tid < ::rocprim::warp_size())
+        if(flat_tid < warp_size_)
         {
-            const unsigned int idx_start = flat_tid * thread_reduction_size_;
-            const unsigned int idx_end = ::rocprim::min(idx_start + thread_reduction_size_, BlockSize);
+            const unsigned int idx_start = index(flat_tid * thread_reduction_size_);
+            const unsigned int idx_end = idx_start + thread_reduction_size_;
+
             T thread_reduction = static_cast<T>(storage.threads[idx_start]);
+            #pragma unroll
             for(unsigned int i = idx_start + 1; i < idx_end; i++)
             {
                 thread_reduction = scan_op(
@@ -472,7 +480,7 @@ private:
 
             // Calculate warp prefixes
             warp_scan_prefix_type().inclusive_scan(thread_reduction, thread_reduction, scan_op);
-            thread_reduction = warp_shuffle_up(thread_reduction, 1, ::rocprim::warp_size());
+            thread_reduction = warp_shuffle_up(thread_reduction, 1, warp_size_);
 
             // Include warp prefix
             thread_reduction =
@@ -480,6 +488,7 @@ private:
                     input : scan_op(thread_reduction, static_cast<T>(storage.threads[idx_start]));
 
             storage.threads[idx_start] = thread_reduction;
+            #pragma unroll
             for(unsigned int i = idx_start + 1; i < idx_end; i++)
             {
                 thread_reduction = scan_op(
@@ -493,29 +502,29 @@ private:
 
     template<class BinaryFunction>
     void exclusive_scan_impl(const unsigned int flat_tid,
-                            T input,
-                            T& output,
-                            T init,
-                            storage_type& storage,
-                            BinaryFunction scan_op) [[hc]]
+                             T input,
+                             T& output,
+                             T init,
+                             storage_type& storage,
+                             BinaryFunction scan_op) [[hc]]
     {
         // Calculates inclusive scan, result for each thread is stored in storage.threads[flat_tid]
-        this->inclusive_scan_base(flat_tid, input, output, storage, scan_op);
-        output = flat_tid == 0 ? init : scan_op(init, static_cast<T>(storage.threads[flat_tid-1]));
+        this->inclusive_scan_base(flat_tid, input, storage, scan_op);
+        output = flat_tid == 0 ? init : scan_op(init, static_cast<T>(storage.threads[index(flat_tid-1)]));
     }
 
     template<class BinaryFunction>
     void exclusive_scan_impl(const unsigned int flat_tid,
-                            T input,
-                            T& output,
-                            storage_type& storage,
-                            BinaryFunction scan_op) [[hc]]
+                             T input,
+                             T& output,
+                             storage_type& storage,
+                             BinaryFunction scan_op) [[hc]]
     {
         // Calculates inclusive scan, result for each thread is stored in storage.threads[flat_tid]
-        this->inclusive_scan_base(flat_tid, input, output, storage, scan_op);
+        this->inclusive_scan_base(flat_tid, input, storage, scan_op);
         if(flat_tid > 0)
         {
-            output = storage.threads[flat_tid-1];
+            output = storage.threads[index(flat_tid-1)];
         }
     }
 
@@ -557,6 +566,13 @@ private:
         }
         ::rocprim::syncthreads();
         return storage.threads[0];
+    }
+
+    // Change index to minimize LDS bank conflicts if necessary
+    unsigned int index(unsigned int n) const [[hc]]
+    {
+        // Move every 32-bank wide "row" (32 banks * 4 bytes) by one item
+        return has_bank_conflicts_ ? (n + (n/banks_no_)) : n;
     }
 };
 
