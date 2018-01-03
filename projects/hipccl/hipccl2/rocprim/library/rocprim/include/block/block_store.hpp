@@ -32,331 +32,250 @@
 #include "../functional.hpp"
 #include "../types.hpp"
 
-BEGIN_ROCPRIM_NAMESPACE
+#include "block_store_func.hpp"
 
 /// \addtogroup collectiveblockmodule
 /// @{
 
-/// \brief Stores a blocked arrangement of items from across the thread block
-/// into a blocked arrangement on continuous memory.
-///
-/// The block arrangement is assumed to be (block-threads * \p ItemsPerThread) items
-/// across a thread block. Each thread uses a \p flat_id to store a range of
-/// \p ItemsPerThread \p items to the thread block.
-///
-/// \tparam IteratorT - [inferred] an iterator type for input (can be a simple
-/// pointer
-/// \tparam T - [inferred] the data type
-/// \tparam ItemsPerThread - [inferred] the number of items to be processed by
-/// each thread
-///
-/// \param flat_id - a local flat 1D thread id in a block (tile) for the calling thread
-/// \param block_output - the input iterator from the thread block to store to
-/// \param items - array that data is stored to thread block
-template<
-    class IteratorT,
-    class T,
-    unsigned int ItemsPerThread
->
-void block_store_direct_blocked(unsigned int flat_id,
-                                IteratorT block_output,
-                                T (&items)[ItemsPerThread]) [[hc]]
+BEGIN_ROCPRIM_NAMESPACE
+
+enum block_store_method
 {
-    unsigned int offset = flat_id * ItemsPerThread;
-    IteratorT thread_iter = block_output + offset;
-    #pragma unroll
-    for (unsigned int item = 0; item < ItemsPerThread; item++)
-    {
-        thread_iter[item] = items[item];
-    }
-}
-
-/// \brief Stores a blocked arrangement of items from across the thread block
-/// into a blocked arrangement on continuous memory, which is guarded by range \p valid.
-///
-/// The block arrangement is assumed to be (block-threads * \p ItemsPerThread) items
-/// across a thread block. Each thread uses a \p flat_id to store a range of
-/// \p ItemsPerThread \p items to the thread block.
-///
-/// \tparam IteratorT - [inferred] an iterator type for input (can be a simple
-/// pointer
-/// \tparam T - [inferred] the data type
-/// \tparam ItemsPerThread - [inferred] the number of items to be processed by
-/// each thread
-///
-/// \param flat_id - a local flat 1D thread id in a block (tile) for the calling thread
-/// \param block_output - the input iterator from the thread block to store to
-/// \param items - array that data is stored to thread block
-/// \param valid - maximum range of valid numbers to store
-template<
-    class IteratorT,
-    class T,
-    unsigned int ItemsPerThread
->
-void block_store_direct_blocked(unsigned int flat_id,
-                                IteratorT block_output,
-                                T (&items)[ItemsPerThread],
-                                unsigned int valid) [[hc]]
-{
-    unsigned int offset = flat_id * ItemsPerThread;
-    IteratorT thread_iter = block_output + offset;
-    #pragma unroll
-    for (unsigned int item = 0; item < ItemsPerThread; item++)
-    {
-        if (item + offset < valid)
-        {
-            thread_iter[item] = items[item];
-        }
-    }
-}
-
-/// \brief Stores a blocked arrangement of items from across the thread block
-/// into a blocked arrangement on continuous memory.
-///
-/// The block arrangement is assumed to be (block-threads * \p ItemsPerThread) items
-/// across a thread block. Each thread uses a \p flat_id to store a range of
-/// \p ItemsPerThread \p items to the thread block.
-///
-/// The input offset (\p block_output + offset) must be quad-item aligned.
-///
-/// The following conditions will prevent vectorization and switch to default
-/// block_load_direct_blocked:
-/// * \p ItemsPerThread is odd.
-/// * The datatype \p T is not a primitive or a HC/HIP vector type (e.g. int2,
-/// int4, etc.
-///
-/// \tparam T - [inferred] the output data type
-/// \tparam U - [inferred] the input data type
-/// \tparam ItemsPerThread - [inferred] the number of items to be processed by
-/// each thread
-///
-/// The type \p U must be such that it can be implicitly converted to \p T.
-///
-/// \param flat_id - a local flat 1D thread id in a block (tile) for the calling thread
-/// \param block_output - the input iterator from the thread block to load from
-/// \param items - array that data is loaded to
-template<
-    class T,
-    class U,
-    unsigned int ItemsPerThread
->
-typename std::enable_if<detail::is_vectorizable<T, ItemsPerThread>()>::type
-block_store_direct_blocked_vectorized(unsigned int flat_id,
-                                      T* block_output,
-                                      U (&items)[ItemsPerThread]) [[hc]]
-{
-    typedef typename detail::match_vector_type<T, ItemsPerThread>::type vector_type;
-    constexpr unsigned int vectors_per_thread = (sizeof(T) * ItemsPerThread) / sizeof(vector_type);
-    vector_type *vectors_ptr = reinterpret_cast<vector_type*>(const_cast<T*>(block_output));
-
-    vector_type raw_vector_items[vectors_per_thread];
-    T *raw_items = reinterpret_cast<T*>(raw_vector_items);
-
-    #pragma unroll
-    for (unsigned int item = 0; item < ItemsPerThread; item++)
-    {
-        raw_items[item] = items[item];
-    }
-
-    block_store_direct_blocked(flat_id, vectors_ptr, raw_vector_items);
-}
+    block_store_direct,
+    block_store_vectorize,
+    block_store_transpose,
+    block_store_warp_transpose
+};
 
 template<
     class T,
-    class U,
-    unsigned int ItemsPerThread
->
-typename std::enable_if<!detail::is_vectorizable<T, ItemsPerThread>()>::type
-block_store_direct_blocked_vectorized(unsigned int flat_id,
-                                      T* block_output,
-                                      U (&items)[ItemsPerThread]) [[hc]]
-{
-    block_store_direct_blocked(flat_id, block_output, items);
-}
-
-/// \brief Stores a striped arrangement of items from across the thread block
-/// into a blocked arrangement on continuous memory.
-///
-/// The striped arrangement is assumed to be (\p BlockSize * \p ItemsPerThread) items
-/// across a thread block. Each thread uses a \p flat_id to store a range of
-/// \p ItemsPerThread \p items to the thread block.
-///
-/// \tparam BlockSize - the number of threads in a block
-/// \tparam IteratorT - [inferred] an iterator type for input (can be a simple
-/// pointer
-/// \tparam T - [inferred] the data type
-/// \tparam ItemsPerThread - [inferred] the number of items to be processed by
-/// each thread
-///
-/// \param flat_id - a local flat 1D thread id in a block (tile) for the calling thread
-/// \param block_output - the input iterator from the thread block to store to
-/// \param items - array that data is stored to thread block
-template<
     unsigned int BlockSize,
-    class IteratorT,
-    class T,
-    unsigned int ItemsPerThread
+    unsigned int ItemsPerThread,
+    block_store_method Method = block_store_direct
 >
-void block_store_direct_striped(unsigned int flat_id,
-                                IteratorT block_output,
-                                T (&items)[ItemsPerThread]) [[hc]]
+class block_store
 {
-    IteratorT thread_iter = block_output + flat_id;
-    #pragma unroll
-    for (unsigned int item = 0; item < ItemsPerThread; item++)
-    {
-         thread_iter[item * BlockSize] = items[item];
-    }
-}
+public:
+    typedef typename detail::empty_type storage_type;
 
-/// \brief Stores a striped arrangement of items from across the thread block
-/// into a blocked arrangement on continuous memory, which is guarded by range \p valid.
-///
-/// The striped arrangement is assumed to be (\p BlockSize * \p ItemsPerThread) items
-/// across a thread block. Each thread uses a \p flat_id to store a range of
-/// \p ItemsPerThread \p items to the thread block.
-///
-/// \tparam BlockSize - the number of threads in a block
-/// \tparam IteratorT - [inferred] an iterator type for input (can be a simple
-/// pointer
-/// \tparam T - [inferred] the data type
-/// \tparam ItemsPerThread - [inferred] the number of items to be processed by
-/// each thread
-///
-/// \param flat_id - a local flat 1D thread id in a block (tile) for the calling thread
-/// \param block_output - the input iterator from the thread block to store to
-/// \param items - array that data is stored to thread block
-/// \param valid - maximum range of valid numbers to store
+    template<class IteratorT>
+    void store(IteratorT block_output,
+               T (&items)[ItemsPerThread]) [[hc]]
+    {
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        block_store_direct_blocked(flat_id, block_output, items);
+    }
+
+    template<class IteratorT>
+    void store(IteratorT block_output,
+               T (&items)[ItemsPerThread],
+               unsigned int valid) [[hc]]
+    {
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        block_store_direct_blocked(flat_id, block_output, items, valid);
+    }
+
+    template<class IteratorT>
+    void store(IteratorT block_output,
+               T (&items)[ItemsPerThread],
+               storage_type& storage) [[hc]]
+    {
+        (void) storage;
+        store(block_output, items);
+    }
+
+    template<class IteratorT>
+    void store(IteratorT block_output,
+               T (&items)[ItemsPerThread],
+               unsigned int valid,
+               storage_type& storage) [[hc]]
+    {
+        (void) storage;
+        store(block_output, items, valid);
+    }
+};
+
 template<
+    class T,
     unsigned int BlockSize,
-    class IteratorT,
-    class T,
     unsigned int ItemsPerThread
 >
-void block_store_direct_striped(unsigned int flat_id,
-                                IteratorT block_output,
-                                T (&items)[ItemsPerThread],
-                                unsigned int valid) [[hc]]
+class block_store<T, BlockSize, ItemsPerThread, block_store_vectorize>
 {
-    IteratorT thread_iter = block_output + flat_id;
-    #pragma unroll
-    for (unsigned int item = 0; item < ItemsPerThread; item++)
-    {
-        unsigned int offset = item * BlockSize;
-        if (flat_id + offset < valid)
-        {
-             thread_iter[offset] = items[item];
-        }
-    }
-}
+public:
+    typedef typename detail::empty_type storage_type;
 
-/// \brief Stores a warp-striped arrangement of items from across the thread block
-/// into a blocked arrangement on continuous memory.
-///
-/// The warp-striped arrangement is assumed to be (\p WarpSize * \p ItemsPerThread) items
-/// across a thread block. Each thread uses a \p flat_id to store a range of
-/// \p ItemsPerThread \p items to the thread block.
-///
-/// * The number of threads in the block must be a multiple of \p WarpSize.
-/// * The default \p WarpSize is a hardware warpsize and is an optimal value.
-/// * \p WarpSize must be a power of two and equal or less than the size of
-///   hardware warp.
-/// * Using \p WarpSize smaller than hardware warpsize could result in lower
-///   performance.
-///
-/// \tparam WarpSize - [optional] the number of threads in a warp
-/// \tparam IteratorT - [inferred] an iterator type for input (can be a simple
-/// pointer
-/// \tparam T - [inferred] the data type
-/// \tparam ItemsPerThread - [inferred] the number of items to be processed by
-/// each thread
-///
-/// \param flat_id - a local flat 1D thread id in a block (tile) for the calling thread
-/// \param block_output - the input iterator from the thread block to store to
-/// \param items - array that data is stored to thread block
+    template<class U>
+    void store(T* block_output,
+               U (&items)[ItemsPerThread]) [[hc]]
+    {
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        block_store_direct_blocked_vectorized(flat_id, block_output, items);
+    }
+
+    template<class IteratorT>
+    void store(IteratorT block_output,
+               T (&items)[ItemsPerThread]) [[hc]]
+    {
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        block_store_direct_blocked(flat_id, block_output, items);
+    }
+
+    template<class IteratorT>
+    void store(IteratorT block_output,
+               T (&items)[ItemsPerThread],
+               unsigned int valid) [[hc]]
+    {
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        block_store_direct_blocked(flat_id, block_output, items, valid);
+    }
+
+    template<class U>
+    void store(T* block_output,
+               U (&items)[ItemsPerThread],
+               storage_type& storage) [[hc]]
+    {
+        (void) storage;
+        store(block_output, items);
+    }
+
+    template<class IteratorT>
+    void store(IteratorT block_output,
+               T (&items)[ItemsPerThread],
+               storage_type& storage) [[hc]]
+    {
+        (void) storage;
+        store(block_output, items);
+    }
+
+    template<class IteratorT>
+    void store(IteratorT block_output,
+               T (&items)[ItemsPerThread],
+               unsigned int valid,
+               storage_type& storage) [[hc]]
+    {
+        (void) storage;
+        store(block_output, items, valid);
+    }
+};
+
 template<
-    unsigned int WarpSize = warp_size(),
-    class IteratorT,
     class T,
+    unsigned int BlockSize,
     unsigned int ItemsPerThread
 >
-void block_store_direct_warp_striped(unsigned int flat_id,
-                                     IteratorT block_output,
-                                     T (&items)[ItemsPerThread]) [[hc]]
+class block_store<T, BlockSize, ItemsPerThread, block_store_transpose>
 {
-    static_assert(detail::is_power_of_two(WarpSize) && WarpSize <= warp_size(),
-                 "WarpSize must be a power of two and equal or less"
-                 "than the size of hardware warp.");
-    unsigned int thread_id = detail::logical_lane_id<WarpSize>();
-    unsigned int warp_id = flat_id / WarpSize;
-    unsigned int warp_offset = warp_id * WarpSize * ItemsPerThread;
+public:
+    block_exchange<T, BlockSize, ItemsPerThread> exchange;
 
-    IteratorT thread_iter = block_output + thread_id + warp_offset;
-    #pragma unroll
-    for (unsigned int item = 0; item < ItemsPerThread; item++)
+    struct storage_type
     {
-        thread_iter[item * WarpSize] = items[item];
-    }
-}
+        volatile int valid;
+    };
 
-/// \brief Stores a warp-striped arrangement of items from across the thread block
-/// into a blocked arrangement on continuous memory, which is guarded by range \p valid.
-///
-/// The warp-striped arrangement is assumed to be (\p WarpSize * \p ItemsPerThread) items
-/// across a thread block. Each thread uses a \p flat_id to store a range of
-/// \p ItemsPerThread \p items to the thread block.
-///
-/// * The number of threads in the block must be a multiple of \p WarpSize.
-/// * The default \p WarpSize is a hardware warpsize and is an optimal value.
-/// * \p WarpSize must be a power of two and equal or less than the size of
-///   hardware warp.
-/// * Using \p WarpSize smaller than hardware warpsize could result in lower
-///   performance.
-///
-/// \tparam WarpSize - [optional] the number of threads in a warp
-/// \tparam IteratorT - [inferred] an iterator type for input (can be a simple
-/// pointer
-/// \tparam T - [inferred] the data type
-/// \tparam ItemsPerThread - [inferred] the number of items to be processed by
-/// each thread
-///
-/// \param flat_id - a local flat 1D thread id in a block (tile) for the calling thread
-/// \param block_output - the input iterator from the thread block to store to
-/// \param items - array that data is stored to thread block
-/// \param valid - maximum range of valid numbers to store
+    template<class IteratorT>
+    void store(IteratorT block_output,
+               T (&items)[ItemsPerThread]) [[hc]]
+    {
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        exchange.blocked_to_striped(items, items);
+        block_store_direct_striped<BlockSize>(flat_id, block_output, items);
+    }
+
+    template<class IteratorT>
+    void store(IteratorT block_output,
+               T (&items)[ItemsPerThread],
+               unsigned int valid) [[hc]]
+    {
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        exchange.blocked_to_striped(items, items);
+        block_store_direct_striped<BlockSize>(flat_id, block_output, items, valid);
+    }
+
+    template<class IteratorT>
+    void store(IteratorT block_output,
+               T (&items)[ItemsPerThread],
+               storage_type& storage) [[hc]]
+    {
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        exchange.blocked_to_striped(items, items, storage);
+        block_store_direct_striped<BlockSize>(flat_id, block_output, items);
+    }
+
+    template<class IteratorT>
+    void store(IteratorT block_output,
+               T (&items)[ItemsPerThread],
+               unsigned int valid,
+               storage_type& storage) [[hc]]
+    {
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        exchange.blocked_to_striped(items, items, storage);
+        block_store_direct_striped<BlockSize>(flat_id, block_output, items, valid);
+    }
+};
+
 template<
-    unsigned int WarpSize = warp_size(),
-    class IteratorT,
     class T,
+    unsigned int BlockSize,
     unsigned int ItemsPerThread
 >
-void block_store_direct_warp_striped(unsigned int flat_id,
-                                     IteratorT block_output,
-                                     T (&items)[ItemsPerThread],
-                                     unsigned int valid) [[hc]]
+class block_store<T, BlockSize, ItemsPerThread, block_store_warp_transpose>
 {
-    static_assert(detail::is_power_of_two(WarpSize) && WarpSize <= warp_size(),
-                 "WarpSize must be a power of two and equal or less"
-                 "than the size of hardware warp.");
-    unsigned int thread_id = detail::logical_lane_id<WarpSize>();
-    unsigned int warp_id = flat_id / WarpSize;
-    unsigned int warp_offset = warp_id * WarpSize * ItemsPerThread;
+public:
+    static_assert(BlockSize % warp_size() == 0,
+                 "BlockSize must be a multiple of hardware warpsize");
+    block_exchange<T, BlockSize, ItemsPerThread> exchange;
 
-    IteratorT thread_iter = block_output + thread_id + warp_offset;
-    #pragma unroll
-    for (unsigned int item = 0; item < ItemsPerThread; item++)
+    struct storage_type
     {
-        unsigned int offset = item * WarpSize;
-        if (warp_offset + thread_id + offset < valid)
-        {
-            thread_iter[offset] = items[item];
-        }
+        volatile int valid;
+    };
+
+    template<class IteratorT>
+    void store(IteratorT block_output,
+               T (&items)[ItemsPerThread]) [[hc]]
+    {
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        exchange.blocked_to_warp_striped(items, items);
+        block_store_direct_warp_striped(flat_id, block_output, items);
     }
-}
+
+    template<class IteratorT>
+    void store(IteratorT block_output,
+               T (&items)[ItemsPerThread],
+               unsigned int valid) [[hc]]
+    {
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        exchange.blocked_to_warp_striped(items, items);
+        block_store_direct_warp_striped(flat_id, block_output, items, valid);
+    }
+
+    template<class IteratorT>
+    void store(IteratorT block_output,
+               T (&items)[ItemsPerThread],
+               storage_type& storage) [[hc]]
+    {
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        exchange.blocked_to_warp_striped(items, items, storage);
+        block_store_direct_warp_striped(flat_id, block_output, items);
+    }
+
+    template<class IteratorT>
+    void store(IteratorT block_output,
+               T (&items)[ItemsPerThread],
+               unsigned int valid,
+               storage_type& storage) [[hc]]
+    {
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        exchange.blocked_to_warp_striped(items, items, storage);
+        block_store_direct_warp_striped(flat_id, block_output, items, valid);
+    }
+};
+
+END_ROCPRIM_NAMESPACE
 
 /// @}
 // end of group collectiveblockmodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_BLOCK_BLOCK_STORE_HPP_

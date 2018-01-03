@@ -35,10 +35,10 @@
 #include "block_load_func.hpp"
 #include "block_exchange.hpp"
 
-BEGIN_ROCPRIM_NAMESPACE
-
 /// \addtogroup collectiveblockmodule
 /// @{
+
+BEGIN_ROCPRIM_NAMESPACE
 
 enum block_load_method
 {
@@ -56,6 +56,7 @@ template<
 >
 class block_load
 {
+public:
     typedef typename detail::empty_type storage_type;
 
     template<class IteratorT>
