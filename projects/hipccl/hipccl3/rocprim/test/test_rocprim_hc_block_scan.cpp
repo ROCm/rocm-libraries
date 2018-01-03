@@ -38,11 +38,13 @@ namespace rp = rocprim;
 template<
     class T,
     unsigned int BlockSize = 256U,
-    unsigned int ItemsPerThread = 1U
+    unsigned int ItemsPerThread = 1U,
+    rocprim::block_scan_algorithm Algorithm = rocprim::block_scan_algorithm::using_warp_scan
 >
 struct params
 {
     using type = T;
+    static constexpr rocprim::block_scan_algorithm algorithm = Algorithm;
     static constexpr unsigned int block_size = BlockSize;
     static constexpr unsigned int items_per_thread = ItemsPerThread;
 };
@@ -56,10 +58,14 @@ class RocprimBlockScanSingleValueTests : public ::testing::Test
 {
 public:
     using type = typename Params::type;
+    static constexpr rocprim::block_scan_algorithm algorithm = Params::algorithm;
     static constexpr unsigned int block_size = Params::block_size;
 };
 
 typedef ::testing::Types<
+    // -----------------------------------------------------------------------
+    // rocprim::block_scan_algorithm::using_warp_scan
+    // -----------------------------------------------------------------------
     params<int, 64U>,
     params<int, 128U>,
     params<int, 256U>,
@@ -76,7 +82,21 @@ typedef ::testing::Types<
     // long tests
     params<long, 64U>,
     params<long, 256U>,
-    params<long, 377U>
+    params<long, 377U>,
+    // -----------------------------------------------------------------------
+    // rocprim::block_scan_algorithm::reduce_then_scan
+    // -----------------------------------------------------------------------
+    params<int, 64U, 1, rocprim::block_scan_algorithm::reduce_then_scan>,
+    params<int, 128U, 1, rocprim::block_scan_algorithm::reduce_then_scan>,
+    params<int, 256U, 1, rocprim::block_scan_algorithm::reduce_then_scan>,
+    params<int, 512U, 1, rocprim::block_scan_algorithm::reduce_then_scan>,
+    params<int, 1024U, 1, rocprim::block_scan_algorithm::reduce_then_scan>,
+    params<unsigned long, 65U, 1, rocprim::block_scan_algorithm::reduce_then_scan>,
+    params<long, 37U, 1, rocprim::block_scan_algorithm::reduce_then_scan>,
+    params<short, 162U, 1, rocprim::block_scan_algorithm::reduce_then_scan>,
+    params<unsigned int, 255U, 1, rocprim::block_scan_algorithm::reduce_then_scan>,
+    params<int, 377U, 1, rocprim::block_scan_algorithm::reduce_then_scan>,
+    params<unsigned char, 377U, 1, rocprim::block_scan_algorithm::reduce_then_scan>
 > SingleValueTestParams;
 
 TYPED_TEST_CASE(RocprimBlockScanSingleValueTests, SingleValueTestParams);
@@ -84,6 +104,7 @@ TYPED_TEST_CASE(RocprimBlockScanSingleValueTests, SingleValueTestParams);
 TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScan)
 {
     using T = typename TestFixture::type;
+    constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;
 
     hc::accelerator acc;
@@ -115,7 +136,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScan)
         [=](hc::tiled_index<1> i) [[hc]]
         {
             T value = d_output[i];
-            rp::block_scan<T, block_size> bscan;
+            rp::block_scan<T, block_size, algorithm> bscan;
             bscan.inclusive_scan(value, value);
             d_output[i] = value;
         }
@@ -131,6 +152,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScan)
 TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanReduce)
 {
     using T = typename TestFixture::type;
+    constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;
 
     hc::accelerator acc;
@@ -169,7 +191,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanReduce)
         {
             T value = d_output[i];
             T reduction;
-            rp::block_scan<T, block_size> bscan;
+            rp::block_scan<T, block_size, algorithm> bscan;
             bscan.inclusive_scan(value, value, reduction);
             d_output[i] = value;
             if(i.local[0] == 0)
@@ -195,6 +217,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanReduce)
 TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanPrefixCallback)
 {
     using T = typename TestFixture::type;
+    constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;
 
     hc::accelerator acc;
@@ -243,7 +266,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanPrefixCallback)
 
             T value = d_output[i];
 
-            using bscan_t = rp::block_scan<T, block_size>;
+            using bscan_t = rp::block_scan<T, block_size, algorithm>;
             tile_static typename bscan_t::storage_type storage;
             bscan_t().inclusive_scan(value, value, prefix_callback, storage);
 
@@ -271,6 +294,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanPrefixCallback)
 TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScan)
 {
     using T = typename TestFixture::type;
+    constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;
 
     hc::accelerator acc;
@@ -282,7 +306,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScan)
 
     const size_t size = block_size * 113;
     // Generate data
-    std::vector<T> output = get_random_data<T>(size, 2, 200);
+    std::vector<T> output = get_random_data<T>(size, 2, 241);
     const T init = get_random_value<T>(0, 100);
 
     // Calulcate expected results on host
@@ -304,7 +328,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScan)
         [=](hc::tiled_index<1> i) [[hc]]
         {
             T value = d_output[i];
-            rp::block_scan<T, block_size> bscan;
+            rp::block_scan<T, block_size, algorithm> bscan;
             bscan.exclusive_scan(value, value, init);
             d_output[i] = value;
         }
@@ -320,6 +344,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScan)
 TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanReduce)
 {
     using T = typename TestFixture::type;
+    constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;
 
     hc::accelerator acc;
@@ -367,7 +392,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanReduce)
         {
             T value = d_output[i];
             T reduction;
-            rp::block_scan<T, block_size> bscan;
+            rp::block_scan<T, block_size, algorithm> bscan;
             bscan.exclusive_scan(value, value, init, reduction);
             d_output[i] = value;
             if(i.local[0] == 0)
@@ -393,6 +418,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanReduce)
 TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanPrefixCallback)
 {
     using T = typename TestFixture::type;
+    constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;
 
     hc::accelerator acc;
@@ -449,7 +475,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanPrefixCallback)
 
             T value = d_output[i];
 
-            using bscan_t = rp::block_scan<T, block_size>;
+            using bscan_t = rp::block_scan<T, block_size, algorithm>;
             tile_static typename bscan_t::storage_type storage;
             bscan_t().exclusive_scan(value, value, init, prefix_callback, storage);
 
@@ -484,19 +510,35 @@ class RocprimBlockScanInputArrayTests : public ::testing::Test
 public:
     using type = typename Params::type;
     static constexpr unsigned int block_size = Params::block_size;
+    static constexpr rocprim::block_scan_algorithm algorithm = Params::algorithm;
     static constexpr unsigned int items_per_thread = Params::items_per_thread;
 };
 
 typedef ::testing::Types<
-    params<float, 64U, 32>,
-    params<float, 32U, 2U>,
-    params<float, 256U, 3>,
-    params<float, 512U, 4>,
-    params<float, 1024U, 1>,
-    params<float, 37U, 2>,
-    params<float, 65U, 5>,
-    params<float, 162U, 7>,
-    params<float, 255U, 15>
+    // -----------------------------------------------------------------------
+    // rocprim::block_scan_algorithm::using_warp_scan
+    // -----------------------------------------------------------------------
+    params<float, 6U,   32>,
+    params<float, 32,   2>,
+    params<float, 256,  3>,
+    params<float, 512,  4>,
+    params<float, 1024, 1>,
+    params<float, 37,   2>,
+    params<float, 65,   5>,
+    params<float, 162,  7>,
+    params<float, 255,  15>,
+    // -----------------------------------------------------------------------
+    // rocprim::block_scan_algorithm::reduce_then_scan
+    // -----------------------------------------------------------------------
+    params<float, 6U,   32, rocprim::block_scan_algorithm::reduce_then_scan>,
+    params<float, 32,   2,  rocprim::block_scan_algorithm::reduce_then_scan>,
+    params<float, 256,  3,  rocprim::block_scan_algorithm::reduce_then_scan>,
+    params<float, 512,  4,  rocprim::block_scan_algorithm::reduce_then_scan>,
+    params<float, 1024, 1,  rocprim::block_scan_algorithm::reduce_then_scan>,
+    params<float, 37,   2,  rocprim::block_scan_algorithm::reduce_then_scan>,
+    params<float, 65,   5,  rocprim::block_scan_algorithm::reduce_then_scan>,
+    params<float, 162,  7,  rocprim::block_scan_algorithm::reduce_then_scan>,
+    params<float, 255,  15, rocprim::block_scan_algorithm::reduce_then_scan>
 > InputArrayTestParams;
 
 TYPED_TEST_CASE(RocprimBlockScanInputArrayTests, InputArrayTestParams);
@@ -504,6 +546,7 @@ TYPED_TEST_CASE(RocprimBlockScanInputArrayTests, InputArrayTestParams);
 TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScan)
 {
     using T = typename TestFixture::type;
+    constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;
     constexpr size_t items_per_thread = TestFixture::items_per_thread;
 
@@ -547,7 +590,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScan)
                 in_out[j] = d_output[idx + j];
             }
 
-            rp::block_scan<T, block_size> bscan;
+            rp::block_scan<T, block_size, algorithm> bscan;
             bscan.inclusive_scan(in_out, in_out);
 
             // store
@@ -571,6 +614,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScan)
 TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScanReduce)
 {
     using T = typename TestFixture::type;
+    constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;
     constexpr size_t items_per_thread = TestFixture::items_per_thread;
 
@@ -622,7 +666,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScanReduce)
                 in_out[j] = d_output[idx + j];
             }
 
-            rp::block_scan<T, block_size> bscan;
+            rp::block_scan<T, block_size, algorithm> bscan;
             T reduction;
             bscan.inclusive_scan(in_out, in_out, reduction);
 
@@ -660,6 +704,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScanReduce)
 TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScanPrefixCallback)
 {
     using T = typename TestFixture::type;
+    constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;
     constexpr size_t items_per_thread = TestFixture::items_per_thread;
 
@@ -719,7 +764,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScanPrefixCallback)
                 in_out[j] = d_output[idx + j];
             }
 
-            using bscan_t = rp::block_scan<T, block_size>;
+            using bscan_t = rp::block_scan<T, block_size, algorithm>;
             tile_static typename bscan_t::storage_type storage;
             bscan_t().inclusive_scan(in_out, in_out, prefix_callback, storage);
 
@@ -757,6 +802,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScanPrefixCallback)
 TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScan)
 {
     using T = typename TestFixture::type;
+    constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;
     constexpr size_t items_per_thread = TestFixture::items_per_thread;
 
@@ -802,7 +848,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScan)
                 in_out[j] = d_output[idx + j];
             }
 
-            rp::block_scan<T, block_size> bscan;
+            rp::block_scan<T, block_size, algorithm> bscan;
             bscan.exclusive_scan(in_out, in_out, init);
 
             // store
@@ -826,6 +872,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScan)
 TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScanReduce)
 {
     using T = typename TestFixture::type;
+    constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;
     constexpr size_t items_per_thread = TestFixture::items_per_thread;
 
@@ -882,7 +929,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScanReduce)
                 in_out[j] = d_output[idx + j];
             }
 
-            rp::block_scan<T, block_size> bscan;
+            rp::block_scan<T, block_size, algorithm> bscan;
             T reduction;
             bscan.exclusive_scan(in_out, in_out, init, reduction);
 
@@ -920,6 +967,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScanReduce)
 TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScanPrefixCallback)
 {
     using T = typename TestFixture::type;
+    constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;
     constexpr size_t items_per_thread = TestFixture::items_per_thread;
 
@@ -980,7 +1028,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScanPrefixCallback)
                 in_out[j] = d_output[idx + j];
             }
 
-            using bscan_t = rp::block_scan<T, block_size>;
+            using bscan_t = rp::block_scan<T, block_size, algorithm>;
             tile_static typename bscan_t::storage_type storage;
             bscan_t().exclusive_scan(in_out, in_out, init, prefix_callback, storage);
 
