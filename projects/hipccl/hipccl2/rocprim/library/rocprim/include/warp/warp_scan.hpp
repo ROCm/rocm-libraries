@@ -194,7 +194,7 @@ public:
     ///         value, // input
     ///         value, // output
     ///         temp[logical_warp_id],
-    ///         rocprim::min<float>()
+    ///         rocprim::minimum<float>()
     ///     );
     ///     ...
     /// }
@@ -219,7 +219,7 @@ public:
     ///             value, // input
     ///             value, // output
     ///             temp[logical_warp_id],
-    ///             rocprim::min<float>()
+    ///             rocprim::minimum<float>()
     ///         );
     ///         ...
     ///     }
@@ -368,7 +368,7 @@ public:
     ///         value, // output
     ///         100.0f, // init
     ///         temp[logical_warp_id],
-    ///         rocprim::min<float>()
+    ///         rocprim::minimum<float>()
     ///     );
     ///     ...
     /// }
@@ -394,7 +394,7 @@ public:
     ///             value, // output
     ///             100.0f, // init
     ///             temp[logical_warp_id],
-    ///             rocprim::min<float>()
+    ///             rocprim::minimum<float>()
     ///         );
     ///         ...
     ///     }
@@ -555,7 +555,7 @@ public:
     ///         ex_output,
     ///         100.0f, // init
     ///         temp[logical_warp_id],
-    ///         rocprim::min<float>()
+    ///         rocprim::minimum<float>()
     ///     );
     ///     ...
     /// }
@@ -583,7 +583,7 @@ public:
     ///             ex_output,
     ///             100.0f, // init
     ///             temp[logical_warp_id],
-    ///             rocprim::min<float>()
+    ///             rocprim::minimum<float>()
     ///         );
     ///         ...
     ///     }
