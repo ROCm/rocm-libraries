@@ -131,12 +131,12 @@ public:
         const auto warp_id = ::rocprim::warp_id();
         this->inclusive_scan_impl(flat_tid, input, output, storage, scan_op);
         // Include block prefix (this operation overwrites storage.warp_prefixes[0])
-        this->include_block_prefix(
+        T block_prefix = this->get_block_prefix(
             flat_tid, warp_id,
-            output /* as input */, output,
             storage.warp_prefixes[warps_no_ - 1], // block reduction
-            prefix_callback_op, storage, scan_op
+            prefix_callback_op, storage
         );
+        output = scan_op(block_prefix, output);
     }
 
     template<unsigned int ItemsPerThread, class BinaryFunction>
@@ -306,7 +306,6 @@ public:
     template<class PrefixCallback, class BinaryFunction>
     void exclusive_scan(T input,
                         T& output,
-                        T init,
                         PrefixCallback& prefix_callback_op,
                         storage_type& storage,
                         BinaryFunction scan_op) [[hc]]
@@ -314,15 +313,15 @@ public:
         const auto flat_tid = ::rocprim::flat_block_thread_id();
         const auto warp_id = ::rocprim::warp_id();
         this->exclusive_scan_impl(
-            flat_tid, input, output, init, storage, scan_op
+            flat_tid, input, output, storage, scan_op
         );
         // Include block prefix (this operation overwrites storage.warp_prefixes[0])
-        this->include_block_prefix(
+        T block_prefix = this->get_block_prefix(
             flat_tid, warp_id,
-            output /* as input */, output,
             storage.warp_prefixes[warps_no_ - 1], // block reduction
-            prefix_callback_op, storage, scan_op
+            prefix_callback_op, storage
         );
+        output = flat_tid == 0 ? block_prefix : scan_op(block_prefix, output);
     }
 
     template<unsigned int ItemsPerThread, class BinaryFunction>
@@ -358,7 +357,7 @@ public:
         for(unsigned int i = 1; i < ItemsPerThread; i++)
         {
             exclusive = scan_op(exclusive, prev);
-            prev = output[i];
+            prev = input[i];
             output[i] = exclusive;
         }
     }
@@ -404,7 +403,6 @@ public:
     >
     void exclusive_scan(T (&input)[ItemsPerThread],
                         T (&output)[ItemsPerThread],
-                        T init,
                         PrefixCallback& prefix_callback_op,
                         storage_type& storage,
                         BinaryFunction scan_op) [[hc]]
@@ -422,7 +420,6 @@ public:
         this->exclusive_scan_impl(
             flat_tid,
             thread_input, thread_input, // input, output
-            init,
             storage,
             scan_op
         );
@@ -436,14 +433,13 @@ public:
 
         // Include init value and block prefix
         T prev = input[0];
-        T exclusive = flat_tid == 0 ? init : thread_input;
-        exclusive = scan_op(block_prefix, exclusive);
+        T exclusive = flat_tid == 0 ? block_prefix : scan_op(block_prefix, thread_input);
         output[0] = exclusive;
         #pragma unroll
         for(unsigned int i = 1; i < ItemsPerThread; i++)
         {
             exclusive = scan_op(exclusive, prev);
-            prev = output[i];
+            prev = input[i];
             output[i] = exclusive;
         }
     }
@@ -564,24 +560,6 @@ private:
             storage.warp_prefixes[flat_tid] = warp_prefix;
         }
         ::rocprim::syncthreads();
-    }
-
-    // THIS OVERWRITES storage.warp_prefixes[0]
-    template<class PrefixCallback, class BinaryFunction>
-    void include_block_prefix(const unsigned int flat_tid,
-                              const unsigned int warp_id,
-                              const T input,
-                              T& output,
-                              const T reduction,
-                              PrefixCallback& prefix_callback_op,
-                              storage_type& storage,
-                              BinaryFunction scan_op) [[hc]]
-    {
-        T block_prefix = this->get_block_prefix(
-            flat_tid, warp_id, reduction,
-            prefix_callback_op, storage
-        );
-        output = scan_op(block_prefix, input);
     }
 
     // THIS OVERWRITES storage.warp_prefixes[0]
