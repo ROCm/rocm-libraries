@@ -32,10 +32,10 @@
 #include "../intrinsics.hpp"
 #include "../functional.hpp"
 
+#include "detail/warp_sort_shuffle.hpp"
+
 /// \addtogroup collectivewarpmodule
 /// @{
-
-#include "detail/warp_sort_shuffle.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
