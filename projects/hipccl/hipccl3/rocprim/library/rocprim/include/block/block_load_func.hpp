@@ -32,10 +32,10 @@
 #include "../functional.hpp"
 #include "../types.hpp"
 
+BEGIN_ROCPRIM_NAMESPACE
+
 /// \addtogroup collectiveblockmodule
 /// @{
-
-BEGIN_ROCPRIM_NAMESPACE
 
 /// \brief Loads data from continuous memory into a blocked arrangement of items
 /// across the thread block.
@@ -44,7 +44,7 @@ BEGIN_ROCPRIM_NAMESPACE
 /// across a thread block. Each thread uses a \p flat_id to load a range of
 /// \p ItemsPerThread into \p items.
 ///
-/// \tparam IteratorT - [inferred] an iterator type for input (can be a simple
+/// \tparam InputIterator - [inferred] an iterator type for input (can be a simple
 /// pointer
 /// \tparam T - [inferred] the data type
 /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
@@ -54,16 +54,16 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \param block_input - the input iterator from the thread block to load from
 /// \param items - array that data is loaded to
 template<
-    class IteratorT,
+    class InputIterator,
     class T,
     unsigned int ItemsPerThread
 >
 void block_load_direct_blocked(unsigned int flat_id,
-                               IteratorT block_input,
+                               InputIterator block_input,
                                T (&items)[ItemsPerThread]) [[hc]]
 {
     unsigned int offset = flat_id * ItemsPerThread;
-    IteratorT thread_iter = block_input + offset;
+    InputIterator thread_iter = block_input + offset;
     #pragma unroll
     for (unsigned int item = 0; item < ItemsPerThread; item++)
     {
@@ -78,7 +78,7 @@ void block_load_direct_blocked(unsigned int flat_id,
 /// across a thread block. Each thread uses a \p flat_id to load a range of
 /// \p ItemsPerThread into \p items.
 ///
-/// \tparam IteratorT - [inferred] an iterator type for input (can be a simple
+/// \tparam InputIterator - [inferred] an iterator type for input (can be a simple
 /// pointer
 /// \tparam T - [inferred] the data type
 /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
@@ -89,17 +89,17 @@ void block_load_direct_blocked(unsigned int flat_id,
 /// \param items - array that data is loaded to
 /// \param valid - maximum range of valid numbers to load
 template<
-    class IteratorT,
+    class InputIterator,
     class T,
     unsigned int ItemsPerThread
 >
 void block_load_direct_blocked(unsigned int flat_id,
-                               IteratorT block_input,
+                               InputIterator block_input,
                                T (&items)[ItemsPerThread],
                                unsigned int valid) [[hc]]
 {
     unsigned int offset = flat_id * ItemsPerThread;
-    IteratorT thread_iter = block_input + offset;
+    InputIterator thread_iter = block_input + offset;
     #pragma unroll
     for (unsigned int item = 0; item < ItemsPerThread; item++)
     {
@@ -118,7 +118,7 @@ void block_load_direct_blocked(unsigned int flat_id,
 /// across a thread block. Each thread uses a \p flat_id to load a range of
 /// \p ItemsPerThread into \p items.
 ///
-/// \tparam IteratorT - [inferred] an iterator type for input (can be a simple
+/// \tparam InputIterator - [inferred] an iterator type for input (can be a simple
 /// pointer
 /// \tparam T - [inferred] the data type
 /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
@@ -131,13 +131,13 @@ void block_load_direct_blocked(unsigned int flat_id,
 /// \param valid - maximum range of valid numbers to load
 /// \param out_of_bounds - default value assigned to out-of-bound items
 template<
-    class IteratorT,
+    class InputIterator,
     class T,
     unsigned int ItemsPerThread,
     class Default
 >
 void block_load_direct_blocked(unsigned int flat_id,
-                               IteratorT block_input,
+                               InputIterator block_input,
                                T (&items)[ItemsPerThread],
                                unsigned int valid,
                                Default out_of_bounds) [[hc]]
@@ -227,7 +227,7 @@ block_load_direct_blocked_vectorized(unsigned int flat_id,
 /// \p ItemsPerThread into \p items.
 ///
 /// \tparam BlockSize - the number of threads in a block
-/// \tparam IteratorT - [inferred] an iterator type for input (can be a simple
+/// \tparam InputIterator - [inferred] an iterator type for input (can be a simple
 /// pointer
 /// \tparam T - [inferred] the data type
 /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
@@ -238,15 +238,15 @@ block_load_direct_blocked_vectorized(unsigned int flat_id,
 /// \param items - array that data is loaded to
 template<
     unsigned int BlockSize,
-    class IteratorT,
+    class InputIterator,
     class T,
     unsigned int ItemsPerThread
 >
 void block_load_direct_striped(unsigned int flat_id,
-                               IteratorT block_input,
+                               InputIterator block_input,
                                T (&items)[ItemsPerThread]) [[hc]]
 {
-    IteratorT thread_iter = block_input + flat_id;
+    InputIterator thread_iter = block_input + flat_id;
     #pragma unroll
     for (unsigned int item = 0; item < ItemsPerThread; item++)
     {
@@ -262,7 +262,7 @@ void block_load_direct_striped(unsigned int flat_id,
 /// \p ItemsPerThread into \p items.
 ///
 /// \tparam BlockSize - the number of threads in a block
-/// \tparam IteratorT - [inferred] an iterator type for input (can be a simple
+/// \tparam InputIterator - [inferred] an iterator type for input (can be a simple
 /// pointer
 /// \tparam T - [inferred] the data type
 /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
@@ -274,16 +274,16 @@ void block_load_direct_striped(unsigned int flat_id,
 /// \param valid - maximum range of valid numbers to load
 template<
     unsigned int BlockSize,
-    class IteratorT,
+    class InputIterator,
     class T,
     unsigned int ItemsPerThread
 >
 void block_load_direct_striped(unsigned int flat_id,
-                               IteratorT block_input,
+                               InputIterator block_input,
                                T (&items)[ItemsPerThread],
                                unsigned int valid) [[hc]]
 {
-    IteratorT thread_iter = block_input + flat_id;
+    InputIterator thread_iter = block_input + flat_id;
     #pragma unroll
     for (unsigned int item = 0; item < ItemsPerThread; item++)
     {
@@ -304,7 +304,7 @@ void block_load_direct_striped(unsigned int flat_id,
 /// \p ItemsPerThread into \p items.
 ///
 /// \tparam BlockSize - the number of threads in a block
-/// \tparam IteratorT - [inferred] an iterator type for input (can be a simple
+/// \tparam InputIterator - [inferred] an iterator type for input (can be a simple
 /// pointer
 /// \tparam T - [inferred] the data type
 /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
@@ -318,13 +318,13 @@ void block_load_direct_striped(unsigned int flat_id,
 /// \param out_of_bounds - default value assigned to out-of-bound items
 template<
     unsigned int BlockSize,
-    class IteratorT,
+    class InputIterator,
     class T,
     unsigned int ItemsPerThread,
     class Default
 >
 void block_load_direct_striped(unsigned int flat_id,
-                               IteratorT block_input,
+                               InputIterator block_input,
                                T (&items)[ItemsPerThread],
                                unsigned int valid,
                                Default out_of_bounds) [[hc]]
@@ -353,7 +353,7 @@ void block_load_direct_striped(unsigned int flat_id,
 ///   performance.
 ///
 /// \tparam WarpSize - [optional] the number of threads in a warp
-/// \tparam IteratorT - [inferred] an iterator type for input (can be a simple
+/// \tparam InputIterator - [inferred] an iterator type for input (can be a simple
 /// pointer
 /// \tparam T - [inferred] the data type
 /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
@@ -364,12 +364,12 @@ void block_load_direct_striped(unsigned int flat_id,
 /// \param items - array that data is loaded to
 template<
     unsigned int WarpSize = warp_size(),
-    class IteratorT,
+    class InputIterator,
     class T,
     unsigned int ItemsPerThread
 >
 void block_load_direct_warp_striped(unsigned int flat_id,
-                                    IteratorT block_input,
+                                    InputIterator block_input,
                                     T (&items)[ItemsPerThread]) [[hc]]
 {
     static_assert(detail::is_power_of_two(WarpSize) && WarpSize <= warp_size(),
@@ -379,7 +379,7 @@ void block_load_direct_warp_striped(unsigned int flat_id,
     unsigned int warp_id = flat_id / WarpSize;
     unsigned int warp_offset = warp_id * WarpSize * ItemsPerThread;
 
-    IteratorT thread_iter = block_input + thread_id + warp_offset;
+    InputIterator thread_iter = block_input + thread_id + warp_offset;
     #pragma unroll
     for (unsigned int item = 0; item < ItemsPerThread; item++)
     {
@@ -402,7 +402,7 @@ void block_load_direct_warp_striped(unsigned int flat_id,
 ///   performance.
 ///
 /// \tparam WarpSize - [optional] the number of threads in a warp
-/// \tparam IteratorT - [inferred] an iterator type for input (can be a simple
+/// \tparam InputIterator - [inferred] an iterator type for input (can be a simple
 /// pointer
 /// \tparam T - [inferred] the data type
 /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
@@ -414,12 +414,12 @@ void block_load_direct_warp_striped(unsigned int flat_id,
 /// \param valid - maximum range of valid numbers to load
 template<
     unsigned int WarpSize = warp_size(),
-    class IteratorT,
+    class InputIterator,
     class T,
     unsigned int ItemsPerThread
 >
 void block_load_direct_warp_striped(unsigned int flat_id,
-                                    IteratorT block_input,
+                                    InputIterator block_input,
                                     T (&items)[ItemsPerThread],
                                     unsigned int valid) [[hc]]
 {
@@ -430,7 +430,7 @@ void block_load_direct_warp_striped(unsigned int flat_id,
     unsigned int warp_id = flat_id / WarpSize;
     unsigned int warp_offset = warp_id * WarpSize * ItemsPerThread;
 
-    IteratorT thread_iter = block_input + thread_id + warp_offset;
+    InputIterator thread_iter = block_input + thread_id + warp_offset;
     #pragma unroll
     for (unsigned int item = 0; item < ItemsPerThread; item++)
     {
@@ -458,7 +458,7 @@ void block_load_direct_warp_striped(unsigned int flat_id,
 ///   performance.
 ///
 /// \tparam WarpSize - [optional] the number of threads in a warp
-/// \tparam IteratorT - [inferred] an iterator type for input (can be a simple
+/// \tparam InputIterator - [inferred] an iterator type for input (can be a simple
 /// pointer
 /// \tparam T - [inferred] the data type
 /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
@@ -472,13 +472,13 @@ void block_load_direct_warp_striped(unsigned int flat_id,
 /// \param out_of_bounds - default value assigned to out-of-bound items
 template<
     unsigned int WarpSize = warp_size(),
-    class IteratorT,
+    class InputIterator,
     class T,
     unsigned int ItemsPerThread,
     class Default
 >
 void block_load_direct_warp_striped(unsigned int flat_id,
-                                    IteratorT block_input,
+                                    InputIterator block_input,
                                     T (&items)[ItemsPerThread],
                                     unsigned int valid,
                                     Default out_of_bounds) [[hc]]

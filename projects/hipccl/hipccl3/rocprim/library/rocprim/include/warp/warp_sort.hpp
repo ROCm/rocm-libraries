@@ -56,7 +56,7 @@ BEGIN_ROCPRIM_NAMESPACE
 /// warps grouped like this: `{ {0, 1, 2, 3}, {4, 5, 6, 7 }, ..., {60, 61, 62, 63} }`
 /// (thread is represented here by its id within hardware warp).
 /// * Accepts custom compare_functions for sorting across a warp.
-/// * Number of threads executing warp_sort's function must be a multiple of \p WarpSize;
+/// * Number of threads executing warp_sort's function must be a multiple of \p WarpSize.
 ///
 /// \par Example:
 /// \parblock
