@@ -46,6 +46,7 @@ template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
     bool Descending = false,
+    bool ToStriped = false,
     unsigned int StartBit = 0,
     unsigned int EndBit = sizeof(Key) * 8
 >
@@ -56,6 +57,7 @@ struct params
     static constexpr unsigned int block_size = BlockSize;
     static constexpr unsigned int items_per_thread = ItemsPerThread;
     static constexpr bool descending = Descending;
+    static constexpr bool to_striped = ToStriped;
     static constexpr unsigned int start_bit = StartBit;
     static constexpr unsigned int end_bit = EndBit;
 };
@@ -77,7 +79,7 @@ typedef ::testing::Types<
     params<double, unsigned int, 65U, 1>,
     params<float, int, 37U, 1>,
     params<long long, char, 510U, 1, true>,
-    params<unsigned int, long long, 162U, 1>,
+    params<unsigned int, long long, 162U, 1, false, true>,
     params<unsigned char, float, 255U, 1>,
 
     // Power of 2 BlockSize and ItemsPerThread > 1
@@ -87,19 +89,19 @@ typedef ::testing::Types<
 
     // Non-power of 2 BlockSize and ItemsPerThread > 1
     params<double, int, 33U, 5>,
-    params<char, double, 464U, 2>,
+    params<char, double, 464U, 2, true, true>,
     params<unsigned short, int, 100U, 3>,
     params<short, int, 234U, 9>,
 
     // StartBit and EndBit
-    params<unsigned long long, char, 64U, 1, false, 8, 20>,
-    params<unsigned short, int, 102U, 3, true, 4, 10>,
-    params<unsigned int, short, 162U, 2, true, 3, 12>,
+    params<unsigned long long, char, 64U, 1, false, false, 8, 20>,
+    params<unsigned short, int, 102U, 3, true, false, 4, 10>,
+    params<unsigned int, short, 162U, 2, true, true, 3, 12>,
 
     // Stability (a number of key values is lower than BlockSize * ItemsPerThread: some keys appear
     // multiple times with different values or key parts outside [StartBit, EndBit))
-    params<unsigned char, int, 512U, 2>,
-    params<unsigned short, double, 60U, 1, true, 8, 11>
+    params<unsigned char, int, 512U, 2, false, true>,
+    params<unsigned short, double, 60U, 1, true, false, 8, 11>
 > Params;
 
 TYPED_TEST_CASE(RocprimBlockRadixSort, Params);
@@ -144,6 +146,7 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeys)
     constexpr size_t block_size = TestFixture::params::block_size;
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
     constexpr bool descending = TestFixture::params::descending;
+    constexpr bool to_striped = TestFixture::params::to_striped;
     constexpr unsigned int start_bit = TestFixture::params::start_bit;
     constexpr unsigned int end_bit = TestFixture::params::end_bit;
     constexpr size_t items_per_block = block_size * items_per_thread;
@@ -193,12 +196,25 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeys)
             rp::block_load_direct_blocked(lid, d_key_output.data() + block_offset, keys);
 
             rp::block_radix_sort<key_type, block_size, items_per_thread> bsort;
-            if(descending)
-                bsort.sort_desc(keys, start_bit, end_bit);
-            else
-                bsort.sort(keys, start_bit, end_bit);
 
-            rp::block_store_direct_blocked(lid, d_key_output.data() + block_offset, keys);
+            if(to_striped)
+            {
+                if(descending)
+                    bsort.sort_desc_to_striped(keys, start_bit, end_bit);
+                else
+                    bsort.sort_to_striped(keys, start_bit, end_bit);
+
+                rp::block_store_direct_striped<block_size>(lid, d_key_output.data() + block_offset, keys);
+            }
+            else
+            {
+                if(descending)
+                    bsort.sort_desc(keys, start_bit, end_bit);
+                else
+                    bsort.sort(keys, start_bit, end_bit);
+
+                rp::block_store_direct_blocked(lid, d_key_output.data() + block_offset, keys);
+            }
         }
     );
 
@@ -218,6 +234,7 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeysValues)
     constexpr size_t block_size = TestFixture::params::block_size;
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
     constexpr bool descending = TestFixture::params::descending;
+    constexpr bool to_striped = TestFixture::params::to_striped;
     constexpr unsigned int start_bit = TestFixture::params::start_bit;
     constexpr unsigned int end_bit = TestFixture::params::end_bit;
     constexpr size_t items_per_block = block_size * items_per_thread;
@@ -291,13 +308,26 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeysValues)
             rp::block_load_direct_blocked(lid, d_value_output.data() + block_offset, values);
 
             rp::block_radix_sort<key_type, block_size, items_per_thread, value_type> bsort;
-            if(descending)
-                bsort.sort_desc(keys, values, start_bit, end_bit);
-            else
-                bsort.sort(keys, values, start_bit, end_bit);
+            if(to_striped)
+            {
+                if(descending)
+                    bsort.sort_desc_to_striped(keys, values, start_bit, end_bit);
+                else
+                    bsort.sort_to_striped(keys, values, start_bit, end_bit);
 
-            rp::block_store_direct_blocked(lid, d_key_output.data() + block_offset, keys);
-            rp::block_store_direct_blocked(lid, d_value_output.data() + block_offset, values);
+                rp::block_store_direct_striped<block_size>(lid, d_key_output.data() + block_offset, keys);
+                rp::block_store_direct_striped<block_size>(lid, d_value_output.data() + block_offset, values);
+            }
+            else
+            {
+                if(descending)
+                    bsort.sort_desc(keys, values, start_bit, end_bit);
+                else
+                    bsort.sort(keys, values, start_bit, end_bit);
+
+                rp::block_store_direct_blocked(lid, d_key_output.data() + block_offset, keys);
+                rp::block_store_direct_blocked(lid, d_value_output.data() + block_offset, values);
+            }
         }
     );
 
