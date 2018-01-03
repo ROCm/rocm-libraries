@@ -430,7 +430,6 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanPrefixCallback)
     const size_t size = block_size * 113;
     // Generate data
     std::vector<T> output = get_random_data<T>(size, 2, 200);
-    const T init = get_random_value<T>(0, 100);
     const T block_prefix = get_random_value<T>(0, 100);
 
     // Output block prefixes
@@ -441,7 +440,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanPrefixCallback)
     std::vector<T> expected_block_prefixes(output_block_prefixes.size(), 0);
     for(size_t i = 0; i < output.size() / block_size; i++)
     {
-        expected[i * block_size] = block_prefix + init;
+        expected[i * block_size] = block_prefix;
         for(size_t j = 1; j < block_size; j++)
         {
             auto idx = i * block_size + j;
@@ -477,7 +476,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanPrefixCallback)
 
             using bscan_t = rp::block_scan<T, block_size, algorithm>;
             tile_static typename bscan_t::storage_type storage;
-            bscan_t().exclusive_scan(value, value, init, prefix_callback, storage);
+            bscan_t().exclusive_scan(value, value, prefix_callback, storage);
 
             d_output[i] = value;
             if(i.local[0] == 0)
@@ -520,8 +519,8 @@ typedef ::testing::Types<
     // -----------------------------------------------------------------------
     params<float, 6U,   32>,
     params<float, 32,   2>,
-    params<float, 256,  3>,
-    params<float, 512,  4>,
+    params<unsigned int, 256,  3>,
+    params<int, 512,  4>,
     params<float, 1024, 1>,
     params<float, 37,   2>,
     params<float, 65,   5>,
@@ -532,8 +531,8 @@ typedef ::testing::Types<
     // -----------------------------------------------------------------------
     params<float, 6U,   32, rocprim::block_scan_algorithm::reduce_then_scan>,
     params<float, 32,   2,  rocprim::block_scan_algorithm::reduce_then_scan>,
-    params<float, 256,  3,  rocprim::block_scan_algorithm::reduce_then_scan>,
-    params<float, 512,  4,  rocprim::block_scan_algorithm::reduce_then_scan>,
+    params<int, 256,  3,  rocprim::block_scan_algorithm::reduce_then_scan>,
+    params<unsigned int, 512,  4,  rocprim::block_scan_algorithm::reduce_then_scan>,
     params<float, 1024, 1,  rocprim::block_scan_algorithm::reduce_then_scan>,
     params<float, 37,   2,  rocprim::block_scan_algorithm::reduce_then_scan>,
     params<float, 65,   5,  rocprim::block_scan_algorithm::reduce_then_scan>,
@@ -719,7 +718,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScanPrefixCallback)
     const size_t size = items_per_block * 37;
     // Generate data
     std::vector<T> output = get_random_data<T>(size, 2, 200);
-    std::vector<T> output_block_prefixes(size / block_size);
+    std::vector<T> output_block_prefixes(size / items_per_block);
     T block_prefix = get_random_value<T>(0, 100);
 
     // Calulcate expected results on host
@@ -982,8 +981,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScanPrefixCallback)
     const size_t size = items_per_block * 37;
     // Generate data
     std::vector<T> output = get_random_data<T>(size, 2, 200);
-    std::vector<T> output_block_prefixes(size / block_size);
-    T init = get_random_value<T>(0, 100);
+    std::vector<T> output_block_prefixes(size / items_per_block);
     T block_prefix = get_random_value<T>(0, 100);
 
     // Calulcate expected results on host
@@ -991,13 +989,18 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScanPrefixCallback)
     std::vector<T> expected_block_prefixes(output_block_prefixes.size(), 0);
     for(size_t i = 0; i < output.size() / items_per_block; i++)
     {
-        expected[i * items_per_block] = init + block_prefix;
+        expected[i * items_per_block] = block_prefix;
         for(size_t j = 1; j < items_per_block; j++)
         {
             auto idx = i * items_per_block + j;
             expected[idx] = output[idx-1] + expected[idx-1];
         }
-        expected_block_prefixes[i] = expected[(i+1) * items_per_block - 1];
+        expected_block_prefixes[i] = block_prefix;
+        for(size_t j = 0; j < items_per_block; j++)
+        {
+            auto idx = i * items_per_block + j;
+            expected_block_prefixes[i] += output[idx];
+        }
     }
 
     // global/grid size
@@ -1030,7 +1033,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScanPrefixCallback)
 
             using bscan_t = rp::block_scan<T, block_size, algorithm>;
             tile_static typename bscan_t::storage_type storage;
-            bscan_t().exclusive_scan(in_out, in_out, init, prefix_callback, storage);
+            bscan_t().exclusive_scan(in_out, in_out, prefix_callback, storage);
 
             // store
             for(unsigned int j = 0; j < items_per_thread; j++)
