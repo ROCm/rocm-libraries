@@ -40,60 +40,437 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-enum block_load_method
+/// \brief \p block_load_method enumerates the methods available to load data
+/// from continuous memory into a blocked arrangement of items across the thread block
+enum class block_load_method
 {
+    /// Data from continuous memory is loaded into a blocked arrangement of items.
+    /// \par Performance Notes:
+    /// * Performance decreases with increasing number of items per thread (stride
+    /// between reads), because of reduced memory coalescing.
     block_load_direct,
+
+    /// Data from continuous memory is loaded into a blocked arrangement of items
+    /// using vectorization as an optimization.
+    /// \par Performance Notes:
+    /// * Performance remains high due to increased memory coalescing, provided that
+    /// vectorization requirements are fulfilled. Otherwise, performance will default
+    /// to \p block_load_direct.
+    /// \par Requirements:
+    /// * The input offset (\p block_input) must be quad-item aligned.
+    /// * The following conditions will prevent vectorization and switch to default
+    /// \p block_load_direct:
+    ///   * \p ItemsPerThread is odd.
+    ///   * The datatype \p T is not a primitive or a HC/HIP vector type (e.g. int2,
+    /// int4, etc.
     block_load_vectorize,
+
+    /// A striped arrangement of data from continuous memory is locally transposed
+    /// into a blocked arrangement of items.
+    /// \par Performance Notes:
+    /// * Performance remains high due to increased memory coalescing, regardless of the
+    /// number of items per thread.
+    /// * Performance may be better compared to \p block_load_direct and 
+    /// \p block_load_vectorize due to reordering on local memory.
     block_load_transpose,
-    block_load_warp_transpose
+
+    /// A warp-striped arrangement of data from continuous memory is locally transposed
+    /// into a blocked arrangement of items.
+    /// \par Requirements:
+    /// * The number of threads in the block must be a multiple of the size of hardware warp.
+    /// \par Performance Notes:
+    /// * Performance remains high due to increased memory coalescing, regardless of the
+    /// number of items per thread.
+    /// * Performance may be better compared to \p block_load_direct and 
+    /// \p block_load_vectorize due to reordering on local memory.
+    block_load_warp_transpose,
+
+    /// Defaults to \p block_load_direct
+    default_method = block_load_direct
 };
 
+/// \brief The \p block_load class is a block level parallel primitive which provides methods
+/// for loading data from continuous memory into a blocked arrangement of items across the thread
+/// block.
+///
+/// \tparam T - the input/output type.
+/// \tparam BlockSize - the number of threads in a block.
+/// \tparam ItemsPerThread - the number of items to be processed by
+/// each thread.
+/// \tparam Method - the method to load data.
+///
+/// \par Overview
+/// * The \p block_load class has a number of different methods to load data:
+///   * [block_load_direct](\ref ::block_load_method::block_load_direct)
+///   * [block_load_vectorize](\ref ::block_load_method::block_load_vectorize)
+///   * [block_load_transpose](\ref ::block_load_method::block_load_transpose)
+///   * [block_load_warp_transpose](\ref ::block_load_method::block_load_warp_transpose)
+///
+/// \par Example:
+/// \parblock
+/// In the examples load operation is performed on block of 128 threads, using type
+/// \p int and 8 items per thread.
+///
+/// \b HIP: \n
+/// \code{.cpp}
+/// __global__ void ExampleKernel(int * input, ...)
+/// {
+///     const int offset = hipBlockIdx_x * 128 * 8;
+///     int items[8];
+///     rocprim::block_load<int, 128, 8, load_method> blockload;
+///     blockload.load(input + offset, items);
+///     ...
+/// }
+/// \endcode
+///
+/// \b HC: \n
+/// \code{.cpp}
+/// hc::parallel_for_each(
+///     hc::extent<1>(...).tile(block_size),
+///     [=](hc::tiled_index<1> i) [[hc]]
+///     {
+///         int items[8];
+///         rocprim::block_load<int, 128, 8, load_method> blockload;
+///         blockload.load(..., items);
+///         ...
+///     }
+/// );
+/// \endcode
+/// \endparblock
 template<
     class T,
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
-    block_load_method Method = block_load_direct
+    block_load_method Method = block_load_method::block_load_direct
 >
 class block_load
 {
-public:
-    typedef typename detail::empty_type storage_type;
+private:
+    using _storage_type = typename ::rocprim::detail::empty_storage_type;
 
-    template<class IteratorT>
-    void load(IteratorT block_input,
+public:
+    /// \brief Struct used to allocate a temporary memory that is required for thread
+    /// communication during operations provided by related parallel primitive.
+    ///
+    /// Depending on the implemention the operations exposed by parallel primitive may
+    /// require a temporary storage for thread communication. The storage should be allocated
+    /// using keywords \p __shared__ in HIP or \p tile_static in HC. It can be aliased to
+    /// an externally allocated memory, or be a part of a union with other storage types
+    /// to increase shared memory reusability.
+    #ifndef DOXYGEN_SHOULD_SKIP_THIS // hides storage_type implementation for Doxygen
+    using storage_type = typename ::rocprim::detail::empty_storage_type;
+    #else
+    using storage_type = _storage_type; // only for Doxygen
+    #endif
+
+    /// \brief Loads data from continuous memory into an arrangement of items across the
+    /// thread block.
+    ///
+    /// \tparam InputIterator - [inferred] an iterator type for input (can be a simple
+    /// pointer.
+    ///
+    /// \param [in] block_input - the input iterator from the thread block to load from.
+    /// \param [out] items - array that data is loaded to.
+    ///
+    /// \par Overview
+    /// * The type \p T must be such that an object of type \p InputIterator
+    /// can be dereferenced and then implicitly converted to \p T.
+    template<class InputIterator>
+    void load(InputIterator block_input,
               T (&items)[ItemsPerThread]) [[hc]]
     {
+        using value_type = typename std::iterator_traits<InputIterator>::value_type;
+        static_assert(std::is_convertible<value_type, T>::value,
+                      "The type T must be such that an object of type InputIterator "
+                      "can be dereferenced and then implicitly converted to T.");
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
-        block_load_direct_blocked(flat_id, block_input + offset, items);
+        block_load_direct_blocked(flat_id, block_input, items);
     }
 
-    template<class IteratorT>
-    void load(IteratorT block_input,
+    /// \brief Loads data from continuous memory into an arrangement of items across the
+    /// thread block, which is guarded by range \p valid.
+    ///
+    /// \tparam InputIterator - [inferred] an iterator type for input (can be a simple
+    /// pointer.
+    ///
+    /// \param [in] block_input - the input iterator from the thread block to load from.
+    /// \param [out] items - array that data is loaded to.
+    /// \param [in] valid - maximum range of valid numbers to load.
+    ///
+    /// \par Overview
+    /// * The type \p T must be such that an object of type \p InputIterator
+    /// can be dereferenced and then implicitly converted to \p T.
+    template<class InputIterator>
+    void load(InputIterator block_input,
               T (&items)[ItemsPerThread],
               unsigned int valid) [[hc]]
     {
+        using value_type = typename std::iterator_traits<InputIterator>::value_type;
+        static_assert(std::is_convertible<value_type, T>::value,
+                      "The type T must be such that an object of type InputIterator "
+                      "can be dereferenced and then implicitly converted to T.");
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
-        block_load_direct_blocked(flat_id, block_input + offset, items, valid);
+        block_load_direct_blocked(flat_id, block_input, items, valid);
     }
 
+    /// \brief Loads data from continuous memory into an arrangement of items across the
+    /// thread block, which is guarded by range with a fall-back value for out-of-bound
+    /// elements.
+    ///
+    /// \tparam InputIterator - [inferred] an iterator type for input (can be a simple
+    /// pointer.
+    /// \tparam Default - [inferred] The data type of the default value.
+    ///
+    /// \param [in] block_input - the input iterator from the thread block to load from.
+    /// \param [out] items - array that data is loaded to.
+    /// \param [in] valid - maximum range of valid numbers to load.
+    /// \param [in] out_of_bounds - default value assigned to out-of-bound items.
+    ///
+    /// \par Overview
+    /// * The type \p T must be such that an object of type \p InputIterator
+    /// can be dereferenced and then implicitly converted to \p T.
     template<
-        class IteratorT,
+        class InputIterator,
         class Default
     >
-    void load(IteratorT block_input,
+    void load(InputIterator block_input,
               T (&items)[ItemsPerThread],
               unsigned int valid,
               Default out_of_bounds) [[hc]]
     {
+        using value_type = typename std::iterator_traits<InputIterator>::value_type;
+        static_assert(std::is_convertible<value_type, T>::value,
+                      "The type T must be such that an object of type InputIterator "
+                      "can be dereferenced and then implicitly converted to T.");
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
-        block_load_direct_blocked(flat_id, block_input + offset, items, valid, out_of_bounds);
+        block_load_direct_blocked(flat_id, block_input, items, valid,
+                                  out_of_bounds);
     }
 
-    template<class IteratorT>
-    void load(IteratorT block_input,
+    /// \brief Loads data from continuous memory into an arrangement of items across the
+    /// thread block, using temporary storage.
+    ///
+    /// \tparam InputIterator - [inferred] an iterator type for input (can be a simple
+    /// pointer.
+    ///
+    /// \param [in] block_input - the input iterator from the thread block to load from.
+    /// \param [out] items - array that data is loaded to.
+    /// \param [in] storage - temporary storage for inputs.
+    ///
+    /// \par Overview
+    /// * The type \p T must be such that an object of type \p InputIterator
+    /// can be dereferenced and then implicitly converted to \p T.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
+    /// universal rocprim::syncthreads().
+    ///
+    /// \par Example.
+    /// \code{.cpp}
+    /// hc::parallel_for_each(
+    ///     hc::extent<1>(...).tile(block_size),
+    ///     [=](hc::tiled_index<1> i) [[hc]]
+    ///     {
+    ///         int items[8];
+    ///         using block_load_int = rocprim::block_load<int, 128, 8>;
+    ///         block_load_int bload;
+    ///         tile_static typename block_load_int::storage_type storage;
+    ///         bload.load(..., items, storage);
+    ///         ...
+    ///     }
+    /// );
+    /// \endcode
+    template<class InputIterator>
+    void load(InputIterator block_input,
+              T (&items)[ItemsPerThread],
+              storage_type& storage) [[hc]]
+    {
+        using value_type = typename std::iterator_traits<InputIterator>::value_type;
+        static_assert(std::is_convertible<value_type, T>::value,
+                      "The type T must be such that an object of type InputIterator "
+                      "can be dereferenced and then implicitly converted to T.");
+        (void) storage;
+        load(block_input, items);
+    }
+
+    /// \brief Loads data from continuous memory into an arrangement of items across the
+    /// thread block, which is guarded by range \p valid, using temporary storage.
+    ///
+    /// \tparam InputIterator - [inferred] an iterator type for input (can be a simple
+    /// pointer
+    ///
+    /// \param [in] block_input - the input iterator from the thread block to load from.
+    /// \param [out] items - array that data is loaded to.
+    /// \param [in] valid - maximum range of valid numbers to load.
+    /// \param [in] storage - temporary storage for inputs.
+    ///
+    /// \par Overview
+    /// * The type \p T must be such that an object of type \p InputIterator
+    /// can be dereferenced and then implicitly converted to \p T.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
+    /// universal rocprim::syncthreads().
+    ///
+    /// \par Example.
+    /// \code{.cpp}
+    /// hc::parallel_for_each(
+    ///     hc::extent<1>(...).tile(block_size),
+    ///     [=](hc::tiled_index<1> i) [[hc]]
+    ///     {
+    ///         int items[8];
+    ///         using block_load_int = rocprim::block_load<int, 128, 8>;
+    ///         block_load_int bload;
+    ///         tile_static typename block_load_int::storage_type storage;
+    ///         bload.load(..., items, valid, storage);
+    ///         ...
+    ///     }
+    /// );
+    /// \endcode
+    template<class InputIterator>
+    void load(InputIterator block_input,
+              T (&items)[ItemsPerThread],
+              unsigned int valid,
+              storage_type& storage) [[hc]]
+    {
+        using value_type = typename std::iterator_traits<InputIterator>::value_type;
+        static_assert(std::is_convertible<value_type, T>::value,
+                      "The type T must be such that an object of type InputIterator "
+                      "can be dereferenced and then implicitly converted to T.");
+        (void) storage;
+        load(block_input, items, valid);
+    }
+
+    /// \brief Loads data from continuous memory into an arrangement of items across the
+    /// thread block, which is guarded by range with a fall-back value for out-of-bound
+    /// elements, using temporary storage.
+    ///
+    /// \tparam InputIterator - [inferred] an iterator type for input (can be a simple
+    /// pointer.
+    /// \tparam Default - [inferred] The data type of the default value.
+    ///
+    /// \param [in] block_input - the input iterator from the thread block to load from.
+    /// \param [out] items - array that data is loaded to.
+    /// \param [in] valid - maximum range of valid numbers to load.
+    /// \param [in] out_of_bounds - default value assigned to out-of-bound items.
+    /// \param [in] storage - temporary storage for inputs.
+    ///
+    /// \par Overview
+    /// * The type \p T must be such that an object of type \p InputIterator
+    /// can be dereferenced and then implicitly converted to \p T.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
+    /// universal rocprim::syncthreads().
+    ///
+    /// \par Example.
+    /// \code{.cpp}
+    /// hc::parallel_for_each(
+    ///     hc::extent<1>(...).tile(block_size),
+    ///     [=](hc::tiled_index<1> i) [[hc]]
+    ///     {
+    ///         int items[8];
+    ///         using block_load_int = rocprim::block_load<int, 128, 8>;
+    ///         block_load_int bload;
+    ///         tile_static typename block_load_int::storage_type storage;
+    ///         bload.load(..., items, valid, out_of_bounds, storage);
+    ///         ...
+    ///     }
+    /// );
+    /// \endcode
+    template<
+        class InputIterator,
+        class Default
+    >
+    void load(InputIterator block_input,
+              T (&items)[ItemsPerThread],
+              unsigned int valid,
+              Default out_of_bounds,
+              storage_type& storage) [[hc]]
+    {
+        using value_type = typename std::iterator_traits<InputIterator>::value_type;
+        static_assert(std::is_convertible<value_type, T>::value,
+                      "The type T must be such that an object of type InputIterator "
+                      "can be dereferenced and then implicitly converted to T.");
+        (void) storage;
+        load(block_input, items, valid, out_of_bounds);
+    }
+};
+
+/// @}
+// end of group collectiveblockmodule
+
+template<
+    class T,
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread
+>
+class block_load<T, BlockSize, ItemsPerThread, block_load_method::block_load_vectorize>
+{
+private:
+    using _storage_type = typename ::rocprim::detail::empty_storage_type;
+
+public:
+    #ifndef DOXYGEN_SHOULD_SKIP_THIS // hides storage_type implementation for Doxygen
+    using storage_type = typename ::rocprim::detail::empty_storage_type;
+    #else
+    using storage_type = _storage_type; // only for Doxygen
+    #endif
+
+    void load(T* block_input,
+              T (&items)[ItemsPerThread]) [[hc]]
+    {
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        block_load_direct_blocked_vectorized(flat_id, block_input, items);
+    }
+
+    template<class InputIterator, class U>
+    void load(InputIterator block_input,
+              U (&items)[ItemsPerThread]) [[hc]]
+    {
+        using value_type = typename std::iterator_traits<InputIterator>::value_type;
+        static_assert(std::is_convertible<value_type, T>::value,
+                      "The type T must be such that an object of type InputIterator "
+                      "can be dereferenced and then implicitly converted to T.");
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        block_load_direct_blocked(flat_id, block_input, items);
+    }
+
+    template<class InputIterator>
+    void load(InputIterator block_input,
+              T (&items)[ItemsPerThread],
+              unsigned int valid) [[hc]]
+    {
+        using value_type = typename std::iterator_traits<InputIterator>::value_type;
+        static_assert(std::is_convertible<value_type, T>::value,
+                      "The type T must be such that an object of type InputIterator "
+                      "can be dereferenced and then implicitly converted to T.");
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        block_load_direct_blocked(flat_id, block_input, items, valid);
+    }
+
+    template<
+        class InputIterator,
+        class Default
+    >
+    void load(InputIterator block_input,
+              T (&items)[ItemsPerThread],
+              unsigned int valid,
+              Default out_of_bounds) [[hc]]
+    {
+        using value_type = typename std::iterator_traits<InputIterator>::value_type;
+        static_assert(std::is_convertible<value_type, T>::value,
+                      "The type T must be such that an object of type InputIterator "
+                      "can be dereferenced and then implicitly converted to T.");
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        block_load_direct_blocked(flat_id, block_input, items, valid,
+                                  out_of_bounds);
+    }
+
+    void load(T* block_input,
               T (&items)[ItemsPerThread],
               storage_type& storage) [[hc]]
     {
@@ -101,121 +478,47 @@ public:
         load(block_input, items);
     }
 
-    template<class IteratorT>
-    void load(IteratorT block_input,
-              T (&items)[ItemsPerThread],
-              unsigned int valid,
-              storage_type& storage) [[hc]]
-    {
-        (void) storage;
-        load(block_input, items, valid);
-    }
-
-    template<
-        class IteratorT,
-        class Default
-    >
-    void load(IteratorT block_input,
-              T (&items)[ItemsPerThread],
-              unsigned int valid,
-              Default out_of_bounds,
-              storage_type& storage) [[hc]]
-    {
-        (void) storage;
-        load(block_input, items, valid, out_of_bounds);
-    }
-};
-
-template<
-    class T,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread
->
-class block_load<T, BlockSize, ItemsPerThread, block_load_vectorize>
-{
-public:
-    typedef typename detail::empty_type storage_type;
-
-    template<class U>
-    void load(T* block_input,
-              U (&items)[ItemsPerThread]) [[hc]]
-    {
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
-        block_load_direct_blocked_vectorized(flat_id, block_input + offset, items);
-    }
-
-    template<class IteratorT>
-    void load(IteratorT block_input,
-              T (&items)[ItemsPerThread]) [[hc]]
-    {
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
-        block_load_direct_blocked(flat_id, block_input + offset, items);
-    }
-
-    template<class IteratorT>
-    void load(IteratorT block_input,
-              T (&items)[ItemsPerThread],
-              unsigned int valid) [[hc]]
-    {
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
-        block_load_direct_blocked(flat_id, block_input + offset, items, valid);
-    }
-
-    template<
-        class IteratorT,
-        class Default
-    >
-    void load(IteratorT block_input,
-              T (&items)[ItemsPerThread],
-              unsigned int valid,
-              Default out_of_bounds) [[hc]]
-    {
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
-        block_load_direct_blocked(flat_id, block_input + offset, items, valid, out_of_bounds);
-    }
-
-    template<class U>
-    void load(T* block_input,
+    template<class InputIterator, class U>
+    void load(InputIterator block_input,
               U (&items)[ItemsPerThread],
               storage_type& storage) [[hc]]
     {
+        using value_type = typename std::iterator_traits<InputIterator>::value_type;
+        static_assert(std::is_convertible<value_type, T>::value,
+                      "The type T must be such that an object of type InputIterator "
+                      "can be dereferenced and then implicitly converted to T.");
         (void) storage;
         load(block_input, items);
     }
 
-    template<class IteratorT>
-    void load(IteratorT block_input,
-              T (&items)[ItemsPerThread],
-              storage_type& storage) [[hc]]
-    {
-        (void) storage;
-        load(block_input, items);
-    }
-
-    template<class IteratorT>
-    void load(IteratorT block_input,
+    template<class InputIterator>
+    void load(InputIterator block_input,
               T (&items)[ItemsPerThread],
               unsigned int valid,
               storage_type& storage) [[hc]]
     {
+        using value_type = typename std::iterator_traits<InputIterator>::value_type;
+        static_assert(std::is_convertible<value_type, T>::value,
+                      "The type T must be such that an object of type InputIterator "
+                      "can be dereferenced and then implicitly converted to T.");
         (void) storage;
         load(block_input, items, valid);
     }
 
     template<
-        class IteratorT,
+        class InputIterator,
         class Default
     >
-    void load(IteratorT block_input,
+    void load(InputIterator block_input,
               T (&items)[ItemsPerThread],
               unsigned int valid,
               Default out_of_bounds,
               storage_type& storage) [[hc]]
     {
+        using value_type = typename std::iterator_traits<InputIterator>::value_type;
+        static_assert(std::is_convertible<value_type, T>::value,
+                      "The type T must be such that an object of type InputIterator "
+                      "can be dereferenced and then implicitly converted to T.");
         (void) storage;
         load(block_input, items, valid, out_of_bounds);
     }
@@ -226,89 +529,110 @@ template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread
 >
-class block_load<T, BlockSize, ItemsPerThread, block_load_transpose>
+class block_load<T, BlockSize, ItemsPerThread, block_load_method::block_load_transpose>
 {
+private:
+    using block_exchange_type = block_exchange<T, BlockSize, ItemsPerThread>;
+
 public:
-    block_exchange<T, BlockSize, ItemsPerThread> exchange;
+    using storage_type = typename block_exchange_type::storage_type;
 
-    struct storage_type
-    {
-        volatile int valid;
-    };
-
-    template<class IteratorT>
-    void load(IteratorT block_input,
+    template<class InputIterator>
+    void load(InputIterator block_input,
               T (&items)[ItemsPerThread]) [[hc]]
     {
+        using value_type = typename std::iterator_traits<InputIterator>::value_type;
+        static_assert(std::is_convertible<value_type, T>::value,
+                      "The type T must be such that an object of type InputIterator "
+                      "can be dereferenced and then implicitly converted to T.");
+        tile_static storage_type storage;
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
-        block_load_direct_striped<BlockSize>(flat_id, block_input + offset, items);
-        exchange.striped_to_blocked(items, items);
+        block_load_direct_striped<BlockSize>(flat_id, block_input, items);
+        block_exchange_type().striped_to_blocked(items, items, storage);
     }
 
-    template<class IteratorT>
-    void load(IteratorT block_input,
+    template<class InputIterator>
+    void load(InputIterator block_input,
               T (&items)[ItemsPerThread],
               unsigned int valid) [[hc]]
     {
+        using value_type = typename std::iterator_traits<InputIterator>::value_type;
+        static_assert(std::is_convertible<value_type, T>::value,
+                      "The type T must be such that an object of type InputIterator "
+                      "can be dereferenced and then implicitly converted to T.");
+        tile_static storage_type storage;
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
-        block_load_direct_striped<BlockSize>(flat_id, block_input + offset, items, valid);
-        exchange.striped_to_blocked(items, items);
+        block_load_direct_striped<BlockSize>(flat_id, block_input, items, valid);
+        block_exchange_type().striped_to_blocked(items, items, storage);
     }
 
     template<
-        class IteratorT,
+        class InputIterator,
         class Default
     >
-    void load(IteratorT block_input,
+    void load(InputIterator block_input,
               T (&items)[ItemsPerThread],
               unsigned int valid,
               Default out_of_bounds) [[hc]]
     {
+        using value_type = typename std::iterator_traits<InputIterator>::value_type;
+        static_assert(std::is_convertible<value_type, T>::value,
+                      "The type T must be such that an object of type InputIterator "
+                      "can be dereferenced and then implicitly converted to T.");
+        tile_static storage_type storage;
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
-        block_load_direct_striped<BlockSize>(flat_id, block_input + offset, items, valid, out_of_bounds);
-        exchange.striped_to_blocked(items, items);
+        block_load_direct_striped<BlockSize>(flat_id, block_input, items, valid,
+                                             out_of_bounds);
+        block_exchange_type().striped_to_blocked(items, items, storage);
     }
 
-    template<class IteratorT>
-    void load(IteratorT block_input,
+    template<class InputIterator>
+    void load(InputIterator block_input,
               T (&items)[ItemsPerThread],
               storage_type& storage) [[hc]]
     {
+        using value_type = typename std::iterator_traits<InputIterator>::value_type;
+        static_assert(std::is_convertible<value_type, T>::value,
+                      "The type T must be such that an object of type InputIterator "
+                      "can be dereferenced and then implicitly converted to T.");
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
-        block_load_direct_striped<BlockSize>(flat_id, block_input + offset, items);
-        exchange.striped_to_blocked(items, items, storage);
+        block_load_direct_striped<BlockSize>(flat_id, block_input, items);
+        block_exchange_type().striped_to_blocked(items, items, storage);
     }
 
-    template<class IteratorT>
-    void load(IteratorT block_input,
+    template<class InputIterator>
+    void load(InputIterator block_input,
               T (&items)[ItemsPerThread],
               unsigned int valid,
               storage_type& storage) [[hc]]
     {
+        using value_type = typename std::iterator_traits<InputIterator>::value_type;
+        static_assert(std::is_convertible<value_type, T>::value,
+                      "The type T must be such that an object of type InputIterator "
+                      "can be dereferenced and then implicitly converted to T.");
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
-        block_load_direct_striped<BlockSize>(flat_id, block_input + offset, items, valid);
-        exchange.striped_to_blocked(items, items, storage);
+        block_load_direct_striped<BlockSize>(flat_id, block_input, items, valid);
+        block_exchange_type().striped_to_blocked(items, items, storage);
     }
 
     template<
-        class IteratorT,
+        class InputIterator,
         class Default
     >
-    void load(IteratorT block_input,
+    void load(InputIterator block_input,
               T (&items)[ItemsPerThread],
               unsigned int valid,
               Default out_of_bounds,
               storage_type& storage) [[hc]]
     {
+        using value_type = typename std::iterator_traits<InputIterator>::value_type;
+        static_assert(std::is_convertible<value_type, T>::value,
+                      "The type T must be such that an object of type InputIterator "
+                      "can be dereferenced and then implicitly converted to T.");
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
-        block_load_direct_striped<BlockSize>(flat_id, block_input + offset, items, valid, out_of_bounds);
-        exchange.striped_to_blocked(items, items, storage);
+        block_load_direct_striped<BlockSize>(flat_id, block_input, items, valid,
+                                             out_of_bounds);
+        block_exchange_type().striped_to_blocked(items, items, storage);
     }
 };
 
@@ -317,98 +641,117 @@ template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread
 >
-class block_load<T, BlockSize, ItemsPerThread, block_load_warp_transpose>
+class block_load<T, BlockSize, ItemsPerThread, block_load_method::block_load_warp_transpose>
 {
+private:
+    using block_exchange_type = block_exchange<T, BlockSize, ItemsPerThread>;
+    
 public:
     static_assert(BlockSize % warp_size() == 0,
                  "BlockSize must be a multiple of hardware warpsize");
-    block_exchange<T, BlockSize, ItemsPerThread> exchange;
 
-    struct storage_type
-    {
-        volatile int valid;
-    };
+    using storage_type = typename block_exchange_type::storage_type;
 
-    template<class IteratorT>
-    void load(IteratorT block_input,
+    template<class InputIterator>
+    void load(InputIterator block_input,
               T (&items)[ItemsPerThread]) [[hc]]
     {
+        using value_type = typename std::iterator_traits<InputIterator>::value_type;
+        static_assert(std::is_convertible<value_type, T>::value,
+                      "The type T must be such that an object of type InputIterator "
+                      "can be dereferenced and then implicitly converted to T.");
+        tile_static storage_type storage;
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
-        block_load_direct_warp_striped(flat_id, block_input + offset, items);
-        exchange.warp_striped_to_blocked(items, items);
+        block_load_direct_warp_striped(flat_id, block_input, items);
+        block_exchange_type().warp_striped_to_blocked(items, items, storage);
     }
 
-    template<class IteratorT>
-    void load(IteratorT block_input,
+    template<class InputIterator>
+    void load(InputIterator block_input,
               T (&items)[ItemsPerThread],
               unsigned int valid) [[hc]]
     {
+        using value_type = typename std::iterator_traits<InputIterator>::value_type;
+        static_assert(std::is_convertible<value_type, T>::value,
+                      "The type T must be such that an object of type InputIterator "
+                      "can be dereferenced and then implicitly converted to T.");
+        tile_static storage_type storage;
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
-        block_load_direct_warp_striped(flat_id, block_input + offset, items, valid);
-        exchange.warp_striped_to_blocked(items, items);
+        block_load_direct_warp_striped(flat_id, block_input, items, valid);
+        block_exchange_type().warp_striped_to_blocked(items, items, storage);
 
     }
 
     template<
-        class IteratorT,
+        class InputIterator,
         class Default
     >
-    void load(IteratorT block_input,
+    void load(InputIterator block_input,
               T (&items)[ItemsPerThread],
               unsigned int valid,
               Default out_of_bounds) [[hc]]
     {
+        using value_type = typename std::iterator_traits<InputIterator>::value_type;
+        static_assert(std::is_convertible<value_type, T>::value,
+                      "The type T must be such that an object of type InputIterator "
+                      "can be dereferenced and then implicitly converted to T.");
+        tile_static storage_type storage;
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
-        block_load_direct_warp_striped(flat_id, block_input + offset, items, valid, out_of_bounds);
-        exchange.warp_striped_to_blocked(items, items);
+        block_load_direct_warp_striped(flat_id, block_input, items, valid,
+                                       out_of_bounds);
+        block_exchange_type().warp_striped_to_blocked(items, items, storage);
     }
 
-    template<class IteratorT>
-    void load(IteratorT block_input,
+    template<class InputIterator>
+    void load(InputIterator block_input,
               T (&items)[ItemsPerThread],
               storage_type& storage) [[hc]]
     {
+        using value_type = typename std::iterator_traits<InputIterator>::value_type;
+        static_assert(std::is_convertible<value_type, T>::value,
+                      "The type T must be such that an object of type InputIterator "
+                      "can be dereferenced and then implicitly converted to T.");
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
-        block_load_direct_warp_striped(flat_id, block_input + offset, items);
-        exchange.warp_striped_to_blocked(items, items, storage);
+        block_load_direct_warp_striped(flat_id, block_input, items);
+        block_exchange_type().warp_striped_to_blocked(items, items, storage);
     }
 
-    template<class IteratorT>
-    void load(IteratorT block_input,
+    template<class InputIterator>
+    void load(InputIterator block_input,
               T (&items)[ItemsPerThread],
               unsigned int valid,
               storage_type& storage) [[hc]]
     {
+        using value_type = typename std::iterator_traits<InputIterator>::value_type;
+        static_assert(std::is_convertible<value_type, T>::value,
+                      "The type T must be such that an object of type InputIterator "
+                      "can be dereferenced and then implicitly converted to T.");
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
-        block_load_direct_warp_striped(flat_id, block_input + offset, items, valid);
-        exchange.warp_striped_to_blocked(items, items, storage);
+        block_load_direct_warp_striped(flat_id, block_input, items, valid);
+        block_exchange_type().warp_striped_to_blocked(items, items, storage);
     }
 
     template<
-        class IteratorT,
+        class InputIterator,
         class Default
     >
-    void load(IteratorT block_input,
+    void load(InputIterator block_input,
               T (&items)[ItemsPerThread],
               unsigned int valid,
               Default out_of_bounds,
               storage_type& storage) [[hc]]
     {
+        using value_type = typename std::iterator_traits<InputIterator>::value_type;
+        static_assert(std::is_convertible<value_type, T>::value,
+                      "The type T must be such that an object of type InputIterator "
+                      "can be dereferenced and then implicitly converted to T.");
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
-        block_load_direct_warp_striped(flat_id, block_input + offset, items, valid, out_of_bounds);
-        exchange.warp_striped_to_blocked(items, items, storage);
+        block_load_direct_warp_striped(flat_id, block_input, items, valid,
+                                       out_of_bounds);
+        block_exchange_type().warp_striped_to_blocked(items, items, storage);
     }
 };
 
 END_ROCPRIM_NAMESPACE
-
-/// @}
-// end of group collectiveblockmodule
 
 #endif // ROCPRIM_BLOCK_BLOCK_LOAD_HPP_
