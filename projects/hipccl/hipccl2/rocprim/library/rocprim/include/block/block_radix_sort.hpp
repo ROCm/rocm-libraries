@@ -157,7 +157,10 @@ public:
             warp_bit_plus_reduce(input[i], r);
             warp_reduction = warp_reduction + r;
         }
-        storage.warp_prefixes[warp_id] = warp_reduction;
+        if(lane_id == 0)
+        {
+            storage.warp_prefixes[warp_id] = warp_reduction;
+        }
         ::rocprim::syncthreads();
 
         // Scan the warp reduction results to calculate warp prefixes
@@ -307,9 +310,83 @@ public:
         sort_impl<true>(keys, values, storage, begin_bit, end_bit);
     }
 
+    void sort_to_striped(Key (&keys)[ItemsPerThread],
+                         unsigned int begin_bit = 0,
+                         unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+    {
+        tile_static storage_type storage;
+        sort_to_striped(keys, storage, begin_bit, end_bit);
+    }
+
+    void sort_to_striped(Key (&keys)[ItemsPerThread],
+                         storage_type& storage,
+                         unsigned int begin_bit = 0,
+                         unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+    {
+        detail::empty_type * values = nullptr;
+        sort_impl<false, true>(keys, values, storage, begin_bit, end_bit);
+    }
+
+    void sort_desc_to_striped(Key (&keys)[ItemsPerThread],
+                              unsigned int begin_bit = 0,
+                              unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+    {
+        tile_static storage_type storage;
+        sort_desc_to_striped(keys, storage, begin_bit, end_bit);
+    }
+
+    void sort_desc_to_striped(Key (&keys)[ItemsPerThread],
+                              storage_type& storage,
+                              unsigned int begin_bit = 0,
+                              unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+    {
+        detail::empty_type * values = nullptr;
+        sort_impl<true, true>(keys, values, storage, begin_bit, end_bit);
+    }
+
+    template<bool WithValues = with_values>
+    void sort_to_striped(Key (&keys)[ItemsPerThread],
+                         typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
+                         unsigned int begin_bit = 0,
+                         unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+    {
+        tile_static storage_type storage;
+        sort_to_striped(keys, values, storage, begin_bit, end_bit);
+    }
+
+    template<bool WithValues = with_values>
+    void sort_to_striped(Key (&keys)[ItemsPerThread],
+                         typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
+                         storage_type& storage,
+                         unsigned int begin_bit = 0,
+                         unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+    {
+        sort_impl<false, true>(keys, values, storage, begin_bit, end_bit);
+    }
+
+    template<bool WithValues = with_values>
+    void sort_desc_to_striped(Key (&keys)[ItemsPerThread],
+                              typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
+                              unsigned int begin_bit = 0,
+                              unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+    {
+        tile_static storage_type storage;
+        sort_desc_to_striped(keys, values, storage, begin_bit, end_bit);
+    }
+
+    template<bool WithValues = with_values>
+    void sort_desc_to_striped(Key (&keys)[ItemsPerThread],
+                              typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
+                              storage_type& storage,
+                              unsigned int begin_bit = 0,
+                              unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+    {
+        sort_impl<true, true>(keys, values, storage, begin_bit, end_bit);
+    }
+
 private:
 
-    template<bool Descending, class SortedValue>
+    template<bool Descending, bool ToStriped = false, class SortedValue>
     void sort_impl(Key (&keys)[ItemsPerThread],
                    SortedValue * values,
                    storage_type& storage,
@@ -375,7 +452,15 @@ private:
                     ? (last_start + from_position - last_position)
                     : to_position;
             }
-            exchange(storage, bit_keys, values, ranks);
+            exchange_keys(storage, bit_keys, ranks);
+            exchange_values(storage, values, ranks);
+        }
+
+        if(ToStriped)
+        {
+            ::rocprim::syncthreads();
+            to_striped_keys(storage, bit_keys);
+            to_striped_values(storage, values);
         }
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
@@ -386,25 +471,47 @@ private:
         }
     }
 
-    template<class SortedValue>
-    void exchange(storage_type& storage,
-                  bit_key_type (&bit_keys)[ItemsPerThread],
-                  SortedValue * values,
-                  const unsigned int (&ranks)[ItemsPerThread]) [[hc]]
+
+    void exchange_keys(storage_type& storage,
+                       bit_key_type (&bit_keys)[ItemsPerThread],
+                       const unsigned int (&ranks)[ItemsPerThread]) [[hc]]
     {
         bit_keys_exchange_type().scatter_to_blocked(bit_keys, bit_keys, ranks, storage.bit_keys_exchange);
+    }
+
+    template<class SortedValue>
+    void exchange_values(storage_type& storage,
+                         SortedValue * values,
+                         const unsigned int (&ranks)[ItemsPerThread]) [[hc]]
+    {
         ::rocprim::syncthreads(); // Storage will be reused (union), synchronization is needed
         SortedValue (&vs)[ItemsPerThread] = *reinterpret_cast<SortedValue (*)[ItemsPerThread]>(values);
         values_exchange_type().scatter_to_blocked(vs, vs, ranks, storage.values_exchange);
     }
 
-    void exchange(storage_type& storage,
-                  bit_key_type (&bit_keys)[ItemsPerThread],
-                  detail::empty_type * values,
-                  const unsigned int (&ranks)[ItemsPerThread]) [[hc]]
+    void exchange_values(storage_type& storage,
+                         detail::empty_type * values,
+                         const unsigned int (&ranks)[ItemsPerThread]) [[hc]]
+    { }
+
+    void to_striped_keys(storage_type& storage,
+                         bit_key_type (&bit_keys)[ItemsPerThread]) [[hc]]
     {
-        bit_keys_exchange_type().scatter_to_blocked(bit_keys, bit_keys, ranks, storage.bit_keys_exchange);
+        bit_keys_exchange_type().blocked_to_striped(bit_keys, bit_keys, storage.bit_keys_exchange);
     }
+
+    template<class SortedValue>
+    void to_striped_values(storage_type& storage,
+                           SortedValue * values) [[hc]]
+    {
+        ::rocprim::syncthreads(); // Storage will be reused (union), synchronization is needed
+        SortedValue (&vs)[ItemsPerThread] = *reinterpret_cast<SortedValue (*)[ItemsPerThread]>(values);
+        values_exchange_type().blocked_to_striped(vs, vs, storage.values_exchange);
+    }
+
+    void to_striped_values(storage_type& storage,
+                           detail::empty_type * values) [[hc]]
+    { }
 };
 
 END_ROCPRIM_NAMESPACE
