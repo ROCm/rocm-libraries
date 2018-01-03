@@ -51,10 +51,28 @@ struct params
     static constexpr bool should_be_vectorized = ShouldBeVectorized;
 };
 
+template<
+    rp::block_load_method Load,
+    rp::block_store_method Store,
+    unsigned int BlockSize
+>
+struct class_params
+{
+    static constexpr rp::block_load_method load_method = Load;
+    static constexpr rp::block_store_method store_method = Store;
+    static constexpr unsigned int block_size = BlockSize;
+};
+
 template<typename BlockSizeWrapper>
 class RocprimBlockLoadStoreTests : public ::testing::Test {
 public:
     static constexpr unsigned int block_size = BlockSizeWrapper::value;
+};
+
+template<class ClassParams>
+class RocprimBlockLoadStoreClassTests : public ::testing::Test {
+public:
+    using params = ClassParams;
 };
 
 template<class Params>
@@ -74,6 +92,28 @@ typedef ::testing::Types<
     uint_wrapper<162U>,
     uint_wrapper<255U>
 > BlockSizes;
+
+typedef ::testing::Types<
+    class_params<rp::block_load_direct, rp::block_store_direct, 64U>,
+    class_params<rp::block_load_direct, rp::block_store_direct, 128U>,
+    class_params<rp::block_load_direct, rp::block_store_direct, 256U>,
+    class_params<rp::block_load_direct, rp::block_store_direct, 512U>,
+
+    class_params<rp::block_load_vectorize, rp::block_store_vectorize, 64U>,
+    class_params<rp::block_load_vectorize, rp::block_store_vectorize, 128U>,
+    class_params<rp::block_load_vectorize, rp::block_store_vectorize, 256U>,
+    class_params<rp::block_load_vectorize, rp::block_store_vectorize, 512U>,
+
+    class_params<rp::block_load_transpose, rp::block_store_transpose, 64U>,
+    class_params<rp::block_load_transpose, rp::block_store_transpose, 128U>,
+    class_params<rp::block_load_transpose, rp::block_store_transpose, 256U>,
+    class_params<rp::block_load_transpose, rp::block_store_transpose, 512U>,
+
+    class_params<rp::block_load_warp_transpose, rp::block_store_warp_transpose, 64U>,
+    class_params<rp::block_load_warp_transpose, rp::block_store_warp_transpose, 128U>,
+    class_params<rp::block_load_warp_transpose, rp::block_store_warp_transpose, 256U>,
+    class_params<rp::block_load_warp_transpose, rp::block_store_warp_transpose, 512U>
+> ClassParams;
 
 typedef ::testing::Types<
     params<int, int, 3, false>,
@@ -127,6 +167,7 @@ typedef ::testing::Types<
 > Params;
 
 TYPED_TEST_CASE(RocprimBlockLoadStoreTests, BlockSizes);
+TYPED_TEST_CASE(RocprimBlockLoadStoreClassTests, ClassParams);
 TYPED_TEST_CASE(RocprimVectorizationTests, Params);
 
 TYPED_TEST(RocprimBlockLoadStoreTests, LoadStoreDirectBlocked)
@@ -320,6 +361,51 @@ TYPED_TEST(RocprimBlockLoadStoreTests, LoadStoreDirectWarpStriped)
                 idx,
                 d_output2.data() + block_offset,
                 t, size);
+        }
+    );
+
+    d_output.synchronize();
+    d_output2.synchronize();
+    for(int i = 0; i < output2.size(); i++)
+    {
+        ASSERT_EQ(output2[i], expected[i]);
+    }
+}
+
+TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClass)
+{
+    hc::accelerator acc;
+
+    constexpr size_t block_size = TestFixture::params::block_size;
+    constexpr rp::block_load_method load_method = TestFixture::params::load_method;
+    constexpr rp::block_store_method store_method = TestFixture::params::store_method;
+    // Given block size not supported
+    if(block_size > get_max_tile_size(acc) || (block_size & (block_size - 1)) != 0)
+    {
+        return;
+    }
+
+    const size_t size = block_size * 113;
+    const size_t items_per_thread = 4;
+    // Generate data
+    std::vector<int> output = get_random_data<int>(size, -100, 100);
+    std::vector<int> output2(output.size(), 0);
+
+    // Calculate expected results on host
+    std::vector<int> expected(output);
+
+    hc::array_view<int, 1> d_output(output.size(), output.data());
+    hc::array_view<int, 1> d_output2(output2.size(), output2.data());
+    hc::parallel_for_each(
+        acc.get_default_view(),
+        hc::extent<1>(output.size()).tile(block_size),
+        [=](hc::tiled_index<1> i) [[hc]]
+        {
+            int t[items_per_thread];
+            rp::block_load<int, block_size, items_per_thread, load_method> load;
+            rp::block_store<int, block_size, items_per_thread, store_method> store;
+            load.load(d_output.data(), t, size);
+            store.store(d_output2.data(), t, size);
         }
     );
 

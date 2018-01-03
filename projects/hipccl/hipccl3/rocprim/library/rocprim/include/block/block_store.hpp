@@ -63,7 +63,8 @@ public:
                T (&items)[ItemsPerThread]) [[hc]]
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        block_store_direct_blocked(flat_id, block_output, items);
+        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
+        block_store_direct_blocked(flat_id, block_output + offset, items);
     }
 
     template<class IteratorT>
@@ -72,7 +73,8 @@ public:
                unsigned int valid) [[hc]]
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        block_store_direct_blocked(flat_id, block_output, items, valid);
+        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
+        block_store_direct_blocked(flat_id, block_output + offset, items, valid);
     }
 
     template<class IteratorT>
@@ -110,7 +112,8 @@ public:
                U (&items)[ItemsPerThread]) [[hc]]
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        block_store_direct_blocked_vectorized(flat_id, block_output, items);
+        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
+        block_store_direct_blocked_vectorized(flat_id, block_output + offset, items);
     }
 
     template<class IteratorT>
@@ -118,7 +121,8 @@ public:
                T (&items)[ItemsPerThread]) [[hc]]
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        block_store_direct_blocked(flat_id, block_output, items);
+        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
+        block_store_direct_blocked(flat_id, block_output + offset, items);
     }
 
     template<class IteratorT>
@@ -127,7 +131,8 @@ public:
                unsigned int valid) [[hc]]
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        block_store_direct_blocked(flat_id, block_output, items, valid);
+        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
+        block_store_direct_blocked(flat_id, block_output + offset, items, valid);
     }
 
     template<class U>
@@ -179,8 +184,9 @@ public:
                T (&items)[ItemsPerThread]) [[hc]]
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
         exchange.blocked_to_striped(items, items);
-        block_store_direct_striped<BlockSize>(flat_id, block_output, items);
+        block_store_direct_striped<BlockSize>(flat_id, block_output + offset, items);
     }
 
     template<class IteratorT>
@@ -189,8 +195,9 @@ public:
                unsigned int valid) [[hc]]
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
         exchange.blocked_to_striped(items, items);
-        block_store_direct_striped<BlockSize>(flat_id, block_output, items, valid);
+        block_store_direct_striped<BlockSize>(flat_id, block_output + offset, items, valid);
     }
 
     template<class IteratorT>
@@ -199,8 +206,9 @@ public:
                storage_type& storage) [[hc]]
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
         exchange.blocked_to_striped(items, items, storage);
-        block_store_direct_striped<BlockSize>(flat_id, block_output, items);
+        block_store_direct_striped<BlockSize>(flat_id, block_output + offset, items);
     }
 
     template<class IteratorT>
@@ -210,8 +218,9 @@ public:
                storage_type& storage) [[hc]]
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
         exchange.blocked_to_striped(items, items, storage);
-        block_store_direct_striped<BlockSize>(flat_id, block_output, items, valid);
+        block_store_direct_striped<BlockSize>(flat_id, block_output + offset, items, valid);
     }
 };
 
@@ -237,8 +246,9 @@ public:
                T (&items)[ItemsPerThread]) [[hc]]
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
         exchange.blocked_to_warp_striped(items, items);
-        block_store_direct_warp_striped(flat_id, block_output, items);
+        block_store_direct_warp_striped(flat_id, block_output + offset, items);
     }
 
     template<class IteratorT>
@@ -247,8 +257,9 @@ public:
                unsigned int valid) [[hc]]
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
         exchange.blocked_to_warp_striped(items, items);
-        block_store_direct_warp_striped(flat_id, block_output, items, valid);
+        block_store_direct_warp_striped(flat_id, block_output + offset, items, valid);
     }
 
     template<class IteratorT>
@@ -257,8 +268,9 @@ public:
                storage_type& storage) [[hc]]
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
         exchange.blocked_to_warp_striped(items, items, storage);
-        block_store_direct_warp_striped(flat_id, block_output, items);
+        block_store_direct_warp_striped(flat_id, block_output + offset, items);
     }
 
     template<class IteratorT>
@@ -268,8 +280,9 @@ public:
                storage_type& storage) [[hc]]
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
         exchange.blocked_to_warp_striped(items, items, storage);
-        block_store_direct_warp_striped(flat_id, block_output, items, valid);
+        block_store_direct_warp_striped(flat_id, block_output + offset, items, valid);
     }
 };
 

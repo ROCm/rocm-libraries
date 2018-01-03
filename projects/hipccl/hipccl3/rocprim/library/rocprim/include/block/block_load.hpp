@@ -64,7 +64,8 @@ public:
               T (&items)[ItemsPerThread]) [[hc]]
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        block_load_direct_blocked(flat_id, block_input, items);
+        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
+        block_load_direct_blocked(flat_id, block_input + offset, items);
     }
 
     template<class IteratorT>
@@ -73,7 +74,8 @@ public:
               unsigned int valid) [[hc]]
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        block_load_direct_blocked(flat_id, block_input, items, valid);
+        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
+        block_load_direct_blocked(flat_id, block_input + offset, items, valid);
     }
 
     template<
@@ -86,7 +88,8 @@ public:
               Default out_of_bounds) [[hc]]
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        block_load_direct_blocked(flat_id, block_input, items, valid, out_of_bounds);
+        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
+        block_load_direct_blocked(flat_id, block_input + offset, items, valid, out_of_bounds);
     }
 
     template<class IteratorT>
@@ -138,7 +141,8 @@ public:
               U (&items)[ItemsPerThread]) [[hc]]
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        block_load_direct_blocked_vectorized(flat_id, block_input, items);
+        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
+        block_load_direct_blocked_vectorized(flat_id, block_input + offset, items);
     }
 
     template<class IteratorT>
@@ -146,7 +150,8 @@ public:
               T (&items)[ItemsPerThread]) [[hc]]
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        block_load_direct_blocked(flat_id, block_input, items);
+        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
+        block_load_direct_blocked(flat_id, block_input + offset, items);
     }
 
     template<class IteratorT>
@@ -155,7 +160,8 @@ public:
               unsigned int valid) [[hc]]
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        block_load_direct_blocked(flat_id, block_input, items, valid);
+        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
+        block_load_direct_blocked(flat_id, block_input + offset, items, valid);
     }
 
     template<
@@ -168,7 +174,8 @@ public:
               Default out_of_bounds) [[hc]]
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        block_load_direct_blocked(flat_id, block_input, items, valid, out_of_bounds);
+        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
+        block_load_direct_blocked(flat_id, block_input + offset, items, valid, out_of_bounds);
     }
 
     template<class U>
@@ -234,7 +241,8 @@ public:
               T (&items)[ItemsPerThread]) [[hc]]
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        block_load_direct_striped<BlockSize>(flat_id, block_input, items);
+        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
+        block_load_direct_striped<BlockSize>(flat_id, block_input + offset, items);
         exchange.striped_to_blocked(items, items);
     }
 
@@ -244,7 +252,8 @@ public:
               unsigned int valid) [[hc]]
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        block_load_direct_striped<BlockSize>(flat_id, block_input, items, valid);
+        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
+        block_load_direct_striped<BlockSize>(flat_id, block_input + offset, items, valid);
         exchange.striped_to_blocked(items, items);
     }
 
@@ -258,7 +267,8 @@ public:
               Default out_of_bounds) [[hc]]
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        block_load_direct_striped<BlockSize>(flat_id, block_input, items, valid, out_of_bounds);
+        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
+        block_load_direct_striped<BlockSize>(flat_id, block_input + offset, items, valid, out_of_bounds);
         exchange.striped_to_blocked(items, items);
     }
 
@@ -268,7 +278,8 @@ public:
               storage_type& storage) [[hc]]
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        block_load_direct_striped<BlockSize>(flat_id, block_input, items);
+        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
+        block_load_direct_striped<BlockSize>(flat_id, block_input + offset, items);
         exchange.striped_to_blocked(items, items, storage);
     }
 
@@ -279,7 +290,8 @@ public:
               storage_type& storage) [[hc]]
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        block_load_direct_striped<BlockSize>(flat_id, block_input, items, valid);
+        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
+        block_load_direct_striped<BlockSize>(flat_id, block_input + offset, items, valid);
         exchange.striped_to_blocked(items, items, storage);
     }
 
@@ -294,7 +306,8 @@ public:
               storage_type& storage) [[hc]]
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        block_load_direct_striped<BlockSize>(flat_id, block_input, items, valid, out_of_bounds);
+        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
+        block_load_direct_striped<BlockSize>(flat_id, block_input + offset, items, valid, out_of_bounds);
         exchange.striped_to_blocked(items, items, storage);
     }
 };
@@ -321,7 +334,8 @@ public:
               T (&items)[ItemsPerThread]) [[hc]]
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        block_load_direct_warp_striped(flat_id, block_input, items);
+        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
+        block_load_direct_warp_striped(flat_id, block_input + offset, items);
         exchange.warp_striped_to_blocked(items, items);
     }
 
@@ -331,7 +345,8 @@ public:
               unsigned int valid) [[hc]]
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        block_load_direct_warp_striped(flat_id, block_input, items, valid);
+        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
+        block_load_direct_warp_striped(flat_id, block_input + offset, items, valid);
         exchange.warp_striped_to_blocked(items, items);
 
     }
@@ -346,7 +361,8 @@ public:
               Default out_of_bounds) [[hc]]
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        block_load_direct_warp_striped(flat_id, block_input, items, valid, out_of_bounds);
+        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
+        block_load_direct_warp_striped(flat_id, block_input + offset, items, valid, out_of_bounds);
         exchange.warp_striped_to_blocked(items, items);
     }
 
@@ -356,7 +372,8 @@ public:
               storage_type& storage) [[hc]]
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        block_load_direct_warp_striped(flat_id, block_input, items);
+        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
+        block_load_direct_warp_striped(flat_id, block_input + offset, items);
         exchange.warp_striped_to_blocked(items, items, storage);
     }
 
@@ -367,7 +384,8 @@ public:
               storage_type& storage) [[hc]]
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        block_load_direct_warp_striped(flat_id, block_input, items, valid);
+        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
+        block_load_direct_warp_striped(flat_id, block_input + offset, items, valid);
         exchange.warp_striped_to_blocked(items, items, storage);
     }
 
@@ -382,7 +400,8 @@ public:
               storage_type& storage) [[hc]]
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        block_load_direct_warp_striped(flat_id, block_input, items, valid, out_of_bounds);
+        const unsigned int offset = ::rocprim::flat_block_id() * BlockSize;
+        block_load_direct_warp_striped(flat_id, block_input + offset, items, valid, out_of_bounds);
         exchange.warp_striped_to_blocked(items, items, storage);
     }
 };
