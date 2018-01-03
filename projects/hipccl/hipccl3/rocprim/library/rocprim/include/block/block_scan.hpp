@@ -238,12 +238,11 @@ public:
     >
     void exclusive_scan(T input,
                         T& output,
-                        T init,
                         PrefixCallback& prefix_callback,
                         storage_type& storage,
                         BinaryFunction scan_op = BinaryFunction()) [[hc]]
     {
-        base_type::exclusive_scan(input, output, init, prefix_callback, storage, scan_op);
+        base_type::exclusive_scan(input, output, prefix_callback, storage, scan_op);
     }
 
     template<
@@ -305,12 +304,11 @@ public:
     >
     void exclusive_scan(T (&input)[ItemsPerThread],
                         T (&output)[ItemsPerThread],
-                        T init,
                         PrefixCallback& prefix_callback,
                         storage_type& storage,
                         BinaryFunction scan_op = BinaryFunction()) [[hc]]
     {
-        base_type::exclusive_scan(input, output, init, prefix_callback, storage, scan_op);
+        base_type::exclusive_scan(input, output, prefix_callback, storage, scan_op);
     }
 };
 

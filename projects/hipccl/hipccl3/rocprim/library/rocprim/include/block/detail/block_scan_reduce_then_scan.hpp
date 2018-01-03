@@ -122,12 +122,12 @@ public:
         const auto warp_id = ::rocprim::warp_id();
         this->inclusive_scan_impl(flat_tid, input, output, storage, scan_op);
         // Include block prefix (this operation overwrites storage.threads[0])
-        this->include_block_prefix(
+        T block_prefix = this->get_block_prefix(
             flat_tid, warp_id,
-            output /* as input */, output,
             storage.threads[index(BlockSize - 1)], // block reduction
-            prefix_callback_op, storage, scan_op
+            prefix_callback_op, storage
         );
+        output = scan_op(block_prefix, output);
     }
 
     template<unsigned int ItemsPerThread, class BinaryFunction>
@@ -292,7 +292,6 @@ public:
     template<class PrefixCallback, class BinaryFunction>
     void exclusive_scan(T input,
                         T& output,
-                        T init,
                         PrefixCallback& prefix_callback_op,
                         storage_type& storage,
                         BinaryFunction scan_op) [[hc]]
@@ -300,17 +299,16 @@ public:
         const auto flat_tid = ::rocprim::flat_block_thread_id();
         const auto warp_id = ::rocprim::warp_id();
         this->exclusive_scan_impl(
-            flat_tid, input, output, init, storage, scan_op
+            flat_tid, input, output, storage, scan_op
         );
         // Get reduction result
         T reduction = storage.threads[index(BlockSize - 1)];
         // Include block prefix (this operation overwrites storage.threads[0])
-        this->include_block_prefix(
-            flat_tid, warp_id,
-            output /* as input */, output,
-            reduction, // block reduction
-            prefix_callback_op, storage, scan_op
+        T block_prefix = this->get_block_prefix(
+            flat_tid, warp_id, reduction,
+            prefix_callback_op, storage
         );
+        output = flat_tid == 0 ? block_prefix : scan_op(block_prefix, output);
     }
 
     template<unsigned int ItemsPerThread, class BinaryFunction>
@@ -392,7 +390,6 @@ public:
     >
     void exclusive_scan(T (&input)[ItemsPerThread],
                         T (&output)[ItemsPerThread],
-                        T init,
                         PrefixCallback& prefix_callback_op,
                         storage_type& storage,
                         BinaryFunction scan_op) [[hc]]
@@ -410,7 +407,6 @@ public:
         this->exclusive_scan_impl(
             flat_tid,
             thread_input, thread_input, // input, output
-            init,
             storage,
             scan_op
         );
@@ -424,8 +420,7 @@ public:
 
         // Include init value and block prefix
         T prev = input[0];
-        T exclusive = flat_tid == 0 ? init : thread_input;
-        exclusive = scan_op(block_prefix, exclusive);
+        T exclusive = flat_tid == 0 ? block_prefix : scan_op(block_prefix, thread_input);
         output[0] = exclusive;
         #pragma unroll
         for(unsigned int i = 1; i < ItemsPerThread; i++)
