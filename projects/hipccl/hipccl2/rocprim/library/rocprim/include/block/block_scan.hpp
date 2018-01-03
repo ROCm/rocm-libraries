@@ -33,6 +33,7 @@
 #include "../functional.hpp"
 
 #include "detail/block_scan_warp_scan.hpp"
+#include "detail/block_scan_reduce_then_scan.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -40,7 +41,8 @@ BEGIN_ROCPRIM_NAMESPACE
 enum class block_scan_algorithm
 {
     using_warp_scan,
-    default_algorithm = using_warp_scan
+    default_algorithm = using_warp_scan,
+    reduce_then_scan
 };
 
 namespace detail
@@ -56,6 +58,13 @@ struct select_block_scan_impl<block_scan_algorithm::using_warp_scan>
 {
     template<class T, unsigned int BlockSize>
     using type = block_scan_warp_scan<T, BlockSize>;
+};
+
+template<>
+struct select_block_scan_impl<block_scan_algorithm::reduce_then_scan>
+{
+    template<class T, unsigned int BlockSize>
+    using type = block_scan_reduce_then_scan<T, BlockSize>;
 };
 
 } // end namespace detail

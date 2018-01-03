@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_BLOCK_DETAIL_BLOCK_SCAN_WARP_SCAN_HPP_
-#define ROCPRIM_BLOCK_DETAIL_BLOCK_SCAN_WARP_SCAN_HPP_
+#ifndef ROCPRIM_BLOCK_DETAIL_BLOCK_SCAN_REDUCE_THEN_SCAN_HPP_
+#define ROCPRIM_BLOCK_DETAIL_BLOCK_SCAN_REDUCE_THEN_SCAN_HPP_
 
 #include <type_traits>
 
@@ -43,38 +43,32 @@ template<
     class T,
     unsigned int BlockSize
 >
-class block_scan_warp_scan
+class block_scan_reduce_then_scan
 {
-    // Select warp size
+    // Number of items to reduce per thread
+    static constexpr unsigned int thread_reduction_size_ =
+        (BlockSize + ::rocprim::warp_size() - 1)/ ::rocprim::warp_size();
+
+    // Warp scan, warp_scan_shuffle does not require shared memory (storage), but
+    // logical warp size must be a power of two.
     static constexpr unsigned int warp_size_ =
         detail::get_min_warp_size(BlockSize, ::rocprim::warp_size());
-    // Number of warps in block
-    static constexpr unsigned int warps_no_ = (BlockSize + warp_size_ - 1) / warp_size_;
+    using warp_scan_prefix_type = ::rocprim::detail::warp_scan_shuffle<T, warp_size_>;
 
-    // typedef of warp_scan primitive that will be used to perform warp-level
-    // inclusive/exclusive scan operations on input values.
-    // warp_scan_shuffle is an implementation of warp_scan that does not need storage,
-    // but requires logical warp size to be a power of two.
-    using warp_scan_input_type = ::rocprim::detail::warp_scan_shuffle<T, warp_size_>;
-    // typedef of warp_scan primtive that will be used to get prefix values for
-    // each warp (scanned carry-outs from warps before it).
-    using warp_scan_prefix_type = ::rocprim::detail::warp_scan_shuffle<T, detail::next_power_of_two(warps_no_)>;
+    // Minimize LDS bank conflicts
+    static constexpr unsigned int banks_no_ = ::rocprim::detail::get_lds_banks_no();
+    static constexpr bool has_bank_conflicts_ =
+        ::rocprim::detail::is_power_of_two(thread_reduction_size_) && thread_reduction_size_ > 1;
+    static constexpr unsigned int bank_conflicts_padding =
+        has_bank_conflicts_ ? (warp_size_ * thread_reduction_size_ / banks_no_) : 0;
 
 public:
+
     struct storage_type
     {
-        T warp_prefixes[warps_no_];
-        // ---------- Shared memory optimisation ----------
-        // Since warp_scan_input and warp_scan_prefix are typedef of warp_scan_shuffle,
-        // we don't need to allocate any temporary memory for them.
-        // If we just use warp_scan, we would need to add following union to this struct:
-        // union
-        // {
-        //     typename warp_scan_input::storage_type wscan[warps_no_];
-        //     typename warp_scan_prefix::storage_type wprefix_scan;
-        // };
-        // and use storage.wscan[warp_id] and storage.wprefix_scan when calling
-        // warp_scan_input().inclusive_scan(..) and warp_scan_prefix().inclusive_scan(..).
+        // volatile allows not using barrier to sync threads when
+        // threads array is accessed only by threads from the same warp.
+        volatile T threads[warp_size_ * thread_reduction_size_ + bank_conflicts_padding];
     };
 
     template<class BinaryFunction>
@@ -83,10 +77,8 @@ public:
                         storage_type& storage,
                         BinaryFunction scan_op) [[hc]]
     {
-        this->inclusive_scan_impl(
-            ::rocprim::flat_block_thread_id(),
-            input, output, storage, scan_op
-        );
+        const auto flat_tid = ::rocprim::flat_block_thread_id();
+        this->inclusive_scan_impl(flat_tid, input, output, storage, scan_op);
     }
 
     template<class BinaryFunction>
@@ -106,8 +98,7 @@ public:
                         BinaryFunction scan_op) [[hc]]
     {
         this->inclusive_scan(input, output, storage, scan_op);
-        // Save reduction result
-        reduction = storage.warp_prefixes[warps_no_ - 1];
+        reduction = storage.threads[index(BlockSize - 1)];
     }
 
     template<class BinaryFunction>
@@ -130,11 +121,11 @@ public:
         const auto flat_tid = ::rocprim::flat_block_thread_id();
         const auto warp_id = ::rocprim::warp_id();
         this->inclusive_scan_impl(flat_tid, input, output, storage, scan_op);
-        // Include block prefix (this operation overwrites storage.warp_prefixes[0])
+        // Include block prefix (this operation overwrites storage.threads[0])
         this->include_block_prefix(
             flat_tid, warp_id,
             output /* as input */, output,
-            storage.warp_prefixes[warps_no_ - 1], // block reduction
+            storage.threads[index(BlockSize - 1)], // block reduction
             prefix_callback_op, storage, scan_op
         );
     }
@@ -190,7 +181,7 @@ public:
     {
         this->inclusive_scan(input, output, storage, scan_op);
         // Save reduction result
-        reduction = storage.warp_prefixes[warps_no_ - 1];
+        reduction = storage.threads[index(BlockSize - 1)];
     }
 
     template<unsigned int ItemsPerThread, class BinaryFunction>
@@ -231,10 +222,10 @@ public:
             scan_op
         );
 
-        // this operation overwrites storage.warp_prefixes[0]
+        // this operation overwrites storage.threads[0]
         T block_prefix = this->get_block_prefix(
             flat_tid, ::rocprim::warp_id(),
-            storage.warp_prefixes[warps_no_ - 1], // block reduction
+            storage.threads[index(BlockSize - 1)], // block reduction
             prefix_callback_op, storage
         );
 
@@ -257,10 +248,8 @@ public:
                         storage_type& storage,
                         BinaryFunction scan_op) [[hc]]
     {
-        this->exclusive_scan_impl(
-            ::rocprim::flat_block_thread_id(),
-            input, output, init, storage, scan_op
-        );
+        const auto flat_tid = ::rocprim::flat_block_thread_id();
+        this->exclusive_scan_impl(flat_tid, input, output, init, storage, scan_op);
     }
 
     template<class BinaryFunction>
@@ -270,9 +259,7 @@ public:
                         BinaryFunction scan_op) [[hc]]
     {
         tile_static storage_type storage;
-        this->exclusive_scan(
-            input, output, init, storage, scan_op
-        );
+        this->exclusive_scan(input, output, init, storage, scan_op);
     }
 
     template<class BinaryFunction>
@@ -283,11 +270,12 @@ public:
                         storage_type& storage,
                         BinaryFunction scan_op) [[hc]]
     {
-        this->exclusive_scan(
-            input, output, init, storage, scan_op
+        const auto flat_tid = ::rocprim::flat_block_thread_id();
+        this->exclusive_scan_impl(
+            flat_tid, input, output, init, storage, scan_op
         );
         // Save reduction result
-        reduction = storage.warp_prefixes[warps_no_ - 1];
+        reduction = storage.threads[index(BlockSize - 1)];
     }
 
     template<class BinaryFunction>
@@ -298,9 +286,7 @@ public:
                         BinaryFunction scan_op) [[hc]]
     {
         tile_static storage_type storage;
-        this->exclusive_scan(
-            input, output, init, reduction, storage, scan_op
-        );
+        this->exclusive_scan(input, output, init, reduction, storage, scan_op);
     }
 
     template<class PrefixCallback, class BinaryFunction>
@@ -316,11 +302,13 @@ public:
         this->exclusive_scan_impl(
             flat_tid, input, output, init, storage, scan_op
         );
-        // Include block prefix (this operation overwrites storage.warp_prefixes[0])
+        // Get reduction result
+        T reduction = storage.threads[index(BlockSize - 1)];
+        // Include block prefix (this operation overwrites storage.threads[0])
         this->include_block_prefix(
             flat_tid, warp_id,
             output /* as input */, output,
-            storage.warp_prefixes[warps_no_ - 1], // block reduction
+            reduction, // block reduction
             prefix_callback_op, storage, scan_op
         );
     }
@@ -358,7 +346,7 @@ public:
         for(unsigned int i = 1; i < ItemsPerThread; i++)
         {
             exclusive = scan_op(exclusive, prev);
-            prev = output[i];
+            prev = input[i];
             output[i] = exclusive;
         }
     }
@@ -383,7 +371,7 @@ public:
     {
         this->exclusive_scan(input, output, init, storage, scan_op);
         // Save reduction result
-        reduction = storage.warp_prefixes[warps_no_ - 1];
+        reduction = storage.threads[index(BlockSize - 1)];
     }
 
     template<unsigned int ItemsPerThread, class BinaryFunction>
@@ -430,7 +418,7 @@ public:
         // this operation overwrites storage.warp_prefixes[0]
         T block_prefix = this->get_block_prefix(
             flat_tid, ::rocprim::warp_id(),
-            storage.warp_prefixes[warps_no_ - 1], // block reduction
+            storage.threads[index(BlockSize - 1)], // block reduction
             prefix_callback_op, storage
         );
 
@@ -443,12 +431,16 @@ public:
         for(unsigned int i = 1; i < ItemsPerThread; i++)
         {
             exclusive = scan_op(exclusive, prev);
-            prev = output[i];
+            prev = input[i];
             output[i] = exclusive;
         }
     }
 
 private:
+
+    // Calculates inclusive scan results and stores them in storage.threads,
+    // result for each thread is stored in storage.threads[flat_tid], and sets
+    // output to storage.threads[flat_tid]
     template<class BinaryFunction>
     void inclusive_scan_impl(const unsigned int flat_tid,
                              T input,
@@ -456,22 +448,56 @@ private:
                              storage_type& storage,
                              BinaryFunction scan_op) [[hc]]
     {
-        // Perform warp scan
-        warp_scan_input_type().inclusive_scan(
-            // not using shared mem, see note in storage_type
-            input, output, scan_op
-        );
+        // Calculate inclusive scan,
+        // result for each thread is stored in storage.threads[flat_tid]
+        this->inclusive_scan_base(flat_tid, input, storage, scan_op);
+        output = storage.threads[index(flat_tid)];
+    }
 
-        // i-th warp will have its prefix stored in storage.warp_prefixes[i-1]
-        const auto warp_id = ::rocprim::warp_id();
-        this->calculate_warp_prefixes(flat_tid, warp_id, output, storage, scan_op);
-
-        // Use warp prefix to calculate the final scan results for every thread
-        if(warp_id != 0)
+    // Calculates inclusive scan results and stores them in storage.threads,
+    // result for each thread is stored in storage.threads[flat_tid]
+    template<class BinaryFunction>
+    void inclusive_scan_base(const unsigned int flat_tid,
+                             T input,
+                             storage_type& storage,
+                             BinaryFunction scan_op) [[hc]]
+    {
+        storage.threads[index(flat_tid)] = input;
+        ::rocprim::syncthreads();
+        if(flat_tid < warp_size_)
         {
-            auto warp_prefix = storage.warp_prefixes[warp_id - 1];
-            output = scan_op(warp_prefix, output);
+            const unsigned int idx_start = index(flat_tid * thread_reduction_size_);
+            const unsigned int idx_end = idx_start + thread_reduction_size_;
+
+            T thread_reduction = static_cast<T>(storage.threads[idx_start]);
+            #pragma unroll
+            for(unsigned int i = idx_start + 1; i < idx_end; i++)
+            {
+                thread_reduction = scan_op(
+                    thread_reduction, static_cast<T>(storage.threads[i])
+                );
+            }
+
+            // Calculate warp prefixes
+            warp_scan_prefix_type().inclusive_scan(thread_reduction, thread_reduction, scan_op);
+            thread_reduction = warp_shuffle_up(thread_reduction, 1, warp_size_);
+
+            // Include warp prefix
+            thread_reduction =
+                flat_tid == 0 ?
+                    input : scan_op(thread_reduction, static_cast<T>(storage.threads[idx_start]));
+
+            storage.threads[idx_start] = thread_reduction;
+            #pragma unroll
+            for(unsigned int i = idx_start + 1; i < idx_end; i++)
+            {
+                thread_reduction = scan_op(
+                    thread_reduction, static_cast<T>(storage.threads[i])
+                );
+                storage.threads[i] = thread_reduction;
+            }
         }
+        ::rocprim::syncthreads();
     }
 
     template<class BinaryFunction>
@@ -482,32 +508,11 @@ private:
                              storage_type& storage,
                              BinaryFunction scan_op) [[hc]]
     {
-        // Perform warp scan on input values
-        warp_scan_input_type().inclusive_scan(
-            // not using shared mem, see note in storage_type
-            input, output, scan_op
-        );
-
-        // i-th warp will have its prefix stored in storage.warp_prefixes[i-1]
-        const auto warp_id = ::rocprim::warp_id();
-        const auto lane_id = ::rocprim::lane_id();
-        this->calculate_warp_prefixes(flat_tid, warp_id, output, storage, scan_op);
-
-        // Include initial value in warp prefixes, and fix warp prefixes
-        // for exclusive scan (first warp prefix is init)
-        auto warp_prefix = init;
-        if(warp_id != 0)
-        {
-            warp_prefix = scan_op(init, storage.warp_prefixes[warp_id-1]);
-        }
-
-        // Use warp prefix to calculate the final scan results for every thread
-        output = scan_op(warp_prefix, output); // include warp prefix in scan results
-        output = warp_shuffle_up(output, 1, warp_size_); // shift to get exclusive results
-        output = lane_id == 0 ? warp_prefix : output;
+        // Calculates inclusive scan, result for each thread is stored in storage.threads[flat_tid]
+        this->inclusive_scan_base(flat_tid, input, storage, scan_op);
+        output = flat_tid == 0 ? init : scan_op(init, static_cast<T>(storage.threads[index(flat_tid-1)]));
     }
 
-    // Exclusive scan with unknown initial value
     template<class BinaryFunction>
     void exclusive_scan_impl(const unsigned int flat_tid,
                              T input,
@@ -515,58 +520,15 @@ private:
                              storage_type& storage,
                              BinaryFunction scan_op) [[hc]]
     {
-        // Perform warp scan on input values
-        warp_scan_input_type().inclusive_scan(
-            // not using shared mem, see note in storage_type
-            input, output, scan_op
-        );
-
-        // i-th warp will have its prefix stored in storage.warp_prefixes[i-1]
-        const auto warp_id = ::rocprim::warp_id();
-        const auto lane_id = ::rocprim::lane_id();
-        this->calculate_warp_prefixes(flat_tid, warp_id, output, storage, scan_op);
-
-        // Use warp prefix to calculate the final scan results for every thread
-        T warp_prefix;
-        if(warp_id != 0)
+        // Calculates inclusive scan, result for each thread is stored in storage.threads[flat_tid]
+        this->inclusive_scan_base(flat_tid, input, storage, scan_op);
+        if(flat_tid > 0)
         {
-            warp_prefix = storage.warp_prefixes[warp_id - 1];
-            output = scan_op(warp_prefix, output);
+            output = storage.threads[index(flat_tid-1)];
         }
-        output = warp_shuffle_up(output, 1, warp_size_); // shift to get exclusive results
-        output = lane_id == 0 ? warp_prefix : output;
     }
 
-    // i-th warp will have its prefix stored in storage.warp_prefixes[i-1]
-    template<class BinaryFunction>
-    void calculate_warp_prefixes(const unsigned int flat_tid,
-                                 const unsigned int warp_id,
-                                 T inclusive_input,
-                                 storage_type& storage,
-                                 BinaryFunction scan_op) [[hc]]
-    {
-        // Save the warp reduction result, that is the scan result
-        // for last element in each warp
-        if(flat_tid == ::rocprim::min((warp_id+1) * warp_size_, BlockSize) - 1)
-        {
-            storage.warp_prefixes[warp_id] = inclusive_input;
-        }
-        ::rocprim::syncthreads();
-
-        // Scan the warp reduction results and store in storage.warp_prefixes
-        if(flat_tid < warps_no_)
-        {
-            auto warp_prefix = storage.warp_prefixes[flat_tid];
-            warp_scan_prefix_type().inclusive_scan(
-                // not using shared mem, see note in storage_type
-                warp_prefix, warp_prefix, scan_op
-            );
-            storage.warp_prefixes[flat_tid] = warp_prefix;
-        }
-        ::rocprim::syncthreads();
-    }
-
-    // THIS OVERWRITES storage.warp_prefixes[0]
+    // OVERWRITES storage.threads[0]
     template<class PrefixCallback, class BinaryFunction>
     void include_block_prefix(const unsigned int flat_tid,
                               const unsigned int warp_id,
@@ -584,7 +546,7 @@ private:
         output = scan_op(block_prefix, input);
     }
 
-    // THIS OVERWRITES storage.warp_prefixes[0]
+    // OVERWRITES storage.threads[0]
     template<class PrefixCallback>
     T get_block_prefix(const unsigned int flat_tid,
                        const unsigned int warp_id,
@@ -597,12 +559,20 @@ private:
             T block_prefix = prefix_callback_op(reduction);
             if(flat_tid == 0)
             {
-                // Reuse storage.warp_prefixes[0] to store block prefix
-                storage.warp_prefixes[0] = block_prefix;
+                // Reuse storage.threads[0] which should not be
+                // needed at that point.
+                storage.threads[0] = block_prefix;
             }
         }
         ::rocprim::syncthreads();
-        return storage.warp_prefixes[0];
+        return storage.threads[0];
+    }
+
+    // Change index to minimize LDS bank conflicts if necessary
+    unsigned int index(unsigned int n) const [[hc]]
+    {
+        // Move every 32-bank wide "row" (32 banks * 4 bytes) by one item
+        return has_bank_conflicts_ ? (n + (n/banks_no_)) : n;
     }
 };
 
@@ -610,4 +580,4 @@ private:
 
 END_ROCPRIM_NAMESPACE
 
-#endif // ROCPRIM_BLOCK_DETAIL_BLOCK_SCAN_WARP_SCAN_HPP_
+#endif // ROCPRIM_BLOCK_DETAIL_BLOCK_SCAN_REDUCE_THEN_SCAN_HPP_
