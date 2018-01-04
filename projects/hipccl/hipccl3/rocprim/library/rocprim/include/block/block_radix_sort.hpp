@@ -29,12 +29,12 @@
 #include "../detail/config.hpp"
 #include "../detail/various.hpp"
 #include "../detail/radix_sort.hpp"
+#include "../warp/detail/warp_scan_shuffle.hpp"
 
 #include "../intrinsics.hpp"
 #include "../functional.hpp"
 
 #include "block_exchange.hpp"
-#include "block_scan.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -114,8 +114,7 @@ void warp_bit_plus_reduce(const buckets<T, Size>& input, buckets<T, Size>& outpu
 /// Specialized block scan of bool (1 bit values)
 template<
     class T,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread
+    unsigned int BlockSize
 >
 class block_bit_plus_scan
 {
@@ -141,6 +140,7 @@ public:
         // any temporaty memory for it.
     };
 
+    template<unsigned int ItemsPerThread>
     void exclusive_scan(const T (&input)[ItemsPerThread],
                         T (&output)[ItemsPerThread],
                         T& reduction,
@@ -219,7 +219,7 @@ class block_radix_sort
     // The last radix value does not have its own bucket and hence no scan is performed, because
     // its value can be calculated based on all other values
     using buckets = detail::buckets<unsigned int, radix_size - 1>;
-    using block_scan = detail::block_bit_plus_scan<buckets, BlockSize, ItemsPerThread>;
+    using bit_block_scan = detail::block_bit_plus_scan<buckets, BlockSize>;
 
     using bit_keys_exchange_type = ::rocprim::block_exchange<bit_key_type, BlockSize, ItemsPerThread>;
     using values_exchange_type = ::rocprim::block_exchange<Value, BlockSize, ItemsPerThread>;
@@ -233,7 +233,7 @@ public:
             typename bit_keys_exchange_type::storage_type bit_keys_exchange;
             typename values_exchange_type::storage_type values_exchange;
         };
-        typename block_scan::storage_type block_scan;
+        typename bit_block_scan::storage_type bit_block_scan;
     };
 
     void sort(Key (&keys)[ItemsPerThread],
@@ -421,7 +421,7 @@ private:
                     banks[i][r] = radix == r;
                 }
             }
-            block_scan().exclusive_scan(banks, positions, counts, storage.block_scan);
+            bit_block_scan().exclusive_scan(banks, positions, counts, storage.bit_block_scan);
 
             // Prefix sum of counts to compute starting positions of keys of each radix value
             buckets starts;
@@ -458,7 +458,6 @@ private:
 
         if(ToStriped)
         {
-            ::rocprim::syncthreads();
             to_striped_keys(storage, bit_keys);
             to_striped_values(storage, values);
         }
@@ -471,11 +470,11 @@ private:
         }
     }
 
-
     void exchange_keys(storage_type& storage,
                        bit_key_type (&bit_keys)[ItemsPerThread],
                        const unsigned int (&ranks)[ItemsPerThread]) [[hc]]
     {
+        // Synchronization is ommited here because bit_block_scan already calls it
         bit_keys_exchange_type().scatter_to_blocked(bit_keys, bit_keys, ranks, storage.bit_keys_exchange);
     }
 
@@ -497,6 +496,7 @@ private:
     void to_striped_keys(storage_type& storage,
                          bit_key_type (&bit_keys)[ItemsPerThread]) [[hc]]
     {
+        ::rocprim::syncthreads();
         bit_keys_exchange_type().blocked_to_striped(bit_keys, bit_keys, storage.bit_keys_exchange);
     }
 
