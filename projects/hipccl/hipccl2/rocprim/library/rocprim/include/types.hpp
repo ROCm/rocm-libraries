@@ -25,7 +25,11 @@
 
 #include "detail/config.hpp"
 
+/// \addtogroup utilsmodule
+/// @{
+
 BEGIN_ROCPRIM_NAMESPACE
+
 namespace detail
 {
 
@@ -47,25 +51,25 @@ DEFINE_VECTOR_TYPE(int);
 DEFINE_VECTOR_TYPE(short);
 
 // Takes a scalar type T and matches to a vector type based on NumElements.
-template <class T, unsigned int NumElements> 
+template <class T, unsigned int NumElements>
 struct make_vector_type
 {
     using type = void;
 };
-    
-template <> 
+
+template <>
 struct make_vector_type<char, 1>
 {
     using type = char;
 };
-    
-template <> 
+
+template <>
 struct make_vector_type<int, 1>
 {
     using type = int;
 };
-    
-template <> 
+
+template <>
 struct make_vector_type<short, 1>
 {
     using type = short;
@@ -87,6 +91,17 @@ DEFINE_MAKE_VECTOR_TYPE(short, 2);
 DEFINE_MAKE_VECTOR_TYPE(short, 4);
 
 } // end namespace detail
+
+/// \brief Empty type used as a placeholder, usually used to flag that given
+/// template parameter should not be used.
+struct empty_type
+{
+
+};
+
 END_ROCPRIM_NAMESPACE
+
+/// @}
+// end of group utilsmodule
 
 #endif // ROCPRIM_TYPES_HPP_

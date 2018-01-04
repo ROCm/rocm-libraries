@@ -113,7 +113,7 @@ BEGIN_ROCPRIM_NAMESPACE
 template<
     class Key,
     unsigned int WarpSize = warp_size(),
-    class Value = detail::empty_type
+    class Value = empty_type
 >
 class warp_sort : detail::warp_sort_shuffle<Key, WarpSize, Value>
 {
