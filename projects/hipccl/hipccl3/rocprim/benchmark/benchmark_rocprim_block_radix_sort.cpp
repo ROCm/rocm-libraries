@@ -43,6 +43,8 @@
 
 // rocPRIM
 #include <block/block_radix_sort.hpp>
+#include <block/block_load.hpp>
+#include <block/block_store.hpp>
 
 #define HIP_CHECK(condition)         \
   {                                  \
@@ -62,34 +64,35 @@ namespace rp = rocprim;
 template<
     class T,
     unsigned int BlockSize,
-    unsigned int ItemsPerThread
+    unsigned int ItemsPerThread,
+    unsigned int Trials
 >
 __global__
 void block_radix_sort_kernel(const T * input, T * output)
 {
-    const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+    const unsigned int lid = hipThreadIdx_x;
+    const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
 
     T keys[ItemsPerThread];
-    for(unsigned int k = 0; k < ItemsPerThread; k++)
+    rp::block_load_direct_blocked(lid, input + block_offset, keys);
+
+    #pragma nounroll
+    for(unsigned int trial = 0; trial < Trials; trial++)
     {
-        keys[k] = input[i * ItemsPerThread + k];
+        rp::block_radix_sort<T, BlockSize, ItemsPerThread> sort;
+        sort.sort(keys);
     }
 
-    rp::block_radix_sort<T, BlockSize, ItemsPerThread> sort;
-    sort.sort(keys);
-
-    for(unsigned int k = 0; k < ItemsPerThread; k++)
-    {
-        output[i * ItemsPerThread + k] = keys[k];
-    }
+    rp::block_store_direct_blocked(lid, output + block_offset, keys);
 }
 
 template<
     class T,
     unsigned int BlockSize,
-    unsigned int ItemsPerThread
+    unsigned int ItemsPerThread,
+    unsigned int Trials = 10
 >
-void benchmark_block_radix_sort(benchmark::State& state, hipStream_t stream, size_t N)
+void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
 {
     constexpr auto items_per_block = BlockSize * ItemsPerThread;
     const auto size = items_per_block * ((N + items_per_block - 1)/items_per_block);
@@ -125,7 +128,7 @@ void benchmark_block_radix_sort(benchmark::State& state, hipStream_t stream, siz
         auto start = std::chrono::high_resolution_clock::now();
 
         hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(block_radix_sort_kernel<T, BlockSize, ItemsPerThread>),
+            HIP_KERNEL_NAME(block_radix_sort_kernel<T, BlockSize, ItemsPerThread, Trials>),
             dim3(size/items_per_block), dim3(BlockSize), 0, stream,
             d_input, d_output
         );
@@ -137,12 +140,19 @@ void benchmark_block_radix_sort(benchmark::State& state, hipStream_t stream, siz
             std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
         state.SetIterationTime(elapsed_seconds.count());
     }
-    state.SetBytesProcessed(state.iterations() * size * sizeof(T));
-    state.SetItemsProcessed(state.iterations() * size);
+    state.SetBytesProcessed(state.iterations() * Trials * size * sizeof(T));
+    state.SetItemsProcessed(state.iterations() * Trials * size);
 
     HIP_CHECK(hipFree(d_input));
     HIP_CHECK(hipFree(d_output));
 }
+
+#define CREATE_BENCHMARK(T, BS, IPT) \
+benchmark::RegisterBenchmark( \
+    ("block_radix_sort<" #T ", " #BS ", " #IPT ">"), \
+    run_benchmark<T, BS, IPT>, \
+    stream, size \
+)
 
 int main(int argc, char *argv[])
 {
@@ -174,34 +184,71 @@ int main(int argc, char *argv[])
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks =
     {
-        benchmark::RegisterBenchmark(
-            "block_radix_sort<unsigned int, 256, 1>",
-            [=](benchmark::State& state) { benchmark_block_radix_sort<unsigned int, 256, 1>(state, stream, size); }
-        ),
-        benchmark::RegisterBenchmark(
-            "block_radix_sort<double, 256, 1>",
-            [=](benchmark::State& state) { benchmark_block_radix_sort<double, 256, 1>(state, stream, size); }
-        ),
-        benchmark::RegisterBenchmark(
-            "block_radix_sort<unsigned int, 512, 4>",
-            [=](benchmark::State& state) { benchmark_block_radix_sort<unsigned int, 512, 4>(state, stream, size); }
-        ),
-        benchmark::RegisterBenchmark(
-            "block_radix_sort<double, 256, 8>",
-            [=](benchmark::State& state) { benchmark_block_radix_sort<double, 256, 8>(state, stream, size); }
-        ),
-        benchmark::RegisterBenchmark(
-            "block_radix_sort<int, 128, 16>",
-            [=](benchmark::State& state) { benchmark_block_radix_sort<int, 128, 16>(state, stream, size); }
-        ),
-        benchmark::RegisterBenchmark(
-            "block_radix_sort<short, 400, 5>",
-            [=](benchmark::State& state) { benchmark_block_radix_sort<short, 400, 5>(state, stream, size); }
-        ),
-        benchmark::RegisterBenchmark(
-            "block_radix_sort<long long, 300, 3>",
-            [=](benchmark::State& state) { benchmark_block_radix_sort<long long, 300, 3>(state, stream, size); }
-        ),
+        CREATE_BENCHMARK(int, 64, 1),
+        CREATE_BENCHMARK(int, 64, 2),
+        CREATE_BENCHMARK(int, 64, 4),
+        CREATE_BENCHMARK(int, 64, 7),
+        CREATE_BENCHMARK(int, 64, 8),
+
+        CREATE_BENCHMARK(int, 128, 1),
+        CREATE_BENCHMARK(int, 128, 2),
+        CREATE_BENCHMARK(int, 128, 4),
+        CREATE_BENCHMARK(int, 128, 7),
+        CREATE_BENCHMARK(int, 128, 8),
+
+        CREATE_BENCHMARK(int, 256, 1),
+        CREATE_BENCHMARK(int, 256, 2),
+        CREATE_BENCHMARK(int, 256, 4),
+        CREATE_BENCHMARK(int, 256, 7),
+        CREATE_BENCHMARK(int, 256, 8),
+
+        CREATE_BENCHMARK(int, 512, 1),
+        CREATE_BENCHMARK(int, 512, 2),
+        CREATE_BENCHMARK(int, 512, 4),
+        CREATE_BENCHMARK(int, 512, 7),
+        CREATE_BENCHMARK(int, 512, 8),
+
+        CREATE_BENCHMARK(int, 1024, 1),
+        CREATE_BENCHMARK(int, 1024, 2),
+        CREATE_BENCHMARK(int, 1024, 4),
+        CREATE_BENCHMARK(int, 1024, 7),
+        CREATE_BENCHMARK(int, 1024, 8),
+
+        CREATE_BENCHMARK(long long, 64, 1),
+        CREATE_BENCHMARK(long long, 64, 2),
+        CREATE_BENCHMARK(long long, 64, 4),
+        CREATE_BENCHMARK(long long, 64, 7),
+        CREATE_BENCHMARK(long long, 64, 8),
+
+        CREATE_BENCHMARK(long long, 128, 1),
+        CREATE_BENCHMARK(long long, 128, 2),
+        CREATE_BENCHMARK(long long, 128, 4),
+        CREATE_BENCHMARK(long long, 128, 7),
+        CREATE_BENCHMARK(long long, 128, 8),
+
+        CREATE_BENCHMARK(long long, 256, 1),
+        CREATE_BENCHMARK(long long, 256, 2),
+        CREATE_BENCHMARK(long long, 256, 4),
+        CREATE_BENCHMARK(long long, 256, 7),
+        CREATE_BENCHMARK(long long, 256, 8),
+
+        CREATE_BENCHMARK(long long, 512, 1),
+        CREATE_BENCHMARK(long long, 512, 2),
+        CREATE_BENCHMARK(long long, 512, 4),
+        CREATE_BENCHMARK(long long, 512, 7),
+        CREATE_BENCHMARK(long long, 512, 8),
+
+        CREATE_BENCHMARK(long long, 1024, 1),
+        CREATE_BENCHMARK(long long, 1024, 2),
+        CREATE_BENCHMARK(long long, 1024, 4),
+
+        CREATE_BENCHMARK(unsigned int, 240, 2),
+        CREATE_BENCHMARK(double, 320, 1),
+        CREATE_BENCHMARK(unsigned int, 500, 4),
+        CREATE_BENCHMARK(double, 243, 8),
+        CREATE_BENCHMARK(int, 120, 16),
+        CREATE_BENCHMARK(short, 400, 5),
+        CREATE_BENCHMARK(long long, 302, 3),
     };
 
     // Use manual timing
