@@ -29,11 +29,12 @@
 #include "../detail/config.hpp"
 #include "../detail/various.hpp"
 #include "../detail/radix_sort.hpp"
+#include "../warp/detail/warp_scan_shuffle.hpp"
 
 #include "../intrinsics.hpp"
 #include "../functional.hpp"
 
-#include "block_scan.hpp"
+#include "block_exchange.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -113,8 +114,7 @@ void warp_bit_plus_reduce(const buckets<T, Size>& input, buckets<T, Size>& outpu
 /// Specialized block scan of bool (1 bit values)
 template<
     class T,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread
+    unsigned int BlockSize
 >
 class block_bit_plus_scan
 {
@@ -140,6 +140,7 @@ public:
         // any temporaty memory for it.
     };
 
+    template<unsigned int ItemsPerThread>
     void exclusive_scan(const T (&input)[ItemsPerThread],
                         T (&output)[ItemsPerThread],
                         T& reduction,
@@ -148,14 +149,18 @@ public:
         const unsigned int lane_id = ::rocprim::lane_id();
         const unsigned int warp_id = ::rocprim::warp_id();
 
-        T reductions[ItemsPerThread];
-        reduction = T();
-        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        T warp_reduction;
+        warp_bit_plus_reduce(input[0], warp_reduction);
+        for(unsigned int i = 1; i < ItemsPerThread; i++)
         {
-            warp_bit_plus_reduce(input[i], reductions[i]);
-            reduction = reduction + reductions[i];
+            T r;
+            warp_bit_plus_reduce(input[i], r);
+            warp_reduction = warp_reduction + r;
         }
-        storage.warp_prefixes[warp_id] = reduction;
+        if(lane_id == 0)
+        {
+            storage.warp_prefixes[warp_id] = warp_reduction;
+        }
         ::rocprim::syncthreads();
 
         // Scan the warp reduction results to calculate warp prefixes
@@ -170,15 +175,23 @@ public:
         }
         ::rocprim::syncthreads();
 
-        // Calculate the final scan result for every thread
-        T prefix = warp_id == 0 ? T() : storage.warp_prefixes[warp_id - 1];
-        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        // Perform exclusive warp scan of bit values
+        T lane_prefix;
+        warp_bit_plus_exlusive_scan(input[0], lane_prefix);
+        for(unsigned int i = 1; i < ItemsPerThread; i++)
         {
-            // Perform exclusive warp scan of bit values
-            warp_bit_plus_exlusive_scan(input[i], output[i]);
-            output[i] = prefix + output[i];
+            T s;
+            warp_bit_plus_exlusive_scan(input[i], s);
+            lane_prefix = lane_prefix + s;
+        }
 
-            prefix = prefix + reductions[i];
+        // Scan the lane's items and calculate final scan results
+        output[0] = warp_id == 0
+            ? lane_prefix
+            : lane_prefix + storage.warp_prefixes[warp_id - 1];
+        for(unsigned int i = 1; i < ItemsPerThread; i++)
+        {
+            output[i] = output[i - 1] + input[i - 1];
         }
 
         // Get the final inclusive reduction result
@@ -206,27 +219,21 @@ class block_radix_sort
     // The last radix value does not have its own bucket and hence no scan is performed, because
     // its value can be calculated based on all other values
     using buckets = detail::buckets<unsigned int, radix_size - 1>;
-    using block_bit_plus_scan = detail::block_bit_plus_scan<buckets, BlockSize, ItemsPerThread>;
+    using bit_block_scan = detail::block_bit_plus_scan<buckets, BlockSize>;
 
-    // Select warp size
-    static constexpr unsigned int warp_size =
-        detail::get_min_warp_size(BlockSize, ::rocprim::warp_size());
-    // Number of warps in block
-    static constexpr unsigned int warps_no = (BlockSize + warp_size - 1) / warp_size;
-
-    struct storage_type_with_values
-    {
-        Value values[BlockSize * ItemsPerThread];
-    };
-    struct storage_type_without_values { };
+    using bit_keys_exchange_type = ::rocprim::block_exchange<bit_key_type, BlockSize, ItemsPerThread>;
+    using values_exchange_type = ::rocprim::block_exchange<Value, BlockSize, ItemsPerThread>;
 
 public:
 
     struct storage_type
-        : std::conditional<with_values, storage_type_with_values, storage_type_without_values>::type
     {
-        bit_key_type bit_keys[BlockSize * ItemsPerThread];
-        typename block_bit_plus_scan::storage_type block_bit_plus_scan;
+        union
+        {
+            typename bit_keys_exchange_type::storage_type bit_keys_exchange;
+            typename values_exchange_type::storage_type values_exchange;
+        };
+        typename bit_block_scan::storage_type bit_block_scan;
     };
 
     void sort(Key (&keys)[ItemsPerThread],
@@ -303,9 +310,83 @@ public:
         sort_impl<true>(keys, values, storage, begin_bit, end_bit);
     }
 
+    void sort_to_striped(Key (&keys)[ItemsPerThread],
+                         unsigned int begin_bit = 0,
+                         unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+    {
+        tile_static storage_type storage;
+        sort_to_striped(keys, storage, begin_bit, end_bit);
+    }
+
+    void sort_to_striped(Key (&keys)[ItemsPerThread],
+                         storage_type& storage,
+                         unsigned int begin_bit = 0,
+                         unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+    {
+        detail::empty_type * values = nullptr;
+        sort_impl<false, true>(keys, values, storage, begin_bit, end_bit);
+    }
+
+    void sort_desc_to_striped(Key (&keys)[ItemsPerThread],
+                              unsigned int begin_bit = 0,
+                              unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+    {
+        tile_static storage_type storage;
+        sort_desc_to_striped(keys, storage, begin_bit, end_bit);
+    }
+
+    void sort_desc_to_striped(Key (&keys)[ItemsPerThread],
+                              storage_type& storage,
+                              unsigned int begin_bit = 0,
+                              unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+    {
+        detail::empty_type * values = nullptr;
+        sort_impl<true, true>(keys, values, storage, begin_bit, end_bit);
+    }
+
+    template<bool WithValues = with_values>
+    void sort_to_striped(Key (&keys)[ItemsPerThread],
+                         typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
+                         unsigned int begin_bit = 0,
+                         unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+    {
+        tile_static storage_type storage;
+        sort_to_striped(keys, values, storage, begin_bit, end_bit);
+    }
+
+    template<bool WithValues = with_values>
+    void sort_to_striped(Key (&keys)[ItemsPerThread],
+                         typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
+                         storage_type& storage,
+                         unsigned int begin_bit = 0,
+                         unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+    {
+        sort_impl<false, true>(keys, values, storage, begin_bit, end_bit);
+    }
+
+    template<bool WithValues = with_values>
+    void sort_desc_to_striped(Key (&keys)[ItemsPerThread],
+                              typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
+                              unsigned int begin_bit = 0,
+                              unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+    {
+        tile_static storage_type storage;
+        sort_desc_to_striped(keys, values, storage, begin_bit, end_bit);
+    }
+
+    template<bool WithValues = with_values>
+    void sort_desc_to_striped(Key (&keys)[ItemsPerThread],
+                              typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
+                              storage_type& storage,
+                              unsigned int begin_bit = 0,
+                              unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+    {
+        sort_impl<true, true>(keys, values, storage, begin_bit, end_bit);
+    }
+
 private:
 
-    template<bool Descending, class SortedValue>
+    template<bool Descending, bool ToStriped = false, class SortedValue>
     void sort_impl(Key (&keys)[ItemsPerThread],
                    SortedValue * values,
                    storage_type& storage,
@@ -313,25 +394,17 @@ private:
                    unsigned int end_bit) [[hc]]
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-        const unsigned int lane_id = ::rocprim::lane_id();
-        const unsigned int warp_id = ::rocprim::warp_id();
-        const unsigned int current_warp_size = (warp_id == warps_no - 1)
-            ? (BlockSize % warp_size > 0 ? BlockSize % warp_size : warp_size)
-            : warp_size;
 
+        bit_key_type bit_keys[ItemsPerThread];
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             bit_key_type bit_key = key_codec::encode(keys[i]);
             bit_key = (Descending ? ~bit_key : bit_key);
-            store(storage, flat_id * ItemsPerThread + i, bit_key, values[i]);
+            bit_keys[i] = bit_key;
         }
-        ::rocprim::syncthreads();
-
-        block_bit_plus_scan scan;
 
         for(unsigned int bit = begin_bit; bit < end_bit; bit += RadixBits)
         {
-            bit_key_type bit_keys[ItemsPerThread];
             buckets banks[ItemsPerThread];
             buckets positions[ItemsPerThread];
             buckets counts;
@@ -342,17 +415,13 @@ private:
 
             for(unsigned int i = 0; i < ItemsPerThread; i++)
             {
-                const unsigned int from_position =
-                    warp_id * warp_size * ItemsPerThread + i * current_warp_size + lane_id;
-                load(bit_keys[i], values[i], storage, from_position);
-                const bit_key_type bit_key = bit_keys[i];
-                const unsigned int radix = (bit_key >> bit) & radix_mask;
+                const unsigned int radix = (bit_keys[i] >> bit) & radix_mask;
                 for(unsigned int r = 0; r < radix_size - 1; r++)
                 {
                     banks[i][r] = radix == r;
                 }
             }
-            scan.exclusive_scan(banks, positions, counts, storage.block_bit_plus_scan);
+            bit_block_scan().exclusive_scan(banks, positions, counts, storage.bit_block_scan);
 
             // Prefix sum of counts to compute starting positions of keys of each radix value
             buckets starts;
@@ -365,10 +434,10 @@ private:
             }
             // Scatter keys to computed positions considering starting positions of their
             // radix values
+            unsigned int ranks[ItemsPerThread];
             for(unsigned int i = 0; i < ItemsPerThread; i++)
             {
-                const bit_key_type bit_key = bit_keys[i];
-                const unsigned int radix = (bit_key >> bit) & radix_mask;
+                const unsigned int radix = (bit_keys[i] >> bit) & radix_mask;
                 unsigned int to_position = 0;
                 unsigned int last_position = 0;
                 for(unsigned int r = 0; r < radix_size - 1; r++)
@@ -378,60 +447,71 @@ private:
                 }
                 // Calculate position for the last radix value based on positions of
                 // all other previous values
-                const unsigned int from_position =
-                    warp_id * warp_size * ItemsPerThread + i * current_warp_size + lane_id;
-                to_position = radix == radix_size - 1
+                const unsigned int from_position = flat_id * ItemsPerThread + i;
+                ranks[i] = radix == radix_size - 1
                     ? (last_start + from_position - last_position)
                     : to_position;
-                store(storage, to_position, bit_key, values[i]);
             }
-            ::rocprim::syncthreads();
+            exchange_keys(storage, bit_keys, ranks);
+            exchange_values(storage, values, ranks);
+        }
+
+        if(ToStriped)
+        {
+            to_striped_keys(storage, bit_keys);
+            to_striped_values(storage, values);
         }
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            bit_key_type bit_key;
-            load(bit_key, values[i], storage, flat_id * ItemsPerThread + i);
+            bit_key_type bit_key = bit_keys[i];
             bit_key = (Descending ? ~bit_key : bit_key);
             keys[i] = key_codec::decode(bit_key);
         }
     }
 
-    template<class SortedValue>
-    void store(storage_type& storage,
-               unsigned int i,
-               const bit_key_type &bit_key,
-               const SortedValue &value) [[hc]]
+    void exchange_keys(storage_type& storage,
+                       bit_key_type (&bit_keys)[ItemsPerThread],
+                       const unsigned int (&ranks)[ItemsPerThread]) [[hc]]
     {
-        storage.bit_keys[i] = bit_key;
-        storage.values[i] = value;
-    }
-
-    void store(storage_type& storage,
-               unsigned int i,
-               const bit_key_type &bit_key,
-               const detail::empty_type &value) [[hc]]
-    {
-        storage.bit_keys[i] = bit_key;
+        // Synchronization is ommited here because bit_block_scan already calls it
+        bit_keys_exchange_type().scatter_to_blocked(bit_keys, bit_keys, ranks, storage.bit_keys_exchange);
     }
 
     template<class SortedValue>
-    void load(bit_key_type &bit_key,
-              SortedValue &value,
-              const storage_type& storage,
-              unsigned int i) [[hc]]
+    void exchange_values(storage_type& storage,
+                         SortedValue * values,
+                         const unsigned int (&ranks)[ItemsPerThread]) [[hc]]
     {
-        bit_key = storage.bit_keys[i];
-        value = storage.values[i];
+        ::rocprim::syncthreads(); // Storage will be reused (union), synchronization is needed
+        SortedValue (&vs)[ItemsPerThread] = *reinterpret_cast<SortedValue (*)[ItemsPerThread]>(values);
+        values_exchange_type().scatter_to_blocked(vs, vs, ranks, storage.values_exchange);
     }
 
-    void load(bit_key_type &bit_key,
-              detail::empty_type &value,
-              const storage_type& storage,
-              unsigned int i) [[hc]]
+    void exchange_values(storage_type& storage,
+                         detail::empty_type * values,
+                         const unsigned int (&ranks)[ItemsPerThread]) [[hc]]
+    { }
+
+    void to_striped_keys(storage_type& storage,
+                         bit_key_type (&bit_keys)[ItemsPerThread]) [[hc]]
     {
-        bit_key = storage.bit_keys[i];
+        ::rocprim::syncthreads();
+        bit_keys_exchange_type().blocked_to_striped(bit_keys, bit_keys, storage.bit_keys_exchange);
     }
+
+    template<class SortedValue>
+    void to_striped_values(storage_type& storage,
+                           SortedValue * values) [[hc]]
+    {
+        ::rocprim::syncthreads(); // Storage will be reused (union), synchronization is needed
+        SortedValue (&vs)[ItemsPerThread] = *reinterpret_cast<SortedValue (*)[ItemsPerThread]>(values);
+        values_exchange_type().blocked_to_striped(vs, vs, storage.values_exchange);
+    }
+
+    void to_striped_values(storage_type& storage,
+                           detail::empty_type * values) [[hc]]
+    { }
 };
 
 END_ROCPRIM_NAMESPACE
