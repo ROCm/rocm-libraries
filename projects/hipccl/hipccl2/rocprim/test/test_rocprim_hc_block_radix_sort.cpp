@@ -172,7 +172,7 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeys)
         );
     }
 
-    // Calulcate expected results on host
+    // Calculate expected results on host
     std::vector<key_type> expected(key_output);
     for(size_t i = 0; i < size / items_per_block; i++)
     {
@@ -276,7 +276,7 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeysValues)
 
     using key_value = std::pair<key_type, value_type>;
 
-    // Calulcate expected results on host
+    // Calculate expected results on host
     std::vector<key_value> expected(size);
     for(size_t i = 0; i < size; i++)
     {

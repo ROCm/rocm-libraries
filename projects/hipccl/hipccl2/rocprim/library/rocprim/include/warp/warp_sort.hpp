@@ -39,7 +39,7 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// \brief The warp_sort class provides warp-wide methods for computing a parallel 
+/// \brief The warp_sort class provides warp-wide methods for computing a parallel
 /// sort of items across thread warps. This class currently implements parallel
 /// bitonic sort, and only accepts warp sizes that are powers of two.
 ///
@@ -50,7 +50,7 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \par Overview
 /// * \p WarpSize must be power of two.
 /// * \p WarpSize must be equal to or less than the size of hardware warp (see
-/// rocprim::warp_size()). If it is less, sort is performed separatly within groups
+/// rocprim::warp_size()). If it is less, sort is performed separately within groups
 /// determined by WarpSize.
 /// For example, if \p WarpSize is 4, hardware warp is 64, sort will be performed in logical
 /// warps grouped like this: `{ {0, 1, 2, 3}, {4, 5, 6, 7 }, ..., {60, 61, 62, 63} }`
@@ -60,16 +60,16 @@ BEGIN_ROCPRIM_NAMESPACE
 ///
 /// \par Example:
 /// \parblock
-/// Every thread within the warp uses the warp_sort class by first specializing the 
-/// warp_sort type, and instantiating an object that will be used to invoke a 
+/// Every thread within the warp uses the warp_sort class by first specializing the
+/// warp_sort type, and instantiating an object that will be used to invoke a
 /// member function.
-/// 
+///
 /// \b HIP: \n
 /// \code{.cpp}
 /// __global__ void ExampleKernel(...)
 /// {
 ///     const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
-///     
+///
 ///     int value = input[i];
 ///     rocprim::warp_sort<int, 64> wsort;
 ///     wsort.sort(value);
@@ -141,12 +141,12 @@ public:
     /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
     template<class BinaryFunction = ::rocprim::less<Key>>
-    void sort(Key& thread_key, 
+    void sort(Key& thread_key,
               BinaryFunction compare_function = BinaryFunction()) [[hc]]
     {
         base_type::sort(thread_key, compare_function);
     }
-    
+
     /// \brief Warp sort for any data type using temporary storage.
     ///
     /// \tparam BinaryFunction - type of binary function used for sort. Default type
@@ -188,7 +188,7 @@ public:
             thread_key, storage, compare_function
         );
     }
-    
+
     /// \brief Warp sort by key for any data type.
     ///
     /// \tparam BinaryFunction - type of binary function used for sort. Default type
@@ -201,8 +201,8 @@ public:
     /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
     template<class BinaryFunction = ::rocprim::less<Key>>
-    void sort(Key& thread_key, 
-              Value& thread_value, 
+    void sort(Key& thread_key,
+              Value& thread_value,
               BinaryFunction compare_function = BinaryFunction()) [[hc]]
     {
         base_type::sort(
@@ -246,7 +246,7 @@ public:
     /// d_output.synchronize();
     /// \endcode
     template<class BinaryFunction = ::rocprim::less<Key>>
-    void sort(Key& thread_key, 
+    void sort(Key& thread_key,
               Value& thread_value,
               storage_type& storage,
               BinaryFunction compare_function = BinaryFunction()) [[hc]]

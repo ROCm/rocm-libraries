@@ -118,7 +118,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScan)
     // Generate data
     std::vector<T> output = get_random_data<T>(size, 2, 200);
 
-    // Calulcate expected results on host
+    // Calculate expected results on host
     std::vector<T> expected(output.size(), 0);
     for(size_t i = 0; i < output.size() / block_size; i++)
     {
@@ -167,7 +167,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanReduce)
     std::vector<T> output = get_random_data<T>(size, 2, 200);
     std::vector<T> output_reductions(size / block_size);
 
-    // Calulcate expected results on host
+    // Calculate expected results on host
     std::vector<T> expected(output.size(), 0);
     std::vector<T> expected_reductions(output_reductions.size(), 0);
     for(size_t i = 0; i < output.size() / block_size; i++)
@@ -233,7 +233,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanPrefixCallback)
     std::vector<T> output_block_prefixes(size / block_size);
     T block_prefix = get_random_value<T>(0, 100);
 
-    // Calulcate expected results on host
+    // Calculate expected results on host
     std::vector<T> expected(output.size(), 0);
     std::vector<T> expected_block_prefixes(output_block_prefixes.size(), 0);
     for(size_t i = 0; i < output.size() / block_size; i++)
@@ -309,7 +309,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScan)
     std::vector<T> output = get_random_data<T>(size, 2, 241);
     const T init = get_random_value<T>(0, 100);
 
-    // Calulcate expected results on host
+    // Calculate expected results on host
     std::vector<T> expected(output.size(), 0);
     for(size_t i = 0; i < output.size() / block_size; i++)
     {
@@ -361,7 +361,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanReduce)
     // Output reduce results
     std::vector<T> output_reductions(size / block_size);
 
-    // Calulcate expected results on host
+    // Calculate expected results on host
     std::vector<T> expected(output.size(), 0);
     std::vector<T> expected_reductions(output_reductions.size(), 0);
     for(size_t i = 0; i < output.size() / block_size; i++)
@@ -435,7 +435,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanPrefixCallback)
     // Output block prefixes
     std::vector<T> output_block_prefixes(size / block_size);
 
-    // Calulcate expected results on host
+    // Calculate expected results on host
     std::vector<T> expected(output.size(), 0);
     std::vector<T> expected_block_prefixes(output_block_prefixes.size(), 0);
     for(size_t i = 0; i < output.size() / block_size; i++)
@@ -561,7 +561,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScan)
     // Generate data
     std::vector<T> output = get_random_data<T>(size, 2, 200);
 
-    // Calulcate expected results on host
+    // Calculate expected results on host
     std::vector<T> expected(output.size(), 0);
     for(size_t i = 0; i < output.size() / items_per_block; i++)
     {
@@ -632,7 +632,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScanReduce)
     // Output reduce results
     std::vector<T> output_reductions(size / block_size);
 
-    // Calulcate expected results on host
+    // Calculate expected results on host
     std::vector<T> expected(output.size(), 0);
     std::vector<T> expected_reductions(output_reductions.size(), 0);
     for(size_t i = 0; i < output.size() / items_per_block; i++)
@@ -721,7 +721,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScanPrefixCallback)
     std::vector<T> output_block_prefixes(size / items_per_block);
     T block_prefix = get_random_value<T>(0, 100);
 
-    // Calulcate expected results on host
+    // Calculate expected results on host
     std::vector<T> expected(output.size(), 0);
     std::vector<T> expected_block_prefixes(output_block_prefixes.size(), 0);
     for(size_t i = 0; i < output.size() / items_per_block; i++)
@@ -818,7 +818,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScan)
     std::vector<T> output = get_random_data<T>(size, 2, 200);
     const T init = get_random_value<T>(0, 100);
 
-    // Calulcate expected results on host
+    // Calculate expected results on host
     std::vector<T> expected(output.size(), 0);
     for(size_t i = 0; i < output.size() / items_per_block; i++)
     {
@@ -891,7 +891,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScanReduce)
     std::vector<T> output_reductions(size / block_size);
     const T init = get_random_value<T>(0, 100);
 
-    // Calulcate expected results on host
+    // Calculate expected results on host
     std::vector<T> expected(output.size(), 0);
     std::vector<T> expected_reductions(output_reductions.size(), 0);
     for(size_t i = 0; i < output.size() / items_per_block; i++)
@@ -984,7 +984,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScanPrefixCallback)
     std::vector<T> output_block_prefixes(size / items_per_block);
     T block_prefix = get_random_value<T>(0, 100);
 
-    // Calulcate expected results on host
+    // Calculate expected results on host
     std::vector<T> expected(output.size(), 0);
     std::vector<T> expected_block_prefixes(output_block_prefixes.size(), 0);
     for(size_t i = 0; i < output.size() / items_per_block; i++)

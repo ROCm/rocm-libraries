@@ -45,7 +45,7 @@ enum class block_scan_algorithm
 {
     /// \brief A warp_scan based algorithm.
     using_warp_scan,
-    /// \brief An algorithm which limits calulcations to a single hardware warp.
+    /// \brief An algorithm which limits calculations to a single hardware warp.
     reduce_then_scan,
     /// \brief Default block_scan algorithm.
     default_algorithm = using_warp_scan,
