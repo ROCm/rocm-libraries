@@ -65,11 +65,11 @@ struct select_warp_scan_impl
 /// \tparam T - the input/output type.
 /// \tparam WarpSize - the size of logical warp size, which can be equal to or less than
 /// the size of hardware warp (see rocprim::warp_size()). Scan operations are performed
-/// separatly within groups determined by WarpSize.
+/// separately within groups determined by WarpSize.
 ///
 /// \par Overview
 /// * \p WarpSize must be equal to or less than the size of hardware warp (see
-/// rocprim::warp_size()). If it is less, scan is performed separatly within groups
+/// rocprim::warp_size()). If it is less, scan is performed separately within groups
 /// determined by WarpSize. \n
 /// For example, if \p WarpSize is 4, hardware warp is 64, scan will be performed in logical
 /// warps grouped like this: `{ {0, 1, 2, 3}, {4, 5, 6, 7 }, ..., {60, 61, 62, 63} }`

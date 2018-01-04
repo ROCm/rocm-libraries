@@ -79,7 +79,7 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScanInt)
     // Generate data
     std::vector<int> output = get_random_data<int>(size, -100, 100); // used for input/output
 
-    // Calulcate expected results on host
+    // Calculate expected results on host
     std::vector<int> expected(output.size(), 0);
     for(size_t i = 0; i < output.size() / logical_warp_size; i++)
     {
@@ -135,7 +135,7 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScanReduceInt)
     std::vector<int> output = get_random_data<int>(size, -100, 100);  // used for input/output
     std::vector<int> output_reductions(size / logical_warp_size);
 
-    // Calulcate expected results on host
+    // Calculate expected results on host
     std::vector<int> expected(output.size(), 0);
     std::vector<int> expected_reductions(output_reductions.size(), 0);
     for(size_t i = 0; i < output.size() / logical_warp_size; i++)
@@ -207,7 +207,7 @@ TYPED_TEST(RocprimWarpScanTests, ExclusiveScanInt)
     std::vector<int> in_out_array = get_random_data<int>(size, -100, 100);
     const int init = get_random_value(0, 100);
 
-    // Calulcate expected results on host
+    // Calculate expected results on host
     std::vector<int> expected(in_out_array.size(), 0);
     for(size_t i = 0; i < in_out_array.size() / logical_warp_size; i++)
     {
@@ -266,7 +266,7 @@ TYPED_TEST(RocprimWarpScanTests, ExclusiveScanReduceInt)
 
     std::vector<int> output_reductions(size / logical_warp_size);
 
-    // Calulcate expected results on host
+    // Calculate expected results on host
     std::vector<int> expected(in_out_array.size(), 0);
     std::vector<int> expected_reductions(output_reductions.size(), 0);
     for(size_t i = 0; i < in_out_array.size() / logical_warp_size; i++)
@@ -348,7 +348,7 @@ TYPED_TEST(RocprimWarpScanTests, ScanInt)
     std::vector<int> i_output(input.size());
     std::vector<int> e_output(input.size());
 
-    // Calulcate expected results on host
+    // Calculate expected results on host
     std::vector<int> e_expected(input.size(), 0);
     std::vector<int> i_expected(input.size(), 0);
     for(size_t i = 0; i < input.size() / logical_warp_size; i++)
@@ -426,7 +426,7 @@ TYPED_TEST(RocprimWarpScanTests, ScanReduceInt)
     std::vector<int> e_output(input.size());
     std::vector<int> output_reductions(input.size() / logical_warp_size);
 
-    // Calulcate expected results on host
+    // Calculate expected results on host
     std::vector<int> e_expected(input.size(), 0);
     std::vector<int> i_expected(input.size(), 0);
     std::vector<int> expected_reductions(output_reductions.size(), 0);
@@ -519,7 +519,7 @@ TYPED_TEST(RocprimWarpScanTests, ScanReduceFloat)
     std::vector<float> e_output(input.size());
     std::vector<float> output_reductions(input.size() / logical_warp_size);
 
-    // Calulcate expected results on host
+    // Calculate expected results on host
     std::vector<float> e_expected(input.size(), 0);
     std::vector<float> i_expected(input.size(), 0);
     std::vector<float> expected_reductions(output_reductions.size(), 0);
