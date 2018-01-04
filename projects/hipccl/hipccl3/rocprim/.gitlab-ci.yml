@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-image: rocm/rocm-terminal:latest
+image: ourrocm/rocm:1.7.60
 
 variables:
   SUDO_CMD: "" # Must be "sudo" on images which don't use root user
@@ -36,10 +36,9 @@ variables:
   TERM: xterm
 
 before_script:
-  # We had to add sudo because rocm image does not use root as user
-  - hipconfig
   - $SUDO_CMD apt-get update -qq
-  - $SUDO_CMD apt-get install -y -qq g++ git wget tar xz-utils bzip2 build-essential xterm pkg-config
+  - $SUDO_CMD apt-get install -y libnuma-dev ca-certificates
+  - hipconfig
   # cmake
   - mkdir -p $DEPS_DIR/cmake
   - wget --no-check-certificate --quiet -O - $CMAKE_URL | tar --strip-components=1 -xz -C $DEPS_DIR/cmake
