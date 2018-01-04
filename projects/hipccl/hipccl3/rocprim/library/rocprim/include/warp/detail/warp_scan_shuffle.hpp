@@ -46,7 +46,7 @@ class warp_scan_shuffle
 public:
     static_assert(detail::is_power_of_two(WarpSize), "WarpSize must be power of 2");
 
-    using storage_type = detail::empty_type;
+    using storage_type = detail::empty_storage_type;
 
     template<class BinaryFunction>
     void inclusive_scan(T input, T& output, BinaryFunction scan_op) [[hc]]

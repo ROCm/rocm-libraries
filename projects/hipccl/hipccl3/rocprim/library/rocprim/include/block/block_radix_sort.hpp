@@ -212,7 +212,7 @@ public:
 /// \tparam Key - the key type.
 /// \tparam BlockSize - the number of threads in a block.
 /// \tparam ItemsPerThread - the number of items contributed by each thread.
-/// \tparam Value - the value type. Default type detail::empty_type indicates
+/// \tparam Value - the value type. Default type empty_type indicates
 /// a keys-only sort.
 /// \tparam RadixBits - The number of radix bits.
 ///
@@ -280,12 +280,12 @@ template<
     class Key,
     unsigned int BlockSize,
     unsigned int ItemsPerThread = 1,
-    class Value = detail::empty_type,
+    class Value = empty_type,
     unsigned int RadixBits = 1
 >
 class block_radix_sort
 {
-    static constexpr bool with_values = !std::is_same<Value, detail::empty_type>::value;
+    static constexpr bool with_values = !std::is_same<Value, empty_type>::value;
     static constexpr unsigned int radix_size = 1 << RadixBits;
 
     using key_codec = ::rocprim::detail::radix_key_codec<Key>;
@@ -393,7 +393,7 @@ public:
               unsigned int begin_bit = 0,
               unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
     {
-        detail::empty_type * values = nullptr;
+        empty_type * values = nullptr;
         sort_impl<false>(keys, values, storage, begin_bit, end_bit);
     }
 
@@ -487,7 +487,7 @@ public:
                    unsigned int begin_bit = 0,
                    unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
     {
-        detail::empty_type * values = nullptr;
+        empty_type * values = nullptr;
         sort_impl<true>(keys, values, storage, begin_bit, end_bit);
     }
 
@@ -514,7 +514,7 @@ public:
     /// \brief Performs ascending radix sort over key-value pairs partitioned across
     /// threads in a block.
     ///
-    /// \pre Method is enabled only if \p Value type is different than detail::empty_type.
+    /// \pre Method is enabled only if \p Value type is different than empty_type.
     ///
     /// \param [in, out] keys - reference to an array of keys provided by a thread.
     /// \param [in, out] values - reference to an array of values provided by a thread.
@@ -603,7 +603,7 @@ public:
     /// * This overload does not accept storage argument. Required shared memory is
     /// allocated by the method itself.
     ///
-    /// \pre Method is enabled only if \p Value type is different than detail::empty_type.
+    /// \pre Method is enabled only if \p Value type is different than empty_type.
     ///
     /// \param [in, out] keys - reference to an array of keys provided by a thread.
     /// \param [in, out] values - reference to an array of values provided by a thread.
@@ -625,7 +625,7 @@ public:
     /// \brief Performs descending radix sort over key-value pairs partitioned across
     /// threads in a block.
     ///
-    /// \pre Method is enabled only if \p Value type is different than detail::empty_type.
+    /// \pre Method is enabled only if \p Value type is different than empty_type.
     ///
     /// \param [in, out] keys - reference to an array of keys provided by a thread.
     /// \param [in, out] values - reference to an array of values provided by a thread.
@@ -714,7 +714,7 @@ public:
     /// * This overload does not accept storage argument. Required shared memory is
     /// allocated by the method itself.
     ///
-    /// \pre Method is enabled only if \p Value type is different than detail::empty_type.
+    /// \pre Method is enabled only if \p Value type is different than empty_type.
     ///
     /// \param [in, out] keys - reference to an array of keys provided by a thread.
     /// \param [in, out] values - reference to an array of values provided by a thread.
@@ -804,7 +804,7 @@ public:
                          unsigned int begin_bit = 0,
                          unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
     {
-        detail::empty_type * values = nullptr;
+        empty_type * values = nullptr;
         sort_impl<false, true>(keys, values, storage, begin_bit, end_bit);
     }
 
@@ -900,7 +900,7 @@ public:
                               unsigned int begin_bit = 0,
                               unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
     {
-        detail::empty_type * values = nullptr;
+        empty_type * values = nullptr;
         sort_impl<true, true>(keys, values, storage, begin_bit, end_bit);
     }
 
@@ -928,7 +928,7 @@ public:
     /// \brief Performs ascending radix sort over key-value pairs partitioned across
     /// threads in a block, results are saved in a striped arrangement.
     ///
-    /// \pre Method is enabled only if \p Value type is different than detail::empty_type.
+    /// \pre Method is enabled only if \p Value type is different than empty_type.
     ///
     /// \param [in, out] keys - reference to an array of keys provided by a thread.
     /// \param [in, out] values - reference to an array of values provided by a thread.
@@ -1037,7 +1037,7 @@ public:
     /// \brief Performs descending radix sort over key-value pairs partitioned across
     /// threads in a block, results are saved in a striped arrangement.
     ///
-    /// \pre Method is enabled only if \p Value type is different than detail::empty_type.
+    /// \pre Method is enabled only if \p Value type is different than empty_type.
     ///
     /// \param [in, out] keys - reference to an array of keys provided by a thread.
     /// \param [in, out] values - reference to an array of values provided by a thread.
@@ -1248,7 +1248,7 @@ private:
     }
 
     void exchange_values(storage_type& storage,
-                         detail::empty_type * values,
+                         empty_type * values,
                          const unsigned int (&ranks)[ItemsPerThread]) [[hc]]
     { }
 
@@ -1269,7 +1269,7 @@ private:
     }
 
     void to_striped_values(storage_type& storage,
-                           detail::empty_type * values) [[hc]]
+                           empty_type * values) [[hc]]
     { }
 };
 
