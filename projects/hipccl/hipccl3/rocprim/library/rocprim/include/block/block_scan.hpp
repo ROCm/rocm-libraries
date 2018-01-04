@@ -720,7 +720,6 @@ public:
     /// \param [in] input - reference to an array containing thread input values.
     /// \param [out] output - reference to a thread output array. May be aliased with \p input.
     /// \param [out] reduction - result of reducing of all \p input values in a block.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
     /// \param [in] scan_op - binary operation function object that will be used for scan.
     /// The signature of the function should be equivalent to the following:
     /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
@@ -1084,7 +1083,6 @@ public:
     /// \param [in] init - initial value used to start the exclusive scan. Should be the same
     /// for all threads in a block.
     /// \param [out] reduction - result of reducing of all \p input values in a block.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
     /// \param [in] scan_op - binary operation function object that will be used for scan.
     /// The signature of the function should be equivalent to the following:
     /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
@@ -1327,7 +1325,6 @@ public:
     /// \param [out] output - reference to a thread output array. May be aliased with \p input.
     /// \param [in] init - initial value used to start the exclusive scan. Should be the same
     /// for all threads in a block.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
     /// \param [in] scan_op - binary operation function object that will be used for scan.
     /// The signature of the function should be equivalent to the following:
     /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
@@ -1459,7 +1456,6 @@ public:
     /// \param [in] init - initial value used to start the exclusive scan. Should be the same
     /// for all threads in a block.
     /// \param [out] reduction - result of reducing of all \p input values in a block.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
     /// \param [in] scan_op - binary operation function object that will be used for scan.
     /// The signature of the function should be equivalent to the following:
     /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
