@@ -32,7 +32,7 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-struct empty_type
+struct empty_storage_type
 {
 
 };
