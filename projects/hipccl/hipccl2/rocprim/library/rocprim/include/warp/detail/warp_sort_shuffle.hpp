@@ -116,10 +116,7 @@ private:
 public:
     static_assert(detail::is_power_of_two(WarpSize), "WarpSize must be power of 2");
 
-    struct storage_type
-    {
-        // can't use empty_type type due to multiple definitions of the same functions
-    };
+    using storage_type = ::rocprim::detail::empty_storage_type;
 
     template<class BinaryFunction>
     void sort(Key& thread_value, BinaryFunction compare_function) [[hc]]

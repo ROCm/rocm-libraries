@@ -75,7 +75,7 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortInt)
     // Generate data
     std::vector<int> output = get_random_data<int>(size, -100, 100);
 
-    // Calulcate expected results on host
+    // Calculate expected results on host
     std::vector<int> expected(output);
 
     for(size_t i = 0; i < output.size() / logical_warp_size; i++)
@@ -126,7 +126,7 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
     for (unsigned i = 0; i < target.size(); i++)
         target[i] = std::make_pair(output_key[i], output_value[i]);
 
-    // Calulcate expected results on host
+    // Calculate expected results on host
     std::vector<std::pair<int, int>> expected(target);
 
     for(size_t i = 0; i < expected.size() / logical_warp_size; i++)
