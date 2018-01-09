@@ -22,7 +22,6 @@
 #define ROCPRIM_BLOCK_BLOCK_DISCONTINUITY_HPP_
 
 #include <type_traits>
-// #include <utility> !!!!!!!!!!!!!!!!!!!!!
 
 // HC API
 #include <hcc/hc.hpp>
@@ -39,6 +38,7 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
+// Trait checks if FlagOp has 3 arguments (a, b, b_index)
 template<class T, class FlagOp, class Decl = decltype(&FlagOp::operator())>
 struct with_b_index_arg
     : std::integral_constant<bool,
@@ -47,6 +47,8 @@ struct with_b_index_arg
     >
 { };
 
+// Wrapping function that allows to call FlagOp of any of these signatures:
+// with b_index (a, b, b_index) or without it (a, b).
 template<class T, class FlagOp>
 typename std::enable_if<with_b_index_arg<T, FlagOp>::value, bool>::type
 apply(FlagOp flag_op, const T& a, const T& b, unsigned int b_index) [[hc]]
@@ -263,7 +265,10 @@ public:
                               FlagOp flag_op) [[hc]]
     {
         tile_static storage_type storage;
-        flag_heads_and_tails(head_flags, tile_predecessor_item, tail_flags, tile_successor_item, input, flag_op, storage);
+        flag_heads_and_tails(
+            head_flags, tile_predecessor_item, tail_flags, tile_successor_item,
+            input, flag_op, storage
+        );
     }
 
 private:
@@ -307,16 +312,18 @@ private:
 
         if(WithHeads)
         {
-            if(flat_id == 0)
+            if(WithTilePredecessor)
             {
-                head_flags[0] = WithTilePredecessor
-                    ? detail::apply(flag_op, tile_predecessor_item, items[0], flat_id * ItemsPerThread)
-                    : Flag(true); // The first item in the block is always flagged
+                const T predecessor_item = (flat_id == 0)
+                    ? tile_predecessor_item
+                    : storage.last_items[flat_id - 1];
+                head_flags[0] = detail::apply(flag_op, predecessor_item, items[0], flat_id * ItemsPerThread);
             }
             else
             {
-                head_flags[0] =
-                    detail::apply(flag_op, storage.last_items[flat_id - 1], items[0], flat_id * ItemsPerThread);
+                head_flags[0] = (flat_id == 0)
+                    ? Flag(true) // The first item in the block is always flagged
+                    : detail::apply(flag_op, storage.last_items[flat_id - 1], items[0], flat_id * ItemsPerThread);
             }
 
             for(unsigned int i = 1; i < ItemsPerThread; i++)
@@ -328,19 +335,27 @@ private:
         {
             for(unsigned int i = 0; i < ItemsPerThread - 1; i++)
             {
-                tail_flags[i] = detail::apply(flag_op, items[i], items[i + 1], flat_id * ItemsPerThread + i);
+                tail_flags[i] = detail::apply(flag_op, items[i], items[i + 1], flat_id * ItemsPerThread + i + 1);
             }
 
-            if(flat_id == BlockSize - 1)
+            if(WithTileSuccessor)
             {
-                tail_flags[ItemsPerThread - 1] = WithTileSuccessor
-                    ? detail::apply(flag_op, items[ItemsPerThread - 1], tile_successor_item, flat_id * ItemsPerThread + ItemsPerThread - 1)
-                    : Flag(true); // The last item in the block is always flagged
+                const T successor_item = (flat_id == BlockSize - 1)
+                    ? tile_successor_item
+                    : storage.first_items[flat_id + 1];
+                tail_flags[ItemsPerThread - 1] = detail::apply(
+                    flag_op, items[ItemsPerThread - 1], successor_item,
+                    flat_id * ItemsPerThread + ItemsPerThread
+                );
             }
             else
             {
-                tail_flags[ItemsPerThread - 1] =
-                    detail::apply(flag_op, items[ItemsPerThread - 1], storage.first_items[flat_id + 1], flat_id * ItemsPerThread + ItemsPerThread - 1);
+                tail_flags[ItemsPerThread - 1] = (flat_id == BlockSize - 1)
+                    ? Flag(true) // The last item in the block is always flagged
+                    : detail::apply(
+                        flag_op, items[ItemsPerThread - 1], storage.first_items[flat_id + 1],
+                        flat_id * ItemsPerThread + ItemsPerThread
+                    );
             }
         }
     }
