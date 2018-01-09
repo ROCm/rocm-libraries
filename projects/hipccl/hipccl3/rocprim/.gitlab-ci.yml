@@ -68,7 +68,9 @@ build:rocm:
     - build/*.deb
     - build/*.zip
 
-test:rocm:
+test:rocm243:
+  tags:
+    - tag243
   stage: test
   variables:
     SUDO_CMD: "sudo -E"
@@ -76,4 +78,18 @@ test:rocm:
     - build:rocm
   script:
     - cd build
+    - ctest --output-on-failure
+    - ctest --output-on-failure
+
+test:rocm244:
+  tags:
+    - tag244
+  stage: test
+  variables:
+    SUDO_CMD: "sudo -E"
+  dependencies:
+    - build:rocm
+  script:
+    - cd build
+    - ctest --output-on-failure
     - ctest --output-on-failure
