@@ -31,8 +31,70 @@
 #include "../functional.hpp"
 #include "../types.hpp"
 
+/// \addtogroup collectiveblockmodule
+/// @{
+
 BEGIN_ROCPRIM_NAMESPACE
 
+/// \brief The \p block_exchange class is a block level parallel primitive which provides
+/// methods for rearranging items partitioned across threads in a block.
+///
+/// \tparam T - the input type.
+/// \tparam BlockSize - the number of threads in a block.
+/// \tparam ItemsPerThread - the number of items contributed by each thread.
+///
+/// \par Overview
+/// * The \p block_exchange class supports the following rearrangement methods:
+///   * Transposing a blocked arrangement to a striped arrangement.
+///   * Transposing a striped arrangement to a blocked arrangement.
+///   * Transposing a blocked arrangement to a warp-striped arrangement.
+///   * Transposing a warp-striped arrangement to a blocked arrangement.
+///   * Scattering items to a blocked arrangement.
+///   * Scattering items to a striped arrangement.
+/// * Data is automatically be padded to ensure zero bank conflicts.
+///
+/// \par Examples
+/// \parblock
+/// In the examples exchange operation is performed on block of 128 threads, using type
+/// \p int with 8 items per thread.
+///
+/// \b HIP: \n
+/// \code{.cpp}
+/// __global__ void example_kernel(...)
+/// {
+///     // specialize block_exchange for int, block of 128 threads and 8 items per thread
+///     using block_exchange_int = rocprim::block_exchange<int, 128, 8>;
+///     // allocate storage in shared memory
+///     __shared__ block_exchange_int::storage_type storage;
+///
+///     int items[8];
+///     ...
+///     block_exchange_int b_exchange;
+///     b_exchange.blocked_to_striped(items, items, storage);
+///     ...
+/// }
+/// \endcode
+///
+/// \b HC: \n
+/// \code{.cpp}
+/// hc::parallel_for_each(
+///     hc::extent<1>(...).tile(128),
+///     [=](hc::tiled_index<1> i) [[hc]]
+///     {
+///         // specialize block_exchange for int, block of 128 threads and 8 items per thread
+///         using block_exchange_int = rocprim::block_exchange<int, 128, 8>;
+///         // allocate storage in shared memory
+///         tile_static block_exchange_int::storage_type storage;
+///
+///         int items[8];
+///         ...
+///         block_exchange_int b_exchange;
+///         b_exchange.blocked_to_striped(items, items, storage);
+///         ...
+///     }
+/// );
+/// \endcode
+/// \endparblock
 template<
     class T,
     unsigned int BlockSize,
@@ -57,11 +119,26 @@ class block_exchange
 
 public:
 
+    /// \brief Struct used to allocate a temporary memory that is required for thread
+    /// communication during operations provided by related parallel primitive.
+    ///
+    /// Depending on the implemention the operations exposed by parallel primitive may
+    /// require a temporary storage for thread communication. The storage should be allocated
+    /// using keywords <tt>__shared__</tt> in HIP or \p tile_static in HC. It can be aliased to
+    /// an externally allocated memory, or be a part of a union type with other storage types
+    /// to increase shared memory reusability.
     struct storage_type
     {
         T buffer[BlockSize * ItemsPerThread + bank_conflicts_padding];
     };
 
+    /// \brief Transposes a blocked arrangement of items to a striped arrangement
+    /// across the thread block.
+    ///
+    /// \tparam U - [inferred] the output type.
+    ///
+    /// \param [in] input - array that data is loaded from.
+    /// \param [out] output - array that data is loaded to.
     template<class U>
     void blocked_to_striped(const T (&input)[ItemsPerThread],
                             U (&output)[ItemsPerThread]) [[hc]]
@@ -70,6 +147,38 @@ public:
         blocked_to_striped(input, output, storage);
     }
 
+    /// \brief Transposes a blocked arrangement of items to a striped arrangement
+    /// across the thread block, using temporary storage.
+    ///
+    /// \tparam U - [inferred] the output type.
+    ///
+    /// \param [in] input - array that data is loaded from.
+    /// \param [out] output - array that data is loaded to.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
+    /// universal rocprim::syncthreads().
+    ///
+    /// \par Example.
+    /// \code{.cpp}
+    /// hc::parallel_for_each(
+    ///     hc::extent<1>(...).tile(128),
+    ///     [=](hc::tiled_index<1> i) [[hc]]
+    ///     {
+    ///         // specialize block_exchange for int, block of 128 threads and 8 items per thread
+    ///         using block_exchange_int = rocprim::block_exchange<int, 128, 8>;
+    ///         // allocate storage in shared memory
+    ///         tile_static block_exchange_int::storage_type storage;
+    ///
+    ///         int items[8];
+    ///         ...
+    ///         block_exchange_int b_exchange;
+    ///         b_exchange.blocked_to_striped(items, items, storage);
+    ///         ...
+    ///     }
+    /// );
     template<class U>
     void blocked_to_striped(const T (&input)[ItemsPerThread],
                             U (&output)[ItemsPerThread],
@@ -89,6 +198,13 @@ public:
         }
     }
 
+    /// \brief Transposes a striped arrangement of items to a blocked arrangement
+    /// across the thread block.
+    ///
+    /// \tparam U - [inferred] the output type.
+    ///
+    /// \param [in] input - array that data is loaded from.
+    /// \param [out] output - array that data is loaded to.
     template<class U>
     void striped_to_blocked(const T (&input)[ItemsPerThread],
                             U (&output)[ItemsPerThread]) [[hc]]
@@ -97,6 +213,38 @@ public:
         striped_to_blocked(input, output, storage);
     }
 
+    /// \brief Transposes a striped arrangement of items to a blocked arrangement
+    /// across the thread block, using temporary storage.
+    ///
+    /// \tparam U - [inferred] the output type.
+    ///
+    /// \param [in] input - array that data is loaded from.
+    /// \param [out] output - array that data is loaded to.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
+    /// universal rocprim::syncthreads().
+    ///
+    /// \par Example.
+    /// \code{.cpp}
+    /// hc::parallel_for_each(
+    ///     hc::extent<1>(...).tile(128),
+    ///     [=](hc::tiled_index<1> i) [[hc]]
+    ///     {
+    ///         // specialize block_exchange for int, block of 128 threads and 8 items per thread
+    ///         using block_exchange_int = rocprim::block_exchange<int, 128, 8>;
+    ///         // allocate storage in shared memory
+    ///         tile_static block_exchange_int::storage_type storage;
+    ///
+    ///         int items[8];
+    ///         ...
+    ///         block_exchange_int b_exchange;
+    ///         b_exchange.striped_to_blocked(items, items, storage);
+    ///         ...
+    ///     }
+    /// );
     template<class U>
     void striped_to_blocked(const T (&input)[ItemsPerThread],
                             U (&output)[ItemsPerThread],
@@ -116,6 +264,13 @@ public:
         }
     }
 
+    /// \brief Transposes a blocked arrangement of items to a warp-striped arrangement
+    /// across the thread block.
+    ///
+    /// \tparam U - [inferred] the output type.
+    ///
+    /// \param [in] input - array that data is loaded from.
+    /// \param [out] output - array that data is loaded to.
     template<class U>
     void blocked_to_warp_striped(const T (&input)[ItemsPerThread],
                                  U (&output)[ItemsPerThread]) [[hc]]
@@ -124,6 +279,38 @@ public:
         blocked_to_warp_striped(input, output, storage);
     }
 
+    /// \brief Transposes a blocked arrangement of items to a warp-striped arrangement
+    /// across the thread block, using temporary storage.
+    ///
+    /// \tparam U - [inferred] the output type.
+    ///
+    /// \param [in] input - array that data is loaded from.
+    /// \param [out] output - array that data is loaded to.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
+    /// universal rocprim::syncthreads().
+    ///
+    /// \par Example.
+    /// \code{.cpp}
+    /// hc::parallel_for_each(
+    ///     hc::extent<1>(...).tile(128),
+    ///     [=](hc::tiled_index<1> i) [[hc]]
+    ///     {
+    ///         // specialize block_exchange for int, block of 128 threads and 8 items per thread
+    ///         using block_exchange_int = rocprim::block_exchange<int, 128, 8>;
+    ///         // allocate storage in shared memory
+    ///         tile_static block_exchange_int::storage_type storage;
+    ///
+    ///         int items[8];
+    ///         ...
+    ///         block_exchange_int b_exchange;
+    ///         b_exchange.blocked_to_warp_striped(items, items, storage);
+    ///         ...
+    ///     }
+    /// );
     template<class U>
     void blocked_to_warp_striped(const T (&input)[ItemsPerThread],
                                  U (&output)[ItemsPerThread],
@@ -146,6 +333,13 @@ public:
         }
     }
 
+    /// \brief Transposes a warp-striped arrangement of items to a blocked arrangement
+    /// across the thread block.
+    ///
+    /// \tparam U - [inferred] the output type.
+    ///
+    /// \param [in] input - array that data is loaded from.
+    /// \param [out] output - array that data is loaded to.
     template<class U>
     void warp_striped_to_blocked(const T (&input)[ItemsPerThread],
                                  U (&output)[ItemsPerThread]) [[hc]]
@@ -154,6 +348,38 @@ public:
         warp_striped_to_blocked(input, output, storage);
     }
 
+    /// \brief Transposes a warp-striped arrangement of items to a blocked arrangement
+    /// across the thread block, using temporary storage.
+    ///
+    /// \tparam U - [inferred] the output type.
+    ///
+    /// \param [in] input - array that data is loaded from.
+    /// \param [out] output - array that data is loaded to.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
+    /// universal rocprim::syncthreads().
+    ///
+    /// \par Example.
+    /// \code{.cpp}
+    /// hc::parallel_for_each(
+    ///     hc::extent<1>(...).tile(128),
+    ///     [=](hc::tiled_index<1> i) [[hc]]
+    ///     {
+    ///         // specialize block_exchange for int, block of 128 threads and 8 items per thread
+    ///         using block_exchange_int = rocprim::block_exchange<int, 128, 8>;
+    ///         // allocate storage in shared memory
+    ///         tile_static block_exchange_int::storage_type storage;
+    ///
+    ///         int items[8];
+    ///         ...
+    ///         block_exchange_int b_exchange;
+    ///         b_exchange.warp_striped_to_blocked(items, items, storage);
+    ///         ...
+    ///     }
+    /// );
     template<class U>
     void warp_striped_to_blocked(const T (&input)[ItemsPerThread],
                                  U (&output)[ItemsPerThread],
@@ -176,6 +402,15 @@ public:
         }
     }
 
+    /// \brief Scatters items to a blocked arrangement based on their ranks
+    /// across the thread block.
+    ///
+    /// \tparam U - [inferred] the output type.
+    /// \tparam Offset - [inferred] the rank type.
+    ///
+    /// \param [in] input - array that data is loaded from.
+    /// \param [out] output - array that data is loaded to.
+    /// \param [out] ranks - array that has rank of data.
     template<class U, class Offset>
     void scatter_to_blocked(const T (&input)[ItemsPerThread],
                             U (&output)[ItemsPerThread],
@@ -185,6 +420,40 @@ public:
         scatter_to_blocked(input, output, ranks, storage);
     }
 
+    /// \brief Scatters items to a blocked arrangement based on their ranks
+    /// across the thread block, using temporary storage.
+    ///
+    /// \tparam U - [inferred] the output type.
+    /// \tparam Offset - [inferred] the rank type.
+    ///
+    /// \param [in] input - array that data is loaded from.
+    /// \param [out] output - array that data is loaded to.
+    /// \param [out] ranks - array that has rank of data.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
+    /// universal rocprim::syncthreads().
+    ///
+    /// \par Example.
+    /// \code{.cpp}
+    /// hc::parallel_for_each(
+    ///     hc::extent<1>(...).tile(128),
+    ///     [=](hc::tiled_index<1> i) [[hc]]
+    ///     {
+    ///         // specialize block_exchange for int, block of 128 threads and 8 items per thread
+    ///         using block_exchange_int = rocprim::block_exchange<int, 128, 8>;
+    ///         // allocate storage in shared memory
+    ///         tile_static block_exchange_int::storage_type storage;
+    ///
+    ///         int items[8];
+    ///         int ranks[8];
+    ///         ...
+    ///         block_exchange_int b_exchange;
+    ///         b_exchange.scatter_to_blocked(items, items, ranks, storage);
+    ///         ...
+    ///     }
+    /// );
     template<class U, class Offset>
     void scatter_to_blocked(const T (&input)[ItemsPerThread],
                             U (&output)[ItemsPerThread],
@@ -206,6 +475,15 @@ public:
         }
     }
 
+    /// \brief Scatters items to a striped arrangement based on their ranks
+    /// across the thread block.
+    ///
+    /// \tparam U - [inferred] the output type.
+    /// \tparam Offset - [inferred] the rank type.
+    ///
+    /// \param [in] input - array that data is loaded from.
+    /// \param [out] output - array that data is loaded to.
+    /// \param [out] ranks - array that has rank of data.
     template<class U, class Offset>
     void scatter_to_striped(const T (&input)[ItemsPerThread],
                             U (&output)[ItemsPerThread],
@@ -215,6 +493,40 @@ public:
         scatter_to_striped(input, output, ranks, storage);
     }
 
+    /// \brief Scatters items to a striped arrangement based on their ranks
+    /// across the thread block, using temporary storage.
+    ///
+    /// \tparam U - [inferred] the output type.
+    /// \tparam Offset - [inferred] the rank type.
+    ///
+    /// \param [in] input - array that data is loaded from.
+    /// \param [out] output - array that data is loaded to.
+    /// \param [out] ranks - array that has rank of data.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
+    /// universal rocprim::syncthreads().
+    ///
+    /// \par Example.
+    /// \code{.cpp}
+    /// hc::parallel_for_each(
+    ///     hc::extent<1>(...).tile(128),
+    ///     [=](hc::tiled_index<1> i) [[hc]]
+    ///     {
+    ///         // specialize block_exchange for int, block of 128 threads and 8 items per thread
+    ///         using block_exchange_int = rocprim::block_exchange<int, 128, 8>;
+    ///         // allocate storage in shared memory
+    ///         tile_static block_exchange_int::storage_type storage;
+    ///
+    ///         int items[8];
+    ///         int ranks[8];
+    ///         ...
+    ///         block_exchange_int b_exchange;
+    ///         b_exchange.scatter_to_striped(items, items, ranks, storage);
+    ///         ...
+    ///     }
+    /// );
     template<class U, class Offset>
     void scatter_to_striped(const T (&input)[ItemsPerThread],
                             U (&output)[ItemsPerThread],
@@ -236,6 +548,18 @@ public:
         }
     }
 
+    /// \brief Scatters items to a striped arrangement based on their ranks
+    /// across the thread block, guarded by rank.
+    ///
+    /// \par Overview
+    /// * Items with rank -1 are not scattered.
+    ///
+    /// \tparam U - [inferred] the output type.
+    /// \tparam Offset - [inferred] the rank type.
+    ///
+    /// \param [in] input - array that data is loaded from.
+    /// \param [out] output - array that data is loaded to.
+    /// \param [in] ranks - array that has rank of data.
     template<class U, class Offset>
     void scatter_to_striped_guarded(const T (&input)[ItemsPerThread],
                                     U (&output)[ItemsPerThread],
@@ -245,6 +569,43 @@ public:
         scatter_to_striped_guarded(input, output, ranks, storage);
     }
 
+    /// \brief Scatters items to a striped arrangement based on their ranks
+    /// across the thread block, guarded by rank, using temporary storage.
+    ///
+    /// \par Overview
+    /// * Items with rank -1 are not scattered.
+    ///
+    /// \tparam U - [inferred] the output type.
+    /// \tparam Offset - [inferred] the rank type.
+    ///
+    /// \param [in] input - array that data is loaded from.
+    /// \param [out] output - array that data is loaded to.
+    /// \param [in] ranks - array that has rank of data.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
+    /// universal rocprim::syncthreads().
+    ///
+    /// \par Example.
+    /// \code{.cpp}
+    /// hc::parallel_for_each(
+    ///     hc::extent<1>(...).tile(128),
+    ///     [=](hc::tiled_index<1> i) [[hc]]
+    ///     {
+    ///         // specialize block_exchange for int, block of 128 threads and 8 items per thread
+    ///         using block_exchange_int = rocprim::block_exchange<int, 128, 8>;
+    ///         // allocate storage in shared memory
+    ///         tile_static block_exchange_int::storage_type storage;
+    ///
+    ///         int items[8];
+    ///         int ranks[8];
+    ///         ...
+    ///         block_exchange_int b_exchange;
+    ///         b_exchange.scatter_to_striped_guarded(items, items, ranks, storage);
+    ///         ...
+    ///     }
+    /// );
     template<class U, class Offset>
     void scatter_to_striped_guarded(const T (&input)[ItemsPerThread],
                                     U (&output)[ItemsPerThread],
@@ -269,6 +630,17 @@ public:
         }
     }
 
+    /// \brief Scatters items to a striped arrangement based on their ranks
+    /// across the thread block, with a flag to denote validity.
+    ///
+    /// \tparam U - [inferred] the output type.
+    /// \tparam Offset - [inferred] the rank type.
+    /// \tparam ValidFlag - [inferred] the validity flag type.
+    ///
+    /// \param [in] input - array that data is loaded from.
+    /// \param [out] output - array that data is loaded to.
+    /// \param [in] ranks - array that has rank of data.
+    /// \param [in] is_valid - array that has flags to denote validity.
     template<class U, class Offset, class ValidFlag>
     void scatter_to_striped_flagged(const T (&input)[ItemsPerThread],
                                     U (&output)[ItemsPerThread],
@@ -279,6 +651,44 @@ public:
         scatter_to_striped_flagged(input, output, ranks, is_valid, storage);
     }
 
+    /// \brief Scatters items to a striped arrangement based on their ranks
+    /// across the thread block, with a flag to denote validity, using temporary
+    /// storage.
+    ///
+    /// \tparam U - [inferred] the output type.
+    /// \tparam Offset - [inferred] the rank type.
+    /// \tparam ValidFlag - [inferred] the validity flag type.
+    ///
+    /// \param [in] input - array that data is loaded from.
+    /// \param [out] output - array that data is loaded to.
+    /// \param [in] ranks - array that has rank of data.
+    /// \param [in] is_valid - array that has flags to denote validity.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
+    /// universal rocprim::syncthreads().
+    ///
+    /// \par Example.
+    /// \code{.cpp}
+    /// hc::parallel_for_each(
+    ///     hc::extent<1>(...).tile(128),
+    ///     [=](hc::tiled_index<1> i) [[hc]]
+    ///     {
+    ///         // specialize block_exchange for int, block of 128 threads and 8 items per thread
+    ///         using block_exchange_int = rocprim::block_exchange<int, 128, 8>;
+    ///         // allocate storage in shared memory
+    ///         tile_static block_exchange_int::storage_type storage;
+    ///
+    ///         int items[8];
+    ///         int ranks[8];
+    ///         int flags[8];
+    ///         ...
+    ///         block_exchange_int b_exchange;
+    ///         b_exchange.scatter_to_striped_flagged(items, items, ranks, flags, storage);
+    ///         ...
+    ///     }
+    /// );
     template<class U, class Offset, class ValidFlag>
     void scatter_to_striped_flagged(const T (&input)[ItemsPerThread],
                                     U (&output)[ItemsPerThread],
@@ -323,5 +733,8 @@ private:
 };
 
 END_ROCPRIM_NAMESPACE
+
+/// @}
+// end of group collectiveblockmodule
 
 #endif // ROCPRIM_BLOCK_BLOCK_EXCHANGE_HPP_
