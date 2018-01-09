@@ -203,7 +203,7 @@ TYPED_TEST(RocprimBlockDiscontinuity, FlagHeads)
             if(idx.tile[0] % 2 == 1)
             {
                 const type tile_predecessor_item = d_input[block_offset - 1];
-                bdiscontinuity.flag_heads(head_flags, input, flag_op_type(), tile_predecessor_item);
+                bdiscontinuity.flag_heads(head_flags, tile_predecessor_item, input, flag_op_type());
             }
             else
             {
@@ -282,7 +282,7 @@ TYPED_TEST(RocprimBlockDiscontinuity, FlagTails)
             if(idx.tile[0] % 2 == 0)
             {
                 const type tile_successor_item = d_input[block_offset + items_per_block];
-                bdiscontinuity.flag_tails(tail_flags, input, flag_op_type(), tile_successor_item);
+                bdiscontinuity.flag_tails(tail_flags, tile_successor_item, input, flag_op_type());
             }
             else
             {

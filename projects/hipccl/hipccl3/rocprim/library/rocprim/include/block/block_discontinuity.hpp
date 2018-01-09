@@ -105,9 +105,9 @@ public:
 
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     void flag_heads(Flag (&head_flags)[ItemsPerThread],
+                    T tile_predecessor_item,
                     const T (&input)[ItemsPerThread],
                     FlagOp flag_op,
-                    T tile_predecessor_item,
                     storage_type& storage) [[hc]]
     {
         flag_impl<true, true, false, false>(
@@ -118,12 +118,12 @@ public:
 
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     void flag_heads(Flag (&head_flags)[ItemsPerThread],
+                    T tile_predecessor_item,
                     const T (&input)[ItemsPerThread],
-                    FlagOp flag_op,
-                    T tile_predecessor_item) [[hc]]
+                    FlagOp flag_op) [[hc]]
     {
         tile_static storage_type storage;
-        flag_heads(head_flags, input, flag_op, tile_predecessor_item, storage);
+        flag_heads(head_flags, tile_predecessor_item, input, flag_op, storage);
     }
 
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
@@ -149,9 +149,9 @@ public:
 
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     void flag_tails(Flag (&tail_flags)[ItemsPerThread],
+                    T tile_successor_item,
                     const T (&input)[ItemsPerThread],
                     FlagOp flag_op,
-                    T tile_successor_item,
                     storage_type& storage) [[hc]]
     {
         flag_impl<false, false, true, true>(
@@ -162,12 +162,12 @@ public:
 
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     void flag_tails(Flag (&tail_flags)[ItemsPerThread],
+                    T tile_successor_item,
                     const T (&input)[ItemsPerThread],
-                    FlagOp flag_op,
-                    T tile_successor_item) [[hc]]
+                    FlagOp flag_op) [[hc]]
     {
         tile_static storage_type storage;
-        flag_tails(tail_flags, input, flag_op, tile_successor_item, storage);
+        flag_tails(tail_flags, tile_successor_item, input, flag_op, storage);
     }
 
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
