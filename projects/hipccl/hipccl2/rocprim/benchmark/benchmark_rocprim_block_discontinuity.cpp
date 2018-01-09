@@ -86,7 +86,7 @@ struct flag_heads
             bool head_flags[ItemsPerThread];
             if(WithTile)
             {
-                bdiscontinuity.flag_heads(head_flags, input, rp::equal_to<T>(), T(123));
+                bdiscontinuity.flag_heads(head_flags, T(123), input, rp::equal_to<T>());
             }
             else
             {
@@ -129,7 +129,7 @@ struct flag_tails
             bool tail_flags[ItemsPerThread];
             if(WithTile)
             {
-                bdiscontinuity.flag_tails(tail_flags, input, rp::equal_to<T>(), T(123));
+                bdiscontinuity.flag_tails(tail_flags, T(123), input, rp::equal_to<T>());
             }
             else
             {
