@@ -80,7 +80,7 @@ struct custom_flag_op2
     }
 };
 
-// Host implementaions of apply function that allows to pass 3 args
+// Host (CPU) implementaions of the wrapping function that allows to pass 3 args
 template<class T, class FlagOp>
 typename std::enable_if<rp::detail::with_b_index_arg<T, FlagOp>::value, bool>::type
 apply(FlagOp flag_op, const T& a, const T& b, unsigned int b_index) [[cpu]]
@@ -156,9 +156,9 @@ TYPED_TEST(RocprimBlockDiscontinuity, FlagHeads)
             const size_t i = bi * items_per_block + ii;
             if(ii == 0)
             {
-                expected_heads[i] = bi % 2 == 0
-                    ? flag_type(true)
-                    : apply(flag_op, input[i - 1], input[i], ii);
+                expected_heads[i] = bi % 2 == 1
+                    ? apply(flag_op, input[i - 1], input[i], ii)
+                    : flag_type(true);
             }
             else
             {
@@ -183,14 +183,14 @@ TYPED_TEST(RocprimBlockDiscontinuity, FlagHeads)
             rp::block_discontinuity<type, block_size> bdiscontinuity;
 
             flag_type head_flags[items_per_thread];
-            if(idx.tile[0] % 2 == 0)
-            {
-                bdiscontinuity.flag_heads(head_flags, input, flag_op_type());
-            }
-            else
+            if(idx.tile[0] % 2 == 1)
             {
                 const type tile_predecessor_item = d_input[block_offset - 1];
                 bdiscontinuity.flag_heads(head_flags, input, flag_op_type(), tile_predecessor_item);
+            }
+            else
+            {
+                bdiscontinuity.flag_heads(head_flags, input, flag_op_type());
             }
 
             rp::block_store_direct_blocked(lid, d_heads.data() + block_offset, head_flags);
@@ -235,13 +235,13 @@ TYPED_TEST(RocprimBlockDiscontinuity, FlagTails)
             const size_t i = bi * items_per_block + ii;
             if(ii == items_per_block - 1)
             {
-                expected_tails[i] = bi % 2 == 1
-                    ? flag_type(true)
-                    : apply(flag_op, input[i], input[i + 1], ii);
+                expected_tails[i] = bi % 2 == 0
+                    ? apply(flag_op, input[i], input[i + 1], ii + 1)
+                    : flag_type(true);
             }
             else
             {
-                expected_tails[i] = apply(flag_op, input[i], input[i + 1], ii);
+                expected_tails[i] = apply(flag_op, input[i], input[i + 1], ii + 1);
             }
         }
     }
@@ -262,14 +262,14 @@ TYPED_TEST(RocprimBlockDiscontinuity, FlagTails)
             rp::block_discontinuity<type, block_size> bdiscontinuity;
 
             flag_type tail_flags[items_per_thread];
-            if(idx.tile[0] % 2 == 1)
-            {
-                bdiscontinuity.flag_tails(tail_flags, input, flag_op_type());
-            }
-            else
+            if(idx.tile[0] % 2 == 0)
             {
                 const type tile_successor_item = d_input[block_offset + items_per_block];
                 bdiscontinuity.flag_tails(tail_flags, input, flag_op_type(), tile_successor_item);
+            }
+            else
+            {
+                bdiscontinuity.flag_tails(tail_flags, input, flag_op_type());
             }
 
             rp::block_store_direct_blocked(lid, d_tails.data() + block_offset, tail_flags);
@@ -316,9 +316,9 @@ TYPED_TEST(RocprimBlockDiscontinuity, FlagHeadsAndTails)
             const size_t i = bi * items_per_block + ii;
             if(ii == 0)
             {
-                expected_heads[i] = (bi % 4 == 0 || bi % 4 == 3)
-                    ? flag_type(true)
-                    : apply(flag_op, input[i - 1], input[i], ii);
+                expected_heads[i] = (bi % 4 == 1 || bi % 4 == 2)
+                    ? apply(flag_op, input[i - 1], input[i], ii)
+                    : flag_type(true);
             }
             else
             {
@@ -326,13 +326,13 @@ TYPED_TEST(RocprimBlockDiscontinuity, FlagHeadsAndTails)
             }
             if(ii == items_per_block - 1)
             {
-                expected_tails[i] = (bi % 4 == 2 || bi % 4 == 3)
-                    ? flag_type(true)
-                    : apply(flag_op, input[i], input[i + 1], ii);
+                expected_tails[i] = (bi % 4 == 0 || bi % 4 == 1)
+                    ? apply(flag_op, input[i], input[i + 1], ii + 1)
+                    : flag_type(true);
             }
             else
             {
-                expected_tails[i] = apply(flag_op, input[i], input[i + 1], ii);
+                expected_tails[i] = apply(flag_op, input[i], input[i + 1], ii + 1);
             }
         }
     }
