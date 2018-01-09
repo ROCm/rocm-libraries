@@ -43,7 +43,9 @@ template<class T, class FlagOp, class Decl = decltype(&FlagOp::operator())>
 struct with_b_index_arg
     : std::integral_constant<bool,
         std::is_same<Decl, bool (FlagOp::*)(const T&, const T&, unsigned int) const>::value ||
-        std::is_same<Decl, bool (FlagOp::*)(const T&, const T&, unsigned int)>::value
+        std::is_same<Decl, bool (FlagOp::*)(const T&, const T&, unsigned int)>::value ||
+        std::is_same<Decl, bool (FlagOp::*)(T, T, unsigned int) const>::value ||
+        std::is_same<Decl, bool (FlagOp::*)(T, T, unsigned int)>::value
     >
 { };
 
@@ -290,6 +292,8 @@ private:
                    FlagOp flag_op,
                    storage_type& storage) [[hc]]
     {
+        static_assert(std::is_integral<Flag>::value, "Flag must be integral type");
+
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
 
         // Copy input items for rare cases when input and head_flags/tail_flags are the same arrays

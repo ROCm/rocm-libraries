@@ -65,9 +65,9 @@ public:
 template<class T>
 struct custom_flag_op1
 {
-    bool operator()(const T& a, const T& b, unsigned int index) [[hc]] [[cpu]]
+    bool operator()(const T& a, const T& b, unsigned int b_index) [[hc]] [[cpu]]
     {
-        return (a == b) || (index % 10 == 0);
+        return (a == b) || (b_index % 10 == 0);
     }
 };
 
@@ -93,6 +93,23 @@ typename std::enable_if<!rp::detail::with_b_index_arg<T, FlagOp>::value, bool>::
 apply(FlagOp flag_op, const T& a, const T& b, unsigned int) [[cpu]]
 {
     return flag_op(a, b);
+}
+
+TEST(RocprimBlockDiscontinuity, Traits)
+{
+    ASSERT_FALSE((rp::detail::with_b_index_arg<int, rocprim::less<int>>::value));
+    ASSERT_FALSE((rp::detail::with_b_index_arg<int, custom_flag_op2<int>>::value));
+    ASSERT_TRUE((rp::detail::with_b_index_arg<int, custom_flag_op1<int>>::value));
+
+    auto f1 = [](const int& a, const int& b, unsigned int b_index) { return (a == b) || (b_index % 10 == 0); };
+    auto f2 = [](const int& a, const int& b) { return (a == b); };
+    ASSERT_TRUE((rp::detail::with_b_index_arg<int, decltype(f1)>::value));
+    ASSERT_FALSE((rp::detail::with_b_index_arg<int, decltype(f2)>::value));
+
+    auto f3 = [](int a, int b, unsigned int b_index) { return (a == b) || (b_index % 10 == 0); };
+    auto f4 = [](const int a, const int b) { return (a == b); };
+    ASSERT_TRUE((rp::detail::with_b_index_arg<int, decltype(f3)>::value));
+    ASSERT_FALSE((rp::detail::with_b_index_arg<int, decltype(f4)>::value));
 }
 
 typedef ::testing::Types<
