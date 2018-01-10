@@ -1601,6 +1601,6 @@ public:
 END_ROCPRIM_NAMESPACE
 
 /// @}
-// end of group collectivewarpmodule
+// end of group collectiveblockmodule
 
 #endif // ROCPRIM_BLOCK_BLOCK_SCAN_HPP_
