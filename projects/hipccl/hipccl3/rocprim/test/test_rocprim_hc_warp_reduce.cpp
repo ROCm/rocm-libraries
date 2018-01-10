@@ -49,13 +49,13 @@ typedef ::testing::Types<
     uint_wrapper<8U>,
     uint_wrapper<16U>,
     uint_wrapper<32U>,
-    uint_wrapper<64U>//,
+    uint_wrapper<64U>,
     // shared memory scan
-    /*uint_wrapper<3U>,
+    uint_wrapper<3U>,
     uint_wrapper<7U>,
     uint_wrapper<15U>,
     uint_wrapper<37U>,
-    uint_wrapper<61U>*/
+    uint_wrapper<61U>
 > WarpSizes;
 
 TYPED_TEST_CASE(RocprimWarpReduceTests, WarpSizes);
@@ -78,7 +78,6 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumInt)
 
     // Generate data
     std::vector<int> input = get_random_data<int>(size, -100, 100); // used for input
-    std::iota(input.begin(), input.end(), 0);
     std::vector<int> output(input.size() / logical_warp_size, 0);
     
     // Calculate expected results on host
@@ -142,7 +141,6 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumValidInt)
 
     // Generate data
     std::vector<int> input = get_random_data<int>(size, -100, 100); // used for input
-    std::iota(input.begin(), input.end(), 0);
     std::vector<int> output(input.size() / logical_warp_size, 0);
     
     // Calculate expected results on host
