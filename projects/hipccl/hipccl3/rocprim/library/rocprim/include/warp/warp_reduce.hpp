@@ -60,7 +60,8 @@ struct select_warp_reduce_impl
 
 template<
     class T,
-    unsigned int WarpSize = warp_size()
+    unsigned int WarpSize = warp_size(),
+    bool UseAllReduce = false
 >
 class warp_reduce
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
@@ -76,7 +77,7 @@ public:
              T& output,
              storage_type& storage) [[hc]]
     {
-        base_type::reduce(input, output, storage, ::rocprim::plus<T>());
+        reduce<UseAllReduce>(input, output, storage, ::rocprim::plus<T>());
     }
     
     void sum(T input,
@@ -84,7 +85,7 @@ public:
              int valid_items,
              storage_type& storage) [[hc]]
     {
-        base_type::reduce(input, output, valid_items, storage, ::rocprim::plus<T>());
+        reduce<UseAllReduce>(input, output, valid_items, storage, ::rocprim::plus<T>());
     }
     
     template<class BinaryFunction = ::rocprim::plus<T>>
@@ -92,18 +93,61 @@ public:
                 T& output,
                 storage_type& storage,
                 BinaryFunction reduce_op = BinaryFunction()) [[hc]]
+    {
+        reduce<UseAllReduce>(input, output, storage, reduce_op);
+    }
+    
+    template<class BinaryFunction = ::rocprim::plus<T>>
+    void reduce(T input,
+                    T& output,
+                    int valid_items,
+                    storage_type& storage,
+                    BinaryFunction reduce_op = BinaryFunction()) [[hc]]
+    {
+        reduce<UseAllReduce>(input, output, valid_items, storage, reduce_op);
+    }
+    
+private:
+    template<bool Switch, class BinaryFunction>
+    typename std::enable_if<(Switch == false)>::type
+    reduce(T input,
+           T& output,
+           storage_type& storage,
+           BinaryFunction reduce_op) [[hc]]
     {
         base_type::reduce(input, output, storage, reduce_op);
     }
     
-    template<class BinaryFunction = ::rocprim::plus<T>>
-    void reduce(T input,
-                T& output,
-                int valid_items,
-                storage_type& storage,
-                BinaryFunction reduce_op = BinaryFunction()) [[hc]]
+    template<bool Switch, class BinaryFunction>
+    typename std::enable_if<(Switch == true)>::type
+    reduce(T input,
+           T& output,
+           storage_type& storage,
+           BinaryFunction reduce_op) [[hc]]
+    {
+        base_type::all_reduce(input, output, storage, reduce_op);
+    }
+    
+    template<bool Switch, class BinaryFunction>
+    typename std::enable_if<(Switch == false)>::type
+    reduce(T input,
+           T& output,
+           int valid_items,
+           storage_type& storage,
+           BinaryFunction reduce_op) [[hc]]
     {
         base_type::reduce(input, output, valid_items, storage, reduce_op);
+    }
+    
+    template<bool Switch, class BinaryFunction>
+    typename std::enable_if<(Switch == true)>::type
+    reduce(T input,
+           T& output,
+           int valid_items,
+           storage_type& storage,
+           BinaryFunction reduce_op) [[hc]]
+    {
+        base_type::all_reduce(input, output, valid_items, storage, reduce_op);
     }
 };
 
