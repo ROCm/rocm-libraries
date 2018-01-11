@@ -122,6 +122,69 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumInt)
     }
 }
 
+TYPED_TEST(RocprimWarpReduceTests, AllReduceSumInt)
+{
+    // logical warp side for warp primitive, execution warp size is always rp::warp_size()
+    constexpr size_t logical_warp_size = TestFixture::warp_size;
+    constexpr size_t block_size =
+        rp::detail::is_power_of_two(logical_warp_size)
+            ? rp::max<size_t>(rp::warp_size(), logical_warp_size * 4)
+            : (rp::warp_size()/logical_warp_size) * logical_warp_size;
+    const size_t size = block_size * 4;
+
+    // Given warp size not supported
+    if(logical_warp_size > rp::warp_size())
+    {
+        return;
+    }
+
+    // Generate data
+    std::vector<int> input = get_random_data<int>(size, -100, 100); // used for input
+    std::vector<int> output(input.size(), 0);
+    
+    // Calculate expected results on host
+    std::vector<int> expected(output.size(), 0);
+    for(size_t i = 0; i < output.size() / logical_warp_size; i++)
+    {
+        int value = 0;
+        for(size_t j = 0; j < logical_warp_size; j++)
+        {
+            auto idx = i * logical_warp_size + j;
+            value += input[idx];
+        }
+        for (size_t j = 0; j < logical_warp_size; j++)
+        {
+            auto idx = i * logical_warp_size + j;
+            expected[idx] = value;
+        }
+    }
+
+    hc::array_view<int, 1> d_input(input.size(), input.data());
+    hc::array_view<int, 1> d_output(output.size(), output.data());
+    hc::parallel_for_each(
+        hc::extent<1>(input.size()).tile(block_size),
+        [=](hc::tiled_index<1> i) [[hc]]
+        {
+            constexpr unsigned int warps_no = block_size/logical_warp_size;
+            const unsigned int warp_id = rp::detail::logical_warp_id<logical_warp_size>();
+
+            int value = d_input[i];
+
+            using wreduce_t = rp::warp_reduce<int, logical_warp_size, true>;
+            tile_static typename wreduce_t::storage_type storage[warps_no];
+            wreduce_t().sum(value, value, storage[warp_id]);
+        
+            d_output[i] = value;
+        }
+    );
+    d_input.synchronize();
+    d_output.synchronize();
+    for(int i = 0; i < output.size(); i++)
+    {
+        ASSERT_EQ(output[i], expected[i]);
+    }
+}
+
 TYPED_TEST(RocprimWarpReduceTests, ReduceSumValidInt)
 {
     // logical warp side for warp primitive, execution warp size is always rp::warp_size()
@@ -184,3 +247,68 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumValidInt)
         ASSERT_EQ(output[i], expected[i]);
     }
 }
+
+TYPED_TEST(RocprimWarpReduceTests, AllReduceSumValidInt)
+{
+    // logical warp side for warp primitive, execution warp size is always rp::warp_size()
+    constexpr size_t logical_warp_size = TestFixture::warp_size;
+    constexpr size_t block_size =
+        rp::detail::is_power_of_two(logical_warp_size)
+            ? rp::max<size_t>(rp::warp_size(), logical_warp_size * 4)
+            : (rp::warp_size()/logical_warp_size) * logical_warp_size;
+    const size_t size = block_size * 4;
+    const size_t valid = logical_warp_size - 1;
+
+    // Given warp size not supported
+    if(logical_warp_size > rp::warp_size())
+    {
+        return;
+    }
+
+    // Generate data
+    std::vector<int> input = get_random_data<int>(size, -100, 100); // used for input
+    std::vector<int> output(input.size(), 0);
+    
+    // Calculate expected results on host
+    std::vector<int> expected(output.size(), 0);
+    for(size_t i = 0; i < output.size() / logical_warp_size; i++)
+    {
+        int value = 0;
+        for(size_t j = 0; j < valid; j++)
+        {
+            auto idx = i * logical_warp_size + j;
+            value += input[idx];
+        }
+        for (size_t j = 0; j < logical_warp_size; j++)
+        {
+            auto idx = i * logical_warp_size + j;
+            expected[idx] = value;
+        }
+    }
+
+    hc::array_view<int, 1> d_input(input.size(), input.data());
+    hc::array_view<int, 1> d_output(output.size(), output.data());
+    hc::parallel_for_each(
+        hc::extent<1>(input.size()).tile(block_size),
+        [=](hc::tiled_index<1> i) [[hc]]
+        {
+            constexpr unsigned int warps_no = block_size/logical_warp_size;
+            const unsigned int warp_id = rp::detail::logical_warp_id<logical_warp_size>();
+
+            int value = d_input[i];
+
+            using wreduce_t = rp::warp_reduce<int, logical_warp_size, true>;
+            tile_static typename wreduce_t::storage_type storage[warps_no];
+            wreduce_t().sum(value, value, valid, storage[warp_id]);
+        
+             d_output[i] = value;
+        }
+    );
+    d_input.synchronize();
+    d_output.synchronize();
+    for(int i = 0; i < output.size(); i++)
+    {
+        ASSERT_EQ(output[i], expected[i]);
+    }
+}
+

@@ -78,6 +78,39 @@ public:
         (void) storage; // disables unused parameter warning
         reduce(input, output, valid_items, reduce_op);
     }
+    
+    template<class BinaryFunction>
+    void all_reduce(T input, T& output, int valid_items, BinaryFunction reduce_op) [[hc]]
+    {
+        output = input;
+
+        T value;
+        #pragma unroll
+        for (unsigned int offset = WarpSize >> 1; offset > 0; offset >>= 1)
+        {
+            value = warp_shuffle_down(output, offset, WarpSize);
+            unsigned int id = detail::logical_lane_id<WarpSize>();
+            if (id + offset < valid_items) output = reduce_op(value, output);
+        }
+        
+        output = warp_shuffle(output, 0, WarpSize);
+    }
+    
+    template<class BinaryFunction>
+    void all_reduce(T input, T& output,
+                storage_type& storage, BinaryFunction reduce_op) [[hc]]
+    {
+        (void) storage; // disables unused parameter warning
+        all_reduce(input, output, WarpSize, reduce_op);
+    }
+    
+    template<class BinaryFunction>
+    void all_reduce(T input, T& output, int valid_items,
+                storage_type& storage, BinaryFunction reduce_op) [[hc]]
+    {
+        (void) storage; // disables unused parameter warning
+        all_reduce(input, output, valid_items, reduce_op);
+    }
 };
 
 } // end namespace detail

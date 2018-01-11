@@ -78,6 +78,37 @@ public:
     {
         reduce(input, output, WarpSize, storage, reduce_op);
     }
+    
+    template<class BinaryFunction>
+    void all_reduce(T input, T& output, int valid_items,
+                storage_type& storage, BinaryFunction reduce_op) [[hc]]
+    {
+        const unsigned int lid = detail::logical_lane_id<WarpSize>();
+        unsigned int ceiling = next_power_of_two(WarpSize);
+        
+        T me = input;
+        storage.threads[lid] = me;
+        for(unsigned int i = ceiling >> 1; i > 0; i >>= 1)
+        {
+            if (lid + i < WarpSize && lid < i && lid + i < valid_items)
+            {
+                me = storage.threads[lid];
+                T other = storage.threads[lid + i];
+                me = reduce_op(me, other);
+                storage.threads[lid] = me;
+            }
+        }
+        
+        me = storage.threads[0];
+        output = me;
+    }
+    
+    template<class BinaryFunction>
+    void all_reduce(T input, T& output,
+                storage_type& storage, BinaryFunction reduce_op) [[hc]]
+    {
+        all_reduce(input, output, WarpSize, storage, reduce_op);
+    }
 };
 
 } // end namespace detail
