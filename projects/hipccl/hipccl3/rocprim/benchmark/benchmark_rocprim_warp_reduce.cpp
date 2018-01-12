@@ -33,6 +33,8 @@
 // CmdParser
 #include "cmdparser.hpp"
 
+#include "benchmark_utils.hpp"
+
 // HC API
 #include <hcc/hc.hpp>
 // HIP API
@@ -57,114 +59,70 @@ const size_t DEFAULT_N = 1024 * 1024 * 128;
 
 namespace rp = rocprim;
 
-template<class T, unsigned int WarpSize, unsigned int BlockSize>
-void benchmark_hc_warp_reduce(benchmark::State& state, hc::accelerator_view acc_view, size_t N)
+struct reduce
 {
-    // Make sure size is a multiple of BlockSize
-    const auto size = BlockSize * ((N + BlockSize - 1)/BlockSize);
-    // Allocate and fill memory
-    std::vector<T> input(size, 1.0f);
-    std::vector<T> output(size, -1.0f);
-    hc::array_view<T, 1> av_input(size, input.data());
-    hc::array_view<T, 1> av_output(size, output.data());
-    av_input.synchronize_to(acc_view);
-    av_output.synchronize_to(acc_view);
-    acc_view.wait();
-
-    for (auto _ : state)
+    template<
+        class T,
+        unsigned int WarpSize,
+        unsigned int Trials
+    >
+    __global__
+    static void kernel(const T * d_input, T * d_output)
     {
-        auto start = std::chrono::high_resolution_clock::now();
-        auto event = hc::parallel_for_each(
-            acc_view,
-            hc::extent<1>(size).tile(BlockSize),
-            [=](hc::tiled_index<1> i) [[hc]]
-            {
-                T value = av_input[i];
+        const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
 
-                using wreduce_t = rp::warp_reduce<T, WarpSize>;
-                tile_static typename wreduce_t::storage_type storage;
-                wreduce_t().sum(value, value, storage);
+        auto value = d_input[i];
 
-                av_output[i] = value;
-            }
-        );
-        event.wait();
+        using wreduce_t = rp::warp_reduce<T, WarpSize>;
+        tile_static typename wreduce_t::storage_type storage;
+        #pragma nounroll
+        for(unsigned int trial = 0; trial < Trials; trial++)
+        {
+            wreduce_t().reduce(value, value, storage);
+        }
 
-        auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds =
-            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-
-        state.SetIterationTime(elapsed_seconds.count());
+        d_output[i] = value;
     }
-    state.SetBytesProcessed(state.iterations() * size * sizeof(T));
-    state.SetItemsProcessed(state.iterations() * size);
-}
+};
 
-template<class T, unsigned int WarpSize, unsigned int BlockSize>
-void benchmark_hc_warp_all_reduce(benchmark::State& state, hc::accelerator_view acc_view, size_t N)
+struct all_reduce
 {
-    // Make sure size is a multiple of BlockSize
-    const auto size = BlockSize * ((N + BlockSize - 1)/BlockSize);
-    // Allocate and fill memory
-    std::vector<T> input(size, 1.0f);
-    std::vector<T> output(size, -1.0f);
-    hc::array_view<T, 1> av_input(size, input.data());
-    hc::array_view<T, 1> av_output(size, output.data());
-    av_input.synchronize_to(acc_view);
-    av_output.synchronize_to(acc_view);
-    acc_view.wait();
-
-    for (auto _ : state)
+    template<
+        class T,
+        unsigned int WarpSize,
+        unsigned int Trials
+    >
+    __global__
+    static void kernel(const T * d_input, T * d_output)
     {
-        auto start = std::chrono::high_resolution_clock::now();
-        auto event = hc::parallel_for_each(
-            acc_view,
-            hc::extent<1>(size).tile(BlockSize),
-            [=](hc::tiled_index<1> i) [[hc]]
-            {
-                T value = av_input[i];
+        const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
 
-                using wreduce_t = rp::warp_reduce<T, WarpSize, true>;
-                tile_static typename wreduce_t::storage_type storage;
-                wreduce_t().sum(value, value, storage);
+        auto value = d_input[i];
 
-                av_output[i] = value;
-            }
-        );
-        event.wait();
+        using wreduce_t = rp::warp_reduce<T, WarpSize, true>;
+        tile_static typename wreduce_t::storage_type storage;
+        #pragma nounroll
+        for(unsigned int trial = 0; trial < Trials; trial++)
+        {
+            wreduce_t().reduce(value, value, storage);
+        }
 
-        auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds =
-            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-
-        state.SetIterationTime(elapsed_seconds.count());
+        d_output[i] = value;
     }
-    state.SetBytesProcessed(state.iterations() * size * sizeof(T));
-    state.SetItemsProcessed(state.iterations() * size);
-}
+};
 
-template<class T, unsigned int WarpSize>
-__global__
-void warp_reduce_kernel(const T* input, T* output)
+template<
+    class Benchmark,
+    class T,
+    unsigned int WarpSize,
+    unsigned int BlockSize,
+    unsigned int Trials = 100
+>
+void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
 {
-    const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
-
-    auto value = input[i];
-
-    using wreduce_t = rp::warp_reduce<T, WarpSize>;
-    tile_static typename wreduce_t::storage_type storage;
-    wreduce_t().sum(value, value, storage);
-
-    output[i] = value;
-}
-
-template<class T, unsigned int WarpSize, unsigned int BlockSize>
-void benchmark_hip_warp_reduce(benchmark::State& state, hipStream_t stream, size_t N)
-{
-    // Make sure size is a multiple of BlockSize
     const auto size = BlockSize * ((N + BlockSize - 1)/BlockSize);
-    // Allocate and fill memory
-    std::vector<T> input(size, 1.0f);
+
+    std::vector<T> input = get_random_data<T>(size, T(0), T(10));
     T * d_input;
     T * d_output;
     HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
@@ -178,11 +136,12 @@ void benchmark_hip_warp_reduce(benchmark::State& state, hipStream_t stream, size
     );
     HIP_CHECK(hipDeviceSynchronize());
 
-    for (auto _ : state)
+    for(auto _ : state)
     {
         auto start = std::chrono::high_resolution_clock::now();
+
         hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(warp_reduce_kernel<T, BlockSize>),
+            HIP_KERNEL_NAME(Benchmark::template kernel<T, WarpSize, Trials>),
             dim3(size/BlockSize), dim3(BlockSize), 0, stream,
             d_input, d_output
         );
@@ -192,73 +151,37 @@ void benchmark_hip_warp_reduce(benchmark::State& state, hipStream_t stream, size
         auto end = std::chrono::high_resolution_clock::now();
         auto elapsed_seconds =
             std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-
         state.SetIterationTime(elapsed_seconds.count());
     }
-    state.SetBytesProcessed(state.iterations() * size * sizeof(T));
-    state.SetItemsProcessed(state.iterations() * size);
+    state.SetBytesProcessed(state.iterations() * Trials * size * sizeof(T));
+    state.SetItemsProcessed(state.iterations() * Trials * size);
 
     HIP_CHECK(hipFree(d_input));
     HIP_CHECK(hipFree(d_output));
 }
 
-template<class T, unsigned int WarpSize>
-__global__
-void warp_all_reduce_kernel(const T* input, T* output)
+#define CREATE_BENCHMARK(T, WS, BS) \
+benchmark::RegisterBenchmark( \
+    (std::string("warp_reduce<" #T ", " #WS ", " #BS ">.") + name).c_str(), \
+    run_benchmark<Benchmark, T, WS, BS>, \
+    stream, size \
+)
+
+template<class Benchmark>
+void add_benchmarks(const std::string& name,
+                    std::vector<benchmark::internal::Benchmark*>& benchmarks,
+                    hipStream_t stream,
+                    size_t size)
 {
-    const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
-
-    auto value = input[i];
-
-    using wreduce_t = rp::warp_reduce<T, WarpSize, true>;
-    tile_static typename wreduce_t::storage_type storage;
-    wreduce_t().sum(value, value, storage);
-
-    output[i] = value;
-}
-
-template<class T, unsigned int WarpSize, unsigned int BlockSize>
-void benchmark_hip_warp_all_reduce(benchmark::State& state, hipStream_t stream, size_t N)
-{
-    // Make sure size is a multiple of BlockSize
-    const auto size = BlockSize * ((N + BlockSize - 1)/BlockSize);
-    // Allocate and fill memory
-    std::vector<T> input(size, 1.0f);
-    T * d_input;
-    T * d_output;
-    HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
-    HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
-    HIP_CHECK(
-        hipMemcpy(
-            d_input, input.data(),
-            size * sizeof(T),
-            hipMemcpyHostToDevice
-        )
-    );
-    HIP_CHECK(hipDeviceSynchronize());
-
-    for (auto _ : state)
+    std::vector<benchmark::internal::Benchmark*> bs =
     {
-        auto start = std::chrono::high_resolution_clock::now();
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(warp_all_reduce_kernel<T, BlockSize>),
-            dim3(size/BlockSize), dim3(BlockSize), 0, stream,
-            d_input, d_output
-        );
-        HIP_CHECK(hipPeekAtLastError());
-        HIP_CHECK(hipDeviceSynchronize());
+        CREATE_BENCHMARK(int, 32, 64),
+        CREATE_BENCHMARK(int, 64, 64),
+        CREATE_BENCHMARK(int, 37, 64),
+        CREATE_BENCHMARK(int, 61, 64),
+    };
 
-        auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds =
-            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-
-        state.SetIterationTime(elapsed_seconds.count());
-    }
-    state.SetBytesProcessed(state.iterations() * size * sizeof(T));
-    state.SetItemsProcessed(state.iterations() * size);
-
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
+    benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
 
 int main(int argc, char *argv[])
@@ -281,37 +204,10 @@ int main(int argc, char *argv[])
     HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
     std::cout << "[HIP] Device name: " << devProp.name << std::endl;
 
-    // HC
-    hc::accelerator_view* acc_view;
-    HIP_CHECK(hipHccGetAcceleratorView(stream, &acc_view));
-    auto acc = acc_view->get_accelerator();
-    std::wstring_convert<std::codecvt_utf8<wchar_t>> conv;
-    std::cout << "[HC]  Device name: " << conv.to_bytes(acc.get_description()) << std::endl;
-
     // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks =
-    {
-        benchmark::RegisterBenchmark(
-            "warp_reduce_hc", // name
-            benchmark_hc_warp_reduce<float, 64, 256>, // func
-            *acc_view, size // arguments for func
-        ),
-        benchmark::RegisterBenchmark(
-            "warp_all_reduce_hc", // name
-            benchmark_hc_warp_all_reduce<float, 64, 256>, // func
-            *acc_view, size // arguments for func
-        ),
-        benchmark::RegisterBenchmark(
-            "warp_reduce_hip",
-            benchmark_hip_warp_reduce<float, 64, 256>,
-            stream, size
-        ),
-        benchmark::RegisterBenchmark(
-            "warp_all_reduce_hip",
-            benchmark_hip_warp_all_reduce<float, 64, 256>,
-            stream, size
-        )
-    };
+    std::vector<benchmark::internal::Benchmark*> benchmarks;
+    add_benchmarks<reduce>("reduce", benchmarks, stream, size);
+    add_benchmarks<all_reduce>("all_reduce", benchmarks, stream, size);
 
     // Use manual timing
     for(auto& b : benchmarks)

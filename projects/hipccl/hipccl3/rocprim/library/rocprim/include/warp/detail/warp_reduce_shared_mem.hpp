@@ -39,7 +39,8 @@ namespace detail
 
 template<
     class T,
-    unsigned int WarpSize
+    unsigned int WarpSize,
+    bool UseAllReduce
 >
 class warp_reduce_shared_mem
 {
@@ -49,6 +50,28 @@ public:
         volatile T threads[WarpSize];
     };
     
+template<class BinaryFunction>
+    void reduce(T input, T& output,
+                storage_type& storage, BinaryFunction reduce_op) [[hc]]
+    {
+        const unsigned int lid = detail::logical_lane_id<WarpSize>();
+        unsigned int ceiling = next_power_of_two(WarpSize);
+        
+        output = input;
+        storage.threads[lid] = output;
+        for(unsigned int i = ceiling >> 1; i > 0; i >>= 1)
+        {
+            if (lid + i < WarpSize && lid < i)
+            {
+                output = storage.threads[lid];
+                T other = storage.threads[lid + i];
+                output = reduce_op(output, other);
+                storage.threads[lid] = output;
+            }
+        }
+        set_output<UseAllReduce>(output, storage);
+    }
+
     template<class BinaryFunction>
     void reduce(T input, T& output, int valid_items,
                 storage_type& storage, BinaryFunction reduce_op) [[hc]]
@@ -56,58 +79,34 @@ public:
         const unsigned int lid = detail::logical_lane_id<WarpSize>();
         unsigned int ceiling = next_power_of_two(WarpSize);
         
-        T me = input;
-        storage.threads[lid] = me;
+        output = input;
+        storage.threads[lid] = output;
         for(unsigned int i = ceiling >> 1; i > 0; i >>= 1)
         {
             if (lid + i < WarpSize && lid < i && lid + i < valid_items)
             {
-                me = storage.threads[lid];
+                output = storage.threads[lid];
                 T other = storage.threads[lid + i];
-                me = reduce_op(me, other);
-                storage.threads[lid] = me;
+                output = reduce_op(output, other);
+                storage.threads[lid] = output;
             }
         }
-        
-        output = me;
+        set_output<UseAllReduce>(output, storage);
     }
-    
-    template<class BinaryFunction>
-    void reduce(T input, T& output,
-                storage_type& storage, BinaryFunction reduce_op) [[hc]]
+
+private:
+    template<bool Switch>
+    typename std::enable_if<(Switch == false)>::type
+    set_output(T& output, storage_type& storage) [[hc]]
     {
-        reduce(input, output, WarpSize, storage, reduce_op);
+        // output already set correctly
     }
-    
-    template<class BinaryFunction>
-    void all_reduce(T input, T& output, int valid_items,
-                storage_type& storage, BinaryFunction reduce_op) [[hc]]
+
+    template<bool Switch>
+    typename std::enable_if<(Switch == true)>::type
+    set_output(T& output, storage_type& storage) [[hc]]
     {
-        const unsigned int lid = detail::logical_lane_id<WarpSize>();
-        unsigned int ceiling = next_power_of_two(WarpSize);
-        
-        T me = input;
-        storage.threads[lid] = me;
-        for(unsigned int i = ceiling >> 1; i > 0; i >>= 1)
-        {
-            if (lid + i < WarpSize && lid < i && lid + i < valid_items)
-            {
-                me = storage.threads[lid];
-                T other = storage.threads[lid + i];
-                me = reduce_op(me, other);
-                storage.threads[lid] = me;
-            }
-        }
-        
-        me = storage.threads[0];
-        output = me;
-    }
-    
-    template<class BinaryFunction>
-    void all_reduce(T input, T& output,
-                storage_type& storage, BinaryFunction reduce_op) [[hc]]
-    {
-        all_reduce(input, output, WarpSize, storage, reduce_op);
+        output = storage.threads[0];
     }
 };
 
