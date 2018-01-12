@@ -36,34 +36,57 @@
 
 namespace rp = rocprim;
 
-template<typename WarpSizeWrapper>
-class RocprimWarpReduceTests : public ::testing::Test {
-public:
-    static constexpr unsigned int warp_size = WarpSizeWrapper::value;
+template<
+    class T,
+    unsigned int WarpSize
+>
+struct params
+{
+    using type = T;
+    static constexpr unsigned int warp_size = WarpSize;
 };
 
+template<class Params>
+class RocprimWarpReduceTests : public ::testing::Test {
+public:
+    using params = Params;
+};
+
+
 typedef ::testing::Types<
-    // shuffle based scan
-    uint_wrapper<2U>,
-    uint_wrapper<4U>,
-    uint_wrapper<8U>,
-    uint_wrapper<16U>,
-    uint_wrapper<32U>,
-    uint_wrapper<64U>,
-    // shared memory scan
-    uint_wrapper<3U>,
-    uint_wrapper<7U>,
-    uint_wrapper<15U>,
-    uint_wrapper<37U>,
-    uint_wrapper<61U>
-> WarpSizes;
+    // shuffle based reduce
+    params<int, 2U>,
+    params<int, 4U>,
+    params<int, 8U>,
+    params<int, 16U>,
+    params<int, 32U>,
+    params<int, 64U>,
+    params<float, 2U>,
+    params<float, 4U>,
+    params<float, 8U>,
+    params<float, 16U>,
+    params<float, 32U>,
+    params<float, 64U>,
+    // shared memory reduce
+    params<int, 3U>,
+    params<int, 7U>,
+    params<int, 15U>,
+    params<int, 37U>,
+    params<int, 61U>,
+    params<float, 3U>,
+    params<float, 7U>,
+    params<float, 15U>,
+    params<float, 37U>,
+    params<float, 61U>
+> Params;
 
-TYPED_TEST_CASE(RocprimWarpReduceTests, WarpSizes);
+TYPED_TEST_CASE(RocprimWarpReduceTests, Params);
 
-TYPED_TEST(RocprimWarpReduceTests, ReduceSumInt)
+TYPED_TEST(RocprimWarpReduceTests, ReduceSum)
 {
     // logical warp side for warp primitive, execution warp size is always rp::warp_size()
-    constexpr size_t logical_warp_size = TestFixture::warp_size;
+    using type = typename TestFixture::params::type;
+    constexpr size_t logical_warp_size = TestFixture::params::warp_size;
     constexpr size_t block_size =
         rp::detail::is_power_of_two(logical_warp_size)
             ? rp::max<size_t>(rp::warp_size(), logical_warp_size * 4)
@@ -77,14 +100,14 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumInt)
     }
 
     // Generate data
-    std::vector<int> input = get_random_data<int>(size, -100, 100); // used for input
-    std::vector<int> output(input.size() / logical_warp_size, 0);
+    std::vector<type> input = get_random_data<type>(size, -100, 100); // used for input
+    std::vector<type> output(input.size() / logical_warp_size, 0);
     
     // Calculate expected results on host
-    std::vector<int> expected(output.size(), 1);
+    std::vector<type> expected(output.size(), 1);
     for(size_t i = 0; i < output.size(); i++)
     {
-        int value = 0;
+        type value = 0;
         for(size_t j = 0; j < logical_warp_size; j++)
         {
             auto idx = i * logical_warp_size + j;
@@ -93,8 +116,8 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumInt)
         expected[i] = value;
     }
 
-    hc::array_view<int, 1> d_input(input.size(), input.data());
-    hc::array_view<int, 1> d_output(output.size(), output.data());
+    hc::array_view<type, 1> d_input(input.size(), input.data());
+    hc::array_view<type, 1> d_output(output.size(), output.data());
     hc::parallel_for_each(
         hc::extent<1>(input.size()).tile(block_size),
         [=](hc::tiled_index<1> i) [[hc]]
@@ -102,11 +125,11 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumInt)
             constexpr unsigned int warps_no = block_size/logical_warp_size;
             const unsigned int warp_id = rp::detail::logical_warp_id<logical_warp_size>();
 
-            int value = d_input[i];
+            type value = d_input[i];
 
-            using wreduce_t = rp::warp_reduce<int, logical_warp_size>;
+            using wreduce_t = rp::warp_reduce<type, logical_warp_size>;
             tile_static typename wreduce_t::storage_type storage[warps_no];
-            wreduce_t().sum(value, value, storage[warp_id]);
+            wreduce_t().reduce(value, value, storage[warp_id]);
             
             if (i.local[0] % logical_warp_size == 0)
             {
@@ -118,14 +141,15 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumInt)
     d_output.synchronize();
     for(int i = 0; i < output.size(); i++)
     {
-        ASSERT_EQ(output[i], expected[i]);
+        ASSERT_NEAR(output[i], expected[i], 0.01);
     }
 }
 
-TYPED_TEST(RocprimWarpReduceTests, AllReduceSumInt)
+TYPED_TEST(RocprimWarpReduceTests, AllReduceSum)
 {
     // logical warp side for warp primitive, execution warp size is always rp::warp_size()
-    constexpr size_t logical_warp_size = TestFixture::warp_size;
+    using type = typename TestFixture::params::type;
+    constexpr size_t logical_warp_size = TestFixture::params::warp_size;
     constexpr size_t block_size =
         rp::detail::is_power_of_two(logical_warp_size)
             ? rp::max<size_t>(rp::warp_size(), logical_warp_size * 4)
@@ -139,14 +163,14 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSumInt)
     }
 
     // Generate data
-    std::vector<int> input = get_random_data<int>(size, -100, 100); // used for input
-    std::vector<int> output(input.size(), 0);
+    std::vector<type> input = get_random_data<type>(size, -100, 100); // used for input
+    std::vector<type> output(input.size(), 0);
     
     // Calculate expected results on host
-    std::vector<int> expected(output.size(), 0);
+    std::vector<type> expected(output.size(), 0);
     for(size_t i = 0; i < output.size() / logical_warp_size; i++)
     {
-        int value = 0;
+        type value = 0;
         for(size_t j = 0; j < logical_warp_size; j++)
         {
             auto idx = i * logical_warp_size + j;
@@ -159,8 +183,8 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSumInt)
         }
     }
 
-    hc::array_view<int, 1> d_input(input.size(), input.data());
-    hc::array_view<int, 1> d_output(output.size(), output.data());
+    hc::array_view<type, 1> d_input(input.size(), input.data());
+    hc::array_view<type, 1> d_output(output.size(), output.data());
     hc::parallel_for_each(
         hc::extent<1>(input.size()).tile(block_size),
         [=](hc::tiled_index<1> i) [[hc]]
@@ -168,11 +192,11 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSumInt)
             constexpr unsigned int warps_no = block_size/logical_warp_size;
             const unsigned int warp_id = rp::detail::logical_warp_id<logical_warp_size>();
 
-            int value = d_input[i];
+            type value = d_input[i];
 
-            using wreduce_t = rp::warp_reduce<int, logical_warp_size, true>;
+            using wreduce_t = rp::warp_reduce<type, logical_warp_size, true>;
             tile_static typename wreduce_t::storage_type storage[warps_no];
-            wreduce_t().sum(value, value, storage[warp_id]);
+            wreduce_t().reduce(value, value, storage[warp_id]);
         
             d_output[i] = value;
         }
@@ -181,14 +205,15 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSumInt)
     d_output.synchronize();
     for(int i = 0; i < output.size(); i++)
     {
-        ASSERT_EQ(output[i], expected[i]);
+        ASSERT_NEAR(output[i], expected[i], 0.01);
     }
 }
 
-TYPED_TEST(RocprimWarpReduceTests, ReduceSumValidInt)
+TYPED_TEST(RocprimWarpReduceTests, ReduceSumValid)
 {
     // logical warp side for warp primitive, execution warp size is always rp::warp_size()
-    constexpr size_t logical_warp_size = TestFixture::warp_size;
+    using type = typename TestFixture::params::type;
+    constexpr size_t logical_warp_size = TestFixture::params::warp_size;
     constexpr size_t block_size =
         rp::detail::is_power_of_two(logical_warp_size)
             ? rp::max<size_t>(rp::warp_size(), logical_warp_size * 4)
@@ -203,14 +228,14 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumValidInt)
     }
 
     // Generate data
-    std::vector<int> input = get_random_data<int>(size, -100, 100); // used for input
-    std::vector<int> output(input.size() / logical_warp_size, 0);
+    std::vector<type> input = get_random_data<type>(size, -100, 100); // used for input
+    std::vector<type> output(input.size() / logical_warp_size, 0);
     
     // Calculate expected results on host
-    std::vector<int> expected(output.size(), 1);
+    std::vector<type> expected(output.size(), 1);
     for(size_t i = 0; i < output.size(); i++)
     {
-        int value = 0;
+        type value = 0;
         for(size_t j = 0; j < valid; j++)
         {
             auto idx = i * logical_warp_size + j;
@@ -219,8 +244,8 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumValidInt)
         expected[i] = value;
     }
 
-    hc::array_view<int, 1> d_input(input.size(), input.data());
-    hc::array_view<int, 1> d_output(output.size(), output.data());
+    hc::array_view<type, 1> d_input(input.size(), input.data());
+    hc::array_view<type, 1> d_output(output.size(), output.data());
     hc::parallel_for_each(
         hc::extent<1>(input.size()).tile(block_size),
         [=](hc::tiled_index<1> i) [[hc]]
@@ -228,11 +253,11 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumValidInt)
             constexpr unsigned int warps_no = block_size/logical_warp_size;
             const unsigned int warp_id = rp::detail::logical_warp_id<logical_warp_size>();
 
-            int value = d_input[i];
+            type value = d_input[i];
 
-            using wreduce_t = rp::warp_reduce<int, logical_warp_size>;
+            using wreduce_t = rp::warp_reduce<type, logical_warp_size>;
             tile_static typename wreduce_t::storage_type storage[warps_no];
-            wreduce_t().sum(value, value, valid, storage[warp_id]);
+            wreduce_t().reduce(value, value, valid, storage[warp_id]);
             
             if (i.local[0] % logical_warp_size == 0)
             {
@@ -244,14 +269,15 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumValidInt)
     d_output.synchronize();
     for(int i = 0; i < output.size(); i++)
     {
-        ASSERT_EQ(output[i], expected[i]);
+        ASSERT_NEAR(output[i], expected[i], 0.01);
     }
 }
 
-TYPED_TEST(RocprimWarpReduceTests, AllReduceSumValidInt)
+TYPED_TEST(RocprimWarpReduceTests, AllReduceSumValid)
 {
     // logical warp side for warp primitive, execution warp size is always rp::warp_size()
-    constexpr size_t logical_warp_size = TestFixture::warp_size;
+    using type = typename TestFixture::params::type;
+    constexpr size_t logical_warp_size = TestFixture::params::warp_size;
     constexpr size_t block_size =
         rp::detail::is_power_of_two(logical_warp_size)
             ? rp::max<size_t>(rp::warp_size(), logical_warp_size * 4)
@@ -266,14 +292,14 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSumValidInt)
     }
 
     // Generate data
-    std::vector<int> input = get_random_data<int>(size, -100, 100); // used for input
-    std::vector<int> output(input.size(), 0);
+    std::vector<type> input = get_random_data<type>(size, -100, 100); // used for input
+    std::vector<type> output(input.size(), 0);
     
     // Calculate expected results on host
-    std::vector<int> expected(output.size(), 0);
+    std::vector<type> expected(output.size(), 0);
     for(size_t i = 0; i < output.size() / logical_warp_size; i++)
     {
-        int value = 0;
+        type value = 0;
         for(size_t j = 0; j < valid; j++)
         {
             auto idx = i * logical_warp_size + j;
@@ -286,8 +312,8 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSumValidInt)
         }
     }
 
-    hc::array_view<int, 1> d_input(input.size(), input.data());
-    hc::array_view<int, 1> d_output(output.size(), output.data());
+    hc::array_view<type, 1> d_input(input.size(), input.data());
+    hc::array_view<type, 1> d_output(output.size(), output.data());
     hc::parallel_for_each(
         hc::extent<1>(input.size()).tile(block_size),
         [=](hc::tiled_index<1> i) [[hc]]
@@ -295,11 +321,11 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSumValidInt)
             constexpr unsigned int warps_no = block_size/logical_warp_size;
             const unsigned int warp_id = rp::detail::logical_warp_id<logical_warp_size>();
 
-            int value = d_input[i];
+            type value = d_input[i];
 
-            using wreduce_t = rp::warp_reduce<int, logical_warp_size, true>;
+            using wreduce_t = rp::warp_reduce<type, logical_warp_size, true>;
             tile_static typename wreduce_t::storage_type storage[warps_no];
-            wreduce_t().sum(value, value, valid, storage[warp_id]);
+            wreduce_t().reduce(value, value, valid, storage[warp_id]);
         
              d_output[i] = value;
         }
@@ -308,7 +334,7 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSumValidInt)
     d_output.synchronize();
     for(int i = 0; i < output.size(); i++)
     {
-        ASSERT_EQ(output[i], expected[i]);
+        ASSERT_NEAR(output[i], expected[i], 0.01);
     }
 }
 
