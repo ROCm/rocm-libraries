@@ -33,6 +33,9 @@
 #include "../functional.hpp"
 #include "../types.hpp"
 
+/// \addtogroup collectiveblockmodule
+/// @{
+
 BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
@@ -67,6 +70,69 @@ apply(FlagOp flag_op, const T& a, const T& b, unsigned int) [[hc]]
 
 } // end namespace detail
 
+/// \brief The \p block_discontinuity class is a block level parallel primitive which provides
+/// methods for flagging items that are discontinued within an ordered set of items across
+/// threads in a block.
+///
+/// \tparam T - the input type.
+/// \tparam BlockSize - the number of threads in a block.
+///
+/// \par Overview
+/// * There are two types of flags:
+///   * Head flags.
+///   * Tail flags.
+/// * The above flags are used to differentiate items from their predecessors or successors.
+/// * E.g. Head flags are convenient for differentiating disjoint data segments as part of a
+/// segmented reduction/scan.
+///
+/// \par Examples
+/// \parblock
+/// In the examples discontinuity operation is performed on block of 128 threads, using type
+/// \p int.
+///
+/// \b HIP: \n
+/// \code{.cpp}
+/// __global__ void example_kernel(...)
+/// {
+///     // specialize discontinuity for int and a block of 128 threads
+///     using block_discontinuity_int = rocprim::block_discontinuity<int, 128>;
+///     // allocate storage in shared memory
+///     __shared__ block_discontinuity_int::storage_type storage;
+///
+///     // segment of consecutive items to be used
+///     int input[8];
+///     ...
+///     int head_flags[8];
+///     block_discontinuity_int b_discontinuity;
+///     using flag_op_type = typename rocprim::greater<int>;
+///     b_discontinuity.flag_heads(head_flags, input, flag_op_type(), storage);
+///     ...
+/// }
+/// \endcode
+///
+/// \b HC: \n
+/// \code{.cpp}
+/// hc::parallel_for_each(
+///     hc::extent<1>(...).tile(128),
+///     [=](hc::tiled_index<1> i) [[hc]]
+///     {
+///         // specialize discontinuity for int and a block of 128 threads
+///         using block_discontinuity_int = rocprim::block_discontinuity<int, 128>;
+///         // allocate storage in shared memory
+///         tile_static block_discontinuity_int::storage_type storage;
+///
+///         // segment of consecutive items to be used
+///         int input[8];
+///         ...
+///         int head_flags[8];
+///         block_discontinuity_int b_discontinuity;
+///         using flag_op_type = typename rocprim::greater<int>;
+///         b_discontinuity.flag_heads(head_flags, input, flag_op_type(), storage);
+///         ...
+///     }
+/// );
+/// \endcode
+/// \endparblock
 template<
     class T,
     unsigned int BlockSize
@@ -76,12 +142,65 @@ class block_discontinuity
 
 public:
 
+    /// \brief Struct used to allocate a temporary memory that is required for thread
+    /// communication during operations provided by related parallel primitive.
+    ///
+    /// Depending on the implemention the operations exposed by parallel primitive may
+    /// require a temporary storage for thread communication. The storage should be allocated
+    /// using keywords <tt>__shared__</tt> in HIP or \p tile_static in HC. It can be aliased to
+    /// an externally allocated memory, or be a part of a union type with other storage types
+    /// to increase shared memory reusability.
     struct storage_type
     {
         T first_items[BlockSize];
         T last_items[BlockSize];
     };
 
+    /// \brief Tags \p head_flags that indicate discontinuities between items partitioned
+    /// across the thread block, where the first item has no reference and is always
+    /// flagged.
+    ///
+    /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+    /// each thread.
+    /// \tparam Flag - [inferred] the flag type.
+    /// \tparam FlagOp - [inferred] type of binary function used for flagging.
+    ///
+    /// \param [out] head_flags - array that contains the head flags.
+    /// \param [in] input - array that data is loaded from.
+    /// \param [in] flag_op - binary operation function object that will be used for flagging.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>. 
+    /// The signature does not need to have <tt>const &</tt>, but function object 
+    /// must not modify the objects passed to it.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
+    /// universal rocprim::syncthreads().
+    ///
+    /// \par Example.
+    /// \code{.cpp}
+    /// hc::parallel_for_each(
+    ///     hc::extent<1>(...).tile(128),
+    ///     [=](hc::tiled_index<1> i) [[hc]]
+    ///     {
+    ///         // specialize discontinuity for int and a block of 128 threads
+    ///         using block_discontinuity_int = rocprim::block_discontinuity<int, 128>;
+    ///         // allocate storage in shared memory
+    ///         tile_static block_discontinuity_int::storage_type storage;
+    ///
+    ///         // segment of consecutive items to be used
+    ///         int input[8];
+    ///         ...
+    ///         int head_flags[8];
+    ///         block_discontinuity_int b_discontinuity;
+    ///         using flag_op_type = typename rocprim::greater<int>;
+    ///         b_discontinuity.flag_heads(head_flags, input, flag_op_type(), storage);
+    ///         ...
+    ///     }
+    /// );
+    /// \endcode
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     void flag_heads(Flag (&head_flags)[ItemsPerThread],
                     const T (&input)[ItemsPerThread],
@@ -94,6 +213,22 @@ public:
         );
     }
 
+    /// \brief Tags \p head_flags that indicate discontinuities between items partitioned
+    /// across the thread block, where the first item has no reference and is always
+    /// flagged.
+    ///
+    /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+    /// each thread.
+    /// \tparam Flag - [inferred] the flag type.
+    /// \tparam FlagOp - [inferred] type of binary function used for flagging.
+    ///
+    /// \param [out] head_flags - array that contains the head flags.
+    /// \param [in] input - array that data is loaded from.
+    /// \param [in] flag_op - binary operation function object that will be used for flagging.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>. 
+    /// The signature does not need to have <tt>const &</tt>, but function object 
+    /// must not modify the objects passed to it.
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     void flag_heads(Flag (&head_flags)[ItemsPerThread],
                     const T (&input)[ItemsPerThread],
@@ -103,6 +238,59 @@ public:
         flag_heads(head_flags, input, flag_op, storage);
     }
 
+    /// \brief Tags \p head_flags that indicate discontinuities between items partitioned
+    /// across the thread block, where the first item of the first thread is compared against 
+    /// a \p tile_predecessor_item.
+    ///
+    /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+    /// each thread.
+    /// \tparam Flag - [inferred] the flag type.
+    /// \tparam FlagOp - [inferred] type of binary function used for flagging.
+    ///
+    /// \param [out] head_flags - array that contains the head flags.
+    /// \param [in] tile_predecessor_item - first tile item from thread to be compared
+    /// against.
+    /// \param [in] input - array that data is loaded from.
+    /// \param [in] flag_op - binary operation function object that will be used for flagging.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>. 
+    /// The signature does not need to have <tt>const &</tt>, but function object 
+    /// must not modify the objects passed to it.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
+    /// universal rocprim::syncthreads().
+    ///
+    /// \par Example.
+    /// \code{.cpp}
+    /// hc::parallel_for_each(
+    ///     hc::extent<1>(...).tile(128),
+    ///     [=](hc::tiled_index<1> i) [[hc]]
+    ///     {
+    ///         // specialize discontinuity for int and a block of 128 threads
+    ///         using block_discontinuity_int = rocprim::block_discontinuity<int, 128>;
+    ///         // allocate storage in shared memory
+    ///         tile_static block_discontinuity_int::storage_type storage;
+    ///
+    ///         // segment of consecutive items to be used
+    ///         int input[8];
+    ///         int tile_item = 0;
+    ///         if (i.local[0] == 0)
+    ///         {
+    ///             tile_item = ...
+    ///         }
+    ///         ...
+    ///         int head_flags[8];
+    ///         block_discontinuity_int b_discontinuity;
+    ///         using flag_op_type = typename rocprim::greater<int>;
+    ///         b_discontinuity.flag_heads(head_flags, tile_item, input, flag_op_type(),
+    ///                                    storage);
+    ///         ...
+    ///     }
+    /// );
+    /// \endcode
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     void flag_heads(Flag (&head_flags)[ItemsPerThread],
                     T tile_predecessor_item,
@@ -116,6 +304,24 @@ public:
         );
     }
 
+    /// \brief Tags \p head_flags that indicate discontinuities between items partitioned
+    /// across the thread block, where the first item of the first thread is compared against 
+    /// a \p tile_predecessor_item.
+    ///
+    /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+    /// each thread.
+    /// \tparam Flag - [inferred] the flag type.
+    /// \tparam FlagOp - [inferred] type of binary function used for flagging.
+    ///
+    /// \param [out] head_flags - array that contains the head flags.
+    /// \param [in] tile_predecessor_item - first tile item from thread to be compared
+    /// against.
+    /// \param [in] input - array that data is loaded from.
+    /// \param [in] flag_op - binary operation function object that will be used for flagging.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>. 
+    /// The signature does not need to have <tt>const &</tt>, but function object 
+    /// must not modify the objects passed to it.
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     void flag_heads(Flag (&head_flags)[ItemsPerThread],
                     T tile_predecessor_item,
@@ -126,6 +332,51 @@ public:
         flag_heads(head_flags, tile_predecessor_item, input, flag_op, storage);
     }
 
+    /// \brief Tags \p tail_flags that indicate discontinuities between items partitioned
+    /// across the thread block, where the last item has no reference and is always
+    /// flagged.
+    ///
+    /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+    /// each thread.
+    /// \tparam Flag - [inferred] the flag type.
+    /// \tparam FlagOp - [inferred] type of binary function used for flagging.
+    ///
+    /// \param [out] tail_flags - array that contains the tail flags.
+    /// \param [in] input - array that data is loaded from.
+    /// \param [in] flag_op - binary operation function object that will be used for flagging.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>. 
+    /// The signature does not need to have <tt>const &</tt>, but function object 
+    /// must not modify the objects passed to it.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
+    /// universal rocprim::syncthreads().
+    ///
+    /// \par Example.
+    /// \code{.cpp}
+    /// hc::parallel_for_each(
+    ///     hc::extent<1>(...).tile(128),
+    ///     [=](hc::tiled_index<1> i) [[hc]]
+    ///     {
+    ///         // specialize discontinuity for int and a block of 128 threads
+    ///         using block_discontinuity_int = rocprim::block_discontinuity<int, 128>;
+    ///         // allocate storage in shared memory
+    ///         tile_static block_discontinuity_int::storage_type storage;
+    ///
+    ///         // segment of consecutive items to be used
+    ///         int input[8];
+    ///         ...
+    ///         int tail_flags[8];
+    ///         block_discontinuity_int b_discontinuity;
+    ///         using flag_op_type = typename rocprim::greater<int>;
+    ///         b_discontinuity.flag_tails(tail_flags, input, flag_op_type(), storage);
+    ///         ...
+    ///     }
+    /// );
+    /// \endcode
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     void flag_tails(Flag (&tail_flags)[ItemsPerThread],
                     const T (&input)[ItemsPerThread],
@@ -138,6 +389,22 @@ public:
         );
     }
 
+    /// \brief Tags \p tail_flags that indicate discontinuities between items partitioned
+    /// across the thread block, where the last item has no reference and is always
+    /// flagged.
+    ///
+    /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+    /// each thread.
+    /// \tparam Flag - [inferred] the flag type.
+    /// \tparam FlagOp - [inferred] type of binary function used for flagging.
+    ///
+    /// \param [out] tail_flags - array that contains the tail flags.
+    /// \param [in] input - array that data is loaded from.
+    /// \param [in] flag_op - binary operation function object that will be used for flagging.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>. 
+    /// The signature does not need to have <tt>const &</tt>, but function object 
+    /// must not modify the objects passed to it.
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     void flag_tails(Flag (&tail_flags)[ItemsPerThread],
                     const T (&input)[ItemsPerThread],
@@ -147,6 +414,59 @@ public:
         flag_tails(tail_flags, input, flag_op, storage);
     }
 
+    /// \brief Tags \p tail_flags that indicate discontinuities between items partitioned
+    /// across the thread block, where the last item of the last thread is compared against 
+    /// a \p tile_successor_item.
+    ///
+    /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+    /// each thread.
+    /// \tparam Flag - [inferred] the flag type.
+    /// \tparam FlagOp - [inferred] type of binary function used for flagging.
+    ///
+    /// \param [out] tail_flags - array that contains the tail flags.
+    /// \param [in] tile_successor_item - last tile item from thread to be compared
+    /// against.
+    /// \param [in] input - array that data is loaded from.
+    /// \param [in] flag_op - binary operation function object that will be used for flagging.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>. 
+    /// The signature does not need to have <tt>const &</tt>, but function object 
+    /// must not modify the objects passed to it.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
+    /// universal rocprim::syncthreads().
+    ///
+    /// \par Example.
+    /// \code{.cpp}
+    /// hc::parallel_for_each(
+    ///     hc::extent<1>(...).tile(128),
+    ///     [=](hc::tiled_index<1> i) [[hc]]
+    ///     {
+    ///         // specialize discontinuity for int and a block of 128 threads
+    ///         using block_discontinuity_int = rocprim::block_discontinuity<int, 128>;
+    ///         // allocate storage in shared memory
+    ///         tile_static block_discontinuity_int::storage_type storage;
+    ///
+    ///         // segment of consecutive items to be used
+    ///         int input[8];
+    ///         int tile_item = 0;
+    ///         if (i.local[0] == 0)
+    ///         {
+    ///             tile_item = ...
+    ///         }
+    ///         ...
+    ///         int tail_flags[8];
+    ///         block_discontinuity_int b_discontinuity;
+    ///         using flag_op_type = typename rocprim::greater<int>;
+    ///         b_discontinuity.flag_tails(tail_flags, tile_item, input, flag_op_type(),
+    ///                                    storage);
+    ///         ...
+    ///     }
+    /// );
+    /// \endcode
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     void flag_tails(Flag (&tail_flags)[ItemsPerThread],
                     T tile_successor_item,
@@ -160,6 +480,24 @@ public:
         );
     }
 
+    /// \brief Tags \p tail_flags that indicate discontinuities between items partitioned
+    /// across the thread block, where the last item of the last thread is compared against 
+    /// a \p tile_successor_item.
+    ///
+    /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+    /// each thread.
+    /// \tparam Flag - [inferred] the flag type.
+    /// \tparam FlagOp - [inferred] type of binary function used for flagging.
+    ///
+    /// \param [out] tail_flags - array that contains the tail flags.
+    /// \param [in] tile_successor_item - last tile item from thread to be compared
+    /// against.
+    /// \param [in] input - array that data is loaded from.
+    /// \param [in] flag_op - binary operation function object that will be used for flagging.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>. 
+    /// The signature does not need to have <tt>const &</tt>, but function object 
+    /// must not modify the objects passed to it.
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     void flag_tails(Flag (&tail_flags)[ItemsPerThread],
                     T tile_successor_item,
@@ -170,6 +508,53 @@ public:
         flag_tails(tail_flags, tile_successor_item, input, flag_op, storage);
     }
 
+    /// \brief Tags both \p head_flags and\p tail_flags that indicate discontinuities 
+    /// between items partitioned across the thread block.
+    ///
+    /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+    /// each thread.
+    /// \tparam Flag - [inferred] the flag type.
+    /// \tparam FlagOp - [inferred] type of binary function used for flagging.
+    ///
+    /// \param [out] head_flags - array that contains the head flags.
+    /// \param [out] tail_flags - array that contains the tail flags.
+    /// \param [in] input - array that data is loaded from.
+    /// \param [in] flag_op - binary operation function object that will be used for flagging.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>. 
+    /// The signature does not need to have <tt>const &</tt>, but function object 
+    /// must not modify the objects passed to it.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
+    /// universal rocprim::syncthreads().
+    ///
+    /// \par Example.
+    /// \code{.cpp}
+    /// hc::parallel_for_each(
+    ///     hc::extent<1>(...).tile(128),
+    ///     [=](hc::tiled_index<1> i) [[hc]]
+    ///     {
+    ///         // specialize discontinuity for int and a block of 128 threads
+    ///         using block_discontinuity_int = rocprim::block_discontinuity<int, 128>;
+    ///         // allocate storage in shared memory
+    ///         tile_static block_discontinuity_int::storage_type storage;
+    ///
+    ///         // segment of consecutive items to be used
+    ///         int input[8];
+    ///         ...
+    ///         int head_flags[8];
+    ///         int tail_flags[8];
+    ///         block_discontinuity_int b_discontinuity;
+    ///         using flag_op_type = typename rocprim::greater<int>;
+    ///         b_discontinuity.flag_heads_and_tails(head_flags, tail_flags, input, 
+    ///                                              flag_op_type(), storage);
+    ///         ...
+    ///     }
+    /// );
+    /// \endcode
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     void flag_heads_and_tails(Flag (&head_flags)[ItemsPerThread],
                               Flag (&tail_flags)[ItemsPerThread],
@@ -183,6 +568,22 @@ public:
         );
     }
 
+    /// \brief Tags both \p head_flags and\p tail_flags that indicate discontinuities 
+    /// between items partitioned across the thread block.
+    ///
+    /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+    /// each thread.
+    /// \tparam Flag - [inferred] the flag type.
+    /// \tparam FlagOp - [inferred] type of binary function used for flagging.
+    ///
+    /// \param [out] head_flags - array that contains the head flags.
+    /// \param [out] tail_flags - array that contains the tail flags.
+    /// \param [in] input - array that data is loaded from.
+    /// \param [in] flag_op - binary operation function object that will be used for flagging.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>. 
+    /// The signature does not need to have <tt>const &</tt>, but function object 
+    /// must not modify the objects passed to it.
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     void flag_heads_and_tails(Flag (&head_flags)[ItemsPerThread],
                               Flag (&tail_flags)[ItemsPerThread],
@@ -193,6 +594,62 @@ public:
         flag_heads_and_tails(head_flags, tail_flags, input, flag_op, storage);
     }
 
+    /// \brief Tags both \p head_flags and\p tail_flags that indicate discontinuities 
+    /// between items partitioned across the thread block, where the last item of the 
+    /// last thread is compared against a \p tile_successor_item.
+    ///
+    /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+    /// each thread.
+    /// \tparam Flag - [inferred] the flag type.
+    /// \tparam FlagOp - [inferred] type of binary function used for flagging.
+    ///
+    /// \param [out] head_flags - array that contains the head flags.
+    /// \param [out] tail_flags - array that contains the tail flags.
+    /// \param [in] tile_successor_item - last tile item from thread to be compared
+    /// against.
+    /// \param [in] input - array that data is loaded from.
+    /// \param [in] flag_op - binary operation function object that will be used for flagging.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>. 
+    /// The signature does not need to have <tt>const &</tt>, but function object 
+    /// must not modify the objects passed to it.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
+    /// universal rocprim::syncthreads().
+    ///
+    /// \par Example.
+    /// \code{.cpp}
+    /// hc::parallel_for_each(
+    ///     hc::extent<1>(...).tile(128),
+    ///     [=](hc::tiled_index<1> i) [[hc]]
+    ///     {
+    ///         // specialize discontinuity for int and a block of 128 threads
+    ///         using block_discontinuity_int = rocprim::block_discontinuity<int, 128>;
+    ///         // allocate storage in shared memory
+    ///         tile_static block_discontinuity_int::storage_type storage;
+    ///
+    ///         // segment of consecutive items to be used
+    ///         int input[8];
+    ///         int tile_item = 0;
+    ///         if (i.local[0] == 0)
+    ///         {
+    ///             tile_item = ...
+    ///         }
+    ///         ...
+    ///         int head_flags[8];
+    ///         int tail_flags[8];
+    ///         block_discontinuity_int b_discontinuity;
+    ///         using flag_op_type = typename rocprim::greater<int>;
+    ///         b_discontinuity.flag_heads_and_tails(head_flags, tail_flags, tile_item,
+    ///                                              input, flag_op_type(),
+    ///                                              storage);
+    ///         ...
+    ///     }
+    /// );
+    /// \endcode
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     void flag_heads_and_tails(Flag (&head_flags)[ItemsPerThread],
                               Flag (&tail_flags)[ItemsPerThread],
@@ -207,6 +664,25 @@ public:
         );
     }
 
+    /// \brief Tags both \p head_flags and\p tail_flags that indicate discontinuities 
+    /// between items partitioned across the thread block, where the last item of the 
+    /// last thread is compared against a \p tile_successor_item.
+    ///
+    /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+    /// each thread.
+    /// \tparam Flag - [inferred] the flag type.
+    /// \tparam FlagOp - [inferred] type of binary function used for flagging.
+    ///
+    /// \param [out] head_flags - array that contains the head flags.
+    /// \param [out] tail_flags - array that contains the tail flags.
+    /// \param [in] tile_successor_item - last tile item from thread to be compared
+    /// against.
+    /// \param [in] input - array that data is loaded from.
+    /// \param [in] flag_op - binary operation function object that will be used for flagging.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>. 
+    /// The signature does not need to have <tt>const &</tt>, but function object 
+    /// must not modify the objects passed to it.
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     void flag_heads_and_tails(Flag (&head_flags)[ItemsPerThread],
                               Flag (&tail_flags)[ItemsPerThread],
@@ -218,6 +694,62 @@ public:
         flag_heads_and_tails(head_flags, tail_flags, tile_successor_item, input, flag_op, storage);
     }
 
+    /// \brief Tags both \p head_flags and\p tail_flags that indicate discontinuities 
+    /// between items partitioned across the thread block, where the first item of the 
+    /// first thread is compared against a \p tile_predecessor_item.
+    ///
+    /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+    /// each thread.
+    /// \tparam Flag - [inferred] the flag type.
+    /// \tparam FlagOp - [inferred] type of binary function used for flagging.
+    ///
+    /// \param [out] head_flags - array that contains the head flags.
+    /// \param [in] tile_predecessor_item - first tile item from thread to be compared
+    /// against.
+    /// \param [out] tail_flags - array that contains the tail flags.
+    /// \param [in] input - array that data is loaded from.
+    /// \param [in] flag_op - binary operation function object that will be used for flagging.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>. 
+    /// The signature does not need to have <tt>const &</tt>, but function object 
+    /// must not modify the objects passed to it.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
+    /// universal rocprim::syncthreads().
+    ///
+    /// \par Example.
+    /// \code{.cpp}
+    /// hc::parallel_for_each(
+    ///     hc::extent<1>(...).tile(128),
+    ///     [=](hc::tiled_index<1> i) [[hc]]
+    ///     {
+    ///         // specialize discontinuity for int and a block of 128 threads
+    ///         using block_discontinuity_int = rocprim::block_discontinuity<int, 128>;
+    ///         // allocate storage in shared memory
+    ///         tile_static block_discontinuity_int::storage_type storage;
+    ///
+    ///         // segment of consecutive items to be used
+    ///         int input[8];
+    ///         int tile_item = 0;
+    ///         if (i.local[0] == 0)
+    ///         {
+    ///             tile_item = ...
+    ///         }
+    ///         ...
+    ///         int head_flags[8];
+    ///         int tail_flags[8];
+    ///         block_discontinuity_int b_discontinuity;
+    ///         using flag_op_type = typename rocprim::greater<int>;
+    ///         b_discontinuity.flag_heads_and_tails(head_flags, tile_item, tail_flags,
+    ///                                              input, flag_op_type(),
+    ///                                              storage);
+    ///         ...
+    ///     }
+    /// );
+    /// \endcode
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     void flag_heads_and_tails(Flag (&head_flags)[ItemsPerThread],
                               T tile_predecessor_item,
@@ -232,6 +764,25 @@ public:
         );
     }
 
+    /// \brief Tags both \p head_flags and\p tail_flags that indicate discontinuities 
+    /// between items partitioned across the thread block, where the first item of the 
+    /// first thread is compared against a \p tile_predecessor_item.
+    ///
+    /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+    /// each thread.
+    /// \tparam Flag - [inferred] the flag type.
+    /// \tparam FlagOp - [inferred] type of binary function used for flagging.
+    ///
+    /// \param [out] head_flags - array that contains the head flags.
+    /// \param [in] tile_predecessor_item - first tile item from thread to be compared
+    /// against.
+    /// \param [out] tail_flags - array that contains the tail flags.
+    /// \param [in] input - array that data is loaded from.
+    /// \param [in] flag_op - binary operation function object that will be used for flagging.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>. 
+    /// The signature does not need to have <tt>const &</tt>, but function object 
+    /// must not modify the objects passed to it.
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     void flag_heads_and_tails(Flag (&head_flags)[ItemsPerThread],
                               T tile_predecessor_item,
@@ -243,6 +794,68 @@ public:
         flag_heads_and_tails(head_flags, tile_predecessor_item, tail_flags, input, flag_op, storage);
     }
 
+    /// \brief Tags both \p head_flags and\p tail_flags that indicate discontinuities 
+    /// between items partitioned across the thread block, where the first and last items of
+    /// the first and last thread is compared against a \p tile_predecessor_item and 
+    /// a \p tile_successor_item.
+    ///
+    /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+    /// each thread.
+    /// \tparam Flag - [inferred] the flag type.
+    /// \tparam FlagOp - [inferred] type of binary function used for flagging.
+    ///
+    /// \param [out] head_flags - array that contains the head flags.
+    /// \param [in] tile_predecessor_item - first tile item from thread to be compared
+    /// against.
+    /// \param [out] tail_flags - array that contains the tail flags.
+    /// \param [in] tile_successor_item - last tile item from thread to be compared
+    /// against.
+    /// \param [in] input - array that data is loaded from.
+    /// \param [in] flag_op - binary operation function object that will be used for flagging.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>. 
+    /// The signature does not need to have <tt>const &</tt>, but function object 
+    /// must not modify the objects passed to it.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
+    /// universal rocprim::syncthreads().
+    ///
+    /// \par Example.
+    /// \code{.cpp}
+    /// hc::parallel_for_each(
+    ///     hc::extent<1>(...).tile(128),
+    ///     [=](hc::tiled_index<1> i) [[hc]]
+    ///     {
+    ///         // specialize discontinuity for int and a block of 128 threads
+    ///         using block_discontinuity_int = rocprim::block_discontinuity<int, 128>;
+    ///         // allocate storage in shared memory
+    ///         tile_static block_discontinuity_int::storage_type storage;
+    ///
+    ///         // segment of consecutive items to be used
+    ///         int input[8];
+    ///         int tile_predecessor_item = 0;
+    ///         int tile_successor_item = 0;
+    ///         if (i.local[0] == 0)
+    ///         {
+    ///             tile_predecessor_item = ...
+    ///             tile_successor_item = ...
+    ///         }
+    ///         ...
+    ///         int head_flags[8];
+    ///         int tail_flags[8];
+    ///         block_discontinuity_int b_discontinuity;
+    ///         using flag_op_type = typename rocprim::greater<int>;
+    ///         b_discontinuity.flag_heads_and_tails(head_flags, tile_predecessor_item,
+    ///                                              tail_flags, tile_successor_item,
+    ///                                              input, flag_op_type(),
+    ///                                              storage);
+    ///         ...
+    ///     }
+    /// );
+    /// \endcode
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     void flag_heads_and_tails(Flag (&head_flags)[ItemsPerThread],
                               T tile_predecessor_item,
@@ -258,6 +871,28 @@ public:
         );
     }
 
+    /// \brief Tags both \p head_flags and \p tail_flags that indicate discontinuities 
+    /// between items partitioned across the thread block, where the first and last items of
+    /// the first and last thread is compared against a \p tile_predecessor_item and 
+    /// a \p tile_successor_item.
+    ///
+    /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+    /// each thread.
+    /// \tparam Flag - [inferred] the flag type.
+    /// \tparam FlagOp - [inferred] type of binary function used for flagging.
+    ///
+    /// \param [out] head_flags - array that contains the head flags.
+    /// \param [in] tile_predecessor_item - first tile item from thread to be compared
+    /// against.
+    /// \param [out] tail_flags - array that contains the tail flags.
+    /// \param [in] tile_successor_item - last tile item from thread to be compared
+    /// against.
+    /// \param [in] input - array that data is loaded from.
+    /// \param [in] flag_op - binary operation function object that will be used for flagging.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>. 
+    /// The signature does not need to have <tt>const &</tt>, but function object 
+    /// must not modify the objects passed to it.
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     void flag_heads_and_tails(Flag (&head_flags)[ItemsPerThread],
                               T tile_predecessor_item,
@@ -366,5 +1001,8 @@ private:
 };
 
 END_ROCPRIM_NAMESPACE
+
+/// @}
+// end of group collectiveblockmodule
 
 #endif // ROCPRIM_BLOCK_BLOCK_DISCONTINUITY_HPP_
