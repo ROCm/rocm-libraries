@@ -39,80 +39,100 @@ struct radix_key_codec_integral { };
 template<class Key, class BitKey>
 struct radix_key_codec_integral<Key, BitKey, typename std::enable_if<std::is_unsigned<Key>::value>::type>
 {
-    using key_type = Key;
     using bit_key_type = BitKey;
 
-    static bit_key_type encode(key_type key) [[hc]]
+    static bit_key_type encode(Key key) [[hc]]
     {
         return *reinterpret_cast<bit_key_type *>(&key);
     }
 
-    static key_type decode(bit_key_type bit_key) [[hc]]
+    static Key decode(bit_key_type bit_key) [[hc]]
     {
-        return *reinterpret_cast<key_type *>(&bit_key);
+        return *reinterpret_cast<Key *>(&bit_key);
     }
 };
 
 template<class Key, class BitKey>
 struct radix_key_codec_integral<Key, BitKey, typename std::enable_if<std::is_signed<Key>::value>::type>
 {
-    using key_type = Key;
     using bit_key_type = BitKey;
 
     static constexpr bit_key_type sign_bit = bit_key_type(1) << (sizeof(bit_key_type) * 8 - 1);
 
-    static bit_key_type encode(key_type key) [[hc]]
+    static bit_key_type encode(Key key) [[hc]]
     {
         return sign_bit ^ *reinterpret_cast<bit_key_type *>(&key);
     }
 
-    static key_type decode(bit_key_type bit_key) [[hc]]
+    static Key decode(bit_key_type bit_key) [[hc]]
     {
         bit_key ^= sign_bit;
-        return *reinterpret_cast<key_type *>(&bit_key);
+        return *reinterpret_cast<Key *>(&bit_key);
     }
 };
 
 template<class Key, class BitKey>
 struct radix_key_codec_floating
 {
-    using key_type = Key;
     using bit_key_type = BitKey;
 
     static constexpr bit_key_type sign_bit = bit_key_type(1) << (sizeof(bit_key_type) * 8 - 1);
 
-    static bit_key_type encode(key_type key) [[hc]]
+    static bit_key_type encode(Key key) [[hc]]
     {
         bit_key_type bit_key = *reinterpret_cast<bit_key_type *>(&key);
         bit_key ^= (sign_bit & bit_key) == 0 ? sign_bit : bit_key_type(-1);
         return bit_key;
     }
 
-    static key_type decode(bit_key_type bit_key) [[hc]]
+    static Key decode(bit_key_type bit_key) [[hc]]
     {
         bit_key ^= (sign_bit & bit_key) == 0 ? bit_key_type(-1) : sign_bit;
-        return *reinterpret_cast<key_type *>(&bit_key);
+        return *reinterpret_cast<Key *>(&bit_key);
     }
 };
 
 template<class Key, class Enable = void>
-struct radix_key_codec
+struct radix_key_codec_base
 {
     static_assert(sizeof(Key) == 0,
         "Only integral (except bool) and floating point types supported as radix sort keys");
 };
 
 template<class Key>
-struct radix_key_codec<
+struct radix_key_codec_base<
     Key,
     typename std::enable_if<std::is_integral<Key>::value && !std::is_same<bool, Key>::value>::type
 > : radix_key_codec_integral<Key, typename std::make_unsigned<Key>::type> { };
 
 template<>
-struct radix_key_codec<float> : radix_key_codec_floating<float, unsigned int> { };
+struct radix_key_codec_base<float> : radix_key_codec_floating<float, unsigned int> { };
 
 template<>
-struct radix_key_codec<double> : radix_key_codec_floating<double, unsigned long long> { };
+struct radix_key_codec_base<double> : radix_key_codec_floating<double, unsigned long long> { };
+
+template<class Key>
+class radix_key_codec : protected radix_key_codec_base<Key>
+{
+    using base_type = radix_key_codec_base<Key>;
+
+public:
+    using bit_key_type = typename base_type::bit_key_type;
+
+    template<bool Descending>
+    static bit_key_type encode(Key key) [[hc]]
+    {
+        bit_key_type bit_key = base_type::encode(key);
+        return (Descending ? ~bit_key : bit_key);
+    }
+
+    template<bool Descending>
+    static Key decode(bit_key_type bit_key) [[hc]]
+    {
+        bit_key = (Descending ? ~bit_key : bit_key);
+        return base_type::decode(bit_key);
+    }
+};
 
 } // end namespace detail
 END_ROCPRIM_NAMESPACE
