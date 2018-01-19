@@ -1157,9 +1157,7 @@ private:
         bit_key_type bit_keys[ItemsPerThread];
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            bit_key_type bit_key = key_codec::encode(keys[i]);
-            bit_key = (Descending ? ~bit_key : bit_key);
-            bit_keys[i] = bit_key;
+            bit_keys[i] = key_codec::template encode<Descending>(keys[i]);
         }
 
         for(unsigned int bit = begin_bit; bit < end_bit; bit += RadixBits)
@@ -1223,9 +1221,7 @@ private:
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            bit_key_type bit_key = bit_keys[i];
-            bit_key = (Descending ? ~bit_key : bit_key);
-            keys[i] = key_codec::decode(bit_key);
+            keys[i] = key_codec::template decode<Descending>(bit_keys[i]);
         }
     }
 
