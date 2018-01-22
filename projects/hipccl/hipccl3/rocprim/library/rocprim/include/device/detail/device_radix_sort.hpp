@@ -34,6 +34,7 @@
 #include "../../block/block_discontinuity.hpp"
 #include "../../block/block_exchange.hpp"
 #include "../../block/block_load.hpp"
+#include "../../block/block_load_func.hpp"
 #include "../../block/block_scan.hpp"
 #include "../../block/block_radix_sort.hpp"
 
@@ -42,32 +43,36 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<unsigned int BlockSize, unsigned int ItemsPerThread, unsigned int RadixBits, bool DescendingIn, class KeyIn>
+template<
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    unsigned int RadixBits,
+    bool DescendingIn,
+    class KeyIn
+>
 __device__
 void fill_digit_counts(const KeyIn * keys_input,
                        unsigned int size,
                        unsigned int * batch_digit_counts,
-                       unsigned int bit, unsigned int current_radix_bits,
-                       unsigned int div_blocks_per_batch, unsigned int rem_blocks_per_batch)
+                       unsigned int bit,
+                       unsigned int current_radix_bits,
+                       unsigned int blocks_per_full_batch,
+                       unsigned int full_batches)
 {
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
     constexpr unsigned int radix_size = 1 << RadixBits;
 
     constexpr unsigned int warp_size =::rocprim::warp_size();
     constexpr unsigned int warps_no = BlockSize / warp_size;
-    static_assert(::rocprim::detail::is_power_of_two(BlockSize) || BlockSize > radix_size, "Incorrect BlockSize");
+    static_assert(is_power_of_two(BlockSize) || BlockSize > radix_size, "Incorrect BlockSize");
 
-    using key_encoder = ::rocprim::detail::radix_key_codec<KeyIn>;
-    using bit_key_type = typename key_encoder::bit_key_type;
-    // TODO: use striped loading as we don't care about order of items, only about counts for the whole block
-    using load_type = ::rocprim::block_load<KeyIn, BlockSize, ItemsPerThread, ::rocprim::block_load_method::block_load_transpose>;
+    using key_in_codec = radix_key_codec<KeyIn, DescendingIn>;
+    using bit_key_type = typename key_in_codec::bit_key_type;
 
-    struct storage_type
+    __shared__ struct
     {
-        typename load_type::storage_type load;
         unsigned int digit_counts[warps_no][radix_size];
-    };
-    __shared__ storage_type storage;
+    } storage;
 
     const unsigned int radix_mask = (1u << current_radix_bits) - 1;
 
@@ -86,41 +91,44 @@ void fill_digit_counts(const KeyIn * keys_input,
 
     unsigned int block_offset;
     unsigned int blocks_per_batch;
-    if(batch_id < rem_blocks_per_batch)
+    if(batch_id < full_batches)
     {
-        blocks_per_batch = div_blocks_per_batch + 1;
+        blocks_per_batch = blocks_per_full_batch;
         block_offset = batch_id * blocks_per_batch;
     }
     else
     {
-        blocks_per_batch = div_blocks_per_batch;
-        block_offset = batch_id * blocks_per_batch + rem_blocks_per_batch;
+        blocks_per_batch = blocks_per_full_batch - 1;
+        block_offset = batch_id * blocks_per_batch + full_batches;
     }
     block_offset *= items_per_block;
+
     for(unsigned int bi = 0; bi < blocks_per_batch; bi++)
     {
         KeyIn keys[ItemsPerThread];
         unsigned int valid_count;
+        // Use loading into a striped arrangement because an order of items is irrelevant,
+        // only totals matter
         if(block_offset + items_per_block <= size)
         {
             valid_count = items_per_block;
-            load_type().load(keys_input + block_offset, keys, storage.load);
+            block_load_direct_striped<BlockSize>(flat_id, keys_input + block_offset, keys);
         }
         else
         {
             valid_count = size - block_offset;
-            load_type().load(keys_input + block_offset, keys, valid_count, storage.load);
+            block_load_direct_striped<BlockSize>(flat_id, keys_input + block_offset, keys, valid_count);
         }
         bit_key_type bit_keys[ItemsPerThread];
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            bit_keys[i] = key_encoder::template encode<DescendingIn>(keys[i]);
+            bit_keys[i] = key_in_codec::encode(keys[i]);
         }
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             const unsigned int digit = (bit_keys[i] >> bit) & radix_mask;
-            const unsigned int pos = flat_id * ItemsPerThread + i;
+            const unsigned int pos = i * BlockSize + flat_id;
             unsigned long long same_digit_lanes_mask = ::rocprim::ballot(pos < valid_count);
             for(unsigned int b = 0; b < RadixBits; b++)
             {
@@ -153,9 +161,15 @@ void fill_digit_counts(const KeyIn * keys_input,
     }
 }
 
-template<unsigned int BlockSize, unsigned int ItemsPerThread, unsigned int RadixBits>
+template<
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    unsigned int RadixBits
+>
 __device__
-void scan_batches(unsigned int * batch_digit_counts, unsigned int * digit_counts, unsigned int batches)
+void scan_batches(unsigned int * batch_digit_counts,
+                  unsigned int * digit_counts,
+                  unsigned int batches)
 {
     constexpr unsigned int radix_size = 1 << RadixBits;
 
@@ -212,7 +226,8 @@ void sort_block(Sort sort,
                 Key (&keys)[ItemsPerThread],
                 Value (&values)[ItemsPerThread],
                 typename Sort::storage_type& storage,
-                unsigned int begin_bit, unsigned int end_bit)
+                unsigned int begin_bit,
+                unsigned int end_bit)
 {
     sort.sort(keys, values, storage, begin_bit, end_bit);
 }
@@ -223,37 +238,54 @@ void sort_block(Sort sort,
                 Key (&keys)[ItemsPerThread],
                 ::rocprim::empty_type (&values)[ItemsPerThread],
                 typename Sort::storage_type& storage,
-                unsigned int begin_bit, unsigned int end_bit)
+                unsigned int begin_bit,
+                unsigned int end_bit)
 {
     sort.sort(keys, storage, begin_bit, end_bit);
 }
 
-template<unsigned int BlockSize, unsigned int ItemsPerThread, unsigned int RadixBits, bool DescendingIn, bool DescendingOut, class KeyIn, class KeyOut, class Value>
+template<
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    unsigned int RadixBits,
+    bool DescendingIn,
+    bool DescendingOut,
+    class KeyIn,
+    class KeyOut,
+    class Value
+>
 __device__
 void sort_and_scatter(const KeyIn * keys_input,
                       KeyOut * keys_output,
                       const Value * values_input,
                       Value * values_output,
                       unsigned int size,
-                      const unsigned int * batch_digit_counts, const unsigned int * digit_counts,
-                      unsigned int bit, unsigned int current_radix_bits,
-                      unsigned int div_blocks_per_batch, unsigned int rem_blocks_per_batch)
+                      const unsigned int * batch_digit_starts,
+                      const unsigned int * digit_starts,
+                      unsigned int bit,
+                      unsigned int current_radix_bits,
+                      unsigned int blocks_per_full_batch,
+                      unsigned int full_batches)
 {
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
     constexpr unsigned int radix_size = 1 << RadixBits;
     constexpr bool with_values = !std::is_same<Value, ::rocprim::empty_type>::value;
 
-    using key_encoder = ::rocprim::detail::radix_key_codec<KeyIn>;
-    using key_decoder = ::rocprim::detail::radix_key_codec<KeyOut>;
-    using bit_key_type = typename key_encoder::bit_key_type;
-    using keys_load_type = ::rocprim::block_load<KeyIn, BlockSize, ItemsPerThread, ::rocprim::block_load_method::block_load_transpose>;
-    using values_load_type = ::rocprim::block_load<Value, BlockSize, ItemsPerThread, ::rocprim::block_load_method::block_load_transpose>;
+    using key_in_codec = radix_key_codec<KeyIn, DescendingIn>;
+    using key_out_codec = radix_key_codec<KeyOut, DescendingOut>;
+    using bit_key_type = typename key_in_codec::bit_key_type;
+    using keys_load_type = ::rocprim::block_load<
+        KeyIn, BlockSize, ItemsPerThread,
+        ::rocprim::block_load_method::block_load_transpose>;
+    using values_load_type = ::rocprim::block_load<
+        Value, BlockSize, ItemsPerThread,
+        ::rocprim::block_load_method::block_load_transpose>;
     using sort_type = ::rocprim::block_radix_sort<bit_key_type, BlockSize, ItemsPerThread, Value>;
     using discontinuity_type = ::rocprim::block_discontinuity<unsigned int, BlockSize>;
     using bit_keys_exchange_type = ::rocprim::block_exchange<bit_key_type, BlockSize, ItemsPerThread>;
     using values_exchange_type = ::rocprim::block_exchange<Value, BlockSize, ItemsPerThread>;
 
-    struct storage_type
+    __shared__ struct
     {
         union
         {
@@ -265,13 +297,11 @@ void sort_and_scatter(const KeyIn * keys_input,
             typename values_exchange_type::storage_type values_exchange;
         };
 
-        // TODO: unsigned short?
-        unsigned int starts[radix_size];
-        unsigned int ends[radix_size];
+        unsigned short starts[radix_size];
+        unsigned short ends[radix_size];
 
         unsigned int block_starts[radix_size];
-    };
-    __shared__ storage_type storage;
+    } storage;
 
     const unsigned int radix_mask = (1u << current_radix_bits) - 1;
 
@@ -280,22 +310,23 @@ void sort_and_scatter(const KeyIn * keys_input,
 
     if(flat_id < radix_size)
     {
-        storage.block_starts[flat_id] = digit_counts[flat_id] + batch_digit_counts[batch_id * radix_size + flat_id];
+        storage.block_starts[flat_id] = digit_starts[flat_id] + batch_digit_starts[batch_id * radix_size + flat_id];
     }
 
     unsigned int block_offset;
     unsigned int blocks_per_batch;
-    if(batch_id < rem_blocks_per_batch)
+    if(batch_id < full_batches)
     {
-        blocks_per_batch = div_blocks_per_batch + 1;
+        blocks_per_batch = blocks_per_full_batch;
         block_offset = batch_id * blocks_per_batch;
     }
     else
     {
-        blocks_per_batch = div_blocks_per_batch;
-        block_offset = batch_id * blocks_per_batch + rem_blocks_per_batch;
+        blocks_per_batch = blocks_per_full_batch - 1;
+        block_offset = batch_id * blocks_per_batch + full_batches;
     }
     block_offset *= items_per_block;
+
     for(unsigned int bi = 0; bi < blocks_per_batch; bi++)
     {
         KeyIn keys[ItemsPerThread];
@@ -314,7 +345,9 @@ void sort_and_scatter(const KeyIn * keys_input,
         else
         {
             valid_count = size - block_offset;
-            keys_load_type().load(keys_input + block_offset, keys, valid_count, storage.keys_load);
+            // Sort will leave "invalid" (out of size) items at the end of the sorted sequence
+            const KeyIn out_of_bounds = key_in_codec::decode(bit_key_type(-1));
+            keys_load_type().load(keys_input + block_offset, keys, valid_count, out_of_bounds, storage.keys_load);
             if(with_values)
             {
                 ::rocprim::syncthreads();
@@ -324,13 +357,7 @@ void sort_and_scatter(const KeyIn * keys_input,
         bit_key_type bit_keys[ItemsPerThread];
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            bit_key_type bit_key = key_encoder::template encode<DescendingIn>(keys[i]);
-            // Sort will leave "invalid" (out of size) items at the end of the sorted sequence
-            const unsigned int pos = flat_id * ItemsPerThread + i;
-            // TODO: use key_encoder::decode(bit_key_type(-1)) as out_of_bounds for the last block ^^^.
-            // Rename to key_codec_in? Make encode/decode non-static?
-            bit_key = (pos < valid_count) ? bit_key : bit_key_type(-1);
-            bit_keys[i] = bit_key;
+            bit_keys[i] = key_in_codec::encode(keys[i]);
         }
 
         if(flat_id < radix_size)
@@ -339,8 +366,8 @@ void sort_and_scatter(const KeyIn * keys_input,
             storage.ends[flat_id] = valid_count;
         }
 
-        sort_block(sort_type(), bit_keys, values, storage.sort, bit, bit + current_radix_bits);
         ::rocprim::syncthreads();
+        sort_block(sort_type(), bit_keys, values, storage.sort, bit, bit + current_radix_bits);
 
         unsigned int digits[ItemsPerThread];
         for(unsigned int i = 0; i < ItemsPerThread; i++)
@@ -351,6 +378,8 @@ void sort_and_scatter(const KeyIn * keys_input,
         bool head_flags[ItemsPerThread];
         bool tail_flags[ItemsPerThread];
         ::rocprim::not_equal_to<unsigned int> flag_op;
+
+        ::rocprim::syncthreads();
         discontinuity_type().flag_heads_and_tails(head_flags, tail_flags, digits, flag_op, storage.discontinuity);
 
         // Fill start and end position of subsequence for every digit
@@ -367,14 +396,15 @@ void sort_and_scatter(const KeyIn * keys_input,
                 storage.ends[digit] = pos;
             }
         }
-        ::rocprim::syncthreads();
 
-        bit_keys_exchange_type().blocked_to_striped(bit_keys, bit_keys, storage.bit_keys_exchange);
         ::rocprim::syncthreads();
+        // Rearrange to striped arrangement to have faster coalesced writes instead of
+        // scattering of blocked-arranged items
+        bit_keys_exchange_type().blocked_to_striped(bit_keys, bit_keys, storage.bit_keys_exchange);
         if(with_values)
         {
-            values_exchange_type().blocked_to_striped(values, values, storage.values_exchange);
             ::rocprim::syncthreads();
+            values_exchange_type().blocked_to_striped(values, values, storage.values_exchange);
         }
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
@@ -384,26 +414,27 @@ void sort_and_scatter(const KeyIn * keys_input,
             if(pos < valid_count)
             {
                 const unsigned int dst = pos - storage.starts[digit] + storage.block_starts[digit];
-                keys_output[dst] = key_decoder::template decode<DescendingOut>(bit_keys[i]);
+                keys_output[dst] = key_out_codec::decode(bit_keys[i]);
                 if(with_values)
                 {
                     values_output[dst] = values[i];
                 }
             }
         }
+
         ::rocprim::syncthreads();
 
+        // Accumulate counts of the current block
         if(flat_id < radix_size)
         {
             const unsigned int digit = flat_id;
             const unsigned int start = storage.starts[digit];
+            const unsigned int end = storage.ends[digit];
             if(start < valid_count)
             {
-                const unsigned int end = ::rocprim::min(valid_count - 1, storage.ends[digit]);
-                storage.block_starts[digit] += (end - start + 1);
+                storage.block_starts[digit] += (::rocprim::min(valid_count - 1, end) - start + 1);
             }
         }
-        ::rocprim::syncthreads();
 
         block_offset += items_per_block;
     }

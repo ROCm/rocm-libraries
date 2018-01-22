@@ -111,7 +111,7 @@ struct radix_key_codec_base<float> : radix_key_codec_floating<float, unsigned in
 template<>
 struct radix_key_codec_base<double> : radix_key_codec_floating<double, unsigned long long> { };
 
-template<class Key>
+template<class Key, bool Descending = false>
 class radix_key_codec : protected radix_key_codec_base<Key>
 {
     using base_type = radix_key_codec_base<Key>;
@@ -119,14 +119,12 @@ class radix_key_codec : protected radix_key_codec_base<Key>
 public:
     using bit_key_type = typename base_type::bit_key_type;
 
-    template<bool Descending>
     static bit_key_type encode(Key key) [[hc]]
     {
         bit_key_type bit_key = base_type::encode(key);
         return (Descending ? ~bit_key : bit_key);
     }
 
-    template<bool Descending>
     static Key decode(bit_key_type bit_key) [[hc]]
     {
         bit_key = (Descending ? ~bit_key : bit_key);

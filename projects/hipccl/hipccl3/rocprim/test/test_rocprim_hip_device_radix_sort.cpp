@@ -84,7 +84,7 @@ typedef ::testing::Types<
     params<int, short>,
     params<unsigned short, char>,
     params<double, int, true>,
-    params<char, double, true>,
+    params<signed char, double, true>,
     params<short, int>,
 
     // start_bit and end_bit
@@ -132,7 +132,7 @@ struct key_value_comparator
 
 std::vector<size_t> get_sizes()
 {
-    std::vector<size_t> sizes = { 1, 10, 53, 211, 1024, 2345, 4096, 34567, (1 << 16) - 1220, (1 << 24) - 76543 };
+    std::vector<size_t> sizes = { 1, 10, 53, 211, 1024, 2345, 4096, 34567, (1 << 16) - 1220, (1 << 23) - 76543 };
     const std::vector<size_t> random_sizes = get_random_data<size_t>(10, 1, 1000000);
     sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
     return sizes;
@@ -186,8 +186,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
         rp::device_radix_sort_keys(
             d_temporary_storage, temporary_storage_bytes,
             d_key_input, d_key_output, size,
-            start_bit, end_bit,
-            0, false
+            start_bit, end_bit
         );
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
@@ -315,8 +314,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeysValues)
         rp::device_radix_sort_pairs(
             d_temporary_storage, temporary_storage_bytes,
             d_key_input, d_key_output, d_value_input, d_value_output, size,
-            start_bit, end_bit,
-            0, false
+            start_bit, end_bit
         );
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
