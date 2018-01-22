@@ -47,25 +47,39 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<unsigned int BlockSize, unsigned int ItemsPerThread, unsigned int RadixBits, bool DescendingIn, class KeyIn>
+template<
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    unsigned int RadixBits,
+    bool DescendingIn,
+    class KeyIn
+>
 __global__
 void fill_digit_counts_kernel(const KeyIn * keys_input,
                               unsigned int size,
                               unsigned int * batch_digit_counts,
-                              unsigned int bit, unsigned int current_radix_bits,
-                              unsigned int div_blocks_per_batch, unsigned int rem_blocks_per_batch)
+                              unsigned int bit,
+                              unsigned int current_radix_bits,
+                              unsigned int blocks_per_full_batch,
+                              unsigned int full_batches)
 {
     fill_digit_counts<BlockSize, ItemsPerThread, RadixBits, DescendingIn>(
         keys_input, size,
         batch_digit_counts,
         bit, current_radix_bits,
-        div_blocks_per_batch, rem_blocks_per_batch
+        blocks_per_full_batch, full_batches
     );
 }
 
-template<unsigned int BlockSize, unsigned int ItemsPerThread, unsigned int RadixBits>
+template<
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    unsigned int RadixBits
+>
 __global__
-void scan_batches_kernel(unsigned int * batch_digit_counts, unsigned int * digit_counts, unsigned int batches)
+void scan_batches_kernel(unsigned int * batch_digit_counts,
+                         unsigned int * digit_counts,
+                         unsigned int batches)
 {
     scan_batches<BlockSize, ItemsPerThread, RadixBits>(batch_digit_counts, digit_counts, batches);
 }
@@ -77,22 +91,34 @@ void scan_digits_kernel(unsigned int * digit_counts)
     scan_digits<RadixBits>(digit_counts);
 }
 
-template<unsigned int BlockSize, unsigned int ItemsPerThread, unsigned int RadixBits, bool DescendingIn, bool DescendingOut, class KeyIn, class KeyOut, class Value>
+template<
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    unsigned int RadixBits,
+    bool DescendingIn,
+    bool DescendingOut,
+    class KeyIn,
+    class KeyOut,
+    class Value
+>
 __global__
 void sort_and_scatter_kernel(const KeyIn * keys_input,
                              KeyOut * keys_output,
                              const Value * values_input,
                              Value * values_output,
                              unsigned int size,
-                             const unsigned int * batch_digit_counts, const unsigned int * digit_counts,
-                             unsigned int bit, unsigned int current_radix_bits,
-                             unsigned int div_blocks_per_batch, unsigned int rem_blocks_per_batch)
+                             const unsigned int * batch_digit_counts,
+                             const unsigned int * digit_counts,
+                             unsigned int bit,
+                             unsigned int current_radix_bits,
+                             unsigned int blocks_per_full_batch,
+                             unsigned int full_batches)
 {
     sort_and_scatter<BlockSize, ItemsPerThread, RadixBits, DescendingIn, DescendingOut>(
         keys_input, keys_output, values_input, values_output, size,
         batch_digit_counts, digit_counts,
         bit, current_radix_bits,
-        div_blocks_per_batch, rem_blocks_per_batch
+        blocks_per_full_batch, full_batches
     );
 }
 
@@ -157,16 +183,18 @@ hipError_t device_radix_sort(void * temporary_storage,
     }
 
     const unsigned int blocks = ::rocprim::ceiling_div(static_cast<unsigned int>(size), sort_size);
-    const unsigned int div_blocks_per_batch = blocks / scan_size;
-    const unsigned int rem_blocks_per_batch = blocks % scan_size;
-    const unsigned int batches = (div_blocks_per_batch == 0 ? rem_blocks_per_batch : scan_size);
+    const unsigned int blocks_per_full_batch = ::rocprim::ceiling_div(blocks, scan_size);
+    const unsigned int full_batches = blocks % scan_size != 0
+        ? blocks % scan_size
+        : scan_size;
+    const unsigned int batches = (blocks_per_full_batch == 1 ? full_batches : scan_size);
     const unsigned int iterations = ::rocprim::ceiling_div(end_bit - begin_bit, radix_bits);
 
     if(debug_synchronous)
     {
         std::cout << "blocks " << blocks << '\n';
-        std::cout << "div_blocks_per_batch " << div_blocks_per_batch << '\n';
-        std::cout << "rem_blocks_per_batch " << rem_blocks_per_batch << '\n';
+        std::cout << "blocks_per_full_batch " << blocks_per_full_batch << '\n';
+        std::cout << "full_batches " << full_batches << '\n';
         std::cout << "batches " << batches << '\n';
         std::cout << "iterations " << iterations << '\n';
         hipError_t error = hipStreamSynchronize(stream);
@@ -198,30 +226,36 @@ hipError_t device_radix_sort(void * temporary_storage,
         // iteration has a shorter mask.
         const unsigned int current_radix_bits = ::rocprim::min(radix_bits, end_bit - bit);
 
-        const bool need_encoding = (bit == begin_bit);
-        const bool need_decoding = (bit + current_radix_bits == end_bit);
+        const bool is_first_iteration = (bit == begin_bit);
+        const bool is_last_iteration = (bit + current_radix_bits == end_bit);
 
         auto start = std::chrono::high_resolution_clock::now();
-        if(need_encoding)
+        if(is_first_iteration)
         {
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(detail::fill_digit_counts_kernel<sort_block_size, sort_items_per_thread, radix_bits, Descending>),
+                HIP_KERNEL_NAME(detail::fill_digit_counts_kernel<
+                    sort_block_size, sort_items_per_thread, radix_bits,
+                    Descending
+                >),
                 dim3(batches), dim3(sort_block_size), 0, stream,
                 keys_input, size,
                 batch_digit_counts,
                 bit, current_radix_bits,
-                div_blocks_per_batch, rem_blocks_per_batch
+                blocks_per_full_batch, full_batches
             );
         }
         else
         {
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(detail::fill_digit_counts_kernel<sort_block_size, sort_items_per_thread, radix_bits, false>),
+                HIP_KERNEL_NAME(detail::fill_digit_counts_kernel<
+                    sort_block_size, sort_items_per_thread, radix_bits,
+                    false
+                >),
                 dim3(batches), dim3(sort_block_size), 0, stream,
                 bit_keys0, size,
                 batch_digit_counts,
                 bit, current_radix_bits,
-                div_blocks_per_batch, rem_blocks_per_batch
+                blocks_per_full_batch, full_batches
             );
         }
         SYNC_AND_RETURN_ON_ERROR("fill_digit_counts", start)
@@ -243,48 +277,60 @@ hipError_t device_radix_sort(void * temporary_storage,
         SYNC_AND_RETURN_ON_ERROR("scan_digits", start)
 
         start = std::chrono::high_resolution_clock::now();
-        if(need_encoding && need_decoding)
+        if(is_first_iteration && is_last_iteration)
         {
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(detail::sort_and_scatter_kernel<sort_block_size, sort_items_per_thread, radix_bits, Descending, Descending>),
+                HIP_KERNEL_NAME(detail::sort_and_scatter_kernel<
+                    sort_block_size, sort_items_per_thread, radix_bits,
+                    Descending, Descending
+                >),
                 dim3(batches), dim3(sort_block_size), 0, stream,
                 keys_input, keys_output, values_input, values_output, size,
                 batch_digit_counts, digit_counts,
                 bit, current_radix_bits,
-                div_blocks_per_batch, rem_blocks_per_batch
+                blocks_per_full_batch, full_batches
             );
         }
-        else if(need_encoding)
+        else if(is_first_iteration)
         {
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(detail::sort_and_scatter_kernel<sort_block_size, sort_items_per_thread, radix_bits, Descending, false>),
+                HIP_KERNEL_NAME(detail::sort_and_scatter_kernel<
+                    sort_block_size, sort_items_per_thread, radix_bits,
+                    Descending, false
+                >),
                 dim3(batches), dim3(sort_block_size), 0, stream,
                 keys_input, bit_keys1, values_input, values1, size,
                 batch_digit_counts, digit_counts,
                 bit, current_radix_bits,
-                div_blocks_per_batch, rem_blocks_per_batch
+                blocks_per_full_batch, full_batches
             );
         }
-        else if(need_decoding)
+        else if(is_last_iteration)
         {
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(detail::sort_and_scatter_kernel<sort_block_size, sort_items_per_thread, radix_bits, false, Descending>),
+                HIP_KERNEL_NAME(detail::sort_and_scatter_kernel<
+                    sort_block_size, sort_items_per_thread, radix_bits,
+                    false, Descending
+                >),
                 dim3(batches), dim3(sort_block_size), 0, stream,
                 bit_keys0, keys_output, values0, values_output, size,
                 batch_digit_counts, digit_counts,
                 bit, current_radix_bits,
-                div_blocks_per_batch, rem_blocks_per_batch
+                blocks_per_full_batch, full_batches
             );
         }
         else
         {
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(detail::sort_and_scatter_kernel<sort_block_size, sort_items_per_thread, radix_bits, false, false>),
+                HIP_KERNEL_NAME(detail::sort_and_scatter_kernel<
+                    sort_block_size, sort_items_per_thread, radix_bits,
+                    false, false
+                >),
                 dim3(batches), dim3(sort_block_size), 0, stream,
                 bit_keys0, bit_keys1, values0, values1, size,
                 batch_digit_counts, digit_counts,
                 bit, current_radix_bits,
-                div_blocks_per_batch, rem_blocks_per_batch
+                blocks_per_full_batch, full_batches
             );
         }
         SYNC_AND_RETURN_ON_ERROR("sort_and_scatter", start)

@@ -288,8 +288,7 @@ class block_radix_sort
     static constexpr bool with_values = !std::is_same<Value, empty_type>::value;
     static constexpr unsigned int radix_size = 1 << RadixBits;
 
-    using key_codec = ::rocprim::detail::radix_key_codec<Key>;
-    using bit_key_type = typename key_codec::bit_key_type;
+    using bit_key_type = typename ::rocprim::detail::radix_key_codec<Key>::bit_key_type;
 
     // The last radix value does not have its own bucket and hence no scan is performed, because
     // its value can be calculated based on all other values
@@ -1152,12 +1151,14 @@ private:
                    unsigned int begin_bit,
                    unsigned int end_bit) [[hc]]
     {
+        using key_codec = ::rocprim::detail::radix_key_codec<Key, Descending>;
+
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
 
         bit_key_type bit_keys[ItemsPerThread];
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            bit_keys[i] = key_codec::template encode<Descending>(keys[i]);
+            bit_keys[i] = key_codec::encode(keys[i]);
         }
 
         for(unsigned int bit = begin_bit; bit < end_bit; bit += RadixBits)
@@ -1221,7 +1222,7 @@ private:
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            keys[i] = key_codec::template decode<Descending>(bit_keys[i]);
+            keys[i] = key_codec::decode(bit_keys[i]);
         }
     }
 
