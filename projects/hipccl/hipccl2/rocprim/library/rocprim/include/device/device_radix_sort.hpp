@@ -77,30 +77,53 @@ void scan_digits_kernel(unsigned int * digit_counts)
     scan_digits<RadixBits>(digit_counts);
 }
 
-template<unsigned int BlockSize, unsigned int ItemsPerThread, unsigned int RadixBits, bool DescendingIn, bool DescendingOut, class KeyIn, class KeyOut>
+template<unsigned int BlockSize, unsigned int ItemsPerThread, unsigned int RadixBits, bool DescendingIn, bool DescendingOut, class KeyIn, class KeyOut, class Value>
 __global__
 void sort_and_scatter_kernel(const KeyIn * keys_input,
                              KeyOut * keys_output,
+                             const Value * values_input,
+                             Value * values_output,
                              unsigned int size,
                              const unsigned int * batch_digit_counts, const unsigned int * digit_counts,
                              unsigned int bit, unsigned int current_radix_bits,
                              unsigned int div_blocks_per_batch, unsigned int rem_blocks_per_batch)
 {
     sort_and_scatter<BlockSize, ItemsPerThread, RadixBits, DescendingIn, DescendingOut>(
-        keys_input, keys_output, size,
+        keys_input, keys_output, values_input, values_output, size,
         batch_digit_counts, digit_counts,
         bit, current_radix_bits,
         div_blocks_per_batch, rem_blocks_per_batch
     );
 }
 
-template<bool Descending, class Key, class SortedValue>
+size_t align_size(size_t size)
+{
+    constexpr size_t alignment = 256;
+    return ::rocprim::ceiling_div(size, alignment) * alignment;
+}
+
+#define SYNC_AND_RETURN_ON_ERROR(name, start) \
+    { \
+        hipError_t error = hipPeekAtLastError(); \
+        if(error != hipSuccess) return error; \
+        if(debug_synchronous) \
+        { \
+            std::cout << name; \
+            error = hipStreamSynchronize(stream); \
+            if(error != hipSuccess) return error; \
+            auto end = std::chrono::high_resolution_clock::now(); \
+            auto d = std::chrono::duration_cast<std::chrono::duration<double>>(end - start); \
+            std::cout << " " << d.count() * 1000 << " ms" << '\n'; \
+        } \
+    }
+
+template<bool Descending, class Key, class Value>
 hipError_t device_radix_sort(void * temporary_storage,
                              size_t& temporary_storage_bytes,
                              const Key * keys_input,
                              Key * keys_output,
-                             const SortedValue * values_input,
-                             SortedValue * values_output,
+                             const Value * values_input,
+                             Value * values_output,
                              size_t size,
                              unsigned int begin_bit,
                              unsigned int end_bit,
@@ -108,6 +131,8 @@ hipError_t device_radix_sort(void * temporary_storage,
                              bool debug_synchronous)
 {
     using bit_key_type = typename ::rocprim::detail::radix_key_codec<Key>::bit_key_type;
+
+    constexpr bool with_values = !std::is_same<Value, ::rocprim::empty_type>::value;
 
     constexpr unsigned int radix_bits = 8;
     constexpr unsigned int radix_size = 1 << radix_bits;
@@ -121,44 +146,50 @@ hipError_t device_radix_sort(void * temporary_storage,
     constexpr unsigned int scan_size = scan_block_size * scan_items_per_thread;
     constexpr unsigned int sort_size = sort_block_size * sort_items_per_thread;
 
+    const size_t batch_digit_counts_bytes = align_size(scan_size * radix_size * sizeof(unsigned int));
+    const size_t digit_counts_bytes = align_size(radix_size * sizeof(unsigned int));
+    const size_t bit_keys_bytes = align_size(size * sizeof(bit_key_type));
+    const size_t values_bytes = with_values ? align_size(size * sizeof(Value)) : 0;
+    if(temporary_storage == nullptr)
+    {
+        temporary_storage_bytes = batch_digit_counts_bytes + digit_counts_bytes + bit_keys_bytes + values_bytes;
+        return hipSuccess;
+    }
+
     const unsigned int blocks = ::rocprim::ceiling_div(static_cast<unsigned int>(size), sort_size);
     const unsigned int div_blocks_per_batch = blocks / scan_size;
     const unsigned int rem_blocks_per_batch = blocks % scan_size;
     const unsigned int batches = (div_blocks_per_batch == 0 ? rem_blocks_per_batch : scan_size);
     const unsigned int iterations = ::rocprim::ceiling_div(end_bit - begin_bit, radix_bits);
 
-    const size_t batch_digit_counts_bytes = scan_size * radix_size * sizeof(unsigned int);
-    const size_t digit_counts_bytes = radix_size * sizeof(unsigned int);
-    const size_t bit_keys_bytes = size * sizeof(bit_key_type);
-    if(temporary_storage == nullptr)
-    {
-        temporary_storage_bytes = batch_digit_counts_bytes + digit_counts_bytes + bit_keys_bytes;
-        return hipSuccess;
-    }
-
     if(debug_synchronous)
     {
-        std::cout << "iterations " << iterations << '\n';
         std::cout << "blocks " << blocks << '\n';
         std::cout << "div_blocks_per_batch " << div_blocks_per_batch << '\n';
         std::cout << "rem_blocks_per_batch " << rem_blocks_per_batch << '\n';
+        std::cout << "batches " << batches << '\n';
+        std::cout << "iterations " << iterations << '\n';
+        hipError_t error = hipStreamSynchronize(stream);
+        if(error != hipSuccess) return error;
     }
 
-    hipError_t error = hipSuccess;
+    char * ptr = reinterpret_cast<char *>(temporary_storage);
+    unsigned int * batch_digit_counts = reinterpret_cast<unsigned int *>(ptr);
+    ptr += batch_digit_counts_bytes;
+    unsigned int * digit_counts = reinterpret_cast<unsigned int *>(ptr);
+    ptr += digit_counts_bytes;
+    bit_key_type * bit_keys0 = reinterpret_cast<bit_key_type *>(ptr);
+    ptr += bit_keys_bytes;
+    Value * values0 = with_values ? reinterpret_cast<Value *>(ptr) : nullptr;
 
-    unsigned int * batch_digit_counts = reinterpret_cast<unsigned int *>(temporary_storage);
-    unsigned int * digit_counts = reinterpret_cast<unsigned int *>(
-        reinterpret_cast<char *>(batch_digit_counts) + batch_digit_counts_bytes
-    );
-    bit_key_type * bit_keys0 = reinterpret_cast<bit_key_type *>(
-        reinterpret_cast<char *>(digit_counts) + digit_counts_bytes
-    );
     bit_key_type * bit_keys1 = reinterpret_cast<bit_key_type *>(keys_output);
+    Value * values1 = values_output;
 
-    // Result must be placed in keys_output
+    // Result must be always placed in keys_output and values_output
     if(iterations % 2 == 0)
     {
         std::swap(bit_keys0, bit_keys1);
+        std::swap(values0, values1);
     }
 
     for(unsigned int bit = begin_bit; bit < end_bit; bit += radix_bits)
@@ -193,15 +224,7 @@ hipError_t device_radix_sort(void * temporary_storage,
                 div_blocks_per_batch, rem_blocks_per_batch
             );
         }
-        if(debug_synchronous)
-        {
-            std::cout << "fill_digit_counts";
-            error = hipStreamSynchronize(stream);
-            if(error != hipSuccess) return error;
-            auto end = std::chrono::high_resolution_clock::now();
-            auto d = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-            std::cout << " " << d.count() * 1000 << "ms" << '\n';
-        }
+        SYNC_AND_RETURN_ON_ERROR("fill_digit_counts", start)
 
         start = std::chrono::high_resolution_clock::now();
         hipLaunchKernelGGL(
@@ -209,15 +232,7 @@ hipError_t device_radix_sort(void * temporary_storage,
             dim3(radix_size), dim3(scan_block_size), 0, stream,
             batch_digit_counts, digit_counts, batches
         );
-        if(debug_synchronous)
-        {
-            std::cout << "scan_batches";
-            error = hipStreamSynchronize(stream);
-            if(error != hipSuccess) return error;
-            auto end = std::chrono::high_resolution_clock::now();
-            auto d = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-            std::cout << " " << d.count() * 1000 << "ms" << '\n';
-        }
+        SYNC_AND_RETURN_ON_ERROR("scan_batches", start)
 
         start = std::chrono::high_resolution_clock::now();
         hipLaunchKernelGGL(
@@ -225,15 +240,7 @@ hipError_t device_radix_sort(void * temporary_storage,
             dim3(1), dim3(radix_size), 0, stream,
             digit_counts
         );
-        if(debug_synchronous)
-        {
-            std::cout << "scan_digits";
-            error = hipStreamSynchronize(stream);
-            if(error != hipSuccess) return error;
-            auto end = std::chrono::high_resolution_clock::now();
-            auto d = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-            std::cout << " " << d.count() * 1000 << "ms" << '\n';
-        }
+        SYNC_AND_RETURN_ON_ERROR("scan_digits", start)
 
         start = std::chrono::high_resolution_clock::now();
         if(need_encoding && need_decoding)
@@ -241,7 +248,7 @@ hipError_t device_radix_sort(void * temporary_storage,
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(detail::sort_and_scatter_kernel<sort_block_size, sort_items_per_thread, radix_bits, Descending, Descending>),
                 dim3(batches), dim3(sort_block_size), 0, stream,
-                keys_input, keys_output, size,
+                keys_input, keys_output, values_input, values_output, size,
                 batch_digit_counts, digit_counts,
                 bit, current_radix_bits,
                 div_blocks_per_batch, rem_blocks_per_batch
@@ -252,7 +259,7 @@ hipError_t device_radix_sort(void * temporary_storage,
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(detail::sort_and_scatter_kernel<sort_block_size, sort_items_per_thread, radix_bits, Descending, false>),
                 dim3(batches), dim3(sort_block_size), 0, stream,
-                keys_input, bit_keys1, size,
+                keys_input, bit_keys1, values_input, values1, size,
                 batch_digit_counts, digit_counts,
                 bit, current_radix_bits,
                 div_blocks_per_batch, rem_blocks_per_batch
@@ -263,7 +270,7 @@ hipError_t device_radix_sort(void * temporary_storage,
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(detail::sort_and_scatter_kernel<sort_block_size, sort_items_per_thread, radix_bits, false, Descending>),
                 dim3(batches), dim3(sort_block_size), 0, stream,
-                bit_keys0, keys_output, size,
+                bit_keys0, keys_output, values0, values_output, size,
                 batch_digit_counts, digit_counts,
                 bit, current_radix_bits,
                 div_blocks_per_batch, rem_blocks_per_batch
@@ -274,27 +281,22 @@ hipError_t device_radix_sort(void * temporary_storage,
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(detail::sort_and_scatter_kernel<sort_block_size, sort_items_per_thread, radix_bits, false, false>),
                 dim3(batches), dim3(sort_block_size), 0, stream,
-                bit_keys0, bit_keys1, size,
+                bit_keys0, bit_keys1, values0, values1, size,
                 batch_digit_counts, digit_counts,
                 bit, current_radix_bits,
                 div_blocks_per_batch, rem_blocks_per_batch
             );
         }
-        if(debug_synchronous)
-        {
-            std::cout << "sort_and_scatter";
-            error = hipStreamSynchronize(stream);
-            if(error != hipSuccess) return error;
-            auto end = std::chrono::high_resolution_clock::now();
-            auto d = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-            std::cout << " " << d.count() * 1000 << "ms" << '\n';
-        }
+        SYNC_AND_RETURN_ON_ERROR("sort_and_scatter", start)
 
         std::swap(bit_keys0, bit_keys1);
+        std::swap(values0, values1);
     }
 
-    return error;
+    return hipSuccess;
 }
+
+#undef SYCN_AND_CHECK_ERROR
 
 } // end namespace detail
 
@@ -333,6 +335,48 @@ hipError_t device_radix_sort_keys_desc(void * temporary_storage,
     return detail::device_radix_sort<true>(
         temporary_storage, temporary_storage_bytes,
         keys_input, keys_output, values, values, size,
+        begin_bit, end_bit,
+        stream, debug_synchronous
+    );
+}
+
+template<class Key, class Value>
+hipError_t device_radix_sort_pairs(void * temporary_storage,
+                                   size_t& temporary_storage_bytes,
+                                   const Key * keys_input,
+                                   Key * keys_output,
+                                   const Value * values_input,
+                                   Value * values_output,
+                                   size_t size,
+                                   unsigned int begin_bit = 0,
+                                   unsigned int end_bit = 8 * sizeof(Key),
+                                   hipStream_t stream = 0,
+                                   bool debug_synchronous = false)
+{
+    return detail::device_radix_sort<false>(
+        temporary_storage, temporary_storage_bytes,
+        keys_input, keys_output, values_input, values_output, size,
+        begin_bit, end_bit,
+        stream, debug_synchronous
+    );
+}
+
+template<class Key, class Value>
+hipError_t device_radix_sort_pairs_desc(void * temporary_storage,
+                                        size_t& temporary_storage_bytes,
+                                        const Key * keys_input,
+                                        Key * keys_output,
+                                        const Value * values_input,
+                                        Value * values_output,
+                                        size_t size,
+                                        unsigned int begin_bit = 0,
+                                        unsigned int end_bit = 8 * sizeof(Key),
+                                        hipStream_t stream = 0,
+                                        bool debug_synchronous = false)
+{
+    return detail::device_radix_sort<true>(
+        temporary_storage, temporary_storage_bytes,
+        keys_input, keys_output, values_input, values_output, size,
         begin_bit, end_bit,
         stream, debug_synchronous
     );

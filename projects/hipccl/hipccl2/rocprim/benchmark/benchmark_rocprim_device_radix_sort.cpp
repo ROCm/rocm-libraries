@@ -122,7 +122,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
 
 #define CREATE_BENCHMARK(Key) \
 benchmark::RegisterBenchmark( \
-    ("device_radix_sort<" #Key ">"), \
+    ("device_radix_sort_keys<" #Key ">"), \
     run_benchmark<Key>, \
     stream, size \
 )
