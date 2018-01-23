@@ -52,45 +52,81 @@
   }
 
 #ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 128;
+const size_t DEFAULT_N = 1024 * 1024 * 32;
 #endif
+
+enum class benchmark_kinds
+{
+    sort_keys,
+    sort_pairs
+};
 
 namespace rp = rocprim;
 
-template<class Key>
-void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
+template<class T>
+void run_benchmark(benchmark::State& state, benchmark_kinds benchmark_kind, hipStream_t stream, size_t size)
 {
-    std::vector<Key> key_input;
-    if(std::is_floating_point<Key>::value)
+    using key_type = T;
+    using value_type = T;
+
+    // Generate data
+    std::vector<key_type> key_input;
+    if(std::is_floating_point<key_type>::value)
     {
-        key_input = get_random_data<Key>(size, (Key)-1000, (Key)+1000);
+        key_input = get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
     }
     else
     {
-        key_input = get_random_data<Key>(
+        key_input = get_random_data<key_type>(
             size,
-            std::numeric_limits<Key>::min(),
-            std::numeric_limits<Key>::max()
+            std::numeric_limits<key_type>::min(),
+            std::numeric_limits<key_type>::max()
         );
     }
-    Key * d_key_input;
-    Key * d_key_output;
-    HIP_CHECK(hipMalloc(&d_key_input, size * sizeof(Key)));
-    HIP_CHECK(hipMalloc(&d_key_output, size * sizeof(Key)));
+
+    std::vector<value_type> value_input(size);
+    std::iota(value_input.begin(), value_input.end(), 0);
+
+    key_type * d_key_input;
+    key_type * d_key_output;
+    HIP_CHECK(hipMalloc(&d_key_input, size * sizeof(key_type)));
+    HIP_CHECK(hipMalloc(&d_key_output, size * sizeof(key_type)));
     HIP_CHECK(
         hipMemcpy(
             d_key_input, key_input.data(),
-            size * sizeof(Key),
+            size * sizeof(key_type),
+            hipMemcpyHostToDevice
+        )
+    );
+
+    value_type * d_value_input;
+    value_type * d_value_output;
+    HIP_CHECK(hipMalloc(&d_value_input, size * sizeof(value_type)));
+    HIP_CHECK(hipMalloc(&d_value_output, size * sizeof(value_type)));
+    HIP_CHECK(
+        hipMemcpy(
+            d_value_input, value_input.data(),
+            size * sizeof(value_type),
             hipMemcpyHostToDevice
         )
     );
 
     void * d_temporary_storage = nullptr;
-    size_t temporary_storage_bytes;
-    rp::device_radix_sort_keys(
-        d_temporary_storage, temporary_storage_bytes,
-        d_key_input, d_key_output, size
-    );
+    size_t temporary_storage_bytes = 0;
+    if(benchmark_kind == benchmark_kinds::sort_keys)
+    {
+        rp::device_radix_sort_keys(
+            d_temporary_storage, temporary_storage_bytes,
+            d_key_input, d_key_output, size
+        );
+    }
+    else if(benchmark_kind == benchmark_kinds::sort_pairs)
+    {
+        rp::device_radix_sort_pairs(
+            d_temporary_storage, temporary_storage_bytes,
+            d_key_input, d_key_output, d_value_input, d_value_output, size
+        );
+    }
 
     HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
     HIP_CHECK(hipDeviceSynchronize());
@@ -99,12 +135,24 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
     {
         auto start = std::chrono::high_resolution_clock::now();
 
-        rp::device_radix_sort_keys(
-            d_temporary_storage, temporary_storage_bytes,
-            d_key_input, d_key_output, size,
-            0, sizeof(Key) * 8,
-            0, false
-        );
+        if(benchmark_kind == benchmark_kinds::sort_keys)
+        {
+            rp::device_radix_sort_keys(
+                d_temporary_storage, temporary_storage_bytes,
+                d_key_input, d_key_output, size,
+                0, sizeof(key_type) * 8,
+                0, false
+            );
+        }
+        else if(benchmark_kind == benchmark_kinds::sort_pairs)
+        {
+            rp::device_radix_sort_pairs(
+                d_temporary_storage, temporary_storage_bytes,
+                d_key_input, d_key_output, d_value_input, d_value_output, size,
+                0, sizeof(key_type) * 8,
+                0, false
+            );
+        }
         HIP_CHECK(hipDeviceSynchronize());
 
         auto end = std::chrono::high_resolution_clock::now();
@@ -112,20 +160,44 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
             std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
         state.SetIterationTime(elapsed_seconds.count());
     }
-    state.SetBytesProcessed(state.iterations() * size * sizeof(Key));
+    state.SetBytesProcessed(state.iterations() * size * sizeof(key_type));
     state.SetItemsProcessed(state.iterations() * size);
 
     HIP_CHECK(hipFree(d_temporary_storage));
     HIP_CHECK(hipFree(d_key_input));
     HIP_CHECK(hipFree(d_key_output));
+    HIP_CHECK(hipFree(d_value_input));
+    HIP_CHECK(hipFree(d_value_output));
 }
 
-#define CREATE_BENCHMARK(Key) \
+#define CREATE_BENCHMARK(T) \
 benchmark::RegisterBenchmark( \
-    ("device_radix_sort_keys<" #Key ">"), \
-    run_benchmark<Key>, \
-    stream, size \
+    (std::string("device_radix_") + name + "<" #T ">").c_str(), \
+    run_benchmark<T>, \
+    benchmark_kind, stream, size \
 )
+
+
+void add_benchmarks(benchmark_kinds benchmark_kind,
+                    const std::string& name,
+                    std::vector<benchmark::internal::Benchmark*>& benchmarks,
+                    hipStream_t stream,
+                    size_t size)
+{
+    std::vector<benchmark::internal::Benchmark*> bs =
+    {
+        CREATE_BENCHMARK(unsigned int),
+        CREATE_BENCHMARK(unsigned long long),
+
+        CREATE_BENCHMARK(char),
+        CREATE_BENCHMARK(short),
+
+        CREATE_BENCHMARK(float),
+        CREATE_BENCHMARK(double),
+    };
+
+    benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
+}
 
 int main(int argc, char *argv[])
 {
@@ -148,17 +220,9 @@ int main(int argc, char *argv[])
     std::cout << "[HIP] Device name: " << devProp.name << std::endl;
 
     // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks =
-    {
-        CREATE_BENCHMARK(unsigned int),
-        CREATE_BENCHMARK(unsigned long long),
-
-        CREATE_BENCHMARK(char),
-        CREATE_BENCHMARK(short),
-
-        CREATE_BENCHMARK(float),
-        CREATE_BENCHMARK(double),
-    };
+    std::vector<benchmark::internal::Benchmark*> benchmarks;
+    add_benchmarks(benchmark_kinds::sort_keys, "sort_keys", benchmarks, stream, size);
+    add_benchmarks(benchmark_kinds::sort_pairs, "sort_pairs", benchmarks, stream, size);
 
     // Use manual timing
     for(auto& b : benchmarks)

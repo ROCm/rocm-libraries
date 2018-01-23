@@ -26,6 +26,10 @@
 #include <random>
 #include <type_traits>
 
+// get_random_data() generates only part of sequence and replicates it,
+// because benchmarks do not need "true" random sequence.
+const size_t max_random_size = 1024 * 1024;
+
 template<class T>
 inline auto get_random_data(size_t size, T min, T max)
     -> typename std::enable_if<std::is_integral<T>::value, std::vector<T>>::type
@@ -34,7 +38,11 @@ inline auto get_random_data(size_t size, T min, T max)
     std::default_random_engine gen(rd());
     std::uniform_int_distribution<T> distribution(min, max);
     std::vector<T> data(size);
-    std::generate(data.begin(), data.end(), [&]() { return distribution(gen); });
+    std::generate(data.begin(), data.begin() + std::min(size, max_random_size), [&]() { return distribution(gen); });
+    for(size_t i = max_random_size; i < size; i += max_random_size)
+    {
+        std::copy_n(data.begin(), std::min(size - i, max_random_size), data.begin() + i);
+    }
     return data;
 }
 
@@ -46,7 +54,11 @@ inline auto get_random_data(size_t size, T min, T max)
     std::default_random_engine gen(rd());
     std::uniform_real_distribution<T> distribution(min, max);
     std::vector<T> data(size);
-    std::generate(data.begin(), data.end(), [&]() { return distribution(gen); });
+    std::generate(data.begin(), data.begin() + std::min(size, max_random_size), [&]() { return distribution(gen); });
+    for(size_t i = max_random_size; i < size; i += max_random_size)
+    {
+        std::copy_n(data.begin(), std::min(size - i, max_random_size), data.begin() + i);
+    }
     return data;
 }
 
