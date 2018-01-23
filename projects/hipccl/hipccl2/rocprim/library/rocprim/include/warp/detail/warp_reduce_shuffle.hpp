@@ -49,7 +49,7 @@ public:
 
     using storage_type = detail::empty_storage_type;
 
-template<class BinaryFunction>
+    template<class BinaryFunction>
     void reduce(T input, T& output,
                 storage_type& storage, BinaryFunction reduce_op) [[hc]]
     {
