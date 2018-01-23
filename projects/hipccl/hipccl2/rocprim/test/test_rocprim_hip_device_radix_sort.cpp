@@ -73,26 +73,21 @@ public:
 };
 
 typedef ::testing::Types<
-    params<unsigned int, int>,
-    params<unsigned short, char, true>,
-    params<double, unsigned int>,
-    params<float, int>,
-    params<long long, char>,
-    params<unsigned int, long long, true>,
-    params<unsigned char, float>,
-    params<float, char, true>,
-    params<int, short>,
-    params<unsigned short, char>,
-    params<double, int, true>,
     params<signed char, double, true>,
-    params<short, int>,
+    params<int, short>,
+    params<short, int, true>,
+    params<long long, char>,
+    params<double, unsigned int>,
+    params<double, int, true>,
+    params<float, int>,
+    params<float, char, true>,
 
     // start_bit and end_bit
-    params<unsigned int, short, true, 0, 15>,
-    params<unsigned long long, char, false, 8, 20>,
+    params<unsigned char, int, true, 0, 7>,
     params<unsigned short, int, true, 4, 10>,
     params<unsigned int, short, false, 3, 22>,
-    params<unsigned char, int, true, 0, 7>,
+    params<unsigned int, short, true, 0, 15>,
+    params<unsigned long long, char, false, 8, 20>,
     params<unsigned short, double, false, 8, 11>
 > Params;
 
@@ -145,6 +140,12 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
     constexpr unsigned int start_bit = TestFixture::params::start_bit;
     constexpr unsigned int end_bit = TestFixture::params::end_bit;
 
+    hipStream_t stream = 0;
+    HIP_CHECK(hipStreamCreate(&stream));
+
+    // WORKAROUND: Tests fail on MI25 without additional syncronization (bug in HIP or ROCm)
+    const bool debug_synchronous = true;
+
     const std::vector<size_t> sizes = get_sizes();
     for(size_t size : sizes)
     {
@@ -188,6 +189,9 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
             d_key_input, d_key_output, size,
             start_bit, end_bit
         );
+
+        ASSERT_GT(temporary_storage_bytes, 0);
+
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
         if(descending)
@@ -196,7 +200,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
                 d_temporary_storage, temporary_storage_bytes,
                 d_key_input, d_key_output, size,
                 start_bit, end_bit,
-                0, false
+                stream, debug_synchronous
             );
         }
         else
@@ -205,10 +209,9 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
                 d_temporary_storage, temporary_storage_bytes,
                 d_key_input, d_key_output, size,
                 start_bit, end_bit,
-                0, false
+                stream, debug_synchronous
             );
         }
-        HIP_CHECK(hipDeviceSynchronize());
 
         HIP_CHECK(hipFree(d_temporary_storage));
         HIP_CHECK(hipFree(d_key_input));
@@ -221,6 +224,12 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
                 hipMemcpyDeviceToHost
             )
         );
+
+        if(debug_synchronous)
+        {
+            HIP_CHECK(hipStreamSynchronize(stream));
+        }
+        HIP_CHECK(hipStreamSynchronize(stream));
         HIP_CHECK(hipFree(d_key_output));
 
         for(size_t i = 0; i < size; i++)
@@ -228,6 +237,8 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
             ASSERT_EQ(key_output[i], expected[i]);
         }
     }
+
+    HIP_CHECK(hipStreamDestroy(stream));
 }
 
 TYPED_TEST(RocprimDeviceRadixSort, SortKeysValues)
@@ -237,6 +248,12 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeysValues)
     constexpr bool descending = TestFixture::params::descending;
     constexpr unsigned int start_bit = TestFixture::params::start_bit;
     constexpr unsigned int end_bit = TestFixture::params::end_bit;
+
+    hipStream_t stream = 0;
+    HIP_CHECK(hipStreamCreate(&stream));
+
+    // WORKAROUND: Tests fail on MI25 without additional syncronization (bug in HIP or ROCm)
+    const bool debug_synchronous = true;
 
     const std::vector<size_t> sizes = get_sizes();
     for(size_t size : sizes)
@@ -258,19 +275,8 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeysValues)
             );
         }
 
-        std::vector<value_type> value_input;
-        if(std::is_floating_point<value_type>::value)
-        {
-            value_input = get_random_data<value_type>(size, (value_type)-1000, (value_type)+1000);
-        }
-        else
-        {
-            value_input = get_random_data<value_type>(
-                size,
-                std::numeric_limits<value_type>::min(),
-                std::numeric_limits<value_type>::max()
-            );
-        }
+        std::vector<value_type> value_input(size);
+        std::iota(value_input.begin(), value_input.end(), 0);
 
         key_type * d_key_input;
         key_type * d_key_output;
@@ -316,6 +322,9 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeysValues)
             d_key_input, d_key_output, d_value_input, d_value_output, size,
             start_bit, end_bit
         );
+
+        ASSERT_GT(temporary_storage_bytes, 0);
+
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
         if(descending)
@@ -324,7 +333,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeysValues)
                 d_temporary_storage, temporary_storage_bytes,
                 d_key_input, d_key_output, d_value_input, d_value_output, size,
                 start_bit, end_bit,
-                0, false
+                stream, debug_synchronous
             );
         }
         else
@@ -333,10 +342,9 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeysValues)
                 d_temporary_storage, temporary_storage_bytes,
                 d_key_input, d_key_output, d_value_input, d_value_output, size,
                 start_bit, end_bit,
-                0, false
+                stream, debug_synchronous
             );
         }
-        HIP_CHECK(hipDeviceSynchronize());
 
         HIP_CHECK(hipFree(d_temporary_storage));
         HIP_CHECK(hipFree(d_key_input));
@@ -350,7 +358,6 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeysValues)
                 hipMemcpyDeviceToHost
             )
         );
-        HIP_CHECK(hipFree(d_key_output));
 
         std::vector<value_type> value_output(size);
         HIP_CHECK(
@@ -360,6 +367,12 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeysValues)
                 hipMemcpyDeviceToHost
             )
         );
+
+        if(debug_synchronous)
+        {
+            HIP_CHECK(hipStreamSynchronize(stream));
+        }
+        HIP_CHECK(hipFree(d_key_output));
         HIP_CHECK(hipFree(d_value_output));
 
         for(size_t i = 0; i < size; i++)
@@ -368,4 +381,6 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeysValues)
             ASSERT_EQ(value_output[i], expected[i].second);
         }
     }
+
+    HIP_CHECK(hipStreamDestroy(stream));
 }
