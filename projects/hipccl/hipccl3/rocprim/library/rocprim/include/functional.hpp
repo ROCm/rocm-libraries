@@ -48,7 +48,7 @@ void swap(T& a, T& b) [[hc]] [[cpu]]
 }
 
 template<class T>
-struct less : public std::binary_function<T, T, bool>
+struct less
 {
     constexpr bool operator()(const T& a, const T& b) const [[hc]] [[cpu]]
     {
@@ -57,7 +57,7 @@ struct less : public std::binary_function<T, T, bool>
 };
 
 template<class T>
-struct less_equal : public std::binary_function<T, T, bool>
+struct less_equal
 {
     constexpr bool operator()(const T& a, const T& b) const [[hc]] [[cpu]]
     {
@@ -66,7 +66,7 @@ struct less_equal : public std::binary_function<T, T, bool>
 };
 
 template<class T>
-struct greater : public std::binary_function<T, T, bool>
+struct greater
 {
     constexpr bool operator()(const T& a, const T& b) const [[hc]] [[cpu]]
     {
@@ -75,7 +75,7 @@ struct greater : public std::binary_function<T, T, bool>
 };
 
 template<class T>
-struct greater_equal : public std::binary_function<T, T, bool>
+struct greater_equal
 {
     constexpr bool operator()(const T& a, const T& b) const [[hc]] [[cpu]]
     {
@@ -84,7 +84,7 @@ struct greater_equal : public std::binary_function<T, T, bool>
 };
 
 template<class T>
-struct equal_to : public std::binary_function<T, T, bool>
+struct equal_to
 {
     constexpr bool operator()(const T& a, const T& b) const [[hc]] [[cpu]]
     {
@@ -93,7 +93,7 @@ struct equal_to : public std::binary_function<T, T, bool>
 };
 
 template<class T>
-struct not_equal_to : public std::binary_function<T, T, bool>
+struct not_equal_to
 {
     constexpr bool operator()(const T& a, const T& b) const [[hc]] [[cpu]]
     {
@@ -102,7 +102,7 @@ struct not_equal_to : public std::binary_function<T, T, bool>
 };
 
 template<class T>
-struct plus : public std::binary_function<T, T, T>
+struct plus
 {
     constexpr T operator()(const T& a, const T& b) const [[hc]] [[cpu]]
     {
@@ -111,7 +111,7 @@ struct plus : public std::binary_function<T, T, T>
 };
 
 template<class T>
-struct minus : public std::binary_function<T, T, T>
+struct minus
 {
     constexpr T operator()(const T& a, const T& b) const [[hc]] [[cpu]]
     {
@@ -120,7 +120,7 @@ struct minus : public std::binary_function<T, T, T>
 };
 
 template<class T>
-struct multiplies : public std::binary_function<T, T, T>
+struct multiplies
 {
     constexpr T operator()(const T& a, const T& b) const [[hc]] [[cpu]]
     {
@@ -129,7 +129,7 @@ struct multiplies : public std::binary_function<T, T, T>
 };
 
 template<class T>
-struct maximum : public std::binary_function<T, T, T>
+struct maximum
 {
     constexpr T operator()(const T& a, const T& b) const [[hc]] [[cpu]]
     {
@@ -138,7 +138,7 @@ struct maximum : public std::binary_function<T, T, T>
 };
 
 template<class T>
-struct minimum : public std::binary_function<T, T, T>
+struct minimum
 {
     constexpr T operator()(const T& a, const T& b) const [[hc]] [[cpu]]
     {
