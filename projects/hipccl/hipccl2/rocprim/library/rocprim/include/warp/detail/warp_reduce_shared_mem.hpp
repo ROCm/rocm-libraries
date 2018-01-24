@@ -99,6 +99,8 @@ private:
     typename std::enable_if<(Switch == false)>::type
     set_output(T& output, storage_type& storage) [[hc]]
     {
+        (void) output;
+        (void) storage;
         // output already set correctly
     }
 

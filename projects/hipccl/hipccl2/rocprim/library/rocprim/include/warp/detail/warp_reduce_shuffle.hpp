@@ -91,6 +91,7 @@ private:
     typename std::enable_if<(Switch == false)>::type
     set_output(T& output) [[hc]]
     {
+        (void) output;
         // output already set correctly
     }
 
