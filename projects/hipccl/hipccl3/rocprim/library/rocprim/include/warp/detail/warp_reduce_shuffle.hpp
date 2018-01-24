@@ -51,10 +51,8 @@ public:
 
     template<class BinaryFunction>
     void reduce(T input, T& output,
-                storage_type& storage, BinaryFunction reduce_op) [[hc]]
+                BinaryFunction reduce_op) [[hc]]
     {
-        (void) storage; // disables unused parameter warning
-
         output = input;
 
         T value;
@@ -68,11 +66,17 @@ public:
     }
 
     template<class BinaryFunction>
-    void reduce(T input, T& output, unsigned int valid_items,
+    void reduce(T input, T& output,
                 storage_type& storage, BinaryFunction reduce_op) [[hc]]
     {
         (void) storage; // disables unused parameter warning
+        this->reduce(input, output, reduce_op);
+    }
 
+    template<class BinaryFunction>
+    void reduce(T input, T& output, unsigned int valid_items,
+                BinaryFunction reduce_op) [[hc]]
+    {
         output = input;
 
         T value;
@@ -84,6 +88,14 @@ public:
             if (id + offset < valid_items) output = reduce_op(output, value);
         }
         set_output<UseAllReduce>(output);
+    }
+
+    template<class BinaryFunction>
+    void reduce(T input, T& output, unsigned int valid_items,
+                storage_type& storage, BinaryFunction reduce_op) [[hc]]
+    {
+        (void) storage; // disables unused parameter warning
+        this->reduce(input, output, valid_items, reduce_op);
     }
 
 private:

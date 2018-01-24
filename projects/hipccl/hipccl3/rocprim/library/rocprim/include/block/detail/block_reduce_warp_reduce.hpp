@@ -51,18 +51,27 @@ class block_reduce_warp_reduce
     // Number of warps in block
     static constexpr unsigned int warps_no_ = (BlockSize + warp_size_ - 1) / warp_size_;
 
+    // Check if we have to pass number of valid items into warp reduction primitive
+    static constexpr bool block_size_is_warp_multiple_ = ((BlockSize % warp_size_) == 0);
+    static constexpr bool warps_no_is_pow_of_two_ = detail::is_power_of_two(warps_no_);
+
     // typedef of warp_reduce primitive that will be used to perform warp-level
-    // reduce operations on input values.
+    // reduce operation on input values.
     // warp_reduce_shuffle is an implementation of warp_reduce that does not need storage,
     // but requires logical warp size to be a power of two.
     using warp_reduce_input_type = ::rocprim::detail::warp_reduce_shuffle<T, warp_size_, false>;
+    // typedef of warp_reduce primitive that will be used to perform reduction
+    // of results of warp-level reduction.
+    using warp_reduce_output_type = ::rocprim::detail::warp_reduce_shuffle<
+        T, detail::next_power_of_two(warps_no_), false
+    >;
 
 public:
     struct storage_type
     {
         T warp_partials[warps_no_];
     };
-    
+
     template<class BinaryFunction>
     void reduce(T input,
                 T& output,
@@ -74,7 +83,7 @@ public:
             input, output, storage, reduce_op
         );
     }
-    
+
     template<class BinaryFunction>
     void reduce(T input,
                 T& output,
@@ -83,7 +92,7 @@ public:
         tile_static storage_type storage;
         this->reduce(input, output, storage, reduce_op);
     }
-    
+
     template<unsigned int ItemsPerThread, class BinaryFunction>
     void reduce(T (&input)[ItemsPerThread],
                 T& output,
@@ -107,7 +116,7 @@ public:
             reduce_op
         );
     }
-    
+
     template<unsigned int ItemsPerThread, class BinaryFunction>
     void reduce(T (&input)[ItemsPerThread],
                 T& output,
@@ -116,11 +125,11 @@ public:
         tile_static storage_type storage;
         this->reduce(input, output, storage, reduce_op);
     }
-    
+
     template<class BinaryFunction>
     void reduce(T input,
                 T& output,
-                int valid_items,
+                unsigned int valid_items,
                 storage_type& storage,
                 BinaryFunction reduce_op) [[hc]]
     {
@@ -129,11 +138,11 @@ public:
             input, output, valid_items, storage, reduce_op
         );
     }
-    
+
     template<class BinaryFunction>
     void reduce(T input,
                 T& output,
-                int valid_items,
+                unsigned int valid_items,
                 BinaryFunction reduce_op) [[hc]]
     {
         tile_static storage_type storage;
@@ -148,71 +157,94 @@ private:
                      storage_type& storage,
                      BinaryFunction reduce_op) [[hc]]
     {
-        typename warp_reduce_input_type::storage_type reduce_storage;
+        const auto warp_id = ::rocprim::warp_id();
+        const auto lane_id = ::rocprim::lane_id();
+        const unsigned int warp_offset = warp_id * warp_size_;
+        const unsigned int num_valid =
+            (warp_offset < BlockSize) ? BlockSize - warp_offset : 0;
+
         // Perform warp reduce
-        warp_reduce_input_type().reduce(
-            // not using shared mem, see note in storage_type
-            input, output, reduce_storage, reduce_op
+        warp_reduce<!block_size_is_warp_multiple_, warp_reduce_input_type>(
+            input, output, num_valid, reduce_op
         );
 
         // i-th warp will have its partial stored in storage.warp_partials[i-1]
-        const auto warp_id = ::rocprim::warp_id();
-        const auto lane_id = ::rocprim::lane_id();
         if(lane_id == 0)
         {
             storage.warp_partials[warp_id] = output;
         }
         ::rocprim::syncthreads();
 
-        // Use warp partial to calculate the final reduce results for every thread
-        auto warp_partial = (flat_tid < warps_no_) ? storage.warp_partials[lane_id] : 0;
-        
-        if(warp_id == 0)
+        if(flat_tid < warps_no_)
         {
-            warp_reduce_input_type().reduce(
-                // not using shared mem, see note in storage_type
-                warp_partial, output, reduce_storage, reduce_op
+            // Use warp partial to calculate the final reduce results for every thread
+            auto warp_partial = storage.warp_partials[lane_id];
+
+            warp_reduce<!warps_no_is_pow_of_two_, warp_reduce_output_type>(
+                warp_partial, output, warps_no_, reduce_op
             );
         }
     }
-    
+
+    template<bool UseValid, class WarpReduce, class BinaryFunction>
+    auto warp_reduce(T input,
+                     T& output,
+                     const unsigned int valid_items,
+                     BinaryFunction reduce_op)
+        -> typename std::enable_if<UseValid>::type
+    {
+        WarpReduce().reduce(
+            input, output, valid_items, reduce_op
+        );
+    }
+
+    template<bool UseValid, class WarpReduce, class BinaryFunction>
+    auto warp_reduce(T input,
+                     T& output,
+                     const unsigned int valid_items,
+                     BinaryFunction reduce_op)
+        -> typename std::enable_if<!UseValid>::type
+    {
+        (void) valid_items;
+        WarpReduce().reduce(
+            input, output, reduce_op
+        );
+    }
+
     template<class BinaryFunction>
     void reduce_impl(const unsigned int flat_tid,
                      T input,
                      T& output,
-                     int valid_items,
+                     const unsigned int valid_items,
                      storage_type& storage,
                      BinaryFunction reduce_op) [[hc]]
     {
-        typename warp_reduce_input_type::storage_type reduce_storage;
         const auto warp_id = ::rocprim::warp_id();
         const auto lane_id = ::rocprim::lane_id();
         const unsigned int warp_offset = warp_id * warp_size_;
-        const unsigned int num_valid = (warp_offset < valid_items) ? 
-                                       valid_items - warp_offset : 0;
-        const bool warp_valid = (num_valid > 0) ?
-                                true : false;   
+        const unsigned int num_valid =
+            (warp_offset < valid_items) ? valid_items - warp_offset : 0;
+
         // Perform warp reduce
         warp_reduce_input_type().reduce(
-            // not using shared mem, see note in storage_type
-            input, output, num_valid, reduce_storage, reduce_op
+            input, output, num_valid, reduce_op
         );
 
         // i-th warp will have its partial stored in storage.warp_partials[i-1]
         if(lane_id == 0)
         {
-            storage.warp_partials[warp_id] = (warp_valid) ? output : 0;
+            storage.warp_partials[warp_id] = output;
         }
         ::rocprim::syncthreads();
 
-        // Use warp partial to calculate the final reduce results for every thread
-        auto warp_partial = (flat_tid < warps_no_) ? storage.warp_partials[lane_id] : 0;
-        
-        if(warp_id == 0)
+        if(flat_tid < warps_no_)
         {
-            warp_reduce_input_type().reduce(
-                // not using shared mem, see note in storage_type
-                warp_partial, output, reduce_storage, reduce_op
+            // Use warp partial to calculate the final reduce results for every thread
+            auto warp_partial = storage.warp_partials[lane_id];
+
+            unsigned int valid_warps_no = (valid_items + warp_size_ - 1) / warp_size_;
+            warp_reduce_output_type().reduce(
+                warp_partial, output, valid_warps_no, reduce_op
             );
         }
     }
