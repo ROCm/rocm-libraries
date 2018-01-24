@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_BLOCK_DETAIL_BLOCK_REDUCE_WARP_REDUCE_HPP_
-#define ROCPRIM_BLOCK_DETAIL_BLOCK_REDUCE_WARP_REDUCE_HPP_
+#ifndef ROCPRIM_BLOCK_DETAIL_BLOCK_REDUCE_RAKING_REDUCE_HPP_
+#define ROCPRIM_BLOCK_DETAIL_BLOCK_REDUCE_RAKING_REDUCE_HPP_
 
 #include <type_traits>
 
@@ -43,26 +43,34 @@ template<
     class T,
     unsigned int BlockSize
 >
-class block_reduce_warp_reduce
+class block_reduce_raking_reduce
 {
-    // Select warp size
+    // Number of items to reduce per thread
+    static constexpr unsigned int thread_reduction_size_ =
+        (BlockSize + ::rocprim::warp_size() - 1)/ ::rocprim::warp_size();
+
+    // Warp reduce, warp_reduce_shuffle does not require shared memory (storage), but
+    // logical warp size must be a power of two.
     static constexpr unsigned int warp_size_ =
         detail::get_min_warp_size(BlockSize, ::rocprim::warp_size());
-    // Number of warps in block
-    static constexpr unsigned int warps_no_ = (BlockSize + warp_size_ - 1) / warp_size_;
+    using warp_reduce_prefix_type = ::rocprim::detail::warp_reduce_shuffle<T, warp_size_, false>;
 
-    // typedef of warp_reduce primitive that will be used to perform warp-level
-    // reduce operations on input values.
-    // warp_reduce_shuffle is an implementation of warp_reduce that does not need storage,
-    // but requires logical warp size to be a power of two.
-    using warp_reduce_input_type = ::rocprim::detail::warp_reduce_shuffle<T, warp_size_, false>;
+    // Minimize LDS bank conflicts
+    static constexpr unsigned int banks_no_ = ::rocprim::detail::get_lds_banks_no();
+    static constexpr bool has_bank_conflicts_ =
+        ::rocprim::detail::is_power_of_two(thread_reduction_size_) && thread_reduction_size_ > 1;
+    static constexpr unsigned int bank_conflicts_padding =
+        has_bank_conflicts_ ? (warp_size_ * thread_reduction_size_ / banks_no_) : 0;
 
 public:
+
     struct storage_type
     {
-        T warp_partials[warps_no_];
+        // volatile allows not using barrier to sync threads when
+        // threads array is accessed only by threads from the same warp.
+        volatile T threads[warp_size_ * thread_reduction_size_ + bank_conflicts_padding];
     };
-    
+
     template<class BinaryFunction>
     void reduce(T input,
                 T& output,
@@ -139,7 +147,7 @@ public:
         tile_static storage_type storage;
         this->reduce(input, output, valid_items, storage, reduce_op);
     }
-
+    
 private:
     template<class BinaryFunction>
     void reduce_impl(const unsigned int flat_tid,
@@ -148,31 +156,22 @@ private:
                      storage_type& storage,
                      BinaryFunction reduce_op) [[hc]]
     {
-        typename warp_reduce_input_type::storage_type reduce_storage;
-        // Perform warp reduce
-        warp_reduce_input_type().reduce(
-            // not using shared mem, see note in storage_type
-            input, output, reduce_storage, reduce_op
-        );
-
-        // i-th warp will have its partial stored in storage.warp_partials[i-1]
-        const auto warp_id = ::rocprim::warp_id();
-        const auto lane_id = ::rocprim::lane_id();
-        if(lane_id == 0)
-        {
-            storage.warp_partials[warp_id] = output;
-        }
+        typename warp_reduce_prefix_type::storage_type reduce_storage;
+        storage.threads[index(flat_tid)] = input;
         ::rocprim::syncthreads();
-
-        // Use warp partial to calculate the final reduce results for every thread
-        auto warp_partial = (flat_tid < warps_no_) ? storage.warp_partials[lane_id] : 0;
         
-        if(warp_id == 0)
+        if (flat_tid < warp_size_)
         {
-            warp_reduce_input_type().reduce(
-                // not using shared mem, see note in storage_type
-                warp_partial, output, reduce_storage, reduce_op
-            );
+            T thread_reduction = static_cast<T>(storage.threads[index(flat_tid)]);
+            #pragma unroll
+            for(unsigned int i = 1; i < thread_reduction_size_; i++)
+            {
+                const unsigned int thread_id = (i * warp_size_) + flat_tid;
+                thread_reduction = (thread_id < BlockSize) ? reduce_op(
+                    thread_reduction, static_cast<T>(storage.threads[index(thread_id)])
+                ) : thread_reduction;
+            }
+            warp_reduce_prefix_type().reduce(thread_reduction, output, reduce_storage, reduce_op);
         }
     }
     
@@ -184,42 +183,34 @@ private:
                      storage_type& storage,
                      BinaryFunction reduce_op) [[hc]]
     {
-        typename warp_reduce_input_type::storage_type reduce_storage;
-        const auto warp_id = ::rocprim::warp_id();
-        const auto lane_id = ::rocprim::lane_id();
-        const unsigned int warp_offset = warp_id * warp_size_;
-        const unsigned int num_valid = (warp_offset < valid_items) ? 
-                                       valid_items - warp_offset : 0;
-        const bool warp_valid = (num_valid > 0) ?
-                                true : false;   
-        // Perform warp reduce
-        warp_reduce_input_type().reduce(
-            // not using shared mem, see note in storage_type
-            input, output, num_valid, reduce_storage, reduce_op
-        );
-
-        // i-th warp will have its partial stored in storage.warp_partials[i-1]
-        if(lane_id == 0)
-        {
-            storage.warp_partials[warp_id] = (warp_valid) ? output : 0;
-        }
+        typename warp_reduce_prefix_type::storage_type reduce_storage;
+        storage.threads[index(flat_tid)] = input;
         ::rocprim::syncthreads();
-
-        // Use warp partial to calculate the final reduce results for every thread
-        auto warp_partial = (flat_tid < warps_no_) ? storage.warp_partials[lane_id] : 0;
         
-        if(warp_id == 0)
+        if (flat_tid < warp_size_)
         {
-            warp_reduce_input_type().reduce(
-                // not using shared mem, see note in storage_type
-                warp_partial, output, reduce_storage, reduce_op
-            );
+            T thread_reduction = (flat_tid < valid_items) ? 
+                                 static_cast<T>(storage.threads[index(flat_tid)]) : (T) 0;
+            #pragma unroll
+            for(unsigned int i = 1; i < thread_reduction_size_; i++)
+            {
+                const unsigned int thread_id = (i * warp_size_) + flat_tid;
+                thread_reduction = (thread_id < valid_items) ? reduce_op(
+                    thread_reduction, static_cast<T>(storage.threads[index(thread_id)])
+                ) : thread_reduction;
+            }
+            warp_reduce_prefix_type().reduce(thread_reduction, output, reduce_storage, reduce_op);
         }
     }
+        
+    unsigned int index(unsigned int n) const [[hc]]
+    {
+        // Move every 32-bank wide "row" (32 banks * 4 bytes) by one item
+        return has_bank_conflicts_ ? (n + (n/banks_no_)) : n;
+    }
 };
-
 } // end namespace detail
 
 END_ROCPRIM_NAMESPACE
 
-#endif // ROCPRIM_BLOCK_DETAIL_BLOCK_REDUCE_WARP_REDUCE_HPP_
+#endif // ROCPRIM_BLOCK_DETAIL_BLOCK_REDUCE_RAKING_REDUCE_HPP_

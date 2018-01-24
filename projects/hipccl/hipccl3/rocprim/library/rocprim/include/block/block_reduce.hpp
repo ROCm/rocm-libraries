@@ -33,6 +33,7 @@
 #include "../functional.hpp"
 
 #include "detail/block_reduce_warp_reduce.hpp"
+#include "detail/block_reduce_raking_reduce.hpp"
 
 /// \addtogroup collectiveblockmodule
 /// @{
@@ -44,7 +45,8 @@ enum class block_reduce_algorithm
 {
     /// \brief A warp_reduce based algorithm.
     using_warp_reduce,
-
+    /// \brief An algorithm which limits calculations to a single hardware warp.
+    raking_reduce,
     /// \brief Default block_reduce algorithm.
     default_algorithm = using_warp_reduce,
 };
@@ -62,6 +64,13 @@ struct select_block_reduce_impl<block_reduce_algorithm::using_warp_reduce>
 {
     template<class T, unsigned int BlockSize>
     using type = block_reduce_warp_reduce<T, BlockSize>;
+};
+    
+template<>
+struct select_block_reduce_impl<block_reduce_algorithm::raking_reduce>
+{
+    template<class T, unsigned int BlockSize>
+    using type = block_reduce_raking_reduce<T, BlockSize>;
 };
 
 } // end namespace detail
@@ -126,6 +135,25 @@ public:
                 BinaryFunction reduce_op = BinaryFunction()) [[hc]]
     {
         base_type::reduce(input, output, reduce_op);
+    }
+    
+    template<class BinaryFunction = ::rocprim::plus<T>>
+    void reduce(T input,
+                T& output,
+                int valid_items,
+                storage_type& storage,
+                BinaryFunction reduce_op = BinaryFunction()) [[hc]]
+    {
+        base_type::reduce(input, output, valid_items, storage, reduce_op);
+    }
+    
+    template<class BinaryFunction = ::rocprim::plus<T>>
+    void reduce(T input,
+                T& output,
+                int valid_items,
+                BinaryFunction reduce_op = BinaryFunction()) [[hc]]
+    {
+        base_type::reduce(input, output, valid_items, reduce_op);
     }
 };
 
