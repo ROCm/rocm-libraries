@@ -133,7 +133,7 @@ TEST(RocprimIntrinsicsTests, WarpShuffleUpInt)
     );
 
     d_output.synchronize();
-    for(int i = 0; i < output.size(); i++)
+    for(size_t i = 0; i < output.size(); i++)
     {
         EXPECT_EQ(output[i], expected[i]);
     }
@@ -166,7 +166,7 @@ TEST(RocprimIntrinsicsTests, WarpShuffleUpChar)
     );
 
     d_output.synchronize();
-    for(char i = 0; i < output.size(); i++)
+    for(size_t i = 0; i < output.size(); i++)
     {
         EXPECT_EQ(output[i], expected[i]);
     }
@@ -346,7 +346,7 @@ TEST(RocprimIntrinsicsTests, WarpShuffleDown)
     );
 
     d_output.synchronize();
-    for(int i = 0; i < output.size(); i++)
+    for(size_t i = 0; i < output.size(); i++)
     {
         EXPECT_EQ(output[i], expected[i]);
     }
@@ -380,7 +380,7 @@ TEST(RocprimIntrinsicsTests, WarpShuffle)
     );
 
     d_output.synchronize();
-    for(int i = 0; i < output.size(); i++)
+    for(size_t i = 0; i < output.size(); i++)
     {
         EXPECT_EQ(output[i], expected[i]);
     }
@@ -414,7 +414,7 @@ TEST(RocprimIntrinsicsTests, WarpShuffleXor)
     );
 
     d_output.synchronize();
-    for(int i = 0; i < output.size(); i++)
+    for(size_t i = 0; i < output.size(); i++)
     {
         EXPECT_EQ(output[i], expected[i]);
     }
@@ -445,7 +445,7 @@ TEST(RocprimIntrinsicsTests, WarpId)
     );
 
     d_output.synchronize();
-    for(int i = 0; i < output.size(); i++)
+    for(size_t i = 0; i < output.size(); i++)
     {
         EXPECT_EQ(output[i], expected[i]);
     }

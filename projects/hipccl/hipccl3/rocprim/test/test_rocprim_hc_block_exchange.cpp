@@ -166,7 +166,7 @@ TYPED_TEST(RocprimBlockExchangeTests, BlockedToStriped)
     );
 
     d_output.synchronize();
-    for(int i = 0; i < size; i++)
+    for(size_t i = 0; i < size; i++)
     {
         ASSERT_EQ(output[i], expected[i]);
     }
@@ -233,7 +233,7 @@ TYPED_TEST(RocprimBlockExchangeTests, StripedToBlocked)
     );
 
     d_output.synchronize();
-    for(int i = 0; i < size; i++)
+    for(size_t i = 0; i < size; i++)
     {
         ASSERT_EQ(output[i], expected[i]);
     }
@@ -311,7 +311,7 @@ TYPED_TEST(RocprimBlockExchangeTests, BlockedToWarpStriped)
     );
 
     d_output.synchronize();
-    for(int i = 0; i < size; i++)
+    for(size_t i = 0; i < size; i++)
     {
         ASSERT_EQ(output[i], expected[i]);
     }
@@ -389,7 +389,7 @@ TYPED_TEST(RocprimBlockExchangeTests, WarpStripedToBlocked)
     );
 
     d_output.synchronize();
-    for(int i = 0; i < size; i++)
+    for(size_t i = 0; i < size; i++)
     {
         ASSERT_EQ(output[i], expected[i]);
     }
@@ -466,7 +466,7 @@ TYPED_TEST(RocprimBlockExchangeTests, ScatterToBlocked)
     );
 
     d_output.synchronize();
-    for(int i = 0; i < size; i++)
+    for(size_t i = 0; i < size; i++)
     {
         ASSERT_EQ(output[i], expected[i]);
     }
@@ -545,7 +545,7 @@ TYPED_TEST(RocprimBlockExchangeTests, ScatterToStriped)
     );
 
     d_output.synchronize();
-    for(int i = 0; i < size; i++)
+    for(size_t i = 0; i < size; i++)
     {
         ASSERT_EQ(output[i], expected[i]);
     }

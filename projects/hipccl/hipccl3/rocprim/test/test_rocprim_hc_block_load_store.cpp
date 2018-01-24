@@ -76,40 +76,40 @@ public:
 };
 
 typedef ::testing::Types<
-    class_params<rp::block_load_method::block_load_direct, 
+    class_params<rp::block_load_method::block_load_direct,
                  rp::block_store_method::block_store_direct, 64U>,
-    class_params<rp::block_load_method::block_load_direct, 
+    class_params<rp::block_load_method::block_load_direct,
                  rp::block_store_method::block_store_direct, 128U>,
-    class_params<rp::block_load_method::block_load_direct, 
+    class_params<rp::block_load_method::block_load_direct,
                  rp::block_store_method::block_store_direct, 256U>,
-    class_params<rp::block_load_method::block_load_direct, 
+    class_params<rp::block_load_method::block_load_direct,
                  rp::block_store_method::block_store_direct, 512U>,
 
-    class_params<rp::block_load_method::block_load_vectorize, 
+    class_params<rp::block_load_method::block_load_vectorize,
                  rp::block_store_method::block_store_vectorize, 64U>,
-    class_params<rp::block_load_method::block_load_vectorize, 
+    class_params<rp::block_load_method::block_load_vectorize,
                  rp::block_store_method::block_store_vectorize, 128U>,
-    class_params<rp::block_load_method::block_load_vectorize, 
+    class_params<rp::block_load_method::block_load_vectorize,
                  rp::block_store_method::block_store_vectorize, 256U>,
-    class_params<rp::block_load_method::block_load_vectorize, 
+    class_params<rp::block_load_method::block_load_vectorize,
                  rp::block_store_method::block_store_vectorize, 512U>,
 
-    class_params<rp::block_load_method::block_load_transpose, 
+    class_params<rp::block_load_method::block_load_transpose,
                  rp::block_store_method::block_store_transpose, 64U>,
-    class_params<rp::block_load_method::block_load_transpose, 
+    class_params<rp::block_load_method::block_load_transpose,
                  rp::block_store_method::block_store_transpose, 128U>,
-    class_params<rp::block_load_method::block_load_transpose, 
+    class_params<rp::block_load_method::block_load_transpose,
                  rp::block_store_method::block_store_transpose, 256U>,
-    class_params<rp::block_load_method::block_load_transpose, 
+    class_params<rp::block_load_method::block_load_transpose,
                  rp::block_store_method::block_store_transpose, 512U>,
 
-    class_params<rp::block_load_method::block_load_warp_transpose, 
+    class_params<rp::block_load_method::block_load_warp_transpose,
                  rp::block_store_method::block_store_warp_transpose, 64U>,
-    class_params<rp::block_load_method::block_load_warp_transpose, 
+    class_params<rp::block_load_method::block_load_warp_transpose,
                  rp::block_store_method::block_store_warp_transpose, 128U>,
-    class_params<rp::block_load_method::block_load_warp_transpose, 
+    class_params<rp::block_load_method::block_load_warp_transpose,
                  rp::block_store_method::block_store_warp_transpose, 256U>,
-    class_params<rp::block_load_method::block_load_warp_transpose, 
+    class_params<rp::block_load_method::block_load_warp_transpose,
                  rp::block_store_method::block_store_warp_transpose, 512U>
 > ClassParams;
 
@@ -190,10 +190,10 @@ TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClass)
 
     // Calculate expected results on host
     std::vector<int> expected(input.size(), 0);
-    for (int i = 0; i < 113; i++) 
+    for (size_t i = 0; i < 113; i++)
     {
         size_t block_offset = i * items_per_block;
-        for (int j = 0; j < items_per_block; j++)
+        for (size_t j = 0; j < items_per_block; j++)
         {
             expected[j + block_offset] = input[j + block_offset];
         }
@@ -217,7 +217,7 @@ TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClass)
 
     d_input.synchronize();
     d_output.synchronize();
-    for(int i = 0; i < output.size(); i++)
+    for(size_t i = 0; i < output.size(); i++)
     {
         ASSERT_EQ(output[i], expected[i]);
     }
@@ -247,10 +247,10 @@ TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClassValid)
 
     // Calculate expected results on host
     std::vector<int> expected(input.size(), 0);
-    for (int i = 0; i < 113; i++) 
+    for (size_t i = 0; i < 113; i++)
     {
         size_t block_offset = i * items_per_block;
-        for (int j = 0; j < items_per_block; j++)
+        for (size_t j = 0; j < items_per_block; j++)
         {
             if (j < valid)
             {
@@ -277,7 +277,7 @@ TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClassValid)
 
     d_input.synchronize();
     d_output.synchronize();
-    for(int i = 0; i < output.size(); i++)
+    for(size_t i = 0; i < output.size(); i++)
     {
         ASSERT_EQ(output[i], expected[i]);
     }
@@ -308,10 +308,10 @@ TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClassDefault)
 
     // Calculate expected results on host
     std::vector<int> expected(input.size(), _default);
-    for (int i = 0; i < 113; i++) 
+    for (size_t i = 0; i < 113; i++)
     {
         size_t block_offset = i * items_per_block;
-        for (int j = 0; j < items_per_block; j++)
+        for (size_t j = 0; j < items_per_block; j++)
         {
             if (j < valid)
             {
@@ -338,7 +338,7 @@ TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClassDefault)
 
     d_input.synchronize();
     d_output.synchronize();
-    for(int i = 0; i < output.size(); i++)
+    for(size_t i = 0; i < output.size(); i++)
     {
         ASSERT_EQ(output[i], expected[i]);
     }

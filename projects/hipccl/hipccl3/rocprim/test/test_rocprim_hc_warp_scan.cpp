@@ -109,7 +109,7 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScanInt)
     );
 
     d_output.synchronize();
-    for(int i = 0; i < output.size(); i++)
+    for(size_t i = 0; i < output.size(); i++)
     {
         ASSERT_EQ(output[i], expected[i]);
     }
@@ -175,13 +175,13 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScanReduceInt)
     );
 
     d_output.synchronize();
-    for(int i = 0; i < output.size(); i++)
+    for(size_t i = 0; i < output.size(); i++)
     {
         EXPECT_EQ(output[i], expected[i]);
     }
 
     d_output_r.synchronize();
-    for(int i = 0; i < output_reductions.size(); i++)
+    for(size_t i = 0; i < output_reductions.size(); i++)
     {
         EXPECT_EQ(output_reductions[i], expected_reductions[i]);
     }
@@ -238,7 +238,7 @@ TYPED_TEST(RocprimWarpScanTests, ExclusiveScanInt)
     );
 
     d_in_out_array.synchronize();
-    for(int i = 0; i < in_out_array.size(); i++)
+    for(size_t i = 0; i < in_out_array.size(); i++)
     {
         EXPECT_EQ(in_out_array[i], expected[i]);
     }
@@ -313,13 +313,13 @@ TYPED_TEST(RocprimWarpScanTests, ExclusiveScanReduceInt)
     );
 
     d_in_out_array.synchronize();
-    for(int i = 0; i < in_out_array.size(); i++)
+    for(size_t i = 0; i < in_out_array.size(); i++)
     {
         EXPECT_EQ(in_out_array[i], expected[i]);
     }
 
     d_output_r.synchronize();
-    for(int i = 0; i < output_reductions.size(); i++)
+    for(size_t i = 0; i < output_reductions.size(); i++)
     {
         EXPECT_EQ(output_reductions[i], expected_reductions[i]);
     }
@@ -390,13 +390,13 @@ TYPED_TEST(RocprimWarpScanTests, ScanInt)
     );
 
     d_i_output.synchronize();
-    for(int i = 0; i < i_output.size(); i++)
+    for(size_t i = 0; i < i_output.size(); i++)
     {
         EXPECT_EQ(i_output[i], i_expected[i]);
     }
 
     d_e_output.synchronize();
-    for(int i = 0; i < e_output.size(); i++)
+    for(size_t i = 0; i < e_output.size(); i++)
     {
         EXPECT_EQ(e_output[i], e_expected[i]);
     }
@@ -477,19 +477,19 @@ TYPED_TEST(RocprimWarpScanTests, ScanReduceInt)
     );
 
     d_i_output.synchronize();
-    for(int i = 0; i < i_output.size(); i++)
+    for(size_t i = 0; i < i_output.size(); i++)
     {
         EXPECT_EQ(i_output[i], i_expected[i]);
     }
 
     d_e_output.synchronize();
-    for(int i = 0; i < e_output.size(); i++)
+    for(size_t i = 0; i < e_output.size(); i++)
     {
         EXPECT_EQ(e_output[i], e_expected[i]);
     }
 
     d_output_r.synchronize();
-    for(int i = 0; i < output_reductions.size(); i++)
+    for(size_t i = 0; i < output_reductions.size(); i++)
     {
         EXPECT_EQ(output_reductions[i], expected_reductions[i]);
     }
