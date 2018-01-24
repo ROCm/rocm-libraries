@@ -49,6 +49,11 @@ private:
     typename std::enable_if<!(WarpSize > warp)>::type
     swap(Key& k, Value& v, int mask, int dir, BinaryFunction compare_function) [[hc]]
     {
+        (void) k;
+        (void) v;
+        (void) mask;
+        (void) dir;
+        (void) compare_function;
     }
 
     template<int warp, class BinaryFunction>
@@ -66,6 +71,10 @@ private:
     typename std::enable_if<!(WarpSize > warp)>::type
     swap(Key& k, int mask, int dir, BinaryFunction compare_function) [[hc]]
     {
+        (void) k;
+        (void) mask;
+        (void) dir;
+        (void) compare_function;
     }
 
     template<int warp, class BinaryFunction>
