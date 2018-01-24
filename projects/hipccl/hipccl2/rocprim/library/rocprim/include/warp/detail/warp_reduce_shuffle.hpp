@@ -48,7 +48,7 @@ public:
     static_assert(detail::is_power_of_two(WarpSize), "WarpSize must be power of 2");
 
     using storage_type = detail::empty_storage_type;
-    
+
 template<class BinaryFunction>
     void reduce(T input, T& output,
                 storage_type& storage, BinaryFunction reduce_op) [[hc]]
@@ -68,7 +68,7 @@ template<class BinaryFunction>
     }
 
     template<class BinaryFunction>
-    void reduce(T input, T& output, int valid_items,
+    void reduce(T input, T& output, unsigned int valid_items,
                 storage_type& storage, BinaryFunction reduce_op) [[hc]]
     {
         (void) storage; // disables unused parameter warning
@@ -91,6 +91,7 @@ private:
     typename std::enable_if<(Switch == false)>::type
     set_output(T& output) [[hc]]
     {
+        (void) output;
         // output already set correctly
     }
 

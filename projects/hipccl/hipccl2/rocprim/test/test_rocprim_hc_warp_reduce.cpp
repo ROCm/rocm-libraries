@@ -102,7 +102,7 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSum)
     // Generate data
     std::vector<type> input = get_random_data<type>(size, -100, 100); // used for input
     std::vector<type> output(input.size() / logical_warp_size, 0);
-    
+
     // Calculate expected results on host
     std::vector<type> expected(output.size(), 1);
     for(size_t i = 0; i < output.size(); i++)
@@ -130,7 +130,7 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSum)
             using wreduce_t = rp::warp_reduce<type, logical_warp_size>;
             tile_static typename wreduce_t::storage_type storage[warps_no];
             wreduce_t().reduce(value, value, storage[warp_id]);
-            
+
             if (i.local[0] % logical_warp_size == 0)
             {
                 d_output[i.global[0] / logical_warp_size] = value;
@@ -139,7 +139,7 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSum)
     );
     d_input.synchronize();
     d_output.synchronize();
-    for(int i = 0; i < output.size(); i++)
+    for(size_t i = 0; i < output.size(); i++)
     {
         ASSERT_NEAR(output[i], expected[i], 0.01);
     }
@@ -165,7 +165,7 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSum)
     // Generate data
     std::vector<type> input = get_random_data<type>(size, -100, 100); // used for input
     std::vector<type> output(input.size(), 0);
-    
+
     // Calculate expected results on host
     std::vector<type> expected(output.size(), 0);
     for(size_t i = 0; i < output.size() / logical_warp_size; i++)
@@ -197,13 +197,13 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSum)
             using wreduce_t = rp::warp_reduce<type, logical_warp_size, true>;
             tile_static typename wreduce_t::storage_type storage[warps_no];
             wreduce_t().reduce(value, value, storage[warp_id]);
-        
+
             d_output[i] = value;
         }
     );
     d_input.synchronize();
     d_output.synchronize();
-    for(int i = 0; i < output.size(); i++)
+    for(size_t i = 0; i < output.size(); i++)
     {
         ASSERT_NEAR(output[i], expected[i], 0.01);
     }
@@ -230,7 +230,7 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumValid)
     // Generate data
     std::vector<type> input = get_random_data<type>(size, -100, 100); // used for input
     std::vector<type> output(input.size() / logical_warp_size, 0);
-    
+
     // Calculate expected results on host
     std::vector<type> expected(output.size(), 1);
     for(size_t i = 0; i < output.size(); i++)
@@ -258,7 +258,7 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumValid)
             using wreduce_t = rp::warp_reduce<type, logical_warp_size>;
             tile_static typename wreduce_t::storage_type storage[warps_no];
             wreduce_t().reduce(value, value, valid, storage[warp_id]);
-            
+
             if (i.local[0] % logical_warp_size == 0)
             {
                 d_output[i.global[0] / logical_warp_size] = value;
@@ -267,7 +267,7 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumValid)
     );
     d_input.synchronize();
     d_output.synchronize();
-    for(int i = 0; i < output.size(); i++)
+    for(size_t i = 0; i < output.size(); i++)
     {
         ASSERT_NEAR(output[i], expected[i], 0.01);
     }
@@ -294,7 +294,7 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSumValid)
     // Generate data
     std::vector<type> input = get_random_data<type>(size, -100, 100); // used for input
     std::vector<type> output(input.size(), 0);
-    
+
     // Calculate expected results on host
     std::vector<type> expected(output.size(), 0);
     for(size_t i = 0; i < output.size() / logical_warp_size; i++)
@@ -326,13 +326,13 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSumValid)
             using wreduce_t = rp::warp_reduce<type, logical_warp_size, true>;
             tile_static typename wreduce_t::storage_type storage[warps_no];
             wreduce_t().reduce(value, value, valid, storage[warp_id]);
-        
+
              d_output[i] = value;
         }
     );
     d_input.synchronize();
     d_output.synchronize();
-    for(int i = 0; i < output.size(); i++)
+    for(size_t i = 0; i < output.size(); i++)
     {
         ASSERT_NEAR(output[i], expected[i], 0.01);
     }

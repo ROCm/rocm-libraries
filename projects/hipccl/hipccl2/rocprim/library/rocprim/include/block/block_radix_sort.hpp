@@ -1250,7 +1250,11 @@ private:
     void exchange_values(storage_type& storage,
                          empty_type * values,
                          const unsigned int (&ranks)[ItemsPerThread]) [[hc]]
-    { }
+    {
+        (void) storage;
+        (void) values;
+        (void) ranks;
+    }
 
     void to_striped_keys(storage_type& storage,
                          bit_key_type (&bit_keys)[ItemsPerThread]) [[hc]]
@@ -1270,7 +1274,10 @@ private:
 
     void to_striped_values(storage_type& storage,
                            empty_type * values) [[hc]]
-    { }
+    {
+        (void) storage;
+        (void) values;
+    }
 };
 
 END_ROCPRIM_NAMESPACE
