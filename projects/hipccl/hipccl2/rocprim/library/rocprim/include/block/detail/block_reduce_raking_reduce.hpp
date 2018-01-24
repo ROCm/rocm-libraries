@@ -53,14 +53,9 @@ class block_reduce_raking_reduce
     // logical warp size must be a power of two.
     static constexpr unsigned int warp_size_ =
         detail::get_min_warp_size(BlockSize, ::rocprim::warp_size());
+    // BlockSize is multiple of hardware warp
+    static constexpr bool block_size_smaller_than_warp_size_ = (BlockSize < warp_size_);
     using warp_reduce_prefix_type = ::rocprim::detail::warp_reduce_shuffle<T, warp_size_, false>;
-
-    // Minimize LDS bank conflicts
-    static constexpr unsigned int banks_no_ = ::rocprim::detail::get_lds_banks_no();
-    static constexpr bool has_bank_conflicts_ =
-        ::rocprim::detail::is_power_of_two(thread_reduction_size_) && thread_reduction_size_ > 1;
-    static constexpr unsigned int bank_conflicts_padding =
-        has_bank_conflicts_ ? (warp_size_ * thread_reduction_size_ / banks_no_) : 0;
 
 public:
 
@@ -68,7 +63,7 @@ public:
     {
         // volatile allows not using barrier to sync threads when
         // threads array is accessed only by threads from the same warp.
-        volatile T threads[warp_size_ * thread_reduction_size_ + bank_conflicts_padding];
+        volatile T threads[BlockSize];
     };
 
     template<class BinaryFunction>
@@ -82,7 +77,7 @@ public:
             input, output, storage, reduce_op
         );
     }
-    
+
     template<class BinaryFunction>
     void reduce(T input,
                 T& output,
@@ -91,7 +86,7 @@ public:
         tile_static storage_type storage;
         this->reduce(input, output, storage, reduce_op);
     }
-    
+
     template<unsigned int ItemsPerThread, class BinaryFunction>
     void reduce(T (&input)[ItemsPerThread],
                 T& output,
@@ -115,7 +110,7 @@ public:
             reduce_op
         );
     }
-    
+
     template<unsigned int ItemsPerThread, class BinaryFunction>
     void reduce(T (&input)[ItemsPerThread],
                 T& output,
@@ -124,11 +119,11 @@ public:
         tile_static storage_type storage;
         this->reduce(input, output, storage, reduce_op);
     }
-    
+
     template<class BinaryFunction>
     void reduce(T input,
                 T& output,
-                int valid_items,
+                unsigned int valid_items,
                 storage_type& storage,
                 BinaryFunction reduce_op) [[hc]]
     {
@@ -137,17 +132,17 @@ public:
             input, output, valid_items, storage, reduce_op
         );
     }
-    
+
     template<class BinaryFunction>
     void reduce(T input,
                 T& output,
-                int valid_items,
+                unsigned int valid_items,
                 BinaryFunction reduce_op) [[hc]]
     {
         tile_static storage_type storage;
         this->reduce(input, output, valid_items, storage, reduce_op);
     }
-    
+
 private:
     template<class BinaryFunction>
     void reduce_impl(const unsigned int flat_tid,
@@ -156,57 +151,73 @@ private:
                      storage_type& storage,
                      BinaryFunction reduce_op) [[hc]]
     {
-        typename warp_reduce_prefix_type::storage_type reduce_storage;
-        storage.threads[index(flat_tid)] = input;
+        storage.threads[flat_tid] = input;
         ::rocprim::syncthreads();
-        
+
         if (flat_tid < warp_size_)
         {
-            T thread_reduction = static_cast<T>(storage.threads[index(flat_tid)]);
+            T thread_reduction = static_cast<T>(storage.threads[flat_tid]);
             #pragma unroll
-            for(unsigned int i = 1; i < thread_reduction_size_; i++)
+            for(unsigned int i = warp_size_ + flat_tid; i < BlockSize; i += warp_size_)
             {
-                const unsigned int thread_id = (i * warp_size_) + flat_tid;
-                thread_reduction = (thread_id < BlockSize) ? reduce_op(
-                    thread_reduction, static_cast<T>(storage.threads[index(thread_id)])
-                ) : thread_reduction;
+                thread_reduction = reduce_op(
+                    thread_reduction, static_cast<T>(storage.threads[i])
+                );
             }
-            warp_reduce_prefix_type().reduce(thread_reduction, output, reduce_storage, reduce_op);
+            warp_reduce<block_size_smaller_than_warp_size_, warp_reduce_prefix_type>(
+                thread_reduction, output, BlockSize, reduce_op
+            );
         }
     }
-    
+
+    template<bool UseValid, class WarpReduce, class BinaryFunction>
+    auto warp_reduce(T input,
+                     T& output,
+                     const unsigned int valid_items,
+                     BinaryFunction reduce_op)
+        -> typename std::enable_if<UseValid>::type
+    {
+        WarpReduce().reduce(
+            input, output, valid_items, reduce_op
+        );
+    }
+
+    template<bool UseValid, class WarpReduce, class BinaryFunction>
+    auto warp_reduce(T input,
+                     T& output,
+                     const unsigned int valid_items,
+                     BinaryFunction reduce_op)
+        -> typename std::enable_if<!UseValid>::type
+    {
+        (void) valid_items;
+        WarpReduce().reduce(
+            input, output, reduce_op
+        );
+    }
+
     template<class BinaryFunction>
     void reduce_impl(const unsigned int flat_tid,
                      T input,
                      T& output,
-                     int valid_items,
+                     const unsigned int valid_items,
                      storage_type& storage,
                      BinaryFunction reduce_op) [[hc]]
     {
-        typename warp_reduce_prefix_type::storage_type reduce_storage;
-        storage.threads[index(flat_tid)] = input;
+        storage.threads[flat_tid] = input;
         ::rocprim::syncthreads();
-        
+
         if (flat_tid < warp_size_)
         {
-            T thread_reduction = (flat_tid < valid_items) ? 
-                                 static_cast<T>(storage.threads[index(flat_tid)]) : (T) 0;
+            T thread_reduction = static_cast<T>(storage.threads[flat_tid]);
             #pragma unroll
-            for(unsigned int i = 1; i < thread_reduction_size_; i++)
+            for(unsigned int i = warp_size_ + flat_tid; i < BlockSize; i += warp_size_)
             {
-                const unsigned int thread_id = (i * warp_size_) + flat_tid;
-                thread_reduction = (thread_id < valid_items) ? reduce_op(
-                    thread_reduction, static_cast<T>(storage.threads[index(thread_id)])
+                thread_reduction = (i < valid_items) ? reduce_op(
+                    thread_reduction, static_cast<T>(storage.threads[i])
                 ) : thread_reduction;
             }
-            warp_reduce_prefix_type().reduce(thread_reduction, output, reduce_storage, reduce_op);
+            warp_reduce_prefix_type().reduce(thread_reduction, output, valid_items, reduce_op);
         }
-    }
-        
-    unsigned int index(unsigned int n) const [[hc]]
-    {
-        // Move every 32-bank wide "row" (32 banks * 4 bytes) by one item
-        return has_bank_conflicts_ ? (n + (n/banks_no_)) : n;
     }
 };
 } // end namespace detail
