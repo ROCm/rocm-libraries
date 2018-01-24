@@ -49,14 +49,14 @@ public:
     {
         volatile T threads[WarpSize];
     };
-    
+
 template<class BinaryFunction>
     void reduce(T input, T& output,
                 storage_type& storage, BinaryFunction reduce_op) [[hc]]
     {
         const unsigned int lid = detail::logical_lane_id<WarpSize>();
         unsigned int ceiling = next_power_of_two(WarpSize);
-        
+
         output = input;
         storage.threads[lid] = output;
         for(unsigned int i = ceiling >> 1; i > 0; i >>= 1)
@@ -73,12 +73,12 @@ template<class BinaryFunction>
     }
 
     template<class BinaryFunction>
-    void reduce(T input, T& output, int valid_items,
+    void reduce(T input, T& output, unsigned int valid_items,
                 storage_type& storage, BinaryFunction reduce_op) [[hc]]
     {
         const unsigned int lid = detail::logical_lane_id<WarpSize>();
         unsigned int ceiling = next_power_of_two(WarpSize);
-        
+
         output = input;
         storage.threads[lid] = output;
         for(unsigned int i = ceiling >> 1; i > 0; i >>= 1)
