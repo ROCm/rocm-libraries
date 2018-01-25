@@ -35,7 +35,7 @@
 #include <hip/hip_hcc.h>
 
 // rocPRIM
-#include <device/device_radix_sort.hpp>
+#include <device/device_radix_sort_hip.hpp>
 
 #include "test_utils.hpp"
 
