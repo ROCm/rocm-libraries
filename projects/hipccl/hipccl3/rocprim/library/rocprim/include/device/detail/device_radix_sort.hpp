@@ -64,7 +64,8 @@ void fill_digit_counts(const KeyIn * keys_input,
 
     constexpr unsigned int warp_size =::rocprim::warp_size();
     constexpr unsigned int warps_no = BlockSize / warp_size;
-    static_assert(is_power_of_two(BlockSize) || BlockSize > radix_size, "Incorrect BlockSize");
+    static_assert(BlockSize % warp_size == 0, "BlockSize must be divisible by warp size");
+    static_assert(radix_size <= BlockSize, "Radix size must not exceed BlockSize");
 
     using key_in_codec = radix_key_codec<KeyIn, DescendingIn>;
     using bit_key_type = typename key_in_codec::bit_key_type;
@@ -241,6 +242,7 @@ void sort_block(Sort sort,
                 unsigned int begin_bit,
                 unsigned int end_bit)
 {
+    (void) values;
     sort.sort(keys, storage, begin_bit, end_bit);
 }
 
