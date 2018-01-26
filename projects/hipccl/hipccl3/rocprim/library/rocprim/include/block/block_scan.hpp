@@ -392,6 +392,7 @@ public:
     ///
     /// \param [in] input - thread input value.
     /// \param [out] output - reference to a thread output value. May be aliased with \p input.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
     /// \param [in,out] prefix_callback_op - function object for generating block prefix value.
     /// The signature of the \p prefix_callback_op should be equivalent to the following:
     /// <tt>T f(const T &block_reduction);</tt>. The signature does not need to have
@@ -399,7 +400,6 @@ public:
     /// The object will be called by the first thread in the first warp from the block with
     /// block reduction of \p input values as input argument. The result will be used as the
     /// block-wide prefix.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
     /// \param [in] scan_op - binary operation function object that will be used for scan.
     /// The signature of the function should be equivalent to the following:
     /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
@@ -448,8 +448,9 @@ public:
     ///     block_scan_int().inclusive_scan(
     ///         input,
     ///         output,
+    ///         storage,
     ///         prefix_callback,
-    ///         storage
+    ///         rocprim::plus<int>()
     ///     );
     ///     ...
     /// }
@@ -480,8 +481,9 @@ public:
     ///         block_scan_int().inclusive_scan(
     ///             input,
     ///             output,
+    ///             storage,
     ///             prefix_callback,
-    ///             storage
+    ///             rocprim::plus<int>()
     ///         );
     ///         ...
     ///     }
@@ -497,11 +499,11 @@ public:
     >
     void inclusive_scan(T input,
                         T& output,
-                        PrefixCallback& prefix_callback_op,
                         storage_type& storage,
-                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+                        PrefixCallback& prefix_callback_op,
+                        BinaryFunction scan_op) [[hc]]
     {
-        base_type::inclusive_scan(input, output, prefix_callback_op, storage, scan_op);
+        base_type::inclusive_scan(input, output, storage, prefix_callback_op, scan_op);
     }
 
     /// \brief Performs inclusive scan across threads in a block.
@@ -747,6 +749,7 @@ public:
     ///
     /// \param [in] input - reference to an array containing thread input values.
     /// \param [out] output - reference to a thread output array. May be aliased with \p input.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
     /// \param [in,out] prefix_callback_op - function object for generating block prefix value.
     /// The signature of the \p prefix_callback_op should be equivalent to the following:
     /// <tt>T f(const T &block_reduction);</tt>. The signature does not need to have
@@ -754,7 +757,6 @@ public:
     /// The object will be called by the first thread in the first warp from the block with
     /// block reduction of \p input values as input argument. The result will be used as the
     /// block-wide prefix.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
     /// \param [in] scan_op - binary operation function object that will be used for scan.
     /// The signature of the function should be equivalent to the following:
     /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
@@ -803,8 +805,9 @@ public:
     ///     block_scan_int().inclusive_scan(
     ///         input,
     ///         output,
+    ///         storage,
     ///         prefix_callback,
-    ///         storage
+    ///         rocprim::plus<int>()
     ///     );
     ///     ...
     /// }
@@ -835,8 +838,9 @@ public:
     ///         block_scan_int().inclusive_scan(
     ///             input,
     ///             output,
+    ///             storage,
     ///             prefix_callback,
-    ///             storage
+    ///             rocprim::plus<int>()
     ///         );
     ///         ...
     ///     }
@@ -849,15 +853,15 @@ public:
     template<
         unsigned int ItemsPerThread,
         class PrefixCallback,
-        class BinaryFunction = ::rocprim::plus<T>
+        class BinaryFunction
     >
     void inclusive_scan(T (&input)[ItemsPerThread],
                         T (&output)[ItemsPerThread],
-                        PrefixCallback& prefix_callback_op,
                         storage_type& storage,
-                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+                        PrefixCallback& prefix_callback_op,
+                        BinaryFunction scan_op) [[hc]]
     {
-        base_type::inclusive_scan(input, output, prefix_callback_op, storage, scan_op);
+        base_type::inclusive_scan(input, output, storage, prefix_callback_op, scan_op);
     }
 
     /// \brief Performs exclusive scan across threads in a block.
@@ -1107,6 +1111,7 @@ public:
     ///
     /// \param [in] input - thread input value.
     /// \param [out] output - reference to a thread output value. May be aliased with \p input.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
     /// \param [in,out] prefix_callback_op - function object for generating block prefix value.
     /// The signature of the \p prefix_callback_op should be equivalent to the following:
     /// <tt>T f(const T &block_reduction);</tt>. The signature does not need to have
@@ -1114,7 +1119,6 @@ public:
     /// The object will be called by the first thread in the first warp from the block with
     /// block reduction of \p input values as input argument. The result will be used as the
     /// block-wide prefix.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
     /// \param [in] scan_op - binary operation function object that will be used for scan.
     /// The signature of the function should be equivalent to the following:
     /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
@@ -1163,8 +1167,9 @@ public:
     ///     block_scan_int().exclusive_scan(
     ///         input,
     ///         output,
+    ///         storage,
     ///         prefix_callback,
-    ///         storage
+    ///         rocprim::plus<int>()
     ///     );
     ///     ...
     /// }
@@ -1195,8 +1200,9 @@ public:
     ///         block_scan_int().exclusive_scan(
     ///             input,
     ///             output,
+    ///             storage,
     ///             prefix_callback,
-    ///             storage
+    ///             rocprim::plus<int>()
     ///         );
     ///         ...
     ///     }
@@ -1212,11 +1218,11 @@ public:
     >
     void exclusive_scan(T input,
                         T& output,
-                        PrefixCallback& prefix_callback_op,
                         storage_type& storage,
-                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+                        PrefixCallback& prefix_callback_op,
+                        BinaryFunction scan_op) [[hc]]
     {
-        base_type::exclusive_scan(input, output, prefix_callback_op, storage, scan_op);
+        base_type::exclusive_scan(input, output, storage, prefix_callback_op, scan_op);
     }
 
     /// \brief Performs exclusive scan across threads in a block.
@@ -1484,6 +1490,7 @@ public:
     ///
     /// \param [in] input - reference to an array containing thread input values.
     /// \param [out] output - reference to a thread output array. May be aliased with \p input.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
     /// \param [in,out] prefix_callback_op - function object for generating block prefix value.
     /// The signature of the \p prefix_callback_op should be equivalent to the following:
     /// <tt>T f(const T &block_reduction);</tt>. The signature does not need to have
@@ -1491,7 +1498,6 @@ public:
     /// The object will be called by the first thread in the first warp from the block with
     /// block reduction of \p input values as input argument. The result will be used as the
     /// block-wide prefix.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
     /// \param [in] scan_op - binary operation function object that will be used for scan.
     /// The signature of the function should be equivalent to the following:
     /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
@@ -1540,8 +1546,9 @@ public:
     ///     block_scan_int().exclusive_scan(
     ///         input,
     ///         output,
+    ///         storage,
     ///         prefix_callback,
-    ///         storage
+    ///         rocprim::plus<int>()
     ///     );
     ///     ...
     /// }
@@ -1572,8 +1579,9 @@ public:
     ///         block_scan_int().exclusive_scan(
     ///             input,
     ///             output,
+    ///             storage,
     ///             prefix_callback,
-    ///             storage
+    ///             rocprim::plus<int>()
     ///         );
     ///         ...
     ///     }
@@ -1586,15 +1594,15 @@ public:
     template<
         unsigned int ItemsPerThread,
         class PrefixCallback,
-        class BinaryFunction = ::rocprim::plus<T>
+        class BinaryFunction
     >
     void exclusive_scan(T (&input)[ItemsPerThread],
                         T (&output)[ItemsPerThread],
-                        PrefixCallback& prefix_callback_op,
                         storage_type& storage,
-                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+                        PrefixCallback& prefix_callback_op,
+                        BinaryFunction scan_op) [[hc]]
     {
-        base_type::exclusive_scan(input, output, prefix_callback_op, storage, scan_op);
+        base_type::exclusive_scan(input, output, storage, prefix_callback_op, scan_op);
     }
 };
 

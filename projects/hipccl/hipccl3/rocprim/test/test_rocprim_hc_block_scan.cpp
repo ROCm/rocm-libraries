@@ -268,7 +268,9 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanPrefixCallback)
 
             using bscan_t = rp::block_scan<T, block_size, algorithm>;
             tile_static typename bscan_t::storage_type storage;
-            bscan_t().inclusive_scan(value, value, prefix_callback, storage);
+            bscan_t().inclusive_scan(
+                value, value, storage, prefix_callback, rp::plus<T>()
+            );
 
             d_output[i] = value;
             if(i.local[0] == 0)
@@ -476,7 +478,9 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanPrefixCallback)
 
             using bscan_t = rp::block_scan<T, block_size, algorithm>;
             tile_static typename bscan_t::storage_type storage;
-            bscan_t().exclusive_scan(value, value, prefix_callback, storage);
+            bscan_t().exclusive_scan(
+                value, value, storage, prefix_callback, rp::plus<T>()
+            );
 
             d_output[i] = value;
             if(i.local[0] == 0)
@@ -765,7 +769,9 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScanPrefixCallback)
 
             using bscan_t = rp::block_scan<T, block_size, algorithm>;
             tile_static typename bscan_t::storage_type storage;
-            bscan_t().inclusive_scan(in_out, in_out, prefix_callback, storage);
+            bscan_t().inclusive_scan(
+                in_out, in_out, storage, prefix_callback, rp::plus<T>()
+            );
 
             // store
             for(unsigned int j = 0; j < items_per_thread; j++)
@@ -1033,7 +1039,9 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScanPrefixCallback)
 
             using bscan_t = rp::block_scan<T, block_size, algorithm>;
             tile_static typename bscan_t::storage_type storage;
-            bscan_t().exclusive_scan(in_out, in_out, prefix_callback, storage);
+            bscan_t().exclusive_scan(
+                in_out, in_out, storage, prefix_callback, rp::plus<T>()
+            );
 
             // store
             for(unsigned int j = 0; j < items_per_thread; j++)
