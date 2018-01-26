@@ -141,7 +141,7 @@ void run_benchmark(benchmark::State& state, benchmark_kinds benchmark_kind, hipS
                 d_temporary_storage, temporary_storage_bytes,
                 d_keys_input, d_keys_output, size,
                 0, sizeof(key_type) * 8,
-                stream, true
+                stream, false
             );
         }
         else if(benchmark_kind == benchmark_kinds::sort_pairs)

@@ -93,7 +93,15 @@ void device_radix_sort(void * temporary_storage,
     constexpr unsigned int scan_size = scan_block_size * scan_items_per_thread;
     constexpr unsigned int sort_size = sort_block_size * sort_items_per_thread;
 
-    const size_t batch_digit_counts_bytes = align_size(scan_size * radix_size * sizeof(unsigned int));
+    const unsigned int blocks = ::rocprim::ceiling_div(static_cast<unsigned int>(size), sort_size);
+    const unsigned int blocks_per_full_batch = ::rocprim::ceiling_div(blocks, scan_size);
+    const unsigned int full_batches = blocks % scan_size != 0
+        ? blocks % scan_size
+        : scan_size;
+    const unsigned int batches = (blocks_per_full_batch == 1 ? full_batches : scan_size);
+    const unsigned int iterations = ::rocprim::ceiling_div(end_bit - begin_bit, radix_bits);
+
+    const size_t batch_digit_counts_bytes = align_size(batches * radix_size * sizeof(unsigned int));
     const size_t digit_counts_bytes = align_size(radix_size * sizeof(unsigned int));
     const size_t bit_keys_bytes = align_size(size * sizeof(bit_key_type));
     const size_t values_bytes = with_values ? align_size(size * sizeof(Value)) : 0;
@@ -102,14 +110,6 @@ void device_radix_sort(void * temporary_storage,
         temporary_storage_bytes = batch_digit_counts_bytes + digit_counts_bytes + bit_keys_bytes + values_bytes;
         return;
     }
-
-    const unsigned int blocks = ::rocprim::ceiling_div(static_cast<unsigned int>(size), sort_size);
-    const unsigned int blocks_per_full_batch = ::rocprim::ceiling_div(blocks, scan_size);
-    const unsigned int full_batches = blocks % scan_size != 0
-        ? blocks % scan_size
-        : scan_size;
-    const unsigned int batches = (blocks_per_full_batch == 1 ? full_batches : scan_size);
-    const unsigned int iterations = ::rocprim::ceiling_div(end_bit - begin_bit, radix_bits);
 
     if(debug_synchronous)
     {
@@ -300,7 +300,7 @@ void device_radix_sort(void * temporary_storage,
     }
 }
 
-#undef SYCN_AND_CHECK_ERROR
+#undef SYNC
 
 } // end namespace detail
 
