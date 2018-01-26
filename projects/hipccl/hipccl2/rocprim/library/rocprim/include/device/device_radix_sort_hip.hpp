@@ -229,7 +229,9 @@ hipError_t device_radix_sort(void * temporary_storage,
         const bool is_first_iteration = (bit == begin_bit);
         const bool is_last_iteration = (bit + current_radix_bits == end_bit);
 
-        auto start = std::chrono::high_resolution_clock::now();
+        std::chrono::high_resolution_clock::time_point start;
+
+        if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         if(is_first_iteration)
         {
             hipLaunchKernelGGL(
@@ -260,7 +262,7 @@ hipError_t device_radix_sort(void * temporary_storage,
         }
         SYNC_AND_RETURN_ON_ERROR("fill_digit_counts", start)
 
-        start = std::chrono::high_resolution_clock::now();
+        if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(detail::scan_batches_kernel<scan_block_size, scan_items_per_thread, radix_bits>),
             dim3(radix_size), dim3(scan_block_size), 0, stream,
@@ -268,7 +270,7 @@ hipError_t device_radix_sort(void * temporary_storage,
         );
         SYNC_AND_RETURN_ON_ERROR("scan_batches", start)
 
-        start = std::chrono::high_resolution_clock::now();
+        if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(detail::scan_digits_kernel<radix_bits>),
             dim3(1), dim3(radix_size), 0, stream,
@@ -276,7 +278,7 @@ hipError_t device_radix_sort(void * temporary_storage,
         );
         SYNC_AND_RETURN_ON_ERROR("scan_digits", start)
 
-        start = std::chrono::high_resolution_clock::now();
+        if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         if(is_first_iteration && is_last_iteration)
         {
             hipLaunchKernelGGL(

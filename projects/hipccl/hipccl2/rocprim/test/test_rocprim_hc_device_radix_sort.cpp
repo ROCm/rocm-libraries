@@ -30,25 +30,15 @@
 // Google Test
 #include <gtest/gtest.h>
 
-// HIP API
-#include <hip/hip_runtime.h>
-#include <hip/hip_hcc.h>
+// HC API
+#include <hcc/hc.hpp>
 
 // rocPRIM
-#include <device/device_radix_sort_hip.hpp>
+#include <device/device_radix_sort_hc.hpp>
 
 #include "test_utils.hpp"
 
 namespace rp = rocprim;
-
-#define HIP_CHECK(condition)         \
-{                                  \
-  hipError_t error = condition;    \
-  if(error != hipSuccess){         \
-      std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
-      exit(error); \
-  } \
-}
 
 template<
     class Key,
@@ -140,11 +130,10 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
     constexpr unsigned int start_bit = TestFixture::params::start_bit;
     constexpr unsigned int end_bit = TestFixture::params::end_bit;
 
-    hipStream_t stream = 0;
-    HIP_CHECK(hipStreamCreate(&stream));
+    hc::accelerator acc;
+    hc::accelerator_view acc_view = acc.create_view();
 
-    // WORKAROUND: Tests fail on MI25 without additional syncronization (bug in HIP or ROCm)
-    const bool debug_synchronous = true;
+    const bool debug_synchronous = false;
 
     const std::vector<size_t> sizes = get_sizes();
     for(size_t size : sizes)
@@ -166,78 +155,51 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
             );
         }
 
-        key_type * d_keys_input;
-        key_type * d_keys_output;
-        HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
-        HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
-        HIP_CHECK(
-            hipMemcpy(
-                d_keys_input, keys_input.data(),
-                size * sizeof(key_type),
-                hipMemcpyHostToDevice
-            )
-        );
+        hc::array<key_type> d_keys_input(hc::extent<1>(size), keys_input.begin(), acc_view);
+        hc::array<key_type> d_keys_output(size, acc_view);
 
         // Calculate expected results on host
         std::vector<key_type> expected(keys_input);
         std::stable_sort(expected.begin(), expected.end(), key_comparator<key_type, descending, start_bit, end_bit>());
 
-        void * d_temporary_storage = nullptr;
         size_t temporary_storage_bytes;
         rp::device_radix_sort_keys(
-            d_temporary_storage, temporary_storage_bytes,
-            d_keys_input, d_keys_output, size,
-            start_bit, end_bit
+            nullptr, temporary_storage_bytes,
+            d_keys_input.accelerator_pointer(), d_keys_output.accelerator_pointer(), size,
+            start_bit, end_bit,
+            acc_view, debug_synchronous
         );
 
         ASSERT_GT(temporary_storage_bytes, 0);
 
-        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+        hc::array<char> d_temporary_storage(temporary_storage_bytes, acc_view);
 
         if(descending)
         {
             rp::device_radix_sort_keys_desc(
-                d_temporary_storage, temporary_storage_bytes,
-                d_keys_input, d_keys_output, size,
+                d_temporary_storage.accelerator_pointer(), temporary_storage_bytes,
+                d_keys_input.accelerator_pointer(), d_keys_output.accelerator_pointer(), size,
                 start_bit, end_bit,
-                stream, debug_synchronous
+                acc_view, debug_synchronous
             );
         }
         else
         {
             rp::device_radix_sort_keys(
-                d_temporary_storage, temporary_storage_bytes,
-                d_keys_input, d_keys_output, size,
+                d_temporary_storage.accelerator_pointer(), temporary_storage_bytes,
+                d_keys_input.accelerator_pointer(), d_keys_output.accelerator_pointer(), size,
                 start_bit, end_bit,
-                stream, debug_synchronous
+                acc_view, debug_synchronous
             );
         }
+        acc_view.wait();
 
-        HIP_CHECK(hipFree(d_temporary_storage));
-        HIP_CHECK(hipFree(d_keys_input));
-
-        std::vector<key_type> keys_output(size);
-        HIP_CHECK(
-            hipMemcpy(
-                keys_output.data(), d_keys_output,
-                size * sizeof(key_type),
-                hipMemcpyDeviceToHost
-            )
-        );
-
-        if(debug_synchronous)
-        {
-            HIP_CHECK(hipStreamSynchronize(stream));
-        }
-        HIP_CHECK(hipFree(d_keys_output));
-
+        std::vector<key_type> keys_output = d_keys_output;
         for(size_t i = 0; i < size; i++)
         {
             ASSERT_EQ(keys_output[i], expected[i]);
         }
     }
-
-    HIP_CHECK(hipStreamDestroy(stream));
 }
 
 TYPED_TEST(RocprimDeviceRadixSort, SortKeysValues)
@@ -248,11 +210,10 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeysValues)
     constexpr unsigned int start_bit = TestFixture::params::start_bit;
     constexpr unsigned int end_bit = TestFixture::params::end_bit;
 
-    hipStream_t stream = 0;
-    HIP_CHECK(hipStreamCreate(&stream));
+    hc::accelerator acc;
+    hc::accelerator_view acc_view = acc.create_view();
 
-    // WORKAROUND: Tests fail on MI25 without additional syncronization (bug in HIP or ROCm)
-    const bool debug_synchronous = true;
+    const bool debug_synchronous = false;
 
     const std::vector<size_t> sizes = get_sizes();
     for(size_t size : sizes)
@@ -277,29 +238,11 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeysValues)
         std::vector<value_type> values_input(size);
         std::iota(values_input.begin(), values_input.end(), 0);
 
-        key_type * d_keys_input;
-        key_type * d_keys_output;
-        HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
-        HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
-        HIP_CHECK(
-            hipMemcpy(
-                d_keys_input, keys_input.data(),
-                size * sizeof(key_type),
-                hipMemcpyHostToDevice
-            )
-        );
+        hc::array<key_type> d_keys_input(hc::extent<1>(size), keys_input.begin(), acc_view);
+        hc::array<key_type> d_keys_output(size, acc_view);
 
-        value_type * d_values_input;
-        value_type * d_values_output;
-        HIP_CHECK(hipMalloc(&d_values_input, size * sizeof(value_type)));
-        HIP_CHECK(hipMalloc(&d_values_output, size * sizeof(value_type)));
-        HIP_CHECK(
-            hipMemcpy(
-                d_values_input, values_input.data(),
-                size * sizeof(value_type),
-                hipMemcpyHostToDevice
-            )
-        );
+        hc::array<value_type> d_values_input(hc::extent<1>(size), values_input.begin(), acc_view);
+        hc::array<value_type> d_values_output(size, acc_view);
 
         using key_value = std::pair<key_type, value_type>;
 
@@ -314,65 +257,46 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeysValues)
             key_value_comparator<key_type, value_type, descending, start_bit, end_bit>()
         );
 
-        void * d_temporary_storage = nullptr;
         size_t temporary_storage_bytes;
         rp::device_radix_sort_pairs(
-            d_temporary_storage, temporary_storage_bytes,
-            d_keys_input, d_keys_output, d_values_input, d_values_output, size,
-            start_bit, end_bit
+            nullptr, temporary_storage_bytes,
+            d_keys_input.accelerator_pointer(), d_keys_output.accelerator_pointer(),
+            d_values_input.accelerator_pointer(), d_values_output.accelerator_pointer(),
+            size,
+            start_bit, end_bit,
+            acc_view, debug_synchronous
         );
 
         ASSERT_GT(temporary_storage_bytes, 0);
 
-        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+        hc::array<char> d_temporary_storage(temporary_storage_bytes, acc_view);
 
         if(descending)
         {
             rp::device_radix_sort_pairs_desc(
-                d_temporary_storage, temporary_storage_bytes,
-                d_keys_input, d_keys_output, d_values_input, d_values_output, size,
+                d_temporary_storage.accelerator_pointer(), temporary_storage_bytes,
+                d_keys_input.accelerator_pointer(), d_keys_output.accelerator_pointer(),
+                d_values_input.accelerator_pointer(), d_values_output.accelerator_pointer(),
+                size,
                 start_bit, end_bit,
-                stream, debug_synchronous
+                acc_view, debug_synchronous
             );
         }
         else
         {
             rp::device_radix_sort_pairs(
-                d_temporary_storage, temporary_storage_bytes,
-                d_keys_input, d_keys_output, d_values_input, d_values_output, size,
+                d_temporary_storage.accelerator_pointer(), temporary_storage_bytes,
+                d_keys_input.accelerator_pointer(), d_keys_output.accelerator_pointer(),
+                d_values_input.accelerator_pointer(), d_values_output.accelerator_pointer(),
+                size,
                 start_bit, end_bit,
-                stream, debug_synchronous
+                acc_view, debug_synchronous
             );
         }
+        acc_view.wait();
 
-        HIP_CHECK(hipFree(d_temporary_storage));
-        HIP_CHECK(hipFree(d_keys_input));
-        HIP_CHECK(hipFree(d_values_input));
-
-        std::vector<key_type> keys_output(size);
-        HIP_CHECK(
-            hipMemcpy(
-                keys_output.data(), d_keys_output,
-                size * sizeof(key_type),
-                hipMemcpyDeviceToHost
-            )
-        );
-
-        std::vector<value_type> values_output(size);
-        HIP_CHECK(
-            hipMemcpy(
-                values_output.data(), d_values_output,
-                size * sizeof(value_type),
-                hipMemcpyDeviceToHost
-            )
-        );
-
-        if(debug_synchronous)
-        {
-            HIP_CHECK(hipStreamSynchronize(stream));
-        }
-        HIP_CHECK(hipFree(d_keys_output));
-        HIP_CHECK(hipFree(d_values_output));
+        std::vector<key_type> keys_output = d_keys_output;
+        std::vector<value_type> values_output = d_values_output;
 
         for(size_t i = 0; i < size; i++)
         {
@@ -380,6 +304,4 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeysValues)
             ASSERT_EQ(values_output[i], expected[i].second);
         }
     }
-
-    HIP_CHECK(hipStreamDestroy(stream));
 }

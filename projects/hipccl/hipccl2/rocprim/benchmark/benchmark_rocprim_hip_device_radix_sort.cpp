@@ -70,42 +70,42 @@ void run_benchmark(benchmark::State& state, benchmark_kinds benchmark_kind, hipS
     using value_type = T;
 
     // Generate data
-    std::vector<key_type> key_input;
+    std::vector<key_type> keys_input;
     if(std::is_floating_point<key_type>::value)
     {
-        key_input = get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
+        keys_input = get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
     }
     else
     {
-        key_input = get_random_data<key_type>(
+        keys_input = get_random_data<key_type>(
             size,
             std::numeric_limits<key_type>::min(),
             std::numeric_limits<key_type>::max()
         );
     }
 
-    std::vector<value_type> value_input(size);
-    std::iota(value_input.begin(), value_input.end(), 0);
+    std::vector<value_type> values_input(size);
+    std::iota(values_input.begin(), values_input.end(), 0);
 
-    key_type * d_key_input;
-    key_type * d_key_output;
-    HIP_CHECK(hipMalloc(&d_key_input, size * sizeof(key_type)));
-    HIP_CHECK(hipMalloc(&d_key_output, size * sizeof(key_type)));
+    key_type * d_keys_input;
+    key_type * d_keys_output;
+    HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
+    HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
     HIP_CHECK(
         hipMemcpy(
-            d_key_input, key_input.data(),
+            d_keys_input, keys_input.data(),
             size * sizeof(key_type),
             hipMemcpyHostToDevice
         )
     );
 
-    value_type * d_value_input;
-    value_type * d_value_output;
-    HIP_CHECK(hipMalloc(&d_value_input, size * sizeof(value_type)));
-    HIP_CHECK(hipMalloc(&d_value_output, size * sizeof(value_type)));
+    value_type * d_values_input;
+    value_type * d_values_output;
+    HIP_CHECK(hipMalloc(&d_values_input, size * sizeof(value_type)));
+    HIP_CHECK(hipMalloc(&d_values_output, size * sizeof(value_type)));
     HIP_CHECK(
         hipMemcpy(
-            d_value_input, value_input.data(),
+            d_values_input, values_input.data(),
             size * sizeof(value_type),
             hipMemcpyHostToDevice
         )
@@ -117,14 +117,14 @@ void run_benchmark(benchmark::State& state, benchmark_kinds benchmark_kind, hipS
     {
         rp::device_radix_sort_keys(
             d_temporary_storage, temporary_storage_bytes,
-            d_key_input, d_key_output, size
+            d_keys_input, d_keys_output, size
         );
     }
     else if(benchmark_kind == benchmark_kinds::sort_pairs)
     {
         rp::device_radix_sort_pairs(
             d_temporary_storage, temporary_storage_bytes,
-            d_key_input, d_key_output, d_value_input, d_value_output, size
+            d_keys_input, d_keys_output, d_values_input, d_values_output, size
         );
     }
 
@@ -139,16 +139,16 @@ void run_benchmark(benchmark::State& state, benchmark_kinds benchmark_kind, hipS
         {
             rp::device_radix_sort_keys(
                 d_temporary_storage, temporary_storage_bytes,
-                d_key_input, d_key_output, size,
+                d_keys_input, d_keys_output, size,
                 0, sizeof(key_type) * 8,
-                stream, false
+                stream, true
             );
         }
         else if(benchmark_kind == benchmark_kinds::sort_pairs)
         {
             rp::device_radix_sort_pairs(
                 d_temporary_storage, temporary_storage_bytes,
-                d_key_input, d_key_output, d_value_input, d_value_output, size,
+                d_keys_input, d_keys_output, d_values_input, d_values_output, size,
                 0, sizeof(key_type) * 8,
                 stream, false
             );
@@ -164,10 +164,10 @@ void run_benchmark(benchmark::State& state, benchmark_kinds benchmark_kind, hipS
     state.SetItemsProcessed(state.iterations() * size);
 
     HIP_CHECK(hipFree(d_temporary_storage));
-    HIP_CHECK(hipFree(d_key_input));
-    HIP_CHECK(hipFree(d_key_output));
-    HIP_CHECK(hipFree(d_value_input));
-    HIP_CHECK(hipFree(d_value_output));
+    HIP_CHECK(hipFree(d_keys_input));
+    HIP_CHECK(hipFree(d_keys_output));
+    HIP_CHECK(hipFree(d_values_input));
+    HIP_CHECK(hipFree(d_values_output));
 }
 
 #define CREATE_BENCHMARK(T) \
