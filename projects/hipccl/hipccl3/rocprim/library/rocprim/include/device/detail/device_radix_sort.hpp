@@ -50,14 +50,13 @@ template<
     bool DescendingIn,
     class KeyIn
 >
-__device__
 void fill_digit_counts(const KeyIn * keys_input,
                        unsigned int size,
                        unsigned int * batch_digit_counts,
                        unsigned int bit,
                        unsigned int current_radix_bits,
                        unsigned int blocks_per_full_batch,
-                       unsigned int full_batches)
+                       unsigned int full_batches) [[hc]]
 {
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
     constexpr unsigned int radix_size = 1 << RadixBits;
@@ -70,7 +69,7 @@ void fill_digit_counts(const KeyIn * keys_input,
     using key_in_codec = radix_key_codec<KeyIn, DescendingIn>;
     using bit_key_type = typename key_in_codec::bit_key_type;
 
-    __shared__ struct
+    tile_static struct
     {
         unsigned int digit_counts[warps_no][radix_size];
     } storage;
@@ -167,10 +166,9 @@ template<
     unsigned int ItemsPerThread,
     unsigned int RadixBits
 >
-__device__
 void scan_batches(unsigned int * batch_digit_counts,
                   unsigned int * digit_counts,
-                  unsigned int batches)
+                  unsigned int batches) [[hc]]
 {
     constexpr unsigned int radix_size = 1 << RadixBits;
 
@@ -205,8 +203,7 @@ void scan_batches(unsigned int * batch_digit_counts,
 }
 
 template<unsigned int RadixBits>
-__device__
-void scan_digits(unsigned int * digit_counts)
+void scan_digits(unsigned int * digit_counts) [[hc]]
 {
     constexpr unsigned int radix_size = 1 << RadixBits;
 
@@ -222,25 +219,25 @@ void scan_digits(unsigned int * digit_counts)
 // Wrapping functions that allow to call proper methods (with or without values)
 // (a variant with values is enabled only when Value is not empty_type)
 template<class Sort, class Key, class Value, unsigned int ItemsPerThread>
-__device__ inline
+inline
 void sort_block(Sort sort,
                 Key (&keys)[ItemsPerThread],
                 Value (&values)[ItemsPerThread],
                 typename Sort::storage_type& storage,
                 unsigned int begin_bit,
-                unsigned int end_bit)
+                unsigned int end_bit) [[hc]]
 {
     sort.sort(keys, values, storage, begin_bit, end_bit);
 }
 
 template<class Sort, class Key, unsigned int ItemsPerThread>
-__device__ inline
+inline
 void sort_block(Sort sort,
                 Key (&keys)[ItemsPerThread],
                 ::rocprim::empty_type (&values)[ItemsPerThread],
                 typename Sort::storage_type& storage,
                 unsigned int begin_bit,
-                unsigned int end_bit)
+                unsigned int end_bit) [[hc]]
 {
     (void) values;
     sort.sort(keys, storage, begin_bit, end_bit);
@@ -256,7 +253,6 @@ template<
     class KeyOut,
     class Value
 >
-__device__
 void sort_and_scatter(const KeyIn * keys_input,
                       KeyOut * keys_output,
                       const Value * values_input,
@@ -267,7 +263,7 @@ void sort_and_scatter(const KeyIn * keys_input,
                       unsigned int bit,
                       unsigned int current_radix_bits,
                       unsigned int blocks_per_full_batch,
-                      unsigned int full_batches)
+                      unsigned int full_batches) [[hc]]
 {
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
     constexpr unsigned int radix_size = 1 << RadixBits;
@@ -287,7 +283,7 @@ void sort_and_scatter(const KeyIn * keys_input,
     using bit_keys_exchange_type = ::rocprim::block_exchange<bit_key_type, BlockSize, ItemsPerThread>;
     using values_exchange_type = ::rocprim::block_exchange<Value, BlockSize, ItemsPerThread>;
 
-    __shared__ struct
+    tile_static struct
     {
         union
         {
