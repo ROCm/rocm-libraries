@@ -51,6 +51,14 @@ constexpr T next_power_of_two(const T x, const T acc = 1)
     return acc >= x ? acc : next_power_of_two(x, 2 * acc);
 }
 
+template<class T>
+inline constexpr
+typename std::enable_if<std::is_integral<T>::value, T>::type
+ceiling_div(T a, T b) [[hc]] [[cpu]]
+{
+    return (a + b - 1) / b;
+}
+
 // Select the minimal warp size for block of size block_size, it's
 // useful for blocks smaller than maximal warp size.
 template<class T>

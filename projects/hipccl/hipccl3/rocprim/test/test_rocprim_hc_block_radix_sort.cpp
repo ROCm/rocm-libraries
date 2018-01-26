@@ -158,14 +158,14 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeys)
 
     const size_t size = items_per_block * 1134;
     // Generate data
-    std::vector<key_type> key_output;
+    std::vector<key_type> keys_output;
     if(std::is_floating_point<key_type>::value)
     {
-        key_output = get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
+        keys_output = get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
     }
     else
     {
-        key_output = get_random_data<key_type>(
+        keys_output = get_random_data<key_type>(
             size,
             std::numeric_limits<key_type>::min(),
             std::numeric_limits<key_type>::max()
@@ -173,7 +173,7 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeys)
     }
 
     // Calculate expected results on host
-    std::vector<key_type> expected(key_output);
+    std::vector<key_type> expected(keys_output);
     for(size_t i = 0; i < size / items_per_block; i++)
     {
         std::stable_sort(
@@ -183,7 +183,7 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeys)
         );
     }
 
-    hc::array_view<key_type, 1> d_key_output(size, key_output.data());
+    hc::array_view<key_type, 1> d_keys_output(size, keys_output.data());
     hc::parallel_for_each(
         acc.get_default_view(),
         hc::extent<1>(size / items_per_thread).tile(block_size),
@@ -193,7 +193,7 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeys)
             const unsigned int block_offset = idx.tile[0] * items_per_block;
 
             key_type keys[items_per_thread];
-            rp::block_load_direct_blocked(lid, d_key_output.data() + block_offset, keys);
+            rp::block_load_direct_blocked(lid, d_keys_output.data() + block_offset, keys);
 
             rp::block_radix_sort<key_type, block_size, items_per_thread> bsort;
 
@@ -204,7 +204,7 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeys)
                 else
                     bsort.sort_to_striped(keys, start_bit, end_bit);
 
-                rp::block_store_direct_striped<block_size>(lid, d_key_output.data() + block_offset, keys);
+                rp::block_store_direct_striped<block_size>(lid, d_keys_output.data() + block_offset, keys);
             }
             else
             {
@@ -213,15 +213,15 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeys)
                 else
                     bsort.sort(keys, start_bit, end_bit);
 
-                rp::block_store_direct_blocked(lid, d_key_output.data() + block_offset, keys);
+                rp::block_store_direct_blocked(lid, d_keys_output.data() + block_offset, keys);
             }
         }
     );
 
-    d_key_output.synchronize();
+    d_keys_output.synchronize();
     for(size_t i = 0; i < size; i++)
     {
-        ASSERT_EQ(key_output[i], expected[i]);
+        ASSERT_EQ(keys_output[i], expected[i]);
     }
 }
 
@@ -246,28 +246,28 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeysValues)
 
     const size_t size = items_per_block * 1134;
     // Generate data
-    std::vector<key_type> key_output;
+    std::vector<key_type> keys_output;
     if(std::is_floating_point<key_type>::value)
     {
-        key_output = get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
+        keys_output = get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
     }
     else
     {
-        key_output = get_random_data<key_type>(
+        keys_output = get_random_data<key_type>(
             size,
             std::numeric_limits<key_type>::min(),
             std::numeric_limits<key_type>::max()
         );
     }
 
-    std::vector<value_type> value_output;
+    std::vector<value_type> values_output;
     if(std::is_floating_point<value_type>::value)
     {
-        value_output = get_random_data<value_type>(size, (value_type)-1000, (value_type)+1000);
+        values_output = get_random_data<value_type>(size, (value_type)-1000, (value_type)+1000);
     }
     else
     {
-        value_output = get_random_data<value_type>(
+        values_output = get_random_data<value_type>(
             size,
             std::numeric_limits<value_type>::min(),
             std::numeric_limits<value_type>::max()
@@ -280,7 +280,7 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeysValues)
     std::vector<key_value> expected(size);
     for(size_t i = 0; i < size; i++)
     {
-        expected[i] = key_value(key_output[i], value_output[i]);
+        expected[i] = key_value(keys_output[i], values_output[i]);
     }
 
     for(size_t i = 0; i < size / items_per_block; i++)
@@ -292,8 +292,8 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeysValues)
         );
     }
 
-    hc::array_view<key_type, 1> d_key_output(size, key_output.data());
-    hc::array_view<value_type, 1> d_value_output(size, value_output.data());
+    hc::array_view<key_type, 1> d_keys_output(size, keys_output.data());
+    hc::array_view<value_type, 1> d_values_output(size, values_output.data());
     hc::parallel_for_each(
         acc.get_default_view(),
         hc::extent<1>(size / items_per_thread).tile(block_size),
@@ -304,8 +304,8 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeysValues)
 
             key_type keys[items_per_thread];
             value_type values[items_per_thread];
-            rp::block_load_direct_blocked(lid, d_key_output.data() + block_offset, keys);
-            rp::block_load_direct_blocked(lid, d_value_output.data() + block_offset, values);
+            rp::block_load_direct_blocked(lid, d_keys_output.data() + block_offset, keys);
+            rp::block_load_direct_blocked(lid, d_values_output.data() + block_offset, values);
 
             rp::block_radix_sort<key_type, block_size, items_per_thread, value_type> bsort;
             if(to_striped)
@@ -315,8 +315,8 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeysValues)
                 else
                     bsort.sort_to_striped(keys, values, start_bit, end_bit);
 
-                rp::block_store_direct_striped<block_size>(lid, d_key_output.data() + block_offset, keys);
-                rp::block_store_direct_striped<block_size>(lid, d_value_output.data() + block_offset, values);
+                rp::block_store_direct_striped<block_size>(lid, d_keys_output.data() + block_offset, keys);
+                rp::block_store_direct_striped<block_size>(lid, d_values_output.data() + block_offset, values);
             }
             else
             {
@@ -325,17 +325,17 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeysValues)
                 else
                     bsort.sort(keys, values, start_bit, end_bit);
 
-                rp::block_store_direct_blocked(lid, d_key_output.data() + block_offset, keys);
-                rp::block_store_direct_blocked(lid, d_value_output.data() + block_offset, values);
+                rp::block_store_direct_blocked(lid, d_keys_output.data() + block_offset, keys);
+                rp::block_store_direct_blocked(lid, d_values_output.data() + block_offset, values);
             }
         }
     );
 
-    d_key_output.synchronize();
-    d_value_output.synchronize();
+    d_keys_output.synchronize();
+    d_values_output.synchronize();
     for(size_t i = 0; i < size; i++)
     {
-        ASSERT_EQ(key_output[i], expected[i].first);
-        ASSERT_EQ(value_output[i], expected[i].second);
+        ASSERT_EQ(keys_output[i], expected[i].first);
+        ASSERT_EQ(values_output[i], expected[i].second);
     }
 }
