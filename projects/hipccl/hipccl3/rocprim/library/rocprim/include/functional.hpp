@@ -22,7 +22,6 @@
 #define ROCPRIM_FUNCTIONAL_HPP_
 
 #include <functional>
-#include <type_traits>
 
 #include "detail/config.hpp"
 
@@ -46,14 +45,6 @@ void swap(T& a, T& b) [[hc]] [[cpu]]
     T c = a;
     a = b;
     b = c;
-}
-
-template<class T>
-inline constexpr
-typename std::enable_if<std::is_integral<T>::value, T>::type
-ceiling_div(T a, T b) [[hc]] [[cpu]]
-{
-    return (a + b - 1) / b;
 }
 
 template<class T>
