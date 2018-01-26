@@ -70,6 +70,12 @@ inline unsigned int flat_block_thread_id() [[hc]]
         + hc_get_workitem_id(0);
 }
 
+/// \brief Returns thread identifier in a multidimensional block (tile) by dimension.
+inline unsigned int block_thread_id(unsigned int dim) [[hc]]
+{
+    return hc_get_workitem_id(dim);
+}
+
 /// \brief Returns flat (linear, 1D) thread identifier in a multidimensional tile (block).
 inline unsigned int flat_tile_thread_id() [[hc]]
 {
@@ -88,6 +94,12 @@ inline unsigned int flat_block_id() [[hc]]
     return (hc_get_group_id(2) * hc_get_num_groups(1) * hc_get_num_groups(0))
         + (hc_get_group_id(1) * hc_get_num_groups(0))
         + hc_get_group_id(0);
+}
+
+/// \brief Returns block identifier in a multidimensional grid by dimension.
+inline unsigned int block_id(unsigned int dim) [[hc]]
+{
+    return hc_get_group_id(dim);
 }
 
 // Sync

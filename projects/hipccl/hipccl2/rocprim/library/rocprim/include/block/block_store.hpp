@@ -42,7 +42,7 @@ BEGIN_ROCPRIM_NAMESPACE
 
 /// \brief \p block_store_method enumerates the methods available to store a striped arrangement
 /// of items into a blocked/striped arrangement on continuous memory
-enum block_store_method
+enum class block_store_method
 {
     /// A blocked arrangement of items is stored into a blocked arrangement on continuous
     /// memory.
@@ -60,7 +60,7 @@ enum block_store_method
     /// \par Requirements:
     /// * The output offset (\p block_output) must be quad-item aligned.
     /// * The following conditions will prevent vectorization and switch to default
-    /// \p block_load_direct:
+    /// \p block_store_direct:
     ///   * \p ItemsPerThread is odd.
     ///   * The datatype \p T is not a primitive or a HC/HIP vector type (e.g. int2,
     /// int4, etc.
@@ -71,7 +71,7 @@ enum block_store_method
     /// \par Performance Notes:
     /// * Performance remains high due to increased memory coalescing, regardless of the
     /// number of items per thread.
-    /// * Performance may be better compared to \p block_store_direct and 
+    /// * Performance may be better compared to \p block_store_direct and
     /// \p block_store_vectorize due to reordering on local memory.
     block_store_transpose,
 
@@ -82,7 +82,7 @@ enum block_store_method
     /// \par Performance Notes:
     /// * Performance remains high due to increased memory coalescing, regardless of the
     /// number of items per thread.
-    /// * Performance may be better compared to \p block_store_direct and 
+    /// * Performance may be better compared to \p block_store_direct and
     /// \p block_store_vectorize due to reordering on local memory.
     block_store_warp_transpose,
 
