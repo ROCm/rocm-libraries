@@ -123,8 +123,8 @@ public:
     template<class PrefixCallback, class BinaryFunction>
     void inclusive_scan(T input,
                         T& output,
-                        PrefixCallback& prefix_callback_op,
                         storage_type& storage,
+                        PrefixCallback& prefix_callback_op,
                         BinaryFunction scan_op) [[hc]]
     {
         const auto flat_tid = ::rocprim::flat_block_thread_id();
@@ -210,8 +210,8 @@ public:
     >
     void inclusive_scan(T (&input)[ItemsPerThread],
                         T (&output)[ItemsPerThread],
-                        PrefixCallback& prefix_callback_op,
                         storage_type& storage,
+                        PrefixCallback& prefix_callback_op,
                         BinaryFunction scan_op) [[hc]]
     {
         // Reduce thread items
@@ -306,8 +306,8 @@ public:
     template<class PrefixCallback, class BinaryFunction>
     void exclusive_scan(T input,
                         T& output,
-                        PrefixCallback& prefix_callback_op,
                         storage_type& storage,
+                        PrefixCallback& prefix_callback_op,
                         BinaryFunction scan_op) [[hc]]
     {
         const auto flat_tid = ::rocprim::flat_block_thread_id();
@@ -403,8 +403,8 @@ public:
     >
     void exclusive_scan(T (&input)[ItemsPerThread],
                         T (&output)[ItemsPerThread],
-                        PrefixCallback& prefix_callback_op,
                         storage_type& storage,
+                        PrefixCallback& prefix_callback_op,
                         BinaryFunction scan_op) [[hc]]
     {
         // Reduce thread items
