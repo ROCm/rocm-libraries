@@ -33,6 +33,19 @@
 #include "intrinsics.hpp"
 #include "rocprim_version.hpp"
 
+#include "warp/warp_reduce.hpp"
+#include "warp/warp_scan.hpp"
+#include "warp/warp_sort.hpp"
+
+#include "block/block_discontinuity.hpp"
+#include "block/block_exchange.hpp"
+#include "block/block_load.hpp"
+#include "block/block_radix_sort.hpp"
+#include "block/block_scan.hpp"
+#include "block/block_store.hpp"
+
+#include "device/device_scan_hc.hpp"
+
 BEGIN_ROCPRIM_NAMESPACE
 
 /// \brief Returns version of rocPRIM library.
