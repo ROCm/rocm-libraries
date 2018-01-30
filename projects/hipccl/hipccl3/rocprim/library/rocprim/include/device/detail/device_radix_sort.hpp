@@ -61,7 +61,7 @@ void fill_digit_counts(const KeyIn * keys_input,
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
     constexpr unsigned int radix_size = 1 << RadixBits;
 
-    constexpr unsigned int warp_size =::rocprim::warp_size();
+    constexpr unsigned int warp_size = ::rocprim::warp_size();
     constexpr unsigned int warps_no = BlockSize / warp_size;
     static_assert(BlockSize % warp_size == 0, "BlockSize must be divisible by warp size");
     static_assert(radix_size <= BlockSize, "Radix size must not exceed BlockSize");

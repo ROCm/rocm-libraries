@@ -59,6 +59,45 @@ inline T get_random_value(T min, T max)
     return get_random_data(1, min, max)[0];
 }
 
+// Can't use std::prefix_sum for inclusive/exclusive scan, because
+// it does not handle short[] -> int(int a, int b) { a + b; } -> int[]
+// they way we expect. That's because sum in std::prefix_sum's implementation
+// is of type typename std::iterator_traits<InputIt>::value_type (short)
+template<class InputIt, class OutputIt, class BinaryOperation>
+OutputIt host_inclusive_scan(InputIt first, InputIt last,
+                             OutputIt d_first, BinaryOperation op)
+{
+    if (first == last) return d_first;
+
+    typename std::iterator_traits<OutputIt>::value_type sum = *first;
+    *d_first = sum;
+
+    while (++first != last) {
+       sum = op(sum, *first);
+       *++d_first = sum;
+    }
+    return ++d_first;
+}
+
+template<class InputIt, class T, class OutputIt, class BinaryOperation>
+OutputIt host_exclusive_scan(InputIt first, InputIt last,
+                             T initial_value, OutputIt d_first,
+                             BinaryOperation op)
+{
+    if (first == last) return d_first;
+
+    typename std::iterator_traits<OutputIt>::value_type sum = initial_value;
+    *d_first = initial_value;
+
+    while ((first+1) != last)
+    {
+       sum = op(sum, *first);
+       *++d_first = sum;
+       first++;
+    }
+    return ++d_first;
+}
+
 template<unsigned int Value>
 struct uint_wrapper
 {

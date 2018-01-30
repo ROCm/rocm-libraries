@@ -1,0 +1,454 @@
+// Copyright (c) 2017 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
+#ifndef ROCPRIM_DEVICE_DETAIL_DEVICE_SCAN_REDUCE_THEN_SCAN_HPP_
+#define ROCPRIM_DEVICE_DETAIL_DEVICE_SCAN_REDUCE_THEN_SCAN_HPP_
+
+#include <type_traits>
+#include <iterator>
+
+// HIP API
+#include <hip/hip_runtime.h>
+#include <hip/hip_hcc.h>
+
+#include "../../detail/config.hpp"
+#include "../../detail/various.hpp"
+
+#include "../../intrinsics.hpp"
+#include "../../functional.hpp"
+#include "../../types.hpp"
+
+#include "../../block/block_load.hpp"
+#include "../../block/block_store.hpp"
+#include "../../block/block_scan.hpp"
+#include "../../block/block_reduce.hpp"
+
+
+BEGIN_ROCPRIM_NAMESPACE
+
+namespace detail
+{
+
+// Helper functions for performing exclusive or inclusive
+// block scan in single_scan.
+template<
+    bool Exclusive,
+    class BlockScan,
+    class T,
+    class InitValueType,
+    unsigned int ItemsPerThread,
+    class BinaryFunction
+>
+auto single_scan_block_scan(T (&input)[ItemsPerThread],
+                            T (&output)[ItemsPerThread],
+                            InitValueType initial_value,
+                            typename BlockScan::storage_type& storage,
+                            BinaryFunction scan_op) [[hc]]
+    -> typename std::enable_if<Exclusive>::type
+{
+    BlockScan()
+        .exclusive_scan(
+            input, // input
+            output, // output
+            initial_value,
+            storage,
+            scan_op
+        );
+}
+
+template<
+    bool Exclusive,
+    class BlockScan,
+    class T,
+    class InitValueType,
+    unsigned int ItemsPerThread,
+    class BinaryFunction
+>
+auto single_scan_block_scan(T (&input)[ItemsPerThread],
+                            T (&output)[ItemsPerThread],
+                            InitValueType initial_value,
+                            typename BlockScan::storage_type& storage,
+                            BinaryFunction scan_op) [[hc]]
+    -> typename std::enable_if<!Exclusive>::type
+{
+    (void) initial_value;
+    BlockScan()
+        .inclusive_scan(
+            input, // input
+            output, // output
+            storage,
+            scan_op
+        );
+}
+
+template<
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    bool Exclusive,
+    class InputIterator,
+    class OutputIterator,
+    class BinaryFunction,
+    class InitValueType
+>
+void single_scan_kernel_impl(InputIterator input,
+                             const size_t input_size,
+                             InitValueType initial_value,
+                             OutputIterator output,
+                             BinaryFunction scan_op) [[hc]]
+{
+    using output_type = typename std::iterator_traits<OutputIterator>::value_type;
+
+    using block_load_type = ::rocprim::block_load<
+        output_type, BlockSize, ItemsPerThread,
+        ::rocprim::block_load_method::block_load_transpose
+    >;
+    using block_store_type = ::rocprim::block_store<
+        output_type, BlockSize, ItemsPerThread,
+        ::rocprim::block_store_method::block_store_transpose
+    >;
+    using block_scan_type = ::rocprim::block_scan<
+        output_type, BlockSize,
+        ::rocprim::block_scan_algorithm::reduce_then_scan
+    >;
+
+    __shared__ union
+    {
+        typename block_load_type::storage_type load;
+        typename block_store_type::storage_type store;
+        typename block_scan_type::storage_type scan;
+    } storage;
+
+    output_type values[ItemsPerThread];
+    // load input values into values
+    block_load_type()
+        .load(
+            input,
+            values,
+            input_size,
+            storage.load
+        );
+    ::rocprim::syncthreads(); // sync threads to reuse shared memory
+
+    single_scan_block_scan<Exclusive, block_scan_type>(
+        values, // input
+        values, // output
+        initial_value,
+        storage.scan,
+        scan_op
+    );
+    ::rocprim::syncthreads(); // sync threads to reuse shared memory
+
+    // Save values into output array
+    block_store_type()
+        .store(
+            output,
+            values,
+            input_size,
+            storage.store
+        );
+}
+
+// Calculates block prefixes that will be used in final_scan
+// when performing block scan operations.
+template<
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    class InputIterator,
+    class BinaryFunction,
+    class ScanOpResultType
+>
+void block_reduce_kernel_impl(InputIterator input,
+                              const size_t input_size,
+                              BinaryFunction scan_op,
+                              ScanOpResultType * block_prefixes) [[hc]]
+{
+    using result_type = ScanOpResultType;
+
+    using block_reduce_type = ::rocprim::block_reduce<
+        result_type, BlockSize,
+        ::rocprim::block_reduce_algorithm::using_warp_reduce
+    >;
+    __shared__ typename block_reduce_type::storage_type reduce_storage;
+
+    // It's assumed kernel is executed in 1D
+    const unsigned int flat_id = ::rocprim::block_thread_id(0);
+    const unsigned int flat_block_id = ::rocprim::block_id(0);
+
+    const unsigned int block_offset = flat_block_id * ItemsPerThread * BlockSize;
+    constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
+    // TODO: number_of_blocks can be calculated on host
+    const unsigned int number_of_blocks = (input_size + items_per_block - 1)/items_per_block;
+
+    // For input values
+    result_type values[ItemsPerThread];
+
+    result_type block_prefix;
+    // TODO: valid_in_last_block can be calculated on host
+    auto valid_in_last_block = input_size - items_per_block * (number_of_blocks - 1);
+    // load input values into values
+    if(flat_block_id == (number_of_blocks - 1)) // last block
+    {
+        block_load_direct_striped<BlockSize>(
+            flat_id,
+            input + block_offset,
+            values,
+            valid_in_last_block
+        );
+    }
+    else
+    {
+        block_load_direct_striped<BlockSize>(
+            flat_id,
+            input + block_offset,
+            values
+        );
+    }
+
+    block_reduce_type()
+        .reduce(
+            values, // input
+            block_prefix, // output
+            reduce_storage,
+            scan_op
+        );
+
+    // Save block prefix
+    if(flat_id == 0)
+    {
+        block_prefixes[flat_block_id] = block_prefix;
+    }
+}
+
+// Helper functions for performing exclusive or inclusive
+// block scan operation in final_scan
+template<
+    bool Exclusive,
+    class BlockScan,
+    class T,
+    unsigned int ItemsPerThread,
+    class ScanOpResultType,
+    class BinaryFunction
+>
+auto final_scan_block_scan(const unsigned int flat_block_id,
+                           T (&input)[ItemsPerThread],
+                           T (&output)[ItemsPerThread],
+                           T initial_value,
+                           ScanOpResultType * block_prefixes,
+                           typename BlockScan::storage_type& storage,
+                           BinaryFunction scan_op) [[hc]]
+    -> typename std::enable_if<Exclusive>::type
+{
+    if(flat_block_id == 0)
+    {
+        BlockScan()
+            .exclusive_scan(
+                input, // input
+                output, // output
+                initial_value,
+                storage,
+                scan_op
+            );
+    }
+    else
+    {
+        // Include initial value in block prefix
+        initial_value = scan_op(
+            initial_value, block_prefixes[flat_block_id - 1]
+        );
+        BlockScan()
+            .exclusive_scan(
+                input, // input
+                output, // output
+                initial_value,
+                storage,
+                scan_op
+            );
+    }
+}
+
+template<
+    bool Exclusive,
+    class BlockScan,
+    class T,
+    unsigned int ItemsPerThread,
+    class ScanOpResultType,
+    class BinaryFunction
+>
+auto final_scan_block_scan(const unsigned int flat_block_id,
+                           T (&input)[ItemsPerThread],
+                           T (&output)[ItemsPerThread],
+                           T initial_value,
+                           ScanOpResultType * block_prefixes,
+                           typename BlockScan::storage_type& storage,
+                           BinaryFunction scan_op) [[hc]]
+    -> typename std::enable_if<!Exclusive>::type
+{
+    (void) initial_value;
+    if(flat_block_id == 0)
+    {
+        BlockScan()
+            .inclusive_scan(
+                input, // input
+                output, // output
+                storage,
+                scan_op
+            );
+    }
+    else
+    {
+        auto block_prefix_op =
+            [&block_prefixes, &flat_block_id](const T& /*not used*/)
+            {
+                return block_prefixes[flat_block_id - 1];
+            };
+        BlockScan()
+            .inclusive_scan(
+                input, // input
+                output, // output
+                storage,
+                block_prefix_op,
+                scan_op
+            );
+    }
+}
+
+template<
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    bool Exclusive,
+    class InputIterator,
+    class OutputIterator,
+    class BinaryFunction,
+    class InitValueType,
+    class ScanOpResultType
+>
+void final_scan_kernel_impl(InputIterator input,
+                            const size_t input_size,
+                            OutputIterator output,
+                            const InitValueType initial_value,
+                            BinaryFunction scan_op,
+                            ScanOpResultType * block_prefixes) [[hc]]
+{
+    using output_type = typename std::iterator_traits<OutputIterator>::value_type;
+
+    using block_load_type = ::rocprim::block_load<
+        output_type, BlockSize, ItemsPerThread,
+        ::rocprim::block_load_method::block_load_transpose
+    >;
+    using block_store_type = ::rocprim::block_store<
+        output_type, BlockSize, ItemsPerThread,
+        ::rocprim::block_store_method::block_store_transpose
+    >;
+    using block_scan_type = ::rocprim::block_scan<
+        output_type, BlockSize,
+        ::rocprim::block_scan_algorithm::using_warp_scan
+    >;
+
+    __shared__ union
+    {
+        typename block_load_type::storage_type load;
+        typename block_store_type::storage_type store;
+        typename block_scan_type::storage_type scan;
+    } storage;
+
+    // It's assumed kernel is executed in 1D
+    const unsigned int flat_block_id = ::rocprim::block_id(0);
+
+    constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
+    const unsigned int block_offset = flat_block_id * items_per_block;
+    // TODO: number_of_blocks can be calculated on host
+    const unsigned int number_of_blocks = (input_size + items_per_block - 1)/items_per_block;
+
+    // For input values
+    output_type values[ItemsPerThread];
+
+    // TODO: valid_in_last_block can be calculated on host
+    auto valid_in_last_block = input_size - items_per_block * (number_of_blocks - 1);
+    // load input values into values
+    if(flat_block_id == (number_of_blocks - 1)) // last block
+    {
+        block_load_type()
+            .load(
+                input + block_offset,
+                values,
+                valid_in_last_block,
+                storage.load
+            );
+    }
+    else
+    {
+        block_load_type()
+            .load(
+                input + block_offset,
+                values,
+                storage.load
+            );
+    }
+
+    final_scan_block_scan<Exclusive, block_scan_type>(
+        flat_block_id,
+        values, // input
+        values, // output
+        static_cast<output_type>(initial_value),
+        block_prefixes,
+        storage.scan,
+        scan_op
+    );
+
+    // Save values into output array
+    if(flat_block_id == (number_of_blocks - 1)) // last block
+    {
+        block_store_type()
+            .store(
+                output + block_offset,
+                values,
+                valid_in_last_block,
+                storage.store
+            );
+    }
+    else
+    {
+        block_store_type()
+            .store(
+                output + block_offset,
+                values,
+                storage.store
+            );
+    }
+}
+
+// Returns size of temporary storage in bytes.
+template<class T>
+size_t get_temporary_storage_bytes(size_t input_size,
+                                   size_t items_per_block)
+{
+    if(input_size <= items_per_block)
+    {
+        return 0;
+    }
+    auto size = (input_size + items_per_block - 1)/(items_per_block);
+    return size * sizeof(T) + get_temporary_storage_bytes<T>(size, items_per_block);
+}
+
+} // end of detail namespace
+
+END_ROCPRIM_NAMESPACE
+
+#endif // ROCPRIM_DEVICE_DETAIL_DEVICE_SCAN_REDUCE_THEN_SCAN_HPP_
