@@ -39,17 +39,17 @@ function(meta_add_rocprim_example EXAMPLE_SOURCE ROCPRIM_TARGET)
   )
 endfunction()
 
-function(add_rocprim_example_hc EXAMPLE_NAME EXAMPLE_SOURCE)
-  meta_add_rocprim_example(${EXAMPLE_NAME} ${EXAMPLE_SOURCE} rocprim_hc)
+function(add_rocprim_example_hc EXAMPLE_SOURCE)
+  meta_add_rocprim_example(${EXAMPLE_SOURCE} rocprim_hc)
 endfunction()
 
-function(add_rocprim_example_hip EXAMPLE_NAME EXAMPLE_SOURCE)
-  meta_add_rocprim_example(${EXAMPLE_NAME} ${EXAMPLE_SOURCE} rocprim_hip)
+function(add_rocprim_example_hip EXAMPLE_SOURCE)
+  meta_add_rocprim_example(${EXAMPLE_SOURCE} rocprim_hip)
 endfunction()
 
 # ****************************************************************************
 # rocPRIM examples
 # ****************************************************************************
-
-# Example, remove after adding first example
-# add_rocprim_example_hc(warp_scan.cpp)
+ 
+add_rocprim_example_hip(example_hip_temporary_storage.cpp)
+add_rocprim_example_hc(example_hc_temporary_storage.cpp)
