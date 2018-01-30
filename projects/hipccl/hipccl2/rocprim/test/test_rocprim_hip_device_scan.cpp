@@ -67,7 +67,10 @@ typedef ::testing::Types<
     // -----------------------------------------------------------------------
     //
     // -----------------------------------------------------------------------
-    DeviceScanParams<int>
+    DeviceScanParams<int>,
+    DeviceScanParams<unsigned long>,
+    DeviceScanParams<short, int>,
+    DeviceScanParams<float, double>
 > RocprimDeviceScanTestsParams;
 
 std::vector<size_t> get_sizes()
@@ -75,7 +78,7 @@ std::vector<size_t> get_sizes()
     std::vector<size_t> sizes = {
         1, 10, 53, 211,
         1024, 2048, 5096,
-        34567, (1 << 17) - 1220
+        34567, (1 << 18) - 1220
     };
     const std::vector<size_t> random_sizes = get_random_data<size_t>(2, 1, 16384);
     sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
@@ -88,6 +91,7 @@ TYPED_TEST_CASE(RocprimDeviceScanTests, RocprimDeviceScanTestsParams);
 TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
 {
     using T = typename TestFixture::input_type;
+    using U = typename TestFixture::output_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
     const std::vector<size_t> sizes = get_sizes();
@@ -101,12 +105,12 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
 
         // Generate data
         std::vector<T> input = get_random_data<T>(size, 1, 1);
-        std::vector<T> output(input.size(), 0);
+        std::vector<U> output(input.size(), 0);
 
         T * d_input;
-        T * d_output;
+        U * d_output;
         HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
-        HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(T)));
+        HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(U)));
         HIP_CHECK(
             hipMemcpy(
                 d_input, input.data(),
@@ -117,12 +121,16 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
         HIP_CHECK(hipDeviceSynchronize());
         HIP_CHECK(hipStreamSynchronize(stream));
 
-        // Calculate expected results on host
-        std::vector<T> expected(input.size(), 0);
-        std::partial_sum(input.begin(), input.end(), expected.begin());
-
         // scan function
-        ::rocprim::plus<T> plus_op;
+        ::rocprim::plus<U> plus_op;
+
+        // Calculate expected results on host
+        std::vector<U> expected(input.size());
+        host_inclusive_scan(
+            input.begin(), input.end(),
+            expected.begin(), plus_op
+        );
+
         // temp storage
         size_t temp_storage_size_bytes;
         void * d_temp_storage = nullptr;
@@ -159,7 +167,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
         HIP_CHECK(
             hipMemcpy(
                 output.data(), d_output,
-                output.size() * sizeof(T),
+                output.size() * sizeof(U),
                 hipMemcpyDeviceToHost
             )
         );
@@ -170,7 +178,9 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
         for(size_t i = 0; i < output.size(); i++)
         {
             SCOPED_TRACE(testing::Message() << "where index = " << i);
-            ASSERT_EQ(output[i], expected[i]);
+            auto diff = std::max<U>(std::abs(0.01f * expected[i]), U(0.01f));
+            if(std::is_integral<U>::value) diff = 0;
+            ASSERT_NEAR(output[i], expected[i], diff);
         }
 
         hipFree(d_input);
@@ -185,6 +195,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
 TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanSum)
 {
     using T = typename TestFixture::input_type;
+    using U = typename TestFixture::output_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
     const std::vector<size_t> sizes = get_sizes();
@@ -198,12 +209,12 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanSum)
 
         // Generate data
         std::vector<T> input = get_random_data<T>(size, 1, 10);
-        std::vector<T> output(input.size(), 0);
+        std::vector<U> output(input.size());
 
         T * d_input;
-        T * d_output;
+        U * d_output;
         HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
-        HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(T)));
+        HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(U)));
         HIP_CHECK(
             hipMemcpy(
                 d_input, input.data(),
@@ -214,15 +225,18 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanSum)
         HIP_CHECK(hipDeviceSynchronize());
         HIP_CHECK(hipStreamSynchronize(stream));
 
-        // Calculate expected results on host
-        std::vector<T> expected(input.size(), 0);
-        T initial_value = get_random_value<T>(1, 100);
-        input[0] += initial_value;
-        expected[0] = initial_value;
-        std::partial_sum(input.begin(), input.end() - 1, expected.begin() + 1);
-
         // scan function
-        ::rocprim::plus<T> plus_op;
+        ::rocprim::plus<U> plus_op;
+
+        // Calculate expected results on host
+        std::vector<U> expected(input.size());
+        T initial_value = get_random_value<T>(1, 100);
+        host_exclusive_scan(
+            input.begin(), input.end(),
+            initial_value, expected.begin(),
+            plus_op
+        );
+
         // temp storage
         size_t temp_storage_size_bytes;
         void * d_temp_storage = nullptr;
@@ -259,7 +273,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanSum)
         HIP_CHECK(
             hipMemcpy(
                 output.data(), d_output,
-                output.size() * sizeof(T),
+                output.size() * sizeof(U),
                 hipMemcpyDeviceToHost
             )
         );
@@ -270,7 +284,9 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanSum)
         for(size_t i = 0; i < output.size(); i++)
         {
             SCOPED_TRACE(testing::Message() << "where index = " << i);
-            ASSERT_EQ(output[i], expected[i]);
+            auto diff = std::max<U>(std::abs(0.01f * expected[i]), U(0.01f));
+            if(std::is_integral<U>::value) diff = 0;
+            ASSERT_NEAR(output[i], expected[i], diff);
         }
 
         hipFree(d_input);
