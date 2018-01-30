@@ -179,10 +179,10 @@ void block_reduce_kernel_impl(InputIterator input,
                               BinaryFunction scan_op,
                               ScanOpResultType * block_prefixes) [[hc]]
 {
-    using input_type = typename std::iterator_traits<InputIterator>::value_type;
+    using result_type = ScanOpResultType;
 
     using block_reduce_type = ::rocprim::block_reduce<
-        input_type, BlockSize,
+        result_type, BlockSize,
         ::rocprim::block_reduce_algorithm::using_warp_reduce
     >;
     __shared__ typename block_reduce_type::storage_type reduce_storage;
@@ -197,9 +197,9 @@ void block_reduce_kernel_impl(InputIterator input,
     const unsigned int number_of_blocks = (input_size + items_per_block - 1)/items_per_block;
 
     // For input values
-    input_type values[ItemsPerThread];
+    result_type values[ItemsPerThread];
 
-    input_type block_prefix;
+    result_type block_prefix;
     // TODO: valid_in_last_block can be calculated on host
     auto valid_in_last_block = input_size - items_per_block * (number_of_blocks - 1);
     // load input values into values
@@ -243,14 +243,13 @@ template<
     class BlockScan,
     class T,
     unsigned int ItemsPerThread,
-    class InitValueType,
     class ScanOpResultType,
     class BinaryFunction
 >
 auto final_scan_block_scan(const unsigned int flat_block_id,
                            T (&input)[ItemsPerThread],
                            T (&output)[ItemsPerThread],
-                           InitValueType initial_value,
+                           T initial_value,
                            ScanOpResultType * block_prefixes,
                            typename BlockScan::storage_type& storage,
                            BinaryFunction scan_op) [[hc]]
@@ -289,22 +288,21 @@ template<
     class BlockScan,
     class T,
     unsigned int ItemsPerThread,
-    class InitValueType,
     class ScanOpResultType,
     class BinaryFunction
 >
 auto final_scan_block_scan(const unsigned int flat_block_id,
                            T (&input)[ItemsPerThread],
                            T (&output)[ItemsPerThread],
-                           InitValueType initial_value,
+                           T initial_value,
                            ScanOpResultType * block_prefixes,
                            typename BlockScan::storage_type& storage,
                            BinaryFunction scan_op) [[hc]]
     -> typename std::enable_if<!Exclusive>::type
 {
+    (void) initial_value;
     if(flat_block_id == 0)
     {
-        (void) initial_value;
         BlockScan()
             .inclusive_scan(
                 input, // input
@@ -408,7 +406,7 @@ void final_scan_kernel_impl(InputIterator input,
         flat_block_id,
         values, // input
         values, // output
-        initial_value,
+        static_cast<output_type>(initial_value),
         block_prefixes,
         storage.scan,
         scan_op
