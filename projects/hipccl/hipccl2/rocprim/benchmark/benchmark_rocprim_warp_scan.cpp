@@ -109,7 +109,7 @@ void warp_inclusive_scan_kernel(const T* input, T* output)
     auto value = input[i];
 
     using wscan_t = rp::warp_scan<T, WarpSize>;
-    tile_static typename wscan_t::storage_type storage;
+    __shared__ typename wscan_t::storage_type storage;
     wscan_t().inclusive_scan(value, value, storage);
 
     output[i] = value;
