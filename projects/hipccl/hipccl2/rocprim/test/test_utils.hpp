@@ -26,8 +26,50 @@
 #include <random>
 #include <type_traits>
 
-// Google Test
-#include <gtest/gtest.h>
+#include <rocprim.hpp>
+
+#ifdef ROCPRIM_HC_API
+size_t get_max_tile_size(hc::accelerator acc = hc::accelerator())
+{
+    return acc.get_max_tile_static_size();
+}
+#endif
+
+#if defined(ROCPRIM_HC_API) || defined(ROCPRIM_HIP_API)
+// Custom type used in tests
+template<class T>
+struct custom_test_type
+{
+    T x;
+    T y;
+
+    ROCPRIM_HOST_DEVICE
+    custom_test_type(T xx = 0, T yy = 0) : x(xx), y(yy) {}
+
+    ROCPRIM_HOST_DEVICE
+    ~custom_test_type() {}
+
+    ROCPRIM_HOST_DEVICE
+    custom_test_type& operator=(const custom_test_type& other)
+    {
+        x = other.x;
+        y = other.y;
+        return *this;
+    }
+
+    ROCPRIM_HOST_DEVICE
+    custom_test_type operator+(const custom_test_type& other) const
+    {
+        return custom_test_type(x + other.x, y + other.y);
+    }
+
+    ROCPRIM_HOST_DEVICE
+    bool operator==(const custom_test_type& other) const
+    {
+        return (x == other.x && y == other.y);
+    }
+};
+#endif
 
 template<class T>
 inline auto get_random_data(size_t size, T min, T max)
@@ -102,38 +144,6 @@ template<unsigned int Value>
 struct uint_wrapper
 {
     static constexpr unsigned int value = Value;
-};
-
-size_t get_max_tile_size(hc::accelerator acc = hc::accelerator())
-{
-    return acc.get_max_tile_static_size();
-}
-
-template<class T>
-struct custom_test_type
-{
-    T x;
-    T y;
-
-    custom_test_type(T xx = 0, T yy = 0) [[hc]] [[cpu]] : x(xx), y(yy) {}
-    ~custom_test_type() [[hc]] [[cpu]] {}
-
-    custom_test_type& operator=(const custom_test_type& other) [[hc]] [[cpu]]
-    {
-        x = other.x;
-        y = other.y;
-        return *this;
-    }
-
-    custom_test_type operator+(const custom_test_type& other) const [[hc]] [[cpu]]
-    {
-        return custom_test_type(x + other.x, y + other.y);
-    }
-
-    bool operator==(const custom_test_type& other) const [[hc]] [[cpu]]
-    {
-        return (x == other.x && y == other.y);
-    }
 };
 
 #endif // ROCPRIM_TEST_UTILS_HPP_

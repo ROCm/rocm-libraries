@@ -27,8 +27,8 @@
 #include <gtest/gtest.h>
 // HC API
 #include <hcc/hc.hpp>
-// rocPRIM
-#include <block/block_reduce.hpp>
+// rocPRIM API
+#include <rocprim.hpp>
 
 #include "test_utils.hpp"
 

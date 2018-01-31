@@ -28,9 +28,8 @@
 #include <gtest/gtest.h>
 // HIP API
 #include <hip/hip_runtime.h>
-
-// rocPRIM HIP API
-#include <device/device_scan_hip.hpp>
+// rocPRIM API
+#include <rocprim.hpp>
 
 #include "test_utils.hpp"
 

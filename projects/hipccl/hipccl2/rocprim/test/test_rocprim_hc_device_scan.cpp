@@ -29,9 +29,8 @@
 
 // HC API
 #include <hcc/hc.hpp>
-
-// rocPRIM HC API
-#include <device/device_scan_hc.hpp>
+// rocPRIM API
+#include <rocprim.hpp>
 
 #include "test_utils.hpp"
 
