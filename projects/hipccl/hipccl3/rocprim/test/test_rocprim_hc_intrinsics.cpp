@@ -29,9 +29,8 @@
 
 // HC API
 #include <hcc/hc.hpp>
-
-// rocPRIM
-#include <intrinsics.hpp>
+// rocPRIM API
+#include <rocprim.hpp>
 
 #include "test_utils.hpp"
 

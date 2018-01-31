@@ -31,10 +31,8 @@
 #include <gtest/gtest.h>
 // HC API
 #include <hcc/hc.hpp>
-// rocPRIM
-#include <block/block_radix_sort.hpp>
-#include <block/block_load.hpp>
-#include <block/block_store.hpp>
+// rocPRIM API
+#include <rocprim.hpp>
 
 #include "test_utils.hpp"
 

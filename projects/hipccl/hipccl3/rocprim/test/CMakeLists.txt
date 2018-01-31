@@ -45,10 +45,6 @@ function(meta_add_rocprim_test TEST_NAME TEST_SOURCE ROCPRIM_TARGET)
   add_test(${TEST_NAME} ${TEST_TARGET})
 endfunction()
 
-function(add_rocprim_test TEST_NAME TEST_SOURCE)
-  meta_add_rocprim_test(${TEST_NAME} ${TEST_SOURCE} rocprim)
-endfunction()
-
 function(add_rocprim_test_hc TEST_NAME TEST_SOURCE)
   meta_add_rocprim_test(${TEST_NAME} ${TEST_SOURCE} rocprim_hc)
 endfunction()
@@ -61,13 +57,12 @@ endfunction()
 # Tests
 # ****************************************************************************
 
-# HC and HIP tests without including rocPRIM
-add_rocprim_test("hcc.device_apis" test_device_apis.cpp)
-
-# rocPRIM tests
-add_rocprim_test("rocprim.basics" test_rocprim_basics.cpp)
+# HC and HIP tests without using rocPRIM
+add_rocprim_test_hc("hip.device_api" test_hc_api.cpp)
+add_rocprim_test_hip("hip.device_api" test_hip_api.cpp)
 
 # rocPRIM HC API tests
+add_rocprim_test_hc("rocprim.hc.basics" test_rocprim_basics.cpp)
 add_rocprim_test_hc("rocprim.hc.block_discontinuity" test_rocprim_hc_block_discontinuity.cpp)
 add_rocprim_test_hc("rocprim.hc.block_exchange" test_rocprim_hc_block_exchange.cpp)
 add_rocprim_test_hc("rocprim.hc.block_load_store" test_rocprim_hc_block_load_store.cpp)
