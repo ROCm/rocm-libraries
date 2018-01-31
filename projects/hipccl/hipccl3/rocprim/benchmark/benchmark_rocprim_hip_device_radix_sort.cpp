@@ -23,16 +23,15 @@
 #include <iostream>
 #include <chrono>
 #include <vector>
-#include <locale>
-#include <codecvt>
+#include <limits>
 #include <string>
+#include <cstdio>
+#include <cstdlib>
 
 // Google Benchmark
 #include "benchmark/benchmark.h"
-
 // CmdParser
 #include "cmdparser.hpp"
-
 #include "benchmark_utils.hpp"
 
 // HIP API
@@ -40,7 +39,7 @@
 #include <hip/hip_hcc.h>
 
 // rocPRIM
-#include <device/device_radix_sort_hip.hpp>
+#include <rocprim.hpp>
 
 #define HIP_CHECK(condition)         \
   {                                  \
@@ -131,27 +130,33 @@ void run_benchmark(benchmark::State& state, benchmark_kinds benchmark_kind, hipS
     HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
     HIP_CHECK(hipDeviceSynchronize());
 
+    const unsigned int batch_size = 10;
     for(auto _ : state)
     {
         auto start = std::chrono::high_resolution_clock::now();
-
         if(benchmark_kind == benchmark_kinds::sort_keys)
         {
-            rp::device_radix_sort_keys(
-                d_temporary_storage, temporary_storage_bytes,
-                d_keys_input, d_keys_output, size,
-                0, sizeof(key_type) * 8,
-                stream, false
-            );
+            for(size_t i = 0; i < batch_size; i++)
+            {
+                rp::device_radix_sort_keys(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_keys_input, d_keys_output, size,
+                    0, sizeof(key_type) * 8,
+                    stream, false
+                );
+            }
         }
         else if(benchmark_kind == benchmark_kinds::sort_pairs)
         {
-            rp::device_radix_sort_pairs(
-                d_temporary_storage, temporary_storage_bytes,
-                d_keys_input, d_keys_output, d_values_input, d_values_output, size,
-                0, sizeof(key_type) * 8,
-                stream, false
-            );
+            for(size_t i = 0; i < batch_size; i++)
+            {
+                rp::device_radix_sort_pairs(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_keys_input, d_keys_output, d_values_input, d_values_output, size,
+                    0, sizeof(key_type) * 8,
+                    stream, false
+                );
+            }
         }
         HIP_CHECK(hipDeviceSynchronize());
 
@@ -160,8 +165,8 @@ void run_benchmark(benchmark::State& state, benchmark_kinds benchmark_kind, hipS
             std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
         state.SetIterationTime(elapsed_seconds.count());
     }
-    state.SetBytesProcessed(state.iterations() * size * sizeof(key_type));
-    state.SetItemsProcessed(state.iterations() * size);
+    state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(key_type));
+    state.SetItemsProcessed(state.iterations() * batch_size * size);
 
     HIP_CHECK(hipFree(d_temporary_storage));
     HIP_CHECK(hipFree(d_keys_input));

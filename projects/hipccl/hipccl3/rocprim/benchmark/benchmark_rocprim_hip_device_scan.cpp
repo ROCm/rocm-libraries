@@ -22,24 +22,24 @@
 
 #include <iostream>
 #include <chrono>
-#include <thread>
 #include <vector>
-#include <locale>
-#include <codecvt>
+#include <limits>
 #include <string>
+#include <cstdio>
+#include <cstdlib>
 
 // Google Benchmark
 #include "benchmark/benchmark.h"
-
-// HIP API
-#include <hip/hip_runtime.h>
-
-// rocPRIM HIP API
-#include <rocprim_hip.hpp>
-
 // CmdParser
 #include "cmdparser.hpp"
 #include "benchmark_utils.hpp"
+
+// HIP API
+#include <hip/hip_runtime.h>
+#include <hip/hip_hcc.h>
+
+// rocPRIM
+#include <rocprim.hpp>
 
 #define HIP_CHECK(condition)         \
   {                                  \
@@ -163,11 +163,11 @@ void run_benchmark(benchmark::State& state,
     }
     HIP_CHECK(hipDeviceSynchronize());
 
+    const unsigned int batch_size = 10;
     for(auto _ : state)
     {
         auto start = std::chrono::high_resolution_clock::now();
-
-        for(size_t i = 0; i < 10; i++)
+        for(size_t i = 0; i < batch_size; i++)
         {
             HIP_CHECK(
                 run_device_scan<Exclusive>(
@@ -184,8 +184,8 @@ void run_benchmark(benchmark::State& state,
             std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
         state.SetIterationTime(elapsed_seconds.count());
     }
-    state.SetBytesProcessed(state.iterations() * 10 * size * sizeof(T));
-    state.SetItemsProcessed(state.iterations() * 10 * size);
+    state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
+    state.SetItemsProcessed(state.iterations() * batch_size * size);
 
     HIP_CHECK(hipFree(d_input));
     HIP_CHECK(hipFree(d_output));
