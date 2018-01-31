@@ -23,10 +23,7 @@
 
 #include <type_traits>
 
-// HC API
-#include <hcc/hc.hpp>
-
-#include "../detail/config.hpp"
+#include "../config.hpp"
 #include "../detail/various.hpp"
 
 #include "../intrinsics.hpp"
@@ -65,7 +62,7 @@ struct select_block_reduce_impl<block_reduce_algorithm::using_warp_reduce>
     template<class T, unsigned int BlockSize>
     using type = block_reduce_warp_reduce<T, BlockSize>;
 };
-    
+
 template<>
 struct select_block_reduce_impl<block_reduce_algorithm::raking_reduce>
 {
@@ -245,7 +242,7 @@ public:
     {
         base_type::reduce(input, output, storage, reduce_op);
     }
-    
+
     /// \overload
     /// \brief Performs reduction across threads in a block.
     ///
@@ -268,7 +265,7 @@ public:
     {
         base_type::reduce(input, output, reduce_op);
     }
-    
+
     /// \brief Performs reduction across threads in a block.
     ///
     /// \tparam ItemsPerThread - number of items in the \p input array.
@@ -353,7 +350,7 @@ public:
     {
         base_type::reduce(input, output, storage, reduce_op);
     }
-    
+
     /// \overload
     /// \brief Performs reduction across threads in a block.
     ///
@@ -380,7 +377,7 @@ public:
     {
         base_type::reduce(input, output, reduce_op);
     }
-    
+
     /// \brief Performs reduction across threads in a block.
     ///
     /// \tparam BinaryFunction - type of binary function used for reduce. Default type
@@ -465,7 +462,7 @@ public:
     {
         base_type::reduce(input, output, valid_items, storage, reduce_op);
     }
-    
+
     /// \overload
     /// \brief Performs reduction across threads in a block.
     ///

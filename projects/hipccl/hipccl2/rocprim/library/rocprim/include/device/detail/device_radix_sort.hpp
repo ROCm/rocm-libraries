@@ -23,7 +23,7 @@
 
 #include <type_traits>
 
-#include "../../detail/config.hpp"
+#include "../../config.hpp"
 #include "../../detail/various.hpp"
 #include "../../detail/radix_sort.hpp"
 

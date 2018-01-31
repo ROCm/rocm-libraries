@@ -21,10 +21,7 @@
 #ifndef ROCPRIM_INTRINSICS_THREAD_HPP_
 #define ROCPRIM_INTRINSICS_THREAD_HPP_
 
-// HC API
-#include <hcc/hc.hpp>
-
-#include "../detail/config.hpp"
+#include "../config.hpp"
 #include "../detail/various.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE

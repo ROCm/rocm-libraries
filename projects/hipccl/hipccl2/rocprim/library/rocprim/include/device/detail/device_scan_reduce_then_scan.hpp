@@ -24,11 +24,7 @@
 #include <type_traits>
 #include <iterator>
 
-// HIP API
-#include <hip/hip_runtime.h>
-#include <hip/hip_hcc.h>
-
-#include "../../detail/config.hpp"
+#include "../../config.hpp"
 #include "../../detail/various.hpp"
 
 #include "../../intrinsics.hpp"
@@ -128,7 +124,7 @@ void single_scan_kernel_impl(InputIterator input,
         ::rocprim::block_scan_algorithm::reduce_then_scan
     >;
 
-    __shared__ union
+    tile_static union
     {
         typename block_load_type::storage_type load;
         typename block_store_type::storage_type store;
@@ -185,7 +181,7 @@ void block_reduce_kernel_impl(InputIterator input,
         result_type, BlockSize,
         ::rocprim::block_reduce_algorithm::using_warp_reduce
     >;
-    __shared__ typename block_reduce_type::storage_type reduce_storage;
+    tile_static typename block_reduce_type::storage_type reduce_storage;
 
     // It's assumed kernel is executed in 1D
     const unsigned int flat_id = ::rocprim::block_thread_id(0);
@@ -361,7 +357,7 @@ void final_scan_kernel_impl(InputIterator input,
         ::rocprim::block_scan_algorithm::using_warp_scan
     >;
 
-    __shared__ union
+    tile_static union
     {
         typename block_load_type::storage_type load;
         typename block_store_type::storage_type store;
@@ -436,15 +432,15 @@ void final_scan_kernel_impl(InputIterator input,
 
 // Returns size of temporary storage in bytes.
 template<class T>
-size_t get_temporary_storage_bytes(size_t input_size,
-                                   size_t items_per_block)
+size_t scan_get_temporary_storage_bytes(size_t input_size,
+                                        size_t items_per_block)
 {
     if(input_size <= items_per_block)
     {
         return 0;
     }
     auto size = (input_size + items_per_block - 1)/(items_per_block);
-    return size * sizeof(T) + get_temporary_storage_bytes<T>(size, items_per_block);
+    return size * sizeof(T) + scan_get_temporary_storage_bytes<T>(size, items_per_block);
 }
 
 } // end of detail namespace

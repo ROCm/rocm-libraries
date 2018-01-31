@@ -24,11 +24,7 @@
 #include <type_traits>
 #include <iterator>
 
-// HIP API
-#include <hip/hip_runtime.h>
-#include <hip/hip_hcc.h>
-
-#include "../detail/config.hpp"
+#include "../config.hpp"
 #include "../detail/various.hpp"
 
 #include "detail/device_scan_reduce_then_scan.hpp"
@@ -161,7 +157,7 @@ hipError_t device_scan_impl(void * temporary_storage,
     // Calculate required temporary storage
     if(temporary_storage == nullptr)
     {
-        storage_size = get_temporary_storage_bytes<result_type>(size, items_per_block);
+        storage_size = scan_get_temporary_storage_bytes<result_type>(size, items_per_block);
         // Make sure user won't try to allocate 0 bytes memory, because
         // hipMalloc will return nullptr when size is zero.
         storage_size = storage_size == 0 ? 4 : storage_size;

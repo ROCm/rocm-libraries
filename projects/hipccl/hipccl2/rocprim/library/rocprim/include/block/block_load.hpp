@@ -21,11 +21,7 @@
 #ifndef ROCPRIM_BLOCK_BLOCK_LOAD_HPP_
 #define ROCPRIM_BLOCK_BLOCK_LOAD_HPP_
 
-// HC API
-#include <hcc/hc.hpp>
-#include <hcc/hc_short_vector.hpp>
-
-#include "../detail/config.hpp"
+#include "../config.hpp"
 #include "../detail/various.hpp"
 
 #include "../intrinsics.hpp"
@@ -70,7 +66,7 @@ enum class block_load_method
     /// \par Performance Notes:
     /// * Performance remains high due to increased memory coalescing, regardless of the
     /// number of items per thread.
-    /// * Performance may be better compared to \p block_load_direct and 
+    /// * Performance may be better compared to \p block_load_direct and
     /// \p block_load_vectorize due to reordering on local memory.
     block_load_transpose,
 
@@ -81,7 +77,7 @@ enum class block_load_method
     /// \par Performance Notes:
     /// * Performance remains high due to increased memory coalescing, regardless of the
     /// number of items per thread.
-    /// * Performance may be better compared to \p block_load_direct and 
+    /// * Performance may be better compared to \p block_load_direct and
     /// \p block_load_vectorize due to reordering on local memory.
     block_load_warp_transpose,
 
@@ -645,7 +641,7 @@ class block_load<T, BlockSize, ItemsPerThread, block_load_method::block_load_war
 {
 private:
     using block_exchange_type = block_exchange<T, BlockSize, ItemsPerThread>;
-    
+
 public:
     static_assert(BlockSize % warp_size() == 0,
                  "BlockSize must be a multiple of hardware warpsize");

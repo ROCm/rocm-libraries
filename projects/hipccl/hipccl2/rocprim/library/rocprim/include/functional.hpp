@@ -23,7 +23,8 @@
 
 #include <functional>
 
-#include "detail/config.hpp"
+// Meta configuration for rocPRIM
+#include "config.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 

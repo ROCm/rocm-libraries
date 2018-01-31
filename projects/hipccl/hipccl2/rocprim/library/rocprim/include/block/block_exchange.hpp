@@ -21,10 +21,7 @@
 #ifndef ROCPRIM_BLOCK_BLOCK_EXCHANGE_HPP_
 #define ROCPRIM_BLOCK_BLOCK_EXCHANGE_HPP_
 
-// HC API
-#include <hcc/hc.hpp>
-
-#include "../detail/config.hpp"
+#include "../config.hpp"
 #include "../detail/various.hpp"
 
 #include "../intrinsics.hpp"

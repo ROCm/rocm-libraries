@@ -25,11 +25,7 @@
 #include <type_traits>
 #include <utility>
 
-// HIP API
-#include <hip/hip_runtime.h>
-#include <hip/hip_hcc.h>
-
-#include "../detail/config.hpp"
+#include "../config.hpp"
 #include "../detail/various.hpp"
 #include "../detail/radix_sort.hpp"
 
