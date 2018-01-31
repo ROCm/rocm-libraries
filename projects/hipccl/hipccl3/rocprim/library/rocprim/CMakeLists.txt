@@ -38,16 +38,6 @@ target_include_directories(rocprim_headers
         $<INSTALL_INTERFACE:include>
 )
 
-# This target allows using both HIP and HC interfaces,
-# links against HIP library (which depends on HC)
-add_library(rocprim INTERFACE)
-target_link_libraries(rocprim
-    INTERFACE
-        rocprim_headers
-        hip::hip_hcc
-        hip::hip_device
-)
-
 # This target allows using only HC interface, links only
 # against HC/HSA library, doesn't require HIP
 add_library(rocprim_hc INTERFACE)
@@ -56,6 +46,10 @@ target_link_libraries(rocprim_hc
         rocprim_headers
         hcc::hccrt
         hcc::hc_am
+)
+target_compile_definitions(rocprim_hc
+    INTERFACE
+        ROCPRIM_HC_API=1
 )
 
 # This target allows using both HIP and HC interfaces,
@@ -66,4 +60,8 @@ target_link_libraries(rocprim_hip
         rocprim_headers
         hip::hip_hcc
         hip::hip_device
+)
+target_compile_definitions(rocprim_hip
+    INTERFACE
+        ROCPRIM_HIP_API=1
 )

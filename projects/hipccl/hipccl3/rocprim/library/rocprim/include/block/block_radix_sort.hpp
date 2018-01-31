@@ -23,10 +23,7 @@
 
 #include <type_traits>
 
-// HC API
-#include <hcc/hc.hpp>
-
-#include "../detail/config.hpp"
+#include "../config.hpp"
 #include "../detail/various.hpp"
 #include "../detail/radix_sort.hpp"
 #include "../warp/detail/warp_scan_shuffle.hpp"

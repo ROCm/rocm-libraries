@@ -21,6 +21,9 @@
 #ifndef ROCPRIM_INTRINSICS_HPP_
 #define ROCPRIM_INTRINSICS_HPP_
 
+// Meta configuration for rocPRIM
+#include "config.hpp"
+
 #include "intrinsics/bit.hpp"
 #include "intrinsics/thread.hpp"
 #include "intrinsics/warp.hpp"

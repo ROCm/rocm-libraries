@@ -25,10 +25,7 @@
 #include <type_traits>
 #include <utility>
 
-// HC API
-#include <hcc/hc.hpp>
-
-#include "../detail/config.hpp"
+#include "../config.hpp"
 #include "../detail/various.hpp"
 #include "../detail/radix_sort.hpp"
 

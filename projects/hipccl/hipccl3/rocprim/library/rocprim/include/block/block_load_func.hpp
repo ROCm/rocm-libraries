@@ -21,11 +21,7 @@
 #ifndef ROCPRIM_BLOCK_BLOCK_LOAD_FUNC_HPP_
 #define ROCPRIM_BLOCK_BLOCK_LOAD_FUNC_HPP_
 
-// HC API
-#include <hcc/hc.hpp>
-#include <hcc/hc_short_vector.hpp>
-
-#include "../detail/config.hpp"
+#include "../config.hpp"
 #include "../detail/various.hpp"
 
 #include "../intrinsics.hpp"

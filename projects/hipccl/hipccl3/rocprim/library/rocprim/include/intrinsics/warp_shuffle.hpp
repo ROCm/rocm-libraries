@@ -23,17 +23,11 @@
 
 #include <type_traits>
 
-// HC API
-#include <hcc/hc.hpp>
-
-#include "../detail/config.hpp"
-
+#include "../config.hpp"
 #include "thread.hpp"
 
 /// \addtogroup collectivewarpmodule
 /// @{
-
-#include "thread.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 

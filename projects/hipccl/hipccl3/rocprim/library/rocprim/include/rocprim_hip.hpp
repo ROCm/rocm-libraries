@@ -25,10 +25,11 @@
 ///
 /// Header to include the whole rocPRIM HIP API.
 
-// HIP API
-#include <hip/hip_runtime.h>
+// Meta configuration
+#include "config.hpp"
 
-#include "rocprim_hc.hpp"
+#include "intrinsics.hpp"
+#include "rocprim_version.hpp"
 
 #include "warp/warp_reduce.hpp"
 #include "warp/warp_scan.hpp"
@@ -41,11 +42,19 @@
 #include "block/block_scan.hpp"
 #include "block/block_store.hpp"
 
+#include "device/device_radix_sort_hip.hpp"
+#include "device/device_reduce_hip.hpp"
 #include "device/device_scan_hip.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
-// TODO
+/// \brief Returns version of rocPRIM library.
+/// \return version of rocPRIM library
+inline
+unsigned int version() __device__ __host__
+{
+    return ROCPRIM_VERSION;
+}
 
 END_ROCPRIM_NAMESPACE
 

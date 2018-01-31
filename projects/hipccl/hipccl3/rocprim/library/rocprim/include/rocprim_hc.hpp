@@ -25,10 +25,8 @@
 ///
 /// Header to include the whole rocPRIM HC API.
 
-// HC API
-#include <hcc/hc.hpp>
-
-#include "detail/config.hpp"
+// Meta configuration
+#include "config.hpp"
 
 #include "intrinsics.hpp"
 #include "rocprim_version.hpp"
@@ -44,6 +42,8 @@
 #include "block/block_scan.hpp"
 #include "block/block_store.hpp"
 
+#include "device/device_radix_sort_hc.hpp"
+#include "device/device_reduce_hc.hpp"
 #include "device/device_scan_hc.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE

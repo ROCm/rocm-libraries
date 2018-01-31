@@ -23,10 +23,7 @@
 
 #include <type_traits>
 
-// HC API
-#include <hcc/hc.hpp>
-
-#include "../detail/config.hpp"
+#include "../config.hpp"
 #include "../detail/various.hpp"
 
 #include "../intrinsics.hpp"
@@ -169,8 +166,8 @@ public:
     /// \param [in] input - array that data is loaded from.
     /// \param [in] flag_op - binary operation function object that will be used for flagging.
     /// The signature of the function should be equivalent to the following:
-    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>. 
-    /// The signature does not need to have <tt>const &</tt>, but function object 
+    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>.
+    /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
     /// \param [in] storage - reference to a temporary storage object of type storage_type.
     ///
@@ -226,8 +223,8 @@ public:
     /// \param [in] input - array that data is loaded from.
     /// \param [in] flag_op - binary operation function object that will be used for flagging.
     /// The signature of the function should be equivalent to the following:
-    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>. 
-    /// The signature does not need to have <tt>const &</tt>, but function object 
+    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>.
+    /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     void flag_heads(Flag (&head_flags)[ItemsPerThread],
@@ -239,7 +236,7 @@ public:
     }
 
     /// \brief Tags \p head_flags that indicate discontinuities between items partitioned
-    /// across the thread block, where the first item of the first thread is compared against 
+    /// across the thread block, where the first item of the first thread is compared against
     /// a \p tile_predecessor_item.
     ///
     /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
@@ -253,8 +250,8 @@ public:
     /// \param [in] input - array that data is loaded from.
     /// \param [in] flag_op - binary operation function object that will be used for flagging.
     /// The signature of the function should be equivalent to the following:
-    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>. 
-    /// The signature does not need to have <tt>const &</tt>, but function object 
+    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>.
+    /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
     /// \param [in] storage - reference to a temporary storage object of type storage_type.
     ///
@@ -305,7 +302,7 @@ public:
     }
 
     /// \brief Tags \p head_flags that indicate discontinuities between items partitioned
-    /// across the thread block, where the first item of the first thread is compared against 
+    /// across the thread block, where the first item of the first thread is compared against
     /// a \p tile_predecessor_item.
     ///
     /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
@@ -319,8 +316,8 @@ public:
     /// \param [in] input - array that data is loaded from.
     /// \param [in] flag_op - binary operation function object that will be used for flagging.
     /// The signature of the function should be equivalent to the following:
-    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>. 
-    /// The signature does not need to have <tt>const &</tt>, but function object 
+    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>.
+    /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     void flag_heads(Flag (&head_flags)[ItemsPerThread],
@@ -345,8 +342,8 @@ public:
     /// \param [in] input - array that data is loaded from.
     /// \param [in] flag_op - binary operation function object that will be used for flagging.
     /// The signature of the function should be equivalent to the following:
-    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>. 
-    /// The signature does not need to have <tt>const &</tt>, but function object 
+    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>.
+    /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
     /// \param [in] storage - reference to a temporary storage object of type storage_type.
     ///
@@ -402,8 +399,8 @@ public:
     /// \param [in] input - array that data is loaded from.
     /// \param [in] flag_op - binary operation function object that will be used for flagging.
     /// The signature of the function should be equivalent to the following:
-    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>. 
-    /// The signature does not need to have <tt>const &</tt>, but function object 
+    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>.
+    /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     void flag_tails(Flag (&tail_flags)[ItemsPerThread],
@@ -415,7 +412,7 @@ public:
     }
 
     /// \brief Tags \p tail_flags that indicate discontinuities between items partitioned
-    /// across the thread block, where the last item of the last thread is compared against 
+    /// across the thread block, where the last item of the last thread is compared against
     /// a \p tile_successor_item.
     ///
     /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
@@ -429,8 +426,8 @@ public:
     /// \param [in] input - array that data is loaded from.
     /// \param [in] flag_op - binary operation function object that will be used for flagging.
     /// The signature of the function should be equivalent to the following:
-    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>. 
-    /// The signature does not need to have <tt>const &</tt>, but function object 
+    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>.
+    /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
     /// \param [in] storage - reference to a temporary storage object of type storage_type.
     ///
@@ -481,7 +478,7 @@ public:
     }
 
     /// \brief Tags \p tail_flags that indicate discontinuities between items partitioned
-    /// across the thread block, where the last item of the last thread is compared against 
+    /// across the thread block, where the last item of the last thread is compared against
     /// a \p tile_successor_item.
     ///
     /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
@@ -495,8 +492,8 @@ public:
     /// \param [in] input - array that data is loaded from.
     /// \param [in] flag_op - binary operation function object that will be used for flagging.
     /// The signature of the function should be equivalent to the following:
-    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>. 
-    /// The signature does not need to have <tt>const &</tt>, but function object 
+    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>.
+    /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     void flag_tails(Flag (&tail_flags)[ItemsPerThread],
@@ -508,7 +505,7 @@ public:
         flag_tails(tail_flags, tile_successor_item, input, flag_op, storage);
     }
 
-    /// \brief Tags both \p head_flags and\p tail_flags that indicate discontinuities 
+    /// \brief Tags both \p head_flags and\p tail_flags that indicate discontinuities
     /// between items partitioned across the thread block.
     ///
     /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
@@ -521,8 +518,8 @@ public:
     /// \param [in] input - array that data is loaded from.
     /// \param [in] flag_op - binary operation function object that will be used for flagging.
     /// The signature of the function should be equivalent to the following:
-    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>. 
-    /// The signature does not need to have <tt>const &</tt>, but function object 
+    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>.
+    /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
     /// \param [in] storage - reference to a temporary storage object of type storage_type.
     ///
@@ -549,7 +546,7 @@ public:
     ///         int tail_flags[8];
     ///         block_discontinuity_int b_discontinuity;
     ///         using flag_op_type = typename rocprim::greater<int>;
-    ///         b_discontinuity.flag_heads_and_tails(head_flags, tail_flags, input, 
+    ///         b_discontinuity.flag_heads_and_tails(head_flags, tail_flags, input,
     ///                                              flag_op_type(), storage);
     ///         ...
     ///     }
@@ -568,7 +565,7 @@ public:
         );
     }
 
-    /// \brief Tags both \p head_flags and\p tail_flags that indicate discontinuities 
+    /// \brief Tags both \p head_flags and\p tail_flags that indicate discontinuities
     /// between items partitioned across the thread block.
     ///
     /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
@@ -581,8 +578,8 @@ public:
     /// \param [in] input - array that data is loaded from.
     /// \param [in] flag_op - binary operation function object that will be used for flagging.
     /// The signature of the function should be equivalent to the following:
-    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>. 
-    /// The signature does not need to have <tt>const &</tt>, but function object 
+    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>.
+    /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     void flag_heads_and_tails(Flag (&head_flags)[ItemsPerThread],
@@ -594,8 +591,8 @@ public:
         flag_heads_and_tails(head_flags, tail_flags, input, flag_op, storage);
     }
 
-    /// \brief Tags both \p head_flags and\p tail_flags that indicate discontinuities 
-    /// between items partitioned across the thread block, where the last item of the 
+    /// \brief Tags both \p head_flags and\p tail_flags that indicate discontinuities
+    /// between items partitioned across the thread block, where the last item of the
     /// last thread is compared against a \p tile_successor_item.
     ///
     /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
@@ -610,8 +607,8 @@ public:
     /// \param [in] input - array that data is loaded from.
     /// \param [in] flag_op - binary operation function object that will be used for flagging.
     /// The signature of the function should be equivalent to the following:
-    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>. 
-    /// The signature does not need to have <tt>const &</tt>, but function object 
+    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>.
+    /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
     /// \param [in] storage - reference to a temporary storage object of type storage_type.
     ///
@@ -664,8 +661,8 @@ public:
         );
     }
 
-    /// \brief Tags both \p head_flags and\p tail_flags that indicate discontinuities 
-    /// between items partitioned across the thread block, where the last item of the 
+    /// \brief Tags both \p head_flags and\p tail_flags that indicate discontinuities
+    /// between items partitioned across the thread block, where the last item of the
     /// last thread is compared against a \p tile_successor_item.
     ///
     /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
@@ -680,8 +677,8 @@ public:
     /// \param [in] input - array that data is loaded from.
     /// \param [in] flag_op - binary operation function object that will be used for flagging.
     /// The signature of the function should be equivalent to the following:
-    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>. 
-    /// The signature does not need to have <tt>const &</tt>, but function object 
+    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>.
+    /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     void flag_heads_and_tails(Flag (&head_flags)[ItemsPerThread],
@@ -694,8 +691,8 @@ public:
         flag_heads_and_tails(head_flags, tail_flags, tile_successor_item, input, flag_op, storage);
     }
 
-    /// \brief Tags both \p head_flags and\p tail_flags that indicate discontinuities 
-    /// between items partitioned across the thread block, where the first item of the 
+    /// \brief Tags both \p head_flags and\p tail_flags that indicate discontinuities
+    /// between items partitioned across the thread block, where the first item of the
     /// first thread is compared against a \p tile_predecessor_item.
     ///
     /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
@@ -710,8 +707,8 @@ public:
     /// \param [in] input - array that data is loaded from.
     /// \param [in] flag_op - binary operation function object that will be used for flagging.
     /// The signature of the function should be equivalent to the following:
-    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>. 
-    /// The signature does not need to have <tt>const &</tt>, but function object 
+    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>.
+    /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
     /// \param [in] storage - reference to a temporary storage object of type storage_type.
     ///
@@ -764,8 +761,8 @@ public:
         );
     }
 
-    /// \brief Tags both \p head_flags and\p tail_flags that indicate discontinuities 
-    /// between items partitioned across the thread block, where the first item of the 
+    /// \brief Tags both \p head_flags and\p tail_flags that indicate discontinuities
+    /// between items partitioned across the thread block, where the first item of the
     /// first thread is compared against a \p tile_predecessor_item.
     ///
     /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
@@ -780,8 +777,8 @@ public:
     /// \param [in] input - array that data is loaded from.
     /// \param [in] flag_op - binary operation function object that will be used for flagging.
     /// The signature of the function should be equivalent to the following:
-    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>. 
-    /// The signature does not need to have <tt>const &</tt>, but function object 
+    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>.
+    /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     void flag_heads_and_tails(Flag (&head_flags)[ItemsPerThread],
@@ -794,9 +791,9 @@ public:
         flag_heads_and_tails(head_flags, tile_predecessor_item, tail_flags, input, flag_op, storage);
     }
 
-    /// \brief Tags both \p head_flags and\p tail_flags that indicate discontinuities 
+    /// \brief Tags both \p head_flags and\p tail_flags that indicate discontinuities
     /// between items partitioned across the thread block, where the first and last items of
-    /// the first and last thread is compared against a \p tile_predecessor_item and 
+    /// the first and last thread is compared against a \p tile_predecessor_item and
     /// a \p tile_successor_item.
     ///
     /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
@@ -813,8 +810,8 @@ public:
     /// \param [in] input - array that data is loaded from.
     /// \param [in] flag_op - binary operation function object that will be used for flagging.
     /// The signature of the function should be equivalent to the following:
-    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>. 
-    /// The signature does not need to have <tt>const &</tt>, but function object 
+    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>.
+    /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
     /// \param [in] storage - reference to a temporary storage object of type storage_type.
     ///
@@ -871,9 +868,9 @@ public:
         );
     }
 
-    /// \brief Tags both \p head_flags and \p tail_flags that indicate discontinuities 
+    /// \brief Tags both \p head_flags and \p tail_flags that indicate discontinuities
     /// between items partitioned across the thread block, where the first and last items of
-    /// the first and last thread is compared against a \p tile_predecessor_item and 
+    /// the first and last thread is compared against a \p tile_predecessor_item and
     /// a \p tile_successor_item.
     ///
     /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
@@ -890,8 +887,8 @@ public:
     /// \param [in] input - array that data is loaded from.
     /// \param [in] flag_op - binary operation function object that will be used for flagging.
     /// The signature of the function should be equivalent to the following:
-    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>. 
-    /// The signature does not need to have <tt>const &</tt>, but function object 
+    /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>.
+    /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     void flag_heads_and_tails(Flag (&head_flags)[ItemsPerThread],
