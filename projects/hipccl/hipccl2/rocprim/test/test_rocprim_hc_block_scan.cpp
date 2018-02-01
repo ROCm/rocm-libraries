@@ -503,6 +503,64 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanPrefixCallback)
     }
 }
 
+TYPED_TEST(RocprimBlockScanSingleValueTests, CustomStruct)
+{
+    using base_type = typename TestFixture::type;
+    using T = custom_test_type<base_type>;
+    constexpr auto algorithm = TestFixture::algorithm;
+    constexpr size_t block_size = TestFixture::block_size;
+
+    hc::accelerator acc;
+    // Given block size not supported
+    if(block_size > get_max_tile_size(acc))
+    {
+        return;
+    }
+
+    const size_t size = block_size * 113;
+    // Generate data
+    std::vector<T> output(size);
+    {
+        std::vector<base_type> random_values =
+            get_random_data<base_type>(2 * output.size(), 2, 200);
+        for(size_t i = 0; i < output.size(); i++)
+        {
+            output[i].x = random_values[i],
+            output[i].y = random_values[i + output.size()];
+        }
+    }
+
+    // Calculate expected results on host
+    std::vector<T> expected(output.size());
+    for(size_t i = 0; i < output.size() / block_size; i++)
+    {
+        for(size_t j = 0; j < block_size; j++)
+        {
+            auto idx = i * block_size + j;
+            expected[idx] = output[idx] + expected[j > 0 ? idx-1 : idx];
+        }
+    }
+
+    hc::array_view<T, 1> d_output(output.size(), output.data());
+    hc::parallel_for_each(
+        acc.get_default_view(),
+        hc::extent<1>(output.size()).tile(block_size),
+        [=](hc::tiled_index<1> i) [[hc]]
+        {
+            T value = d_output[i];
+            rp::block_scan<T, block_size, algorithm> bscan;
+            bscan.inclusive_scan(value, value);
+            d_output[i] = value;
+        }
+    );
+
+    d_output.synchronize();
+    for(size_t i = 0; i < output.size(); i++)
+    {
+        ASSERT_EQ(output[i], expected[i]);
+    }
+}
+
 // ---------------------------------------------------------
 // Test for scan ops taking array of values as input
 // ---------------------------------------------------------

@@ -109,4 +109,31 @@ size_t get_max_tile_size(hc::accelerator acc = hc::accelerator())
     return acc.get_max_tile_static_size();
 }
 
+template<class T>
+struct custom_test_type
+{
+    T x;
+    T y;
+
+    custom_test_type(T xx = 0, T yy = 0) [[hc]] [[cpu]] : x(xx), y(yy) {}
+    ~custom_test_type() [[hc]] [[cpu]] {}
+
+    custom_test_type& operator=(const custom_test_type& other) [[hc]] [[cpu]]
+    {
+        x = other.x;
+        y = other.y;
+        return *this;
+    }
+
+    custom_test_type operator+(const custom_test_type& other) const [[hc]] [[cpu]]
+    {
+        return custom_test_type(x + other.x, y + other.y);
+    }
+
+    bool operator==(const custom_test_type& other) const [[hc]] [[cpu]]
+    {
+        return (x == other.x && y == other.y);
+    }
+};
+
 #endif // ROCPRIM_TEST_UTILS_HPP_

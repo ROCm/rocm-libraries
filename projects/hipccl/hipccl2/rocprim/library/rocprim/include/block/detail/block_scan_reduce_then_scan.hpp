@@ -66,9 +66,7 @@ public:
 
     struct storage_type
     {
-        // volatile allows not using barrier to sync threads when
-        // threads array is accessed only by threads from the same warp.
-        volatile T threads[warp_size_ * thread_reduction_size_ + bank_conflicts_padding];
+        T threads[warp_size_ * thread_reduction_size_ + bank_conflicts_padding];
     };
 
     template<class BinaryFunction>
@@ -464,12 +462,12 @@ private:
             const unsigned int idx_start = index(flat_tid * thread_reduction_size_);
             const unsigned int idx_end = idx_start + thread_reduction_size_;
 
-            T thread_reduction = static_cast<T>(storage.threads[idx_start]);
+            T thread_reduction = storage.threads[idx_start];
             #pragma unroll
             for(unsigned int i = idx_start + 1; i < idx_end; i++)
             {
                 thread_reduction = scan_op(
-                    thread_reduction, static_cast<T>(storage.threads[i])
+                    thread_reduction, storage.threads[i]
                 );
             }
 
@@ -480,14 +478,14 @@ private:
             // Include warp prefix
             thread_reduction =
                 flat_tid == 0 ?
-                    input : scan_op(thread_reduction, static_cast<T>(storage.threads[idx_start]));
+                    input : scan_op(thread_reduction, storage.threads[idx_start]);
 
             storage.threads[idx_start] = thread_reduction;
             #pragma unroll
             for(unsigned int i = idx_start + 1; i < idx_end; i++)
             {
                 thread_reduction = scan_op(
-                    thread_reduction, static_cast<T>(storage.threads[i])
+                    thread_reduction, storage.threads[i]
                 );
                 storage.threads[i] = thread_reduction;
             }
@@ -505,7 +503,8 @@ private:
     {
         // Calculates inclusive scan, result for each thread is stored in storage.threads[flat_tid]
         this->inclusive_scan_base(flat_tid, input, storage, scan_op);
-        output = flat_tid == 0 ? init : scan_op(init, static_cast<T>(storage.threads[index(flat_tid-1)]));
+        output = flat_tid == 0 ?
+            init : scan_op(init, storage.threads[index(flat_tid-1)]);
     }
 
     template<class BinaryFunction>
