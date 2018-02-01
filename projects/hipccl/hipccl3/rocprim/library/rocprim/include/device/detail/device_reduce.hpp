@@ -38,80 +38,56 @@
 #include "../../block/block_load.hpp"
 #include "../../block/block_reduce.hpp"
 
-
 BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
 {
-    
+
+// Helper functions for reducing final value with
+// initial value.
 template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    class InputIterator,
-    class OutputIterator,
-    class BinaryFunction,
-    class T
+    bool Final,
+    class T,
+    class InitValueType,
+    class BinaryFunction
 >
-void block_reduce_kernel_impl(InputIterator input,
-                              const size_t input_size,
-                              OutputIterator output,
-                              BinaryFunction reduce_op,
-                              T init_value) [[hc]]
+auto reduce_with_initial(T& output,
+                         InitValueType initial_value,
+                         BinaryFunction reduce_op) [[hc]]
+    -> typename std::enable_if<Final, T>::type
 {
-    using output_type = typename std::iterator_traits<OutputIterator>::value_type;
-    const unsigned int flat_id = ::rocprim::block_thread_id(0);
-    const unsigned int flat_block_id = ::rocprim::block_id(0);
-    constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
-    const unsigned int block_offset = flat_block_id * BlockSize * ItemsPerThread;
-    const unsigned int number_of_blocks = (input_size + items_per_block - 1)/items_per_block;
-    auto valid_in_last_block = input_size - items_per_block * (number_of_blocks - 1);
-    
-    using block_reduce_type = ::rocprim::block_reduce<
-        output_type, BlockSize,
-        ::rocprim::block_reduce_algorithm::using_warp_reduce
-    >;
+    return reduce_op(output, initial_value);
+}
 
-    output_type values[ItemsPerThread];
-    output_type output_value;
-    if(flat_block_id == (number_of_blocks - 1)) // last block
-    {
-        block_load_direct_striped<BlockSize>(flat_id,
-                                             input + block_offset,
-                                             values,
-                                             valid_in_last_block,
-                                             init_value);
-    }
-    else
-    {
-        block_load_direct_striped<BlockSize>(flat_id,
-                                             input + block_offset,
-                                             values);
-    }
-
-    // load input values into values
-    block_reduce_type()
-        . reduce(
-            values, // input
-            output_value, // output
-            reduce_op
-        );
-
-    // Save value into output
-    if(flat_id == 0)
-    {
-        output[flat_block_id] = output_value;
-    }
+template<
+    bool Final,
+    class T,
+    class InitValueType,
+    class BinaryFunction
+>
+auto reduce_with_initial(T& output,
+                         InitValueType initial_value,
+                         BinaryFunction reduce_op) [[hc]]
+    -> typename std::enable_if<!Final, T>::type
+{
+    (void) initial_value;
+    (void) reduce_op;
+    return output;
 }
 
 template<
     unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    bool Final,
     class InputIterator,
     class OutputIterator,
+    class InitValueType,
     class BinaryFunction
 >
-void final_reduce_kernel_impl(InputIterator input,
+void block_reduce_kernel_impl(InputIterator input,
                               const size_t input_size,
                               OutputIterator output,
+                              InitValueType initial_value,
                               BinaryFunction reduce_op) [[hc]]
 {
     using output_type = typename std::iterator_traits<OutputIterator>::value_type;
@@ -119,31 +95,69 @@ void final_reduce_kernel_impl(InputIterator input,
         output_type, BlockSize,
         ::rocprim::block_reduce_algorithm::using_warp_reduce
     >;
-    
+    constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
+
     const unsigned int flat_id = ::rocprim::block_thread_id(0);
     const unsigned int flat_block_id = ::rocprim::block_id(0);
-    const unsigned int global_id = flat_block_id * ::rocprim::flat_tile_size() + flat_id;
-    const unsigned int step = ::rocprim::flat_tile_size() * ::rocprim::grid_id(0);
-    unsigned int valid = input_size;
+    const unsigned int block_offset = flat_block_id * BlockSize * ItemsPerThread;
+    const unsigned int number_of_blocks = (input_size + items_per_block - 1)/items_per_block;
+    auto valid_in_last_block = input_size - items_per_block * (number_of_blocks - 1);
 
-    output_type output_value = input[global_id];
-    
-    for(size_t i = global_id + step; i < input_size; i += step)
+    output_type values[ItemsPerThread];
+    output_type output_value;
+    if(flat_block_id == (number_of_blocks - 1)) // last block
     {
-        output_value = reduce_op(output_value, input[i]);
-    }
-    
-    block_reduce_type()
-        .reduce(
-            output_value, // input
-            output_value, // output
-            valid,
-            reduce_op
+        block_load_direct_striped<BlockSize>(
+            flat_id,
+            input + block_offset,
+            values,
+            valid_in_last_block
         );
-    
+
+        output_value = values[0];
+        #pragma unroll
+        for(unsigned int i = 1; i < ItemsPerThread; i++)
+        {
+            unsigned int offset = i * BlockSize;
+            if(flat_id + offset < valid_in_last_block)
+            {
+                output_value = reduce_op(output_value, values[i]);
+            }
+        }
+
+        block_reduce_type()
+            .reduce(
+                output_value, // input
+                output_value, // output
+                valid_in_last_block,
+                reduce_op
+            );
+    }
+    else
+    {
+        block_load_direct_striped<BlockSize>(
+            flat_id,
+            input + block_offset,
+            values
+        );
+
+        // load input values into values
+        block_reduce_type()
+            .reduce(
+                values, // input
+                output_value, // output
+                reduce_op
+            );
+    }
+
+    // Save value into output
     if(flat_id == 0)
     {
-        output[flat_block_id] = output_value;
+        output[flat_block_id] = reduce_with_initial<Final>(
+                                    output_value,
+                                    initial_value,
+                                    reduce_op
+                                );
     }
 }
 
