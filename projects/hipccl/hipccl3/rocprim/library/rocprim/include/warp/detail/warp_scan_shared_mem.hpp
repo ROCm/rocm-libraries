@@ -46,7 +46,7 @@ class warp_scan_shared_mem
 public:
     struct storage_type
     {
-        volatile T threads[WarpSize];
+        T threads[WarpSize];
     };
 
     template<class BinaryFunction>
@@ -56,18 +56,14 @@ public:
         const unsigned int lid = detail::logical_lane_id<WarpSize>();
 
         T me = input;
-        storage.threads[lid] = me;
+        store_volatile(&storage.threads[lid], me);
         for(unsigned int i = 1; i < WarpSize; i *= 2)
         {
-            T other;
             if(lid >= i)
             {
-                other = storage.threads[lid - i];
-            }
-            if(lid >= i)
-            {
+                T other = load_volatile(&storage.threads[lid - i]);
                 me = scan_op(other, me);
-                storage.threads[lid] = me;
+                store_volatile(&storage.threads[lid], me);
             }
         }
         output = me;
@@ -78,7 +74,7 @@ public:
                         storage_type& storage, BinaryFunction scan_op) [[hc]]
     {
         inclusive_scan(input, output, storage, scan_op);
-        reduction = storage.threads[WarpSize - 1];
+        reduction = load_volatile(&storage.threads[WarpSize - 1]);
     }
 
     template<class BinaryFunction>
@@ -94,7 +90,7 @@ public:
                         storage_type& storage, BinaryFunction scan_op) [[hc]]
     {
         inclusive_scan(input, output, storage, scan_op);
-        reduction = storage.threads[WarpSize - 1];
+        reduction = load_volatile(&storage.threads[WarpSize - 1]);
         to_exclusive(output, init, storage, scan_op);
     }
 
@@ -111,7 +107,7 @@ public:
               storage_type& storage, BinaryFunction scan_op) [[hc]]
     {
         inclusive_scan(input, inclusive_output, storage, scan_op);
-        reduction = storage.threads[WarpSize - 1];
+        reduction = load_volatile(&storage.threads[WarpSize - 1]);
         to_exclusive(exclusive_output, init, storage, scan_op);
     }
 
@@ -123,7 +119,7 @@ private:
                       storage_type& storage, BinaryFunction scan_op) [[hc]]
     {
         const unsigned int lid = detail::logical_lane_id<WarpSize>();
-        exclusive_output = lid == 0 ? init : scan_op(init, static_cast<T>(storage.threads[lid-1]));
+        exclusive_output = lid == 0 ? init : scan_op(init, load_volatile(&storage.threads[lid-1]));
     }
 };
 

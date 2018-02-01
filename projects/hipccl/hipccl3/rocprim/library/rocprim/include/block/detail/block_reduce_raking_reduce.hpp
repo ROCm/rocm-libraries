@@ -61,9 +61,7 @@ public:
 
     struct storage_type
     {
-        // volatile allows not using barrier to sync threads when
-        // threads array is accessed only by threads from the same warp.
-        volatile T threads[BlockSize];
+        T threads[BlockSize];
     };
 
     template<class BinaryFunction>
@@ -156,12 +154,12 @@ private:
 
         if (flat_tid < warp_size_)
         {
-            T thread_reduction = static_cast<T>(storage.threads[flat_tid]);
+            T thread_reduction = storage.threads[flat_tid];
             #pragma unroll
             for(unsigned int i = warp_size_ + flat_tid; i < BlockSize; i += warp_size_)
             {
                 thread_reduction = reduce_op(
-                    thread_reduction, static_cast<T>(storage.threads[i])
+                    thread_reduction, storage.threads[i]
                 );
             }
             warp_reduce<block_size_smaller_than_warp_size_, warp_reduce_prefix_type>(
@@ -208,12 +206,12 @@ private:
 
         if (flat_tid < warp_size_)
         {
-            T thread_reduction = static_cast<T>(storage.threads[flat_tid]);
+            T thread_reduction = storage.threads[flat_tid];
             #pragma unroll
             for(unsigned int i = warp_size_ + flat_tid; i < BlockSize; i += warp_size_)
             {
                 thread_reduction = (i < valid_items) ? reduce_op(
-                    thread_reduction, static_cast<T>(storage.threads[i])
+                    thread_reduction, storage.threads[i]
                 ) : thread_reduction;
             }
             warp_reduce_prefix_type().reduce(thread_reduction, output, valid_items, reduce_op);
