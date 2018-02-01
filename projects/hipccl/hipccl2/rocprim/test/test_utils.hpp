@@ -140,10 +140,4 @@ OutputIt host_exclusive_scan(InputIt first, InputIt last,
     return ++d_first;
 }
 
-template<unsigned int Value>
-struct uint_wrapper
-{
-    static constexpr unsigned int value = Value;
-};
-
 #endif // ROCPRIM_TEST_UTILS_HPP_

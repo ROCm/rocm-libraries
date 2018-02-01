@@ -36,26 +36,32 @@
 
 namespace rp = rocprim;
 
-template<typename WarpSizeWrapper>
+template<unsigned int WarpSize>
+struct params
+{
+    static constexpr unsigned int warp_size = WarpSize;
+};
+
+template<typename Params>
 class RocprimWarpScanTests : public ::testing::Test {
 public:
-    static constexpr unsigned int warp_size = WarpSizeWrapper::value;
+    static constexpr unsigned int warp_size = Params::warp_size;
 };
 
 typedef ::testing::Types<
     // shuffle based scan
-    uint_wrapper<2U>,
-    uint_wrapper<4U>,
-    uint_wrapper<8U>,
-    uint_wrapper<16U>,
-    uint_wrapper<32U>,
-    uint_wrapper<64U>,
+    params<2U>,
+    params<4U>,
+    params<8U>,
+    params<16U>,
+    params<32U>,
+    params<64U>,
     // shared memory scan
-    uint_wrapper<3U>,
-    uint_wrapper<7U>,
-    uint_wrapper<15U>,
-    uint_wrapper<37U>,
-    uint_wrapper<61U>
+    params<3U>,
+    params<7U>,
+    params<15U>,
+    params<37U>,
+    params<61U>
 > WarpSizes;
 
 TYPED_TEST_CASE(RocprimWarpScanTests, WarpSizes);
