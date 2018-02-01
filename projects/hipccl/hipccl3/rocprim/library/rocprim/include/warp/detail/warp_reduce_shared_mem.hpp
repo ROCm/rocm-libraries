@@ -47,7 +47,7 @@ class warp_reduce_shared_mem
 public:
     struct storage_type
     {
-        volatile T threads[WarpSize];
+        T threads[WarpSize];
     };
 
 template<class BinaryFunction>
@@ -58,15 +58,15 @@ template<class BinaryFunction>
         unsigned int ceiling = next_power_of_two(WarpSize);
 
         output = input;
-        storage.threads[lid] = output;
+        store_volatile(&storage.threads[lid], output);
         for(unsigned int i = ceiling >> 1; i > 0; i >>= 1)
         {
             if (lid + i < WarpSize && lid < i)
             {
-                output = storage.threads[lid];
-                T other = storage.threads[lid + i];
+                output = load_volatile(&storage.threads[lid]);
+                T other = load_volatile(&storage.threads[lid + i]);
                 output = reduce_op(output, other);
-                storage.threads[lid] = output;
+                store_volatile(&storage.threads[lid], output);
             }
         }
         set_output<UseAllReduce>(output, storage);
@@ -80,15 +80,15 @@ template<class BinaryFunction>
         unsigned int ceiling = next_power_of_two(WarpSize);
 
         output = input;
-        storage.threads[lid] = output;
+        store_volatile(&storage.threads[lid], output);
         for(unsigned int i = ceiling >> 1; i > 0; i >>= 1)
         {
             if (lid + i < WarpSize && lid < i && lid + i < valid_items)
             {
-                output = storage.threads[lid];
-                T other = storage.threads[lid + i];
+                output = load_volatile(&storage.threads[lid]);
+                T other = load_volatile(&storage.threads[lid + i]);
                 output = reduce_op(output, other);
-                storage.threads[lid] = output;
+                store_volatile(&storage.threads[lid], output);
             }
         }
         set_output<UseAllReduce>(output, storage);
@@ -108,7 +108,7 @@ private:
     typename std::enable_if<(Switch == true)>::type
     set_output(T& output, storage_type& storage) [[hc]]
     {
-        output = storage.threads[0];
+        output = load_volatile(&storage.threads[0]);
     }
 };
 

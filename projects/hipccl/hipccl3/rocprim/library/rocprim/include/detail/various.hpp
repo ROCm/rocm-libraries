@@ -121,6 +121,78 @@ constexpr unsigned int get_lds_banks_no()
     return 32;
 }
 
+// Finds biggest fundamental type for type T that sizeof(T) is
+// a multiple of that type's size.
+template<class T>
+struct match_fundamental_type
+{
+    using type =
+        typename std::conditional<
+            sizeof(T)%8 == 0,
+            unsigned long long,
+            typename std::conditional<
+                sizeof(T)%4 == 0,
+                unsigned int,
+                typename std::conditional<
+                    sizeof(T)%2 == 0,
+                    unsigned short,
+                    unsigned char
+                >::type
+            >::type
+        >::type;
+};
+
+template<class T>
+auto store_volatile(T * output, T value)
+    -> typename std::enable_if<std::is_fundamental<T>::value>::type
+{
+    *const_cast<volatile T*>(output) = value;
+}
+
+template<class T>
+auto store_volatile(T * output, T value)
+    -> typename std::enable_if<!std::is_fundamental<T>::value>::type
+{
+    using fundamental_type = typename match_fundamental_type<T>::type;
+    constexpr unsigned int n = sizeof(T) / sizeof(fundamental_type);
+
+    auto input_ptr = reinterpret_cast<volatile fundamental_type*>(&value);
+    auto output_ptr = reinterpret_cast<volatile fundamental_type*>(output);
+
+    #pragma unroll
+    for(unsigned int i = 0; i < n; i++)
+    {
+        output_ptr[i] = input_ptr[i];
+    }
+}
+
+template<class T>
+auto load_volatile(T * input)
+    -> typename std::enable_if<std::is_fundamental<T>::value, T>::type
+{
+    T retval = *const_cast<volatile T*>(input);
+    return retval;
+}
+
+template<class T>
+auto load_volatile(T * input)
+    -> typename std::enable_if<!std::is_fundamental<T>::value, T>::type
+{
+    using fundamental_type = typename match_fundamental_type<T>::type;
+    constexpr unsigned int n = sizeof(T) / sizeof(fundamental_type);
+
+    T retval;
+    auto output_ptr = reinterpret_cast<volatile fundamental_type*>(&retval);
+    auto input_ptr = reinterpret_cast<volatile fundamental_type*>(input);
+
+    #pragma unroll
+    for(unsigned int i = 0; i < n; i++)
+    {
+        output_ptr[i] = input_ptr[i];
+    }
+    return retval;
+}
+
 } // end namespace detail
 END_ROCPRIM_NAMESPACE
 
