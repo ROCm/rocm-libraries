@@ -80,7 +80,7 @@ void run_benchmark(benchmark::State& state,
     T * d_input;
     T * d_output;
     HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
-    HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
+    HIP_CHECK(hipMalloc(&d_output, sizeof(T)));
     HIP_CHECK(
         hipMemcpy(
             d_input, input.data(),
@@ -97,8 +97,8 @@ void run_benchmark(benchmark::State& state,
     HIP_CHECK(
         rocprim::device_reduce(
             d_temp_storage, temp_storage_size_bytes,
-            d_input, d_output, size,
-            reduce_op, T(), stream
+            d_input, d_output, T(), size,
+            reduce_op, stream
         )
     );
     HIP_CHECK(hipMalloc(&d_temp_storage,temp_storage_size_bytes));
@@ -110,24 +110,25 @@ void run_benchmark(benchmark::State& state,
         HIP_CHECK(
             rocprim::device_reduce(
                 d_temp_storage, temp_storage_size_bytes,
-                d_input, d_output, size,
-                reduce_op, T(), stream
+                d_input, d_output, T(), size,
+                reduce_op, stream
             )
         );
     }
     HIP_CHECK(hipDeviceSynchronize());
 
+    const unsigned int batch_size = 10;
     for(auto _ : state)
     {
         auto start = std::chrono::high_resolution_clock::now();
 
-        for(size_t i = 0; i < 10; i++)
+        for(size_t i = 0; i < batch_size; i++)
         {
             HIP_CHECK(
                 rocprim::device_reduce(
                     d_temp_storage, temp_storage_size_bytes,
-                    d_input, d_output, size,
-                    reduce_op, T(), stream
+                    d_input, d_output, T(), size,
+                    reduce_op, stream
                 )
             );
         }
@@ -138,8 +139,8 @@ void run_benchmark(benchmark::State& state,
             std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
         state.SetIterationTime(elapsed_seconds.count());
     }
-    state.SetBytesProcessed(state.iterations() * 10 * size * sizeof(T));
-    state.SetItemsProcessed(state.iterations() * 10 * size);
+    state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
+    state.SetItemsProcessed(state.iterations() * batch_size * size);
 
     HIP_CHECK(hipFree(d_input));
     HIP_CHECK(hipFree(d_output));
