@@ -102,6 +102,12 @@ inline unsigned int block_id(unsigned int dim) [[hc]]
     return hc_get_group_id(dim);
 }
 
+/// \brief Returns grid identifier by dimension.
+inline unsigned int grid_id(unsigned int dim) [[hc]]
+{
+    return hc_get_num_groups(dim);
+}
+
 // Sync
 
 /// \brief Synchronize all threads in a block (tile)
