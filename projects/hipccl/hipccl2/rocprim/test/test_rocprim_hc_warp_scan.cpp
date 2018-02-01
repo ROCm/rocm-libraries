@@ -596,3 +596,70 @@ TYPED_TEST(RocprimWarpScanTests, ScanReduceFloat)
         );
     }
 }
+
+TYPED_TEST(RocprimWarpScanTests, InclusiveScanCustomStruct)
+{
+    using base_type = int;
+    using T = custom_test_type<base_type>;
+
+    // logical warp side for warp primitive, execution warp size is always rp::warp_size()
+    constexpr size_t logical_warp_size = TestFixture::warp_size;
+    constexpr size_t block_size =
+        rp::detail::is_power_of_two(logical_warp_size)
+            ? rp::max<size_t>(rp::warp_size(), logical_warp_size * 4)
+            : (rp::warp_size()/logical_warp_size) * logical_warp_size;
+    const size_t size = block_size * 4;
+
+    // Given warp size not supported
+    if(logical_warp_size > rp::warp_size())
+    {
+        return;
+    }
+
+    // Generate data
+    std::vector<T> output(size); // used for input/output
+    {
+        auto random_values =
+            get_random_data<base_type>(2 * output.size(), 0, 100);
+        for(size_t i = 0; i < output.size(); i++)
+        {
+            output[i].x = random_values[i];
+            output[i].y = random_values[i + output.size()];
+        }
+    }
+
+    // Calculate expected results on host
+    std::vector<T> expected(output.size());
+    for(size_t i = 0; i < output.size() / logical_warp_size; i++)
+    {
+        for(size_t j = 0; j < logical_warp_size; j++)
+        {
+            auto idx = i * logical_warp_size + j;
+            expected[idx] = output[idx] + expected[j > 0 ? idx-1 : idx];
+        }
+    }
+
+    hc::array_view<T, 1> d_output(output.size(), output.data());
+    hc::parallel_for_each(
+        hc::extent<1>(output.size()).tile(block_size),
+        [=](hc::tiled_index<1> i) [[hc]]
+        {
+            constexpr unsigned int warps_no = block_size/logical_warp_size;
+            const unsigned int warp_id = rp::detail::logical_warp_id<logical_warp_size>();
+
+            T value = d_output[i];
+
+            using wscan_t = rp::warp_scan<T, logical_warp_size>;
+            tile_static typename wscan_t::storage_type storage[warps_no];
+            wscan_t().inclusive_scan(value, value, storage[warp_id]);
+
+            d_output[i] = value;
+        }
+    );
+
+    d_output.synchronize();
+    for(size_t i = 0; i < output.size(); i++)
+    {
+        ASSERT_EQ(output[i], expected[i]);
+    }
+}

@@ -141,7 +141,9 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSum)
     d_output.synchronize();
     for(size_t i = 0; i < output.size(); i++)
     {
-        ASSERT_NEAR(output[i], expected[i], 0.01);
+        auto diff = std::max<type>(std::abs(0.1f * expected[i]), type(0.01f));
+        if(std::is_integral<type>::value) diff = 0;
+        ASSERT_NEAR(output[i], expected[i], diff);
     }
 }
 
@@ -205,7 +207,9 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSum)
     d_output.synchronize();
     for(size_t i = 0; i < output.size(); i++)
     {
-        ASSERT_NEAR(output[i], expected[i], 0.01);
+        auto diff = std::max<type>(std::abs(0.1f * expected[i]), type(0.01f));
+        if(std::is_integral<type>::value) diff = 0;
+        ASSERT_NEAR(output[i], expected[i], diff);
     }
 }
 
@@ -269,7 +273,9 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumValid)
     d_output.synchronize();
     for(size_t i = 0; i < output.size(); i++)
     {
-        ASSERT_NEAR(output[i], expected[i], 0.01);
+        auto diff = std::max<type>(std::abs(0.1f * expected[i]), type(0.01f));
+        if(std::is_integral<type>::value) diff = 0;
+        ASSERT_NEAR(output[i], expected[i], diff);
     }
 }
 
@@ -334,7 +340,88 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSumValid)
     d_output.synchronize();
     for(size_t i = 0; i < output.size(); i++)
     {
-        ASSERT_NEAR(output[i], expected[i], 0.01);
+        auto diff = std::max<type>(std::abs(0.1f * expected[i]), type(0.01f));
+        if(std::is_integral<type>::value) diff = 0;
+        ASSERT_NEAR(output[i], expected[i], diff);
     }
 }
 
+TYPED_TEST(RocprimWarpReduceTests, ReduceSumCustomStruct)
+{
+    using base_type = typename TestFixture::params::type;
+    using type = custom_test_type<base_type>;
+
+    // logical warp side for warp primitive, execution warp size is always rp::warp_size()
+    constexpr size_t logical_warp_size = TestFixture::params::warp_size;
+    constexpr size_t block_size =
+        rp::detail::is_power_of_two(logical_warp_size)
+            ? rp::max<size_t>(rp::warp_size(), logical_warp_size * 4)
+            : (rp::warp_size()/logical_warp_size) * logical_warp_size;
+    const size_t size = block_size * 4;
+
+    // Given warp size not supported
+    if(logical_warp_size > rp::warp_size())
+    {
+        return;
+    }
+
+    // Generate data
+    std::vector<type> input(size);
+    {
+        auto random_values =
+            get_random_data<base_type>(2 * input.size(), 0, 100);
+        for(size_t i = 0; i < input.size(); i++)
+        {
+            input[i].x = random_values[i];
+            input[i].y = random_values[i + input.size()];
+        }
+    }
+    std::vector<type> output(input.size() / logical_warp_size);
+
+    // Calculate expected results on host
+    std::vector<type> expected(output.size());
+    for(size_t i = 0; i < output.size(); i++)
+    {
+        type value(0, 0);
+        for(size_t j = 0; j < logical_warp_size; j++)
+        {
+            auto idx = i * logical_warp_size + j;
+            value = value + input[idx];
+        }
+        expected[i] = value;
+    }
+
+    hc::array_view<type, 1> d_input(input.size(), input.data());
+    hc::array_view<type, 1> d_output(output.size(), output.data());
+    hc::parallel_for_each(
+        hc::extent<1>(input.size()).tile(block_size),
+        [=](hc::tiled_index<1> i) [[hc]]
+        {
+            constexpr unsigned int warps_no = block_size/logical_warp_size;
+            const unsigned int warp_id = rp::detail::logical_warp_id<logical_warp_size>();
+
+            type value = d_input[i];
+
+            using wreduce_t = rp::warp_reduce<type, logical_warp_size>;
+            tile_static typename wreduce_t::storage_type storage[warps_no];
+            wreduce_t().reduce(value, value, storage[warp_id]);
+
+            if (i.local[0] % logical_warp_size == 0)
+            {
+                d_output[i.global[0] / logical_warp_size] = value;
+            }
+        }
+    );
+
+    d_output.synchronize();
+    for(size_t i = 0; i < output.size(); i++)
+    {
+        auto diffx = std::max<base_type>(std::abs(0.1f * expected[i].x), base_type(0.01f));
+        if(std::is_integral<base_type>::value) diffx = 0;
+        ASSERT_NEAR(output[i].x, expected[i].x, diffx);
+
+        auto diffy = std::max<base_type>(std::abs(0.1f * expected[i].y), base_type(0.01f));
+        if(std::is_integral<base_type>::value) diffy = 0;
+        ASSERT_NEAR(output[i].y, expected[i].y, diffy);
+    }
+}
