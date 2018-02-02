@@ -138,8 +138,9 @@ public:
     /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
     template<class BinaryFunction = ::rocprim::less<Key>>
+    ROCPRIM_DEVICE inline
     void sort(Key& thread_key,
-              BinaryFunction compare_function = BinaryFunction()) [[hc]]
+              BinaryFunction compare_function = BinaryFunction())
     {
         base_type::sort(thread_key, compare_function);
     }
@@ -177,9 +178,10 @@ public:
     /// );
     /// \endcode
     template<class BinaryFunction = ::rocprim::less<Key>>
+    ROCPRIM_DEVICE inline
     void sort(Key& thread_key,
               storage_type& storage,
-              BinaryFunction compare_function = BinaryFunction()) [[hc]]
+              BinaryFunction compare_function = BinaryFunction())
     {
         base_type::sort(
             thread_key, storage, compare_function
@@ -198,9 +200,10 @@ public:
     /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
     template<class BinaryFunction = ::rocprim::less<Key>>
+    ROCPRIM_DEVICE inline
     void sort(Key& thread_key,
               Value& thread_value,
-              BinaryFunction compare_function = BinaryFunction()) [[hc]]
+              BinaryFunction compare_function = BinaryFunction())
     {
         base_type::sort(
             thread_key, thread_value, compare_function
@@ -243,10 +246,11 @@ public:
     /// d_output.synchronize();
     /// \endcode
     template<class BinaryFunction = ::rocprim::less<Key>>
+    ROCPRIM_DEVICE inline
     void sort(Key& thread_key,
               Value& thread_value,
               storage_type& storage,
-              BinaryFunction compare_function = BinaryFunction()) [[hc]]
+              BinaryFunction compare_function = BinaryFunction())
     {
         base_type::sort(
             thread_key, thread_value, storage, compare_function
