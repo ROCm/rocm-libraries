@@ -47,8 +47,8 @@ public:
     using storage_type = detail::empty_storage_type;
 
     template<class BinaryFunction>
-    void reduce(T input, T& output,
-                BinaryFunction reduce_op) [[hc]]
+    ROCPRIM_DEVICE inline
+    void reduce(T input, T& output, BinaryFunction reduce_op)
     {
         output = input;
 
@@ -63,16 +63,16 @@ public:
     }
 
     template<class BinaryFunction>
-    void reduce(T input, T& output,
-                storage_type& storage, BinaryFunction reduce_op) [[hc]]
+    ROCPRIM_DEVICE inline
+    void reduce(T input, T& output, storage_type& storage, BinaryFunction reduce_op)
     {
         (void) storage; // disables unused parameter warning
         this->reduce(input, output, reduce_op);
     }
 
     template<class BinaryFunction>
-    void reduce(T input, T& output, unsigned int valid_items,
-                BinaryFunction reduce_op) [[hc]]
+    ROCPRIM_DEVICE inline
+    void reduce(T input, T& output, unsigned int valid_items, BinaryFunction reduce_op)
     {
         output = input;
 
@@ -88,8 +88,9 @@ public:
     }
 
     template<class BinaryFunction>
+    ROCPRIM_DEVICE inline
     void reduce(T input, T& output, unsigned int valid_items,
-                storage_type& storage, BinaryFunction reduce_op) [[hc]]
+                storage_type& storage, BinaryFunction reduce_op)
     {
         (void) storage; // disables unused parameter warning
         this->reduce(input, output, valid_items, reduce_op);
@@ -97,16 +98,18 @@ public:
 
 private:
     template<bool Switch>
+    ROCPRIM_DEVICE inline
     typename std::enable_if<(Switch == false)>::type
-    set_output(T& output) [[hc]]
+    set_output(T& output)
     {
         (void) output;
         // output already set correctly
     }
 
     template<bool Switch>
+    ROCPRIM_DEVICE inline
     typename std::enable_if<(Switch == true)>::type
-    set_output(T& output) [[hc]]
+    set_output(T& output)
     {
         output = warp_shuffle(output, 0, WarpSize);
     }

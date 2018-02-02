@@ -47,9 +47,9 @@ public:
         T threads[WarpSize];
     };
 
-template<class BinaryFunction>
-    void reduce(T input, T& output,
-                storage_type& storage, BinaryFunction reduce_op) [[hc]]
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE inline
+    void reduce(T input, T& output, storage_type& storage, BinaryFunction reduce_op)
     {
         const unsigned int lid = detail::logical_lane_id<WarpSize>();
         unsigned int ceiling = next_power_of_two(WarpSize);
@@ -70,8 +70,9 @@ template<class BinaryFunction>
     }
 
     template<class BinaryFunction>
+    ROCPRIM_DEVICE inline
     void reduce(T input, T& output, unsigned int valid_items,
-                storage_type& storage, BinaryFunction reduce_op) [[hc]]
+                storage_type& storage, BinaryFunction reduce_op)
     {
         const unsigned int lid = detail::logical_lane_id<WarpSize>();
         unsigned int ceiling = next_power_of_two(WarpSize);
@@ -93,8 +94,9 @@ template<class BinaryFunction>
 
 private:
     template<bool Switch>
+    ROCPRIM_DEVICE inline
     typename std::enable_if<(Switch == false)>::type
-    set_output(T& output, storage_type& storage) [[hc]]
+    set_output(T& output, storage_type& storage)
     {
         (void) output;
         (void) storage;
@@ -102,8 +104,9 @@ private:
     }
 
     template<bool Switch>
+    ROCPRIM_DEVICE inline
     typename std::enable_if<(Switch == true)>::type
-    set_output(T& output, storage_type& storage) [[hc]]
+    set_output(T& output, storage_type& storage)
     {
         output = load_volatile(&storage.threads[0]);
     }

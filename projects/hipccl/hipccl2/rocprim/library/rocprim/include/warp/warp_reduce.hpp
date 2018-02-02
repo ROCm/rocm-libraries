@@ -226,10 +226,11 @@ public:
     /// \endcode
     /// \endparblock
     template<class BinaryFunction = ::rocprim::plus<T>>
+    ROCPRIM_DEVICE inline
     void reduce(T input,
                 T& output,
                 storage_type& storage,
-                BinaryFunction reduce_op = BinaryFunction()) [[hc]]
+                BinaryFunction reduce_op = BinaryFunction())
     {
         base_type::reduce(input, output, storage, reduce_op);
     }
@@ -309,11 +310,12 @@ public:
     /// \endcode
     /// \endparblock
     template<class BinaryFunction = ::rocprim::plus<T>>
+    ROCPRIM_DEVICE inline
     void reduce(T input,
                 T& output,
                 int valid_items,
                 storage_type& storage,
-                BinaryFunction reduce_op = BinaryFunction()) [[hc]]
+                BinaryFunction reduce_op = BinaryFunction())
     {
         base_type::reduce(input, output, valid_items, storage, reduce_op);
     }
