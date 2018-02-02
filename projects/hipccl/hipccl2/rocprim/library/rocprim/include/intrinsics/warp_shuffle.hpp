@@ -35,8 +35,8 @@ namespace detail
 {
 
 template<class T, class ShuffleOp>
-inline
-T warp_shuffle_op(T input, ShuffleOp&& op) [[hc]]
+ROCPRIM_DEVICE inline
+T warp_shuffle_op(T input, ShuffleOp&& op)
 {
     constexpr int words_no = (sizeof(T) + sizeof(int) - 1) / sizeof(int);
 
@@ -69,8 +69,8 @@ T warp_shuffle_op(T input, ShuffleOp&& op) [[hc]]
 /// \param src_lane - warp if of a thread whose \p input should be returned
 /// \param width - logical warp width
 template<class T>
-inline
-T warp_shuffle(T input, const int src_lane, const int width = warp_size()) [[hc]]
+ROCPRIM_DEVICE inline
+T warp_shuffle(T input, const int src_lane, const int width = warp_size())
 {
     return detail::warp_shuffle_op(
         input,
@@ -94,8 +94,8 @@ T warp_shuffle(T input, const int src_lane, const int width = warp_size()) [[hc]
 /// \param delta - offset for calulcating source lane id
 /// \param width - logical warp width
 template<class T>
-inline
-T warp_shuffle_up(T input, const unsigned int delta, const int width = warp_size()) [[hc]]
+ROCPRIM_DEVICE inline
+T warp_shuffle_up(T input, const unsigned int delta, const int width = warp_size())
 {
     return detail::warp_shuffle_op(
         input,
@@ -119,8 +119,8 @@ T warp_shuffle_up(T input, const unsigned int delta, const int width = warp_size
 /// \param delta - offset for calulcating source lane id
 /// \param width - logical warp width
 template<class T>
-inline
-T warp_shuffle_down(T input, const unsigned int delta, const int width = warp_size()) [[hc]]
+ROCPRIM_DEVICE inline
+T warp_shuffle_down(T input, const unsigned int delta, const int width = warp_size())
 {
     return detail::warp_shuffle_op(
         input,
@@ -143,8 +143,8 @@ T warp_shuffle_down(T input, const unsigned int delta, const int width = warp_si
 /// \param lane_mask - mask used for calulcating source lane id
 /// \param width - logical warp width
 template<class T>
-inline
-T warp_shuffle_xor(T input, const int lane_mask, const int width = warp_size()) [[hc]]
+ROCPRIM_DEVICE inline
+T warp_shuffle_xor(T input, const int lane_mask, const int width = warp_size())
 {
     return detail::warp_shuffle_op(
         input,
