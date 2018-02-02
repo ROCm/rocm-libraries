@@ -32,7 +32,7 @@ BEGIN_ROCPRIM_NAMESPACE
 ///
 /// It is constant for a device.
 ROCPRIM_HOST_DEVICE
-constexpr unsigned int warp_size()
+inline constexpr unsigned int warp_size()
 {
     // Using marco allows contexpr, but we may have to
     // change it to hc::__wavesize() for safety
@@ -41,13 +41,15 @@ constexpr unsigned int warp_size()
 }
 
 /// \brief Returns flat size of a multidimensional block (tile).
-inline unsigned int flat_block_size() [[hc]]
+ROCPRIM_DEVICE
+inline unsigned int flat_block_size()
 {
     return hc_get_group_size(2) * hc_get_group_size(1) * hc_get_group_size(0);
 }
 
 /// \brief Returns flat size of a multidimensional tile (block).
-inline unsigned int flat_tile_size() [[hc]]
+ROCPRIM_DEVICE
+inline unsigned int flat_tile_size()
 {
     return flat_block_size();
 }
@@ -55,13 +57,15 @@ inline unsigned int flat_tile_size() [[hc]]
 // IDs
 
 /// \brief Returns thread identifier in a warp.
-inline unsigned int lane_id() [[hc]]
+ROCPRIM_DEVICE
+inline unsigned int lane_id()
 {
     return hc::__lane_id();
 }
 
 /// \brief Returns flat (linear, 1D) thread identifier in a multidimensional block (tile).
-inline unsigned int flat_block_thread_id() [[hc]]
+ROCPRIM_DEVICE
+inline unsigned int flat_block_thread_id()
 {
     return (hc_get_workitem_id(2) * hc_get_group_size(1) * hc_get_group_size(0))
         + (hc_get_workitem_id(1) * hc_get_group_size(0))
@@ -69,25 +73,29 @@ inline unsigned int flat_block_thread_id() [[hc]]
 }
 
 /// \brief Returns thread identifier in a multidimensional block (tile) by dimension.
-inline unsigned int block_thread_id(unsigned int dim) [[hc]]
+ROCPRIM_DEVICE
+inline unsigned int block_thread_id(unsigned int dim)
 {
     return hc_get_workitem_id(dim);
 }
 
 /// \brief Returns flat (linear, 1D) thread identifier in a multidimensional tile (block).
-inline unsigned int flat_tile_thread_id() [[hc]]
+ROCPRIM_DEVICE
+inline unsigned int flat_tile_thread_id()
 {
     return flat_block_thread_id();
 }
 
 /// \brief Returns warp id in a block (tile).
-inline unsigned int warp_id() [[hc]]
+ROCPRIM_DEVICE
+inline unsigned int warp_id()
 {
     return flat_block_thread_id()/warp_size();
 }
 
 /// \brief Returns flat (linear, 1D) block identifier in a multidimensional grid.
-inline unsigned int flat_block_id() [[hc]]
+ROCPRIM_DEVICE
+inline unsigned int flat_block_id()
 {
     return (hc_get_group_id(2) * hc_get_num_groups(1) * hc_get_num_groups(0))
         + (hc_get_group_id(1) * hc_get_num_groups(0))
@@ -95,13 +103,15 @@ inline unsigned int flat_block_id() [[hc]]
 }
 
 /// \brief Returns block identifier in a multidimensional grid by dimension.
-inline unsigned int block_id(unsigned int dim) [[hc]]
+ROCPRIM_DEVICE
+inline unsigned int block_id(unsigned int dim)
 {
     return hc_get_group_id(dim);
 }
 
 /// \brief Returns grid identifier by dimension.
-inline unsigned int grid_id(unsigned int dim) [[hc]]
+ROCPRIM_DEVICE
+inline unsigned int grid_id(unsigned int dim)
 {
     return hc_get_num_groups(dim);
 }
@@ -109,7 +119,8 @@ inline unsigned int grid_id(unsigned int dim) [[hc]]
 // Sync
 
 /// \brief Synchronize all threads in a block (tile)
-inline void syncthreads() [[hc]]
+ROCPRIM_DEVICE
+inline void syncthreads()
 {
     hc_barrier(CLK_LOCAL_MEM_FENCE);
 }
@@ -118,34 +129,39 @@ namespace detail
 {
     // Return thread id in a "logical warp", which can be smaller than a hardware warp size.
     template<unsigned int LogicalWarpSize>
-    auto logical_lane_id() [[hc]]
+    ROCPRIM_DEVICE inline
+    auto logical_lane_id()
         -> typename std::enable_if<detail::is_power_of_two(LogicalWarpSize), unsigned int>::type
     {
         return lane_id() & (LogicalWarpSize-1); // same as land_id()%WarpSize
     }
 
     template<unsigned int LogicalWarpSize>
-    auto logical_lane_id() [[hc]]
+    ROCPRIM_DEVICE inline
+    auto logical_lane_id()
         -> typename std::enable_if<!detail::is_power_of_two(LogicalWarpSize), unsigned int>::type
     {
         return lane_id()%LogicalWarpSize;
     }
 
     template<>
-    unsigned int logical_lane_id<warp_size()>() [[hc]]
+    ROCPRIM_DEVICE inline
+    unsigned int logical_lane_id<warp_size()>()
     {
         return lane_id();
     }
 
     // Return id of "logical warp" in a block
     template<unsigned int LogicalWarpSize>
-    unsigned int logical_warp_id() [[hc]]
+    ROCPRIM_DEVICE inline
+    unsigned int logical_warp_id()
     {
         return flat_block_thread_id()/LogicalWarpSize;
     }
 
     template<>
-    unsigned int logical_warp_id<warp_size()>() [[hc]]
+    ROCPRIM_DEVICE inline
+    unsigned int logical_warp_id<warp_size()>()
     {
         return warp_id();
     }
