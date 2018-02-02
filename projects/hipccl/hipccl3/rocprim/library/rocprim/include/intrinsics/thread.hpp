@@ -31,7 +31,8 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \brief Returns a number of threads in a hardware warp.
 ///
 /// It is constant for a device.
-constexpr unsigned int warp_size() [[hc]] [[cpu]]
+ROCPRIM_HOST_DEVICE
+constexpr unsigned int warp_size()
 {
     // Using marco allows contexpr, but we may have to
     // change it to hc::__wavesize() for safety

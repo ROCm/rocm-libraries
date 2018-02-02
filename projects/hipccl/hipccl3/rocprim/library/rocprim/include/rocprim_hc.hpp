@@ -50,8 +50,8 @@ BEGIN_ROCPRIM_NAMESPACE
 
 /// \brief Returns version of rocPRIM library.
 /// \return version of rocPRIM library
-inline
-unsigned int version() [[hc]] [[cpu]]
+ROCPRIM_HOST_DEVICE
+inline unsigned int version()
 {
     return ROCPRIM_VERSION;
 }

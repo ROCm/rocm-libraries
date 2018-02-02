@@ -23,7 +23,7 @@
 
 #include <type_traits>
 
-#include "config.hpp"
+#include "../config.hpp"
 #include "../types.hpp"
 
 // TODO: Refactor when it gets crowded
@@ -52,9 +52,9 @@ constexpr T next_power_of_two(const T x, const T acc = 1)
 }
 
 template<class T>
-inline constexpr
-typename std::enable_if<std::is_integral<T>::value, T>::type
-ceiling_div(T a, T b) [[hc]] [[cpu]]
+ROCPRIM_HOST_DEVICE
+inline constexpr auto ceiling_div(T a, T b)
+    -> typename std::enable_if<std::is_integral<T>::value, T>::type
 {
     return (a + b - 1) / b;
 }
@@ -108,7 +108,8 @@ struct match_vector_type
 
 // Checks if Items is odd and ensures that size of T is smaller than vector_type.
 template<class T, unsigned int Items>
-inline constexpr bool is_vectorizable() [[hc]] [[cpu]]
+ROCPRIM_HOST_DEVICE
+inline constexpr bool is_vectorizable()
 {
     return (Items % 2 == 0) &&
            (sizeof(T) < sizeof(typename match_vector_type<T, Items>::type));
