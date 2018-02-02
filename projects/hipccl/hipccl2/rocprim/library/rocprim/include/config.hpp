@@ -57,6 +57,10 @@
         #define ROCPRIM_SHARED_MEMORY __shared__
     #endif
 #else
+    #define ROCPRIM_DEVICE
+    #define ROCPRIM_HOST
+    #define ROCPRIM_HOST_DEVICE
+    #define ROCPRIM_SHARED_MEMORY
     #error "HIP and HC APIs are not available"
 #endif
 

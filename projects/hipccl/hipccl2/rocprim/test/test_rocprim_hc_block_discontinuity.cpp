@@ -63,7 +63,8 @@ public:
 template<class T>
 struct custom_flag_op1
 {
-    bool operator()(const T& a, const T& b, unsigned int b_index) [[hc]] [[cpu]]
+    ROCPRIM_HOST_DEVICE
+    bool operator()(const T& a, const T& b, unsigned int b_index)
     {
         return (a == b) || (b_index % 10 == 0);
     }
@@ -72,7 +73,8 @@ struct custom_flag_op1
 template<class T>
 struct custom_flag_op2
 {
-    bool operator()(const T& a, const T& b) const [[hc]] [[cpu]]
+    ROCPRIM_HOST_DEVICE
+    bool operator()(const T& a, const T& b) const
     {
         return (a - b > 5);
     }
@@ -81,14 +83,14 @@ struct custom_flag_op2
 // Host (CPU) implementaions of the wrapping function that allows to pass 3 args
 template<class T, class FlagOp>
 typename std::enable_if<rp::detail::with_b_index_arg<T, FlagOp>::value, bool>::type
-apply(FlagOp flag_op, const T& a, const T& b, unsigned int b_index) [[cpu]]
+apply(FlagOp flag_op, const T& a, const T& b, unsigned int b_index)
 {
     return flag_op(a, b, b_index);
 }
 
 template<class T, class FlagOp>
 typename std::enable_if<!rp::detail::with_b_index_arg<T, FlagOp>::value, bool>::type
-apply(FlagOp flag_op, const T& a, const T& b, unsigned int) [[cpu]]
+apply(FlagOp flag_op, const T& a, const T& b, unsigned int)
 {
     return flag_op(a, b);
 }
