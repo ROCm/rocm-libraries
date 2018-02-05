@@ -235,10 +235,11 @@ public:
     /// \p output value will be <tt>{-256}</tt>.
     /// \endparblock
     template<class BinaryFunction = ::rocprim::plus<T>>
+    ROCPRIM_DEVICE inline
     void reduce(T input,
                 T& output,
                 storage_type& storage,
-                BinaryFunction reduce_op = BinaryFunction()) [[hc]]
+                BinaryFunction reduce_op = BinaryFunction())
     {
         base_type::reduce(input, output, storage, reduce_op);
     }
@@ -259,9 +260,10 @@ public:
     /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
     template<class BinaryFunction = ::rocprim::plus<T>>
+    ROCPRIM_DEVICE inline
     void reduce(T input,
                 T& output,
-                BinaryFunction reduce_op = BinaryFunction()) [[hc]]
+                BinaryFunction reduce_op = BinaryFunction())
     {
         base_type::reduce(input, output, reduce_op);
     }
@@ -343,10 +345,11 @@ public:
         unsigned int ItemsPerThread,
         class BinaryFunction = ::rocprim::plus<T>
     >
+    ROCPRIM_DEVICE inline
     void reduce(T (&input)[ItemsPerThread],
                 T& output,
                 storage_type& storage,
-                BinaryFunction reduce_op = BinaryFunction()) [[hc]]
+                BinaryFunction reduce_op = BinaryFunction())
     {
         base_type::reduce(input, output, storage, reduce_op);
     }
@@ -371,9 +374,10 @@ public:
         unsigned int ItemsPerThread,
         class BinaryFunction = ::rocprim::plus<T>
     >
+    ROCPRIM_DEVICE inline
     void reduce(T (&input)[ItemsPerThread],
                 T& output,
-                BinaryFunction reduce_op = BinaryFunction()) [[hc]]
+                BinaryFunction reduce_op = BinaryFunction())
     {
         base_type::reduce(input, output, reduce_op);
     }
@@ -454,11 +458,12 @@ public:
     /// \endcode
     /// \endparblock
     template<class BinaryFunction = ::rocprim::plus<T>>
+    ROCPRIM_DEVICE inline
     void reduce(T input,
                 T& output,
                 unsigned int valid_items,
                 storage_type& storage,
-                BinaryFunction reduce_op = BinaryFunction()) [[hc]]
+                BinaryFunction reduce_op = BinaryFunction())
     {
         base_type::reduce(input, output, valid_items, storage, reduce_op);
     }
@@ -481,10 +486,11 @@ public:
     /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
     template<class BinaryFunction = ::rocprim::plus<T>>
+    ROCPRIM_DEVICE inline
     void reduce(T input,
                 T& output,
                 unsigned int valid_items,
-                BinaryFunction reduce_op = BinaryFunction()) [[hc]]
+                BinaryFunction reduce_op = BinaryFunction())
     {
         base_type::reduce(input, output, valid_items, reduce_op);
     }
