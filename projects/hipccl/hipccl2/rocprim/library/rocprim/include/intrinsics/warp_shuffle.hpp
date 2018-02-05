@@ -76,7 +76,11 @@ T warp_shuffle(T input, const int src_lane, const int width = warp_size())
         input,
         [=](int v) -> int
         {
-            return hc::__shfl(v, src_lane, width);
+            #ifdef ROCPRIM_HC_API
+                return hc::__shfl(v, src_lane, width);
+            #else
+                return __shfl(v, src_lane, width);
+            #endif
         }
     );
 }
@@ -91,7 +95,7 @@ T warp_shuffle(T input, const int src_lane, const int width = warp_size())
 /// undefined if it is not a power of 2, or it is greater than warp_size().
 ///
 /// \param input - input to pass to other threads
-/// \param delta - offset for calulcating source lane id
+/// \param delta - offset for calculating source lane id
 /// \param width - logical warp width
 template<class T>
 ROCPRIM_DEVICE inline
@@ -101,7 +105,11 @@ T warp_shuffle_up(T input, const unsigned int delta, const int width = warp_size
         input,
         [=](int v) -> int
         {
-            return hc::__shfl_up(v, delta, width);
+            #ifdef ROCPRIM_HC_API
+                return hc::__shfl_up(v, delta, width);
+            #else
+                return __shfl_up(v, delta, width);
+            #endif
         }
     );
 }
@@ -116,7 +124,7 @@ T warp_shuffle_up(T input, const unsigned int delta, const int width = warp_size
 /// undefined if it is not a power of 2, or it is greater than warp_size().
 ///
 /// \param input - input to pass to other threads
-/// \param delta - offset for calulcating source lane id
+/// \param delta - offset for calculating source lane id
 /// \param width - logical warp width
 template<class T>
 ROCPRIM_DEVICE inline
@@ -126,7 +134,11 @@ T warp_shuffle_down(T input, const unsigned int delta, const int width = warp_si
         input,
         [=](int v) -> int
         {
-            return hc::__shfl_down(v, delta, width);
+            #ifdef ROCPRIM_HC_API
+                return hc::__shfl_down(v, delta, width);
+            #else
+                return __shfl_down(v, delta, width);
+            #endif
         }
     );
 }
@@ -140,7 +152,7 @@ T warp_shuffle_down(T input, const unsigned int delta, const int width = warp_si
 /// undefined if it is not a power of 2, or it is greater than warp_size().
 ///
 /// \param input - input to pass to other threads
-/// \param lane_mask - mask used for calulcating source lane id
+/// \param lane_mask - mask used for calculating source lane id
 /// \param width - logical warp width
 template<class T>
 ROCPRIM_DEVICE inline
@@ -150,7 +162,11 @@ T warp_shuffle_xor(T input, const int lane_mask, const int width = warp_size())
         input,
         [=](int v) -> int
         {
-            return hc::__shfl_xor(v, lane_mask, width);
+            #ifdef ROCPRIM_HC_API
+                return hc::__shfl_xor(v, lane_mask, width);
+            #else
+                return __shfl_xor(v, lane_mask, width);
+            #endif
         }
     );
 }
