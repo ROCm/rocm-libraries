@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_TEST_UTILS_HPP_
-#define ROCPRIM_TEST_UTILS_HPP_
+#ifndef ROCPRIM_TEST_TEST_UTILS_HPP_
+#define ROCPRIM_TEST_TEST_UTILS_HPP_
 
 #include <algorithm>
 #include <vector>
@@ -140,4 +140,4 @@ OutputIt host_exclusive_scan(InputIt first, InputIt last,
     return ++d_first;
 }
 
-#endif // ROCPRIM_TEST_UTILS_HPP_
+#endif // ROCPRIM_TEST_TEST_UTILS_HPP_
