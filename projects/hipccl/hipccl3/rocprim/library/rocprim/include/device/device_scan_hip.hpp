@@ -133,6 +133,7 @@ template<
     class InitValueType,
     class BinaryFunction
 >
+inline
 hipError_t device_scan_impl(void * temporary_storage,
                             size_t& storage_size,
                             InputIterator input,
@@ -268,6 +269,7 @@ template<
     class OutputIterator,
     class BinaryFunction = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>
 >
+inline
 hipError_t device_inclusive_scan(void * temporary_storage,
                                  size_t& storage_size,
                                  InputIterator input,
@@ -294,6 +296,7 @@ template<
     class InitValueType,
     class BinaryFunction = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>
 >
+inline
 hipError_t device_exclusive_scan(void * temporary_storage,
                                  size_t& storage_size,
                                  InputIterator input,

@@ -29,21 +29,21 @@
 BEGIN_ROCPRIM_NAMESPACE
 
 template<class T>
-ROCPRIM_HOST_DEVICE
-inline constexpr T max(const T& a, const T& b)
+ROCPRIM_HOST_DEVICE inline
+constexpr T max(const T& a, const T& b)
 {
     return a < b ? b : a;
 }
 
 template<class T>
-ROCPRIM_HOST_DEVICE
-inline constexpr T min(const T& a, const T& b)
+ROCPRIM_HOST_DEVICE inline
+constexpr T min(const T& a, const T& b)
 {
     return a < b ? a : b;
 }
 
 template<class T>
-ROCPRIM_HOST_DEVICE
+ROCPRIM_HOST_DEVICE inline
 void swap(T& a, T& b)
 {
     T c = a;
@@ -54,7 +54,7 @@ void swap(T& a, T& b)
 template<class T>
 struct less
 {
-    ROCPRIM_HOST_DEVICE
+    ROCPRIM_HOST_DEVICE inline
     constexpr bool operator()(const T& a, const T& b) const
     {
         return a < b;
@@ -64,7 +64,7 @@ struct less
 template<class T>
 struct less_equal
 {
-    ROCPRIM_HOST_DEVICE
+    ROCPRIM_HOST_DEVICE inline
     constexpr bool operator()(const T& a, const T& b) const
     {
         return a <= b;
@@ -74,7 +74,7 @@ struct less_equal
 template<class T>
 struct greater
 {
-    ROCPRIM_HOST_DEVICE
+    ROCPRIM_HOST_DEVICE inline
     constexpr bool operator()(const T& a, const T& b) const
     {
         return a > b;
@@ -84,7 +84,7 @@ struct greater
 template<class T>
 struct greater_equal
 {
-    ROCPRIM_HOST_DEVICE
+    ROCPRIM_HOST_DEVICE inline
     constexpr bool operator()(const T& a, const T& b) const
     {
         return a >= b;
@@ -94,7 +94,7 @@ struct greater_equal
 template<class T>
 struct equal_to
 {
-    ROCPRIM_HOST_DEVICE
+    ROCPRIM_HOST_DEVICE inline
     constexpr bool operator()(const T& a, const T& b) const
     {
         return a == b;
@@ -104,7 +104,7 @@ struct equal_to
 template<class T>
 struct not_equal_to
 {
-    ROCPRIM_HOST_DEVICE
+    ROCPRIM_HOST_DEVICE inline
     constexpr bool operator()(const T& a, const T& b) const
     {
         return a != b;
@@ -114,7 +114,7 @@ struct not_equal_to
 template<class T>
 struct plus
 {
-    ROCPRIM_HOST_DEVICE
+    ROCPRIM_HOST_DEVICE inline
     constexpr T operator()(const T& a, const T& b) const
     {
         return a + b;
@@ -124,7 +124,7 @@ struct plus
 template<class T>
 struct minus
 {
-    ROCPRIM_HOST_DEVICE
+    ROCPRIM_HOST_DEVICE inline
     constexpr T operator()(const T& a, const T& b) const
     {
         return a - b;
@@ -134,7 +134,7 @@ struct minus
 template<class T>
 struct multiplies
 {
-    ROCPRIM_HOST_DEVICE
+    ROCPRIM_HOST_DEVICE inline
     constexpr T operator()(const T& a, const T& b) const
     {
         return a * b;
@@ -144,7 +144,7 @@ struct multiplies
 template<class T>
 struct maximum
 {
-    ROCPRIM_HOST_DEVICE
+    ROCPRIM_HOST_DEVICE inline
     constexpr T operator()(const T& a, const T& b) const
     {
         return a < b ? b : a;
@@ -154,7 +154,7 @@ struct maximum
 template<class T>
 struct minimum
 {
-    ROCPRIM_HOST_DEVICE
+    ROCPRIM_HOST_DEVICE inline
     constexpr T operator()(const T& a, const T& b) const
     {
         return a < b ? a : b;
