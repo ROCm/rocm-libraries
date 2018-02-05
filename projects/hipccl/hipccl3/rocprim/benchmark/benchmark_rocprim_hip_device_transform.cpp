@@ -63,15 +63,6 @@ struct transform
     }
 };
 
-template<class T>
-struct transform2
-{
-    constexpr T operator()(const T& a, const T& b) const [[hc]] [[cpu]]
-    {
-        return a + b;
-    }
-};
-
 template<
     class T,
     class BinaryFunction
@@ -148,106 +139,10 @@ void run_benchmark(benchmark::State& state,
     HIP_CHECK(hipFree(d_output));
 }
 
-template<
-    class T,
-    class BinaryFunction
->
-void run_benchmark2(benchmark::State& state,
-                   size_t size,
-                   const hipStream_t stream,
-                   BinaryFunction transform_op)
-{
-    std::vector<T> input;
-    std::vector<T> output;
-    if(std::is_floating_point<T>::value)
-    {
-        input = get_random_data<T>(size, (T)-1000, (T)+1000);
-        output = get_random_data<T>(size, (T)-1000, (T)+1000);
-    }
-    else
-    {
-        input = get_random_data<T>(
-            size,
-            std::numeric_limits<T>::min(),
-            std::numeric_limits<T>::max()
-        );
-        output = get_random_data<T>(
-            size,
-            std::numeric_limits<T>::min(),
-            std::numeric_limits<T>::max()
-        );
-    }
-
-    T * d_input;
-    T * d_output;
-    HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
-    HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
-    HIP_CHECK(
-        hipMemcpy(
-            d_input, input.data(),
-            size * sizeof(T),
-            hipMemcpyHostToDevice
-        )
-    );
-    HIP_CHECK(
-        hipMemcpy(
-            d_output, output.data(),
-            size * sizeof(T),
-            hipMemcpyHostToDevice
-        )
-    );
-    HIP_CHECK(hipDeviceSynchronize());
-
-    // Warm-up
-    for(size_t i = 0; i < 10; i++)
-    {
-        HIP_CHECK(
-            rocprim::device_transform(
-                d_input, d_output, d_output, size,
-                transform_op, stream
-            )
-        );
-    }
-    HIP_CHECK(hipDeviceSynchronize());
-
-    const unsigned int batch_size = 10;
-    for(auto _ : state)
-    {
-        auto start = std::chrono::high_resolution_clock::now();
-
-        for(size_t i = 0; i < batch_size; i++)
-        {
-            HIP_CHECK(
-                rocprim::device_transform(
-                    d_input, d_output, d_output, size,
-                    transform_op, stream
-                )
-            );
-        }
-        HIP_CHECK(hipStreamSynchronize(stream));
-
-        auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds =
-            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-        state.SetIterationTime(elapsed_seconds.count());
-    }
-    state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
-    state.SetItemsProcessed(state.iterations() * batch_size * size);
-
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
-}
-
 #define CREATE_BENCHMARK(T, TRANSFORM_OP) \
 benchmark::RegisterBenchmark( \
     ("device_transform<" #T "," #TRANSFORM_OP ">"), \
     run_benchmark<T, TRANSFORM_OP>, size, stream, TRANSFORM_OP() \
-)
-
-#define CREATE_BENCHMARK2(T, TRANSFORM_OP) \
-benchmark::RegisterBenchmark( \
-    ("device_transform<" #T "," #TRANSFORM_OP ">"), \
-    run_benchmark2<T, TRANSFORM_OP>, size, stream, TRANSFORM_OP() \
 )
 
 int main(int argc, char *argv[])
@@ -278,12 +173,6 @@ int main(int argc, char *argv[])
 
         CREATE_BENCHMARK(float, transform<float>),
         CREATE_BENCHMARK(double, transform<double>),
-        
-        CREATE_BENCHMARK2(unsigned int, transform2<unsigned int>),
-        CREATE_BENCHMARK2(unsigned long long, transform2<unsigned long long>),
-
-        CREATE_BENCHMARK2(float, transform2<float>),
-        CREATE_BENCHMARK2(double, transform2<double>),
     };
 
     // Use manual timing
