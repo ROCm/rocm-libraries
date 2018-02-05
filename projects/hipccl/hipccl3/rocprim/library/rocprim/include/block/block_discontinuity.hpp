@@ -52,15 +52,17 @@ struct with_b_index_arg
 // Wrapping function that allows to call FlagOp of any of these signatures:
 // with b_index (a, b, b_index) or without it (a, b).
 template<class T, class FlagOp>
+ROCPRIM_DEVICE inline
 typename std::enable_if<with_b_index_arg<T, FlagOp>::value, bool>::type
-apply(FlagOp flag_op, const T& a, const T& b, unsigned int b_index) [[hc]]
+apply(FlagOp flag_op, const T& a, const T& b, unsigned int b_index)
 {
     return flag_op(a, b, b_index);
 }
 
 template<class T, class FlagOp>
+ROCPRIM_DEVICE inline
 typename std::enable_if<!with_b_index_arg<T, FlagOp>::value, bool>::type
-apply(FlagOp flag_op, const T& a, const T& b, unsigned int) [[hc]]
+apply(FlagOp flag_op, const T& a, const T& b, unsigned int)
 {
     return flag_op(a, b);
 }
@@ -199,10 +201,11 @@ public:
     /// );
     /// \endcode
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
+    ROCPRIM_DEVICE inline
     void flag_heads(Flag (&head_flags)[ItemsPerThread],
                     const T (&input)[ItemsPerThread],
                     FlagOp flag_op,
-                    storage_type& storage) [[hc]]
+                    storage_type& storage)
     {
         flag_impl<true, false, false, false>(
             head_flags, /* ignored: */ input[0], /* ignored: */ head_flags, /* ignored: */ input[0],
@@ -227,11 +230,12 @@ public:
     /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
+    ROCPRIM_DEVICE inline
     void flag_heads(Flag (&head_flags)[ItemsPerThread],
                     const T (&input)[ItemsPerThread],
-                    FlagOp flag_op) [[hc]]
+                    FlagOp flag_op)
     {
-        tile_static storage_type storage;
+        ROCPRIM_SHARED_MEMORY storage_type storage;
         flag_heads(head_flags, input, flag_op, storage);
     }
 
@@ -289,11 +293,12 @@ public:
     /// );
     /// \endcode
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
+    ROCPRIM_DEVICE inline
     void flag_heads(Flag (&head_flags)[ItemsPerThread],
                     T tile_predecessor_item,
                     const T (&input)[ItemsPerThread],
                     FlagOp flag_op,
-                    storage_type& storage) [[hc]]
+                    storage_type& storage)
     {
         flag_impl<true, true, false, false>(
             head_flags, tile_predecessor_item, /* ignored: */ head_flags, /* ignored: */ input[0],
@@ -320,12 +325,13 @@ public:
     /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
+    ROCPRIM_DEVICE inline
     void flag_heads(Flag (&head_flags)[ItemsPerThread],
                     T tile_predecessor_item,
                     const T (&input)[ItemsPerThread],
-                    FlagOp flag_op) [[hc]]
+                    FlagOp flag_op)
     {
-        tile_static storage_type storage;
+        ROCPRIM_SHARED_MEMORY storage_type storage;
         flag_heads(head_flags, tile_predecessor_item, input, flag_op, storage);
     }
 
@@ -375,10 +381,11 @@ public:
     /// );
     /// \endcode
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
+    ROCPRIM_DEVICE inline
     void flag_tails(Flag (&tail_flags)[ItemsPerThread],
                     const T (&input)[ItemsPerThread],
                     FlagOp flag_op,
-                    storage_type& storage) [[hc]]
+                    storage_type& storage)
     {
         flag_impl<false, false, true, false>(
             /* ignored: */ tail_flags, /* ignored: */ input[0], tail_flags, /* ignored: */ input[0],
@@ -403,11 +410,12 @@ public:
     /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
+    ROCPRIM_DEVICE inline
     void flag_tails(Flag (&tail_flags)[ItemsPerThread],
                     const T (&input)[ItemsPerThread],
-                    FlagOp flag_op) [[hc]]
+                    FlagOp flag_op)
     {
-        tile_static storage_type storage;
+        ROCPRIM_SHARED_MEMORY storage_type storage;
         flag_tails(tail_flags, input, flag_op, storage);
     }
 
@@ -465,11 +473,12 @@ public:
     /// );
     /// \endcode
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
+    ROCPRIM_DEVICE inline
     void flag_tails(Flag (&tail_flags)[ItemsPerThread],
                     T tile_successor_item,
                     const T (&input)[ItemsPerThread],
                     FlagOp flag_op,
-                    storage_type& storage) [[hc]]
+                    storage_type& storage)
     {
         flag_impl<false, false, true, true>(
             /* ignored: */ tail_flags, /* ignored: */ input[0], tail_flags, tile_successor_item,
@@ -496,12 +505,13 @@ public:
     /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
+    ROCPRIM_DEVICE inline
     void flag_tails(Flag (&tail_flags)[ItemsPerThread],
                     T tile_successor_item,
                     const T (&input)[ItemsPerThread],
-                    FlagOp flag_op) [[hc]]
+                    FlagOp flag_op)
     {
-        tile_static storage_type storage;
+        ROCPRIM_SHARED_MEMORY storage_type storage;
         flag_tails(tail_flags, tile_successor_item, input, flag_op, storage);
     }
 
@@ -553,11 +563,12 @@ public:
     /// );
     /// \endcode
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
+    ROCPRIM_DEVICE inline
     void flag_heads_and_tails(Flag (&head_flags)[ItemsPerThread],
                               Flag (&tail_flags)[ItemsPerThread],
                               const T (&input)[ItemsPerThread],
                               FlagOp flag_op,
-                              storage_type& storage) [[hc]]
+                              storage_type& storage)
     {
         flag_impl<true, false, true, false>(
             head_flags, /* ignored: */ input[0], tail_flags, /* ignored: */ input[0],
@@ -582,12 +593,13 @@ public:
     /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
+    ROCPRIM_DEVICE inline
     void flag_heads_and_tails(Flag (&head_flags)[ItemsPerThread],
                               Flag (&tail_flags)[ItemsPerThread],
                               const T (&input)[ItemsPerThread],
-                              FlagOp flag_op) [[hc]]
+                              FlagOp flag_op)
     {
-        tile_static storage_type storage;
+        ROCPRIM_SHARED_MEMORY storage_type storage;
         flag_heads_and_tails(head_flags, tail_flags, input, flag_op, storage);
     }
 
@@ -648,12 +660,13 @@ public:
     /// );
     /// \endcode
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
+    ROCPRIM_DEVICE inline
     void flag_heads_and_tails(Flag (&head_flags)[ItemsPerThread],
                               Flag (&tail_flags)[ItemsPerThread],
                               T tile_successor_item,
                               const T (&input)[ItemsPerThread],
                               FlagOp flag_op,
-                              storage_type& storage) [[hc]]
+                              storage_type& storage)
     {
         flag_impl<true, false, true, true>(
             head_flags, /* ignored: */ input[0], tail_flags, tile_successor_item,
@@ -681,13 +694,14 @@ public:
     /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
+    ROCPRIM_DEVICE inline
     void flag_heads_and_tails(Flag (&head_flags)[ItemsPerThread],
                               Flag (&tail_flags)[ItemsPerThread],
                               T tile_successor_item,
                               const T (&input)[ItemsPerThread],
-                              FlagOp flag_op) [[hc]]
+                              FlagOp flag_op)
     {
-        tile_static storage_type storage;
+        ROCPRIM_SHARED_MEMORY storage_type storage;
         flag_heads_and_tails(head_flags, tail_flags, tile_successor_item, input, flag_op, storage);
     }
 
@@ -748,12 +762,13 @@ public:
     /// );
     /// \endcode
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
+    ROCPRIM_DEVICE inline
     void flag_heads_and_tails(Flag (&head_flags)[ItemsPerThread],
                               T tile_predecessor_item,
                               Flag (&tail_flags)[ItemsPerThread],
                               const T (&input)[ItemsPerThread],
                               FlagOp flag_op,
-                              storage_type& storage) [[hc]]
+                              storage_type& storage)
     {
         flag_impl<true, true, true, false>(
             head_flags, tile_predecessor_item, tail_flags, /* ignored: */ input[0],
@@ -781,13 +796,14 @@ public:
     /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
+    ROCPRIM_DEVICE inline
     void flag_heads_and_tails(Flag (&head_flags)[ItemsPerThread],
                               T tile_predecessor_item,
                               Flag (&tail_flags)[ItemsPerThread],
                               const T (&input)[ItemsPerThread],
-                              FlagOp flag_op) [[hc]]
+                              FlagOp flag_op)
     {
-        tile_static storage_type storage;
+        ROCPRIM_SHARED_MEMORY storage_type storage;
         flag_heads_and_tails(head_flags, tile_predecessor_item, tail_flags, input, flag_op, storage);
     }
 
@@ -854,13 +870,14 @@ public:
     /// );
     /// \endcode
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
+    ROCPRIM_DEVICE inline
     void flag_heads_and_tails(Flag (&head_flags)[ItemsPerThread],
                               T tile_predecessor_item,
                               Flag (&tail_flags)[ItemsPerThread],
                               T tile_successor_item,
                               const T (&input)[ItemsPerThread],
                               FlagOp flag_op,
-                              storage_type& storage) [[hc]]
+                              storage_type& storage)
     {
         flag_impl<true, true, true, true>(
             head_flags, tile_predecessor_item, tail_flags, tile_successor_item,
@@ -891,14 +908,15 @@ public:
     /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
+    ROCPRIM_DEVICE inline
     void flag_heads_and_tails(Flag (&head_flags)[ItemsPerThread],
                               T tile_predecessor_item,
                               Flag (&tail_flags)[ItemsPerThread],
                               T tile_successor_item,
                               const T (&input)[ItemsPerThread],
-                              FlagOp flag_op) [[hc]]
+                              FlagOp flag_op)
     {
-        tile_static storage_type storage;
+        ROCPRIM_SHARED_MEMORY storage_type storage;
         flag_heads_and_tails(
             head_flags, tile_predecessor_item, tail_flags, tile_successor_item,
             input, flag_op, storage
@@ -916,13 +934,14 @@ private:
         class Flag,
         class FlagOp
     >
+    ROCPRIM_DEVICE inline
     void flag_impl(Flag (&head_flags)[ItemsPerThread],
                    T tile_predecessor_item,
                    Flag (&tail_flags)[ItemsPerThread],
                    T tile_successor_item,
                    const T (&input)[ItemsPerThread],
                    FlagOp flag_op,
-                   storage_type& storage) [[hc]]
+                   storage_type& storage)
     {
         static_assert(std::is_integral<Flag>::value, "Flag must be integral type");
 

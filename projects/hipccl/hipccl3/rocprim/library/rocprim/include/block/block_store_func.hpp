@@ -54,9 +54,10 @@ template<
     class T,
     unsigned int ItemsPerThread
 >
+ROCPRIM_DEVICE inline
 void block_store_direct_blocked(unsigned int flat_id,
                                 OutputIterator block_output,
-                                T (&items)[ItemsPerThread]) [[hc]]
+                                T (&items)[ItemsPerThread])
 {
     unsigned int offset = flat_id * ItemsPerThread;
     OutputIterator thread_iter = block_output + offset;
@@ -89,10 +90,11 @@ template<
     class T,
     unsigned int ItemsPerThread
 >
+ROCPRIM_DEVICE inline
 void block_store_direct_blocked(unsigned int flat_id,
                                 OutputIterator block_output,
                                 T (&items)[ItemsPerThread],
-                                unsigned int valid) [[hc]]
+                                unsigned int valid)
 {
     unsigned int offset = flat_id * ItemsPerThread;
     OutputIterator thread_iter = block_output + offset;
@@ -136,10 +138,11 @@ template<
     class U,
     unsigned int ItemsPerThread
 >
+ROCPRIM_DEVICE inline
 typename std::enable_if<detail::is_vectorizable<T, ItemsPerThread>()>::type
 block_store_direct_blocked_vectorized(unsigned int flat_id,
                                       T* block_output,
-                                      U (&items)[ItemsPerThread]) [[hc]]
+                                      U (&items)[ItemsPerThread])
 {
     typedef typename detail::match_vector_type<T, ItemsPerThread>::type vector_type;
     constexpr unsigned int vectors_per_thread = (sizeof(T) * ItemsPerThread) / sizeof(vector_type);
@@ -162,10 +165,11 @@ template<
     class U,
     unsigned int ItemsPerThread
 >
+ROCPRIM_DEVICE inline
 typename std::enable_if<!detail::is_vectorizable<T, ItemsPerThread>()>::type
 block_store_direct_blocked_vectorized(unsigned int flat_id,
                                       T* block_output,
-                                      U (&items)[ItemsPerThread]) [[hc]]
+                                      U (&items)[ItemsPerThread])
 {
     block_store_direct_blocked(flat_id, block_output, items);
 }
@@ -193,9 +197,10 @@ template<
     class T,
     unsigned int ItemsPerThread
 >
+ROCPRIM_DEVICE inline
 void block_store_direct_striped(unsigned int flat_id,
                                 OutputIterator block_output,
-                                T (&items)[ItemsPerThread]) [[hc]]
+                                T (&items)[ItemsPerThread])
 {
     OutputIterator thread_iter = block_output + flat_id;
     #pragma unroll
@@ -229,10 +234,11 @@ template<
     class T,
     unsigned int ItemsPerThread
 >
+ROCPRIM_DEVICE inline
 void block_store_direct_striped(unsigned int flat_id,
                                 OutputIterator block_output,
                                 T (&items)[ItemsPerThread],
-                                unsigned int valid) [[hc]]
+                                unsigned int valid)
 {
     OutputIterator thread_iter = block_output + flat_id;
     #pragma unroll
@@ -276,9 +282,10 @@ template<
     class T,
     unsigned int ItemsPerThread
 >
+ROCPRIM_DEVICE inline
 void block_store_direct_warp_striped(unsigned int flat_id,
                                      OutputIterator block_output,
-                                     T (&items)[ItemsPerThread]) [[hc]]
+                                     T (&items)[ItemsPerThread])
 {
     static_assert(detail::is_power_of_two(WarpSize) && WarpSize <= warp_size(),
                  "WarpSize must be a power of two and equal or less"
@@ -326,10 +333,11 @@ template<
     class T,
     unsigned int ItemsPerThread
 >
+ROCPRIM_DEVICE inline
 void block_store_direct_warp_striped(unsigned int flat_id,
                                      OutputIterator block_output,
                                      T (&items)[ItemsPerThread],
-                                     unsigned int valid) [[hc]]
+                                     unsigned int valid)
 {
     static_assert(detail::is_power_of_two(WarpSize) && WarpSize <= warp_size(),
                  "WarpSize must be a power of two and equal or less"

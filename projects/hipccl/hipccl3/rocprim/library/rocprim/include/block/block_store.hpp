@@ -172,8 +172,9 @@ public:
     /// * The type \p T must be such that an object of type \p InputIterator
     /// can be dereferenced and then implicitly converted to \p T.
     template<class OutputIterator>
+    ROCPRIM_DEVICE inline
     void store(OutputIterator block_output,
-               T (&items)[ItemsPerThread]) [[hc]]
+               T (&items)[ItemsPerThread])
     {
         using value_type = typename std::iterator_traits<OutputIterator>::value_type;
         static_assert(std::is_convertible<value_type, T>::value,
@@ -197,9 +198,10 @@ public:
     /// * The type \p T must be such that an object of type \p InputIterator
     /// can be dereferenced and then implicitly converted to \p T.
     template<class OutputIterator>
+    ROCPRIM_DEVICE inline
     void store(OutputIterator block_output,
                T (&items)[ItemsPerThread],
-               unsigned int valid) [[hc]]
+               unsigned int valid)
     {
         using value_type = typename std::iterator_traits<OutputIterator>::value_type;
         static_assert(std::is_convertible<value_type, T>::value,
@@ -244,9 +246,10 @@ public:
     /// );
     /// \endcode
     template<class OutputIterator>
+    ROCPRIM_DEVICE inline
     void store(OutputIterator block_output,
                T (&items)[ItemsPerThread],
-               storage_type& storage) [[hc]]
+               storage_type& storage)
     {
         using value_type = typename std::iterator_traits<OutputIterator>::value_type;
         static_assert(std::is_convertible<value_type, T>::value,
@@ -293,10 +296,11 @@ public:
     /// );
     /// \endcode
     template<class OutputIterator>
+    ROCPRIM_DEVICE inline
     void store(OutputIterator block_output,
                T (&items)[ItemsPerThread],
                unsigned int valid,
-               storage_type& storage) [[hc]]
+               storage_type& storage)
     {
         using value_type = typename std::iterator_traits<OutputIterator>::value_type;
         static_assert(std::is_convertible<value_type, T>::value,
@@ -327,16 +331,18 @@ public:
     using storage_type = _storage_type; // only for Doxygen
     #endif
 
+    ROCPRIM_DEVICE inline
     void store(T* block_output,
-               T (&items)[ItemsPerThread]) [[hc]]
+               T (&items)[ItemsPerThread])
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
         block_store_direct_blocked_vectorized(flat_id, block_output, items);
     }
 
     template<class OutputIterator, class U>
+    ROCPRIM_DEVICE inline
     void store(OutputIterator block_output,
-               U (&items)[ItemsPerThread]) [[hc]]
+               U (&items)[ItemsPerThread])
     {
         using value_type = typename std::iterator_traits<OutputIterator>::value_type;
         static_assert(std::is_convertible<value_type, T>::value,
@@ -347,9 +353,10 @@ public:
     }
 
     template<class OutputIterator>
+    ROCPRIM_DEVICE inline
     void store(OutputIterator block_output,
                T (&items)[ItemsPerThread],
-               unsigned int valid) [[hc]]
+               unsigned int valid)
     {
         using value_type = typename std::iterator_traits<OutputIterator>::value_type;
         static_assert(std::is_convertible<value_type, T>::value,
@@ -359,18 +366,20 @@ public:
         block_store_direct_blocked(flat_id, block_output, items, valid);
     }
 
+    ROCPRIM_DEVICE inline
     void store(T* block_output,
                T (&items)[ItemsPerThread],
-               storage_type& storage) [[hc]]
+               storage_type& storage)
     {
         (void) storage;
         store(block_output, items);
     }
 
     template<class OutputIterator, class U>
+    ROCPRIM_DEVICE inline
     void store(OutputIterator block_output,
                U (&items)[ItemsPerThread],
-               storage_type& storage) [[hc]]
+               storage_type& storage)
     {
         using value_type = typename std::iterator_traits<OutputIterator>::value_type;
         static_assert(std::is_convertible<value_type, T>::value,
@@ -381,10 +390,11 @@ public:
     }
 
     template<class OutputIterator>
+    ROCPRIM_DEVICE inline
     void store(OutputIterator block_output,
                T (&items)[ItemsPerThread],
                unsigned int valid,
-               storage_type& storage) [[hc]]
+               storage_type& storage)
     {
         using value_type = typename std::iterator_traits<OutputIterator>::value_type;
         static_assert(std::is_convertible<value_type, T>::value,
@@ -409,38 +419,41 @@ public:
     using storage_type = typename block_exchange_type::storage_type;
 
     template<class OutputIterator>
+    ROCPRIM_DEVICE inline
     void store(OutputIterator block_output,
-               T (&items)[ItemsPerThread]) [[hc]]
+               T (&items)[ItemsPerThread])
     {
         using value_type = typename std::iterator_traits<OutputIterator>::value_type;
         static_assert(std::is_convertible<value_type, T>::value,
                       "The type T must be such that an object of type OutputIterator "
                       "can be dereferenced and assigned a value of type T.");
-        tile_static storage_type storage;
+        ROCPRIM_SHARED_MEMORY storage_type storage;
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
         block_exchange_type().blocked_to_striped(items, items, storage);
         block_store_direct_striped<BlockSize>(flat_id, block_output, items);
     }
 
     template<class OutputIterator>
+    ROCPRIM_DEVICE inline
     void store(OutputIterator block_output,
                T (&items)[ItemsPerThread],
-               unsigned int valid) [[hc]]
+               unsigned int valid)
     {
         using value_type = typename std::iterator_traits<OutputIterator>::value_type;
         static_assert(std::is_convertible<value_type, T>::value,
                       "The type T must be such that an object of type OutputIterator "
                       "can be dereferenced and assigned a value of type T.");
-        tile_static storage_type storage;
+        ROCPRIM_SHARED_MEMORY storage_type storage;
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
         block_exchange_type().blocked_to_striped(items, items, storage);
         block_store_direct_striped<BlockSize>(flat_id, block_output, items, valid);
     }
 
     template<class OutputIterator>
+    ROCPRIM_DEVICE inline
     void store(OutputIterator block_output,
                T (&items)[ItemsPerThread],
-               storage_type& storage) [[hc]]
+               storage_type& storage)
     {
         using value_type = typename std::iterator_traits<OutputIterator>::value_type;
         static_assert(std::is_convertible<value_type, T>::value,
@@ -452,10 +465,11 @@ public:
     }
 
     template<class OutputIterator>
+    ROCPRIM_DEVICE inline
     void store(OutputIterator block_output,
                T (&items)[ItemsPerThread],
                unsigned int valid,
-               storage_type& storage) [[hc]]
+               storage_type& storage)
     {
         using value_type = typename std::iterator_traits<OutputIterator>::value_type;
         static_assert(std::is_convertible<value_type, T>::value,
@@ -484,38 +498,41 @@ public:
     using storage_type = typename block_exchange_type::storage_type;
 
     template<class OutputIterator>
+    ROCPRIM_DEVICE inline
     void store(OutputIterator block_output,
-               T (&items)[ItemsPerThread]) [[hc]]
+               T (&items)[ItemsPerThread])
     {
         using value_type = typename std::iterator_traits<OutputIterator>::value_type;
         static_assert(std::is_convertible<value_type, T>::value,
                       "The type T must be such that an object of type OutputIterator "
                       "can be dereferenced and assigned a value of type T.");
-        tile_static storage_type storage;
+        ROCPRIM_SHARED_MEMORY storage_type storage;
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
         block_exchange_type().blocked_to_warp_striped(items, items, storage);
         block_store_direct_warp_striped(flat_id, block_output, items);
     }
 
     template<class OutputIterator>
+    ROCPRIM_DEVICE inline
     void store(OutputIterator block_output,
                T (&items)[ItemsPerThread],
-               unsigned int valid) [[hc]]
+               unsigned int valid)
     {
         using value_type = typename std::iterator_traits<OutputIterator>::value_type;
         static_assert(std::is_convertible<value_type, T>::value,
                       "The type T must be such that an object of type OutputIterator "
                       "can be dereferenced and assigned a value of type T.");
-        tile_static storage_type storage;
+        ROCPRIM_SHARED_MEMORY storage_type storage;
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
         block_exchange_type().blocked_to_warp_striped(items, items, storage);
         block_store_direct_warp_striped(flat_id, block_output, items, valid);
     }
 
     template<class OutputIterator>
+    ROCPRIM_DEVICE inline
     void store(OutputIterator block_output,
                T (&items)[ItemsPerThread],
-               storage_type& storage) [[hc]]
+               storage_type& storage)
     {
         using value_type = typename std::iterator_traits<OutputIterator>::value_type;
         static_assert(std::is_convertible<value_type, T>::value,
@@ -527,10 +544,11 @@ public:
     }
 
     template<class OutputIterator>
+    ROCPRIM_DEVICE inline
     void store(OutputIterator block_output,
                T (&items)[ItemsPerThread],
                unsigned int valid,
-               storage_type& storage) [[hc]]
+               storage_type& storage)
     {
         using value_type = typename std::iterator_traits<OutputIterator>::value_type;
         static_assert(std::is_convertible<value_type, T>::value,

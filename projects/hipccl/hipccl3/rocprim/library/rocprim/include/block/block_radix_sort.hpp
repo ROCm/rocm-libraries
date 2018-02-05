@@ -49,7 +49,8 @@ struct buckets
     static constexpr unsigned int size = Size;
     T xs[Size];
 
-    buckets() [[hc]]
+    ROCPRIM_DEVICE inline
+    buckets()
     {
         for(unsigned int r = 0; r < Size; r++)
         {
@@ -57,7 +58,8 @@ struct buckets
         }
     }
 
-    buckets operator+(const buckets& b) const [[hc]]
+    ROCPRIM_DEVICE inline
+    buckets operator+(const buckets& b) const
     {
         buckets c;
         for(unsigned int r = 0; r < Size; r++)
@@ -67,12 +69,14 @@ struct buckets
         return c;
     }
 
-    T& operator[](unsigned int idx) [[hc]]
+    ROCPRIM_DEVICE inline
+    T& operator[](unsigned int idx)
     {
         return xs[idx];
     }
 
-    T operator[](unsigned int idx) const [[hc]]
+    ROCPRIM_DEVICE inline
+    T operator[](unsigned int idx) const
     {
         return xs[idx];
     }
@@ -83,13 +87,15 @@ struct buckets
 /// because of using hardware ability to calculate which lanes have true predicate values.
 
 template<class T>
-void warp_bit_plus_exclusive_scan(const T input, T& output) [[hc]]
+ROCPRIM_DEVICE inline
+void warp_bit_plus_exclusive_scan(const T input, T& output)
 {
     output = ::rocprim::masked_bit_count(::rocprim::ballot(input));
 }
 
 template<class T, unsigned int Size>
-void warp_bit_plus_exclusive_scan(const buckets<T, Size>& input, buckets<T, Size>& output) [[hc]]
+ROCPRIM_DEVICE inline
+void warp_bit_plus_exclusive_scan(const buckets<T, Size>& input, buckets<T, Size>& output)
 {
     for(unsigned int r = 0; r < Size; r++)
     {
@@ -98,13 +104,15 @@ void warp_bit_plus_exclusive_scan(const buckets<T, Size>& input, buckets<T, Size
 }
 
 template<class T>
-void warp_bit_plus_reduce(const T input, T& output) [[hc]]
+ROCPRIM_DEVICE inline
+void warp_bit_plus_reduce(const T input, T& output)
 {
     output = ::rocprim::bit_count(::rocprim::ballot(input));
 }
 
 template<class T, unsigned int Size>
-void warp_bit_plus_reduce(const buckets<T, Size>& input, buckets<T, Size>& output) [[hc]]
+ROCPRIM_DEVICE inline
+void warp_bit_plus_reduce(const buckets<T, Size>& input, buckets<T, Size>& output)
 {
     for(unsigned int r = 0; r < Size; r++)
     {
@@ -142,10 +150,11 @@ public:
     };
 
     template<unsigned int ItemsPerThread>
+    ROCPRIM_DEVICE inline
     void exclusive_scan(const T (&input)[ItemsPerThread],
                         T (&output)[ItemsPerThread],
                         T& reduction,
-                        storage_type& storage) [[hc]]
+                        storage_type& storage)
     {
         const unsigned int lane_id = ::rocprim::lane_id();
         const unsigned int warp_id = ::rocprim::warp_id();
@@ -384,10 +393,11 @@ public:
     /// If the \p input values across threads in a block are <tt>{[256, 255], ..., [4, 3], [2, 1]}}</tt>, then
     /// then after sort they will be equal <tt>{[1, 2], [3, 4]  ..., [255, 256]}</tt>.
     /// \endparblock
+    ROCPRIM_DEVICE inline
     void sort(Key (&keys)[ItemsPerThread],
               storage_type& storage,
               unsigned int begin_bit = 0,
-              unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+              unsigned int end_bit = 8 * sizeof(Key))
     {
         empty_type * values = nullptr;
         sort_impl<false>(keys, values, storage, begin_bit, end_bit);
@@ -405,11 +415,12 @@ public:
     /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
+    ROCPRIM_DEVICE inline
     void sort(Key (&keys)[ItemsPerThread],
               unsigned int begin_bit = 0,
-              unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+              unsigned int end_bit = 8 * sizeof(Key))
     {
-        tile_static storage_type storage;
+        ROCPRIM_SHARED_MEMORY storage_type storage;
         sort(keys, storage, begin_bit, end_bit);
     }
 
@@ -478,10 +489,11 @@ public:
     /// If the \p input values across threads in a block are <tt>{[1, 2], [3, 4]  ..., [255, 256]}</tt>,
     /// then after sort they will be equal <tt>{[256, 255], ..., [4, 3], [2, 1]}</tt>.
     /// \endparblock
+    ROCPRIM_DEVICE inline
     void sort_desc(Key (&keys)[ItemsPerThread],
                    storage_type& storage,
                    unsigned int begin_bit = 0,
-                   unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+                   unsigned int end_bit = 8 * sizeof(Key))
     {
         empty_type * values = nullptr;
         sort_impl<true>(keys, values, storage, begin_bit, end_bit);
@@ -499,11 +511,12 @@ public:
     /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
+    ROCPRIM_DEVICE inline
     void sort_desc(Key (&keys)[ItemsPerThread],
                    unsigned int begin_bit = 0,
-                   unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+                   unsigned int end_bit = 8 * sizeof(Key))
     {
-        tile_static storage_type storage;
+        ROCPRIM_SHARED_MEMORY storage_type storage;
         sort_desc(keys, storage, begin_bit, end_bit);
     }
 
@@ -583,11 +596,12 @@ public:
     /// equal <tt>{[128, 128], [127, 127]  ..., [2, 2], [1, 1]}</tt>.
     /// \endparblock
     template<bool WithValues = with_values>
+    ROCPRIM_DEVICE inline
     void sort(Key (&keys)[ItemsPerThread],
               typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
               storage_type& storage,
               unsigned int begin_bit = 0,
-              unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+              unsigned int end_bit = 8 * sizeof(Key))
     {
         sort_impl<false>(keys, values, storage, begin_bit, end_bit);
     }
@@ -609,12 +623,13 @@ public:
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
     template<bool WithValues = with_values>
+    ROCPRIM_DEVICE inline
     void sort(Key (&keys)[ItemsPerThread],
               typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
               unsigned int begin_bit = 0,
-              unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+              unsigned int end_bit = 8 * sizeof(Key))
     {
-        tile_static storage_type storage;
+        ROCPRIM_SHARED_MEMORY storage_type storage;
         sort(keys, values, storage, begin_bit, end_bit);
     }
 
@@ -694,11 +709,12 @@ public:
     /// will be equal <tt>{[1, 1], [2, 2]  ..., [128, 128]}</tt>.
     /// \endparblock
     template<bool WithValues = with_values>
+    ROCPRIM_DEVICE inline
     void sort_desc(Key (&keys)[ItemsPerThread],
                    typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
                    storage_type& storage,
                    unsigned int begin_bit = 0,
-                   unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+                   unsigned int end_bit = 8 * sizeof(Key))
     {
         sort_impl<true>(keys, values, storage, begin_bit, end_bit);
     }
@@ -720,12 +736,13 @@ public:
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
     template<bool WithValues = with_values>
+    ROCPRIM_DEVICE inline
     void sort_desc(Key (&keys)[ItemsPerThread],
                    typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
                    unsigned int begin_bit = 0,
-                   unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+                   unsigned int end_bit = 8 * sizeof(Key))
     {
-        tile_static storage_type storage;
+        ROCPRIM_SHARED_MEMORY storage_type storage;
         sort_desc(keys, values, storage, begin_bit, end_bit);
     }
 
@@ -795,10 +812,11 @@ public:
     /// If the \p input values across threads in a block are <tt>{[256, 255], ..., [4, 3], [2, 1]}}</tt>, then
     /// then after sort they will be equal <tt>{[1, 129], [2, 130]  ..., [128, 256]}</tt>.
     /// \endparblock
+    ROCPRIM_DEVICE inline
     void sort_to_striped(Key (&keys)[ItemsPerThread],
                          storage_type& storage,
                          unsigned int begin_bit = 0,
-                         unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+                         unsigned int end_bit = 8 * sizeof(Key))
     {
         empty_type * values = nullptr;
         sort_impl<false, true>(keys, values, storage, begin_bit, end_bit);
@@ -817,11 +835,12 @@ public:
     /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
+    ROCPRIM_DEVICE inline
     void sort_to_striped(Key (&keys)[ItemsPerThread],
                          unsigned int begin_bit = 0,
-                         unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+                         unsigned int end_bit = 8 * sizeof(Key))
     {
-        tile_static storage_type storage;
+        ROCPRIM_SHARED_MEMORY storage_type storage;
         sort_to_striped(keys, storage, begin_bit, end_bit);
     }
 
@@ -891,10 +910,11 @@ public:
     /// If the \p input values across threads in a block are <tt>{[1, 2], [3, 4]  ..., [255, 256]}</tt>,
     /// then after sort they will be equal <tt>{[256, 128], ..., [130, 2], [129, 1]}</tt>.
     /// \endparblock
+    ROCPRIM_DEVICE inline
     void sort_desc_to_striped(Key (&keys)[ItemsPerThread],
                               storage_type& storage,
                               unsigned int begin_bit = 0,
-                              unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+                              unsigned int end_bit = 8 * sizeof(Key))
     {
         empty_type * values = nullptr;
         sort_impl<true, true>(keys, values, storage, begin_bit, end_bit);
@@ -913,11 +933,12 @@ public:
     /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
+    ROCPRIM_DEVICE inline
     void sort_desc_to_striped(Key (&keys)[ItemsPerThread],
                               unsigned int begin_bit = 0,
-                              unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+                              unsigned int end_bit = 8 * sizeof(Key))
     {
-        tile_static storage_type storage;
+        ROCPRIM_SHARED_MEMORY storage_type storage;
         sort_desc_to_striped(keys, storage, begin_bit, end_bit);
     }
 
@@ -997,11 +1018,12 @@ public:
     /// equal <tt>{[-8, -4], [-7, -3], [-6, -2], [-5, -1]}</tt>.
     /// \endparblock
     template<bool WithValues = with_values>
+    ROCPRIM_DEVICE inline
     void sort_to_striped(Key (&keys)[ItemsPerThread],
                          typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
                          storage_type& storage,
                          unsigned int begin_bit = 0,
-                         unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+                         unsigned int end_bit = 8 * sizeof(Key))
     {
         sort_impl<false, true>(keys, values, storage, begin_bit, end_bit);
     }
@@ -1021,12 +1043,13 @@ public:
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
     template<bool WithValues = with_values>
+    ROCPRIM_DEVICE inline
     void sort_to_striped(Key (&keys)[ItemsPerThread],
                          typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
                          unsigned int begin_bit = 0,
-                         unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+                         unsigned int end_bit = 8 * sizeof(Key))
     {
-        tile_static storage_type storage;
+        ROCPRIM_SHARED_MEMORY storage_type storage;
         sort_to_striped(keys, values, storage, begin_bit, end_bit);
     }
 
@@ -1106,11 +1129,12 @@ public:
     /// equal <tt>{[10, 50], [20, 60], [30, 70], [40, 80]}</tt>.
     /// \endparblock
     template<bool WithValues = with_values>
+    ROCPRIM_DEVICE inline
     void sort_desc_to_striped(Key (&keys)[ItemsPerThread],
                               typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
                               storage_type& storage,
                               unsigned int begin_bit = 0,
-                              unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+                              unsigned int end_bit = 8 * sizeof(Key))
     {
         sort_impl<true, true>(keys, values, storage, begin_bit, end_bit);
     }
@@ -1130,23 +1154,25 @@ public:
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
     template<bool WithValues = with_values>
+    ROCPRIM_DEVICE inline
     void sort_desc_to_striped(Key (&keys)[ItemsPerThread],
                               typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
                               unsigned int begin_bit = 0,
-                              unsigned int end_bit = 8 * sizeof(Key)) [[hc]]
+                              unsigned int end_bit = 8 * sizeof(Key))
     {
-        tile_static storage_type storage;
+        ROCPRIM_SHARED_MEMORY storage_type storage;
         sort_desc_to_striped(keys, values, storage, begin_bit, end_bit);
     }
 
 private:
 
     template<bool Descending, bool ToStriped = false, class SortedValue>
+    ROCPRIM_DEVICE inline
     void sort_impl(Key (&keys)[ItemsPerThread],
                    SortedValue * values,
                    storage_type& storage,
                    unsigned int begin_bit,
-                   unsigned int end_bit) [[hc]]
+                   unsigned int end_bit)
     {
         using key_codec = ::rocprim::detail::radix_key_codec<Key, Descending>;
 
@@ -1223,51 +1249,57 @@ private:
         }
     }
 
+    ROCPRIM_DEVICE inline
     void exchange_keys(storage_type& storage,
                        bit_key_type (&bit_keys)[ItemsPerThread],
-                       const unsigned int (&ranks)[ItemsPerThread]) [[hc]]
+                       const unsigned int (&ranks)[ItemsPerThread])
     {
         // Synchronization is omitted here because bit_block_scan already calls it
         bit_keys_exchange_type().scatter_to_blocked(bit_keys, bit_keys, ranks, storage.bit_keys_exchange);
     }
 
     template<class SortedValue>
+    ROCPRIM_DEVICE inline
     void exchange_values(storage_type& storage,
                          SortedValue * values,
-                         const unsigned int (&ranks)[ItemsPerThread]) [[hc]]
+                         const unsigned int (&ranks)[ItemsPerThread])
     {
         ::rocprim::syncthreads(); // Storage will be reused (union), synchronization is needed
         SortedValue (&vs)[ItemsPerThread] = *reinterpret_cast<SortedValue (*)[ItemsPerThread]>(values);
         values_exchange_type().scatter_to_blocked(vs, vs, ranks, storage.values_exchange);
     }
 
+    ROCPRIM_DEVICE inline
     void exchange_values(storage_type& storage,
                          empty_type * values,
-                         const unsigned int (&ranks)[ItemsPerThread]) [[hc]]
+                         const unsigned int (&ranks)[ItemsPerThread])
     {
         (void) storage;
         (void) values;
         (void) ranks;
     }
 
+    ROCPRIM_DEVICE inline
     void to_striped_keys(storage_type& storage,
-                         bit_key_type (&bit_keys)[ItemsPerThread]) [[hc]]
+                         bit_key_type (&bit_keys)[ItemsPerThread])
     {
         ::rocprim::syncthreads();
         bit_keys_exchange_type().blocked_to_striped(bit_keys, bit_keys, storage.bit_keys_exchange);
     }
 
     template<class SortedValue>
+    ROCPRIM_DEVICE inline
     void to_striped_values(storage_type& storage,
-                           SortedValue * values) [[hc]]
+                           SortedValue * values)
     {
         ::rocprim::syncthreads(); // Storage will be reused (union), synchronization is needed
         SortedValue (&vs)[ItemsPerThread] = *reinterpret_cast<SortedValue (*)[ItemsPerThread]>(values);
         values_exchange_type().blocked_to_striped(vs, vs, storage.values_exchange);
     }
 
+    ROCPRIM_DEVICE inline
     void to_striped_values(storage_type& storage,
-                           empty_type * values) [[hc]]
+                           empty_type * values)
     {
         (void) storage;
         (void) values;

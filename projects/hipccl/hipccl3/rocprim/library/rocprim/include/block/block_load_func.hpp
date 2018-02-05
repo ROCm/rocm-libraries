@@ -54,9 +54,10 @@ template<
     class T,
     unsigned int ItemsPerThread
 >
+ROCPRIM_DEVICE inline
 void block_load_direct_blocked(unsigned int flat_id,
                                InputIterator block_input,
-                               T (&items)[ItemsPerThread]) [[hc]]
+                               T (&items)[ItemsPerThread])
 {
     unsigned int offset = flat_id * ItemsPerThread;
     InputIterator thread_iter = block_input + offset;
@@ -89,10 +90,11 @@ template<
     class T,
     unsigned int ItemsPerThread
 >
+ROCPRIM_DEVICE inline
 void block_load_direct_blocked(unsigned int flat_id,
                                InputIterator block_input,
                                T (&items)[ItemsPerThread],
-                               unsigned int valid) [[hc]]
+                               unsigned int valid)
 {
     unsigned int offset = flat_id * ItemsPerThread;
     InputIterator thread_iter = block_input + offset;
@@ -132,11 +134,12 @@ template<
     unsigned int ItemsPerThread,
     class Default
 >
+ROCPRIM_DEVICE inline
 void block_load_direct_blocked(unsigned int flat_id,
                                InputIterator block_input,
                                T (&items)[ItemsPerThread],
                                unsigned int valid,
-                               Default out_of_bounds) [[hc]]
+                               Default out_of_bounds)
 {
     #pragma unroll
     for (unsigned int item = 0; item < ItemsPerThread; item++)
@@ -177,10 +180,11 @@ template<
     class U,
     unsigned int ItemsPerThread
 >
+ROCPRIM_DEVICE inline
 typename std::enable_if<detail::is_vectorizable<T, ItemsPerThread>()>::type
 block_load_direct_blocked_vectorized(unsigned int flat_id,
                                      T* block_input,
-                                     U (&items)[ItemsPerThread]) [[hc]]
+                                     U (&items)[ItemsPerThread])
 {
     typedef typename detail::match_vector_type<T, ItemsPerThread>::type vector_type;
     constexpr unsigned int vectors_per_thread = (sizeof(T) * ItemsPerThread) / sizeof(vector_type);
@@ -207,10 +211,11 @@ template<
     class U,
     unsigned int ItemsPerThread
 >
+ROCPRIM_DEVICE inline
 typename std::enable_if<!detail::is_vectorizable<T, ItemsPerThread>()>::type
 block_load_direct_blocked_vectorized(unsigned int flat_id,
                                      T* block_input,
-                                     U (&items)[ItemsPerThread]) [[hc]]
+                                     U (&items)[ItemsPerThread])
 {
     block_load_direct_blocked(flat_id, block_input, items);
 }
@@ -238,9 +243,10 @@ template<
     class T,
     unsigned int ItemsPerThread
 >
+ROCPRIM_DEVICE inline
 void block_load_direct_striped(unsigned int flat_id,
                                InputIterator block_input,
-                               T (&items)[ItemsPerThread]) [[hc]]
+                               T (&items)[ItemsPerThread])
 {
     InputIterator thread_iter = block_input + flat_id;
     #pragma unroll
@@ -274,10 +280,11 @@ template<
     class T,
     unsigned int ItemsPerThread
 >
+ROCPRIM_DEVICE inline
 void block_load_direct_striped(unsigned int flat_id,
                                InputIterator block_input,
                                T (&items)[ItemsPerThread],
-                               unsigned int valid) [[hc]]
+                               unsigned int valid)
 {
     InputIterator thread_iter = block_input + flat_id;
     #pragma unroll
@@ -319,11 +326,12 @@ template<
     unsigned int ItemsPerThread,
     class Default
 >
+ROCPRIM_DEVICE inline
 void block_load_direct_striped(unsigned int flat_id,
                                InputIterator block_input,
                                T (&items)[ItemsPerThread],
                                unsigned int valid,
-                               Default out_of_bounds) [[hc]]
+                               Default out_of_bounds)
 {
     #pragma unroll
     for (unsigned int item = 0; item < ItemsPerThread; item++)
@@ -364,9 +372,10 @@ template<
     class T,
     unsigned int ItemsPerThread
 >
+ROCPRIM_DEVICE inline
 void block_load_direct_warp_striped(unsigned int flat_id,
                                     InputIterator block_input,
-                                    T (&items)[ItemsPerThread]) [[hc]]
+                                    T (&items)[ItemsPerThread])
 {
     static_assert(detail::is_power_of_two(WarpSize) && WarpSize <= warp_size(),
                  "WarpSize must be a power of two and equal or less"
@@ -414,10 +423,11 @@ template<
     class T,
     unsigned int ItemsPerThread
 >
+ROCPRIM_DEVICE inline
 void block_load_direct_warp_striped(unsigned int flat_id,
                                     InputIterator block_input,
                                     T (&items)[ItemsPerThread],
-                                    unsigned int valid) [[hc]]
+                                    unsigned int valid)
 {
     static_assert(detail::is_power_of_two(WarpSize) && WarpSize <= warp_size(),
                  "WarpSize must be a power of two and equal or less"
@@ -473,11 +483,12 @@ template<
     unsigned int ItemsPerThread,
     class Default
 >
+ROCPRIM_DEVICE inline
 void block_load_direct_warp_striped(unsigned int flat_id,
                                     InputIterator block_input,
                                     T (&items)[ItemsPerThread],
                                     unsigned int valid,
-                                    Default out_of_bounds) [[hc]]
+                                    Default out_of_bounds)
 {
     static_assert(detail::is_power_of_two(WarpSize) && WarpSize <= warp_size(),
                  "WarpSize must be a power of two and equal or less"
