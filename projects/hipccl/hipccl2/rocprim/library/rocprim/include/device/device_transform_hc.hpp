@@ -18,15 +18,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_DEVICE_DEVICE_TRANSFORM_HIP_HPP_
-#define ROCPRIM_DEVICE_DEVICE_TRANSFORM_HIP_HPP_
+#ifndef ROCPRIM_DEVICE_DEVICE_TRANSFORM_HC_HPP_
+#define ROCPRIM_DEVICE_DEVICE_TRANSFORM_HC_HPP_
 
 #include <type_traits>
 #include <iterator>
 
-// HIP API
-#include <hip/hip_runtime.h>
-#include <hip/hip_hcc.h>
+// HC API
+#include <hcc/hc.hpp>
 
 #include "../detail/config.hpp"
 #include "../detail/various.hpp"
@@ -38,44 +37,12 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    class InputIterator,
-    class OutputIterator,
-    class UnaryFunction
->
-__global__
-void transform_kernel(InputIterator input,
-                      const size_t size,
-                      OutputIterator output,
-                      UnaryFunction transform_op)
-{
-    transform_kernel_impl<BlockSize, ItemsPerThread>(
-        input, size, output, transform_op
-    );
-}
-
-#define ROCPRIM_DETAIL_HIP_SYNC(name, size, start) \
-    if(debug_synchronous) \
+#define ROCPRIM_DETAIL_HC_SYNC(name, size, start) \
     { \
-        std::cout << name << "(" << size << ")"; \
-        auto error = hipStreamSynchronize(stream); \
-        if(error != hipSuccess) return error; \
-        auto end = std::chrono::high_resolution_clock::now(); \
-        auto d = std::chrono::duration_cast<std::chrono::duration<double>>(end - start); \
-        std::cout << " " << d.count() * 1000 << " ms" << '\n'; \
-    }
-
-#define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start) \
-    { \
-        auto error = hipPeekAtLastError(); \
-        if(error != hipSuccess) return error; \
         if(debug_synchronous) \
         { \
             std::cout << name << "(" << size << ")"; \
-            auto error = hipStreamSynchronize(stream); \
-            if(error != hipSuccess) return error; \
+            acc_view.wait(); \
             auto end = std::chrono::high_resolution_clock::now(); \
             auto d = std::chrono::duration_cast<std::chrono::duration<double>>(end - start); \
             std::cout << " " << d.count() * 1000 << " ms" << '\n'; \
@@ -89,12 +56,12 @@ template<
     class OutputIterator,
     class UnaryFunction
 >
-hipError_t device_transform(InputIterator input,
-                            OutputIterator output,
-                            const size_t size,
-                            UnaryFunction transform_op,
-                            const hipStream_t stream = 0,
-                            bool debug_synchronous = false)
+void device_transform(InputIterator input,
+                      OutputIterator output,
+                      const size_t size,
+                      UnaryFunction transform_op,
+                      hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
+                      bool debug_synchronous = false)
 {
     // TODO: Those values should depend on type size
     constexpr unsigned int block_size = 256;
@@ -112,23 +79,24 @@ hipError_t device_transform(InputIterator input,
         std::cout << "items_per_block " << items_per_block << '\n';
     }
 
-    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(detail::transform_kernel<
-            block_size, items_per_thread,
-            InputIterator, OutputIterator, UnaryFunction
-        >),
-        dim3(number_of_blocks), dim3(block_size), 0, stream,
-        input, size, output, transform_op
-    );
-    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("transform_kernel", size, start);
+    auto grid_size = number_of_blocks * block_size;
 
-    return hipSuccess;
+    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
+    hc::parallel_for_each(
+        acc_view,
+        hc::tiled_extent<1>(grid_size, block_size),
+        [=](hc::tiled_index<1>) [[hc]]
+        {
+            detail::transform_kernel_impl<block_size, items_per_thread>(
+                input, size, output, transform_op
+            );
+        }
+    );
+    ROCPRIM_DETAIL_HC_SYNC("transform_kernel", size, start)
 }
 
-#undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
-#undef ROCPRIM_DETAIL_HIP_SYNC
+#undef ROCPRIM_DETAIL_HC_SYNC
 
 END_ROCPRIM_NAMESPACE
 
-#endif // ROCPRIM_DEVICE_DEVICE_TRANSFORM_HIP_HPP_
+#endif // ROCPRIM_DEVICE_DEVICE_TRANSFORM_HC_HPP_
