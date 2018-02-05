@@ -33,7 +33,11 @@ BEGIN_ROCPRIM_NAMESPACE
 ROCPRIM_DEVICE inline
 unsigned long long ballot(bool predicate)
 {
-    return hc::__ballot(predicate);
+    #ifdef ROCPRIM_HC_API
+        return hc::__ballot(predicate);
+    #else // HIP
+        return __ballot(predicate);
+    #endif
 }
 
 /// \brief Masked bit count
@@ -43,10 +47,18 @@ unsigned long long ballot(bool predicate)
 ROCPRIM_DEVICE inline
 unsigned int masked_bit_count(unsigned long long x)
 {
-    int c;
-    c = hc::__amdgcn_mbcnt_lo(static_cast<int>(x), 0);
-    c = hc::__amdgcn_mbcnt_hi(static_cast<int>(x >> 32), c);
-    return c;
+    #ifdef ROCPRIM_HC_API
+        int c;
+        c = hc::__amdgcn_mbcnt_lo(static_cast<int>(x), 0);
+        c = hc::__amdgcn_mbcnt_hi(static_cast<int>(x >> 32), c);
+        return c;
+    #else // HIP
+        // TODO: Use HIP function(s)
+        int c;
+        c = hc::__amdgcn_mbcnt_lo(static_cast<int>(x), 0);
+        c = hc::__amdgcn_mbcnt_hi(static_cast<int>(x >> 32), c);
+        return c;
+    #endif
 }
 
 END_ROCPRIM_NAMESPACE

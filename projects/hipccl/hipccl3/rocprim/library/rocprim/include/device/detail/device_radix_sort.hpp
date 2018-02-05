@@ -78,7 +78,7 @@ void fill_digit_counts(const KeyIn * keys_input,
     const unsigned int radix_mask = (1u << current_radix_bits) - 1;
 
     const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-    const unsigned int batch_id = ::rocprim::block_id(0);
+    const unsigned int batch_id = ::rocprim::detail::block_id<0>();
     const unsigned int warp_id = ::rocprim::warp_id();
 
     if(flat_id < radix_size)
@@ -176,7 +176,7 @@ void scan_batches(unsigned int * batch_digit_counts,
 
     using scan_type = typename ::rocprim::block_scan<unsigned int, BlockSize>;
 
-    const unsigned int digit = ::rocprim::block_id(0);
+    const unsigned int digit = ::rocprim::detail::block_id<0>();
     const unsigned int flat_id = ::rocprim::flat_block_thread_id();
 
     unsigned int values[ItemsPerThread];
@@ -308,7 +308,7 @@ void sort_and_scatter(const KeyIn * keys_input,
     const unsigned int radix_mask = (1u << current_radix_bits) - 1;
 
     const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-    const unsigned int batch_id = ::rocprim::block_id(0);
+    const unsigned int batch_id = ::rocprim::detail::block_id<0>();
 
     if(flat_id < radix_size)
     {

@@ -188,8 +188,8 @@ void block_reduce_kernel_impl(InputIterator input,
     ROCPRIM_SHARED_MEMORY typename block_reduce_type::storage_type reduce_storage;
 
     // It's assumed kernel is executed in 1D
-    const unsigned int flat_id = ::rocprim::block_thread_id(0);
-    const unsigned int flat_block_id = ::rocprim::block_id(0);
+    const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
+    const unsigned int flat_block_id = ::rocprim::detail::block_id<0>();
 
     const unsigned int block_offset = flat_block_id * ItemsPerThread * BlockSize;
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
@@ -372,7 +372,7 @@ void final_scan_kernel_impl(InputIterator input,
     } storage;
 
     // It's assumed kernel is executed in 1D
-    const unsigned int flat_block_id = ::rocprim::block_id(0);
+    const unsigned int flat_block_id = ::rocprim::detail::block_id<0>();
 
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
     const unsigned int block_offset = flat_block_id * items_per_block;
