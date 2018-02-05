@@ -20,9 +20,10 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-function(meta_add_rocprim_test TEST_NAME TEST_SOURCE ROCPRIM_TARGET)
-  get_filename_component(TEST_TARGET ${TEST_SOURCE} NAME_WE)
-  add_executable(${TEST_TARGET} ${TEST_SOURCE})
+function(meta_add_rocprim_test TEST_NAME TEST_SOURCES ROCPRIM_TARGET)
+  list(GET TEST_SOURCES 0 TEST_MAIN_SOURCE)
+  get_filename_component(TEST_TARGET ${TEST_MAIN_SOURCE} NAME_WE)
+  add_executable(${TEST_TARGET} ${TEST_SOURCES})
   target_include_directories(${TEST_TARGET} SYSTEM
     PUBLIC
       ${GTEST_INCLUDE_DIRS}
@@ -45,12 +46,12 @@ function(meta_add_rocprim_test TEST_NAME TEST_SOURCE ROCPRIM_TARGET)
   add_test(${TEST_NAME} ${TEST_TARGET})
 endfunction()
 
-function(add_rocprim_test_hc TEST_NAME TEST_SOURCE)
-  meta_add_rocprim_test(${TEST_NAME} ${TEST_SOURCE} rocprim_hc)
+function(add_rocprim_test_hc TEST_NAME TEST_SOURCES)
+  meta_add_rocprim_test(${TEST_NAME} "${TEST_SOURCES}" rocprim_hc)
 endfunction()
 
-function(add_rocprim_test_hip TEST_NAME TEST_SOURCE)
-  meta_add_rocprim_test(${TEST_NAME} ${TEST_SOURCE} rocprim_hip)
+function(add_rocprim_test_hip TEST_NAME TEST_SOURCES)
+  meta_add_rocprim_test(${TEST_NAME} "${TEST_SOURCES}" rocprim_hip)
 endfunction()
 
 # ****************************************************************************
@@ -61,8 +62,11 @@ endfunction()
 add_rocprim_test_hc("hip.device_api" test_hc_api.cpp)
 add_rocprim_test_hip("hip.device_api" test_hip_api.cpp)
 
+# HC and HIP basic tests, which also checks if there are no linkage problems when there are multiple sources
+add_rocprim_test_hip("rocprim.hip.basic_test" "test_rocprim_hip_basic.cpp;detail/get_rocprim_version_hip.cpp")
+add_rocprim_test_hc("rocprim.hc.basic_test" "test_rocprim_hc_basic.cpp;detail/get_rocprim_version_hc.cpp")
+
 # rocPRIM HC API tests
-add_rocprim_test_hc("rocprim.hc.basics" test_rocprim_basics.cpp)
 add_rocprim_test_hc("rocprim.hc.block_discontinuity" test_rocprim_hc_block_discontinuity.cpp)
 add_rocprim_test_hc("rocprim.hc.block_exchange" test_rocprim_hc_block_exchange.cpp)
 add_rocprim_test_hc("rocprim.hc.block_load_store" test_rocprim_hc_block_load_store.cpp)
@@ -72,7 +76,7 @@ add_rocprim_test_hc("rocprim.hc.block_scan" test_rocprim_hc_block_scan.cpp)
 add_rocprim_test_hc("rocprim.hc.device_radix_sort" test_rocprim_hc_device_radix_sort.cpp)
 add_rocprim_test_hc("rocprim.hc.device_reduce" test_rocprim_hc_device_reduce.cpp)
 add_rocprim_test_hc("rocprim.hc.device_scan" test_rocprim_hc_device_scan.cpp)
-add_rocprim_test_hc("rocprim.hc.device_scan" test_rocprim_hc_device_transform.cpp)
+add_rocprim_test_hc("rocprim.hc.device_transform" test_rocprim_hc_device_transform.cpp)
 add_rocprim_test_hc("rocprim.hc.intrinsics" test_rocprim_hc_intrinsics.cpp)
 add_rocprim_test_hc("rocprim.hc.warp_reduce" test_rocprim_hc_warp_reduce.cpp)
 add_rocprim_test_hc("rocprim.hc.warp_scan" test_rocprim_hc_warp_scan.cpp)
