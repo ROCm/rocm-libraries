@@ -24,10 +24,7 @@
 #include <type_traits>
 #include <iterator>
 
-// HC API
-#include <hcc/hc.hpp>
-
-#include "../detail/config.hpp"
+#include "../config.hpp"
 #include "../detail/various.hpp"
 
 #include "detail/device_transform.hpp"
@@ -56,6 +53,7 @@ template<
     class OutputIterator,
     class UnaryFunction
 >
+inline
 void device_transform(InputIterator input,
                       OutputIterator output,
                       const size_t size,

@@ -47,9 +47,10 @@ template<
     class InitValueType,
     class BinaryFunction
 >
+ROCPRIM_DEVICE inline
 auto reduce_with_initial(T& output,
                          InitValueType initial_value,
-                         BinaryFunction reduce_op) [[hc]]
+                         BinaryFunction reduce_op)
     -> typename std::enable_if<WithInitialValue, T>::type
 {
     return reduce_op(output, initial_value);
@@ -61,9 +62,10 @@ template<
     class InitValueType,
     class BinaryFunction
 >
+ROCPRIM_DEVICE inline
 auto reduce_with_initial(T& output,
                          InitValueType initial_value,
-                         BinaryFunction reduce_op) [[hc]]
+                         BinaryFunction reduce_op)
     -> typename std::enable_if<!WithInitialValue, T>::type
 {
     (void) initial_value;
@@ -80,11 +82,12 @@ template<
     class InitValueType,
     class BinaryFunction
 >
+ROCPRIM_DEVICE inline
 void block_reduce_kernel_impl(InputIterator input,
                               const size_t input_size,
                               OutputIterator output,
                               InitValueType initial_value,
-                              BinaryFunction reduce_op) [[hc]]
+                              BinaryFunction reduce_op)
 {
     using output_type = typename std::iterator_traits<OutputIterator>::value_type;
     using block_reduce_type = ::rocprim::block_reduce<
