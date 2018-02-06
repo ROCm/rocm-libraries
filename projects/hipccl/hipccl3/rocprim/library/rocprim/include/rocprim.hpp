@@ -29,6 +29,8 @@
 #include "config.hpp"
 
 #include "intrinsics.hpp"
+#include "functional.hpp"
+#include "types.hpp"
 #include "rocprim_version.hpp"
 
 #include "warp/warp_reduce.hpp"
