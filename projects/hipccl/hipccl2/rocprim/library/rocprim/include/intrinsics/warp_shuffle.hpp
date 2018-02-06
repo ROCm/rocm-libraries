@@ -76,7 +76,7 @@ T warp_shuffle(T input, const int src_lane, const int width = warp_size())
         input,
         [=](int v) -> int
         {
-            #ifdef ROCPRIM_HC_API
+            #if defined(ROCPRIM_HC_API) || defined(__HIP_PLATFORM_HCC__)
                 return hc::__shfl(v, src_lane, width);
             #else
                 return __shfl(v, src_lane, width);
@@ -105,7 +105,7 @@ T warp_shuffle_up(T input, const unsigned int delta, const int width = warp_size
         input,
         [=](int v) -> int
         {
-            #ifdef ROCPRIM_HC_API
+            #if defined(ROCPRIM_HC_API) || defined(__HIP_PLATFORM_HCC__)
                 return hc::__shfl_up(v, delta, width);
             #else
                 return __shfl_up(v, delta, width);
@@ -134,7 +134,7 @@ T warp_shuffle_down(T input, const unsigned int delta, const int width = warp_si
         input,
         [=](int v) -> int
         {
-            #ifdef ROCPRIM_HC_API
+            #if defined(ROCPRIM_HC_API) || defined(__HIP_PLATFORM_HCC__)
                 return hc::__shfl_down(v, delta, width);
             #else
                 return __shfl_down(v, delta, width);
@@ -162,7 +162,7 @@ T warp_shuffle_xor(T input, const int lane_mask, const int width = warp_size())
         input,
         [=](int v) -> int
         {
-            #ifdef ROCPRIM_HC_API
+            #if defined(ROCPRIM_HC_API) || defined(__HIP_PLATFORM_HCC__)
                 return hc::__shfl_xor(v, lane_mask, width);
             #else
                 return __shfl_xor(v, lane_mask, width);
