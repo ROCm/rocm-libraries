@@ -87,3 +87,4 @@ add_rocprim_test_hip("rocprim.hip.device_radix_sort" test_rocprim_hip_device_rad
 add_rocprim_test_hip("rocprim.hip.device_reduce" test_rocprim_hip_device_reduce.cpp)
 add_rocprim_test_hip("rocprim.hip.device_scan" test_rocprim_hip_device_scan.cpp)
 add_rocprim_test_hip("rocprim.hip.device_transform" test_rocprim_hip_device_transform.cpp)
+add_rocprim_test_hip("rocprim.hip.warp_scan" test_rocprim_hip_warp_scan.cpp)
