@@ -21,6 +21,7 @@
 #include <vector>
 #include <random>
 
+// rocPRIM HIP API
 #include <rocprim_hip.hpp>
 
 #include "example_utils.hpp"

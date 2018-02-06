@@ -21,6 +21,7 @@
 #include <iostream>
 #include <vector>
 
+// rocPRIM HC API
 #include <rocprim_hc.hpp>
 
 #include "example_utils.hpp"
@@ -96,7 +97,7 @@ void run_example_union_storage_types(size_t size, hc::accelerator_view acc_view)
 
     // Device memory allocation
     hc::array_view<T> device_input(host_input.size(), host_input.data());
-    hc::array_view<T> device_output(host_output.size(), host_output.data()); 
+    hc::array_view<T> device_output(host_output.size(), host_output.data());
 
     // Getting output data from device
     device_output.synchronize();
@@ -119,7 +120,7 @@ void run_example_union_storage_types(size_t size, hc::accelerator_view acc_view)
             >;
 
             // Allocate storage in shared memory for load,store and scan operations
-            __shared__ union
+            tile_static union
             {
                 typename block_scan_type::storage_type scan;
                 typename block_load_type::storage_type load;
@@ -251,7 +252,7 @@ void run_example_global_memory_storage(size_t size, hc::accelerator_view acc_vie
     using storage_type = typename rocprim::block_scan<T, block_size>::storage_type;
     std::vector<storage_type> host_global_storage(number_of_tiles);
 
-    hc::array<storage_type, 1> 
+    hc::array<storage_type, 1>
         device_global_storage(
             hc::extent<1>(host_global_storage.size()),
             host_global_storage.begin(),
@@ -280,7 +281,7 @@ void run_example_global_memory_storage(size_t size, hc::accelerator_view acc_vie
 
             device_output[index] = output_value;
         }
-    );   
+    );
 
     // Getting output data from device
     device_output.synchronize();
@@ -297,8 +298,8 @@ int main()
 {
     hc::accelerator hc_accelerator;
     hc::accelerator_view acc_view = hc_accelerator.create_view();
-    
-    // Running each example kernel 
+
+    // Running each example kernel
     run_example_shared_memory<int>(1024, acc_view);
     run_example_union_storage_types<int>(1024, acc_view);
     run_example_dynamic_shared_memory<int>(1024, acc_view);
