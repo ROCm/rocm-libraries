@@ -87,6 +87,8 @@ test:rocm244:
   stage: test
   variables:
     SUDO_CMD: "sudo -E"
+    HIP_LAUNCH_BLOCKING: 1
+    HCC_OPT_FLUSH: 0
   dependencies:
     - build:rocm
   script:
