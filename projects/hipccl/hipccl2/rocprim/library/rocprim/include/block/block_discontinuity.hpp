@@ -138,6 +138,11 @@ template<
 >
 class block_discontinuity
 {
+    struct storage_type_
+    {
+        T first_items[BlockSize];
+        T last_items[BlockSize];
+    };
 
 public:
 
@@ -149,11 +154,7 @@ public:
     /// using keywords <tt>__shared__</tt> in HIP or \p tile_static in HC. It can be aliased to
     /// an externally allocated memory, or be a part of a union type with other storage types
     /// to increase shared memory reusability.
-    struct storage_type
-    {
-        T first_items[BlockSize];
-        T last_items[BlockSize];
-    };
+    using storage_type = storage_type_;
 
     /// \brief Tags \p head_flags that indicate discontinuities between items partitioned
     /// across the thread block, where the first item has no reference and is always
