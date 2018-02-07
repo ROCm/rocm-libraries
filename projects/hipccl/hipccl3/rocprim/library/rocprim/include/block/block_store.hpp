@@ -142,7 +142,7 @@ template<
 class block_store
 {
 private:
-    using _storage_type = typename ::rocprim::detail::empty_storage_type;
+    using storage_type_ = typename ::rocprim::detail::empty_storage_type;
 
 public:
     /// \brief Struct used to allocate a temporary memory that is required for thread
@@ -156,7 +156,7 @@ public:
     #ifndef DOXYGEN_SHOULD_SKIP_THIS // hides storage_type implementation for Doxygen
     using storage_type = typename ::rocprim::detail::empty_storage_type;
     #else
-    using storage_type = _storage_type; // only for Doxygen
+    using storage_type = storage_type_; // only for Doxygen
     #endif
 
     /// \brief Stores an arrangement of items from across the thread block into an
@@ -314,6 +314,8 @@ public:
 /// @}
 // end of group collectiveblockmodule
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+
 template<
     class T,
     unsigned int BlockSize,
@@ -322,13 +324,13 @@ template<
 class block_store<T, BlockSize, ItemsPerThread, block_store_method::block_store_vectorize>
 {
 private:
-    using _storage_type = typename ::rocprim::detail::empty_storage_type;
+    using storage_type_ = typename ::rocprim::detail::empty_storage_type;
 
 public:
     #ifndef DOXYGEN_SHOULD_SKIP_THIS // hides storage_type implementation for Doxygen
     using storage_type = typename ::rocprim::detail::empty_storage_type;
     #else
-    using storage_type = _storage_type; // only for Doxygen
+    using storage_type = storage_type_; // only for Doxygen
     #endif
 
     ROCPRIM_DEVICE inline
@@ -559,6 +561,8 @@ public:
         block_store_direct_warp_striped(flat_id, block_output, items, valid);
     }
 };
+
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 END_ROCPRIM_NAMESPACE
 
