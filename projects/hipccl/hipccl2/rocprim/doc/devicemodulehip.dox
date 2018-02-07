@@ -1,0 +1,10 @@
+/**
+@brief rocPRIM HIP device-wide primitives.
+@author
+@file
+*/
+
+/**
+ * \defgroup devicemodule_hip rocPRIM HIP device-wide primitives
+ *
+ */
