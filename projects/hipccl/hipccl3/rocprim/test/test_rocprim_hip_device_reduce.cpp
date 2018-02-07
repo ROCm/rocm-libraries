@@ -26,11 +26,12 @@
 
 // Google Test
 #include <gtest/gtest.h>
+
 // HIP API
 #include <hip/hip_runtime.h>
-
-// rocPRIM HIP API
-#include <device/device_reduce_hip.hpp>
+#include <hip/hip_hcc.h>
+// rocPRIM API
+#include <rocprim.hpp>
 
 #include "test_utils.hpp"
 

@@ -28,9 +28,8 @@
 #include <gtest/gtest.h>
 // HIP API
 #include <hip/hip_runtime.h>
-
-// rocPRIM HIP API
-#include <device/device_transform_hip.hpp>
+// rocPRIM API
+#include <rocprim.hpp>
 
 #include "test_utils.hpp"
 
@@ -91,7 +90,8 @@ TYPED_TEST_CASE(RocprimDeviceTransformTests, RocprimDeviceTransformTestsParams);
 template<class T>
 struct transform
 {
-    constexpr T operator()(const T& a) const [[hc]] [[cpu]]
+    __device__ __host__
+    constexpr T operator()(const T& a) const
     {
         return a + 5;
     }

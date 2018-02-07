@@ -23,10 +23,7 @@
 
 #include <type_traits>
 
-// HC API
-#include <hcc/hc.hpp>
-
-#include "../detail/config.hpp"
+#include "../config.hpp"
 #include "../detail/various.hpp"
 
 #include "../intrinsics.hpp"
@@ -59,7 +56,7 @@ struct select_warp_reduce_impl
 } // end namespace detail
 
 /// \brief The warp_reduce class is a warp level parallel primitive which provides methods
-/// for performing reduction operations on items partitioned across threads in a hardware 
+/// for performing reduction operations on items partitioned across threads in a hardware
 /// warp.
 ///
 /// \tparam T - the input/output type.
@@ -156,7 +153,7 @@ public:
     /// an externally allocated memory, or be a part of a union type with other storage types
     /// to increase shared memory reusability.
     using storage_type = typename base_type::storage_type;
-    
+
     /// \brief Performs reduction across threads in a logical warp.
     ///
     /// \tparam BinaryFunction - type of binary function used for reduce. Default type
@@ -229,14 +226,15 @@ public:
     /// \endcode
     /// \endparblock
     template<class BinaryFunction = ::rocprim::plus<T>>
+    ROCPRIM_DEVICE inline
     void reduce(T input,
                 T& output,
                 storage_type& storage,
-                BinaryFunction reduce_op = BinaryFunction()) [[hc]]
+                BinaryFunction reduce_op = BinaryFunction())
     {
         base_type::reduce(input, output, storage, reduce_op);
     }
-    
+
     /// \brief Performs reduction across threads in a logical warp.
     ///
     /// \tparam BinaryFunction - type of binary function used for reduce. Default type
@@ -312,11 +310,12 @@ public:
     /// \endcode
     /// \endparblock
     template<class BinaryFunction = ::rocprim::plus<T>>
+    ROCPRIM_DEVICE inline
     void reduce(T input,
                 T& output,
                 int valid_items,
                 storage_type& storage,
-                BinaryFunction reduce_op = BinaryFunction()) [[hc]]
+                BinaryFunction reduce_op = BinaryFunction())
     {
         base_type::reduce(input, output, valid_items, storage, reduce_op);
     }

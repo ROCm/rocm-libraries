@@ -24,11 +24,7 @@
 #include <type_traits>
 #include <iterator>
 
-// HIP API
-#include <hip/hip_runtime.h>
-#include <hip/hip_hcc.h>
-
-#include "../../detail/config.hpp"
+#include "../../config.hpp"
 #include "../../detail/various.hpp"
 
 #include "../../intrinsics.hpp"
@@ -50,24 +46,25 @@ template<
     class OutputIterator,
     class UnaryFunction
 >
+ROCPRIM_DEVICE inline
 void transform_kernel_impl(InputIterator input,
                            const size_t input_size,
                            OutputIterator output,
-                           UnaryFunction transform_op) [[hc]]
+                           UnaryFunction transform_op)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     using output_type = typename std::iterator_traits<OutputIterator>::value_type;
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
-    
-    const unsigned int flat_id = ::rocprim::block_thread_id(0);
-    const unsigned int flat_block_id = ::rocprim::block_id(0);
+
+    const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
+    const unsigned int flat_block_id = ::rocprim::detail::block_id<0>();
     const unsigned int block_offset = flat_block_id * BlockSize * ItemsPerThread;
     const unsigned int number_of_blocks = (input_size + items_per_block - 1)/items_per_block;
     auto valid_in_last_block = input_size - items_per_block * (number_of_blocks - 1);
 
     input_type input_values[ItemsPerThread];
     output_type output_values[ItemsPerThread];
-    
+
     // load input values into values
     if(flat_block_id == (number_of_blocks - 1)) // last block
     {
@@ -86,13 +83,13 @@ void transform_kernel_impl(InputIterator input,
             input_values
         );
     }
-    
+
     #pragma unroll
     for(unsigned int i = 0; i < ItemsPerThread; i++)
     {
         output_values[i] = transform_op(input_values[i]);
     }
-    
+
     // Save values into output array
     if(flat_block_id == (number_of_blocks - 1)) // last block
     {
@@ -112,7 +109,7 @@ void transform_kernel_impl(InputIterator input,
         );
     }
 }
-    
+
 } // end of detail namespace
 
 END_ROCPRIM_NAMESPACE

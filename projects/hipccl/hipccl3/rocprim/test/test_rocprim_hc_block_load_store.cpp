@@ -29,9 +29,8 @@
 // HC API
 #include <hcc/hc.hpp>
 #include <hcc/hc_short_vector.hpp>
-// rocPRIM
-#include <block/block_load.hpp>
-#include <block/block_store.hpp>
+// rocPRIM API
+#include <rocprim.hpp>
 
 #include "test_utils.hpp"
 

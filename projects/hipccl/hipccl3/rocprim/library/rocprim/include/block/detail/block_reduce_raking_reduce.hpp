@@ -23,10 +23,7 @@
 
 #include <type_traits>
 
-// HC API
-#include <hcc/hc.hpp>
-
-#include "../../detail/config.hpp"
+#include "../../config.hpp"
 #include "../../detail/various.hpp"
 
 #include "../../intrinsics.hpp"
@@ -65,10 +62,11 @@ public:
     };
 
     template<class BinaryFunction>
+    ROCPRIM_DEVICE inline
     void reduce(T input,
                 T& output,
                 storage_type& storage,
-                BinaryFunction reduce_op) [[hc]]
+                BinaryFunction reduce_op)
     {
         this->reduce_impl(
             ::rocprim::flat_block_thread_id(),
@@ -77,19 +75,21 @@ public:
     }
 
     template<class BinaryFunction>
+    ROCPRIM_DEVICE inline
     void reduce(T input,
                 T& output,
-                BinaryFunction reduce_op) [[hc]]
+                BinaryFunction reduce_op)
     {
-        tile_static storage_type storage;
+        ROCPRIM_SHARED_MEMORY storage_type storage;
         this->reduce(input, output, storage, reduce_op);
     }
 
     template<unsigned int ItemsPerThread, class BinaryFunction>
+    ROCPRIM_DEVICE inline
     void reduce(T (&input)[ItemsPerThread],
                 T& output,
                 storage_type& storage,
-                BinaryFunction reduce_op) [[hc]]
+                BinaryFunction reduce_op)
     {
         // Reduce thread items
         T thread_input = input[0];
@@ -110,20 +110,22 @@ public:
     }
 
     template<unsigned int ItemsPerThread, class BinaryFunction>
+    ROCPRIM_DEVICE inline
     void reduce(T (&input)[ItemsPerThread],
                 T& output,
-                BinaryFunction reduce_op) [[hc]]
+                BinaryFunction reduce_op)
     {
-        tile_static storage_type storage;
+        ROCPRIM_SHARED_MEMORY storage_type storage;
         this->reduce(input, output, storage, reduce_op);
     }
 
     template<class BinaryFunction>
+    ROCPRIM_DEVICE inline
     void reduce(T input,
                 T& output,
                 unsigned int valid_items,
                 storage_type& storage,
-                BinaryFunction reduce_op) [[hc]]
+                BinaryFunction reduce_op)
     {
         this->reduce_impl(
             ::rocprim::flat_block_thread_id(),
@@ -132,22 +134,24 @@ public:
     }
 
     template<class BinaryFunction>
+    ROCPRIM_DEVICE inline
     void reduce(T input,
                 T& output,
                 unsigned int valid_items,
-                BinaryFunction reduce_op) [[hc]]
+                BinaryFunction reduce_op)
     {
-        tile_static storage_type storage;
+        ROCPRIM_SHARED_MEMORY storage_type storage;
         this->reduce(input, output, valid_items, storage, reduce_op);
     }
 
 private:
     template<class BinaryFunction>
+    ROCPRIM_DEVICE inline
     void reduce_impl(const unsigned int flat_tid,
                      T input,
                      T& output,
                      storage_type& storage,
-                     BinaryFunction reduce_op) [[hc]]
+                     BinaryFunction reduce_op)
     {
         storage.threads[flat_tid] = input;
         ::rocprim::syncthreads();
@@ -169,6 +173,7 @@ private:
     }
 
     template<bool UseValid, class WarpReduce, class BinaryFunction>
+    ROCPRIM_DEVICE inline
     auto warp_reduce(T input,
                      T& output,
                      const unsigned int valid_items,
@@ -181,6 +186,7 @@ private:
     }
 
     template<bool UseValid, class WarpReduce, class BinaryFunction>
+    ROCPRIM_DEVICE inline
     auto warp_reduce(T input,
                      T& output,
                      const unsigned int valid_items,
@@ -194,12 +200,13 @@ private:
     }
 
     template<class BinaryFunction>
+    ROCPRIM_DEVICE inline
     void reduce_impl(const unsigned int flat_tid,
                      T input,
                      T& output,
                      const unsigned int valid_items,
                      storage_type& storage,
-                     BinaryFunction reduce_op) [[hc]]
+                     BinaryFunction reduce_op)
     {
         storage.threads[flat_tid] = input;
         ::rocprim::syncthreads();

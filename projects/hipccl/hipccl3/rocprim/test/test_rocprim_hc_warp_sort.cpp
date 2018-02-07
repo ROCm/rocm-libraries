@@ -29,17 +29,23 @@
 #include <gtest/gtest.h>
 // HC API
 #include <hcc/hc.hpp>
-// rocPRIM
-#include <warp/warp_sort.hpp>
+// rocPRIM API
+#include <rocprim.hpp>
 
 #include "test_utils.hpp"
 
 namespace rp = rocprim;
 
-template<typename WarpSizeWrapper>
+template<unsigned int WarpSize>
+struct params
+{
+    static constexpr unsigned int warp_size = WarpSize;
+};
+
+template<typename Params>
 class RocprimWarpSortShuffleBasedTests : public ::testing::Test {
 public:
-    static constexpr unsigned int warp_size = WarpSizeWrapper::value;
+    static constexpr unsigned int warp_size = Params::warp_size;
 };
 
 template<class T>
@@ -49,12 +55,12 @@ bool test(const T& a, const T& b) [[hc]]
 }
 
 typedef ::testing::Types<
-    uint_wrapper<2U>,
-    uint_wrapper<4U>,
-    uint_wrapper<8U>,
-    uint_wrapper<16U>,
-    uint_wrapper<32U>,
-    uint_wrapper<64U>
+    params<2U>,
+    params<4U>,
+    params<8U>,
+    params<16U>,
+    params<32U>,
+    params<64U>
 > WarpSizes;
 
 TYPED_TEST_CASE(RocprimWarpSortShuffleBasedTests, WarpSizes);

@@ -23,7 +23,7 @@
 
 #include <type_traits>
 
-#include "config.hpp"
+#include "../config.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 namespace detail
@@ -41,12 +41,14 @@ struct radix_key_codec_integral<Key, BitKey, typename std::enable_if<std::is_uns
 {
     using bit_key_type = BitKey;
 
-    static bit_key_type encode(Key key) [[hc]]
+    ROCPRIM_DEVICE inline
+    static bit_key_type encode(Key key)
     {
         return *reinterpret_cast<bit_key_type *>(&key);
     }
 
-    static Key decode(bit_key_type bit_key) [[hc]]
+    ROCPRIM_DEVICE inline
+    static Key decode(bit_key_type bit_key)
     {
         return *reinterpret_cast<Key *>(&bit_key);
     }
@@ -59,12 +61,14 @@ struct radix_key_codec_integral<Key, BitKey, typename std::enable_if<std::is_sig
 
     static constexpr bit_key_type sign_bit = bit_key_type(1) << (sizeof(bit_key_type) * 8 - 1);
 
-    static bit_key_type encode(Key key) [[hc]]
+    ROCPRIM_DEVICE inline
+    static bit_key_type encode(Key key)
     {
         return sign_bit ^ *reinterpret_cast<bit_key_type *>(&key);
     }
 
-    static Key decode(bit_key_type bit_key) [[hc]]
+    ROCPRIM_DEVICE inline
+    static Key decode(bit_key_type bit_key)
     {
         bit_key ^= sign_bit;
         return *reinterpret_cast<Key *>(&bit_key);
@@ -78,14 +82,16 @@ struct radix_key_codec_floating
 
     static constexpr bit_key_type sign_bit = bit_key_type(1) << (sizeof(bit_key_type) * 8 - 1);
 
-    static bit_key_type encode(Key key) [[hc]]
+    ROCPRIM_DEVICE inline
+    static bit_key_type encode(Key key)
     {
         bit_key_type bit_key = *reinterpret_cast<bit_key_type *>(&key);
         bit_key ^= (sign_bit & bit_key) == 0 ? sign_bit : bit_key_type(-1);
         return bit_key;
     }
 
-    static Key decode(bit_key_type bit_key) [[hc]]
+    ROCPRIM_DEVICE inline
+    static Key decode(bit_key_type bit_key)
     {
         bit_key ^= (sign_bit & bit_key) == 0 ? bit_key_type(-1) : sign_bit;
         return *reinterpret_cast<Key *>(&bit_key);
@@ -119,13 +125,15 @@ class radix_key_codec : protected radix_key_codec_base<Key>
 public:
     using bit_key_type = typename base_type::bit_key_type;
 
-    static bit_key_type encode(Key key) [[hc]]
+    ROCPRIM_DEVICE inline
+    static bit_key_type encode(Key key)
     {
         bit_key_type bit_key = base_type::encode(key);
         return (Descending ? ~bit_key : bit_key);
     }
 
-    static Key decode(bit_key_type bit_key) [[hc]]
+    ROCPRIM_DEVICE inline
+    static Key decode(bit_key_type bit_key)
     {
         bit_key = (Descending ? ~bit_key : bit_key);
         return base_type::decode(bit_key);

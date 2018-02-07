@@ -23,7 +23,8 @@
 
 #include <type_traits>
 
-#include "detail/config.hpp"
+// Meta configuration for rocPRIM
+#include "config.hpp"
 
 /// \addtogroup utilsmodule
 /// @{

@@ -30,12 +30,8 @@
 #include <gtest/gtest.h>
 // HC API
 #include <hcc/hc.hpp>
-// rocPRIM
-#include <block/block_exchange.hpp>
-#include <block/block_load.hpp>
-#include <block/block_store.hpp>
-
-#include <detail/various.hpp>
+// rocPRIM API
+#include <rocprim.hpp>
 
 #include "test_utils.hpp"
 
@@ -67,13 +63,14 @@ struct dummy
     T x;
     T y;
 
-    dummy() [[hc]] [[cpu]] = default;
+    ROCPRIM_HOST_DEVICE
+    dummy() = default;
 
     template<class U>
-    dummy(U a) [[hc]] [[cpu]]
-        : x(a + 1), y(a * 2)
-    { }
+    ROCPRIM_HOST_DEVICE
+    dummy(U a) : x(a + 1), y(a * 2) { }
 
+    ROCPRIM_HOST_DEVICE
     bool operator==(const dummy& rhs) const
     {
         return std::tie(x, y) == std::tie(rhs.x, rhs.y);

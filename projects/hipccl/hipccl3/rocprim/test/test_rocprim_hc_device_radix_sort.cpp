@@ -32,9 +32,8 @@
 
 // HC API
 #include <hcc/hc.hpp>
-
-// rocPRIM
-#include <device/device_radix_sort_hc.hpp>
+// rocPRIM API
+#include <rocprim.hpp>
 
 #include "test_utils.hpp"
 

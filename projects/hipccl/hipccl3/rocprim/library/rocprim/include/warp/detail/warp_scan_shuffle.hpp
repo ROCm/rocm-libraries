@@ -23,10 +23,7 @@
 
 #include <type_traits>
 
-// HC API
-#include <hcc/hc.hpp>
-
-#include "../../detail/config.hpp"
+#include "../../config.hpp"
 #include "../../detail/various.hpp"
 
 #include "../../intrinsics.hpp"
@@ -49,7 +46,8 @@ public:
     using storage_type = detail::empty_storage_type;
 
     template<class BinaryFunction>
-    void inclusive_scan(T input, T& output, BinaryFunction scan_op) [[hc]]
+    ROCPRIM_DEVICE inline
+    void inclusive_scan(T input, T& output, BinaryFunction scan_op)
     {
         output = input;
 
@@ -64,16 +62,18 @@ public:
     }
 
     template<class BinaryFunction>
+    ROCPRIM_DEVICE inline
     void inclusive_scan(T input, T& output,
-                        storage_type& storage, BinaryFunction scan_op) [[hc]]
+                        storage_type& storage, BinaryFunction scan_op)
     {
         (void) storage; // disables unused parameter warning
         inclusive_scan(input, output, scan_op);
     }
 
     template<class BinaryFunction>
+    ROCPRIM_DEVICE inline
     void inclusive_scan(T input, T& output, T& reduction,
-                        BinaryFunction scan_op) [[hc]]
+                        BinaryFunction scan_op)
     {
         inclusive_scan(input, output, scan_op);
         // Broadcast value from the last thread in warp
@@ -81,15 +81,17 @@ public:
     }
 
     template<class BinaryFunction>
+    ROCPRIM_DEVICE inline
     void inclusive_scan(T input, T& output, T& reduction,
-                        storage_type& storage, BinaryFunction scan_op) [[hc]]
+                        storage_type& storage, BinaryFunction scan_op)
     {
         (void) storage;
         inclusive_scan(input, output, reduction, scan_op);
     }
 
     template<class BinaryFunction>
-    void exclusive_scan(T input, T& output, T init, BinaryFunction scan_op) [[hc]]
+    ROCPRIM_DEVICE inline
+    void exclusive_scan(T input, T& output, T init, BinaryFunction scan_op)
     {
         inclusive_scan(input, output, scan_op);
         // Convert inclusive scan result to exclusive
@@ -97,16 +99,18 @@ public:
     }
 
     template<class BinaryFunction>
+    ROCPRIM_DEVICE inline
     void exclusive_scan(T input, T& output, T init,
-                        storage_type& storage, BinaryFunction scan_op) [[hc]]
+                        storage_type& storage, BinaryFunction scan_op)
     {
         (void) storage; // disables unused parameter warning
         exclusive_scan(input, output, init, scan_op);
     }
 
     template<class BinaryFunction>
+    ROCPRIM_DEVICE inline
     void exclusive_scan(T input, T& output, T init, T& reduction,
-                        BinaryFunction scan_op) [[hc]]
+                        BinaryFunction scan_op)
     {
         inclusive_scan(input, output, scan_op);
         // Broadcast value from the last thread in warp
@@ -116,16 +120,18 @@ public:
     }
 
     template<class BinaryFunction>
+    ROCPRIM_DEVICE inline
     void exclusive_scan(T input, T& output, T init, T& reduction,
-                        storage_type& storage, BinaryFunction scan_op) [[hc]]
+                        storage_type& storage, BinaryFunction scan_op)
     {
         (void) storage;
         exclusive_scan(input, output, init, reduction, scan_op);
     }
 
     template<class BinaryFunction>
+    ROCPRIM_DEVICE inline
     void scan(T input, T& inclusive_output, T& exclusive_output, T init,
-              BinaryFunction scan_op) [[hc]]
+              BinaryFunction scan_op)
     {
         inclusive_scan(input, inclusive_output, scan_op);
         // Convert inclusive scan result to exclusive
@@ -133,16 +139,18 @@ public:
     }
 
     template<class BinaryFunction>
+    ROCPRIM_DEVICE inline
     void scan(T input, T& inclusive_output, T& exclusive_output, T init,
-              storage_type& storage, BinaryFunction scan_op) [[hc]]
+              storage_type& storage, BinaryFunction scan_op)
     {
         (void) storage; // disables unused parameter warning
         scan(input, inclusive_output, exclusive_output, init, scan_op);
     }
 
     template<class BinaryFunction>
+    ROCPRIM_DEVICE inline
     void scan(T input, T& inclusive_output, T& exclusive_output, T init, T& reduction,
-              BinaryFunction scan_op) [[hc]]
+              BinaryFunction scan_op)
     {
         inclusive_scan(input, inclusive_output, scan_op);
         // Broadcast value from the last thread in warp
@@ -152,8 +160,9 @@ public:
     }
 
     template<class BinaryFunction>
+    ROCPRIM_DEVICE inline
     void scan(T input, T& inclusive_output, T& exclusive_output, T init, T& reduction,
-              storage_type& storage, BinaryFunction scan_op) [[hc]]
+              storage_type& storage, BinaryFunction scan_op)
     {
         (void) storage;
         scan(input, inclusive_output, exclusive_output, init, reduction, scan_op);
@@ -163,8 +172,9 @@ private:
 
     // Changes inclusive scan results to exclusive scan results
     template<class BinaryFunction>
+    ROCPRIM_DEVICE inline
     void to_exclusive(T inclusive_input, T& exclusive_output, T init,
-                      BinaryFunction scan_op) [[hc]]
+                      BinaryFunction scan_op)
     {
         // include init value in scan results
         exclusive_output = scan_op(init, inclusive_input);

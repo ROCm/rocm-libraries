@@ -24,10 +24,7 @@
 #include <type_traits>
 #include <iterator>
 
-// HC API
-#include <hcc/hc.hpp>
-
-#include "../detail/config.hpp"
+#include "../config.hpp"
 #include "../detail/various.hpp"
 
 #include "detail/device_scan_reduce_then_scan.hpp"
@@ -58,6 +55,7 @@ template<
     class InitValueType,
     class BinaryFunction
 >
+inline
 void device_scan_impl(void * temporary_storage,
                       size_t& storage_size,
                       InputIterator input,
@@ -82,7 +80,7 @@ void device_scan_impl(void * temporary_storage,
     // Calculate required temporary storage
     if(temporary_storage == nullptr)
     {
-        storage_size = get_temporary_storage_bytes<result_type>(size, items_per_block);
+        storage_size = scan_get_temporary_storage_bytes<result_type>(size, items_per_block);
         // Make sure user won't try to allocate 0 bytes memory, otherwise
         // user may again pass nullptr as temporary_storage
         storage_size = storage_size == 0 ? 4 : storage_size;
@@ -185,6 +183,7 @@ template<
     class OutputIterator,
     class BinaryFunction = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>
 >
+inline
 void device_inclusive_scan(void * temporary_storage,
                            size_t& storage_size,
                            InputIterator input,
@@ -211,6 +210,7 @@ template<
     class InitValueType,
     class BinaryFunction = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>
 >
+inline
 void device_exclusive_scan(void * temporary_storage,
                            size_t& storage_size,
                            InputIterator input,

@@ -23,7 +23,7 @@
 
 #include <type_traits>
 
-#include "config.hpp"
+#include "../config.hpp"
 #include "../types.hpp"
 
 // TODO: Refactor when it gets crowded
@@ -38,6 +38,7 @@ struct empty_storage_type
 };
 
 template<class T>
+ROCPRIM_HOST_DEVICE inline
 constexpr bool is_power_of_two(const T x)
 {
     static_assert(std::is_integral<T>::value, "T must be integer type");
@@ -45,6 +46,7 @@ constexpr bool is_power_of_two(const T x)
 }
 
 template<class T>
+ROCPRIM_HOST_DEVICE inline
 constexpr T next_power_of_two(const T x, const T acc = 1)
 {
     static_assert(std::is_unsigned<T>::value, "T must be unsigned type");
@@ -52,9 +54,9 @@ constexpr T next_power_of_two(const T x, const T acc = 1)
 }
 
 template<class T>
-inline constexpr
-typename std::enable_if<std::is_integral<T>::value, T>::type
-ceiling_div(T a, T b) [[hc]] [[cpu]]
+ROCPRIM_HOST_DEVICE inline
+constexpr auto ceiling_div(T a, T b)
+    -> typename std::enable_if<std::is_integral<T>::value, T>::type
 {
     return (a + b - 1) / b;
 }
@@ -62,6 +64,7 @@ ceiling_div(T a, T b) [[hc]] [[cpu]]
 // Select the minimal warp size for block of size block_size, it's
 // useful for blocks smaller than maximal warp size.
 template<class T>
+ROCPRIM_HOST_DEVICE inline
 constexpr T get_min_warp_size(const T block_size, const T max_warp_size)
 {
     static_assert(std::is_unsigned<T>::value, "T must be unsigned type");
@@ -108,13 +111,15 @@ struct match_vector_type
 
 // Checks if Items is odd and ensures that size of T is smaller than vector_type.
 template<class T, unsigned int Items>
-inline constexpr bool is_vectorizable() [[hc]] [[cpu]]
+ROCPRIM_HOST_DEVICE
+constexpr bool is_vectorizable()
 {
     return (Items % 2 == 0) &&
            (sizeof(T) < sizeof(typename match_vector_type<T, Items>::type));
 }
 
 // Returns the number of LDS (local data share) banks.
+ROCPRIM_HOST_DEVICE
 constexpr unsigned int get_lds_banks_no()
 {
     // Currently all devices supported by ROCm have 32 banks (4 bytes each)
@@ -143,6 +148,7 @@ struct match_fundamental_type
 };
 
 template<class T>
+ROCPRIM_DEVICE inline
 auto store_volatile(T * output, T value)
     -> typename std::enable_if<std::is_fundamental<T>::value>::type
 {
@@ -150,6 +156,7 @@ auto store_volatile(T * output, T value)
 }
 
 template<class T>
+ROCPRIM_DEVICE inline
 auto store_volatile(T * output, T value)
     -> typename std::enable_if<!std::is_fundamental<T>::value>::type
 {
@@ -167,6 +174,7 @@ auto store_volatile(T * output, T value)
 }
 
 template<class T>
+ROCPRIM_DEVICE inline
 auto load_volatile(T * input)
     -> typename std::enable_if<std::is_fundamental<T>::value, T>::type
 {
@@ -175,6 +183,7 @@ auto load_volatile(T * input)
 }
 
 template<class T>
+ROCPRIM_DEVICE inline
 auto load_volatile(T * input)
     -> typename std::enable_if<!std::is_fundamental<T>::value, T>::type
 {

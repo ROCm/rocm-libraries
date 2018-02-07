@@ -25,10 +25,7 @@
 #include <type_traits>
 #include <utility>
 
-// HC API
-#include <hcc/hc.hpp>
-
-#include "../detail/config.hpp"
+#include "../config.hpp"
 #include "../detail/various.hpp"
 #include "../detail/radix_sort.hpp"
 
@@ -46,6 +43,7 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
+inline
 size_t align_size(size_t size)
 {
     constexpr size_t alignment = 256;
@@ -65,6 +63,7 @@ size_t align_size(size_t size)
     }
 
 template<bool Descending, class Key, class Value>
+inline
 void device_radix_sort(void * temporary_storage,
                        size_t& temporary_storage_bytes,
                        const Key * keys_input,
@@ -305,6 +304,7 @@ void device_radix_sort(void * temporary_storage,
 } // end namespace detail
 
 template<class Key>
+inline
 void device_radix_sort_keys(void * temporary_storage,
                             size_t& temporary_storage_bytes,
                             const Key * keys_input,
@@ -325,6 +325,7 @@ void device_radix_sort_keys(void * temporary_storage,
 }
 
 template<class Key>
+inline
 void device_radix_sort_keys_desc(void * temporary_storage,
                                  size_t& temporary_storage_bytes,
                                  const Key * keys_input,
@@ -345,6 +346,7 @@ void device_radix_sort_keys_desc(void * temporary_storage,
 }
 
 template<class Key, class Value>
+inline
 void device_radix_sort_pairs(void * temporary_storage,
                              size_t& temporary_storage_bytes,
                              const Key * keys_input,
@@ -366,6 +368,7 @@ void device_radix_sort_pairs(void * temporary_storage,
 }
 
 template<class Key, class Value>
+inline
 void device_radix_sort_pairs_desc(void * temporary_storage,
                                   size_t& temporary_storage_bytes,
                                   const Key * keys_input,

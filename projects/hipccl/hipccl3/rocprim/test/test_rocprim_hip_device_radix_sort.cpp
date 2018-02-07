@@ -33,9 +33,8 @@
 // HIP API
 #include <hip/hip_runtime.h>
 #include <hip/hip_hcc.h>
-
-// rocPRIM
-#include <device/device_radix_sort_hip.hpp>
+// rocPRIM API
+#include <rocprim.hpp>
 
 #include "test_utils.hpp"
 

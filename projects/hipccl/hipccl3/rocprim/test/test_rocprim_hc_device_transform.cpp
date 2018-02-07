@@ -26,12 +26,10 @@
 
 // Google Test
 #include <gtest/gtest.h>
-
 // HC API
 #include <hcc/hc.hpp>
-
-// rocPRIM HC API
-#include <device/device_transform_hc.hpp>
+// rocPRIM API
+#include <rocprim.hpp>
 
 #include "test_utils.hpp"
 

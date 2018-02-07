@@ -21,10 +21,7 @@
 #ifndef ROCPRIM_INTRINSICS_WARP_HPP_
 #define ROCPRIM_INTRINSICS_WARP_HPP_
 
-// HC API
-#include <hcc/hc.hpp>
-
-#include "../detail/config.hpp"
+#include "../config.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -33,23 +30,35 @@ BEGIN_ROCPRIM_NAMESPACE
 /// for the <tt>i</tt>-th thread of the warp and the <tt>i</tt>-th thread is active.
 ///
 /// \param predicate - input to be evaluated for all active lanes
-inline
-unsigned long long ballot(bool predicate) [[hc]]
+ROCPRIM_DEVICE inline
+unsigned long long ballot(bool predicate)
 {
-    return hc::__ballot(predicate);
+    #ifdef ROCPRIM_HC_API
+        return hc::__ballot(predicate);
+    #else // HIP
+        return __ballot(predicate);
+    #endif
 }
 
 /// \brief Masked bit count
 ///
 /// For each thread, this function returns the number of active threads which
 /// have <tt>i</tt>-th bit of \p x set and come before the current thread.
-inline
-unsigned int masked_bit_count(unsigned long long x) [[hc]]
+ROCPRIM_DEVICE inline
+unsigned int masked_bit_count(unsigned long long x)
 {
-    int c;
-    c = hc::__amdgcn_mbcnt_lo(static_cast<int>(x), 0);
-    c = hc::__amdgcn_mbcnt_hi(static_cast<int>(x >> 32), c);
-    return c;
+    #ifdef ROCPRIM_HC_API
+        int c;
+        c = hc::__amdgcn_mbcnt_lo(static_cast<int>(x), 0);
+        c = hc::__amdgcn_mbcnt_hi(static_cast<int>(x >> 32), c);
+        return c;
+    #else // HIP
+        // TODO: Use HIP function(s)
+        int c;
+        c = hc::__amdgcn_mbcnt_lo(static_cast<int>(x), 0);
+        c = hc::__amdgcn_mbcnt_hi(static_cast<int>(x >> 32), c);
+        return c;
+    #endif
 }
 
 END_ROCPRIM_NAMESPACE
