@@ -31,6 +31,9 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
+/// \addtogroup devicemodule_hip
+/// @{
+
 namespace detail
 {
 
@@ -262,8 +265,76 @@ hipError_t device_scan_impl(void * temporary_storage,
 
 /// \brief HIP parallel inclusive scan primitive for device level.
 ///
-/// Returns the required size of \p temporary_storage in \p storage_size
-/// if \p temporary_storage in null.
+/// device_inclusive_scan function performs a device-wide inclusive prefix scan operation
+/// using binary \p scan_op operator.
+///
+/// \par Overview
+/// * Supports non-commutative scan operators. However, a scan operator should be
+/// associative. When used with non-associative functions the results may be non-deterministic
+/// and/or vary in precision.
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage in a null pointer.
+/// * Ranges specified by \p input and \p output must have at least \p size elements.
+///
+/// \tparam InputIterator - random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam BinaryFunction - type of binary function used for scan. Default type
+/// is \p rocprim::plus<T>, where \p T is a \p value_type of \p InputIterator.
+///
+/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the scan operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input - iterator to the first element in the range to scan.
+/// \param [out] output - iterator to the first element in the output range. It can be
+/// same as \p input.
+/// \param [in] size - number of element in the input range.
+/// \param [in] scan_op - binary operation function object that will be used for scan.
+/// The signature of the function should be equivalent to the following:
+/// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
+/// <tt>const &</tt>, but function object must not modify the objects passed to it.
+/// Default is BinaryFunction().
+/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \returns \p hipSuccess (\p 0) after successful scan; otherwise a HIP runtime error of
+/// type \p hipError_t.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level inclusive sum operation is performed on an array of
+/// integer values (<tt>short</tt>s are scanned into <tt>int</tt>s).
+///
+/// \code{.cpp}
+/// #include <rocprim.hpp>
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t input_size;    // e.g., 8
+/// short * input;        // e.g., [1, 2, 3, 4, 5, 6, 7, 8]
+/// int * output;         // empty array of 8 elements
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::device_inclusive_scan(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, output, input_size, rocprim::plus<U>()
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform scan
+/// rocprim::device_inclusive_scan(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, output, input_size, rocprim::plus<U>()
+/// );
+/// // output: [1, 3, 6, 10, 15, 21, 28, 36]
+/// \endcode
+/// \endparblock
 template<
     class InputIterator,
     class OutputIterator,
@@ -290,6 +361,88 @@ hipError_t device_inclusive_scan(void * temporary_storage,
     );
 }
 
+/// \brief HIP parallel exclusive scan primitive for device level.
+///
+/// device_exclusive_scan function performs a device-wide exclusive prefix scan operation
+/// using binary \p scan_op operator.
+///
+/// \par Overview
+/// * Supports non-commutative scan operators. However, a scan operator should be
+/// associative. When used with non-associative functions the results may be non-deterministic
+/// and/or vary in precision.
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage in a null pointer.
+/// * Ranges specified by \p input and \p output must have at least \p size elements.
+///
+/// \tparam InputIterator - random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam InitValueType - type of the initial value.
+/// \tparam BinaryFunction - type of binary function used for scan. Default type
+/// is \p rocprim::plus<T>, where \p T is a \p value_type of \p InputIterator.
+///
+/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the scan operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input - iterator to the first element in the range to scan.
+/// \param [out] output - iterator to the first element in the output range. It can be
+/// same as \p input.
+/// \param [in] initial_value - initial value to start the scan.
+/// \param [in] size - number of element in the input range.
+/// \param [in] scan_op - binary operation function object that will be used for scan.
+/// The signature of the function should be equivalent to the following:
+/// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
+/// <tt>const &</tt>, but function object must not modify the objects passed to it.
+/// The default value is \p BinaryFunction().
+/// \param [in] stream - [optional] HIP stream object. The default is \p 0 (default stream).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. The default value is \p false.
+///
+/// \returns \p hipSuccess (\p 0) after successful scan; otherwise a HIP runtime error of
+/// type \p hipError_t.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level inclusive min-scan operation is performed on an array of
+/// integer values (<tt>short</tt>s are scanned into <tt>int</tt>s) using custom operator.
+///
+/// \code{.cpp}
+/// #include <rocprim.hpp>
+///
+/// // custom scan function
+/// auto min_op =
+///     [] __device__ (int a, int b) -> int
+///     {
+///         return a < b ? a : b;
+///     };
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t input_size;    // e.g., 8
+/// short * input;        // e.g., [4, 7, 6, 2, 5, 1, 3, 8]
+/// int * output;         // empty array of 8 elements
+/// int start_value;      // e.g., 9
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::device_inclusive_scan(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, output, start_value, input_size, min_op
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform scan
+/// rocprim::device_inclusive_scan(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, output, start_value, input_size, min_op
+/// );
+/// // output: [9, 4, 7, 6, 2, 2, 1, 1]
+/// \endcode
+/// \endparblock
 template<
     class InputIterator,
     class OutputIterator,
@@ -316,6 +469,9 @@ hipError_t device_exclusive_scan(void * temporary_storage,
         scan_op, stream, debug_synchronous
     );
 }
+
+/// @}
+// end of group devicemodule_hip
 
 END_ROCPRIM_NAMESPACE
 

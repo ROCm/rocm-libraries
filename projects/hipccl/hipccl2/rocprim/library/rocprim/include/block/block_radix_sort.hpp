@@ -325,7 +325,7 @@ public:
         typename bit_block_scan::storage_type bit_block_scan;
     };
     #else
-    using storage_type = _storage_type; // only for Doxygen
+    using storage_type = storage_type_; // only for Doxygen
     #endif
 
     /// \brief Performs ascending radix sort over keys partitioned across threads in a block.
