@@ -24,15 +24,10 @@
 #include <type_traits>
 #include <iterator>
 
-// HIP API
-#include <hip/hip_runtime.h>
-#include <hip/hip_hcc.h>
-
-#include "../detail/config.hpp"
+#include "../config.hpp"
 #include "../detail/various.hpp"
 
 #include "detail/device_reduce.hpp"
-
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -42,7 +37,7 @@ namespace detail
 template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
-    bool Final,
+    bool WithInitialValue,
     class InputIterator,
     class OutputIterator,
     class InitValueType,
@@ -55,7 +50,7 @@ void block_reduce_kernel(InputIterator input,
                          InitValueType initial_value,
                          BinaryFunction reduce_op)
 {
-    block_reduce_kernel_impl<BlockSize, ItemsPerThread, Final>(
+    block_reduce_kernel_impl<BlockSize, ItemsPerThread, WithInitialValue>(
         input, size, output, initial_value, reduce_op
     );
 }
@@ -90,12 +85,13 @@ void block_reduce_kernel(InputIterator input,
 template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
-    bool Final,
+    bool WithInitialValue, // true when inital_value should be used in reduction
     class InputIterator,
     class OutputIterator,
     class InitValueType,
     class BinaryFunction
 >
+inline
 hipError_t device_reduce_impl(void * temporary_storage,
                               size_t& storage_size,
                               InputIterator input,
@@ -120,7 +116,7 @@ hipError_t device_reduce_impl(void * temporary_storage,
 
     if(temporary_storage == nullptr)
     {
-        storage_size = get_temporary_storage_bytes<result_type>(size, items_per_block);
+        storage_size = reduce_get_temporary_storage_bytes<result_type>(size, items_per_block);
         // Make sure user won't try to allocate 0 bytes memory
         storage_size = storage_size == 0 ? 4 : storage_size;
         return hipSuccess;
@@ -158,7 +154,7 @@ hipError_t device_reduce_impl(void * temporary_storage,
         auto nested_temp_storage_size = storage_size - (number_of_blocks * sizeof(result_type));
 
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-        auto error = device_reduce_impl<BlockSize, ItemsPerThread, Final>(
+        auto error = device_reduce_impl<BlockSize, ItemsPerThread, WithInitialValue>(
             nested_temp_storage,
             nested_temp_storage_size,
             block_prefixes, // input
@@ -180,7 +176,7 @@ hipError_t device_reduce_impl(void * temporary_storage,
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(detail::block_reduce_kernel<
-                single_reduce_block_size, single_reduce_items_per_thread, Final,
+                single_reduce_block_size, single_reduce_items_per_thread, WithInitialValue,
                 InputIterator, OutputIterator, InitValueType, BinaryFunction
             >),
             dim3(1), dim3(single_reduce_block_size), 0, stream,
@@ -203,6 +199,7 @@ template<
     class InitValueType,
     class BinaryFunction = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>
 >
+inline
 hipError_t device_reduce(void * temporary_storage,
                          size_t& storage_size,
                          InputIterator input,
@@ -228,6 +225,7 @@ template<
     class OutputIterator,
     class BinaryFunction = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>
 >
+inline
 hipError_t device_reduce(void * temporary_storage,
                          size_t& storage_size,
                          InputIterator input,

@@ -21,17 +21,27 @@
 // SOFTWARE.
 
 #include <iostream>
+#include <vector>
 
 // Google Test
 #include <gtest/gtest.h>
 
-// rocPRIM
+// rocPRIM HIP API
 #include <rocprim.hpp>
 
-namespace rp = rocprim;
+#include "detail/get_rocprim_version.hpp"
 
-TEST(RocprimBasicsTests, GetVersion)
+TEST(RocprimBasicTests, GetVersion)
 {
-    auto version = rp::version();
-    EXPECT_EQ(version, ROCPRIM_VERSION);
+    auto version = rocprim::version();
+    ASSERT_EQ(version, ROCPRIM_VERSION);
+}
+
+// get_rocprim_version_on_device is compiled in a separate source,
+// that way we can be sure that all rocPRIM functions are inline
+// and there won't be any multiple definitions error
+TEST(RocprimBasicTests, BlockScan)
+{
+    auto version = get_rocprim_version_on_device();
+    ASSERT_EQ(version, ROCPRIM_VERSION);
 }

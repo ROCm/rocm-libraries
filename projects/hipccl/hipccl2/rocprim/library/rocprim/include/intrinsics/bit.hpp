@@ -21,15 +21,13 @@
 #ifndef ROCPRIM_INTRINSICS_BIT_HPP_
 #define ROCPRIM_INTRINSICS_BIT_HPP_
 
-// HC API
-#include <hcc/hc.hpp>
-
-#include "../detail/config.hpp"
+#include "../config.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
 /// \brief Returns a single bit at 'i' from 'x'
-inline int get_bit(int x, int i) [[hc]]
+ROCPRIM_DEVICE inline
+int get_bit(int x, int i)
 {
     return (x >> i) & 1;
 }
@@ -37,19 +35,27 @@ inline int get_bit(int x, int i) [[hc]]
 /// \brief Bit count
 ///
 /// Returns the number of bit of \p x set.
-inline
-unsigned int bit_count(unsigned int x) [[hc]]
+ROCPRIM_DEVICE inline
+unsigned int bit_count(unsigned int x)
 {
-    return hc::__popcount_u32_b32(x);
+    #ifdef ROCPRIM_HC_API
+        return hc::__popcount_u32_b32(x);
+    #else
+        return __popc(x);
+    #endif
 }
 
 /// \brief Bit count
 ///
 /// Returns the number of bit of \p x set.
-inline
-unsigned int bit_count(unsigned long long x) [[hc]]
+ROCPRIM_DEVICE inline
+unsigned int bit_count(unsigned long long x)
 {
-    return hc::__popcount_u32_b64(x);
+    #ifdef ROCPRIM_HC_API
+        return hc::__popcount_u32_b64(x);
+    #else
+        return __popcll(x);
+    #endif
 }
 
 END_ROCPRIM_NAMESPACE

@@ -23,23 +23,23 @@
 #include <iostream>
 #include <chrono>
 #include <vector>
+#include <limits>
 #include <string>
 #include <cstdio>
+#include <cstdlib>
 
 // Google Benchmark
 #include "benchmark/benchmark.h"
-
 // CmdParser
 #include "cmdparser.hpp"
+#include "benchmark_utils.hpp"
 
-// HC API
-#include <hcc/hc.hpp>
 // HIP API
 #include <hip/hip_runtime.h>
 #include <hip/hip_hcc.h>
 
 // rocPRIM
-#include <block/block_reduce.hpp>
+#include <rocprim.hpp>
 
 #define HIP_CHECK(condition)         \
   {                                  \
@@ -85,7 +85,7 @@ struct reduce
         {
             breduce_t().reduce(values, reduced_value, storage);
         }
-        
+
         if(hipThreadIdx_x == 0)
         {
             output[hipBlockIdx_x] = reduced_value;

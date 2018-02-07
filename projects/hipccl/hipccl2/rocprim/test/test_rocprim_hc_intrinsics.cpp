@@ -23,15 +23,15 @@
 #include <iostream>
 #include <vector>
 #include <cmath>
+#include <tuple>
 
 // Google Test
 #include <gtest/gtest.h>
 
 // HC API
 #include <hcc/hc.hpp>
-
-// rocPRIM
-#include <intrinsics.hpp>
+// rocPRIM API
+#include <rocprim.hpp>
 
 #include "test_utils.hpp"
 
@@ -43,10 +43,13 @@ struct custom
     float f;
     unsigned int u;
 
-    custom() [[cpu]] [[hc]] {};
-    ~custom() [[cpu]] [[hc]] {};
+    ROCPRIM_HOST_DEVICE
+    custom() {};
+    ROCPRIM_HOST_DEVICE
+    ~custom() {};
 
-    custom& operator+=(const custom& rhs) [[cpu]] [[hc]]
+    ROCPRIM_HOST_DEVICE
+    custom& operator+=(const custom& rhs)
     {
         this->i += rhs.i;
         this->d += rhs.d;
@@ -56,19 +59,19 @@ struct custom
     }
 };
 
-inline custom operator+(custom lhs,
-                        const custom& rhs) [[cpu]] [[hc]]
+ROCPRIM_HOST_DEVICE
+inline custom operator+(custom lhs, const custom& rhs)
 {
     lhs += rhs;
     return lhs;
 }
 
+ROCPRIM_HOST_DEVICE
 inline bool operator==(const custom& lhs, const custom& rhs)
 {
-    return lhs.i == rhs.i && lhs.d == rhs.d
-        && lhs.f == rhs.f && lhs.u == rhs.u;
+    return std::tie(lhs.i, lhs.d, lhs.f, lhs.u) ==
+        std::tie(rhs.i, rhs.d, rhs.f, rhs.u);
 }
-
 
 // Custom structure aligned to 16 bytes
 struct custom_16aligned
@@ -77,10 +80,13 @@ struct custom_16aligned
     unsigned int u;
     float f;
 
-    custom_16aligned() [[cpu]] [[hc]] {};
-    ~custom_16aligned() [[cpu]] [[hc]] {};
+    ROCPRIM_HOST_DEVICE
+    custom_16aligned() {};
+    ROCPRIM_HOST_DEVICE
+    ~custom_16aligned() {};
 
-    custom_16aligned& operator+=(const custom_16aligned& rhs) [[cpu]] [[hc]]
+    ROCPRIM_HOST_DEVICE
+    custom_16aligned& operator+=(const custom_16aligned& rhs)
     {
         this->i += rhs.i;
         this->u += rhs.u;
@@ -89,17 +95,15 @@ struct custom_16aligned
     }
 } __attribute__((aligned(16)));;
 
-inline
-custom_16aligned operator+(custom_16aligned lhs,
-                           const custom_16aligned& rhs) [[cpu]] [[hc]]
+inline ROCPRIM_HOST_DEVICE
+custom_16aligned operator+(custom_16aligned lhs, const custom_16aligned& rhs)
 {
     lhs += rhs;
     return lhs;
 }
 
-inline
-bool operator==(const custom_16aligned& lhs,
-                const custom_16aligned& rhs)
+inline ROCPRIM_HOST_DEVICE
+bool operator==(const custom_16aligned& lhs, const custom_16aligned& rhs)
 {
     return lhs.i == rhs.i && lhs.f == rhs.f && lhs.u == rhs.u;
 }

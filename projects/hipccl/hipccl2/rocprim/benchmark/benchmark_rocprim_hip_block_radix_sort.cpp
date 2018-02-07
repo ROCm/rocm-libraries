@@ -23,29 +23,23 @@
 #include <iostream>
 #include <chrono>
 #include <vector>
-#include <locale>
-#include <codecvt>
-#include <numeric>
+#include <limits>
 #include <string>
+#include <cstdio>
+#include <cstdlib>
 
 // Google Benchmark
 #include "benchmark/benchmark.h"
-
 // CmdParser
 #include "cmdparser.hpp"
-
 #include "benchmark_utils.hpp"
 
-// HC API
-#include <hcc/hc.hpp>
 // HIP API
 #include <hip/hip_runtime.h>
 #include <hip/hip_hcc.h>
 
 // rocPRIM
-#include <block/block_radix_sort.hpp>
-#include <block/block_load.hpp>
-#include <block/block_store.hpp>
+#include <rocprim.hpp>
 
 #define HIP_CHECK(condition)         \
   {                                  \
@@ -316,13 +310,6 @@ int main(int argc, char *argv[])
     HIP_CHECK(hipGetDevice(&device_id));
     HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
     std::cout << "[HIP] Device name: " << devProp.name << std::endl;
-
-    // HC
-    hc::accelerator_view* acc_view;
-    HIP_CHECK(hipHccGetAcceleratorView(stream, &acc_view));
-    auto acc = acc_view->get_accelerator();
-    std::wstring_convert<std::codecvt_utf8<wchar_t>> conv;
-    std::cout << "[HC] Device name: " << conv.to_bytes(acc.get_description()) << std::endl;
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;

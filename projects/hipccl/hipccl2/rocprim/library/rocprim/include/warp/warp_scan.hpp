@@ -23,10 +23,7 @@
 
 #include <type_traits>
 
-// HC API
-#include <hcc/hc.hpp>
-
-#include "../detail/config.hpp"
+#include "../config.hpp"
 #include "../detail/various.hpp"
 
 #include "../intrinsics.hpp"
@@ -230,10 +227,11 @@ public:
     /// <tt>{33, -34, -34, -36, ..., -64}</tt> etc.
     /// \endparblock
     template<class BinaryFunction = ::rocprim::plus<T>>
+    ROCPRIM_DEVICE inline
     void inclusive_scan(T input,
                         T& output,
                         storage_type& storage,
-                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+                        BinaryFunction scan_op = BinaryFunction())
     {
         base_type::inclusive_scan(input, output, storage, scan_op);
     }
@@ -316,11 +314,12 @@ public:
     /// The \p reduction will be equal \p 64.
     /// \endparblock
     template<class BinaryFunction = ::rocprim::plus<T>>
+    ROCPRIM_DEVICE inline
     void inclusive_scan(T input,
                         T& output,
                         T& reduction,
                         storage_type& storage,
-                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+                        BinaryFunction scan_op = BinaryFunction())
     {
         base_type::inclusive_scan(input, output, reduction, storage, scan_op);
     }
@@ -406,11 +405,12 @@ public:
     /// <tt>{100, 33, -34, -34, -36, ..., -62}</tt> etc.
     /// \endparblock
     template<class BinaryFunction = ::rocprim::plus<T>>
+    ROCPRIM_DEVICE inline
     void exclusive_scan(T input,
                         T& output,
                         T init,
                         storage_type& storage,
-                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+                        BinaryFunction scan_op = BinaryFunction())
     {
         base_type::exclusive_scan(input, output, init, storage, scan_op);
     }
@@ -498,12 +498,13 @@ public:
     /// <tt>{10, 11, 12, 13, ..., 73}</tt>. The \p reduction will be 64.
     /// \endparblock
     template<class BinaryFunction = ::rocprim::plus<T>>
+    ROCPRIM_DEVICE inline
     void exclusive_scan(T input,
                         T& output,
                         T init,
                         T& reduction,
                         storage_type& storage,
-                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+                        BinaryFunction scan_op = BinaryFunction())
     {
         base_type::exclusive_scan(input, output, init, reduction, storage, scan_op);
     }
@@ -597,12 +598,13 @@ public:
     /// <tt>{100, 33, -34, -34, -36, ..., -62}</tt> etc.
     /// \endparblock
     template<class BinaryFunction = ::rocprim::plus<T>>
+    ROCPRIM_DEVICE inline
     void scan(T input,
               T& inclusive_output,
               T& exclusive_output,
               T init,
               storage_type& storage,
-              BinaryFunction scan_op = BinaryFunction()) [[hc]]
+              BinaryFunction scan_op = BinaryFunction())
     {
         base_type::scan(input, inclusive_output, exclusive_output, init, storage, scan_op);
     }
@@ -696,13 +698,14 @@ public:
     /// be <tt>{10, 11, 12, 13, ..., 73}</tt>. The \p reduction will be 64.
     /// \endparblock
     template<class BinaryFunction = ::rocprim::plus<T>>
+    ROCPRIM_DEVICE inline
     void scan(T input,
               T& inclusive_output,
               T& exclusive_output,
               T init,
               T& reduction,
               storage_type& storage,
-              BinaryFunction scan_op = BinaryFunction()) [[hc]]
+              BinaryFunction scan_op = BinaryFunction())
     {
         base_type::scan(
             input, inclusive_output, exclusive_output, init, reduction,

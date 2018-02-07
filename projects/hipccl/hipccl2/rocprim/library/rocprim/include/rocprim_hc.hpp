@@ -25,37 +25,9 @@
 ///
 /// Header to include the whole rocPRIM HC API.
 
-// HC API
-#include <hcc/hc.hpp>
-
-#include "detail/config.hpp"
-
-#include "intrinsics.hpp"
-#include "rocprim_version.hpp"
-
-#include "warp/warp_reduce.hpp"
-#include "warp/warp_scan.hpp"
-#include "warp/warp_sort.hpp"
-
-#include "block/block_discontinuity.hpp"
-#include "block/block_exchange.hpp"
-#include "block/block_load.hpp"
-#include "block/block_radix_sort.hpp"
-#include "block/block_scan.hpp"
-#include "block/block_store.hpp"
-
-#include "device/device_scan_hc.hpp"
-
-BEGIN_ROCPRIM_NAMESPACE
-
-/// \brief Returns version of rocPRIM library.
-/// \return version of rocPRIM library
-inline
-unsigned int version() [[hc]] [[cpu]]
-{
-    return ROCPRIM_VERSION;
-}
-
-END_ROCPRIM_NAMESPACE
+#if !defined(ROCPRIM_HIP_API) && !defined(ROCPRIM_HC_API)
+    #define ROCPRIM_HC_API
+#endif
+#include "rocprim.hpp"
 
 #endif // ROCPRIM_HC_HPP_

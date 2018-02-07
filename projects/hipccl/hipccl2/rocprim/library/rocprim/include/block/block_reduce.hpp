@@ -23,10 +23,7 @@
 
 #include <type_traits>
 
-// HC API
-#include <hcc/hc.hpp>
-
-#include "../detail/config.hpp"
+#include "../config.hpp"
 #include "../detail/various.hpp"
 
 #include "../intrinsics.hpp"
@@ -65,7 +62,7 @@ struct select_block_reduce_impl<block_reduce_algorithm::using_warp_reduce>
     template<class T, unsigned int BlockSize>
     using type = block_reduce_warp_reduce<T, BlockSize>;
 };
-    
+
 template<>
 struct select_block_reduce_impl<block_reduce_algorithm::raking_reduce>
 {
@@ -238,14 +235,15 @@ public:
     /// \p output value will be <tt>{-256}</tt>.
     /// \endparblock
     template<class BinaryFunction = ::rocprim::plus<T>>
+    ROCPRIM_DEVICE inline
     void reduce(T input,
                 T& output,
                 storage_type& storage,
-                BinaryFunction reduce_op = BinaryFunction()) [[hc]]
+                BinaryFunction reduce_op = BinaryFunction())
     {
         base_type::reduce(input, output, storage, reduce_op);
     }
-    
+
     /// \overload
     /// \brief Performs reduction across threads in a block.
     ///
@@ -262,13 +260,14 @@ public:
     /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
     template<class BinaryFunction = ::rocprim::plus<T>>
+    ROCPRIM_DEVICE inline
     void reduce(T input,
                 T& output,
-                BinaryFunction reduce_op = BinaryFunction()) [[hc]]
+                BinaryFunction reduce_op = BinaryFunction())
     {
         base_type::reduce(input, output, reduce_op);
     }
-    
+
     /// \brief Performs reduction across threads in a block.
     ///
     /// \tparam ItemsPerThread - number of items in the \p input array.
@@ -346,14 +345,15 @@ public:
         unsigned int ItemsPerThread,
         class BinaryFunction = ::rocprim::plus<T>
     >
+    ROCPRIM_DEVICE inline
     void reduce(T (&input)[ItemsPerThread],
                 T& output,
                 storage_type& storage,
-                BinaryFunction reduce_op = BinaryFunction()) [[hc]]
+                BinaryFunction reduce_op = BinaryFunction())
     {
         base_type::reduce(input, output, storage, reduce_op);
     }
-    
+
     /// \overload
     /// \brief Performs reduction across threads in a block.
     ///
@@ -374,13 +374,14 @@ public:
         unsigned int ItemsPerThread,
         class BinaryFunction = ::rocprim::plus<T>
     >
+    ROCPRIM_DEVICE inline
     void reduce(T (&input)[ItemsPerThread],
                 T& output,
-                BinaryFunction reduce_op = BinaryFunction()) [[hc]]
+                BinaryFunction reduce_op = BinaryFunction())
     {
         base_type::reduce(input, output, reduce_op);
     }
-    
+
     /// \brief Performs reduction across threads in a block.
     ///
     /// \tparam BinaryFunction - type of binary function used for reduce. Default type
@@ -457,15 +458,16 @@ public:
     /// \endcode
     /// \endparblock
     template<class BinaryFunction = ::rocprim::plus<T>>
+    ROCPRIM_DEVICE inline
     void reduce(T input,
                 T& output,
                 unsigned int valid_items,
                 storage_type& storage,
-                BinaryFunction reduce_op = BinaryFunction()) [[hc]]
+                BinaryFunction reduce_op = BinaryFunction())
     {
         base_type::reduce(input, output, valid_items, storage, reduce_op);
     }
-    
+
     /// \overload
     /// \brief Performs reduction across threads in a block.
     ///
@@ -484,10 +486,11 @@ public:
     /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
     template<class BinaryFunction = ::rocprim::plus<T>>
+    ROCPRIM_DEVICE inline
     void reduce(T input,
                 T& output,
                 unsigned int valid_items,
-                BinaryFunction reduce_op = BinaryFunction()) [[hc]]
+                BinaryFunction reduce_op = BinaryFunction())
     {
         base_type::reduce(input, output, valid_items, reduce_op);
     }

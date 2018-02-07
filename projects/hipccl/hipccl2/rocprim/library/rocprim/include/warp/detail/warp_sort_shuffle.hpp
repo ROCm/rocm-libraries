@@ -23,10 +23,7 @@
 
 #include <type_traits>
 
-// HC API
-#include <hcc/hc.hpp>
-
-#include "../../detail/config.hpp"
+#include "../../config.hpp"
 #include "../../detail/various.hpp"
 
 #include "../../intrinsics.hpp"
@@ -46,8 +43,9 @@ class warp_sort_shuffle
 {
 private:
     template<int warp, class BinaryFunction>
+    ROCPRIM_DEVICE inline
     typename std::enable_if<!(WarpSize > warp)>::type
-    swap(Key& k, Value& v, int mask, int dir, BinaryFunction compare_function) [[hc]]
+    swap(Key& k, Value& v, int mask, int dir, BinaryFunction compare_function)
     {
         (void) k;
         (void) v;
@@ -57,8 +55,9 @@ private:
     }
 
     template<int warp, class BinaryFunction>
+    ROCPRIM_DEVICE inline
     typename std::enable_if<(WarpSize > warp)>::type
-    swap(Key& k, Value& v, int mask, int dir, BinaryFunction compare_function) [[hc]]
+    swap(Key& k, Value& v, int mask, int dir, BinaryFunction compare_function)
     {
         Key k1 = warp_shuffle_xor(k, mask, WarpSize);
         Value v1 = warp_shuffle_xor(v, mask, WarpSize);
@@ -68,8 +67,9 @@ private:
     }
 
     template<int warp, class BinaryFunction>
+    ROCPRIM_DEVICE inline
     typename std::enable_if<!(WarpSize > warp)>::type
-    swap(Key& k, int mask, int dir, BinaryFunction compare_function) [[hc]]
+    swap(Key& k, int mask, int dir, BinaryFunction compare_function)
     {
         (void) k;
         (void) mask;
@@ -78,15 +78,17 @@ private:
     }
 
     template<int warp, class BinaryFunction>
+    ROCPRIM_DEVICE inline
     typename std::enable_if<(WarpSize > warp)>::type
-    swap(Key& k, int mask, int dir, BinaryFunction compare_function) [[hc]]
+    swap(Key& k, int mask, int dir, BinaryFunction compare_function)
     {
         Key k1 = warp_shuffle_xor(k, mask, WarpSize);
         k = compare_function(k, k1) == dir ? k1 : k;
     }
 
     template<class BinaryFunction, class... KeyValue>
-    void bitonic_sort(BinaryFunction compare_function, KeyValue&... kv) [[hc]]
+    ROCPRIM_DEVICE inline
+    void bitonic_sort(BinaryFunction compare_function, KeyValue&... kv)
     {
         static_assert(
             sizeof...(KeyValue) < 3,
@@ -128,30 +130,34 @@ public:
     using storage_type = ::rocprim::detail::empty_storage_type;
 
     template<class BinaryFunction>
-    void sort(Key& thread_value, BinaryFunction compare_function) [[hc]]
+    ROCPRIM_DEVICE inline
+    void sort(Key& thread_value, BinaryFunction compare_function)
     {
         // sort by value only
         bitonic_sort(compare_function, thread_value);
     }
 
     template<class BinaryFunction>
+    ROCPRIM_DEVICE inline
     void sort(Key& thread_value, storage_type& storage,
-              BinaryFunction compare_function) [[hc]]
+              BinaryFunction compare_function)
     {
         (void) storage;
         sort(thread_value, compare_function);
     }
 
     template<class BinaryFunction>
+    ROCPRIM_DEVICE inline
     void sort(Key& thread_key, Value& thread_value,
-              BinaryFunction compare_function) [[hc]]
+              BinaryFunction compare_function)
     {
         bitonic_sort(compare_function, thread_key, thread_value);
     }
 
     template<class BinaryFunction>
+    ROCPRIM_DEVICE inline
     void sort(Key& thread_key, Value& thread_value,
-              storage_type& storage, BinaryFunction compare_function) [[hc]]
+              storage_type& storage, BinaryFunction compare_function)
     {
         (void) storage;
         return sort(compare_function, thread_key, thread_value);

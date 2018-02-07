@@ -23,9 +23,49 @@
 
 /// \file
 ///
-/// Meta-header to include rocPRIM HC and HIP APIs.
+/// Meta-header to include rocPRIM HC or HIP APIs.
 
-#include "rocprim_hc.hpp"
-#include "rocprim_hip.hpp"
+// Meta configuration for rocPRIM
+#include "config.hpp"
+
+#include "intrinsics.hpp"
+#include "functional.hpp"
+#include "types.hpp"
+#include "rocprim_version.hpp"
+
+#include "warp/warp_reduce.hpp"
+#include "warp/warp_scan.hpp"
+#include "warp/warp_sort.hpp"
+
+#include "block/block_discontinuity.hpp"
+#include "block/block_exchange.hpp"
+#include "block/block_load.hpp"
+#include "block/block_radix_sort.hpp"
+#include "block/block_scan.hpp"
+#include "block/block_store.hpp"
+
+#ifdef ROCPRIM_HC_API
+    #include "device/device_radix_sort_hc.hpp"
+    #include "device/device_reduce_hc.hpp"
+    #include "device/device_scan_hc.hpp"
+    #include "device/device_transform_hc.hpp"
+#else
+    #include "device/device_radix_sort_hip.hpp"
+    #include "device/device_reduce_hip.hpp"
+    #include "device/device_scan_hip.hpp"
+    #include "device/device_transform_hip.hpp"
+#endif
+
+BEGIN_ROCPRIM_NAMESPACE
+
+/// \brief Returns version of rocPRIM library.
+/// \return version of rocPRIM library
+ROCPRIM_HOST_DEVICE inline
+unsigned int version()
+{
+    return ROCPRIM_VERSION;
+}
+
+END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_HPP_

@@ -22,24 +22,24 @@
 
 #include <iostream>
 #include <chrono>
-#include <thread>
 #include <vector>
-#include <locale>
-#include <codecvt>
+#include <limits>
 #include <string>
+#include <cstdio>
+#include <cstdlib>
 
 // Google Benchmark
 #include "benchmark/benchmark.h"
-
-// HIP API
-#include <hip/hip_runtime.h>
-
-// rocPRIM HIP API
-#include <device/device_transform_hip.hpp>
-
 // CmdParser
 #include "cmdparser.hpp"
 #include "benchmark_utils.hpp"
+
+// HIP API
+#include <hip/hip_runtime.h>
+#include <hip/hip_hcc.h>
+
+// rocPRIM
+#include <rocprim.hpp>
 
 #define HIP_CHECK(condition)         \
   {                                  \
@@ -57,7 +57,8 @@ const size_t DEFAULT_N = 1024 * 1024 * 128;
 template<class T>
 struct transform
 {
-    constexpr T operator()(const T& a) const [[hc]] [[cpu]]
+    __device__ __host__
+    constexpr T operator()(const T& a) const
     {
         return a + 5;
     }

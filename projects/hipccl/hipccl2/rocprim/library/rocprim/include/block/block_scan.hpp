@@ -23,10 +23,7 @@
 
 #include <type_traits>
 
-// HC API
-#include <hcc/hc.hpp>
-
-#include "../detail/config.hpp"
+#include "../config.hpp"
 #include "../detail/various.hpp"
 
 #include "../intrinsics.hpp"
@@ -238,10 +235,11 @@ public:
     /// \p output values in will be <tt>{1, -2, -2, -4, ..., -254, -256}</tt>.
     /// \endparblock
     template<class BinaryFunction = ::rocprim::plus<T>>
+    ROCPRIM_DEVICE inline
     void inclusive_scan(T input,
                         T& output,
                         storage_type& storage,
-                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+                        BinaryFunction scan_op = BinaryFunction())
     {
         base_type::inclusive_scan(input, output, storage, scan_op);
     }
@@ -262,9 +260,10 @@ public:
     /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
     template<class BinaryFunction = ::rocprim::plus<T>>
+    ROCPRIM_DEVICE inline
     void inclusive_scan(T input,
                         T& output,
-                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+                        BinaryFunction scan_op = BinaryFunction())
     {
         base_type::inclusive_scan(input, output, scan_op);
     }
@@ -348,11 +347,12 @@ public:
     /// be <tt>-256</tt>.
     /// \endparblock
     template<class BinaryFunction = ::rocprim::plus<T>>
+    ROCPRIM_DEVICE inline
     void inclusive_scan(T input,
                         T& output,
                         T& reduction,
                         storage_type& storage,
-                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+                        BinaryFunction scan_op = BinaryFunction())
     {
         base_type::inclusive_scan(input, output, reduction, storage, scan_op);
     }
@@ -374,10 +374,11 @@ public:
     /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
     template<class BinaryFunction = ::rocprim::plus<T>>
+    ROCPRIM_DEVICE inline
     void inclusive_scan(T input,
                         T& output,
                         T& reduction,
-                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+                        BinaryFunction scan_op = BinaryFunction())
     {
         base_type::inclusive_scan(input, output, reduction, scan_op);
     }
@@ -497,11 +498,12 @@ public:
         class PrefixCallback,
         class BinaryFunction = ::rocprim::plus<T>
     >
+    ROCPRIM_DEVICE inline
     void inclusive_scan(T input,
                         T& output,
                         storage_type& storage,
                         PrefixCallback& prefix_callback_op,
-                        BinaryFunction scan_op) [[hc]]
+                        BinaryFunction scan_op)
     {
         base_type::inclusive_scan(input, output, storage, prefix_callback_op, scan_op);
     }
@@ -583,10 +585,11 @@ public:
         unsigned int ItemsPerThread,
         class BinaryFunction = ::rocprim::plus<T>
     >
+    ROCPRIM_DEVICE inline
     void inclusive_scan(T (&input)[ItemsPerThread],
                         T (&output)[ItemsPerThread],
                         storage_type& storage,
-                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+                        BinaryFunction scan_op = BinaryFunction())
     {
         base_type::inclusive_scan(input, output, storage, scan_op);
     }
@@ -611,9 +614,10 @@ public:
         unsigned int ItemsPerThread,
         class BinaryFunction = ::rocprim::plus<T>
     >
+    ROCPRIM_DEVICE inline
     void inclusive_scan(T (&input)[ItemsPerThread],
                         T (&output)[ItemsPerThread],
-                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+                        BinaryFunction scan_op = BinaryFunction())
     {
         base_type::inclusive_scan(input, output, scan_op);
     }
@@ -700,11 +704,12 @@ public:
         unsigned int ItemsPerThread,
         class BinaryFunction = ::rocprim::plus<T>
     >
+    ROCPRIM_DEVICE inline
     void inclusive_scan(T (&input)[ItemsPerThread],
                         T (&output)[ItemsPerThread],
                         T& reduction,
                         storage_type& storage,
-                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+                        BinaryFunction scan_op = BinaryFunction())
     {
         base_type::inclusive_scan(input, output, reduction, storage, scan_op);
     }
@@ -730,10 +735,11 @@ public:
         unsigned int ItemsPerThread,
         class BinaryFunction = ::rocprim::plus<T>
     >
+    ROCPRIM_DEVICE inline
     void inclusive_scan(T (&input)[ItemsPerThread],
                         T (&output)[ItemsPerThread],
                         T& reduction,
-                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+                        BinaryFunction scan_op = BinaryFunction())
     {
         base_type::inclusive_scan(input, output, reduction, scan_op);
     }
@@ -855,11 +861,12 @@ public:
         class PrefixCallback,
         class BinaryFunction
     >
+    ROCPRIM_DEVICE inline
     void inclusive_scan(T (&input)[ItemsPerThread],
                         T (&output)[ItemsPerThread],
                         storage_type& storage,
                         PrefixCallback& prefix_callback_op,
-                        BinaryFunction scan_op) [[hc]]
+                        BinaryFunction scan_op)
     {
         base_type::inclusive_scan(input, output, storage, prefix_callback_op, scan_op);
     }
@@ -943,11 +950,12 @@ public:
     /// and \p init is \p 0, then \p output values in will be <tt>{0, 0, -2, -2, -4, ..., -254, -254}</tt>.
     /// \endparblock
     template<class BinaryFunction = ::rocprim::plus<T>>
+    ROCPRIM_DEVICE inline
     void exclusive_scan(T input,
                         T& output,
                         T init,
                         storage_type& storage,
-                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+                        BinaryFunction scan_op = BinaryFunction())
     {
         base_type::exclusive_scan(input, output, init, storage, scan_op);
     }
@@ -970,10 +978,11 @@ public:
     /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
     template<class BinaryFunction = ::rocprim::plus<T>>
+    ROCPRIM_DEVICE inline
     void exclusive_scan(T input,
                         T& output,
                         T init,
-                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+                        BinaryFunction scan_op = BinaryFunction())
     {
         base_type::exclusive_scan(input, output, init, scan_op);
     }
@@ -1063,12 +1072,13 @@ public:
     /// and the \p reduction will be \p -256.
     /// \endparblock
     template<class BinaryFunction = ::rocprim::plus<T>>
+    ROCPRIM_DEVICE inline
     void exclusive_scan(T input,
                         T& output,
                         T init,
                         T& reduction,
                         storage_type& storage,
-                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+                        BinaryFunction scan_op = BinaryFunction())
     {
         base_type::exclusive_scan(input, output, init, reduction, storage, scan_op);
     }
@@ -1092,11 +1102,12 @@ public:
     /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
     template<class BinaryFunction = ::rocprim::plus<T>>
+    ROCPRIM_DEVICE inline
     void exclusive_scan(T input,
                         T& output,
                         T init,
                         T& reduction,
-                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+                        BinaryFunction scan_op = BinaryFunction())
     {
         base_type::exclusive_scan(input, output, init, reduction, scan_op);
     }
@@ -1216,11 +1227,12 @@ public:
         class PrefixCallback,
         class BinaryFunction = ::rocprim::plus<T>
     >
+    ROCPRIM_DEVICE inline
     void exclusive_scan(T input,
                         T& output,
                         storage_type& storage,
                         PrefixCallback& prefix_callback_op,
-                        BinaryFunction scan_op) [[hc]]
+                        BinaryFunction scan_op)
     {
         base_type::exclusive_scan(input, output, storage, prefix_callback_op, scan_op);
     }
@@ -1308,11 +1320,12 @@ public:
         unsigned int ItemsPerThread,
         class BinaryFunction = ::rocprim::plus<T>
     >
+    ROCPRIM_DEVICE inline
     void exclusive_scan(T (&input)[ItemsPerThread],
                         T (&output)[ItemsPerThread],
                         T init,
                         storage_type& storage,
-                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+                        BinaryFunction scan_op = BinaryFunction())
     {
         base_type::exclusive_scan(input, output, init, storage, scan_op);
     }
@@ -1339,10 +1352,11 @@ public:
         unsigned int ItemsPerThread,
         class BinaryFunction = ::rocprim::plus<T>
     >
+    ROCPRIM_DEVICE inline
     void exclusive_scan(T (&input)[ItemsPerThread],
                         T (&output)[ItemsPerThread],
                         T init,
-                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+                        BinaryFunction scan_op = BinaryFunction())
     {
         base_type::exclusive_scan(input, output, init, scan_op);
     }
@@ -1437,12 +1451,13 @@ public:
         unsigned int ItemsPerThread,
         class BinaryFunction = ::rocprim::plus<T>
     >
+    ROCPRIM_DEVICE inline
     void exclusive_scan(T (&input)[ItemsPerThread],
                         T (&output)[ItemsPerThread],
                         T init,
                         T& reduction,
                         storage_type& storage,
-                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+                        BinaryFunction scan_op = BinaryFunction())
     {
         base_type::exclusive_scan(input, output, init, reduction, storage, scan_op);
     }
@@ -1470,11 +1485,12 @@ public:
         unsigned int ItemsPerThread,
         class BinaryFunction = ::rocprim::plus<T>
     >
+    ROCPRIM_DEVICE inline
     void exclusive_scan(T (&input)[ItemsPerThread],
                         T (&output)[ItemsPerThread],
                         T init,
                         T& reduction,
-                        BinaryFunction scan_op = BinaryFunction()) [[hc]]
+                        BinaryFunction scan_op = BinaryFunction())
     {
         base_type::exclusive_scan(input, output, init, reduction, scan_op);
     }
@@ -1596,11 +1612,12 @@ public:
         class PrefixCallback,
         class BinaryFunction
     >
+    ROCPRIM_DEVICE inline
     void exclusive_scan(T (&input)[ItemsPerThread],
                         T (&output)[ItemsPerThread],
                         storage_type& storage,
                         PrefixCallback& prefix_callback_op,
-                        BinaryFunction scan_op) [[hc]]
+                        BinaryFunction scan_op)
     {
         base_type::exclusive_scan(input, output, storage, prefix_callback_op, scan_op);
     }

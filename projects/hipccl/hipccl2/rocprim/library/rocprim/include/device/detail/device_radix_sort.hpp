@@ -23,7 +23,7 @@
 
 #include <type_traits>
 
-#include "../../detail/config.hpp"
+#include "../../config.hpp"
 #include "../../detail/various.hpp"
 #include "../../detail/radix_sort.hpp"
 
@@ -50,13 +50,14 @@ template<
     bool DescendingIn,
     class KeyIn
 >
+ROCPRIM_DEVICE inline
 void fill_digit_counts(const KeyIn * keys_input,
                        unsigned int size,
                        unsigned int * batch_digit_counts,
                        unsigned int bit,
                        unsigned int current_radix_bits,
                        unsigned int blocks_per_full_batch,
-                       unsigned int full_batches) [[hc]]
+                       unsigned int full_batches)
 {
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
     constexpr unsigned int radix_size = 1 << RadixBits;
@@ -69,7 +70,7 @@ void fill_digit_counts(const KeyIn * keys_input,
     using key_in_codec = radix_key_codec<KeyIn, DescendingIn>;
     using bit_key_type = typename key_in_codec::bit_key_type;
 
-    tile_static struct
+    ROCPRIM_SHARED_MEMORY struct
     {
         unsigned int digit_counts[warps_no][radix_size];
     } storage;
@@ -77,7 +78,7 @@ void fill_digit_counts(const KeyIn * keys_input,
     const unsigned int radix_mask = (1u << current_radix_bits) - 1;
 
     const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-    const unsigned int batch_id = ::rocprim::block_id(0);
+    const unsigned int batch_id = ::rocprim::detail::block_id<0>();
     const unsigned int warp_id = ::rocprim::warp_id();
 
     if(flat_id < radix_size)
@@ -166,15 +167,16 @@ template<
     unsigned int ItemsPerThread,
     unsigned int RadixBits
 >
+ROCPRIM_DEVICE inline
 void scan_batches(unsigned int * batch_digit_counts,
                   unsigned int * digit_counts,
-                  unsigned int batches) [[hc]]
+                  unsigned int batches)
 {
     constexpr unsigned int radix_size = 1 << RadixBits;
 
     using scan_type = typename ::rocprim::block_scan<unsigned int, BlockSize>;
 
-    const unsigned int digit = ::rocprim::block_id(0);
+    const unsigned int digit = ::rocprim::detail::block_id<0>();
     const unsigned int flat_id = ::rocprim::flat_block_thread_id();
 
     unsigned int values[ItemsPerThread];
@@ -203,7 +205,8 @@ void scan_batches(unsigned int * batch_digit_counts,
 }
 
 template<unsigned int RadixBits>
-void scan_digits(unsigned int * digit_counts) [[hc]]
+ROCPRIM_DEVICE inline
+void scan_digits(unsigned int * digit_counts)
 {
     constexpr unsigned int radix_size = 1 << RadixBits;
 
@@ -219,25 +222,25 @@ void scan_digits(unsigned int * digit_counts) [[hc]]
 // Wrapping functions that allow to call proper methods (with or without values)
 // (a variant with values is enabled only when Value is not empty_type)
 template<class Sort, class Key, class Value, unsigned int ItemsPerThread>
-inline
+ROCPRIM_DEVICE inline
 void sort_block(Sort sort,
                 Key (&keys)[ItemsPerThread],
                 Value (&values)[ItemsPerThread],
                 typename Sort::storage_type& storage,
                 unsigned int begin_bit,
-                unsigned int end_bit) [[hc]]
+                unsigned int end_bit)
 {
     sort.sort(keys, values, storage, begin_bit, end_bit);
 }
 
 template<class Sort, class Key, unsigned int ItemsPerThread>
-inline
+ROCPRIM_DEVICE inline
 void sort_block(Sort sort,
                 Key (&keys)[ItemsPerThread],
                 ::rocprim::empty_type (&values)[ItemsPerThread],
                 typename Sort::storage_type& storage,
                 unsigned int begin_bit,
-                unsigned int end_bit) [[hc]]
+                unsigned int end_bit)
 {
     (void) values;
     sort.sort(keys, storage, begin_bit, end_bit);
@@ -253,6 +256,7 @@ template<
     class KeyOut,
     class Value
 >
+ROCPRIM_DEVICE inline
 void sort_and_scatter(const KeyIn * keys_input,
                       KeyOut * keys_output,
                       const Value * values_input,
@@ -263,7 +267,7 @@ void sort_and_scatter(const KeyIn * keys_input,
                       unsigned int bit,
                       unsigned int current_radix_bits,
                       unsigned int blocks_per_full_batch,
-                      unsigned int full_batches) [[hc]]
+                      unsigned int full_batches)
 {
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
     constexpr unsigned int radix_size = 1 << RadixBits;
@@ -283,7 +287,7 @@ void sort_and_scatter(const KeyIn * keys_input,
     using bit_keys_exchange_type = ::rocprim::block_exchange<bit_key_type, BlockSize, ItemsPerThread>;
     using values_exchange_type = ::rocprim::block_exchange<Value, BlockSize, ItemsPerThread>;
 
-    tile_static struct
+    ROCPRIM_SHARED_MEMORY struct
     {
         union
         {
@@ -304,7 +308,7 @@ void sort_and_scatter(const KeyIn * keys_input,
     const unsigned int radix_mask = (1u << current_radix_bits) - 1;
 
     const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-    const unsigned int batch_id = ::rocprim::block_id(0);
+    const unsigned int batch_id = ::rocprim::detail::block_id<0>();
 
     if(flat_id < radix_size)
     {

@@ -23,26 +23,26 @@
 #include <iostream>
 #include <chrono>
 #include <vector>
-#include <locale>
-#include <codecvt>
+#include <limits>
 #include <string>
+#include <cstdio>
+#include <cstdlib>
 
 // Google Benchmark
 #include "benchmark/benchmark.h"
-
 // CmdParser
 #include "cmdparser.hpp"
-
 #include "benchmark_utils.hpp"
 
-// HC API
-#include <hcc/hc.hpp>
 // HIP API
 #include <hip/hip_runtime.h>
 #include <hip/hip_hcc.h>
 
 // rocPRIM
-#include <warp/warp_reduce.hpp>
+#include <rocprim.hpp>
+
+// rocPRIM
+#include <block/block_scan.hpp>
 
 #define HIP_CHECK(condition)         \
   {                                  \
@@ -59,70 +59,56 @@ const size_t DEFAULT_N = 1024 * 1024 * 128;
 
 namespace rp = rocprim;
 
-struct reduce
+template<rocprim::block_scan_algorithm algorithm>
+struct inclusive_scan
 {
     template<
         class T,
-        unsigned int WarpSize,
+        unsigned int BlockSize,
+        unsigned int ItemsPerThread,
         unsigned int Trials
     >
     __global__
-    static void kernel(const T * d_input, T * d_output)
+    static void kernel(const T* input, T* output)
     {
         const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
 
-        auto value = d_input[i];
+        T values[ItemsPerThread];
+        for(unsigned int k = 0; k < ItemsPerThread; k++)
+        {
+            values[k] = input[i * ItemsPerThread + k];
+        }
 
-        using wreduce_t = rp::warp_reduce<T, WarpSize>;
-        tile_static typename wreduce_t::storage_type storage;
+        using bscan_t = rp::block_scan<T, BlockSize, algorithm>;
+        __shared__ typename bscan_t::storage_type storage;
+
         #pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
-            wreduce_t().reduce(value, value, storage);
+            bscan_t().inclusive_scan(values, values, storage);
         }
 
-        d_output[i] = value;
-    }
-};
-
-struct all_reduce
-{
-    template<
-        class T,
-        unsigned int WarpSize,
-        unsigned int Trials
-    >
-    __global__
-    static void kernel(const T * d_input, T * d_output)
-    {
-        const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
-
-        auto value = d_input[i];
-
-        using wreduce_t = rp::warp_reduce<T, WarpSize, true>;
-        tile_static typename wreduce_t::storage_type storage;
-        #pragma nounroll
-        for(unsigned int trial = 0; trial < Trials; trial++)
+        for(unsigned int k = 0; k < ItemsPerThread; k++)
         {
-            wreduce_t().reduce(value, value, storage);
+            output[i * ItemsPerThread + k] = values[k];
         }
-
-        d_output[i] = value;
     }
 };
 
 template<
     class Benchmark,
     class T,
-    unsigned int WarpSize,
     unsigned int BlockSize,
+    unsigned int ItemsPerThread,
     unsigned int Trials = 100
 >
 void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
 {
-    const auto size = BlockSize * ((N + BlockSize - 1)/BlockSize);
-
-    std::vector<T> input = get_random_data<T>(size, T(0), T(10));
+    // Make sure size is a multiple of BlockSize
+    constexpr auto items_per_block = BlockSize * ItemsPerThread;
+    const auto size = items_per_block * ((N + items_per_block - 1)/items_per_block);
+    // Allocate and fill memory
+    std::vector<T> input(size, 1.0f);
     T * d_input;
     T * d_output;
     HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
@@ -136,13 +122,12 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     );
     HIP_CHECK(hipDeviceSynchronize());
 
-    for(auto _ : state)
+    for (auto _ : state)
     {
         auto start = std::chrono::high_resolution_clock::now();
-
         hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(Benchmark::template kernel<T, WarpSize, Trials>),
-            dim3(size/BlockSize), dim3(BlockSize), 0, stream,
+            HIP_KERNEL_NAME(Benchmark::template kernel<T, BlockSize, ItemsPerThread, Trials>),
+            dim3(size/items_per_block), dim3(BlockSize), 0, stream,
             d_input, d_output
         );
         HIP_CHECK(hipPeekAtLastError());
@@ -151,37 +136,66 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
         auto end = std::chrono::high_resolution_clock::now();
         auto elapsed_seconds =
             std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+
         state.SetIterationTime(elapsed_seconds.count());
     }
-    state.SetBytesProcessed(state.iterations() * Trials * size * sizeof(T));
-    state.SetItemsProcessed(state.iterations() * Trials * size);
+    state.SetBytesProcessed(state.iterations() * size * sizeof(T) * Trials);
+    state.SetItemsProcessed(state.iterations() * size * Trials);
 
     HIP_CHECK(hipFree(d_input));
     HIP_CHECK(hipFree(d_output));
 }
 
-#define CREATE_BENCHMARK(T, WS, BS) \
-benchmark::RegisterBenchmark( \
-    (std::string("warp_reduce<" #T ", " #WS ", " #BS ">.") + name).c_str(), \
-    run_benchmark<Benchmark, T, WS, BS>, \
-    stream, size \
-)
+// IPT - items per thread
+#define CREATE_BENCHMARK(T, BS, IPT) \
+    benchmark::RegisterBenchmark( \
+        (std::string("block_scan<"#T", "#BS", "#IPT", " + algorithm_name + ">.") + method_name).c_str(), \
+        run_benchmark<Benchmark, T, BS, IPT>, \
+        stream, size \
+    )
 
 template<class Benchmark>
-void add_benchmarks(const std::string& name,
-                    std::vector<benchmark::internal::Benchmark*>& benchmarks,
+void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
+                    const std::string& method_name,
+                    const std::string& algorithm_name,
                     hipStream_t stream,
                     size_t size)
 {
-    std::vector<benchmark::internal::Benchmark*> bs =
+    std::vector<benchmark::internal::Benchmark*> new_benchmarks =
     {
-        CREATE_BENCHMARK(int, 32, 64),
-        CREATE_BENCHMARK(int, 64, 64),
-        CREATE_BENCHMARK(int, 37, 64),
-        CREATE_BENCHMARK(int, 61, 64),
-    };
+        CREATE_BENCHMARK(float, 256, 1),
+        CREATE_BENCHMARK(float, 256, 2),
+        CREATE_BENCHMARK(float, 256, 3),
+        CREATE_BENCHMARK(float, 256, 4),
+        CREATE_BENCHMARK(float, 256, 8),
+        CREATE_BENCHMARK(float, 256, 11),
+        CREATE_BENCHMARK(float, 256, 16),
 
-    benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
+        CREATE_BENCHMARK(int, 256, 1),
+        CREATE_BENCHMARK(int, 256, 2),
+        CREATE_BENCHMARK(int, 256, 3),
+        CREATE_BENCHMARK(int, 256, 4),
+        CREATE_BENCHMARK(int, 256, 8),
+        CREATE_BENCHMARK(int, 256, 11),
+        CREATE_BENCHMARK(int, 256, 16),
+
+        CREATE_BENCHMARK(int, 320, 1),
+        CREATE_BENCHMARK(int, 320, 2),
+        CREATE_BENCHMARK(int, 320, 3),
+        CREATE_BENCHMARK(int, 320, 4),
+        CREATE_BENCHMARK(int, 320, 8),
+        CREATE_BENCHMARK(int, 320, 11),
+        CREATE_BENCHMARK(int, 320, 16),
+
+        CREATE_BENCHMARK(double, 256, 1),
+        CREATE_BENCHMARK(double, 256, 2),
+        CREATE_BENCHMARK(double, 256, 3),
+        CREATE_BENCHMARK(double, 256, 4),
+        CREATE_BENCHMARK(double, 256, 8),
+        CREATE_BENCHMARK(double, 256, 11),
+        CREATE_BENCHMARK(double, 256, 16),
+    };
+    benchmarks.insert(benchmarks.end(), new_benchmarks.begin(), new_benchmarks.end());
 }
 
 int main(int argc, char *argv[])
@@ -206,8 +220,16 @@ int main(int argc, char *argv[])
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_benchmarks<reduce>("reduce", benchmarks, stream, size);
-    add_benchmarks<all_reduce>("all_reduce", benchmarks, stream, size);
+    // using_warp_scan
+    using inclusive_scan_uws_t = inclusive_scan<rocprim::block_scan_algorithm::using_warp_scan>;
+    add_benchmarks<inclusive_scan_uws_t>(
+        benchmarks, "inclusive_scan", "using_warp_scan", stream, size
+    );
+    // reduce then scan
+    using inclusive_scan_rts_t = inclusive_scan<rocprim::block_scan_algorithm::reduce_then_scan>;
+    add_benchmarks<inclusive_scan_rts_t>(
+        benchmarks, "inclusive_scan", "reduce_then_scan", stream, size
+    );
 
     // Use manual timing
     for(auto& b : benchmarks)

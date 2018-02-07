@@ -24,11 +24,7 @@
 #include <type_traits>
 #include <iterator>
 
-// HIP API
-#include <hip/hip_runtime.h>
-#include <hip/hip_hcc.h>
-
-#include "../../detail/config.hpp"
+#include "../../config.hpp"
 #include "../../detail/various.hpp"
 
 #include "../../intrinsics.hpp"
@@ -46,29 +42,31 @@ namespace detail
 // Helper functions for reducing final value with
 // initial value.
 template<
-    bool Final,
+    bool WithInitialValue,
     class T,
     class InitValueType,
     class BinaryFunction
 >
+ROCPRIM_DEVICE inline
 auto reduce_with_initial(T& output,
                          InitValueType initial_value,
-                         BinaryFunction reduce_op) [[hc]]
-    -> typename std::enable_if<Final, T>::type
+                         BinaryFunction reduce_op)
+    -> typename std::enable_if<WithInitialValue, T>::type
 {
     return reduce_op(output, initial_value);
 }
 
 template<
-    bool Final,
+    bool WithInitialValue,
     class T,
     class InitValueType,
     class BinaryFunction
 >
+ROCPRIM_DEVICE inline
 auto reduce_with_initial(T& output,
                          InitValueType initial_value,
-                         BinaryFunction reduce_op) [[hc]]
-    -> typename std::enable_if<!Final, T>::type
+                         BinaryFunction reduce_op)
+    -> typename std::enable_if<!WithInitialValue, T>::type
 {
     (void) initial_value;
     (void) reduce_op;
@@ -78,17 +76,18 @@ auto reduce_with_initial(T& output,
 template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
-    bool Final,
+    bool WithInitialValue,
     class InputIterator,
     class OutputIterator,
     class InitValueType,
     class BinaryFunction
 >
+ROCPRIM_DEVICE inline
 void block_reduce_kernel_impl(InputIterator input,
                               const size_t input_size,
                               OutputIterator output,
                               InitValueType initial_value,
-                              BinaryFunction reduce_op) [[hc]]
+                              BinaryFunction reduce_op)
 {
     using output_type = typename std::iterator_traits<OutputIterator>::value_type;
     using block_reduce_type = ::rocprim::block_reduce<
@@ -97,8 +96,8 @@ void block_reduce_kernel_impl(InputIterator input,
     >;
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
 
-    const unsigned int flat_id = ::rocprim::block_thread_id(0);
-    const unsigned int flat_block_id = ::rocprim::block_id(0);
+    const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
+    const unsigned int flat_block_id = ::rocprim::detail::block_id<0>();
     const unsigned int block_offset = flat_block_id * BlockSize * ItemsPerThread;
     const unsigned int number_of_blocks = (input_size + items_per_block - 1)/items_per_block;
     auto valid_in_last_block = input_size - items_per_block * (number_of_blocks - 1);
@@ -153,25 +152,26 @@ void block_reduce_kernel_impl(InputIterator input,
     // Save value into output
     if(flat_id == 0)
     {
-        output[flat_block_id] = reduce_with_initial<Final>(
-                                    output_value,
-                                    initial_value,
-                                    reduce_op
-                                );
+        output[flat_block_id] =
+            reduce_with_initial<WithInitialValue>(
+                output_value,
+                initial_value,
+                reduce_op
+            );
     }
 }
 
 // Returns size of temporary storage in bytes.
 template<class T>
-size_t get_temporary_storage_bytes(size_t input_size,
-                                   size_t items_per_block)
+size_t reduce_get_temporary_storage_bytes(size_t input_size,
+                                          size_t items_per_block)
 {
     if(input_size <= items_per_block)
     {
         return 0;
     }
     auto size = (input_size + items_per_block - 1)/(items_per_block);
-    return size * sizeof(T) + get_temporary_storage_bytes<T>(size, items_per_block);
+    return size * sizeof(T) + reduce_get_temporary_storage_bytes<T>(size, items_per_block);
 }
 
 } // end of detail namespace

@@ -23,17 +23,11 @@
 
 #include <type_traits>
 
-// HC API
-#include <hcc/hc.hpp>
-
-#include "../detail/config.hpp"
-
+#include "../config.hpp"
 #include "thread.hpp"
 
 /// \addtogroup collectivewarpmodule
 /// @{
-
-#include "thread.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -41,8 +35,8 @@ namespace detail
 {
 
 template<class T, class ShuffleOp>
-inline
-T warp_shuffle_op(T input, ShuffleOp&& op) [[hc]]
+ROCPRIM_DEVICE inline
+T warp_shuffle_op(T input, ShuffleOp&& op)
 {
     constexpr int words_no = (sizeof(T) + sizeof(int) - 1) / sizeof(int);
 
@@ -75,14 +69,18 @@ T warp_shuffle_op(T input, ShuffleOp&& op) [[hc]]
 /// \param src_lane - warp if of a thread whose \p input should be returned
 /// \param width - logical warp width
 template<class T>
-inline
-T warp_shuffle(T input, const int src_lane, const int width = warp_size()) [[hc]]
+ROCPRIM_DEVICE inline
+T warp_shuffle(T input, const int src_lane, const int width = warp_size())
 {
     return detail::warp_shuffle_op(
         input,
         [=](int v) -> int
         {
-            return hc::__shfl(v, src_lane, width);
+            #if defined(ROCPRIM_HC_API) || defined(__HIP_PLATFORM_HCC__)
+                return hc::__shfl(v, src_lane, width);
+            #else
+                return __shfl(v, src_lane, width);
+            #endif
         }
     );
 }
@@ -97,17 +95,21 @@ T warp_shuffle(T input, const int src_lane, const int width = warp_size()) [[hc]
 /// undefined if it is not a power of 2, or it is greater than warp_size().
 ///
 /// \param input - input to pass to other threads
-/// \param delta - offset for calulcating source lane id
+/// \param delta - offset for calculating source lane id
 /// \param width - logical warp width
 template<class T>
-inline
-T warp_shuffle_up(T input, const unsigned int delta, const int width = warp_size()) [[hc]]
+ROCPRIM_DEVICE inline
+T warp_shuffle_up(T input, const unsigned int delta, const int width = warp_size())
 {
     return detail::warp_shuffle_op(
         input,
         [=](int v) -> int
         {
-            return hc::__shfl_up(v, delta, width);
+            #if defined(ROCPRIM_HC_API) || defined(__HIP_PLATFORM_HCC__)
+                return hc::__shfl_up(v, delta, width);
+            #else
+                return __shfl_up(v, delta, width);
+            #endif
         }
     );
 }
@@ -122,17 +124,21 @@ T warp_shuffle_up(T input, const unsigned int delta, const int width = warp_size
 /// undefined if it is not a power of 2, or it is greater than warp_size().
 ///
 /// \param input - input to pass to other threads
-/// \param delta - offset for calulcating source lane id
+/// \param delta - offset for calculating source lane id
 /// \param width - logical warp width
 template<class T>
-inline
-T warp_shuffle_down(T input, const unsigned int delta, const int width = warp_size()) [[hc]]
+ROCPRIM_DEVICE inline
+T warp_shuffle_down(T input, const unsigned int delta, const int width = warp_size())
 {
     return detail::warp_shuffle_op(
         input,
         [=](int v) -> int
         {
-            return hc::__shfl_down(v, delta, width);
+            #if defined(ROCPRIM_HC_API) || defined(__HIP_PLATFORM_HCC__)
+                return hc::__shfl_down(v, delta, width);
+            #else
+                return __shfl_down(v, delta, width);
+            #endif
         }
     );
 }
@@ -146,17 +152,21 @@ T warp_shuffle_down(T input, const unsigned int delta, const int width = warp_si
 /// undefined if it is not a power of 2, or it is greater than warp_size().
 ///
 /// \param input - input to pass to other threads
-/// \param lane_mask - mask used for calulcating source lane id
+/// \param lane_mask - mask used for calculating source lane id
 /// \param width - logical warp width
 template<class T>
-inline
-T warp_shuffle_xor(T input, const int lane_mask, const int width = warp_size()) [[hc]]
+ROCPRIM_DEVICE inline
+T warp_shuffle_xor(T input, const int lane_mask, const int width = warp_size())
 {
     return detail::warp_shuffle_op(
         input,
         [=](int v) -> int
         {
-            return hc::__shfl_xor(v, lane_mask, width);
+            #if defined(ROCPRIM_HC_API) || defined(__HIP_PLATFORM_HCC__)
+                return hc::__shfl_xor(v, lane_mask, width);
+            #else
+                return __shfl_xor(v, lane_mask, width);
+            #endif
         }
     );
 }
