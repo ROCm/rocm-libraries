@@ -775,7 +775,8 @@ INPUT                  = mainpage.dox \
                          collectivemodule.dox \
                          collectivewarpmodule.dox \
                          collectiveblockmodule.dox \
-                         devicemodule.dox \
+                         devicemodulehc.dox \
+                         devicemodulehip.dox \
                          utilsmodule.dox \
                          ../library/rocprim/include
 
