@@ -1,0 +1,10 @@
+/**
+@brief rocPRIM HC device-wide primitives.
+@author
+@file
+*/
+
+/**
+ * \defgroup devicemodule_hc rocPRIM HC device-wide primitives
+ *
+ */

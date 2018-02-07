@@ -35,7 +35,7 @@
 
 #include "detail/device_radix_sort.hpp"
 
-/// \addtogroup collectivedevicemodule
+/// \addtogroup devicemodule_hc
 /// @{
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -392,6 +392,6 @@ void device_radix_sort_pairs_desc(void * temporary_storage,
 END_ROCPRIM_NAMESPACE
 
 /// @}
-// end of group collectivedevicemodule
+// end of group devicemodule_hc
 
 #endif // ROCPRIM_DEVICE_DEVICE_RADIX_SORT_HC_HPP_
