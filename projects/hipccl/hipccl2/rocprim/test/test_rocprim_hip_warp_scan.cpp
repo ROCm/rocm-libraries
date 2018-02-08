@@ -25,8 +25,8 @@
 
 // Google Test
 #include <gtest/gtest.h>
-// rocPRIM HIP API
-#include <rocprim_hip.hpp>
+// rocPRIM API
+#include <rocprim.hpp>
 
 #include "test_utils.hpp"
 
@@ -99,7 +99,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
-void test_hip_warp_inclusive_scan_kernel(T* device_input, T* device_output)
+void warp_inclusive_scan_kernel(T* device_input, T* device_output)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
     const unsigned int warp_id = rp::detail::logical_warp_id<LogicalWarpSize>();
@@ -163,13 +163,8 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScan)
 
     // Launching kernel
     hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(
-            test_hip_warp_inclusive_scan_kernel<
-                T, block_size, logical_warp_size
-            >
-        ),
-        dim3(grid_size), dim3(block_size),
-        0, 0,
+        HIP_KERNEL_NAME(warp_inclusive_scan_kernel<T, block_size, logical_warp_size>),
+        dim3(grid_size), dim3(block_size), 0, 0,
         device_input, device_output
     );
 
@@ -209,7 +204,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
-void test_hip_warp_inclusive_scan_reduce_kernel(
+void warp_inclusive_scan_reduce_kernel(
     T* device_input,
     T* device_output,
     T* device_output_reductions)
@@ -291,11 +286,7 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScanReduce)
 
     // Launching kernel
     hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(
-            test_hip_warp_inclusive_scan_reduce_kernel<
-                T, block_size, logical_warp_size
-            >
-        ),
+        HIP_KERNEL_NAME(warp_inclusive_scan_reduce_kernel<T, block_size, logical_warp_size>),
         dim3(grid_size), dim3(block_size), 0, 0,
         device_input, device_output, device_output_reductions
     );
@@ -356,7 +347,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
-void test_hip_warp_exclusive_scan_kernel(T* device_input, T* device_output, T init)
+void warp_exclusive_scan_kernel(T* device_input, T* device_output, T init)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
     const unsigned int warp_id = rp::detail::logical_warp_id<LogicalWarpSize>();
@@ -422,13 +413,8 @@ TYPED_TEST(RocprimWarpScanTests, ExclusiveScan)
 
     // Launching kernel
     hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(
-            test_hip_warp_exclusive_scan_kernel<
-                T, block_size, logical_warp_size
-            >
-        ),
-        dim3(grid_size), dim3(block_size),
-        0, 0,
+        HIP_KERNEL_NAME(warp_exclusive_scan_kernel<T, block_size, logical_warp_size>),
+        dim3(grid_size), dim3(block_size), 0, 0,
         device_input, device_output, init
     );
 
@@ -468,7 +454,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
-void test_hip_warp_exclusive_scan_reduce_kernel(
+void warp_exclusive_scan_reduce_kernel(
     T* device_input,
     T* device_output,
     T* device_output_reductions,
@@ -559,13 +545,8 @@ TYPED_TEST(RocprimWarpScanTests, ExclusiveReduceScan)
 
     // Launching kernel
     hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(
-            test_hip_warp_exclusive_scan_reduce_kernel<
-                T, block_size, logical_warp_size
-            >
-        ),
-        dim3(grid_size), dim3(block_size),
-        0, 0,
+        HIP_KERNEL_NAME(warp_exclusive_scan_reduce_kernel<T, block_size, logical_warp_size>),
+        dim3(grid_size), dim3(block_size), 0, 0,
         device_input, device_output, device_output_reductions, init
     );
 
@@ -625,7 +606,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
-void test_hip_warp_scan_kernel(
+void warp_scan_kernel(
     T* device_input,
     T* device_inclusive_output,
     T* device_exclusive_output,
@@ -715,13 +696,8 @@ TYPED_TEST(RocprimWarpScanTests, Scan)
 
     // Launching kernel
     hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(
-            test_hip_warp_scan_kernel<
-                T, block_size, logical_warp_size
-            >
-        ),
-        dim3(grid_size), dim3(block_size),
-        0, 0,
+        HIP_KERNEL_NAME(warp_scan_kernel<T, block_size, logical_warp_size>),
+        dim3(grid_size), dim3(block_size), 0, 0,
         device_input, device_inclusive_output, device_exclusive_output, init
     );
 
@@ -773,7 +749,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
-void test_hip_warp_scan_reduce_kernel(
+void warp_scan_reduce_kernel(
     T* device_input,
     T* device_inclusive_output,
     T* device_exclusive_output,
@@ -878,13 +854,8 @@ TYPED_TEST(RocprimWarpScanTests, ScanReduce)
 
     // Launching kernel
     hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(
-            test_hip_warp_scan_reduce_kernel<
-                T, block_size, logical_warp_size
-            >
-        ),
-        dim3(grid_size), dim3(block_size),
-        0, 0,
+        HIP_KERNEL_NAME(warp_scan_reduce_kernel<T, block_size, logical_warp_size>),
+        dim3(grid_size), dim3(block_size), 0, 0,
         device_input,
         device_inclusive_output, device_exclusive_output, device_output_reductions, init
     );
@@ -950,27 +921,6 @@ TYPED_TEST(RocprimWarpScanTests, ScanReduce)
     }
 }
 
-template<
-    class T,
-    unsigned int BlockSize,
-    unsigned int LogicalWarpSize
->
-__global__
-void test_hip_warp_inclusive_scan_custom_type_kernel(T* device_input, T* device_output)
-{
-    constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
-    const unsigned int warp_id = rp::detail::logical_warp_id<LogicalWarpSize>();
-    unsigned int index = hipThreadIdx_x + (hipBlockIdx_x * hipBlockDim_x);
-
-    T value = device_input[index];
-
-    using wscan_t = rp::warp_scan<T, LogicalWarpSize>;
-    __shared__ typename wscan_t::storage_type storage[warps_no];
-    wscan_t().inclusive_scan(value, value, storage[warp_id]);
-
-    device_output[index] = value;
-}
-
 TYPED_TEST(RocprimWarpScanTests, InclusiveScanCustomType)
 {
     using base_type = typename TestFixture::type;
@@ -1032,13 +982,8 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScanCustomType)
 
     // Launching kernel
     hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(
-            test_hip_warp_inclusive_scan_custom_type_kernel<
-                T, block_size, logical_warp_size
-            >
-        ),
-        dim3(grid_size), dim3(block_size),
-        0, 0,
+        HIP_KERNEL_NAME(warp_inclusive_scan_kernel<T, block_size, logical_warp_size>),
+        dim3(grid_size), dim3(block_size), 0, 0,
         device_input, device_output
     );
 

@@ -22,13 +22,9 @@
 
 #include <iostream>
 #include <vector>
-#include <algorithm>
-#include <cmath>
 
 // Google Test
 #include <gtest/gtest.h>
-// HC API
-#include <hcc/hc.hpp>
 // rocPRIM API
 #include <rocprim.hpp>
 
@@ -36,38 +32,62 @@
 
 namespace rp = rocprim;
 
-template<unsigned int WarpSize>
+template<
+    class T,
+    unsigned int WarpSize
+>
 struct params
 {
+    using type = T;
     static constexpr unsigned int warp_size = WarpSize;
 };
 
 template<typename Params>
 class RocprimWarpScanTests : public ::testing::Test {
 public:
+    using type = typename Params::type;
     static constexpr unsigned int warp_size = Params::warp_size;
 };
 
 typedef ::testing::Types<
+
+    // Integer
     // shuffle based scan
-    params<2U>,
-    params<4U>,
-    params<8U>,
-    params<16U>,
-    params<32U>,
-    params<64U>,
+    params<int, 2U>,
+    params<int, 4U>,
+    params<int, 8U>,
+    params<int, 16U>,
+    params<int, 32U>,
+    params<int, 64U>,
     // shared memory scan
-    params<3U>,
-    params<7U>,
-    params<15U>,
-    params<37U>,
-    params<61U>
-> WarpSizes;
+    params<int, 3U>,
+    params<int, 7U>,
+    params<int, 15U>,
+    params<int, 37U>,
+    params<int, 61U>,
 
-TYPED_TEST_CASE(RocprimWarpScanTests, WarpSizes);
+    // Float
+    // shuffle based scan
+    params<float, 2U>,
+    params<float, 4U>,
+    params<float, 8U>,
+    params<float, 16U>,
+    params<float, 32U>,
+    params<float, 64U>,
+    // shared memory scan
+    params<float, 3U>,
+    params<float, 7U>,
+    params<float, 15U>,
+    params<float, 37U>,
+    params<float, 61U>
 
-TYPED_TEST(RocprimWarpScanTests, InclusiveScanInt)
+> WarpScanTestParams;
+
+TYPED_TEST_CASE(RocprimWarpScanTests, WarpScanTestParams);
+
+TYPED_TEST(RocprimWarpScanTests, InclusiveScan)
 {
+    using T = typename TestFixture::type;
     // logical warp side for warp primitive, execution warp size is always rp::warp_size()
     constexpr size_t logical_warp_size = TestFixture::warp_size;
     constexpr size_t block_size =
@@ -83,10 +103,10 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScanInt)
     }
 
     // Generate data
-    std::vector<int> output = get_random_data<int>(size, -100, 100); // used for input/output
+    std::vector<T> output = get_random_data<T>(size, -100, 100); // used for input/output
 
     // Calculate expected results on host
-    std::vector<int> expected(output.size(), 0);
+    std::vector<T> expected(output.size(), 0);
     for(size_t i = 0; i < output.size() / logical_warp_size; i++)
     {
         for(size_t j = 0; j < logical_warp_size; j++)
@@ -96,7 +116,7 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScanInt)
         }
     }
 
-    hc::array_view<int, 1> d_output(output.size(), output.data());
+    hc::array_view<T, 1> d_output(output.size(), output.data());
     hc::parallel_for_each(
         hc::extent<1>(output.size()).tile(block_size),
         [=](hc::tiled_index<1> i) [[hc]]
@@ -104,9 +124,9 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScanInt)
             constexpr unsigned int warps_no = block_size/logical_warp_size;
             const unsigned int warp_id = rp::detail::logical_warp_id<logical_warp_size>();
 
-            int value = d_output[i];
+            T value = d_output[i];
 
-            using wscan_t = rp::warp_scan<int, logical_warp_size>;
+            using wscan_t = rp::warp_scan<T, logical_warp_size>;
             tile_static typename wscan_t::storage_type storage[warps_no];
             wscan_t().inclusive_scan(value, value, storage[warp_id]);
 
@@ -115,14 +135,28 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScanInt)
     );
 
     d_output.synchronize();
-    for(size_t i = 0; i < output.size(); i++)
+
+     // Validating results
+    if (std::is_integral<T>::value)
     {
-        ASSERT_EQ(output[i], expected[i]);
+        for(size_t i = 0; i < output.size(); i++)
+        {
+            EXPECT_EQ(output[i], expected[i]);
+        }
+    }
+    else if (std::is_floating_point<T>::value)
+    {
+        for(size_t i = 0; i < output.size(); i++)
+        {
+            auto tolerance = std::max<T>(std::abs(0.1f * expected[i]), T(0.01f));
+            EXPECT_NEAR(output[i], expected[i], tolerance);
+        }
     }
 }
 
-TYPED_TEST(RocprimWarpScanTests, InclusiveScanReduceInt)
+TYPED_TEST(RocprimWarpScanTests, InclusiveScanReduce)
 {
+    using T = typename TestFixture::type;
     // logical warp side for warp primitive, execution warp size is always rp::warp_size()
     constexpr size_t logical_warp_size = TestFixture::warp_size;
     constexpr size_t block_size =
@@ -138,12 +172,12 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScanReduceInt)
     }
 
     // Generate data
-    std::vector<int> output = get_random_data<int>(size, -100, 100);  // used for input/output
-    std::vector<int> output_reductions(size / logical_warp_size);
+    std::vector<T> output = get_random_data<T>(size, -100, 100);  // used for input/output
+    std::vector<T> output_reductions(size / logical_warp_size);
 
     // Calculate expected results on host
-    std::vector<int> expected(output.size(), 0);
-    std::vector<int> expected_reductions(output_reductions.size(), 0);
+    std::vector<T> expected(output.size(), 0);
+    std::vector<T> expected_reductions(output_reductions.size(), 0);
     for(size_t i = 0; i < output.size() / logical_warp_size; i++)
     {
         for(size_t j = 0; j < logical_warp_size; j++)
@@ -154,8 +188,8 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScanReduceInt)
         expected_reductions[i] = expected[(i+1) * logical_warp_size - 1];
     }
 
-    hc::array_view<int, 1> d_output(output.size(), output.data());
-    hc::array_view<int, 1> d_output_r(
+    hc::array_view<T, 1> d_output(output.size(), output.data());
+    hc::array_view<T, 1> d_output_r(
         output_reductions.size(), output_reductions.data()
     );
     hc::parallel_for_each(
@@ -165,10 +199,10 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScanReduceInt)
             constexpr unsigned int warps_no = block_size/logical_warp_size;
             const unsigned int warp_id = rp::detail::logical_warp_id<logical_warp_size>();
 
-            int value = d_output[i];
-            int reduction;
+            T value = d_output[i];
+            T reduction;
 
-            using wscan_t = rp::warp_scan<int, logical_warp_size>;
+            using wscan_t = rp::warp_scan<T, logical_warp_size>;
             tile_static typename wscan_t::storage_type storage[warps_no];
             wscan_t().inclusive_scan(value, value, reduction, storage[warp_id]);
 
@@ -181,20 +215,40 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScanReduceInt)
     );
 
     d_output.synchronize();
-    for(size_t i = 0; i < output.size(); i++)
-    {
-        EXPECT_EQ(output[i], expected[i]);
-    }
-
     d_output_r.synchronize();
-    for(size_t i = 0; i < output_reductions.size(); i++)
+
+    // Validating results
+    if (std::is_integral<T>::value)
     {
-        EXPECT_EQ(output_reductions[i], expected_reductions[i]);
+        for(size_t i = 0; i < output.size(); i++)
+        {
+            EXPECT_EQ(output[i], expected[i]);
+        }
+
+        for(size_t i = 0; i < output_reductions.size(); i++)
+        {
+            EXPECT_EQ(output_reductions[i], expected_reductions[i]);
+        }
+    }
+    else if (std::is_floating_point<T>::value)
+    {
+        for(size_t i = 0; i < output.size(); i++)
+        {
+            auto tolerance = std::max<T>(std::abs(0.1f * expected[i]), T(0.01f));
+            EXPECT_NEAR(output[i], expected[i], tolerance);
+        }
+
+        for(size_t i = 0; i < output_reductions.size(); i++)
+        {
+            auto tolerance = std::max<T>(std::abs(0.1f * expected_reductions[i]), T(0.01f));
+            EXPECT_NEAR(output_reductions[i], expected_reductions[i], tolerance);
+        }
     }
 }
 
-TYPED_TEST(RocprimWarpScanTests, ExclusiveScanInt)
+TYPED_TEST(RocprimWarpScanTests, ExclusiveScan)
 {
+    using T = typename TestFixture::type;
     // logical warp side for warp primitive, execution warp size is always rp::warp_size()
     constexpr size_t logical_warp_size = TestFixture::warp_size;
     constexpr size_t block_size =
@@ -210,11 +264,11 @@ TYPED_TEST(RocprimWarpScanTests, ExclusiveScanInt)
     }
 
     // Generate data
-    std::vector<int> in_out_array = get_random_data<int>(size, -100, 100);
-    const int init = get_random_value(0, 100);
+    std::vector<T> in_out_array = get_random_data<T>(size, -100, 100);
+    const T init = get_random_value(0, 100);
 
     // Calculate expected results on host
-    std::vector<int> expected(in_out_array.size(), 0);
+    std::vector<T> expected(in_out_array.size(), 0);
     for(size_t i = 0; i < in_out_array.size() / logical_warp_size; i++)
     {
         expected[i * logical_warp_size] = init;
@@ -225,7 +279,7 @@ TYPED_TEST(RocprimWarpScanTests, ExclusiveScanInt)
         }
     }
 
-    hc::array_view<int, 1> d_in_out_array(in_out_array.size(), in_out_array.data());
+    hc::array_view<T, 1> d_in_out_array(in_out_array.size(), in_out_array.data());
     hc::parallel_for_each(
         hc::extent<1>(in_out_array.size()).tile(block_size),
         [=](hc::tiled_index<1> i) [[hc]]
@@ -233,9 +287,9 @@ TYPED_TEST(RocprimWarpScanTests, ExclusiveScanInt)
             constexpr unsigned int warps_no = block_size/logical_warp_size;
             const unsigned int warp_id = rp::detail::logical_warp_id<logical_warp_size>();
 
-            int value = d_in_out_array[i];
+            T value = d_in_out_array[i];
 
-            using wscan_t = rp::warp_scan<int, logical_warp_size>;
+            using wscan_t = rp::warp_scan<T, logical_warp_size>;
             tile_static typename wscan_t::storage_type storage[warps_no];
             wscan_t().exclusive_scan(value, value, init, storage[warp_id]);
 
@@ -244,14 +298,28 @@ TYPED_TEST(RocprimWarpScanTests, ExclusiveScanInt)
     );
 
     d_in_out_array.synchronize();
-    for(size_t i = 0; i < in_out_array.size(); i++)
+
+    // Validating results
+    if (std::is_integral<T>::value)
     {
-        EXPECT_EQ(in_out_array[i], expected[i]);
+        for(size_t i = 0; i < in_out_array.size(); i++)
+        {
+            EXPECT_EQ(in_out_array[i], expected[i]);
+        }
+    }
+    else if (std::is_floating_point<T>::value)
+    {
+        for(size_t i = 0; i < in_out_array.size(); i++)
+        {
+            auto tolerance = std::max<T>(std::abs(0.1f * expected[i]), T(0.01f));
+            EXPECT_NEAR(in_out_array[i], expected[i], tolerance);
+        }
     }
 }
 
-TYPED_TEST(RocprimWarpScanTests, ExclusiveScanReduceInt)
+TYPED_TEST(RocprimWarpScanTests, ExclusiveScanReduce)
 {
+    using T = typename TestFixture::type;
     // logical warp side for warp primitive, execution warp size is always rp::warp_size()
     constexpr size_t logical_warp_size = TestFixture::warp_size;
     constexpr size_t block_size =
@@ -267,14 +335,14 @@ TYPED_TEST(RocprimWarpScanTests, ExclusiveScanReduceInt)
     }
 
     // Generate data
-    std::vector<int> in_out_array = get_random_data<int>(size, -100, 100);
+    std::vector<T> in_out_array = get_random_data<T>(size, -100, 100);
     const int init = get_random_value(0, 100);
 
-    std::vector<int> output_reductions(size / logical_warp_size);
+    std::vector<T> output_reductions(size / logical_warp_size);
 
     // Calculate expected results on host
-    std::vector<int> expected(in_out_array.size(), 0);
-    std::vector<int> expected_reductions(output_reductions.size(), 0);
+    std::vector<T> expected(in_out_array.size(), 0);
+    std::vector<T> expected_reductions(output_reductions.size(), 0);
     for(size_t i = 0; i < in_out_array.size() / logical_warp_size; i++)
     {
         expected[i * logical_warp_size] = init;
@@ -292,8 +360,8 @@ TYPED_TEST(RocprimWarpScanTests, ExclusiveScanReduceInt)
         }
     }
 
-    hc::array_view<int, 1> d_in_out_array(in_out_array.size(), in_out_array.data());
-    hc::array_view<int, 1> d_output_r(
+    hc::array_view<T, 1> d_in_out_array(in_out_array.size(), in_out_array.data());
+    hc::array_view<T, 1> d_output_r(
         output_reductions.size(), output_reductions.data()
     );
     hc::parallel_for_each(
@@ -303,10 +371,10 @@ TYPED_TEST(RocprimWarpScanTests, ExclusiveScanReduceInt)
             constexpr unsigned int warps_no = block_size/logical_warp_size;
             const unsigned int warp_id = rp::detail::logical_warp_id<logical_warp_size>();
 
-            int value = d_in_out_array[i];
-            int reduction;
+            T value = d_in_out_array[i];
+            T reduction;
 
-            using wscan_t = rp::warp_scan<int, logical_warp_size>;
+            using wscan_t = rp::warp_scan<T, logical_warp_size>;
             tile_static typename wscan_t::storage_type storage[warps_no];
             wscan_t().exclusive_scan(value, value, init, reduction, storage[warp_id]);
 
@@ -319,20 +387,40 @@ TYPED_TEST(RocprimWarpScanTests, ExclusiveScanReduceInt)
     );
 
     d_in_out_array.synchronize();
-    for(size_t i = 0; i < in_out_array.size(); i++)
-    {
-        EXPECT_EQ(in_out_array[i], expected[i]);
-    }
-
     d_output_r.synchronize();
-    for(size_t i = 0; i < output_reductions.size(); i++)
+
+    // Validating results
+    if (std::is_integral<T>::value)
     {
-        EXPECT_EQ(output_reductions[i], expected_reductions[i]);
+        for(size_t i = 0; i < in_out_array.size(); i++)
+        {
+            EXPECT_EQ(in_out_array[i], expected[i]);
+        }
+
+        for(size_t i = 0; i < output_reductions.size(); i++)
+        {
+            EXPECT_EQ(output_reductions[i], expected_reductions[i]);
+        }
+    }
+    else if (std::is_floating_point<T>::value)
+    {
+        for(size_t i = 0; i < in_out_array.size(); i++)
+        {
+            auto tolerance = std::max<T>(std::abs(0.1f * expected[i]), T(0.01f));
+            EXPECT_NEAR(in_out_array[i], expected[i], tolerance);
+        }
+
+        for(size_t i = 0; i < output_reductions.size(); i++)
+        {
+            auto tolerance = std::max<T>(std::abs(0.1f * expected_reductions[i]), T(0.01f));
+            EXPECT_NEAR(output_reductions[i], expected_reductions[i], tolerance);
+        }
     }
 }
 
-TYPED_TEST(RocprimWarpScanTests, ScanInt)
+TYPED_TEST(RocprimWarpScanTests, Scan)
 {
+    using T = typename TestFixture::type;
     // logical warp side for warp primitive, execution warp size is always rp::warp_size()
     constexpr size_t logical_warp_size = TestFixture::warp_size;
     constexpr size_t block_size =
@@ -348,15 +436,15 @@ TYPED_TEST(RocprimWarpScanTests, ScanInt)
     }
 
     // Generate data
-    std::vector<int> input = get_random_data<int>(size, -100, 100);
-    const int init = get_random_value(0, 100);
+    std::vector<T> input = get_random_data<T>(size, -100, 100);
+    const T init = get_random_value(0, 100);
 
-    std::vector<int> i_output(input.size());
-    std::vector<int> e_output(input.size());
+    std::vector<T> i_output(input.size());
+    std::vector<T> e_output(input.size());
 
     // Calculate expected results on host
-    std::vector<int> e_expected(input.size(), 0);
-    std::vector<int> i_expected(input.size(), 0);
+    std::vector<T> e_expected(input.size(), 0);
+    std::vector<T> i_expected(input.size(), 0);
     for(size_t i = 0; i < input.size() / logical_warp_size; i++)
     {
         for(size_t j = 0; j < logical_warp_size; j++)
@@ -373,9 +461,9 @@ TYPED_TEST(RocprimWarpScanTests, ScanInt)
         }
     }
 
-    hc::array_view<int, 1> d_input(input.size(), input.data());
-    hc::array_view<int, 1> d_i_output(i_output.size(), i_output.data());
-    hc::array_view<int, 1> d_e_output(e_output.size(), e_output.data());
+    hc::array_view<T, 1> d_input(input.size(), input.data());
+    hc::array_view<T, 1> d_i_output(i_output.size(), i_output.data());
+    hc::array_view<T, 1> d_e_output(e_output.size(), e_output.data());
     hc::parallel_for_each(
         hc::extent<1>(input.size()).tile(block_size),
         [=](hc::tiled_index<1> i) [[hc]]
@@ -383,10 +471,10 @@ TYPED_TEST(RocprimWarpScanTests, ScanInt)
             constexpr unsigned int warps_no = block_size/logical_warp_size;
             const unsigned int warp_id = rp::detail::logical_warp_id<logical_warp_size>();
 
-            int input = d_input[i];
-            int i_output, e_output;
+            T input = d_input[i];
+            T i_output, e_output;
 
-            using wscan_t = rp::warp_scan<int, logical_warp_size>;
+            using wscan_t = rp::warp_scan<T, logical_warp_size>;
             tile_static typename wscan_t::storage_type storage[warps_no];
             wscan_t().scan(input, i_output, e_output, init, storage[warp_id]);
 
@@ -396,20 +484,33 @@ TYPED_TEST(RocprimWarpScanTests, ScanInt)
     );
 
     d_i_output.synchronize();
-    for(size_t i = 0; i < i_output.size(); i++)
-    {
-        EXPECT_EQ(i_output[i], i_expected[i]);
-    }
-
     d_e_output.synchronize();
-    for(size_t i = 0; i < e_output.size(); i++)
+
+    // Validating results
+    if (std::is_integral<T>::value)
     {
-        EXPECT_EQ(e_output[i], e_expected[i]);
+        for(size_t i = 0; i < i_output.size(); i++)
+        {
+            EXPECT_EQ(i_output[i], i_expected[i]);
+            EXPECT_EQ(e_output[i], e_expected[i]);
+        }
+    }
+    else if (std::is_floating_point<T>::value)
+    {
+        for(size_t i = 0; i < i_output.size(); i++)
+        {
+            auto tolerance = std::max<T>(std::abs(0.1f * i_expected[i]), T(0.01f));
+            EXPECT_NEAR(i_output[i], i_expected[i], tolerance);
+
+            tolerance = std::max<T>(std::abs(0.1f * e_expected[i]), T(0.01f));
+            EXPECT_NEAR(e_output[i], e_expected[i], tolerance);
+        }
     }
 }
 
-TYPED_TEST(RocprimWarpScanTests, ScanReduceInt)
+TYPED_TEST(RocprimWarpScanTests, ScanReduce)
 {
+    using T = typename TestFixture::type;
     // logical warp side for warp primitive, execution warp size is always rp::warp_size()
     constexpr size_t logical_warp_size = TestFixture::warp_size;
     constexpr size_t block_size =
@@ -425,17 +526,17 @@ TYPED_TEST(RocprimWarpScanTests, ScanReduceInt)
     }
 
     // Generate data
-    std::vector<int> input = get_random_data<int>(size, -100, 100);
-    const int init = get_random_value(0, 100);
+    std::vector<T> input = get_random_data<T>(size, -100, 100);
+    const T init = get_random_value(0, 100);
 
-    std::vector<int> i_output(input.size());
-    std::vector<int> e_output(input.size());
-    std::vector<int> output_reductions(input.size() / logical_warp_size);
+    std::vector<T> i_output(input.size());
+    std::vector<T> e_output(input.size());
+    std::vector<T> output_reductions(input.size() / logical_warp_size);
 
     // Calculate expected results on host
-    std::vector<int> e_expected(input.size(), 0);
-    std::vector<int> i_expected(input.size(), 0);
-    std::vector<int> expected_reductions(output_reductions.size(), 0);
+    std::vector<T> e_expected(input.size(), 0);
+    std::vector<T> i_expected(input.size(), 0);
+    std::vector<T> expected_reductions(output_reductions.size(), 0);
     for(size_t i = 0; i < input.size() / logical_warp_size; i++)
     {
         for(size_t j = 0; j < logical_warp_size; j++)
@@ -453,10 +554,10 @@ TYPED_TEST(RocprimWarpScanTests, ScanReduceInt)
         }
     }
 
-    hc::array_view<int, 1> d_input(input.size(), input.data());
-    hc::array_view<int, 1> d_i_output(i_output.size(), i_output.data());
-    hc::array_view<int, 1> d_e_output(e_output.size(), e_output.data());
-    hc::array_view<int, 1> d_output_r(
+    hc::array_view<T, 1> d_input(input.size(), input.data());
+    hc::array_view<T, 1> d_i_output(i_output.size(), i_output.data());
+    hc::array_view<T, 1> d_e_output(e_output.size(), e_output.data());
+    hc::array_view<T, 1> d_output_r(
         output_reductions.size(), output_reductions.data()
     );
     hc::parallel_for_each(
@@ -466,10 +567,10 @@ TYPED_TEST(RocprimWarpScanTests, ScanReduceInt)
             constexpr unsigned int warps_no = block_size/logical_warp_size;
             const unsigned int warp_id = rp::detail::logical_warp_id<logical_warp_size>();
 
-            int input = d_input[i];
-            int i_output, e_output, reduction;
+            T input = d_input[i];
+            T i_output, e_output, reduction;
 
-            using wscan_t = rp::warp_scan<int, logical_warp_size>;
+            using wscan_t = rp::warp_scan<T, logical_warp_size>;
             tile_static typename wscan_t::storage_type storage[warps_no];
             wscan_t().scan(input, i_output, e_output, init, reduction, storage[warp_id]);
 
@@ -483,129 +584,43 @@ TYPED_TEST(RocprimWarpScanTests, ScanReduceInt)
     );
 
     d_i_output.synchronize();
-    for(size_t i = 0; i < i_output.size(); i++)
-    {
-        EXPECT_EQ(i_output[i], i_expected[i]);
-    }
-
     d_e_output.synchronize();
-    for(size_t i = 0; i < e_output.size(); i++)
-    {
-        EXPECT_EQ(e_output[i], e_expected[i]);
-    }
-
     d_output_r.synchronize();
-    for(size_t i = 0; i < output_reductions.size(); i++)
+
+    // Validating results
+    if (std::is_integral<T>::value)
     {
-        EXPECT_EQ(output_reductions[i], expected_reductions[i]);
-    }
-}
-
-TYPED_TEST(RocprimWarpScanTests, ScanReduceFloat)
-{
-    // logical warp side for warp primitive, execution warp size is always rp::warp_size()
-    constexpr size_t logical_warp_size = TestFixture::warp_size;
-    constexpr size_t block_size =
-        rp::detail::is_power_of_two(logical_warp_size)
-            ? rp::max<size_t>(rp::warp_size(), logical_warp_size * 4)
-            : (rp::warp_size()/logical_warp_size) * logical_warp_size;
-    const size_t size = block_size * 4;
-
-    // Given warp size not supported
-    if(logical_warp_size > rp::warp_size())
-    {
-        return;
-    }
-
-    // Generate data
-    std::vector<float> input = get_random_data<float>(size, 2, 200);
-    const float init = get_random_value(1, 100);
-
-    std::vector<float> i_output(input.size());
-    std::vector<float> e_output(input.size());
-    std::vector<float> output_reductions(input.size() / logical_warp_size);
-
-    // Calculate expected results on host
-    std::vector<float> e_expected(input.size(), 0);
-    std::vector<float> i_expected(input.size(), 0);
-    std::vector<float> expected_reductions(output_reductions.size(), 0);
-    for(size_t i = 0; i < input.size() / logical_warp_size; i++)
-    {
-        for(size_t j = 0; j < logical_warp_size; j++)
+        for(size_t i = 0; i < i_output.size(); i++)
         {
-            auto idx = i * logical_warp_size + j;
-            i_expected[idx] = input[idx] + i_expected[j > 0 ? idx-1 : idx];
+            EXPECT_EQ(i_output[i], i_expected[i]);
+            EXPECT_EQ(e_output[i], e_expected[i]);
         }
-        expected_reductions[i] = i_expected[(i+1) * logical_warp_size - 1];
-
-        e_expected[i * logical_warp_size] = init;
-        for(size_t j = 1; j < logical_warp_size; j++)
+        for(size_t i = 0; i < output_reductions.size(); i++)
         {
-            auto idx = i * logical_warp_size + j;
-            e_expected[idx] = input[idx-1] + e_expected[idx-1];
+            EXPECT_EQ(output_reductions[i], expected_reductions[i]);
         }
     }
-
-    hc::array_view<float, 1> d_input(input.size(), input.data());
-    hc::array_view<float, 1> d_i_output(i_output.size(), i_output.data());
-    hc::array_view<float, 1> d_e_output(e_output.size(), e_output.data());
-    hc::array_view<float, 1> d_output_r(
-        output_reductions.size(), output_reductions.data()
-    );
-    hc::parallel_for_each(
-        hc::extent<1>(input.size()).tile(block_size),
-        [=](hc::tiled_index<1> i) [[hc]]
+    else if (std::is_floating_point<T>::value)
+    {
+        for(size_t i = 0; i < i_output.size(); i++)
         {
-            constexpr unsigned int warps_no = block_size/logical_warp_size;
-            const unsigned int warp_id = rp::detail::logical_warp_id<logical_warp_size>();
+            auto tolerance = std::max<T>(std::abs(0.1f * i_expected[i]), T(0.01f));
+            EXPECT_NEAR(i_output[i], i_expected[i], tolerance);
 
-            float input = d_input[i];
-            float i_output, e_output, reduction;
-
-            using wscan_t = rp::warp_scan<float, logical_warp_size>;
-            tile_static typename wscan_t::storage_type storage[warps_no];
-            wscan_t().scan(input, i_output, e_output, init, reduction, storage[warp_id]);
-
-            d_i_output[i] = i_output;
-            d_e_output[i] = e_output;
-            if(i.local[0]%logical_warp_size == 0)
-            {
-                d_output_r[i.global[0]/logical_warp_size] = reduction;
-            }
+            tolerance = std::max<T>(std::abs(0.1f * e_expected[i]), T(0.01f));
+            EXPECT_NEAR(e_output[i], e_expected[i], tolerance);
         }
-    );
-
-    d_i_output.synchronize();
-    for(size_t i = 0; i < i_output.size(); i++)
-    {
-        EXPECT_NEAR(
-            i_output[i], i_expected[i],
-            std::abs(0.01f * i_expected[i])
-        );
-    }
-
-    d_e_output.synchronize();
-    for(size_t i = 0; i < e_output.size(); i++)
-    {
-        EXPECT_NEAR(
-            e_output[i], e_expected[i],
-            std::abs(0.01f * e_expected[i])
-        );
-    }
-
-    d_output_r.synchronize();
-    for(size_t i = 0; i < output_reductions.size(); i++)
-    {
-        EXPECT_NEAR(
-            output_reductions[i], expected_reductions[i],
-            std::abs(0.01f * expected_reductions[i])
-        );
+        for(size_t i = 0; i < output_reductions.size(); i++)
+        {
+            auto tolerance = std::max<T>(std::abs(0.1f * expected_reductions[i]), T(0.01f));
+            EXPECT_NEAR(output_reductions[i], expected_reductions[i], tolerance);
+        }
     }
 }
 
 TYPED_TEST(RocprimWarpScanTests, InclusiveScanCustomStruct)
 {
-    using base_type = int;
+    using base_type = typename TestFixture::type;
     using T = custom_test_type<base_type>;
 
     // logical warp side for warp primitive, execution warp size is always rp::warp_size()
@@ -664,8 +679,23 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScanCustomStruct)
     );
 
     d_output.synchronize();
-    for(size_t i = 0; i < output.size(); i++)
+
+    // Validating results
+    if (std::is_integral<base_type>::value)
     {
-        ASSERT_EQ(output[i], expected[i]);
+        for(size_t i = 0; i < output.size(); i++)
+        {
+            EXPECT_EQ(output[i], expected[i]);
+        }
+    }
+    else if (std::is_floating_point<base_type>::value)
+    {
+        for(size_t i = 0; i < output.size(); i++)
+        {
+            auto tolerance_x = std::max<base_type>(std::abs(0.1f * expected[i].x), base_type(0.01f));
+            auto tolerance_y = std::max<base_type>(std::abs(0.1f * expected[i].y), base_type(0.01f));
+            EXPECT_NEAR(output[i].x, expected[i].x, tolerance_x);
+            EXPECT_NEAR(output[i].y, expected[i].y, tolerance_y);
+        }
     }
 }
