@@ -196,37 +196,38 @@ hipError_t device_reduce_impl(void * temporary_storage,
 
 } // end of detail namespace
 
-/// \brief HIP parallel reduce primitive for device level.
+/// \brief HIP parallel reduction primitive for device level.
 ///
 /// device_reduce function performs a device-wide reduction operation
 /// using binary \p reduce_op operator.
 ///
 /// \par Overview
-/// * Supports non-commutative reduce operators. However, a reduce operator should be
+/// * Supports non-commutative reduction operators. However, a reduction operator should be
 /// associative. When used with non-associative functions the results may be non-deterministic
 /// and/or vary in precision.
 /// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
-/// * Ranges specified by \p input and \p output must have at least \p size elements.
+/// * Ranges specified by \p input must have at least \p size elements, while \p output
+/// only needs one element.
 ///
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
 /// \tparam InitValueType - type of the initial value.
-/// \tparam BinaryFunction - type of binary function used for reduce. Default type
+/// \tparam BinaryFunction - type of binary function used for reduction. Default type
 /// is \p rocprim::plus<T>, where \p T is a \p value_type of \p InputIterator.
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
-/// \p storage_size and function returns without performing the reduce operation.
+/// \p storage_size and function returns without performing the reduction operation.
 /// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
 /// \param [in] input - iterator to the first element in the range to reduce.
 /// \param [out] output - iterator to the first element in the output range. It can be
 /// same as \p input.
-/// \param [in] initial_value - initial value to start the reduce.
+/// \param [in] initial_value - initial value to start the reduction.
 /// \param [in] size - number of element in the input range.
-/// \param [in] reduce_op - binary operation function object that will be used for reduce.
+/// \param [in] reduce_op - binary operation function object that will be used for reduction.
 /// The signature of the function should be equivalent to the following:
 /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
 /// <tt>const &</tt>, but function object must not modify the objects passed to it.
@@ -235,13 +236,13 @@ hipError_t device_reduce_impl(void * temporary_storage,
 /// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. The default value is \p false.
 ///
-/// \returns \p hipSuccess (\p 0) after successful reduce; otherwise a HIP runtime error of
+/// \returns \p hipSuccess (\p 0) after successful reduction; otherwise a HIP runtime error of
 /// type \p hipError_t.
 ///
 /// \par Example
 /// \parblock
-/// In this example a device-level min-reduce operation is performed on an array of
-/// integer values (<tt>short</tt>s are reducened into <tt>int</tt>s) using custom operator.
+/// In this example a device-level min-reduction operation is performed on an array of
+/// integer values (<tt>short</tt>s are reduced into <tt>int</tt>s) using custom operator.
 ///
 /// \code{.cpp}
 /// #include <rocprim.hpp>
@@ -311,29 +312,30 @@ hipError_t device_reduce(void * temporary_storage,
 /// using binary \p reduce_op operator.
 ///
 /// \par Overview
-/// * Supports non-commutative reduce operators. However, a reduce operator should be
+/// * Supports non-commutative reduction operators. However, a reduction operator should be
 /// associative. When used with non-associative functions the results may be non-deterministic
 /// and/or vary in precision.
 /// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
-/// * Ranges specified by \p input and \p output must have at least \p size elements.
+/// * Ranges specified by \p input must have at least \p size elements, while \p output
+/// only needs one element.
 ///
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
-/// \tparam BinaryFunction - type of binary function used for reduce. Default type
+/// \tparam BinaryFunction - type of binary function used for reduction. Default type
 /// is \p rocprim::plus<T>, where \p T is a \p value_type of \p InputIterator.
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
-/// \p storage_size and function returns without performing the reduce operation.
+/// \p storage_size and function returns without performing the reduction operation.
 /// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
 /// \param [in] input - iterator to the first element in the range to reduce.
 /// \param [out] output - iterator to the first element in the output range. It can be
 /// same as \p input.
 /// \param [in] size - number of element in the input range.
-/// \param [in] reduce_op - binary operation function object that will be used for reduce.
+/// \param [in] reduce_op - binary operation function object that will be used for reduction.
 /// The signature of the function should be equivalent to the following:
 /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
 /// <tt>const &</tt>, but function object must not modify the objects passed to it.
@@ -342,13 +344,13 @@ hipError_t device_reduce(void * temporary_storage,
 /// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
-/// \returns \p hipSuccess (\p 0) after successful reduce; otherwise a HIP runtime error of
+/// \returns \p hipSuccess (\p 0) after successful reduction; otherwise a HIP runtime error of
 /// type \p hipError_t.
 ///
 /// \par Example
 /// \parblock
 /// In this example a device-level sum operation is performed on an array of
-/// integer values (<tt>short</tt>s are reducened into <tt>int</tt>s).
+/// integer values (<tt>short</tt>s are reduced into <tt>int</tt>s).
 ///
 /// \code{.cpp}
 /// #include <rocprim.hpp>
@@ -363,7 +365,7 @@ hipError_t device_reduce(void * temporary_storage,
 /// // Get required size of the temporary storage
 /// rocprim::device_reduce(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
-///     input, output, input_size, rocprim::plus<U>()
+///     input, output, input_size, rocprim::plus<int>()
 /// );
 ///
 /// // allocate temporary storage
@@ -372,7 +374,7 @@ hipError_t device_reduce(void * temporary_storage,
 /// // perform reduce
 /// rocprim::device_reduce(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
-///     input, output, input_size, rocprim::plus<U>()
+///     input, output, input_size, rocprim::plus<int>()
 /// );
 /// // output: [36]
 /// \endcode
