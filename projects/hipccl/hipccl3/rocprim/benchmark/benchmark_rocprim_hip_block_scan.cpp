@@ -161,6 +161,9 @@ void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                     hipStream_t stream,
                     size_t size)
 {
+    using custom_double2 = custom_type<double, double>;
+    using custom_int_double = custom_type<int, double>;
+
     std::vector<benchmark::internal::Benchmark*> new_benchmarks =
     {
         CREATE_BENCHMARK(float, 256, 1),
@@ -194,6 +197,14 @@ void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
         CREATE_BENCHMARK(double, 256, 8),
         CREATE_BENCHMARK(double, 256, 11),
         CREATE_BENCHMARK(double, 256, 16),
+
+        CREATE_BENCHMARK(custom_double2, 256, 1),
+        CREATE_BENCHMARK(custom_double2, 256, 4),
+        CREATE_BENCHMARK(custom_double2, 256, 8),
+
+        CREATE_BENCHMARK(custom_int_double, 256, 1),
+        CREATE_BENCHMARK(custom_int_double, 256, 4),
+        CREATE_BENCHMARK(custom_int_double, 256, 8)
     };
     benchmarks.insert(benchmarks.end(), new_benchmarks.begin(), new_benchmarks.end());
 }

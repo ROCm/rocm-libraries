@@ -26,6 +26,8 @@
 #include <random>
 #include <type_traits>
 
+#include <rocprim.hpp>
+
 // get_random_data() generates only part of sequence and replicates it,
 // because benchmarks do not need "true" random sequence.
 const size_t max_random_size = 1024 * 1024;
@@ -67,5 +69,28 @@ inline T get_random_value(T min, T max)
 {
     return get_random_data(1, min, max)[0];
 }
+
+template<class T, class U = T>
+struct custom_type
+{
+    T x;
+    U y;
+
+    ROCPRIM_HOST_DEVICE inline
+    custom_type(T xx = 0, U yy = 0) : x(xx), y(yy)
+    {
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    ~custom_type()
+    {
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    custom_type operator+(const custom_type& other) const
+    {
+        return custom_type(x + other.x, y + other.y);
+    }
+};
 
 #endif // ROCPRIM_BENCHMARK_UTILS_HPP_
