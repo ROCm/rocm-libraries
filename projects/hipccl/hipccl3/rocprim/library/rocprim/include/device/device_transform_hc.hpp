@@ -83,7 +83,7 @@ namespace detail
 /// \par Example
 /// \parblock
 /// In this example a device-level transform operation is performed on an array of
-/// integer values (<tt>short</tt>s are transformned into <tt>int</tt>s).
+/// integer values (<tt>short</tt>s are transformed into <tt>int</tt>s).
 ///
 /// \code{.cpp}
 /// #include <rocprim.hpp>
