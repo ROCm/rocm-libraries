@@ -24,11 +24,11 @@
 #include <iterator>
 #include <utility>
 
-#include "../../functional.hpp"
-#include "../../intrinsics.hpp"
-
-#include "../../detail/config.hpp"
+#include "../../config.hpp"
 #include "../../detail/various.hpp"
+
+#include "../../intrinsics.hpp"
+#include "../../functional.hpp"
 
 #include "../../block/block_discontinuity.hpp"
 #include "../../block/block_exchange.hpp"
@@ -67,11 +67,13 @@ struct scan_by_key_op
 {
     BinaryFunction reduce_op;
 
-    scan_by_key_op(BinaryFunction reduce_op) [[hc]]
+    ROCPRIM_DEVICE inline
+    scan_by_key_op(BinaryFunction reduce_op)
         : reduce_op(reduce_op)
     {}
 
-    Pair operator()(const Pair& a, const Pair& b) [[hc]]
+    ROCPRIM_DEVICE inline
+    Pair operator()(const Pair& a, const Pair& b)
     {
         Pair c;
         c.key = a.key + b.key;
@@ -89,11 +91,13 @@ struct key_flag_op
 {
     KeyCompareFunction key_compare_op;
 
-    key_flag_op(KeyCompareFunction key_compare_op) [[hc]]
+    ROCPRIM_DEVICE inline
+    key_flag_op(KeyCompareFunction key_compare_op)
         : key_compare_op(key_compare_op)
     {}
 
-    bool operator()(const Key& a, const Key& b) const [[hc]]
+    ROCPRIM_DEVICE inline
+    bool operator()(const Key& a, const Key& b) const
     {
         return !key_compare_op(a, b);
     }
@@ -107,11 +111,13 @@ struct guarded_key_flag_op
     KeyCompareFunction key_compare_op;
     unsigned int valid_count;
 
-    guarded_key_flag_op(KeyCompareFunction key_compare_op, unsigned int valid_count) [[hc]]
+    ROCPRIM_DEVICE inline
+    guarded_key_flag_op(KeyCompareFunction key_compare_op, unsigned int valid_count)
         : key_compare_op(key_compare_op), valid_count(valid_count)
     {}
 
-    bool operator()(const Key& a, const Key& b, unsigned int b_index) const [[hc]]
+    ROCPRIM_DEVICE inline
+    bool operator()(const Key& a, const Key& b, unsigned int b_index) const
     {
         return (b_index < valid_count && !key_compare_op(a, b)) || b_index == valid_count;
     }
@@ -123,13 +129,14 @@ template<
     class KeysInputIterator,
     class KeyCompareFunction
 >
+ROCPRIM_DEVICE inline
 void fill_unique_counts(KeysInputIterator keys_input,
                         unsigned int size,
                         unsigned int * unique_counts,
                         KeyCompareFunction key_compare_op,
                         unsigned int blocks_per_full_batch,
                         unsigned int full_batches,
-                        unsigned int blocks) [[hc]]
+                        unsigned int blocks)
 {
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
     constexpr unsigned int warp_size = ::rocprim::warp_size();
@@ -142,7 +149,7 @@ void fill_unique_counts(KeysInputIterator keys_input,
         ::rocprim::block_load_method::block_load_transpose>;
     using discontinuity_type = ::rocprim::block_discontinuity<key_type, BlockSize>;
 
-    tile_static struct
+    ROCPRIM_SHARED_MEMORY struct
     {
         union
         {
@@ -153,7 +160,7 @@ void fill_unique_counts(KeysInputIterator keys_input,
     } storage;
 
     const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-    const unsigned int batch_id = ::rocprim::block_id(0);
+    const unsigned int batch_id = ::rocprim::detail::block_id<0>();
     const unsigned int lane_id = ::rocprim::lane_id();
     const unsigned int warp_id = ::rocprim::warp_id();
 
@@ -240,9 +247,10 @@ template<
     unsigned int ItemsPerThread,
     class UniqueCountOutputIterator
 >
+ROCPRIM_DEVICE inline
 void scan_unique_counts(unsigned int * unique_counts,
                         UniqueCountOutputIterator unique_count_output,
-                        unsigned int batches) [[hc]]
+                        unsigned int batches)
 {
     using load_type = ::rocprim::block_load<
         unsigned int, BlockSize, ItemsPerThread,
@@ -252,7 +260,7 @@ void scan_unique_counts(unsigned int * unique_counts,
         ::rocprim::block_store_method::block_store_transpose>;
     using scan_type = typename ::rocprim::block_scan<unsigned int, BlockSize>;
 
-    tile_static union
+    ROCPRIM_SHARED_MEMORY union
     {
         typename load_type::storage_type load;
         typename store_type::storage_type store;
@@ -288,6 +296,7 @@ template<
     class KeyCompareFunction,
     class BinaryFunction
 >
+ROCPRIM_DEVICE inline
 void reduce_by_key(KeysInputIterator keys_input,
                    ValuesInputIterator values_input,
                    unsigned int size,
@@ -299,7 +308,7 @@ void reduce_by_key(KeysInputIterator keys_input,
                    BinaryFunction reduce_op,
                    unsigned int blocks_per_full_batch,
                    unsigned int full_batches,
-                   unsigned int blocks) [[hc]]
+                   unsigned int blocks)
 {
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
 
@@ -317,7 +326,7 @@ void reduce_by_key(KeysInputIterator keys_input,
     using keys_exchange_type = ::rocprim::block_exchange<key_type, BlockSize, ItemsPerThread>;
     using values_exchange_type = ::rocprim::block_exchange<value_type, BlockSize, ItemsPerThread>;
 
-    tile_static struct
+    ROCPRIM_SHARED_MEMORY struct
     {
         union
         {
@@ -335,7 +344,7 @@ void reduce_by_key(KeysInputIterator keys_input,
     } storage;
 
     const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-    const unsigned int batch_id = ::rocprim::block_id(0);
+    const unsigned int batch_id = ::rocprim::detail::block_id<0>();
 
     unsigned int block_id;
     unsigned int blocks_per_batch;
@@ -553,11 +562,12 @@ template<
     class KeyCompareFunction,
     class BinaryFunction
 >
+ROCPRIM_DEVICE inline
 void scan_and_scatter_carry_outs(const CarryOut * carry_outs,
                                  AggregatesOutputIterator aggregates_output,
                                  KeyCompareFunction key_compare_op,
                                  BinaryFunction reduce_op,
-                                 unsigned int batches) [[hc]]
+                                 unsigned int batches)
 {
     using key_type = decltype(std::declval<CarryOut>().key);
     using value_type = decltype(std::declval<CarryOut>().value);
@@ -568,7 +578,7 @@ void scan_and_scatter_carry_outs(const CarryOut * carry_outs,
     using discontinuity_type = ::rocprim::block_discontinuity<key_type, BlockSize>;
     using scan_type = ::rocprim::block_scan<scan_by_key_pair<value_type>, BlockSize>;
 
-    tile_static union
+    ROCPRIM_SHARED_MEMORY union
     {
         typename load_type::storage_type load;
         typename discontinuity_type::storage_type discontinuity;

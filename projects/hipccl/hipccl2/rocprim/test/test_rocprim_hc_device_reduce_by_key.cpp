@@ -33,9 +33,8 @@
 
 // HC API
 #include <hcc/hc.hpp>
-
-// rocPRIM
-#include <device/device_reduce_by_key_hc.hpp>
+// rocPRIM API
+#include <rocprim.hpp>
 
 #include "test_utils.hpp"
 

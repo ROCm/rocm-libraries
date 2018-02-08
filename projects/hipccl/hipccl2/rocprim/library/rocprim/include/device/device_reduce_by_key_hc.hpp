@@ -24,13 +24,10 @@
 #include <iterator>
 #include <iostream>
 
-// HC API
-#include <hcc/hc.hpp>
+#include "../config.hpp"
+#include "../detail/various.hpp"
 
 #include "../functional.hpp"
-
-#include "../detail/config.hpp"
-#include "../detail/various.hpp"
 
 #include "detail/device_reduce_by_key.hpp"
 
@@ -38,12 +35,6 @@ BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
 {
-
-size_t align_size(size_t size)
-{
-    constexpr size_t alignment = 256;
-    return ::rocprim::detail::ceiling_div(size, alignment) * alignment;
-}
 
 #define ROCPRIM_DETAIL_HC_SYNC(name, size, start) \
     { \
@@ -66,6 +57,7 @@ template<
     class KeyCompareFunction,
     class BinaryFunction
 >
+inline
 void device_reduce_by_key_impl(void * temporary_storage,
                                size_t& storage_size,
                                KeysInputIterator keys_input,
@@ -105,8 +97,8 @@ void device_reduce_by_key_impl(void * temporary_storage,
         : scan_items_per_block;
     const unsigned int batches = (blocks_per_full_batch == 1 ? full_batches : scan_items_per_block);
 
-    const size_t unique_counts_bytes = align_size(batches * sizeof(unsigned int));
-    const size_t carry_outs_bytes = align_size(batches * sizeof(carry_out_type));
+    const size_t unique_counts_bytes = ::rocprim::detail::align_size(batches * sizeof(unsigned int));
+    const size_t carry_outs_bytes = ::rocprim::detail::align_size(batches * sizeof(carry_out_type));
     if(temporary_storage == nullptr)
     {
         storage_size = unique_counts_bytes + carry_outs_bytes;
@@ -207,6 +199,7 @@ template<
     class UniqueCountOutputIterator,
     class BinaryFunction = ::rocprim::plus<typename std::iterator_traits<ValuesInputIterator>::value_type>
 >
+inline
 void device_reduce_by_key(void * temporary_storage,
                           size_t& storage_size,
                           KeysInputIterator keys_input,
