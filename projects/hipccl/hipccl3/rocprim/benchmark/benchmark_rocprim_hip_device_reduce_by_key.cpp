@@ -29,10 +29,8 @@
 
 // Google Benchmark
 #include "benchmark/benchmark.h"
-
 // CmdParser
 #include "cmdparser.hpp"
-
 #include "benchmark_utils.hpp"
 
 // HIP API
@@ -40,7 +38,7 @@
 #include <hip/hip_hcc.h>
 
 // rocPRIM
-#include <device/device_reduce_by_key_hc.hpp> // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#include <rocprim.hpp>
 
 #define HIP_CHECK(condition)         \
   {                                   \
@@ -122,8 +120,8 @@ void run_benchmark(benchmark::State& state, size_t max_length, hipStream_t strea
         d_keys_input, d_values_input, size,
         d_unique_output, d_aggregates_output,
         d_unique_count_output,
-        reduce_op/*,
-        acc_view, debug_synchronous*/
+        reduce_op,
+        stream, false
     );
 
     HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
@@ -137,8 +135,8 @@ void run_benchmark(benchmark::State& state, size_t max_length, hipStream_t strea
             d_keys_input, d_values_input, size,
             d_unique_output, d_aggregates_output,
             d_unique_count_output,
-            reduce_op/*,
-            acc_view, debug_synchronous*/
+            reduce_op,
+            stream, false
         );
     }
     HIP_CHECK(hipDeviceSynchronize());
@@ -155,8 +153,8 @@ void run_benchmark(benchmark::State& state, size_t max_length, hipStream_t strea
                 d_keys_input, d_values_input, size,
                 d_unique_output, d_aggregates_output,
                 d_unique_count_output,
-                reduce_op/*,
-                acc_view, debug_synchronous*/
+                reduce_op,
+                stream, false
             );
         }
         HIP_CHECK(hipStreamSynchronize(stream));

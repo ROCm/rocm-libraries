@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_DEVICE_DETAIL_DEVICE_REDUCE_BY_KEY_HC_HPP_
-#define ROCPRIM_DEVICE_DETAIL_DEVICE_REDUCE_BY_KEY_HC_HPP_
+#ifndef ROCPRIM_DEVICE_DETAIL_DEVICE_REDUCE_BY_KEY_HPP_
+#define ROCPRIM_DEVICE_DETAIL_DEVICE_REDUCE_BY_KEY_HPP_
 
 #include <iterator>
 #include <utility>
@@ -48,7 +48,7 @@ struct carry_out
     Key key;
     Value value;
     unsigned int destination;
-    bool is_final_aggregate;
+    unsigned int is_final_aggregate;
 };
 
 template<class Value>
@@ -477,7 +477,7 @@ void reduce_by_key(KeysInputIterator keys_input,
             // Apply carry-out of the previous block as carry-in
             for(unsigned int i = 0; i < ItemsPerThread; i++)
             {
-                if(ranks[i] == 0 && (tail_flags[i] || (flat_id * ItemsPerThread + i == valid_count - 1)))
+                if(ranks[i] == 0)
                 {
                     values[i] = reduce_op(storage.carry_in, values[i]);
                 }
@@ -643,4 +643,4 @@ void scan_and_scatter_carry_outs(const CarryOut * carry_outs,
 
 END_ROCPRIM_NAMESPACE
 
-#endif // ROCPRIM_DEVICE_DETAIL_DEVICE_REDUCE_BY_KEY_HC_HPP_
+#endif // ROCPRIM_DEVICE_DETAIL_DEVICE_REDUCE_BY_KEY_HPP_
