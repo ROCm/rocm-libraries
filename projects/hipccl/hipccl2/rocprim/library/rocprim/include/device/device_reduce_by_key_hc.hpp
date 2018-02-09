@@ -75,17 +75,11 @@ void device_reduce_by_key_impl(void * temporary_storage,
     using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
     using carry_out_type = carry_out<key_type, value_type>;
 
-    constexpr unsigned int block_size = 128;
-    constexpr unsigned int items_per_thread = 2;
+    constexpr unsigned int block_size = 256;
+    constexpr unsigned int items_per_thread = 7;
 
-    constexpr unsigned int scan_block_size = 128;
-    constexpr unsigned int scan_items_per_thread = 2;
-
-    // constexpr unsigned int block_size = 256;
-    // constexpr unsigned int items_per_thread = 7;
-
-    // constexpr unsigned int scan_block_size = 256;
-    // constexpr unsigned int scan_items_per_thread = 7;
+    constexpr unsigned int scan_block_size = 256;
+    constexpr unsigned int scan_items_per_thread = 7;
 
     constexpr unsigned int items_per_block = block_size * items_per_thread;
     constexpr unsigned int scan_items_per_block = scan_block_size * scan_items_per_thread;
