@@ -31,6 +31,9 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
+/// \addtogroup devicemodule_hip
+/// @{
+
 namespace detail
 {
 
@@ -80,6 +83,61 @@ void transform_kernel(InputIterator input,
 
 } // end of detail namespace
 
+/// \brief HIP parallel transform primitive for device level.
+///
+/// device_transform function performs a device-wide transformation operation
+/// using unary \p transform_op operator.
+///
+/// \par Overview
+/// * Supports non-commutative transform operators. However, a transform operator should be
+/// associative. When used with non-associative functions the results may be non-deterministic
+/// and/or vary in precision.
+/// * Ranges specified by \p input and \p output must have at least \p size elements.
+///
+/// \tparam InputIterator - random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam UnaryFunction - type of unary function used for transform.
+///
+/// \param [in] input - iterator to the first element in the range to transform.
+/// \param [out] output - iterator to the first element in the output range.
+/// \param [in] size - number of element in the input range.
+/// \param [in] transform_op - unary operation function object that will be used for transform.
+/// The signature of the function should be equivalent to the following:
+/// <tt>T f(const T &a);</tt>. The signature does not need to have
+/// <tt>const &</tt>, but function object must not modify the objects passed to it.
+/// \param [in] stream - [optional] HIP stream object. The default is \p 0 (default stream).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. The default value is \p false.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level transform operation is performed on an array of
+/// integer values (<tt>short</tt>s are transformed into <tt>int</tt>s).
+///
+/// \code{.cpp}
+/// #include <rocprim.hpp>
+///
+/// // custom transform function
+/// auto transform_op =
+///     [] __device__ (int a) -> int
+///     {
+///         return a + 5;
+///     };
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t input_size;    // e.g., 8
+/// short * input;        // e.g., [1, 2, 3, 4, 5, 6, 7, 8]
+/// int * output;         // empty array of 8 elements
+///
+/// // perform transform
+/// rocprim::device_transform(
+///     input, output, input_size, transform_op
+/// );
+/// // output: [6, 7, 8, 9, 10, 11, 12, 13]
+/// \endcode
+/// \endparblock
 template<
     class InputIterator,
     class OutputIterator,
@@ -125,6 +183,9 @@ hipError_t device_transform(InputIterator input,
 
 #undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
 #undef ROCPRIM_DETAIL_HIP_SYNC
+
+/// @}
+// end of group devicemodule_hip
 
 END_ROCPRIM_NAMESPACE
 
