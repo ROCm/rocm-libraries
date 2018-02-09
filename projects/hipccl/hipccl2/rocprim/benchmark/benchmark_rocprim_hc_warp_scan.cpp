@@ -29,18 +29,14 @@
 
 // Google Benchmark
 #include "benchmark/benchmark.h"
-
 // CmdParser
 #include "cmdparser.hpp"
-
 // HC API
 #include <hcc/hc.hpp>
-// HIP API
-#include <hip/hip_runtime.h>
-#include <hip/hip_hcc.h>
-
 // rocPRIM
 #include <warp/warp_scan.hpp>
+
+#include "benchmark_utils.hpp"
 
 #define HIP_CHECK(condition)         \
   {                                  \
@@ -52,25 +48,32 @@
   }
 
 #ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 128;
+const size_t DEFAULT_N = 1024 * 1024 * 32;
 #endif
 
 namespace rp = rocprim;
 
-template<class T, unsigned int WarpSize, unsigned int BlockSize>
-void benchmark_hc_warp_inclusive_scan(benchmark::State& state, hc::accelerator_view acc_view, size_t N)
+template<
+    class T,
+    unsigned int BlockSize,
+    unsigned int WarpSize,
+    bool Inclusive = true,
+    unsigned int Trials = 100
+>
+void run_benchmark(benchmark::State& state, hc::accelerator_view acc_view, size_t size)
 {
     // Make sure size is a multiple of BlockSize
-    const auto size = BlockSize * ((N + BlockSize - 1)/BlockSize);
+    size = BlockSize * ((size + BlockSize - 1)/BlockSize);
     // Allocate and fill memory
-    std::vector<T> input(size, 1.0f);
-    std::vector<T> output(size, -1.0f);
+    std::vector<T> input(size, T(1));
+    std::vector<T> output(size);
     hc::array_view<T, 1> av_input(size, input.data());
     hc::array_view<T, 1> av_output(size, output.data());
     av_input.synchronize_to(acc_view);
     av_output.synchronize_to(acc_view);
     acc_view.wait();
 
+    const auto init = input[0];
     for (auto _ : state)
     {
         auto start = std::chrono::high_resolution_clock::now();
@@ -83,12 +86,28 @@ void benchmark_hc_warp_inclusive_scan(benchmark::State& state, hc::accelerator_v
 
                 using wscan_t = rp::warp_scan<T, WarpSize>;
                 tile_static typename wscan_t::storage_type storage;
-                wscan_t().inclusive_scan(value, value, storage);
+                if(Inclusive)
+                {
+                    #pragma nounroll
+                    for(unsigned int trial = 0; trial < Trials; trial++)
+                    {
+                        wscan_t().inclusive_scan(value, value, storage);
+                    }
+                }
+                else
+                {
+                    #pragma nounroll
+                    for(unsigned int trial = 0; trial < Trials; trial++)
+                    {
+                        wscan_t().exclusive_scan(value, value, init, storage);
+                    }
+                }
 
                 av_output[i] = value;
             }
         );
         event.wait();
+        acc_view.wait();
 
         auto end = std::chrono::high_resolution_clock::now();
         auto elapsed_seconds =
@@ -96,67 +115,50 @@ void benchmark_hc_warp_inclusive_scan(benchmark::State& state, hc::accelerator_v
 
         state.SetIterationTime(elapsed_seconds.count());
     }
-    state.SetBytesProcessed(state.iterations() * size * sizeof(T));
-    state.SetItemsProcessed(state.iterations() * size);
+    state.SetBytesProcessed(state.iterations() * size * sizeof(T) * Trials);
+    state.SetItemsProcessed(state.iterations() * size * Trials);
 }
 
-template<class T, unsigned int WarpSize>
-__global__
-void warp_inclusive_scan_kernel(const T* input, T* output)
+#define CREATE_BENCHMARK(T, BS, WS, INCLUSIVE) \
+    benchmark::RegisterBenchmark( \
+        (std::string("warp_scan<"#T", "#BS", "#WS">.") + method_name).c_str(), \
+        run_benchmark<T, BS, WS, INCLUSIVE>, \
+        acc_view, size \
+    )
+
+template<bool Inclusive>
+void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
+                    const std::string& method_name,
+                    hc::accelerator_view acc_view,
+                    size_t size)
 {
-    const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+    using custom_double2 = custom_type<double, double>;
+    using custom_int_double = custom_type<int, double>;
 
-    auto value = input[i];
-
-    using wscan_t = rp::warp_scan<T, WarpSize>;
-    __shared__ typename wscan_t::storage_type storage;
-    wscan_t().inclusive_scan(value, value, storage);
-
-    output[i] = value;
-}
-
-template<class T, unsigned int WarpSize, unsigned int BlockSize>
-void benchmark_hip_warp_inclusive_scan(benchmark::State& state, hipStream_t stream, size_t N)
-{
-    // Make sure size is a multiple of BlockSize
-    const auto size = BlockSize * ((N + BlockSize - 1)/BlockSize);
-    // Allocate and fill memory
-    std::vector<T> input(size, 1.0f);
-    T * d_input;
-    T * d_output;
-    HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
-    HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
-    HIP_CHECK(
-        hipMemcpy(
-            d_input, input.data(),
-            size * sizeof(T),
-            hipMemcpyHostToDevice
-        )
-    );
-    HIP_CHECK(hipDeviceSynchronize());
-
-    for (auto _ : state)
+    std::vector<benchmark::internal::Benchmark*> new_benchmarks =
     {
-        auto start = std::chrono::high_resolution_clock::now();
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(warp_inclusive_scan_kernel<T, BlockSize>),
-            dim3(size/BlockSize), dim3(BlockSize), 0, stream,
-            d_input, d_output
-        );
-        HIP_CHECK(hipPeekAtLastError());
-        HIP_CHECK(hipDeviceSynchronize());
+        CREATE_BENCHMARK(float, 64, 64, Inclusive),
+        CREATE_BENCHMARK(float, 128, 64, Inclusive),
+        CREATE_BENCHMARK(float, 256, 64, Inclusive),
+        CREATE_BENCHMARK(float, 256, 32, Inclusive),
+        CREATE_BENCHMARK(float, 256, 16, Inclusive),
+        // force using shared memory version
+        CREATE_BENCHMARK(float, 63, 63, Inclusive),
+        CREATE_BENCHMARK(float, 62, 31, Inclusive),
+        CREATE_BENCHMARK(float, 60, 15, Inclusive),
 
-        auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds =
-            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+        CREATE_BENCHMARK(int, 64, 64, Inclusive),
+        CREATE_BENCHMARK(int, 128, 64, Inclusive),
+        CREATE_BENCHMARK(int, 256, 64, Inclusive),
 
-        state.SetIterationTime(elapsed_seconds.count());
-    }
-    state.SetBytesProcessed(state.iterations() * size * sizeof(T));
-    state.SetItemsProcessed(state.iterations() * size);
+        CREATE_BENCHMARK(double, 64, 64, Inclusive),
+        CREATE_BENCHMARK(double, 128, 64, Inclusive),
+        CREATE_BENCHMARK(double, 256, 64, Inclusive),
 
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
+        CREATE_BENCHMARK(custom_double2, 64, 64, Inclusive),
+        CREATE_BENCHMARK(custom_int_double, 64, 64, Inclusive)
+    };
+    benchmarks.insert(benchmarks.end(), new_benchmarks.begin(), new_benchmarks.end());
 }
 
 int main(int argc, char *argv[])
@@ -171,35 +173,16 @@ int main(int argc, char *argv[])
     const size_t size = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
 
-    // HIP
-    hipStream_t stream = 0; // default
-    hipDeviceProp_t devProp;
-    int device_id = 0;
-    HIP_CHECK(hipGetDevice(&device_id));
-    HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
-    std::cout << "[HIP] Device name: " << devProp.name << std::endl;
-
     // HC
-    hc::accelerator_view* acc_view;
-    HIP_CHECK(hipHccGetAcceleratorView(stream, &acc_view));
-    auto acc = acc_view->get_accelerator();
+    hc::accelerator acc;
+    auto acc_view = acc.get_default_view();
     std::wstring_convert<std::codecvt_utf8<wchar_t>> conv;
     std::cout << "[HC]  Device name: " << conv.to_bytes(acc.get_description()) << std::endl;
 
     // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks =
-    {
-        benchmark::RegisterBenchmark(
-            "warp_inclusive_scan_hc", // name
-            benchmark_hc_warp_inclusive_scan<float, 64, 256>, // func
-            *acc_view, size // arguments for func
-        ),
-        benchmark::RegisterBenchmark(
-            "warp_inclusive_scan_hip",
-            benchmark_hip_warp_inclusive_scan<float, 64, 256>,
-            stream, size
-        )
-    };
+    std::vector<benchmark::internal::Benchmark*> benchmarks;
+    add_benchmarks<true>(benchmarks, "inclusive_scan", acc_view, size);
+    add_benchmarks<false>(benchmarks, "exclusive_scan", acc_view, size);
 
     // Use manual timing
     for(auto& b : benchmarks)
