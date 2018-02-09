@@ -31,6 +31,9 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
+/// \addtogroup devicemodule_hc
+/// @{
+
 namespace detail
 {
 
@@ -101,7 +104,7 @@ void device_reduce_impl(void * temporary_storage,
 
     if(number_of_blocks > 1)
     {
-        // Grid size for block_reduce_kernel and final_scan_kernel
+        // Grid size for block_reduce_kernel and final_reduce_kernel
         auto grid_size = number_of_blocks * block_size;
 
         // Pointer to array with block_prefixes
@@ -159,6 +162,89 @@ void device_reduce_impl(void * temporary_storage,
 
 } // end of detail namespace
 
+/// \brief HC parallel reduction primitive for device level.
+///
+/// device_reduce function performs a device-wide reduction operation
+/// using binary \p reduce_op operator.
+///
+/// \par Overview
+/// * Supports non-commutative reduction operators. However, a reduction operator should be
+/// associative. When used with non-associative functions the results may be non-deterministic
+/// and/or vary in precision.
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage in a null pointer.
+/// * Ranges specified by \p input must have at least \p size elements, while \p output
+/// only needs one element.
+///
+/// \tparam InputIterator - random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam InitValueType - type of the initial value.
+/// \tparam BinaryFunction - type of binary function used for reduction. Default type
+/// is \p rocprim::plus<T>, where \p T is a \p value_type of \p InputIterator.
+///
+/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the reduction operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input - iterator to the first element in the range to reduce.
+/// \param [out] output - iterator to the first element in the output range.
+/// \param [in] initial_value - initial value to start the reduction.
+/// \param [in] size - number of element in the input range.
+/// \param [in] reduce_op - binary operation function object that will be used for reduction.
+/// The signature of the function should be equivalent to the following:
+/// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
+/// <tt>const &</tt>, but function object must not modify the objects passed to it.
+/// The default value is \p BinaryFunction().
+/// \param [in] acc_view - [optional] \p hc::accelerator_view object. The default value
+/// is \p hc::accelerator().get_default_view() (default view of the default accelerator).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced. The default value is \p false.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level min-reduction operation is performed on an array of
+/// integer values (<tt>short</tt>s are reduced into <tt>int</tt>s) using custom operator.
+///
+/// \code{.cpp}
+/// #include <rocprim.hpp>
+///
+/// // custom reduce function
+/// auto min_op =
+///     [](int a, int b) [[hc]]
+///     {
+///         return a < b ? a : b;
+///     };
+///
+/// hc::accelerator_view acc_view = ...;
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t size;                                      // e.g., 8
+/// hc::array<short> input(hc::extent<1>(size), ...); // e.g., [4, 7, 6, 2, 5, 1, 3, 8]
+/// hc::array<int> output(1, ...);                    // empty array of 1 element
+/// int start_value;                                  // e.g., 9
+///
+/// size_t temporary_storage_size_bytes;
+/// // Get required size of the temporary storage
+/// rocprim::device_reduce(
+///     nullptr, temporary_storage_size_bytes,
+///     input.accelerator_pointer(), output.accelerator_pointer(), start_value,
+///     input.size(), min_op, acc_view, false
+/// );
+///
+/// // allocate temporary storage
+/// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
+///
+/// // perform reduce
+/// rocprim::device_reduce(
+///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
+///     input.accelerator_pointer(), output.accelerator_pointer(), start_value,
+///     input.size(), min_op, acc_view, false
+/// );
+/// // output: [1]
+/// \endcode
+/// \endparblock
 template<
     class InputIterator,
     class OutputIterator,
@@ -186,6 +272,79 @@ void device_reduce(void * temporary_storage,
     );
 }
 
+/// \brief HC parallel reduction primitive for device level.
+///
+/// device_reduce function performs a device-wide reduction operation
+/// using binary \p reduce_op operator.
+///
+/// \par Overview
+/// * Supports non-commutative reduction operators. However, a reduction operator should be
+/// associative. When used with non-associative functions the results may be non-deterministic
+/// and/or vary in precision.
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage in a null pointer.
+/// * Ranges specified by \p input must have at least \p size elements, while \p output
+/// only needs one element.
+///
+/// \tparam InputIterator - random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam BinaryFunction - type of binary function used for reduction. Default type
+/// is \p rocprim::plus<T>, where \p T is a \p value_type of \p InputIterator.
+///
+/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the reduction operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input - iterator to the first element in the range to reduce.
+/// \param [out] output - iterator to the first element in the output range.
+/// \param [in] size - number of element in the input range.
+/// \param [in] reduce_op - binary operation function object that will be used for reduction.
+/// The signature of the function should be equivalent to the following:
+/// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
+/// <tt>const &</tt>, but function object must not modify the objects passed to it.
+/// Default is BinaryFunction().
+/// \param [in] acc_view - [optional] \p hc::accelerator_view object. The default value
+/// is \p hc::accelerator().get_default_view() (default view of the default accelerator).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced. Default value is \p false.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level sum operation is performed on an array of
+/// integer values (<tt>short</tt>s are reduced into <tt>int</tt>s).
+///
+/// \code{.cpp}
+/// #include <rocprim.hpp>
+///
+/// hc::accelerator_view acc_view = ...;
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t size;                                      // e.g., 8
+/// hc::array<short> input(hc::extent<1>(size), ...); // e.g., [1, 2, 3, 4, 5, 6, 7, 8]
+/// hc::array<int> output(1, ...);                    // empty array of 1 element
+///
+/// size_t temporary_storage_size_bytes;
+/// // Get required size of the temporary storage
+/// rocprim::device_reduce(
+///     nullptr, temporary_storage_size_bytes,
+///     input.accelerator_pointer(), output.accelerator_pointer(), input.size(),
+///     rocprim::plus<int>(), acc_view, false
+/// );
+///
+/// // allocate temporary storage
+/// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
+///
+/// // perform reduce
+/// rocprim::device_reduce(
+///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
+///     input.accelerator_pointer(), output.accelerator_pointer(), input.size(),
+///     rocprim::plus<int>(), acc_view, false
+/// );
+/// // output: [36]
+/// \endcode
+/// \endparblock
 template<
     class InputIterator,
     class OutputIterator,
@@ -210,6 +369,9 @@ void device_reduce(void * temporary_storage,
         reduce_op, acc_view, debug_synchronous
     );
 }
+
+/// @}
+// end of group devicemodule_hc
 
 END_ROCPRIM_NAMESPACE
 
