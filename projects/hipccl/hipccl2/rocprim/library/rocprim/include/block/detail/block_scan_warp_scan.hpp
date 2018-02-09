@@ -166,7 +166,11 @@ public:
         );
 
         // Include prefix (first thread does not have prefix)
-        output[0] = flat_tid == 0 ? input[0] : scan_op(thread_input, input[0]);
+        output[0] = input[0];
+        if(flat_tid != 0)
+        {
+            output[0] = scan_op(thread_input, input[0]);
+        }
         // Final thread-local scan
         #pragma unroll
         for(unsigned int i = 1; i < ItemsPerThread; i++)
@@ -246,7 +250,11 @@ public:
         );
 
         // Include prefix (first thread does not have prefix)
-        output[0] = flat_tid == 0 ? input[0] : scan_op(thread_input, input[0]);
+        output[0] = input[0];
+        if(flat_tid != 0)
+        {
+            output[0] = scan_op(thread_input, input[0]);
+        }
         // Include block prefix
         output[0] = scan_op(block_prefix, output[0]);
         // Final thread-local scan
@@ -333,7 +341,8 @@ public:
             storage.warp_prefixes[warps_no_ - 1], // block reduction
             prefix_callback_op, storage
         );
-        output = flat_tid == 0 ? block_prefix : scan_op(block_prefix, output);
+        output = scan_op(block_prefix, output);
+        if(flat_tid == 0) output = block_prefix;
     }
 
     template<unsigned int ItemsPerThread, class BinaryFunction>
@@ -364,8 +373,13 @@ public:
 
         // Include init value
         T prev = input[0];
-        T exclusive = flat_tid == 0 ? init : thread_input;
+        T exclusive = init;
+        if(flat_tid != 0)
+        {
+            exclusive = thread_input;
+        }
         output[0] = exclusive;
+
         #pragma unroll
         for(unsigned int i = 1; i < ItemsPerThread; i++)
         {
@@ -450,8 +464,13 @@ public:
 
         // Include init value and block prefix
         T prev = input[0];
-        T exclusive = flat_tid == 0 ? block_prefix : scan_op(block_prefix, thread_input);
+        T exclusive = block_prefix;
+        if(flat_tid != 0)
+        {
+            exclusive = scan_op(block_prefix, thread_input);
+        }
         output[0] = exclusive;
+
         #pragma unroll
         for(unsigned int i = 1; i < ItemsPerThread; i++)
         {
@@ -505,7 +524,6 @@ private:
 
         // i-th warp will have its prefix stored in storage.warp_prefixes[i-1]
         const auto warp_id = ::rocprim::warp_id();
-        const auto lane_id = ::rocprim::lane_id();
         this->calculate_warp_prefixes(flat_tid, warp_id, output, storage, scan_op);
 
         // Include initial value in warp prefixes, and fix warp prefixes
@@ -519,7 +537,10 @@ private:
         // Use warp prefix to calculate the final scan results for every thread
         output = scan_op(warp_prefix, output); // include warp prefix in scan results
         output = warp_shuffle_up(output, 1, warp_size_); // shift to get exclusive results
-        output = lane_id == 0 ? warp_prefix : output;
+        if(::rocprim::lane_id() == 0)
+        {
+            output = warp_prefix;
+        }
     }
 
     // Exclusive scan with unknown initial value
@@ -539,7 +560,6 @@ private:
 
         // i-th warp will have its prefix stored in storage.warp_prefixes[i-1]
         const auto warp_id = ::rocprim::warp_id();
-        const auto lane_id = ::rocprim::lane_id();
         this->calculate_warp_prefixes(flat_tid, warp_id, output, storage, scan_op);
 
         // Use warp prefix to calculate the final scan results for every thread
@@ -550,7 +570,10 @@ private:
             output = scan_op(warp_prefix, output);
         }
         output = warp_shuffle_up(output, 1, warp_size_); // shift to get exclusive results
-        output = lane_id == 0 ? warp_prefix : output;
+        if(::rocprim::lane_id() == 0)
+        {
+            output = warp_prefix;
+        }
     }
 
     // i-th warp will have its prefix stored in storage.warp_prefixes[i-1]

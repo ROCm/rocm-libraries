@@ -52,11 +52,11 @@ public:
         output = input;
 
         T value;
+        const unsigned int id = detail::logical_lane_id<WarpSize>();
         #pragma unroll
         for(unsigned int offset = 1; offset < WarpSize; offset *= 2)
         {
             value = warp_shuffle_up(output, offset, WarpSize);
-            unsigned int id = detail::logical_lane_id<WarpSize>();
             if(id >= offset) output = scan_op(value, output);
         }
     }
@@ -180,8 +180,10 @@ private:
         exclusive_output = scan_op(init, inclusive_input);
         // get exclusive results
         exclusive_output = warp_shuffle_up(exclusive_output, 1, WarpSize);
-        const unsigned int id = detail::logical_lane_id<WarpSize>();
-        exclusive_output = id == 0 ? init : exclusive_output;
+        if(detail::logical_lane_id<WarpSize>() == 0)
+        {
+            exclusive_output = init;
+        }
     }
 };
 

@@ -155,7 +155,8 @@ public:
         );
 
         // Include prefix (first thread does not have prefix)
-        output[0] = flat_tid == 0 ? input[0] : scan_op(thread_input, input[0]);
+        output[0] = input[0];
+        if(flat_tid != 0) output[0] = scan_op(thread_input, input[0]);
         // Final thread-local scan
         #pragma unroll
         for(unsigned int i = 1; i < ItemsPerThread; i++)
@@ -235,7 +236,8 @@ public:
         );
 
         // Include prefix (first thread does not have prefix)
-        output[0] = flat_tid == 0 ? input[0] : scan_op(thread_input, input[0]);
+        output[0] = input[0];
+        if(flat_tid != 0) output[0] = scan_op(thread_input, input[0]);
         // Include block prefix
         output[0] = scan_op(block_prefix, output[0]);
         // Final thread-local scan
@@ -318,7 +320,8 @@ public:
             flat_tid, warp_id, reduction,
             prefix_callback_op, storage
         );
-        output = flat_tid == 0 ? block_prefix : scan_op(block_prefix, output);
+        output = scan_op(block_prefix, output);
+        if(flat_tid == 0) output = block_prefix;
     }
 
     template<unsigned int ItemsPerThread, class BinaryFunction>
@@ -349,7 +352,11 @@ public:
 
         // Include init value
         T prev = input[0];
-        T exclusive = flat_tid == 0 ? init : thread_input;
+        T exclusive = init;
+        if(flat_tid != 0)
+        {
+            exclusive = thread_input;
+        }
         output[0] = exclusive;
         #pragma unroll
         for(unsigned int i = 1; i < ItemsPerThread; i++)
@@ -435,7 +442,11 @@ public:
 
         // Include init value and block prefix
         T prev = input[0];
-        T exclusive = flat_tid == 0 ? block_prefix : scan_op(block_prefix, thread_input);
+        T exclusive = block_prefix;
+        if(flat_tid != 0)
+        {
+            exclusive = scan_op(block_prefix, thread_input);
+        }
         output[0] = exclusive;
         #pragma unroll
         for(unsigned int i = 1; i < ItemsPerThread; i++)
@@ -495,9 +506,11 @@ private:
             thread_reduction = warp_shuffle_up(thread_reduction, 1, warp_size_);
 
             // Include warp prefix
-            thread_reduction =
-                flat_tid == 0 ?
-                    input : scan_op(thread_reduction, storage.threads[idx_start]);
+            thread_reduction = scan_op(thread_reduction, storage.threads[idx_start]);
+            if(flat_tid == 0)
+            {
+                thread_reduction = input;
+            }
 
             storage.threads[idx_start] = thread_reduction;
             #pragma unroll
@@ -523,8 +536,8 @@ private:
     {
         // Calculates inclusive scan, result for each thread is stored in storage.threads[flat_tid]
         this->inclusive_scan_base(flat_tid, input, storage, scan_op);
-        output = flat_tid == 0 ?
-            init : scan_op(init, storage.threads[index(flat_tid-1)]);
+        output = init;
+        if(flat_tid != 0) output = scan_op(init, storage.threads[index(flat_tid-1)]);
     }
 
     template<class BinaryFunction>
