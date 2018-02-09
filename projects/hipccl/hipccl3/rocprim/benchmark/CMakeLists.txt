@@ -54,7 +54,6 @@ endfunction()
 
 # TODO: separate HIP from HC in those
 # For now rocprim_hip works for both HIP and HC
-add_rocprim_benchmark_hip(benchmark_rocprim_warp_scan.cpp)
 add_rocprim_benchmark_hip(benchmark_rocprim_warp_sort.cpp)
 
 # rocPRIM HIP benchmarks
@@ -64,7 +63,11 @@ add_rocprim_benchmark_hip(benchmark_rocprim_hip_block_radix_sort.cpp)
 add_rocprim_benchmark_hip(benchmark_rocprim_hip_block_reduce.cpp)
 add_rocprim_benchmark_hip(benchmark_rocprim_hip_block_scan.cpp)
 add_rocprim_benchmark_hip(benchmark_rocprim_hip_warp_reduce.cpp)
+add_rocprim_benchmark_hip(benchmark_rocprim_hip_warp_scan.cpp)
 add_rocprim_benchmark_hip(benchmark_rocprim_hip_device_radix_sort.cpp)
 add_rocprim_benchmark_hip(benchmark_rocprim_hip_device_reduce.cpp)
 add_rocprim_benchmark_hip(benchmark_rocprim_hip_device_scan.cpp)
 add_rocprim_benchmark_hip(benchmark_rocprim_hip_device_transform.cpp)
+
+# rocPRIM HC benchmarks
+add_rocprim_benchmark_hc(benchmark_rocprim_hc_warp_scan.cpp)
