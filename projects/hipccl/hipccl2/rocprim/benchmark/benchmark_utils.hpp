@@ -40,7 +40,10 @@ inline auto get_random_data(size_t size, T min, T max)
     std::default_random_engine gen(rd());
     std::uniform_int_distribution<T> distribution(min, max);
     std::vector<T> data(size);
-    std::generate(data.begin(), data.begin() + std::min(size, max_random_size), [&]() { return distribution(gen); });
+    std::generate(
+        data.begin(), data.begin() + std::min(size, max_random_size),
+        [&]() { return distribution(gen); }
+    );
     for(size_t i = max_random_size; i < size; i += max_random_size)
     {
         std::copy_n(data.begin(), std::min(size - i, max_random_size), data.begin() + i);
@@ -56,7 +59,10 @@ inline auto get_random_data(size_t size, T min, T max)
     std::default_random_engine gen(rd());
     std::uniform_real_distribution<T> distribution(min, max);
     std::vector<T> data(size);
-    std::generate(data.begin(), data.begin() + std::min(size, max_random_size), [&]() { return distribution(gen); });
+    std::generate(
+        data.begin(), data.begin() + std::min(size, max_random_size),
+        [&]() { return distribution(gen); }
+    );
     for(size_t i = max_random_size; i < size; i += max_random_size)
     {
         std::copy_n(data.begin(), std::min(size - i, max_random_size), data.begin() + i);
@@ -73,6 +79,9 @@ inline T get_random_value(T min, T max)
 template<class T, class U = T>
 struct custom_type
 {
+    using first_type = T;
+    using second_type = U;
+
     T x;
     U y;
 
@@ -87,10 +96,38 @@ struct custom_type
     }
 
     ROCPRIM_HOST_DEVICE inline
-    custom_type operator+(const custom_type& other) const
+    custom_type operator+(const custom_type& rhs) const
     {
-        return custom_type(x + other.x, y + other.y);
+        return custom_type(x + rhs.x, y + rhs.y);
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    bool operator<(const custom_type& rhs) const
+    {
+        return std::tie(x, y) < std::tie(rhs.x, rhs.y);
     }
 };
+
+template<typename>
+struct is_custom_type : std::false_type {};
+
+template<class T, class U>
+struct is_custom_type<custom_type<T,U>> : std::true_type {};
+
+template<class T>
+inline auto get_random_data(size_t size, T min, T max)
+    -> typename std::enable_if<is_custom_type<T>::value, std::vector<T>>::type
+{
+    using first_type = typename T::first_type;
+    using second_type = typename T::second_type;
+    std::vector<T> data(size);
+    auto fdata = get_random_data<first_type>(size, min.x, max.x);
+    auto sdata = get_random_data<second_type>(size, min.y, max.y);
+    for(size_t i = 0; i < size; i++)
+    {
+        data[i] = T(fdata[i], sdata[i]);
+    }
+    return data;
+}
 
 #endif // ROCPRIM_BENCHMARK_UTILS_HPP_
