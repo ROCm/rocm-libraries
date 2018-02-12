@@ -95,3 +95,45 @@ test:rocm244:
     - cd build
     - ctest --output-on-failure
     - ctest --output-on-failure
+
+build:rocm-rc:
+  image: ourrocm/rocm:1.7.119rc
+  allow_failure: true
+  tags:
+    - tag241
+  stage: build
+  variables:
+    SUDO_CMD: "sudo -E"
+  script:
+    - mkdir build
+    - cd build
+    - cmake -DBUILD_TEST=ON -DBUILD_EXAMPLE=ON -DBUILD_BENCHMARK=ON -DDEPENDENCIES_FORCE_DOWNLOAD=ON ../.
+    - make -j16
+  artifacts:
+    paths:
+    - build/library/
+    - build/test/
+    - build/benchmark/
+    - build/gtest/
+    - build/CMakeCache.txt
+    - build/CTestTestfile.cmake
+    - build/Makefile
+    - build/*.deb
+    - build/*.zip
+
+test:rocm241-rc:
+  image: ourrocm/rocm:1.7.119rc
+  allow_failure: true
+  tags:
+    - tag241
+  stage: test
+  variables:
+    SUDO_CMD: "sudo -E"
+    HIP_LAUNCH_BLOCKING: 1
+    HCC_OPT_FLUSH: 0
+  dependencies:
+    - build:rocm-rc
+  script:
+    - cd build
+    - ctest --output-on-failure
+    - ctest --output-on-failure
