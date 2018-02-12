@@ -61,7 +61,7 @@ struct scan_by_key_pair
 // Special operator which allows to calculate scan-by-key using block_scan.
 // block_scan supports non-commutative scan operators.
 // Initial values of pairs' keys must be 1 for the first item (head) of segment and 0 otherwise.
-// As a result key contains the current item's index in segment and value contains segmented scan result.
+// As a result key contains the current segment's index and value contains segmented scan result.
 template<class Pair, class BinaryFunction>
 struct scan_by_key_op
 {
@@ -209,7 +209,10 @@ void fill_unique_counts(KeysInputIterator keys_input,
         }
         else
         {
-            successor_key = (flat_id == BlockSize - 1) ? keys_input[block_offset + items_per_block] : successor_key;
+            if(flat_id == BlockSize - 1)
+            {
+                successor_key = keys_input[block_offset + items_per_block];
+            }
             discontinuity_type().flag_tails(
                 tail_flags, successor_key, keys,
                 key_flag_op<key_type, KeyCompareFunction>(key_compare_op),
@@ -337,10 +340,9 @@ void reduce_by_key(KeysInputIterator keys_input,
             typename keys_exchange_type::storage_type keys_exchange;
             typename values_exchange_type::storage_type values_exchange;
         };
-        value_type carry_in;
-        bool has_carry_in;
+        unsigned int unique_count;
         bool has_carry_out;
-        unsigned int last_rank;
+        value_type carry_out;
     } storage;
 
     const unsigned int flat_id = ::rocprim::flat_block_thread_id();
@@ -379,56 +381,27 @@ void reduce_by_key(KeysInputIterator keys_input,
 
         bool head_flags[ItemsPerThread];
         bool tail_flags[ItemsPerThread];
-        key_type predecessor_key = keys[0];
         key_type successor_key = keys[ItemsPerThread - 1];
         ::rocprim::syncthreads();
-        if(block_id == 0 && block_id == blocks - 1)
+        if(block_id == blocks - 1)
         {
             discontinuity_type().flag_heads_and_tails(
                 head_flags, tail_flags, successor_key, keys,
-                guarded_key_flag_op<key_type, KeyCompareFunction>(key_compare_op, valid_count),
-                storage.discontinuity
-            );
-        }
-        else if(block_id == 0)
-        {
-            successor_key = (flat_id == BlockSize - 1) ? keys_input[block_offset + items_per_block] : successor_key;
-            discontinuity_type().flag_heads_and_tails(
-                head_flags, tail_flags, successor_key, keys,
-                key_flag_op<key_type, KeyCompareFunction>(key_compare_op),
-                storage.discontinuity
-            );
-        }
-        else if(block_id == blocks - 1)
-        {
-            predecessor_key = (flat_id == 0) ? keys_input[block_offset - 1] : predecessor_key;
-            discontinuity_type().flag_heads_and_tails(
-                head_flags, predecessor_key, tail_flags, successor_key, keys,
                 guarded_key_flag_op<key_type, KeyCompareFunction>(key_compare_op, valid_count),
                 storage.discontinuity
             );
         }
         else
         {
-            predecessor_key = (flat_id == 0) ? keys_input[block_offset - 1] : predecessor_key;
-            successor_key = (flat_id == BlockSize - 1) ? keys_input[block_offset + items_per_block] : successor_key;
+            if(flat_id == BlockSize - 1)
+            {
+                successor_key = keys_input[block_offset + items_per_block];
+            }
             discontinuity_type().flag_heads_and_tails(
-                head_flags, predecessor_key, tail_flags, successor_key, keys,
+                head_flags, tail_flags, successor_key, keys,
                 key_flag_op<key_type, KeyCompareFunction>(key_compare_op),
                 storage.discontinuity
             );
-        }
-
-        if(flat_id == 0)
-        {
-            storage.has_carry_in = !head_flags[0];
-        }
-        for(unsigned int i = 0; i < ItemsPerThread; i++)
-        {
-            if(flat_id * ItemsPerThread + i == valid_count - 1)
-            {
-                storage.has_carry_out = !tail_flags[i];
-            }
         }
 
         value_type values[ItemsPerThread];
@@ -443,12 +416,15 @@ void reduce_by_key(KeysInputIterator keys_input,
         }
 
         // Build pairs and run non-commutative inclusive scan to calculate scan-by-key
-        // and local indices (ranks) of items in each segment:
-        // keys       | 1 1 1 2 3 3 4 4 |
-        // head_flags | +     + +   +   |
-        // values     | 2 0 1 4 2 3 1 5 |
-        // incl. scan | 2 2 3 4 2 5 1 6 |
-        // ranks      | 0 1 2 0 0 1 0 1 |
+        // and indices (ranks) of each segment:
+        // input:
+        //   keys          | 1 1 1 2 3 3 4 4 |
+        //   head_flags    | +     + +   +   |
+        //   values        | 2 0 1 4 2 3 1 5 |
+        // result:
+        //   scan values   | 2 2 3 4 2 5 1 6 |
+        //   scan keys     | 1 1 1 2 3 3 4 4 |
+        //   ranks (key-1) | 0 0 0 1 2 2 3 3 |
         scan_by_key_pair<value_type> pairs[ItemsPerThread];
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
@@ -462,53 +438,49 @@ void reduce_by_key(KeysInputIterator keys_input,
         unsigned int ranks[ItemsPerThread];
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            ranks[i] = pairs[i].key - (storage.has_carry_in ? 0 : 1);
+            ranks[i] = pairs[i].key - 1; // The first item is always flagged as head, so indices start from 1
             values[i] = pairs[i].value;
         }
-        for(unsigned int i = 0; i < ItemsPerThread; i++)
+
+        if(flat_id == BlockSize - 1)
         {
-            if(flat_id * ItemsPerThread + i == valid_count - 1)
-            {
-                storage.last_rank = ranks[i];
-            }
+            storage.unique_count = ranks[ItemsPerThread - 1] + (tail_flags[ItemsPerThread - 1] ? 1 : 0);
         }
-        if(bi > 0 && storage.has_carry_in)
+
+        if(bi > 0 && storage.has_carry_out)
         {
-            // Apply carry-out of the previous block as carry-in
+            // Apply carry-out of the previous block as carry-in for the first segment
             for(unsigned int i = 0; i < ItemsPerThread; i++)
             {
                 if(ranks[i] == 0)
                 {
-                    values[i] = reduce_op(storage.carry_in, values[i]);
+                    values[i] = reduce_op(storage.carry_out, values[i]);
                 }
             }
         }
 
         ::rocprim::syncthreads();
-        if(bi == blocks_per_batch - 1)
+        if(flat_id == BlockSize - 1)
         {
-            // Save carry-out of the last block of the current batch
-            for(unsigned int i = 0; i < ItemsPerThread; i++)
+            if(bi == blocks_per_batch - 1)
             {
-                if(flat_id * ItemsPerThread + i == valid_count - 1)
-                {
-                    carry_outs[batch_id].key = keys[i];
-                    carry_outs[batch_id].value = values[i];
-                    carry_outs[batch_id].destination = block_start + storage.last_rank;
-                    carry_outs[batch_id].is_final_aggregate = tail_flags[i];
-                }
+                // Save carry-out of the last block of the current batch
+                carry_outs[batch_id].key = keys[ItemsPerThread - 1];
+                carry_outs[batch_id].value = values[ItemsPerThread - 1];
+                carry_outs[batch_id].destination = block_start + ranks[ItemsPerThread - 1];
+                carry_outs[batch_id].is_final_aggregate = tail_flags[ItemsPerThread - 1];
+            }
+            else
+            {
+                // Save carry-out to use it as carry-in for the next block of the current batch
+                storage.has_carry_out = !tail_flags[ItemsPerThread - 1];
+                storage.carry_out = values[ItemsPerThread - 1];
             }
         }
-        else if(flat_id == BlockSize - 1)
-        {
-            // Save carry-out to use it as carry-in for the next block of the current batch
-            storage.carry_in = values[ItemsPerThread - 1];
-        }
 
-        const unsigned int unique_count = storage.last_rank + (storage.has_carry_out ? 0 : 1);
-
+        const unsigned int unique_count = storage.unique_count;
         // Save unique keys and aggregates (some aggregates contains partial values
-        // and will be updated later by calculation scan-by-key of carry-outs)
+        // and will be updated later by calculating scan-by-key of carry-outs)
         if(unique_count < items_per_block / 4)
         {
             // Small number of unique keys and aggregate is faster to write directly
@@ -586,7 +558,7 @@ void scan_and_scatter_carry_outs(const CarryOut * carry_outs,
     } storage;
 
     CarryOut cs[ItemsPerThread];
-    load_type().load(carry_outs, cs, batches, storage.load);
+    load_type().load(carry_outs, cs, batches - 1, storage.load);
 
     key_type keys[ItemsPerThread];
     value_type values[ItemsPerThread];
@@ -604,7 +576,7 @@ void scan_and_scatter_carry_outs(const CarryOut * carry_outs,
     discontinuity_type().flag_heads_and_tails(
         head_flags, tail_flags,
         successor_key, keys,
-        guarded_key_flag_op<key_type, KeyCompareFunction>(key_compare_op, batches),
+        guarded_key_flag_op<key_type, KeyCompareFunction>(key_compare_op, batches - 1),
         storage.discontinuity
     );
 
