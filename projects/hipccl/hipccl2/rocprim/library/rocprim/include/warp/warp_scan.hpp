@@ -140,6 +140,9 @@ class warp_scan
 {
     using base_type = typename detail::select_warp_scan_impl<T, WarpSize>::type;
 
+    // Check if WarpSize is correct
+    static_assert(WarpSize <= warp_size(), "WarpSize can't be greater than hardware warp size.");
+
 public:
     /// \brief Struct used to allocate a temporary memory that is required for thread
     /// communication during operations provided by related parallel primitive.
