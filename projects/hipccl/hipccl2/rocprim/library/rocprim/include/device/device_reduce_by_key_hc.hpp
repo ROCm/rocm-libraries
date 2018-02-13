@@ -54,8 +54,8 @@ template<
     class UniqueOutputIterator,
     class AggregatesOutputIterator,
     class UniqueCountOutputIterator,
-    class KeyCompareFunction,
-    class BinaryFunction
+    class BinaryFunction,
+    class KeyCompareFunction
 >
 inline
 void device_reduce_by_key_impl(void * temporary_storage,
@@ -66,8 +66,8 @@ void device_reduce_by_key_impl(void * temporary_storage,
                                UniqueOutputIterator unique_output,
                                AggregatesOutputIterator aggregates_output,
                                UniqueCountOutputIterator unique_count_output,
-                               KeyCompareFunction key_compare_op,
                                BinaryFunction reduce_op,
+                               KeyCompareFunction key_compare_op,
                                hc::accelerator_view acc_view,
                                const bool debug_synchronous)
 {
@@ -191,7 +191,8 @@ template<
     class UniqueOutputIterator,
     class AggregatesOutputIterator,
     class UniqueCountOutputIterator,
-    class BinaryFunction = ::rocprim::plus<typename std::iterator_traits<ValuesInputIterator>::value_type>
+    class BinaryFunction = ::rocprim::plus<typename std::iterator_traits<ValuesInputIterator>::value_type>,
+    class KeyCompareFunction = ::rocprim::equal_to<typename std::iterator_traits<KeysInputIterator>::value_type>
 >
 inline
 void device_reduce_by_key(void * temporary_storage,
@@ -203,17 +204,15 @@ void device_reduce_by_key(void * temporary_storage,
                           AggregatesOutputIterator aggregates_output,
                           UniqueCountOutputIterator unique_count_output,
                           BinaryFunction reduce_op = BinaryFunction(),
+                          KeyCompareFunction key_compare_op = KeyCompareFunction(),
                           hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
                           const bool debug_synchronous = false)
 {
-    using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
-
-    ::rocprim::equal_to<key_type> key_compare_op;
     detail::device_reduce_by_key_impl(
         temporary_storage, storage_size,
         keys_input, values_input, size,
         unique_output, aggregates_output, unique_count_output,
-        key_compare_op, reduce_op,
+        reduce_op, key_compare_op,
         acc_view, debug_synchronous
     );
 }

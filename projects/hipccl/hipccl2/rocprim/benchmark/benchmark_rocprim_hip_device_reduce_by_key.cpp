@@ -114,13 +114,14 @@ void run_benchmark(benchmark::State& state, size_t max_length, hipStream_t strea
     size_t temporary_storage_bytes = 0;
 
     rp::plus<value_type> reduce_op;
+    rp::equal_to<key_type> key_compare_op;
 
     rp::device_reduce_by_key(
         nullptr, temporary_storage_bytes,
         d_keys_input, d_values_input, size,
         d_unique_output, d_aggregates_output,
         d_unique_count_output,
-        reduce_op,
+        reduce_op, key_compare_op,
         stream, false
     );
 
@@ -135,7 +136,7 @@ void run_benchmark(benchmark::State& state, size_t max_length, hipStream_t strea
             d_keys_input, d_values_input, size,
             d_unique_output, d_aggregates_output,
             d_unique_count_output,
-            reduce_op,
+            reduce_op, key_compare_op,
             stream, false
         );
     }
@@ -153,7 +154,7 @@ void run_benchmark(benchmark::State& state, size_t max_length, hipStream_t strea
                 d_keys_input, d_values_input, size,
                 d_unique_output, d_aggregates_output,
                 d_unique_count_output,
-                reduce_op,
+                reduce_op, key_compare_op,
                 stream, false
             );
         }

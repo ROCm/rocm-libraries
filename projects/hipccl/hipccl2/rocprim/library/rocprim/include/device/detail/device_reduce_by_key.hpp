@@ -31,10 +31,8 @@
 #include "../../functional.hpp"
 
 #include "../../block/block_discontinuity.hpp"
-#include "../../block/block_exchange.hpp"
 #include "../../block/block_load.hpp"
 #include "../../block/block_store.hpp"
-#include "../../block/block_store_func.hpp"
 #include "../../block/block_scan.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -326,8 +324,6 @@ void reduce_by_key(KeysInputIterator keys_input,
         ::rocprim::block_load_method::block_load_transpose>;
     using discontinuity_type = ::rocprim::block_discontinuity<key_type, BlockSize>;
     using scan_type = ::rocprim::block_scan<scan_by_key_pair<value_type>, BlockSize>;
-    using keys_exchange_type = ::rocprim::block_exchange<key_type, BlockSize, ItemsPerThread>;
-    using values_exchange_type = ::rocprim::block_exchange<value_type, BlockSize, ItemsPerThread>;
 
     ROCPRIM_SHARED_MEMORY struct
     {
@@ -337,8 +333,6 @@ void reduce_by_key(KeysInputIterator keys_input,
             typename values_load_type::storage_type values_load;
             typename discontinuity_type::storage_type discontinuity;
             typename scan_type::storage_type scan;
-            typename keys_exchange_type::storage_type keys_exchange;
-            typename values_exchange_type::storage_type values_exchange;
         };
         unsigned int unique_count;
         bool has_carry_out;
@@ -361,6 +355,15 @@ void reduce_by_key(KeysInputIterator keys_input,
         block_id = batch_id * blocks_per_batch + full_batches;
     }
     unsigned int block_start = unique_starts[batch_id];
+
+    if(flat_id == 0)
+    {
+        storage.has_carry_out = (block_id > 0 && blocks_per_batch > 0) &&
+            key_compare_op(
+                keys_input[block_id * items_per_block - 1],
+                keys_input[block_id * items_per_block]
+            );
+    }
 
     for(unsigned int bi = 0; bi < blocks_per_batch; bi++)
     {
@@ -460,6 +463,26 @@ void reduce_by_key(KeysInputIterator keys_input,
         }
 
         ::rocprim::syncthreads();
+        const unsigned int unique_count = storage.unique_count;
+        if(flat_id == 0)
+        {
+            // The first item must be written only if it is the first item of the current segment
+            // (otherwise it is written by one of previous blocks)
+            head_flags[0] = !storage.has_carry_out;
+        }
+        if(block_id == blocks - 1)
+        {
+            // Unflag the head after the last segment as it will be write out of bounds
+            for(unsigned int i = 0; i < ItemsPerThread; i++)
+            {
+                if(ranks[i] >= unique_count)
+                {
+                    head_flags[i] = false;
+                }
+            }
+        }
+
+        ::rocprim::syncthreads();
         if(flat_id == BlockSize - 1)
         {
             if(bi == blocks_per_batch - 1)
@@ -478,47 +501,20 @@ void reduce_by_key(KeysInputIterator keys_input,
             }
         }
 
-        const unsigned int unique_count = storage.unique_count;
         // Save unique keys and aggregates (some aggregates contains partial values
         // and will be updated later by calculating scan-by-key of carry-outs)
-        if(unique_count < items_per_block / 4)
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            // Small number of unique keys and aggregate is faster to write directly
-            for(unsigned int i = 0; i < ItemsPerThread; i++)
+            if(head_flags[i])
             {
-                if(tail_flags[i])
-                {
-                    unique_output[block_start + ranks[i]] = keys[i];
-                    aggregates_output[block_start + ranks[i]] = values[i];
-                }
+                // Write the key of the first item of the segment as a unique key
+                unique_output[block_start + ranks[i]] = keys[i];
             }
-        }
-        else
-        {
-            // Compact unique and aggregates and store them using coalesced write
-            ::rocprim::syncthreads();
-            keys_exchange_type().scatter_to_striped_flagged(
-                keys, keys, ranks,
-                tail_flags, storage.keys_exchange
-            );
-            block_store_direct_striped<BlockSize>(
-                flat_id,
-                unique_output + block_start,
-                keys,
-                unique_count
-            );
-            ::rocprim::syncthreads();
-            values_exchange_type().scatter_to_striped_flagged(
-                values, values, ranks,
-                tail_flags, storage.values_exchange
-            );
-            block_store_direct_striped<BlockSize>(
-                flat_id,
-                aggregates_output + block_start,
-                values,
-                unique_count
-            );
-            ::rocprim::syncthreads();
+            if(tail_flags[i])
+            {
+                // Write the scanned value of the last item of the segment as an aggregate (reduction of the segment)
+                aggregates_output[block_start + ranks[i]] = values[i];
+            }
         }
 
         block_id++;
