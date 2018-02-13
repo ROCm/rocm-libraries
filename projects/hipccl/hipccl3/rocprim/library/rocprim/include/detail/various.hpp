@@ -61,6 +61,12 @@ constexpr auto ceiling_div(T a, T b)
     return (a + b - 1) / b;
 }
 
+ROCPRIM_HOST_DEVICE inline
+size_t align_size(size_t size, size_t alignment = 256)
+{
+    return ceiling_div(size, alignment) * alignment;
+}
+
 // Select the minimal warp size for block of size block_size, it's
 // useful for blocks smaller than maximal warp size.
 template<class T>
