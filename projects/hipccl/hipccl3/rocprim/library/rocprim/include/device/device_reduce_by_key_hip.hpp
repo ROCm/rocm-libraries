@@ -149,8 +149,8 @@ template<
     class UniqueOutputIterator,
     class AggregatesOutputIterator,
     class UniqueCountOutputIterator,
-    class KeyCompareFunction,
-    class BinaryFunction
+    class BinaryFunction,
+    class KeyCompareFunction
 >
 inline
 hipError_t device_reduce_by_key_impl(void * temporary_storage,
@@ -161,8 +161,8 @@ hipError_t device_reduce_by_key_impl(void * temporary_storage,
                                      UniqueOutputIterator unique_output,
                                      AggregatesOutputIterator aggregates_output,
                                      UniqueCountOutputIterator unique_count_output,
-                                     KeyCompareFunction key_compare_op,
                                      BinaryFunction reduce_op,
+                                     KeyCompareFunction key_compare_op,
                                      const hipStream_t stream,
                                      const bool debug_synchronous)
 {
@@ -269,7 +269,8 @@ template<
     class UniqueOutputIterator,
     class AggregatesOutputIterator,
     class UniqueCountOutputIterator,
-    class BinaryFunction = ::rocprim::plus<typename std::iterator_traits<ValuesInputIterator>::value_type>
+    class BinaryFunction = ::rocprim::plus<typename std::iterator_traits<ValuesInputIterator>::value_type>,
+    class KeyCompareFunction = ::rocprim::equal_to<typename std::iterator_traits<KeysInputIterator>::value_type>
 >
 inline
 hipError_t device_reduce_by_key(void * temporary_storage,
@@ -281,17 +282,15 @@ hipError_t device_reduce_by_key(void * temporary_storage,
                                 AggregatesOutputIterator aggregates_output,
                                 UniqueCountOutputIterator unique_count_output,
                                 BinaryFunction reduce_op = BinaryFunction(),
+                                KeyCompareFunction key_compare_op = KeyCompareFunction(),
                                 const hipStream_t stream = 0,
                                 const bool debug_synchronous = false)
 {
-    using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
-
-    ::rocprim::equal_to<key_type> key_compare_op;
     return detail::device_reduce_by_key_impl(
         temporary_storage, storage_size,
         keys_input, values_input, size,
         unique_output, aggregates_output, unique_count_output,
-        key_compare_op, reduce_op,
+        reduce_op, key_compare_op,
         stream, debug_synchronous
     );
 }

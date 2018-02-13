@@ -45,7 +45,8 @@ template<
     class Value,
     class ReduceOp,
     unsigned int MinSegmentLength,
-    unsigned int MaxSegmentLength
+    unsigned int MaxSegmentLength,
+    class KeyCompareFunction = ::rocprim::equal_to<Key>
 >
 struct params
 {
@@ -54,7 +55,7 @@ struct params
     using reduce_op_type = ReduceOp;
     static constexpr unsigned int min_segment_length = MinSegmentLength;
     static constexpr unsigned int max_segment_length = MaxSegmentLength;
-
+    using key_compare_op = KeyCompareFunction;
 };
 
 template<class Params>
@@ -63,13 +64,26 @@ public:
     using params = Params;
 };
 
+
+template<class T>
+struct custom_key_compare_op1
+{
+    ROCPRIM_HOST_DEVICE
+    bool operator()(const T& a, const T& b) const
+    {
+        return static_cast<int>(a / 10) == static_cast<int>(b / 10);
+    }
+};
+
 typedef ::testing::Types<
-    params<unsigned int, unsigned int, rp::plus<unsigned int>, 1, 1>,
+    params<int, int, rp::plus<int>, 1, 1>,
+    params<double, int, rp::plus<int>, 3, 5, custom_key_compare_op1<double>>,
     params<float, int, rp::plus<int>, 1, 10>,
     params<unsigned long long, float, rp::minimum<float>, 1, 30>,
     params<int, unsigned int, rp::maximum<unsigned int>, 20, 100>,
-    params<int, unsigned long long, rp::maximum<unsigned long long>, 100, 400>,
+    params<float, unsigned long long, rp::maximum<unsigned long long>, 100, 400, custom_key_compare_op1<float>>,
     params<unsigned int, unsigned int, rp::plus<unsigned int>, 200, 600>,
+    params<double, int, rp::plus<int>, 100, 2000, custom_key_compare_op1<double>>,
     params<int, unsigned int, rp::plus<unsigned int>, 1000, 5000>,
     params<unsigned int, int, rp::plus<int>, 2048, 2048>,
     params<unsigned int, double, rp::minimum<double>, 1000, 50000>,
@@ -81,7 +95,7 @@ TYPED_TEST_CASE(RocprimDeviceReduceByKey, Params);
 std::vector<size_t> get_sizes()
 {
     std::vector<size_t> sizes = {
-        1024, 2048, 4096,
+        1024, 2048, 4096, 1792,
         1, 10, 53, 211, 500,
         2345, 11001, 34567,
         100000,
@@ -97,6 +111,7 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
     using key_type = typename TestFixture::params::key_type;
     using value_type = typename TestFixture::params::value_type;
     using reduce_op_type = typename TestFixture::params::reduce_op_type;
+    using key_compare_op_type = typename TestFixture::params::key_compare_op;
     using key_distribution_type = typename std::conditional<
         std::is_floating_point<key_type>::value,
         std::uniform_real_distribution<key_type>,
@@ -109,6 +124,7 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
     const bool debug_synchronous = false;
 
     reduce_op_type reduce_op;
+    key_compare_op_type key_compare_op;
 
     const std::vector<size_t> sizes = get_sizes();
 
@@ -134,6 +150,7 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
 
         size_t offset = 0;
         key_type current_key = key_distribution_type(0, 100)(gen);
+        key_type prev_key = current_key;
         while(offset < size)
         {
             const size_t key_count = key_count_dis(gen);
@@ -144,15 +161,26 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
             {
                 keys_input[i] = current_key;
             }
-            unique_expected.push_back(current_key);
-            unique_count_expected++;
             value_type aggregate = values_input[offset];
             for(size_t i = offset + 1; i < end; i++)
             {
                 aggregate = reduce_op(aggregate, values_input[i]);
             }
-            aggregates_expected.push_back(aggregate);
 
+            // The first key of the segment must be written into unique
+            // (it may differ from other keys in case of custom key compraison operators)
+            if(unique_count_expected == 0 || !key_compare_op(prev_key, current_key))
+            {
+                unique_expected.push_back(current_key);
+                unique_count_expected++;
+                aggregates_expected.push_back(aggregate);
+            }
+            else
+            {
+                aggregates_expected.back() = reduce_op(aggregates_expected.back(), aggregate);
+            }
+
+            prev_key = current_key;
             offset += key_count;
         }
 
@@ -170,7 +198,7 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
             d_keys_input.accelerator_pointer(), d_values_input.accelerator_pointer(), size,
             d_unique_output.accelerator_pointer(), d_aggregates_output.accelerator_pointer(),
             d_unique_count_output.accelerator_pointer(),
-            reduce_op,
+            reduce_op, key_compare_op,
             acc_view, debug_synchronous
         );
 
@@ -183,7 +211,7 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
             d_keys_input.accelerator_pointer(), d_values_input.accelerator_pointer(), size,
             d_unique_output.accelerator_pointer(), d_aggregates_output.accelerator_pointer(),
             d_unique_count_output.accelerator_pointer(),
-            reduce_op,
+            reduce_op, key_compare_op,
             acc_view, debug_synchronous
         );
         acc_view.wait();
