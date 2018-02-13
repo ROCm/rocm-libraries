@@ -74,6 +74,7 @@ add_rocprim_test_hc("rocprim.hc.block_radix_sort" test_rocprim_hc_block_radix_so
 add_rocprim_test_hc("rocprim.hc.block_reduce" test_rocprim_hc_block_reduce.cpp)
 add_rocprim_test_hc("rocprim.hc.block_scan" test_rocprim_hc_block_scan.cpp)
 add_rocprim_test_hc("rocprim.hc.device_radix_sort" test_rocprim_hc_device_radix_sort.cpp)
+add_rocprim_test_hc("rocprim.hc.device_reduce_by_key" test_rocprim_hc_device_reduce_by_key.cpp)
 add_rocprim_test_hc("rocprim.hc.device_reduce" test_rocprim_hc_device_reduce.cpp)
 add_rocprim_test_hc("rocprim.hc.device_scan" test_rocprim_hc_device_scan.cpp)
 add_rocprim_test_hc("rocprim.hc.device_transform" test_rocprim_hc_device_transform.cpp)
@@ -84,6 +85,7 @@ add_rocprim_test_hc("rocprim.hc.warp_sort" test_rocprim_hc_warp_sort.cpp)
 
 # rocPRIM HIP API tests
 add_rocprim_test_hip("rocprim.hip.device_radix_sort" test_rocprim_hip_device_radix_sort.cpp)
+add_rocprim_test_hip("rocprim.hip.device_reduce_by_key" test_rocprim_hip_device_reduce_by_key.cpp)
 add_rocprim_test_hip("rocprim.hip.device_reduce" test_rocprim_hip_device_reduce.cpp)
 add_rocprim_test_hip("rocprim.hip.device_scan" test_rocprim_hip_device_scan.cpp)
 add_rocprim_test_hip("rocprim.hip.device_transform" test_rocprim_hip_device_transform.cpp)

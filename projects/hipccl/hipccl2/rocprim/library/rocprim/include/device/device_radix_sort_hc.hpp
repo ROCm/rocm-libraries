@@ -43,13 +43,6 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-inline
-size_t align_size(size_t size)
-{
-    constexpr size_t alignment = 256;
-    return ::rocprim::detail::ceiling_div(size, alignment) * alignment;
-}
-
 #define SYNC(name, start) \
     { \
         if(debug_synchronous) \
@@ -100,10 +93,10 @@ void device_radix_sort(void * temporary_storage,
     const unsigned int batches = (blocks_per_full_batch == 1 ? full_batches : scan_size);
     const unsigned int iterations = ::rocprim::detail::ceiling_div(end_bit - begin_bit, radix_bits);
 
-    const size_t batch_digit_counts_bytes = align_size(batches * radix_size * sizeof(unsigned int));
-    const size_t digit_counts_bytes = align_size(radix_size * sizeof(unsigned int));
-    const size_t bit_keys_bytes = align_size(size * sizeof(bit_key_type));
-    const size_t values_bytes = with_values ? align_size(size * sizeof(Value)) : 0;
+    const size_t batch_digit_counts_bytes = ::rocprim::detail::align_size(batches * radix_size * sizeof(unsigned int));
+    const size_t digit_counts_bytes = ::rocprim::detail::align_size(radix_size * sizeof(unsigned int));
+    const size_t bit_keys_bytes = ::rocprim::detail::align_size(size * sizeof(bit_key_type));
+    const size_t values_bytes = with_values ? ::rocprim::detail::align_size(size * sizeof(Value)) : 0;
     if(temporary_storage == nullptr)
     {
         temporary_storage_bytes = batch_digit_counts_bytes + digit_counts_bytes + bit_keys_bytes + values_bytes;

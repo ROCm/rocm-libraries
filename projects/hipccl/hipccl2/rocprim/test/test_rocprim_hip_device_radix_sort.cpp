@@ -181,34 +181,40 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
         std::vector<key_type> expected(keys_input);
         std::stable_sort(expected.begin(), expected.end(), key_comparator<key_type, descending, start_bit, end_bit>());
 
-        void * d_temporary_storage = nullptr;
         size_t temporary_storage_bytes;
-        rp::device_radix_sort_keys(
-            d_temporary_storage, temporary_storage_bytes,
-            d_keys_input, d_keys_output, size,
-            start_bit, end_bit
+        HIP_CHECK(
+            rp::device_radix_sort_keys(
+                nullptr, temporary_storage_bytes,
+                d_keys_input, d_keys_output, size,
+                start_bit, end_bit
+            )
         );
 
         ASSERT_GT(temporary_storage_bytes, 0);
 
+        void * d_temporary_storage;
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
         if(descending)
         {
-            rp::device_radix_sort_keys_desc(
-                d_temporary_storage, temporary_storage_bytes,
-                d_keys_input, d_keys_output, size,
-                start_bit, end_bit,
-                stream, debug_synchronous
+            HIP_CHECK(
+                rp::device_radix_sort_keys_desc(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_keys_input, d_keys_output, size,
+                    start_bit, end_bit,
+                    stream, debug_synchronous
+                )
             );
         }
         else
         {
-            rp::device_radix_sort_keys(
-                d_temporary_storage, temporary_storage_bytes,
-                d_keys_input, d_keys_output, size,
-                start_bit, end_bit,
-                stream, debug_synchronous
+            HIP_CHECK(
+                rp::device_radix_sort_keys(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_keys_input, d_keys_output, size,
+                    start_bit, end_bit,
+                    stream, debug_synchronous
+                )
             );
         }
 
