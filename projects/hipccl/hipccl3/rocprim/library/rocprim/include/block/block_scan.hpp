@@ -67,7 +67,13 @@ template<>
 struct select_block_scan_impl<block_scan_algorithm::reduce_then_scan>
 {
     template<class T, unsigned int BlockSize>
-    using type = block_scan_reduce_then_scan<T, BlockSize>;
+    // When BlockSize is less than hardware warp size block_scan_warp_scan performs better than
+    // block_scan_reduce_then_scan by specializing for warps 
+    using type = typename std::conditional<
+                    (BlockSize <= ::rocprim::warp_size()),
+                    block_scan_warp_scan<T, BlockSize>,
+                    block_scan_reduce_then_scan<T, BlockSize>
+                 >::type;
 };
 
 } // end namespace detail

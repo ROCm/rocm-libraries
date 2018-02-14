@@ -507,7 +507,8 @@ private:
             output = scan_op(warp_prefix, output);
         }
     }
-
+    
+    // When BlockSize is less than warp_size we dont need the extra prefix calculations.
     template<class BinaryFunction, unsigned int BlockSize_ = BlockSize>
     ROCPRIM_DEVICE inline
     auto inclusive_scan_impl(unsigned int flat_tid,
@@ -570,8 +571,8 @@ private:
         }
     }
 
-    // Exclusive scan with initial value when BlockSize is bigger than warp_size
-    // and BlockSize is not power of 2
+    // Exclusive scan with initial value when BlockSize is less than warp_size.
+    // When BlockSize is less than warp_size we dont need the extra prefix calculations.
     template<class BinaryFunction, unsigned int BlockSize_ = BlockSize>
     ROCPRIM_DEVICE inline
     auto exclusive_scan_impl(const unsigned int flat_tid,
@@ -641,6 +642,7 @@ private:
     }
 
     // Exclusive scan with unknown initial value, when BlockSize less than warp_size.
+    // When BlockSize is less than warp_size we dont need the extra prefix calculations.
     template<class BinaryFunction, unsigned int BlockSize_ = BlockSize>
     ROCPRIM_DEVICE inline
     auto exclusive_scan_impl(const unsigned int flat_tid,
