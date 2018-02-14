@@ -481,13 +481,14 @@ public:
     }
 
 private:
-    template<class BinaryFunction>
+    template<class BinaryFunction, unsigned int BlockSize_ = BlockSize>
     ROCPRIM_DEVICE inline
-    void inclusive_scan_impl(const unsigned int flat_tid,
+    auto inclusive_scan_impl(const unsigned int flat_tid,
                              T input,
                              T& output,
                              storage_type& storage,
                              BinaryFunction scan_op)
+        -> typename std::enable_if<(BlockSize_ > ::rocprim::warp_size())>::type
     {
         // Perform warp scan
         warp_scan_input_type().inclusive_scan(
@@ -506,15 +507,42 @@ private:
             output = scan_op(warp_prefix, output);
         }
     }
-
-    template<class BinaryFunction>
+    
+    // When BlockSize is less than warp_size we dont need the extra prefix calculations.
+    template<class BinaryFunction, unsigned int BlockSize_ = BlockSize>
     ROCPRIM_DEVICE inline
-    void exclusive_scan_impl(const unsigned int flat_tid,
+    auto inclusive_scan_impl(unsigned int flat_tid,
+                             T input,
+                             T& output,
+                             storage_type& storage,
+                             BinaryFunction scan_op)
+        -> typename std::enable_if<!(BlockSize_ > ::rocprim::warp_size())>::type
+    {
+        (void) storage;
+        (void) flat_tid;
+        // Perform warp scan
+        warp_scan_input_type().inclusive_scan(
+            // not using shared mem, see note in storage_type
+            input, output, scan_op
+        );
+
+        if(flat_tid == BlockSize_ - 1)
+        {
+            storage.warp_prefixes[0] = output;
+        }
+        ::rocprim::syncthreads();
+    }
+
+    // Exclusive scan with initial value when BlockSize is bigger than warp_size
+    template<class BinaryFunction, unsigned int BlockSize_ = BlockSize>
+    ROCPRIM_DEVICE inline
+    auto exclusive_scan_impl(const unsigned int flat_tid,
                              T input,
                              T& output,
                              T init,
                              storage_type& storage,
                              BinaryFunction scan_op)
+        -> typename std::enable_if<(BlockSize_ > ::rocprim::warp_size())>::type
     {
         // Perform warp scan on input values
         warp_scan_input_type().inclusive_scan(
@@ -543,14 +571,51 @@ private:
         }
     }
 
-    // Exclusive scan with unknown initial value
-    template<class BinaryFunction>
+    // Exclusive scan with initial value when BlockSize is less than warp_size.
+    // When BlockSize is less than warp_size we dont need the extra prefix calculations.
+    template<class BinaryFunction, unsigned int BlockSize_ = BlockSize>
     ROCPRIM_DEVICE inline
-    void exclusive_scan_impl(const unsigned int flat_tid,
+    auto exclusive_scan_impl(const unsigned int flat_tid,
+                             T input,
+                             T& output,
+                             T init,
+                             storage_type& storage,
+                             BinaryFunction scan_op)
+        -> typename std::enable_if<!(BlockSize_ > ::rocprim::warp_size())>::type
+    {
+        (void) flat_tid;
+        (void) storage;
+        (void) init;
+        // Perform warp scan on input values
+        warp_scan_input_type().inclusive_scan(
+            // not using shared mem, see note in storage_type
+            input, output, scan_op
+        );
+
+        if(flat_tid == BlockSize_ - 1)
+        {
+            storage.warp_prefixes[0] = output;
+        }
+        ::rocprim::syncthreads();
+
+        // Use warp prefix to calculate the final scan results for every thread
+        output = scan_op(init, output); // include warp prefix in scan results
+        output = warp_shuffle_up(output, 1, warp_size_); // shift to get exclusive results
+        if(::rocprim::lane_id() == 0)
+        {
+            output = init;
+        }
+    }
+
+    // Exclusive scan with unknown initial value
+    template<class BinaryFunction, unsigned int BlockSize_ = BlockSize>
+    ROCPRIM_DEVICE inline
+    auto exclusive_scan_impl(const unsigned int flat_tid,
                              T input,
                              T& output,
                              storage_type& storage,
                              BinaryFunction scan_op)
+        -> typename std::enable_if<(BlockSize_ > ::rocprim::warp_size())>::type
     {
         // Perform warp scan on input values
         warp_scan_input_type().inclusive_scan(
@@ -574,6 +639,33 @@ private:
         {
             output = warp_prefix;
         }
+    }
+
+    // Exclusive scan with unknown initial value, when BlockSize less than warp_size.
+    // When BlockSize is less than warp_size we dont need the extra prefix calculations.
+    template<class BinaryFunction, unsigned int BlockSize_ = BlockSize>
+    ROCPRIM_DEVICE inline
+    auto exclusive_scan_impl(const unsigned int flat_tid,
+                             T input,
+                             T& output,
+                             storage_type& storage,
+                             BinaryFunction scan_op)
+        -> typename std::enable_if<!(BlockSize_ > ::rocprim::warp_size())>::type
+    {
+        (void) flat_tid;
+        (void) storage;
+        // Perform warp scan on input values
+        warp_scan_input_type().inclusive_scan(
+            // not using shared mem, see note in storage_type
+            input, output, scan_op
+        );
+
+        if(flat_tid == BlockSize_ - 1)
+        {
+            storage.warp_prefixes[0] = output;
+        }
+        ::rocprim::syncthreads();
+        output = warp_shuffle_up(output, 1, warp_size_); // shift to get exclusive results
     }
 
     // i-th warp will have its prefix stored in storage.warp_prefixes[i-1]

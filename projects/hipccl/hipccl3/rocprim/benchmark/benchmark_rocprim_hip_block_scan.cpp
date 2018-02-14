@@ -93,6 +93,47 @@ struct inclusive_scan
             output[i * ItemsPerThread + k] = values[k];
         }
     }
+
+};
+
+template<rocprim::block_scan_algorithm algorithm>
+struct exclusive_scan
+{
+    template<
+        class T,
+        unsigned int BlockSize,
+        unsigned int ItemsPerThread,
+        unsigned int Trials
+    >
+    __global__
+    static void kernel(const T* input, T* output)
+    {
+        const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+        using U = typename std::remove_reference<T>::type;
+
+        T values[ItemsPerThread];
+        U init = 100;
+
+        for(unsigned int k = 0; k < ItemsPerThread; k++)
+        {
+            values[k] = input[i * ItemsPerThread + k];
+        }
+
+        using bscan_t = rp::block_scan<T, BlockSize, algorithm>;
+        __shared__ typename bscan_t::storage_type storage;
+
+        #pragma nounroll
+        for(unsigned int trial = 0; trial < Trials; trial++)
+        {
+            bscan_t().exclusive_scan(values, values, init, storage);
+        }
+
+        for(unsigned int k = 0; k < ItemsPerThread; k++)
+        {
+            output[i * ItemsPerThread + k] = values[k];
+        }
+    }
+
 };
 
 template<
@@ -166,6 +207,23 @@ void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
 
     std::vector<benchmark::internal::Benchmark*> new_benchmarks =
     {
+        // When block size is less than or equal to warp size
+        CREATE_BENCHMARK(int, 64, 1),
+        CREATE_BENCHMARK(int, 64, 2),
+        CREATE_BENCHMARK(int, 64, 4),
+        CREATE_BENCHMARK(int, 64, 8),
+        CREATE_BENCHMARK(int, 64, 16),
+        CREATE_BENCHMARK(float, 64, 1),
+        CREATE_BENCHMARK(float, 64, 2),
+        CREATE_BENCHMARK(float, 64, 4),
+        CREATE_BENCHMARK(float, 64, 8),
+        CREATE_BENCHMARK(float, 64, 16),
+        CREATE_BENCHMARK(double, 64, 1),
+        CREATE_BENCHMARK(double, 64, 2),
+        CREATE_BENCHMARK(double, 64, 4),
+        CREATE_BENCHMARK(double, 64, 8),
+        CREATE_BENCHMARK(double, 64, 16),
+
         CREATE_BENCHMARK(float, 256, 1),
         CREATE_BENCHMARK(float, 256, 2),
         CREATE_BENCHMARK(float, 256, 3),
@@ -205,6 +263,7 @@ void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
         CREATE_BENCHMARK(custom_int_double, 256, 1),
         CREATE_BENCHMARK(custom_int_double, 256, 4),
         CREATE_BENCHMARK(custom_int_double, 256, 8)
+
     };
     benchmarks.insert(benchmarks.end(), new_benchmarks.begin(), new_benchmarks.end());
 }
@@ -231,15 +290,25 @@ int main(int argc, char *argv[])
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
-    // using_warp_scan
+    // inclusive_scan using_warp_scan
     using inclusive_scan_uws_t = inclusive_scan<rocprim::block_scan_algorithm::using_warp_scan>;
     add_benchmarks<inclusive_scan_uws_t>(
         benchmarks, "inclusive_scan", "using_warp_scan", stream, size
     );
-    // reduce then scan
+    // exclusive_scan using_warp_scan
+    using exclusive_scan_uws_t = exclusive_scan<rocprim::block_scan_algorithm::using_warp_scan>;
+    add_benchmarks<exclusive_scan_uws_t>(
+        benchmarks, "exclusive_scan", "using_warp_scan", stream, size
+    );
+    // inclusive_scan reduce then scan
     using inclusive_scan_rts_t = inclusive_scan<rocprim::block_scan_algorithm::reduce_then_scan>;
     add_benchmarks<inclusive_scan_rts_t>(
         benchmarks, "inclusive_scan", "reduce_then_scan", stream, size
+    );
+    // exclusive_scan reduce then scan
+    using exclusive_scan_rts_t = exclusive_scan<rocprim::block_scan_algorithm::reduce_then_scan>;
+    add_benchmarks<exclusive_scan_rts_t>(
+        benchmarks, "exclusive_scan", "reduce_then_scan", stream, size
     );
 
     // Use manual timing
