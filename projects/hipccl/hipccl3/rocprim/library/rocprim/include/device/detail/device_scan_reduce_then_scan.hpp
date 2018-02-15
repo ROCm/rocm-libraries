@@ -256,32 +256,21 @@ auto final_scan_block_scan(const unsigned int flat_block_id,
                            BinaryFunction scan_op)
     -> typename std::enable_if<Exclusive>::type
 {
-    if(flat_block_id == 0)
-    {
-        BlockScan()
-            .exclusive_scan(
-                input, // input
-                output, // output
-                initial_value,
-                storage,
-                scan_op
-            );
-    }
-    else
+    if(flat_block_id != 0)
     {
         // Include initial value in block prefix
         initial_value = scan_op(
             initial_value, block_prefixes[flat_block_id - 1]
         );
-        BlockScan()
-            .exclusive_scan(
-                input, // input
-                output, // output
-                initial_value,
-                storage,
-                scan_op
-            );
     }
+    BlockScan()
+        .exclusive_scan(
+            input, // input
+            output, // output
+            initial_value,
+            storage,
+            scan_op
+        );
 }
 
 template<
@@ -404,6 +393,7 @@ void final_scan_kernel_impl(InputIterator input,
                 storage.load
             );
     }
+    ::rocprim::syncthreads(); // sync threads to reuse shared memory
 
     final_scan_block_scan<Exclusive, block_scan_type>(
         flat_block_id,
@@ -414,6 +404,7 @@ void final_scan_kernel_impl(InputIterator input,
         storage.scan,
         scan_op
     );
+    ::rocprim::syncthreads(); // sync threads to reuse shared memory
 
     // Save values into output array
     if(flat_block_id == (number_of_blocks - 1)) // last block
