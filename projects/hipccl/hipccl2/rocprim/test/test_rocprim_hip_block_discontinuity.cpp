@@ -195,7 +195,7 @@ TYPED_TEST(RocprimBlockDiscontinuity, FlagHeads)
     constexpr size_t grid_size = size / items_per_block;
 
     // Given block size not supported
-    if(block_size > rp::warp_size())
+    if(block_size > hip_get_max_block_size())
     {
         return;
     }
@@ -324,7 +324,7 @@ TYPED_TEST(RocprimBlockDiscontinuity, FlagTails)
     constexpr size_t grid_size = size / items_per_block;
 
     // Given block size not supported
-    if(block_size > rp::warp_size())
+    if(block_size > hip_get_max_block_size())
     {
         return;
     }
@@ -466,7 +466,7 @@ TYPED_TEST(RocprimBlockDiscontinuity, FlagHeadsAndTails)
     constexpr size_t grid_size = size / items_per_block;
 
     // Given block size not supported
-    if(block_size > rp::warp_size())
+    if(block_size > hip_get_max_block_size())
     {
         return;
     }

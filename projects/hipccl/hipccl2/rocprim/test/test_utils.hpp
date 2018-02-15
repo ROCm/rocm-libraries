@@ -25,6 +25,7 @@
 #include <vector>
 #include <random>
 #include <type_traits>
+#include <cstdlib>
 
 #include <rocprim.hpp>
 
@@ -32,6 +33,23 @@
 size_t get_max_tile_size(hc::accelerator acc = hc::accelerator())
 {
     return acc.get_max_tile_static_size();
+}
+#endif
+
+#ifdef ROCPRIM_HIP_API
+size_t hip_get_max_block_size()
+{
+    hipDeviceProp_t device_properties;
+    hipError_t error = hipGetDeviceProperties(&device_properties, 0);
+    if(error != hipSuccess)
+    {
+        std::cout << "HIP error: " << error 
+                  << " file: " << __FILE__ 
+                  << " line: " << __LINE__ 
+                  << std::endl;
+        std::exit(error);
+    }
+    return device_properties.maxThreadsPerBlock;
 }
 #endif
 
