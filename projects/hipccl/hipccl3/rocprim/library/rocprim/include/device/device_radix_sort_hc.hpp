@@ -22,6 +22,7 @@
 #define ROCPRIM_DEVICE_DEVICE_RADIX_SORT_HC_HPP_
 
 #include <iostream>
+#include <iterator>
 #include <type_traits>
 #include <utility>
 
@@ -43,11 +44,11 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-#define SYNC(name, start) \
+#define ROCPRIM_DETAIL_HC_SYNC(name, size, start) \
     { \
         if(debug_synchronous) \
         { \
-            std::cout << name; \
+            std::cout << name << "(" << size << ")"; \
             acc_view.wait(); \
             auto end = std::chrono::high_resolution_clock::now(); \
             auto d = std::chrono::duration_cast<std::chrono::duration<double>>(end - start); \
@@ -55,26 +56,33 @@ namespace detail
         } \
     }
 
-template<bool Descending, class Key, class Value>
+template<
+    bool Descending,
+    class KeysInputIterator,
+    class KeysOutputIterator,
+    class ValuesInputIterator,
+    class ValuesOutputIterator
+>
 inline
 void device_radix_sort(void * temporary_storage,
                        size_t& temporary_storage_bytes,
-                       const Key * keys_input,
-                       Key * keys_output,
-                       const Value * values_input,
-                       Value * values_output,
+                       KeysInputIterator keys_input,
+                       KeysOutputIterator keys_output,
+                       ValuesInputIterator values_input,
+                       ValuesOutputIterator values_output,
                        unsigned int size,
                        unsigned int begin_bit,
                        unsigned int end_bit,
                        hc::accelerator_view& acc_view,
                        bool debug_synchronous)
 {
-    using bit_key_type = typename ::rocprim::detail::radix_key_codec<Key>::bit_key_type;
-
-    constexpr bool with_values = !std::is_same<Value, ::rocprim::empty_type>::value;
-
     constexpr unsigned int radix_bits = 8;
     constexpr unsigned int radix_size = 1 << radix_bits;
+
+    using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
+    using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
+
+    constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
 
     constexpr unsigned int scan_block_size = 256;
     constexpr unsigned int scan_items_per_thread = 4;
@@ -95,11 +103,11 @@ void device_radix_sort(void * temporary_storage,
 
     const size_t batch_digit_counts_bytes = ::rocprim::detail::align_size(batches * radix_size * sizeof(unsigned int));
     const size_t digit_counts_bytes = ::rocprim::detail::align_size(radix_size * sizeof(unsigned int));
-    const size_t bit_keys_bytes = ::rocprim::detail::align_size(size * sizeof(bit_key_type));
-    const size_t values_bytes = with_values ? ::rocprim::detail::align_size(size * sizeof(Value)) : 0;
+    const size_t keys_bytes = ::rocprim::detail::align_size(size * sizeof(key_type));
+    const size_t values_bytes = with_values ? ::rocprim::detail::align_size(size * sizeof(value_type)) : 0;
     if(temporary_storage == nullptr)
     {
-        temporary_storage_bytes = batch_digit_counts_bytes + digit_counts_bytes + bit_keys_bytes + values_bytes;
+        temporary_storage_bytes = batch_digit_counts_bytes + digit_counts_bytes + keys_bytes + values_bytes;
         return;
     }
 
@@ -118,20 +126,11 @@ void device_radix_sort(void * temporary_storage,
     ptr += batch_digit_counts_bytes;
     unsigned int * digit_counts = reinterpret_cast<unsigned int *>(ptr);
     ptr += digit_counts_bytes;
-    bit_key_type * bit_keys0 = reinterpret_cast<bit_key_type *>(ptr);
-    ptr += bit_keys_bytes;
-    Value * values0 = with_values ? reinterpret_cast<Value *>(ptr) : nullptr;
+    key_type * keys_tmp = reinterpret_cast<key_type *>(ptr);
+    ptr += keys_bytes;
+    value_type * values_tmp = with_values ? reinterpret_cast<value_type *>(ptr) : nullptr;
 
-    bit_key_type * bit_keys1 = reinterpret_cast<bit_key_type *>(keys_output);
-    Value * values1 = values_output;
-
-    // Result must be always placed in keys_output and values_output
-    if(iterations % 2 == 0)
-    {
-        std::swap(bit_keys0, bit_keys1);
-        std::swap(values0, values1);
-    }
-
+    unsigned int iterations_left = iterations - 1;
     for(unsigned int bit = begin_bit; bit < end_bit; bit += radix_bits)
     {
         // Handle cases when (end_bit - bit) is not divisible by radix_bits, i.e. the last
@@ -139,7 +138,6 @@ void device_radix_sort(void * temporary_storage,
         const unsigned int current_radix_bits = ::rocprim::min(radix_bits, end_bit - bit);
 
         const bool is_first_iteration = (bit == begin_bit);
-        const bool is_last_iteration = (bit + current_radix_bits == end_bit);
 
         std::chrono::high_resolution_clock::time_point start;
 
@@ -151,10 +149,7 @@ void device_radix_sort(void * temporary_storage,
                 hc::tiled_extent<1>(batches * sort_block_size, sort_block_size),
                 [=](hc::tiled_index<1>) [[hc]]
                 {
-                    detail::fill_digit_counts<
-                        sort_block_size, sort_items_per_thread, radix_bits,
-                        Descending
-                    >(
+                    fill_digit_counts<sort_block_size, sort_items_per_thread, radix_bits, Descending>(
                         keys_input, size,
                         batch_digit_counts,
                         bit, current_radix_bits,
@@ -165,24 +160,40 @@ void device_radix_sort(void * temporary_storage,
         }
         else
         {
-            hc::parallel_for_each(
-                acc_view,
-                hc::tiled_extent<1>(batches * sort_block_size, sort_block_size),
-                [=](hc::tiled_index<1>) [[hc]]
-                {
-                    detail::fill_digit_counts<
-                        sort_block_size, sort_items_per_thread, radix_bits,
-                        false
-                    >(
-                        bit_keys0, size,
-                        batch_digit_counts,
-                        bit, current_radix_bits,
-                        blocks_per_full_batch, full_batches
-                    );
-                }
-            );
+            if(iterations_left % 2 == 0)
+            {
+                hc::parallel_for_each(
+                    acc_view,
+                    hc::tiled_extent<1>(batches * sort_block_size, sort_block_size),
+                    [=](hc::tiled_index<1>) [[hc]]
+                    {
+                        fill_digit_counts<sort_block_size, sort_items_per_thread, radix_bits, Descending>(
+                            keys_tmp, size,
+                            batch_digit_counts,
+                            bit, current_radix_bits,
+                            blocks_per_full_batch, full_batches
+                        );
+                    }
+                );
+            }
+            else
+            {
+                hc::parallel_for_each(
+                    acc_view,
+                    hc::tiled_extent<1>(batches * sort_block_size, sort_block_size),
+                    [=](hc::tiled_index<1>) [[hc]]
+                    {
+                        fill_digit_counts<sort_block_size, sort_items_per_thread, radix_bits, Descending>(
+                            keys_output, size,
+                            batch_digit_counts,
+                            bit, current_radix_bits,
+                            blocks_per_full_batch, full_batches
+                        );
+                    }
+                );
+            }
         }
-        SYNC("fill_digit_counts", start)
+        ROCPRIM_DETAIL_HC_SYNC("fill_digit_counts", size, start)
 
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         hc::parallel_for_each(
@@ -190,12 +201,12 @@ void device_radix_sort(void * temporary_storage,
             hc::tiled_extent<1>(radix_size * scan_block_size, scan_block_size),
             [=](hc::tiled_index<1>) [[hc]]
             {
-                detail::scan_batches<scan_block_size, scan_items_per_thread, radix_bits>(
+                scan_batches<scan_block_size, scan_items_per_thread, radix_bits>(
                     batch_digit_counts, digit_counts, batches
                 );
             }
         );
-        SYNC("scan_batches", start)
+        ROCPRIM_DETAIL_HC_SYNC("scan_batches", radix_size * scan_block_size, start)
 
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         hc::parallel_for_each(
@@ -203,96 +214,89 @@ void device_radix_sort(void * temporary_storage,
             hc::tiled_extent<1>(radix_size, radix_size),
             [=](hc::tiled_index<1>) [[hc]]
             {
-                detail::scan_digits<radix_bits>(digit_counts);
+                scan_digits<radix_bits>(digit_counts);
             }
         );
-        SYNC("scan_digits", start)
+        ROCPRIM_DETAIL_HC_SYNC("scan_digits", radix_size, start)
 
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-        if(is_first_iteration && is_last_iteration)
+        if(is_first_iteration)
         {
-            hc::parallel_for_each(
-                acc_view,
-                hc::tiled_extent<1>(batches * sort_block_size, sort_block_size),
-                [=](hc::tiled_index<1>) [[hc]]
-                {
-                    detail::sort_and_scatter<
-                        sort_block_size, sort_items_per_thread, radix_bits,
-                        Descending, Descending
-                    >(
-                        keys_input, keys_output, values_input, values_output, size,
-                        batch_digit_counts, digit_counts,
-                        bit, current_radix_bits,
-                        blocks_per_full_batch, full_batches
-                    );
-                }
-            );
-        }
-        else if(is_first_iteration)
-        {
-            hc::parallel_for_each(
-                acc_view,
-                hc::tiled_extent<1>(batches * sort_block_size, sort_block_size),
-                [=](hc::tiled_index<1>) [[hc]]
-                {
-                    detail::sort_and_scatter<
-                        sort_block_size, sort_items_per_thread, radix_bits,
-                        Descending, false
-                    >(
-                        keys_input, bit_keys1, values_input, values1, size,
-                        batch_digit_counts, digit_counts,
-                        bit, current_radix_bits,
-                        blocks_per_full_batch, full_batches
-                    );
-                }
-            );
-        }
-        else if(is_last_iteration)
-        {
-            hc::parallel_for_each(
-                acc_view,
-                hc::tiled_extent<1>(batches * sort_block_size, sort_block_size),
-                [=](hc::tiled_index<1>) [[hc]]
-                {
-                    detail::sort_and_scatter<
-                        sort_block_size, sort_items_per_thread, radix_bits,
-                        false, Descending
-                    >(
-                        bit_keys0, keys_output, values0, values_output, size,
-                        batch_digit_counts, digit_counts,
-                        bit, current_radix_bits,
-                        blocks_per_full_batch, full_batches
-                    );
-                }
-            );
+            if(iterations_left % 2 == 0)
+            {
+                hc::parallel_for_each(
+                    acc_view,
+                    hc::tiled_extent<1>(batches * sort_block_size, sort_block_size),
+                    [=](hc::tiled_index<1>) [[hc]]
+                    {
+                        sort_and_scatter<sort_block_size, sort_items_per_thread, radix_bits, Descending>(
+                            keys_input, keys_output, values_input, values_output, size,
+                            batch_digit_counts, digit_counts,
+                            bit, current_radix_bits,
+                            blocks_per_full_batch, full_batches
+                        );
+                    }
+                );
+            }
+            else
+            {
+                hc::parallel_for_each(
+                    acc_view,
+                    hc::tiled_extent<1>(batches * sort_block_size, sort_block_size),
+                    [=](hc::tiled_index<1>) [[hc]]
+                    {
+                        sort_and_scatter<sort_block_size, sort_items_per_thread, radix_bits, Descending>(
+                            keys_input, keys_tmp, values_input, values_tmp, size,
+                            batch_digit_counts, digit_counts,
+                            bit, current_radix_bits,
+                            blocks_per_full_batch, full_batches
+                        );
+                    }
+                );
+            }
         }
         else
         {
-            hc::parallel_for_each(
-                acc_view,
-                hc::tiled_extent<1>(batches * sort_block_size, sort_block_size),
-                [=](hc::tiled_index<1>) [[hc]]
-                {
-                    detail::sort_and_scatter<
-                        sort_block_size, sort_items_per_thread, radix_bits,
-                        false, false
-                    >(
-                        bit_keys0, bit_keys1, values0, values1, size,
-                        batch_digit_counts, digit_counts,
-                        bit, current_radix_bits,
-                        blocks_per_full_batch, full_batches
-                    );
-                }
-            );
+            if(iterations_left % 2 == 0)
+            {
+                hc::parallel_for_each(
+                    acc_view,
+                    hc::tiled_extent<1>(batches * sort_block_size, sort_block_size),
+                    [=](hc::tiled_index<1>) [[hc]]
+                    {
+                        sort_and_scatter<sort_block_size, sort_items_per_thread, radix_bits, Descending>(
+                            keys_tmp, keys_output, values_tmp, values_output, size,
+                            batch_digit_counts, digit_counts,
+                            bit, current_radix_bits,
+                            blocks_per_full_batch, full_batches
+                        );
+                    }
+                );
+            }
+            else
+            {
+                hc::parallel_for_each(
+                    acc_view,
+                    hc::tiled_extent<1>(batches * sort_block_size, sort_block_size),
+                    [=](hc::tiled_index<1>) [[hc]]
+                    {
+                        sort_and_scatter<sort_block_size, sort_items_per_thread, radix_bits, Descending>(
+                            keys_output, keys_tmp, values_output, values_tmp, size,
+                            batch_digit_counts, digit_counts,
+                            bit, current_radix_bits,
+                            blocks_per_full_batch, full_batches
+                        );
+                    }
+                );
+            }
         }
-        SYNC("sort_and_scatter", start)
+        ROCPRIM_DETAIL_HC_SYNC("sort_and_scatter", size, start)
 
-        std::swap(bit_keys0, bit_keys1);
-        std::swap(values0, values1);
+        iterations_left--;
     }
 }
 
-#undef SYNC
+#undef ROCPRIM_DETAIL_HC_SYNC
 
 } // end namespace detail
 
@@ -305,15 +309,18 @@ void device_radix_sort(void * temporary_storage,
 /// * The contents of the inputs are not altered by the sorting function.
 /// * Returns the required size of \p temporary_storage in \p temporary_storage_bytes
 /// if \p temporary_storage in a null pointer.
-/// * \p Key type must be an arithmetic type (that is, an integral type or a floating-point
-/// type).
+/// * \p Key type (a \p value_type of \p KeysInputIterator and \p KeysOutputIterator) must be
+/// an arithmetic type (that is, an integral type or a floating-point type).
 /// * Ranges specified by \p keys_input, \p keys_output, \p values_input and \p values_output must
 /// have at least \p size elements.
 /// * If \p Key is an integer type and the range of keys is known in advance, the performance
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 5</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
-/// \tparam Key - key type. Must be an integral type or a floating-point type.
+/// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -367,15 +374,19 @@ void device_radix_sort(void * temporary_storage,
 /// // keys_output: [0.08, 0.2, 0.3, 0.4, 0.6, 0.65, 0.7, 1]
 /// \endcode
 /// \endparblock
-template<class Key>
+template<
+    class KeysInputIterator,
+    class KeysOutputIterator
+>
 inline
 void device_radix_sort_keys(void * temporary_storage,
                             size_t& temporary_storage_bytes,
-                            const Key * keys_input,
-                            Key * keys_output,
+                            KeysInputIterator keys_input,
+                            KeysOutputIterator keys_output,
                             unsigned int size,
                             unsigned int begin_bit = 0,
-                            unsigned int end_bit = 8 * sizeof(Key),
+                            unsigned int end_bit =
+                                8 * sizeof(typename std::iterator_traits<KeysInputIterator>::value_type),
                             hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
                             bool debug_synchronous = false)
 {
@@ -397,15 +408,18 @@ void device_radix_sort_keys(void * temporary_storage,
 /// * The contents of the inputs are not altered by the sorting function.
 /// * Returns the required size of \p temporary_storage in \p temporary_storage_bytes
 /// if \p temporary_storage in a null pointer.
-/// * \p Key type must be an arithmetic type (that is, an integral type or a floating-point
-/// type).
+/// * \p Key type (a \p value_type of \p KeysInputIterator and \p KeysOutputIterator) must be
+/// an arithmetic type (that is, an integral type or a floating-point type).
 /// * Ranges specified by \p keys_input, \p keys_output, \p values_input and \p values_output must
 /// have at least \p size elements.
 /// * If \p Key is an integer type and the range of keys is known in advance, the performance
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 5</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
-/// \tparam Key - key type. Must be an integral type or a floating-point type.
+/// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -459,15 +473,19 @@ void device_radix_sort_keys(void * temporary_storage,
 /// // keys_output: [8, 7, 6, 5, 4, 3, 2, 1]
 /// \endcode
 /// \endparblock
-template<class Key>
+template<
+    class KeysInputIterator,
+    class KeysOutputIterator
+>
 inline
 void device_radix_sort_keys_desc(void * temporary_storage,
                                  size_t& temporary_storage_bytes,
-                                 const Key * keys_input,
-                                 Key * keys_output,
+                                 KeysInputIterator keys_input,
+                                 KeysOutputIterator keys_output,
                                  unsigned int size,
                                  unsigned int begin_bit = 0,
-                                 unsigned int end_bit = 8 * sizeof(Key),
+                                 unsigned int end_bit =
+                                     8 * sizeof(typename std::iterator_traits<KeysInputIterator>::value_type),
                                  hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
                                  bool debug_synchronous = false)
 {
@@ -489,16 +507,22 @@ void device_radix_sort_keys_desc(void * temporary_storage,
 /// * The contents of the inputs are not altered by the sorting function.
 /// * Returns the required size of \p temporary_storage in \p temporary_storage_bytes
 /// if \p temporary_storage in a null pointer.
-/// * \p Key type must be an arithmetic type (that is, an integral type or a floating-point
-/// type).
+/// * \p Key type (a \p value_type of \p KeysInputIterator and \p KeysOutputIterator) must be
+/// an arithmetic type (that is, an integral type or a floating-point type).
 /// * Ranges specified by \p keys_input, \p keys_output, \p values_input and \p values_output must
 /// have at least \p size elements.
 /// * If \p Key is an integer type and the range of keys is known in advance, the performance
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 5</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
-/// \tparam Key - key type. Must be an integral type or a floating-point type.
-/// \tparam Value - value type.
+/// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam ValuesInputIterator - random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam ValuesOutputIterator - random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -563,17 +587,23 @@ void device_radix_sort_keys_desc(void * temporary_storage,
 /// // values_output: [-1, -2, 2, 3, -4, -5, 7, -8]
 /// \endcode
 /// \endparblock
-template<class Key, class Value>
+template<
+    class KeysInputIterator,
+    class KeysOutputIterator,
+    class ValuesInputIterator,
+    class ValuesOutputIterator
+>
 inline
 void device_radix_sort_pairs(void * temporary_storage,
                              size_t& temporary_storage_bytes,
-                             const Key * keys_input,
-                             Key * keys_output,
-                             const Value * values_input,
-                             Value * values_output,
+                             KeysInputIterator keys_input,
+                             KeysOutputIterator keys_output,
+                             ValuesInputIterator values_input,
+                             ValuesOutputIterator values_output,
                              unsigned int size,
                              unsigned int begin_bit = 0,
-                             unsigned int end_bit = 8 * sizeof(Key),
+                             unsigned int end_bit =
+                                 8 * sizeof(typename std::iterator_traits<KeysInputIterator>::value_type),
                              hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
                              bool debug_synchronous = false)
 {
@@ -594,16 +624,22 @@ void device_radix_sort_pairs(void * temporary_storage,
 /// * The contents of the inputs are not altered by the sorting function.
 /// * Returns the required size of \p temporary_storage in \p temporary_storage_bytes
 /// if \p temporary_storage in a null pointer.
-/// * \p Key type must be an arithmetic type (that is, an integral type or a floating-point
-/// type).
+/// * \p Key type (a \p value_type of \p KeysInputIterator and \p KeysOutputIterator) must be
+/// an arithmetic type (that is, an integral type or a floating-point type).
 /// * Ranges specified by \p keys_input, \p keys_output, \p values_input and \p values_output must
 /// have at least \p size elements.
 /// * If \p Key is an integer type and the range of keys is known in advance, the performance
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 5</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
-/// \tparam Key - key type. Must be an integral type or a floating-point type.
-/// \tparam Value - value type.
+/// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam ValuesInputIterator - random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam ValuesOutputIterator - random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -663,17 +699,23 @@ void device_radix_sort_pairs(void * temporary_storage,
 /// // values_output: [-8, 7, -5, -4, 3, 2, -1, -2]
 /// \endcode
 /// \endparblock
-template<class Key, class Value>
+template<
+    class KeysInputIterator,
+    class KeysOutputIterator,
+    class ValuesInputIterator,
+    class ValuesOutputIterator
+>
 inline
 void device_radix_sort_pairs_desc(void * temporary_storage,
                                   size_t& temporary_storage_bytes,
-                                  const Key * keys_input,
-                                  Key * keys_output,
-                                  const Value * values_input,
-                                  Value * values_output,
+                                  KeysInputIterator keys_input,
+                                  KeysOutputIterator keys_output,
+                                  ValuesInputIterator values_input,
+                                  ValuesOutputIterator values_output,
                                   unsigned int size,
                                   unsigned int begin_bit = 0,
-                                  unsigned int end_bit = 8 * sizeof(Key),
+                                  unsigned int end_bit =
+                                      8 * sizeof(typename std::iterator_traits<KeysInputIterator>::value_type),
                                   hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
                                   bool debug_synchronous = false)
 {
