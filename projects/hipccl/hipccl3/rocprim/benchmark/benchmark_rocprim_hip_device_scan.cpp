@@ -32,14 +32,13 @@
 #include "benchmark/benchmark.h"
 // CmdParser
 #include "cmdparser.hpp"
-#include "benchmark_utils.hpp"
-
 // HIP API
 #include <hip/hip_runtime.h>
 #include <hip/hip_hcc.h>
-
 // rocPRIM
-#include <rocprim.hpp>
+#include <device/device_scan_hip.hpp>
+
+#include "benchmark_utils.hpp"
 
 #define HIP_CHECK(condition)         \
   {                                  \
@@ -66,13 +65,14 @@ auto run_device_scan(void * temporary_storage,
                      const T initial_value,
                      const size_t input_size,
                      BinaryFunction scan_op,
-                     const hipStream_t stream)
+                     const hipStream_t stream,
+                     const bool debug = false)
     -> typename std::enable_if<Exclusive, hipError_t>::type
 {
     return rocprim::device_exclusive_scan(
         temporary_storage, storage_size,
         input, output, initial_value, input_size,
-        scan_op, stream
+        scan_op, stream, debug
     );
 }
 
@@ -88,14 +88,15 @@ auto run_device_scan(void * temporary_storage,
                      const T initial_value,
                      const size_t input_size,
                      BinaryFunction scan_op,
-                     const hipStream_t stream)
+                     const hipStream_t stream,
+                     const bool debug = false)
     -> typename std::enable_if<!Exclusive, hipError_t>::type
 {
     (void) initial_value;
     return rocprim::device_inclusive_scan(
         temporary_storage, storage_size,
         input, output, input_size,
-        scan_op, stream
+        scan_op, stream, debug
     );
 }
 
@@ -224,11 +225,25 @@ int main(int argc, char *argv[])
     HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
     std::cout << "[HIP] Device name: " << devProp.name << std::endl;
 
+    using custom_double2 = custom_type<double, double>;
+    using custom_int_double = custom_type<int, double>;
+
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks =
     {
         CREATE_INCLUSIVE_BENCHMARK(int, rocprim::plus<int>),
-        CREATE_EXCLUSIVE_BENCHMARK(int, rocprim::plus<int>)
+        CREATE_EXCLUSIVE_BENCHMARK(int, rocprim::plus<int>),
+
+        CREATE_INCLUSIVE_BENCHMARK(float, rocprim::plus<float>),
+        CREATE_EXCLUSIVE_BENCHMARK(float, rocprim::plus<float>),
+
+        CREATE_INCLUSIVE_BENCHMARK(double, rocprim::plus<double>),
+        CREATE_EXCLUSIVE_BENCHMARK(double, rocprim::plus<double>),
+
+        CREATE_INCLUSIVE_BENCHMARK(custom_double2, rocprim::plus<custom_double2>),
+        CREATE_EXCLUSIVE_BENCHMARK(custom_double2, rocprim::plus<custom_double2>),
+        CREATE_INCLUSIVE_BENCHMARK(custom_int_double, rocprim::plus<custom_int_double>),
+        CREATE_EXCLUSIVE_BENCHMARK(custom_int_double, rocprim::plus<custom_int_double>)
     };
 
     // Use manual timing

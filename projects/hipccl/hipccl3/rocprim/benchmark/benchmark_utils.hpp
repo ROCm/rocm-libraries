@@ -91,9 +91,7 @@ struct custom_type
     }
 
     ROCPRIM_HOST_DEVICE inline
-    ~custom_type()
-    {
-    }
+    ~custom_type() = default;
 
     ROCPRIM_HOST_DEVICE inline
     custom_type operator+(const custom_type& rhs) const
