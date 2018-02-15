@@ -22,6 +22,7 @@
 #define ROCPRIM_DEVICE_DETAIL_DEVICE_RADIX_SORT_HPP_
 
 #include <type_traits>
+#include <iterator>
 
 #include "../../config.hpp"
 #include "../../detail/various.hpp"
@@ -47,11 +48,11 @@ template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
     unsigned int RadixBits,
-    bool DescendingIn,
-    class KeyIn
+    bool Descending,
+    class KeysInputIterator
 >
 ROCPRIM_DEVICE inline
-void fill_digit_counts(const KeyIn * keys_input,
+void fill_digit_counts(KeysInputIterator keys_input,
                        unsigned int size,
                        unsigned int * batch_digit_counts,
                        unsigned int bit,
@@ -62,13 +63,15 @@ void fill_digit_counts(const KeyIn * keys_input,
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
     constexpr unsigned int radix_size = 1 << RadixBits;
 
+    using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
+
     constexpr unsigned int warp_size = ::rocprim::warp_size();
     constexpr unsigned int warps_no = BlockSize / warp_size;
     static_assert(BlockSize % warp_size == 0, "BlockSize must be divisible by warp size");
     static_assert(radix_size <= BlockSize, "Radix size must not exceed BlockSize");
 
-    using key_in_codec = radix_key_codec<KeyIn, DescendingIn>;
-    using bit_key_type = typename key_in_codec::bit_key_type;
+    using key_codec = radix_key_codec<key_type, Descending>;
+    using bit_key_type = typename key_codec::bit_key_type;
 
     ROCPRIM_SHARED_MEMORY struct
     {
@@ -106,7 +109,7 @@ void fill_digit_counts(const KeyIn * keys_input,
 
     for(unsigned int bi = 0; bi < blocks_per_batch; bi++)
     {
-        KeyIn keys[ItemsPerThread];
+        key_type keys[ItemsPerThread];
         unsigned int valid_count;
         // Use loading into a striped arrangement because an order of items is irrelevant,
         // only totals matter
@@ -123,7 +126,7 @@ void fill_digit_counts(const KeyIn * keys_input,
         bit_key_type bit_keys[ItemsPerThread];
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            bit_keys[i] = key_in_codec::encode(keys[i]);
+            bit_keys[i] = key_codec::encode(keys[i]);
         }
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
@@ -250,17 +253,17 @@ template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
     unsigned int RadixBits,
-    bool DescendingIn,
-    bool DescendingOut,
-    class KeyIn,
-    class KeyOut,
-    class Value
+    bool Descending,
+    class KeysInputIterator,
+    class KeysOutputIterator,
+    class ValuesInputIterator,
+    class ValuesOutputIterator
 >
 ROCPRIM_DEVICE inline
-void sort_and_scatter(const KeyIn * keys_input,
-                      KeyOut * keys_output,
-                      const Value * values_input,
-                      Value * values_output,
+void sort_and_scatter(KeysInputIterator keys_input,
+                      KeysOutputIterator keys_output,
+                      ValuesInputIterator values_input,
+                      ValuesOutputIterator values_output,
                       unsigned int size,
                       const unsigned int * batch_digit_starts,
                       const unsigned int * digit_starts,
@@ -271,21 +274,24 @@ void sort_and_scatter(const KeyIn * keys_input,
 {
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
     constexpr unsigned int radix_size = 1 << RadixBits;
-    constexpr bool with_values = !std::is_same<Value, ::rocprim::empty_type>::value;
 
-    using key_in_codec = radix_key_codec<KeyIn, DescendingIn>;
-    using key_out_codec = radix_key_codec<KeyOut, DescendingOut>;
-    using bit_key_type = typename key_in_codec::bit_key_type;
+    using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
+    using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
+
+    using key_codec = radix_key_codec<key_type, Descending>;
+    using bit_key_type = typename key_codec::bit_key_type;
     using keys_load_type = ::rocprim::block_load<
-        KeyIn, BlockSize, ItemsPerThread,
+        key_type, BlockSize, ItemsPerThread,
         ::rocprim::block_load_method::block_load_transpose>;
     using values_load_type = ::rocprim::block_load<
-        Value, BlockSize, ItemsPerThread,
+        value_type, BlockSize, ItemsPerThread,
         ::rocprim::block_load_method::block_load_transpose>;
-    using sort_type = ::rocprim::block_radix_sort<bit_key_type, BlockSize, ItemsPerThread, Value>;
+    using sort_type = ::rocprim::block_radix_sort<bit_key_type, BlockSize, ItemsPerThread, value_type>;
     using discontinuity_type = ::rocprim::block_discontinuity<unsigned int, BlockSize>;
     using bit_keys_exchange_type = ::rocprim::block_exchange<bit_key_type, BlockSize, ItemsPerThread>;
-    using values_exchange_type = ::rocprim::block_exchange<Value, BlockSize, ItemsPerThread>;
+    using values_exchange_type = ::rocprim::block_exchange<value_type, BlockSize, ItemsPerThread>;
+
+    constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
 
     ROCPRIM_SHARED_MEMORY struct
     {
@@ -331,8 +337,8 @@ void sort_and_scatter(const KeyIn * keys_input,
 
     for(unsigned int bi = 0; bi < blocks_per_batch; bi++)
     {
-        KeyIn keys[ItemsPerThread];
-        Value values[ItemsPerThread];
+        key_type keys[ItemsPerThread];
+        value_type values[ItemsPerThread];
         unsigned int valid_count;
         if(block_offset + items_per_block <= size)
         {
@@ -348,7 +354,7 @@ void sort_and_scatter(const KeyIn * keys_input,
         {
             valid_count = size - block_offset;
             // Sort will leave "invalid" (out of size) items at the end of the sorted sequence
-            const KeyIn out_of_bounds = key_in_codec::decode(bit_key_type(-1));
+            const key_type out_of_bounds = key_codec::decode(bit_key_type(-1));
             keys_load_type().load(keys_input + block_offset, keys, valid_count, out_of_bounds, storage.keys_load);
             if(with_values)
             {
@@ -359,7 +365,7 @@ void sort_and_scatter(const KeyIn * keys_input,
         bit_key_type bit_keys[ItemsPerThread];
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            bit_keys[i] = key_in_codec::encode(keys[i]);
+            bit_keys[i] = key_codec::encode(keys[i]);
         }
 
         if(flat_id < radix_size)
@@ -416,7 +422,7 @@ void sort_and_scatter(const KeyIn * keys_input,
             if(pos < valid_count)
             {
                 const unsigned int dst = pos - storage.starts[digit] + storage.block_starts[digit];
-                keys_output[dst] = key_out_codec::decode(bit_keys[i]);
+                keys_output[dst] = key_codec::decode(bit_keys[i]);
                 if(with_values)
                 {
                     values_output[dst] = values[i];
