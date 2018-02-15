@@ -196,6 +196,9 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScan)
             EXPECT_NEAR(output[i], expected[i], tolerance);
         }
     }
+
+    HIP_CHECK(hipFree(device_input));
+    HIP_CHECK(hipFree(device_output));
 }
 
 template<
@@ -339,6 +342,9 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScanReduce)
         }
     }
 
+    HIP_CHECK(hipFree(device_input));
+    HIP_CHECK(hipFree(device_output));
+    HIP_CHECK(hipFree(device_output_reductions));
 }
 
 template<
@@ -446,6 +452,9 @@ TYPED_TEST(RocprimWarpScanTests, ExclusiveScan)
             EXPECT_NEAR(output[i], expected[i], tolerance);
         }
     }
+
+    HIP_CHECK(hipFree(device_input));
+    HIP_CHECK(hipFree(device_output));
 }
 
 template<
@@ -598,6 +607,9 @@ TYPED_TEST(RocprimWarpScanTests, ExclusiveReduceScan)
         }
     }
 
+    HIP_CHECK(hipFree(device_input));
+    HIP_CHECK(hipFree(device_output));
+    HIP_CHECK(hipFree(device_output_reductions));
 }
 
 template<
@@ -741,6 +753,10 @@ TYPED_TEST(RocprimWarpScanTests, Scan)
             EXPECT_NEAR(output_exclusive[i], expected_exclusive[i], tolerance);
         }
     }
+
+    HIP_CHECK(hipFree(device_input));
+    HIP_CHECK(hipFree(device_inclusive_output));
+    HIP_CHECK(hipFree(device_exclusive_output));
 }
 
 template<
@@ -919,6 +935,10 @@ TYPED_TEST(RocprimWarpScanTests, ScanReduce)
             EXPECT_NEAR(output_reductions[i], expected_reductions[i], tolerance);
         }
     }
+
+    HIP_CHECK(hipFree(device_input));
+    HIP_CHECK(hipFree(device_inclusive_output));
+    HIP_CHECK(hipFree(device_exclusive_output));
 }
 
 TYPED_TEST(RocprimWarpScanTests, InclusiveScanCustomType)
@@ -1017,5 +1037,8 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScanCustomType)
             EXPECT_NEAR(output[i].y, expected[i].y, tolerance_y);
         }
     }
+
+    HIP_CHECK(hipFree(device_input));
+    HIP_CHECK(hipFree(device_output));
 }
 
