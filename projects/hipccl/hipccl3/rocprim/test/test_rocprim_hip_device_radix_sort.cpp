@@ -446,8 +446,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeysDoubleBuffer)
             rp::device_radix_sort_keys(
                 nullptr, temporary_storage_bytes,
                 d_keys, size,
-                start_bit, end_bit,
-                stream, debug_synchronous
+                start_bit, end_bit
             )
         );
 
@@ -588,8 +587,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairsDoubleBuffer)
         rp::device_radix_sort_pairs(
             d_temporary_storage, temporary_storage_bytes,
             d_keys, d_values, size,
-            start_bit, end_bit,
-            stream, debug_synchronous
+            start_bit, end_bit
         );
 
         ASSERT_GT(temporary_storage_bytes, 0);
