@@ -166,8 +166,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
         rp::device_radix_sort_keys(
             nullptr, temporary_storage_bytes,
             d_keys_input.accelerator_pointer(), d_keys_output.accelerator_pointer(), size,
-            start_bit, end_bit,
-            acc_view, debug_synchronous
+            start_bit, end_bit
         );
 
         ASSERT_GT(temporary_storage_bytes, 0);
@@ -263,8 +262,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairs)
             d_keys_input.accelerator_pointer(), d_keys_output.accelerator_pointer(),
             d_values_input.accelerator_pointer(), d_values_output.accelerator_pointer(),
             size,
-            start_bit, end_bit,
-            acc_view, debug_synchronous
+            start_bit, end_bit
         );
 
         ASSERT_GT(temporary_storage_bytes, 0);
@@ -351,8 +349,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeysDoubleBuffer)
         rp::device_radix_sort_keys(
             nullptr, temporary_storage_bytes,
             d_keys, size,
-            start_bit, end_bit,
-            acc_view, debug_synchronous
+            start_bit, end_bit
         );
 
         ASSERT_GT(temporary_storage_bytes, 0);
@@ -451,8 +448,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairsDoubleBuffer)
         rp::device_radix_sort_pairs(
             nullptr, temporary_storage_bytes,
             d_keys, d_values, size,
-            start_bit, end_bit,
-            acc_view, debug_synchronous
+            start_bit, end_bit
         );
 
         ASSERT_GT(temporary_storage_bytes, 0);

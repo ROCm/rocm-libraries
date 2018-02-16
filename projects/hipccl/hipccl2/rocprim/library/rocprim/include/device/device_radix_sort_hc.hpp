@@ -388,7 +388,8 @@ void device_radix_sort(void * temporary_storage,
 /// \endparblock
 template<
     class KeysInputIterator,
-    class KeysOutputIterator
+    class KeysOutputIterator,
+    class Key = typename std::iterator_traits<KeysInputIterator>::value_type
 >
 inline
 void device_radix_sort_keys(void * temporary_storage,
@@ -397,8 +398,7 @@ void device_radix_sort_keys(void * temporary_storage,
                             KeysOutputIterator keys_output,
                             unsigned int size,
                             unsigned int begin_bit = 0,
-                            unsigned int end_bit =
-                                8 * sizeof(typename std::iterator_traits<KeysInputIterator>::value_type),
+                            unsigned int end_bit = 8 * sizeof(Key),
                             hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
                             bool debug_synchronous = false)
 {
@@ -489,7 +489,8 @@ void device_radix_sort_keys(void * temporary_storage,
 /// \endparblock
 template<
     class KeysInputIterator,
-    class KeysOutputIterator
+    class KeysOutputIterator,
+    class Key = typename std::iterator_traits<KeysInputIterator>::value_type
 >
 inline
 void device_radix_sort_keys_desc(void * temporary_storage,
@@ -498,8 +499,7 @@ void device_radix_sort_keys_desc(void * temporary_storage,
                                  KeysOutputIterator keys_output,
                                  unsigned int size,
                                  unsigned int begin_bit = 0,
-                                 unsigned int end_bit =
-                                     8 * sizeof(typename std::iterator_traits<KeysInputIterator>::value_type),
+                                 unsigned int end_bit = 8 * sizeof(Key),
                                  hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
                                  bool debug_synchronous = false)
 {
@@ -608,7 +608,8 @@ template<
     class KeysInputIterator,
     class KeysOutputIterator,
     class ValuesInputIterator,
-    class ValuesOutputIterator
+    class ValuesOutputIterator,
+    class Key = typename std::iterator_traits<KeysInputIterator>::value_type
 >
 inline
 void device_radix_sort_pairs(void * temporary_storage,
@@ -619,8 +620,7 @@ void device_radix_sort_pairs(void * temporary_storage,
                              ValuesOutputIterator values_output,
                              unsigned int size,
                              unsigned int begin_bit = 0,
-                             unsigned int end_bit =
-                                 8 * sizeof(typename std::iterator_traits<KeysInputIterator>::value_type),
+                             unsigned int end_bit = 8 * sizeof(Key),
                              hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
                              bool debug_synchronous = false)
 {
@@ -724,7 +724,8 @@ template<
     class KeysInputIterator,
     class KeysOutputIterator,
     class ValuesInputIterator,
-    class ValuesOutputIterator
+    class ValuesOutputIterator,
+    class Key = typename std::iterator_traits<KeysInputIterator>::value_type
 >
 inline
 void device_radix_sort_pairs_desc(void * temporary_storage,
@@ -735,8 +736,7 @@ void device_radix_sort_pairs_desc(void * temporary_storage,
                                   ValuesOutputIterator values_output,
                                   unsigned int size,
                                   unsigned int begin_bit = 0,
-                                  unsigned int end_bit =
-                                      8 * sizeof(typename std::iterator_traits<KeysInputIterator>::value_type),
+                                  unsigned int end_bit = 8 * sizeof(Key),
                                   hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
                                   bool debug_synchronous = false)
 {
