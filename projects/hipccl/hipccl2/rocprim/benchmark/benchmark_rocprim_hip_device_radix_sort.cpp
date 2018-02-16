@@ -57,13 +57,79 @@ const size_t DEFAULT_N = 1024 * 1024 * 32;
 enum class benchmark_kinds
 {
     sort_keys,
-    sort_pairs
+    sort_keys_desc,
+    sort_pairs,
+    sort_pairs_desc
 };
 
 namespace rp = rocprim;
 
-template<class T>
-void run_benchmark(benchmark::State& state, benchmark_kinds benchmark_kind, hipStream_t stream, size_t size)
+template<benchmark_kinds benchmark_kind, class Key, class Value>
+auto run_device_radix_sort(void * d_temporary_storage, size_t& temporary_storage_bytes,
+                           Key * d_keys_input, Key * d_keys_output,
+                           Value *, Value *,
+                           size_t size,
+                           hipStream_t stream)
+    -> typename std::enable_if<benchmark_kind == benchmark_kinds::sort_keys, hipError_t>::type
+{
+    return rp::device_radix_sort_keys(
+        d_temporary_storage, temporary_storage_bytes,
+        d_keys_input, d_keys_output, size,
+        0, sizeof(Key) * 8,
+        stream
+    );
+}
+
+template<benchmark_kinds benchmark_kind, class Key, class Value>
+auto run_device_radix_sort(void * d_temporary_storage, size_t& temporary_storage_bytes,
+                           Key * d_keys_input, Key * d_keys_output,
+                           Value *, Value *,
+                           size_t size,
+                           hipStream_t stream)
+    -> typename std::enable_if<benchmark_kind == benchmark_kinds::sort_keys_desc, hipError_t>::type
+{
+    return rp::device_radix_sort_keys_desc(
+        d_temporary_storage, temporary_storage_bytes,
+        d_keys_input, d_keys_output, size,
+        0, sizeof(Key) * 8,
+        stream
+    );
+}
+
+template<benchmark_kinds benchmark_kind, class Key, class Value>
+auto run_device_radix_sort(void * d_temporary_storage, size_t& temporary_storage_bytes,
+                           Key * d_keys_input, Key * d_keys_output,
+                           Value * d_values_input, Value * d_values_output,
+                           size_t size,
+                           hipStream_t stream)
+    -> typename std::enable_if<benchmark_kind == benchmark_kinds::sort_pairs, hipError_t>::type
+{
+    return rp::device_radix_sort_pairs(
+        d_temporary_storage, temporary_storage_bytes,
+        d_keys_input, d_keys_output, d_values_input, d_values_output, size,
+        0, sizeof(Key) * 8,
+        stream
+    );
+}
+
+template<benchmark_kinds benchmark_kind, class Key, class Value>
+auto run_device_radix_sort(void * d_temporary_storage, size_t& temporary_storage_bytes,
+                           Key * d_keys_input, Key * d_keys_output,
+                           Value * d_values_input, Value * d_values_output,
+                           size_t size,
+                           hipStream_t stream)
+    -> typename std::enable_if<benchmark_kind == benchmark_kinds::sort_pairs_desc, hipError_t>::type
+{
+    return rp::device_radix_sort_pairs_desc(
+        d_temporary_storage, temporary_storage_bytes,
+        d_keys_input, d_keys_output, d_values_input, d_values_output, size,
+        0, sizeof(Key) * 8,
+        stream
+    );
+}
+
+template<benchmark_kinds benchmark_kind, class T>
+void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
 {
     using key_type = T;
     using value_type = T;
@@ -112,53 +178,45 @@ void run_benchmark(benchmark::State& state, benchmark_kinds benchmark_kind, hipS
 
     void * d_temporary_storage = nullptr;
     size_t temporary_storage_bytes = 0;
-    if(benchmark_kind == benchmark_kinds::sort_keys)
-    {
-        rp::device_radix_sort_keys(
+    HIP_CHECK(
+        run_device_radix_sort<benchmark_kind>(
             d_temporary_storage, temporary_storage_bytes,
-            d_keys_input, d_keys_output, size
-        );
-    }
-    else if(benchmark_kind == benchmark_kinds::sort_pairs)
-    {
-        rp::device_radix_sort_pairs(
-            d_temporary_storage, temporary_storage_bytes,
-            d_keys_input, d_keys_output, d_values_input, d_values_output, size
-        );
-    }
+            d_keys_input, d_keys_output, d_values_input, d_values_output, size,
+            stream
+        )
+    );
 
     HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+    HIP_CHECK(hipDeviceSynchronize());
+
+    // Warm-up
+    for(size_t i = 0; i < 10; i++)
+    {
+        HIP_CHECK(
+            run_device_radix_sort<benchmark_kind>(
+                d_temporary_storage, temporary_storage_bytes,
+                d_keys_input, d_keys_output, d_values_input, d_values_output, size,
+                stream
+            )
+        );
+    }
     HIP_CHECK(hipDeviceSynchronize());
 
     const unsigned int batch_size = 10;
     for(auto _ : state)
     {
         auto start = std::chrono::high_resolution_clock::now();
-        if(benchmark_kind == benchmark_kinds::sort_keys)
+        for(size_t i = 0; i < batch_size; i++)
         {
-            for(size_t i = 0; i < batch_size; i++)
-            {
-                rp::device_radix_sort_keys(
-                    d_temporary_storage, temporary_storage_bytes,
-                    d_keys_input, d_keys_output, size,
-                    0, sizeof(key_type) * 8,
-                    stream, false
-                );
-            }
-        }
-        else if(benchmark_kind == benchmark_kinds::sort_pairs)
-        {
-            for(size_t i = 0; i < batch_size; i++)
-            {
-                rp::device_radix_sort_pairs(
+            HIP_CHECK(
+                run_device_radix_sort<benchmark_kind>(
                     d_temporary_storage, temporary_storage_bytes,
                     d_keys_input, d_keys_output, d_values_input, d_values_output, size,
-                    0, sizeof(key_type) * 8,
-                    stream, false
-                );
-            }
+                    stream
+                )
+            );
         }
-        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK(hipStreamSynchronize(stream));
 
         auto end = std::chrono::high_resolution_clock::now();
         auto elapsed_seconds =
@@ -178,13 +236,12 @@ void run_benchmark(benchmark::State& state, benchmark_kinds benchmark_kind, hipS
 #define CREATE_BENCHMARK(T) \
 benchmark::RegisterBenchmark( \
     (std::string("device_radix_") + name + "<" #T ">").c_str(), \
-    run_benchmark<T>, \
-    benchmark_kind, stream, size \
+    run_benchmark<benchmark_kind, T>, \
+    stream, size \
 )
 
-
-void add_benchmarks(benchmark_kinds benchmark_kind,
-                    const std::string& name,
+template<benchmark_kinds benchmark_kind>
+void add_benchmarks(const std::string& name,
                     std::vector<benchmark::internal::Benchmark*>& benchmarks,
                     hipStream_t stream,
                     size_t size)
@@ -192,7 +249,10 @@ void add_benchmarks(benchmark_kinds benchmark_kind,
     std::vector<benchmark::internal::Benchmark*> bs =
     {
         CREATE_BENCHMARK(unsigned int),
+        CREATE_BENCHMARK(int),
+
         CREATE_BENCHMARK(unsigned long long),
+        CREATE_BENCHMARK(long long),
 
         CREATE_BENCHMARK(char),
         CREATE_BENCHMARK(short),
@@ -226,8 +286,10 @@ int main(int argc, char *argv[])
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_benchmarks(benchmark_kinds::sort_keys, "sort_keys", benchmarks, stream, size);
-    add_benchmarks(benchmark_kinds::sort_pairs, "sort_pairs", benchmarks, stream, size);
+    add_benchmarks<benchmark_kinds::sort_keys>("sort_keys", benchmarks, stream, size);
+    add_benchmarks<benchmark_kinds::sort_keys_desc>("sort_keys_desc", benchmarks, stream, size);
+    add_benchmarks<benchmark_kinds::sort_pairs>("sort_pairs", benchmarks, stream, size);
+    add_benchmarks<benchmark_kinds::sort_pairs_desc>("sort_pairs_desc", benchmarks, stream, size);
 
     // Use manual timing
     for(auto& b : benchmarks)
