@@ -75,6 +75,7 @@ typedef ::testing::Types<
     params<unsigned char, int, true, 0, 7>,
     params<unsigned short, int, true, 4, 10>,
     params<unsigned int, short, false, 3, 22>,
+    params<unsigned int, double, true, 4, 21>,
     params<unsigned int, short, true, 0, 15>,
     params<unsigned long long, char, false, 8, 20>,
     params<unsigned short, double, false, 8, 11>
@@ -201,7 +202,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
     }
 }
 
-TYPED_TEST(RocprimDeviceRadixSort, SortKeysValues)
+TYPED_TEST(RocprimDeviceRadixSort, SortPairs)
 {
     using key_type = typename TestFixture::params::key_type;
     using value_type = typename TestFixture::params::value_type;
@@ -293,6 +294,193 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeysValues)
             );
         }
         acc_view.wait();
+
+        std::vector<key_type> keys_output = d_keys_output;
+        std::vector<value_type> values_output = d_values_output;
+
+        for(size_t i = 0; i < size; i++)
+        {
+            ASSERT_EQ(keys_output[i], expected[i].first);
+            ASSERT_EQ(values_output[i], expected[i].second);
+        }
+    }
+}
+
+TYPED_TEST(RocprimDeviceRadixSort, SortKeysDoubleBuffer)
+{
+    using key_type = typename TestFixture::params::key_type;
+    constexpr bool descending = TestFixture::params::descending;
+    constexpr unsigned int start_bit = TestFixture::params::start_bit;
+    constexpr unsigned int end_bit = TestFixture::params::end_bit;
+
+    hc::accelerator acc;
+    hc::accelerator_view acc_view = acc.create_view();
+
+    const bool debug_synchronous = false;
+
+    const std::vector<size_t> sizes = get_sizes();
+    for(unsigned int size : sizes)
+    {
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+        // Generate data
+        std::vector<key_type> keys_input;
+        if(std::is_floating_point<key_type>::value)
+        {
+            keys_input = get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
+        }
+        else
+        {
+            keys_input = get_random_data<key_type>(
+                size,
+                std::numeric_limits<key_type>::min(),
+                std::numeric_limits<key_type>::max()
+            );
+        }
+
+        hc::array<key_type> d_keys0(hc::extent<1>(size), keys_input.begin(), acc_view);
+        hc::array<key_type> d_keys1(size, acc_view);
+
+        // Calculate expected results on host
+        std::vector<key_type> expected(keys_input);
+        std::stable_sort(expected.begin(), expected.end(), key_comparator<key_type, descending, start_bit, end_bit>());
+
+        rp::double_buffer<key_type> d_keys(d_keys0.accelerator_pointer(), d_keys1.accelerator_pointer());
+
+        size_t temporary_storage_bytes;
+        rp::device_radix_sort_keys(
+            nullptr, temporary_storage_bytes,
+            d_keys, size,
+            start_bit, end_bit,
+            acc_view, debug_synchronous
+        );
+
+        ASSERT_GT(temporary_storage_bytes, 0);
+
+        hc::array<char> d_temporary_storage(temporary_storage_bytes, acc_view);
+
+        if(descending)
+        {
+            rp::device_radix_sort_keys_desc(
+                d_temporary_storage.accelerator_pointer(), temporary_storage_bytes,
+                d_keys, size,
+                start_bit, end_bit,
+                acc_view, debug_synchronous
+            );
+        }
+        else
+        {
+            rp::device_radix_sort_keys(
+                d_temporary_storage.accelerator_pointer(), temporary_storage_bytes,
+                d_keys, size,
+                start_bit, end_bit,
+                acc_view, debug_synchronous
+            );
+        }
+        acc_view.wait();
+
+        hc::array<key_type> d_keys_output(hc::extent<1>(size), acc_view, d_keys.current());
+
+        std::vector<key_type> keys_output = d_keys_output;
+        for(size_t i = 0; i < size; i++)
+        {
+            ASSERT_EQ(keys_output[i], expected[i]);
+        }
+    }
+}
+
+TYPED_TEST(RocprimDeviceRadixSort, SortPairsDoubleBuffer)
+{
+    using key_type = typename TestFixture::params::key_type;
+    using value_type = typename TestFixture::params::value_type;
+    constexpr bool descending = TestFixture::params::descending;
+    constexpr unsigned int start_bit = TestFixture::params::start_bit;
+    constexpr unsigned int end_bit = TestFixture::params::end_bit;
+
+    hc::accelerator acc;
+    hc::accelerator_view acc_view = acc.create_view();
+
+    const bool debug_synchronous = false;
+
+    const std::vector<size_t> sizes = get_sizes();
+    for(size_t size : sizes)
+    {
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+        // Generate data
+        std::vector<key_type> keys_input;
+        if(std::is_floating_point<key_type>::value)
+        {
+            keys_input = get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
+        }
+        else
+        {
+            keys_input = get_random_data<key_type>(
+                size,
+                std::numeric_limits<key_type>::min(),
+                std::numeric_limits<key_type>::max()
+            );
+        }
+
+        std::vector<value_type> values_input(size);
+        std::iota(values_input.begin(), values_input.end(), 0);
+
+        hc::array<key_type> d_keys0(hc::extent<1>(size), keys_input.begin(), acc_view);
+        hc::array<key_type> d_keys1(size, acc_view);
+
+        hc::array<value_type> d_values0(hc::extent<1>(size), values_input.begin(), acc_view);
+        hc::array<value_type> d_values1(size, acc_view);
+
+        using key_value = std::pair<key_type, value_type>;
+
+        // Calculate expected results on host
+        std::vector<key_value> expected(size);
+        for(size_t i = 0; i < size; i++)
+        {
+            expected[i] = key_value(keys_input[i], values_input[i]);
+        }
+        std::stable_sort(
+            expected.begin(), expected.end(),
+            key_value_comparator<key_type, value_type, descending, start_bit, end_bit>()
+        );
+
+        rp::double_buffer<key_type> d_keys(d_keys0.accelerator_pointer(), d_keys1.accelerator_pointer());
+        rp::double_buffer<value_type> d_values(d_values0.accelerator_pointer(), d_values1.accelerator_pointer());
+
+        size_t temporary_storage_bytes;
+        rp::device_radix_sort_pairs(
+            nullptr, temporary_storage_bytes,
+            d_keys, d_values, size,
+            start_bit, end_bit,
+            acc_view, debug_synchronous
+        );
+
+        ASSERT_GT(temporary_storage_bytes, 0);
+
+        hc::array<char> d_temporary_storage(temporary_storage_bytes, acc_view);
+
+        if(descending)
+        {
+            rp::device_radix_sort_pairs_desc(
+                d_temporary_storage.accelerator_pointer(), temporary_storage_bytes,
+                d_keys, d_values, size,
+                start_bit, end_bit,
+                acc_view, debug_synchronous
+            );
+        }
+        else
+        {
+            rp::device_radix_sort_pairs(
+                d_temporary_storage.accelerator_pointer(), temporary_storage_bytes,
+                d_keys, d_values, size,
+                start_bit, end_bit,
+                acc_view, debug_synchronous
+            );
+        }
+        acc_view.wait();
+
+        hc::array<key_type> d_keys_output(hc::extent<1>(size), acc_view, d_keys.current());
+        hc::array<value_type> d_values_output(hc::extent<1>(size), acc_view, d_values.current());
 
         std::vector<key_type> keys_output = d_keys_output;
         std::vector<value_type> values_output = d_values_output;

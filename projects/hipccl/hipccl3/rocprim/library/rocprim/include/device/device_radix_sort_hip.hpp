@@ -34,6 +34,7 @@
 #include "../functional.hpp"
 #include "../types.hpp"
 
+#include "double_buffer.hpp"
 #include "detail/device_radix_sort.hpp"
 
 /// \addtogroup devicemodule_hip
@@ -145,10 +146,13 @@ inline
 hipError_t device_radix_sort(void * temporary_storage,
                              size_t& temporary_storage_bytes,
                              KeysInputIterator keys_input,
+                             typename std::iterator_traits<KeysInputIterator>::value_type * keys_tmp,
                              KeysOutputIterator keys_output,
                              ValuesInputIterator values_input,
+                             typename std::iterator_traits<ValuesInputIterator>::value_type * values_tmp,
                              ValuesOutputIterator values_output,
                              unsigned int size,
+                             bool& is_result_in_output,
                              unsigned int begin_bit,
                              unsigned int end_bit,
                              hipStream_t stream,
@@ -178,6 +182,7 @@ hipError_t device_radix_sort(void * temporary_storage,
         : scan_size;
     const unsigned int batches = (blocks_per_full_batch == 1 ? full_batches : scan_size);
     const unsigned int iterations = ::rocprim::detail::ceiling_div(end_bit - begin_bit, radix_bits);
+    const bool with_double_buffer = keys_tmp != nullptr;
 
     const size_t batch_digit_counts_bytes = ::rocprim::detail::align_size(batches * radix_size * sizeof(unsigned int));
     const size_t digit_counts_bytes = ::rocprim::detail::align_size(radix_size * sizeof(unsigned int));
@@ -185,7 +190,11 @@ hipError_t device_radix_sort(void * temporary_storage,
     const size_t values_bytes = with_values ? ::rocprim::detail::align_size(size * sizeof(value_type)) : 0;
     if(temporary_storage == nullptr)
     {
-        temporary_storage_bytes = batch_digit_counts_bytes + digit_counts_bytes + keys_bytes + values_bytes;
+        temporary_storage_bytes = batch_digit_counts_bytes + digit_counts_bytes;
+        if(!with_double_buffer)
+        {
+            temporary_storage_bytes += keys_bytes + values_bytes;
+        }
         return hipSuccess;
     }
 
@@ -205,11 +214,14 @@ hipError_t device_radix_sort(void * temporary_storage,
     ptr += batch_digit_counts_bytes;
     unsigned int * digit_counts = reinterpret_cast<unsigned int *>(ptr);
     ptr += digit_counts_bytes;
-    key_type * keys_tmp = reinterpret_cast<key_type *>(ptr);
-    ptr += keys_bytes;
-    value_type * values_tmp = with_values ? reinterpret_cast<value_type *>(ptr) : nullptr;
+   if(!with_double_buffer)
+    {
+        keys_tmp = reinterpret_cast<key_type *>(ptr);
+        ptr += keys_bytes;
+        values_tmp = with_values ? reinterpret_cast<value_type *>(ptr) : nullptr;
+    }
 
-    unsigned int iterations_left = iterations - 1;
+    bool to_output = with_double_buffer || (iterations - 1) % 2 == 0;
     for(unsigned int bit = begin_bit; bit < end_bit; bit += radix_bits)
     {
         // Handle cases when (end_bit - bit) is not divisible by radix_bits, i.e. the last
@@ -236,7 +248,7 @@ hipError_t device_radix_sort(void * temporary_storage,
         }
         else
         {
-            if(iterations_left % 2 == 0)
+            if(to_output)
             {
                 hipLaunchKernelGGL(
                     HIP_KERNEL_NAME(fill_digit_counts_kernel<
@@ -284,7 +296,7 @@ hipError_t device_radix_sort(void * temporary_storage,
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         if(is_first_iteration)
         {
-            if(iterations_left % 2 == 0)
+            if(to_output)
             {
                 hipLaunchKernelGGL(
                     HIP_KERNEL_NAME(sort_and_scatter_kernel<
@@ -315,7 +327,7 @@ hipError_t device_radix_sort(void * temporary_storage,
         }
         else
         {
-            if(iterations_left % 2 == 0)
+            if(to_output)
             {
                 hipLaunchKernelGGL(
                     HIP_KERNEL_NAME(sort_and_scatter_kernel<
@@ -346,7 +358,8 @@ hipError_t device_radix_sort(void * temporary_storage,
         }
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("sort_and_scatter", size, start)
 
-        iterations_left--;
+        is_result_in_output = to_output;
+        to_output = !to_output;
     }
 
     return hipSuccess;
@@ -446,9 +459,12 @@ hipError_t device_radix_sort_keys(void * temporary_storage,
                                   bool debug_synchronous = false)
 {
     empty_type * values = nullptr;
+    bool ignored;
     return detail::device_radix_sort<false>(
         temporary_storage, temporary_storage_bytes,
-        keys_input, keys_output, values, values, size,
+        keys_input, nullptr, keys_output,
+        values, nullptr, values,
+        size, ignored,
         begin_bit, end_bit,
         stream, debug_synchronous
     );
@@ -544,9 +560,12 @@ hipError_t device_radix_sort_keys_desc(void * temporary_storage,
                                        bool debug_synchronous = false)
 {
     empty_type * values = nullptr;
+    bool ignored;
     return detail::device_radix_sort<true>(
         temporary_storage, temporary_storage_bytes,
-        keys_input, keys_output, values, values, size,
+        keys_input, nullptr, keys_output,
+        values, nullptr, values,
+        size, ignored,
         begin_bit, end_bit,
         stream, debug_synchronous
     );
@@ -660,9 +679,12 @@ hipError_t device_radix_sort_pairs(void * temporary_storage,
                                    hipStream_t stream = 0,
                                    bool debug_synchronous = false)
 {
+    bool ignored;
     return detail::device_radix_sort<false>(
         temporary_storage, temporary_storage_bytes,
-        keys_input, keys_output, values_input, values_output, size,
+        keys_input, nullptr, keys_output,
+        values_input, nullptr, values_output,
+        size, ignored,
         begin_bit, end_bit,
         stream, debug_synchronous
     );
@@ -772,12 +794,129 @@ hipError_t device_radix_sort_pairs_desc(void * temporary_storage,
                                         hipStream_t stream = 0,
                                         bool debug_synchronous = false)
 {
+    bool ignored;
     return detail::device_radix_sort<true>(
         temporary_storage, temporary_storage_bytes,
-        keys_input, keys_output, values_input, values_output, size,
+        keys_input, nullptr, keys_output,
+        values_input, nullptr, values_output,
+        size, ignored,
         begin_bit, end_bit,
         stream, debug_synchronous
     );
+}
+
+template<class Key>
+inline
+hipError_t device_radix_sort_keys(void * temporary_storage,
+                                  size_t& temporary_storage_bytes,
+                                  double_buffer<Key>& keys,
+                                  unsigned int size,
+                                  unsigned int begin_bit = 0,
+                                  unsigned int end_bit = 8 * sizeof(Key),
+                                  hipStream_t stream = 0,
+                                  bool debug_synchronous = false)
+{
+    empty_type * values = nullptr;
+    bool is_result_in_output;
+    hipError_t error = detail::device_radix_sort<false>(
+        temporary_storage, temporary_storage_bytes,
+        keys.current(), keys.current(), keys.alternate(),
+        values, values, values,
+        size, is_result_in_output,
+        begin_bit, end_bit,
+        stream, debug_synchronous
+    );
+    if(temporary_storage != nullptr && is_result_in_output)
+    {
+        keys.selector ^= 1;
+    }
+    return error;
+}
+
+template<class Key>
+inline
+hipError_t device_radix_sort_keys_desc(void * temporary_storage,
+                                       size_t& temporary_storage_bytes,
+                                       double_buffer<Key>& keys,
+                                       unsigned int size,
+                                       unsigned int begin_bit = 0,
+                                       unsigned int end_bit = 8 * sizeof(Key),
+                                       hipStream_t stream = 0,
+                                       bool debug_synchronous = false)
+{
+    empty_type * values = nullptr;
+    bool is_result_in_output;
+    hipError_t error = detail::device_radix_sort<true>(
+        temporary_storage, temporary_storage_bytes,
+        keys.current(), keys.current(), keys.alternate(),
+        values, values, values,
+        size, is_result_in_output,
+        begin_bit, end_bit,
+        stream, debug_synchronous
+    );
+    if(temporary_storage != nullptr && is_result_in_output)
+    {
+        keys.selector ^= 1;
+    }
+    return error;
+}
+
+template<class Key, class Value>
+inline
+hipError_t device_radix_sort_pairs(void * temporary_storage,
+                                   size_t& temporary_storage_bytes,
+                                   double_buffer<Key>& keys,
+                                   double_buffer<Value>& values,
+                                   unsigned int size,
+                                   unsigned int begin_bit = 0,
+                                   unsigned int end_bit = 8 * sizeof(Key),
+                                   hipStream_t stream = 0,
+                                   bool debug_synchronous = false)
+{
+    bool is_result_in_output;
+    hipError_t error = detail::device_radix_sort<false>(
+        temporary_storage, temporary_storage_bytes,
+        keys.current(), keys.current(), keys.alternate(),
+        values.current(), values.current(), values.alternate(),
+        size, is_result_in_output,
+        begin_bit, end_bit,
+        stream, debug_synchronous
+    );
+    if(temporary_storage != nullptr && is_result_in_output)
+    {
+        keys.selector ^= 1;
+        values.selector ^= 1;
+    }
+    return error;
+}
+
+template<class Key, class Value>
+inline
+hipError_t device_radix_sort_pairs_desc(void * temporary_storage,
+                                        size_t& temporary_storage_bytes,
+                                        double_buffer<Key>& keys,
+                                        double_buffer<Value>& values,
+                                        unsigned int size,
+                                        unsigned int begin_bit = 0,
+                                        unsigned int end_bit = 8 * sizeof(Key),
+                                        hipStream_t stream = 0,
+                                        bool debug_synchronous = false)
+{
+    bool is_result_in_output;
+    hipError_t error = detail::device_radix_sort<true>(
+        temporary_storage, temporary_storage_bytes,
+        keys.current(), keys.current(), keys.alternate(),
+        values.current(), values.current(), values.alternate(),
+        size, is_result_in_output,
+        begin_bit, end_bit,
+        stream, debug_synchronous
+    );
+    if(temporary_storage != nullptr && is_result_in_output)
+    {
+        keys.selector ^= 1;
+        values.selector ^= 1;
+    }
+    return error;
 }
 
 END_ROCPRIM_NAMESPACE
