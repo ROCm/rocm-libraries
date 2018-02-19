@@ -59,14 +59,14 @@ build:rocm:
   artifacts:
     paths:
     - build/library/
-    - build/test/
-    - build/benchmark/
+    - build/test/test_*
+    - build/test/CTestTestfile.cmake
     - build/gtest/
     - build/CMakeCache.txt
     - build/CTestTestfile.cmake
-    - build/Makefile
     - build/*.deb
     - build/*.zip
+    expire_in: 4 week
 
 test:rocm243:
   tags:
@@ -112,14 +112,14 @@ build:rocm-rc:
   artifacts:
     paths:
     - build/library/
-    - build/test/
-    - build/benchmark/
+    - build/test/test_*
+    - build/test/CTestTestfile.cmake
     - build/gtest/
     - build/CMakeCache.txt
     - build/CTestTestfile.cmake
-    - build/Makefile
     - build/*.deb
     - build/*.zip
+    expire_in: 4 week
 
 test:rocm241-rc:
   image: ourrocm/rocm:1.7.119rc
