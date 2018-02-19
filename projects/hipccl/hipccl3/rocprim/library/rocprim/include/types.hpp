@@ -26,6 +26,8 @@
 // Meta configuration for rocPRIM
 #include "config.hpp"
 
+#include "types/double_buffer.hpp"
+
 /// \addtogroup utilsmodule
 /// @{
 

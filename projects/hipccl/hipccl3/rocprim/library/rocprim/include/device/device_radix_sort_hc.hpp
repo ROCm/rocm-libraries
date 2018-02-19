@@ -34,7 +34,6 @@
 #include "../functional.hpp"
 #include "../types.hpp"
 
-#include "double_buffer.hpp"
 #include "detail/device_radix_sort.hpp"
 
 /// \addtogroup devicemodule_hc
