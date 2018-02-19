@@ -116,7 +116,7 @@ typedef ::testing::Types<
                  rp::block_store_method::block_store_direct, 512U, 1>,
     class_params<double, rp::block_load_method::block_load_direct,
                  rp::block_store_method::block_store_direct, 512U, 4>,
-    
+
     // block_load_vectorize
     class_params<int, rp::block_load_method::block_load_vectorize,
                  rp::block_store_method::block_store_vectorize, 64U, 1>,
@@ -186,7 +186,7 @@ typedef ::testing::Types<
                  rp::block_store_method::block_store_transpose, 512U, 1>,
     class_params<double, rp::block_load_method::block_load_transpose,
                  rp::block_store_method::block_store_transpose, 512U, 4>
- 
+
 > ClassParams;
 
 typedef ::testing::Types<
