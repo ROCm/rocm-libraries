@@ -100,6 +100,7 @@ void run_benchmark(benchmark::State& state, size_t max_length, hc::accelerator_v
         acc_view,
         false
     );
+    acc_view.wait();
 
     // allocate temporary storage
     hc::array<char> d_temp_storage(temp_storage_size_bytes, acc_view);
