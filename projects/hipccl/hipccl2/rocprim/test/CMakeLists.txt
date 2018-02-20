@@ -89,6 +89,7 @@ add_rocprim_test_hip("rocprim.hip.block_exchange" test_rocprim_hip_block_exchang
 add_rocprim_test_hip("rocprim.hip.block_reduce" test_rocprim_hip_block_reduce.cpp)
 add_rocprim_test_hip("rocprim.hip.block_load_store" test_rocprim_hip_block_load_store.cpp)
 add_rocprim_test_hip("rocprim.hip.block_radix_sort" test_rocprim_hip_block_radix_sort.cpp)
+add_rocprim_test_hip("rocprim.hip.block_scan" test_rocprim_hip_block_scan.cpp)
 add_rocprim_test_hip("rocprim.hip.device_radix_sort" test_rocprim_hip_device_radix_sort.cpp)
 add_rocprim_test_hip("rocprim.hip.device_reduce_by_key" test_rocprim_hip_device_reduce_by_key.cpp)
 add_rocprim_test_hip("rocprim.hip.device_reduce" test_rocprim_hip_device_reduce.cpp)

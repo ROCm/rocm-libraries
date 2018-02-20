@@ -432,5 +432,8 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeysValues)
         ASSERT_EQ(keys_output[i], expected[i].first);
         ASSERT_EQ(values_output[i], expected[i].second);
     }
+
+    HIP_CHECK(hipFree(device_keys_output));
+    HIP_CHECK(hipFree(device_values_output));
 }
 
