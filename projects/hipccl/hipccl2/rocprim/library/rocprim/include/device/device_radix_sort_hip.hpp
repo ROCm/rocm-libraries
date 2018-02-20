@@ -142,20 +142,20 @@ template<
     class ValuesOutputIterator
 >
 inline
-hipError_t device_radix_sort(void * temporary_storage,
-                             size_t& temporary_storage_bytes,
-                             KeysInputIterator keys_input,
-                             typename std::iterator_traits<KeysInputIterator>::value_type * keys_tmp,
-                             KeysOutputIterator keys_output,
-                             ValuesInputIterator values_input,
-                             typename std::iterator_traits<ValuesInputIterator>::value_type * values_tmp,
-                             ValuesOutputIterator values_output,
-                             unsigned int size,
-                             bool& is_result_in_output,
-                             unsigned int begin_bit,
-                             unsigned int end_bit,
-                             hipStream_t stream,
-                             bool debug_synchronous)
+hipError_t radix_sort(void * temporary_storage,
+                      size_t& temporary_storage_bytes,
+                      KeysInputIterator keys_input,
+                      typename std::iterator_traits<KeysInputIterator>::value_type * keys_tmp,
+                      KeysOutputIterator keys_output,
+                      ValuesInputIterator values_input,
+                      typename std::iterator_traits<ValuesInputIterator>::value_type * values_tmp,
+                      ValuesOutputIterator values_output,
+                      unsigned int size,
+                      bool& is_result_in_output,
+                      unsigned int begin_bit,
+                      unsigned int end_bit,
+                      hipStream_t stream,
+                      bool debug_synchronous)
 {
     constexpr unsigned int radix_bits = 8;
     constexpr unsigned int radix_size = 1 << radix_bits;
@@ -370,7 +370,7 @@ hipError_t device_radix_sort(void * temporary_storage,
 
 /// \brief HIP parallel ascending radix sort primitive for device level.
 ///
-/// \p device_radix_sort_keys function performs a device-wide radix sort
+/// \p radix_sort_keys function performs a device-wide radix sort
 /// of keys. Function sorts input keys in ascending order.
 ///
 /// \par Overview
@@ -424,7 +424,7 @@ hipError_t device_radix_sort(void * temporary_storage,
 /// size_t temporary_storage_size_bytes;
 /// void * temporary_storage_ptr = nullptr;
 /// // Get required size of the temporary storage
-/// rocprim::device_radix_sort_keys(
+/// rocprim::radix_sort_keys(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     input, output, input_size
 /// );
@@ -433,7 +433,7 @@ hipError_t device_radix_sort(void * temporary_storage,
 /// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
 ///
 /// // perform sort
-/// rocprim::device_radix_sort_keys(
+/// rocprim::radix_sort_keys(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     input, output, input_size
 /// );
@@ -446,19 +446,19 @@ template<
     class Key = typename std::iterator_traits<KeysInputIterator>::value_type
 >
 inline
-hipError_t device_radix_sort_keys(void * temporary_storage,
-                                  size_t& temporary_storage_bytes,
-                                  KeysInputIterator keys_input,
-                                  KeysOutputIterator keys_output,
-                                  unsigned int size,
-                                  unsigned int begin_bit = 0,
-                                  unsigned int end_bit = 8 * sizeof(Key),
-                                  hipStream_t stream = 0,
-                                  bool debug_synchronous = false)
+hipError_t radix_sort_keys(void * temporary_storage,
+                           size_t& temporary_storage_bytes,
+                           KeysInputIterator keys_input,
+                           KeysOutputIterator keys_output,
+                           unsigned int size,
+                           unsigned int begin_bit = 0,
+                           unsigned int end_bit = 8 * sizeof(Key),
+                           hipStream_t stream = 0,
+                           bool debug_synchronous = false)
 {
     empty_type * values = nullptr;
     bool ignored;
-    return detail::device_radix_sort<false>(
+    return detail::radix_sort<false>(
         temporary_storage, temporary_storage_bytes,
         keys_input, nullptr, keys_output,
         values, nullptr, values,
@@ -470,7 +470,7 @@ hipError_t device_radix_sort_keys(void * temporary_storage,
 
 /// \brief HIP parallel descending radix sort primitive for device level.
 ///
-/// \p device_radix_sort_keys_desc function performs a device-wide radix sort
+/// \p radix_sort_keys_desc function performs a device-wide radix sort
 /// of keys. Function sorts input keys in descending order.
 ///
 /// \par Overview
@@ -524,7 +524,7 @@ hipError_t device_radix_sort_keys(void * temporary_storage,
 /// size_t temporary_storage_size_bytes;
 /// void * temporary_storage_ptr = nullptr;
 /// // Get required size of the temporary storage
-/// rocprim::device_radix_sort_keys_desc(
+/// rocprim::radix_sort_keys_desc(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     input, output, input_size
 /// );
@@ -533,7 +533,7 @@ hipError_t device_radix_sort_keys(void * temporary_storage,
 /// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
 ///
 /// // perform sort
-/// rocprim::device_radix_sort_keys_desc(
+/// rocprim::radix_sort_keys_desc(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     input, output, input_size
 /// );
@@ -546,19 +546,19 @@ template<
     class Key = typename std::iterator_traits<KeysInputIterator>::value_type
 >
 inline
-hipError_t device_radix_sort_keys_desc(void * temporary_storage,
-                                       size_t& temporary_storage_bytes,
-                                       KeysInputIterator keys_input,
-                                       KeysOutputIterator keys_output,
-                                       unsigned int size,
-                                       unsigned int begin_bit = 0,
-                                       unsigned int end_bit = 8 * sizeof(Key),
-                                       hipStream_t stream = 0,
-                                       bool debug_synchronous = false)
+hipError_t radix_sort_keys_desc(void * temporary_storage,
+                                size_t& temporary_storage_bytes,
+                                KeysInputIterator keys_input,
+                                KeysOutputIterator keys_output,
+                                unsigned int size,
+                                unsigned int begin_bit = 0,
+                                unsigned int end_bit = 8 * sizeof(Key),
+                                hipStream_t stream = 0,
+                                bool debug_synchronous = false)
 {
     empty_type * values = nullptr;
     bool ignored;
-    return detail::device_radix_sort<true>(
+    return detail::radix_sort<true>(
         temporary_storage, temporary_storage_bytes,
         keys_input, nullptr, keys_output,
         values, nullptr, values,
@@ -570,7 +570,7 @@ hipError_t device_radix_sort_keys_desc(void * temporary_storage,
 
 /// \brief HIP parallel ascending radix sort-by-key primitive for device level.
 ///
-/// \p device_radix_sort_pairs_desc function performs a device-wide radix sort
+/// \p radix_sort_pairs_desc function performs a device-wide radix sort
 /// of (key, value) pairs. Function sorts input pairs in ascending order of keys.
 ///
 /// \par Overview
@@ -637,7 +637,7 @@ hipError_t device_radix_sort_keys_desc(void * temporary_storage,
 /// size_t temporary_storage_size_bytes;
 /// void * temporary_storage_ptr = nullptr;
 /// // Get required size of the temporary storage
-/// rocprim::device_radix_sort_pairs(
+/// rocprim::radix_sort_pairs(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     keys_input, keys_output, values_input, values_output,
 ///     input_size, 0, 5
@@ -647,7 +647,7 @@ hipError_t device_radix_sort_keys_desc(void * temporary_storage,
 /// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
 ///
 /// // perform sort
-/// rocprim::device_radix_sort_pairs(
+/// rocprim::radix_sort_pairs(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     keys_input, keys_output, values_input, values_output,
 ///     input_size, 0, 5
@@ -664,20 +664,20 @@ template<
     class Key = typename std::iterator_traits<KeysInputIterator>::value_type
 >
 inline
-hipError_t device_radix_sort_pairs(void * temporary_storage,
-                                   size_t& temporary_storage_bytes,
-                                   KeysInputIterator keys_input,
-                                   KeysOutputIterator keys_output,
-                                   ValuesInputIterator values_input,
-                                   ValuesOutputIterator values_output,
-                                   unsigned int size,
-                                   unsigned int begin_bit = 0,
-                                   unsigned int end_bit = 8 * sizeof(Key),
-                                   hipStream_t stream = 0,
-                                   bool debug_synchronous = false)
+hipError_t radix_sort_pairs(void * temporary_storage,
+                            size_t& temporary_storage_bytes,
+                            KeysInputIterator keys_input,
+                            KeysOutputIterator keys_output,
+                            ValuesInputIterator values_input,
+                            ValuesOutputIterator values_output,
+                            unsigned int size,
+                            unsigned int begin_bit = 0,
+                            unsigned int end_bit = 8 * sizeof(Key),
+                            hipStream_t stream = 0,
+                            bool debug_synchronous = false)
 {
     bool ignored;
-    return detail::device_radix_sort<false>(
+    return detail::radix_sort<false>(
         temporary_storage, temporary_storage_bytes,
         keys_input, nullptr, keys_output,
         values_input, nullptr, values_output,
@@ -689,7 +689,7 @@ hipError_t device_radix_sort_pairs(void * temporary_storage,
 
 /// \brief HIP parallel descending radix sort-by-key primitive for device level.
 ///
-/// \p device_radix_sort_pairs_desc function performs a device-wide radix sort
+/// \p radix_sort_pairs_desc function performs a device-wide radix sort
 /// of (key, value) pairs. Function sorts input pairs in descending order of keys.
 ///
 /// \par Overview
@@ -752,7 +752,7 @@ hipError_t device_radix_sort_pairs(void * temporary_storage,
 /// size_t temporary_storage_size_bytes;
 /// void * temporary_storage_ptr = nullptr;
 /// // Get required size of the temporary storage
-/// rocprim::device_radix_sort_pairs_desc(
+/// rocprim::radix_sort_pairs_desc(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     keys_input, keys_output, values_input, values_output,
 ///     input_size
@@ -762,7 +762,7 @@ hipError_t device_radix_sort_pairs(void * temporary_storage,
 /// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
 ///
 /// // perform sort
-/// rocprim::device_radix_sort_pairs_desc(
+/// rocprim::radix_sort_pairs_desc(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     keys_input, keys_output, values_input, values_output,
 ///     input_size
@@ -779,20 +779,20 @@ template<
     class Key = typename std::iterator_traits<KeysInputIterator>::value_type
 >
 inline
-hipError_t device_radix_sort_pairs_desc(void * temporary_storage,
-                                        size_t& temporary_storage_bytes,
-                                        KeysInputIterator keys_input,
-                                        KeysOutputIterator keys_output,
-                                        ValuesInputIterator values_input,
-                                        ValuesOutputIterator values_output,
-                                        unsigned int size,
-                                        unsigned int begin_bit = 0,
-                                        unsigned int end_bit = 8 * sizeof(Key),
-                                        hipStream_t stream = 0,
-                                        bool debug_synchronous = false)
+hipError_t radix_sort_pairs_desc(void * temporary_storage,
+                                 size_t& temporary_storage_bytes,
+                                 KeysInputIterator keys_input,
+                                 KeysOutputIterator keys_output,
+                                 ValuesInputIterator values_input,
+                                 ValuesOutputIterator values_output,
+                                 unsigned int size,
+                                 unsigned int begin_bit = 0,
+                                 unsigned int end_bit = 8 * sizeof(Key),
+                                 hipStream_t stream = 0,
+                                 bool debug_synchronous = false)
 {
     bool ignored;
-    return detail::device_radix_sort<true>(
+    return detail::radix_sort<true>(
         temporary_storage, temporary_storage_bytes,
         keys_input, nullptr, keys_output,
         values_input, nullptr, values_output,
@@ -804,7 +804,7 @@ hipError_t device_radix_sort_pairs_desc(void * temporary_storage,
 
 /// \brief HIP parallel ascending radix sort primitive for device level.
 ///
-/// \p device_radix_sort_keys function performs a device-wide radix sort
+/// \p radix_sort_keys function performs a device-wide radix sort
 /// of keys. Function sorts input keys in ascending order.
 ///
 /// \par Overview
@@ -862,7 +862,7 @@ hipError_t device_radix_sort_pairs_desc(void * temporary_storage,
 /// size_t temporary_storage_size_bytes;
 /// void * temporary_storage_ptr = nullptr;
 /// // Get required size of the temporary storage
-/// rocprim::device_radix_sort_keys(
+/// rocprim::radix_sort_keys(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     keys, input_size
 /// );
@@ -871,7 +871,7 @@ hipError_t device_radix_sort_pairs_desc(void * temporary_storage,
 /// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
 ///
 /// // perform sort
-/// rocprim::device_radix_sort_keys(
+/// rocprim::radix_sort_keys(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     keys, input_size
 /// );
@@ -880,18 +880,18 @@ hipError_t device_radix_sort_pairs_desc(void * temporary_storage,
 /// \endparblock
 template<class Key>
 inline
-hipError_t device_radix_sort_keys(void * temporary_storage,
-                                  size_t& temporary_storage_bytes,
-                                  double_buffer<Key>& keys,
-                                  unsigned int size,
-                                  unsigned int begin_bit = 0,
-                                  unsigned int end_bit = 8 * sizeof(Key),
-                                  hipStream_t stream = 0,
-                                  bool debug_synchronous = false)
+hipError_t radix_sort_keys(void * temporary_storage,
+                           size_t& temporary_storage_bytes,
+                           double_buffer<Key>& keys,
+                           unsigned int size,
+                           unsigned int begin_bit = 0,
+                           unsigned int end_bit = 8 * sizeof(Key),
+                           hipStream_t stream = 0,
+                           bool debug_synchronous = false)
 {
     empty_type * values = nullptr;
     bool is_result_in_output;
-    hipError_t error = detail::device_radix_sort<false>(
+    hipError_t error = detail::radix_sort<false>(
         temporary_storage, temporary_storage_bytes,
         keys.current(), keys.current(), keys.alternate(),
         values, values, values,
@@ -908,7 +908,7 @@ hipError_t device_radix_sort_keys(void * temporary_storage,
 
 /// \brief HIP parallel descending radix sort primitive for device level.
 ///
-/// \p device_radix_sort_keys_desc function performs a device-wide radix sort
+/// \p radix_sort_keys_desc function performs a device-wide radix sort
 /// of keys. Function sorts input keys in descending order.
 ///
 /// \par Overview
@@ -966,7 +966,7 @@ hipError_t device_radix_sort_keys(void * temporary_storage,
 /// size_t temporary_storage_size_bytes;
 /// void * temporary_storage_ptr = nullptr;
 /// // Get required size of the temporary storage
-/// rocprim::device_radix_sort_keys_desc(
+/// rocprim::radix_sort_keys_desc(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     keys, input_size
 /// );
@@ -975,7 +975,7 @@ hipError_t device_radix_sort_keys(void * temporary_storage,
 /// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
 ///
 /// // perform sort
-/// rocprim::device_radix_sort_keys_desc(
+/// rocprim::radix_sort_keys_desc(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     keys, input_size
 /// );
@@ -984,18 +984,18 @@ hipError_t device_radix_sort_keys(void * temporary_storage,
 /// \endparblock
 template<class Key>
 inline
-hipError_t device_radix_sort_keys_desc(void * temporary_storage,
-                                       size_t& temporary_storage_bytes,
-                                       double_buffer<Key>& keys,
-                                       unsigned int size,
-                                       unsigned int begin_bit = 0,
-                                       unsigned int end_bit = 8 * sizeof(Key),
-                                       hipStream_t stream = 0,
-                                       bool debug_synchronous = false)
+hipError_t radix_sort_keys_desc(void * temporary_storage,
+                                size_t& temporary_storage_bytes,
+                                double_buffer<Key>& keys,
+                                unsigned int size,
+                                unsigned int begin_bit = 0,
+                                unsigned int end_bit = 8 * sizeof(Key),
+                                hipStream_t stream = 0,
+                                bool debug_synchronous = false)
 {
     empty_type * values = nullptr;
     bool is_result_in_output;
-    hipError_t error = detail::device_radix_sort<true>(
+    hipError_t error = detail::radix_sort<true>(
         temporary_storage, temporary_storage_bytes,
         keys.current(), keys.current(), keys.alternate(),
         values, values, values,
@@ -1012,7 +1012,7 @@ hipError_t device_radix_sort_keys_desc(void * temporary_storage,
 
 /// \brief HIP parallel ascending radix sort-by-key primitive for device level.
 ///
-/// \p device_radix_sort_pairs_desc function performs a device-wide radix sort
+/// \p radix_sort_pairs_desc function performs a device-wide radix sort
 /// of (key, value) pairs. Function sorts input pairs in ascending order of keys.
 ///
 /// \par Overview
@@ -1080,7 +1080,7 @@ hipError_t device_radix_sort_keys_desc(void * temporary_storage,
 /// size_t temporary_storage_size_bytes;
 /// void * temporary_storage_ptr = nullptr;
 /// // Get required size of the temporary storage
-/// rocprim::device_radix_sort_pairs(
+/// rocprim::radix_sort_pairs(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     keys, values, input_size,
 ///     0, 5
@@ -1090,7 +1090,7 @@ hipError_t device_radix_sort_keys_desc(void * temporary_storage,
 /// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
 ///
 /// // perform sort
-/// rocprim::device_radix_sort_pairs(
+/// rocprim::radix_sort_pairs(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     keys, values, input_size,
 ///     0, 5
@@ -1101,18 +1101,18 @@ hipError_t device_radix_sort_keys_desc(void * temporary_storage,
 /// \endparblock
 template<class Key, class Value>
 inline
-hipError_t device_radix_sort_pairs(void * temporary_storage,
-                                   size_t& temporary_storage_bytes,
-                                   double_buffer<Key>& keys,
-                                   double_buffer<Value>& values,
-                                   unsigned int size,
-                                   unsigned int begin_bit = 0,
-                                   unsigned int end_bit = 8 * sizeof(Key),
-                                   hipStream_t stream = 0,
-                                   bool debug_synchronous = false)
+hipError_t radix_sort_pairs(void * temporary_storage,
+                            size_t& temporary_storage_bytes,
+                            double_buffer<Key>& keys,
+                            double_buffer<Value>& values,
+                            unsigned int size,
+                            unsigned int begin_bit = 0,
+                            unsigned int end_bit = 8 * sizeof(Key),
+                            hipStream_t stream = 0,
+                            bool debug_synchronous = false)
 {
     bool is_result_in_output;
-    hipError_t error = detail::device_radix_sort<false>(
+    hipError_t error = detail::radix_sort<false>(
         temporary_storage, temporary_storage_bytes,
         keys.current(), keys.current(), keys.alternate(),
         values.current(), values.current(), values.alternate(),
@@ -1130,7 +1130,7 @@ hipError_t device_radix_sort_pairs(void * temporary_storage,
 
 /// \brief HIP parallel descending radix sort-by-key primitive for device level.
 ///
-/// \p device_radix_sort_pairs_desc function performs a device-wide radix sort
+/// \p radix_sort_pairs_desc function performs a device-wide radix sort
 /// of (key, value) pairs. Function sorts input pairs in descending order of keys.
 ///
 /// \par Overview
@@ -1194,7 +1194,7 @@ hipError_t device_radix_sort_pairs(void * temporary_storage,
 /// size_t temporary_storage_size_bytes;
 /// void * temporary_storage_ptr = nullptr;
 /// // Get required size of the temporary storage
-/// rocprim::device_radix_sort_pairs_desc(
+/// rocprim::radix_sort_pairs_desc(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     keys, values, input_size
 /// );
@@ -1203,7 +1203,7 @@ hipError_t device_radix_sort_pairs(void * temporary_storage,
 /// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
 ///
 /// // perform sort
-/// rocprim::device_radix_sort_pairs_desc(
+/// rocprim::radix_sort_pairs_desc(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     keys, values, input_size
 /// );
@@ -1213,18 +1213,18 @@ hipError_t device_radix_sort_pairs(void * temporary_storage,
 /// \endparblock
 template<class Key, class Value>
 inline
-hipError_t device_radix_sort_pairs_desc(void * temporary_storage,
-                                        size_t& temporary_storage_bytes,
-                                        double_buffer<Key>& keys,
-                                        double_buffer<Value>& values,
-                                        unsigned int size,
-                                        unsigned int begin_bit = 0,
-                                        unsigned int end_bit = 8 * sizeof(Key),
-                                        hipStream_t stream = 0,
-                                        bool debug_synchronous = false)
+hipError_t radix_sort_pairs_desc(void * temporary_storage,
+                                 size_t& temporary_storage_bytes,
+                                 double_buffer<Key>& keys,
+                                 double_buffer<Value>& values,
+                                 unsigned int size,
+                                 unsigned int begin_bit = 0,
+                                 unsigned int end_bit = 8 * sizeof(Key),
+                                 hipStream_t stream = 0,
+                                 bool debug_synchronous = false)
 {
     bool is_result_in_output;
-    hipError_t error = detail::device_radix_sort<true>(
+    hipError_t error = detail::radix_sort<true>(
         temporary_storage, temporary_storage_bytes,
         keys.current(), keys.current(), keys.alternate(),
         values.current(), values.current(), values.alternate(),

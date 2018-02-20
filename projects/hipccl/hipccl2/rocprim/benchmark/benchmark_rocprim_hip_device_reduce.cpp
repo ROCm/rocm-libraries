@@ -95,7 +95,7 @@ void run_benchmark(benchmark::State& state,
     void * d_temp_storage = nullptr;
     // Get size of d_temp_storage
     HIP_CHECK(
-        rocprim::device_reduce(
+        rocprim::reduce(
             d_temp_storage, temp_storage_size_bytes,
             d_input, d_output, T(), size,
             reduce_op, stream
@@ -108,7 +108,7 @@ void run_benchmark(benchmark::State& state,
     for(size_t i = 0; i < 10; i++)
     {
         HIP_CHECK(
-            rocprim::device_reduce(
+            rocprim::reduce(
                 d_temp_storage, temp_storage_size_bytes,
                 d_input, d_output, T(), size,
                 reduce_op, stream
@@ -125,7 +125,7 @@ void run_benchmark(benchmark::State& state,
         for(size_t i = 0; i < batch_size; i++)
         {
             HIP_CHECK(
-                rocprim::device_reduce(
+                rocprim::reduce(
                     d_temp_storage, temp_storage_size_bytes,
                     d_input, d_output, T(), size,
                     reduce_op, stream

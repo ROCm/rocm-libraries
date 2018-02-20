@@ -116,7 +116,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
         // temp storage
         size_t temp_storage_size_bytes;
         // Get size of d_temp_storage
-        rocprim::device_inclusive_scan(
+        rocprim::inclusive_scan(
             nullptr,
             temp_storage_size_bytes,
             d_input.accelerator_pointer(),
@@ -136,7 +136,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
         acc_view.wait();
 
         // Run
-        rocprim::device_inclusive_scan(
+        rocprim::inclusive_scan(
             d_temp_storage.accelerator_pointer(),
             temp_storage_size_bytes,
             d_input.accelerator_pointer(),
@@ -195,7 +195,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanSum)
         // temp storage
         size_t temp_storage_size_bytes;
         // Get size of d_temp_storage
-        rocprim::device_exclusive_scan(
+        rocprim::exclusive_scan(
             nullptr, temp_storage_size_bytes,
             d_input.accelerator_pointer(),
             d_output.accelerator_pointer(),
@@ -215,7 +215,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanSum)
         acc_view.wait();
 
         // Run
-        rocprim::device_exclusive_scan(
+        rocprim::exclusive_scan(
             d_temp_storage.accelerator_pointer(),
             temp_storage_size_bytes,
             d_input.accelerator_pointer(),

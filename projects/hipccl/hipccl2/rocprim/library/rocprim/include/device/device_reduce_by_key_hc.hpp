@@ -58,18 +58,18 @@ template<
     class KeyCompareFunction
 >
 inline
-void device_reduce_by_key_impl(void * temporary_storage,
-                               size_t& storage_size,
-                               KeysInputIterator keys_input,
-                               ValuesInputIterator values_input,
-                               const unsigned int size,
-                               UniqueOutputIterator unique_output,
-                               AggregatesOutputIterator aggregates_output,
-                               UniqueCountOutputIterator unique_count_output,
-                               BinaryFunction reduce_op,
-                               KeyCompareFunction key_compare_op,
-                               hc::accelerator_view acc_view,
-                               const bool debug_synchronous)
+void reduce_by_key_impl(void * temporary_storage,
+                        size_t& storage_size,
+                        KeysInputIterator keys_input,
+                        ValuesInputIterator values_input,
+                        const unsigned int size,
+                        UniqueOutputIterator unique_output,
+                        AggregatesOutputIterator aggregates_output,
+                        UniqueCountOutputIterator unique_count_output,
+                        BinaryFunction reduce_op,
+                        KeyCompareFunction key_compare_op,
+                        hc::accelerator_view acc_view,
+                        const bool debug_synchronous)
 {
     using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
     using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
@@ -195,20 +195,20 @@ template<
     class KeyCompareFunction = ::rocprim::equal_to<typename std::iterator_traits<KeysInputIterator>::value_type>
 >
 inline
-void device_reduce_by_key(void * temporary_storage,
-                          size_t& storage_size,
-                          KeysInputIterator keys_input,
-                          ValuesInputIterator values_input,
-                          const unsigned int size,
-                          UniqueOutputIterator unique_output,
-                          AggregatesOutputIterator aggregates_output,
-                          UniqueCountOutputIterator unique_count_output,
-                          BinaryFunction reduce_op = BinaryFunction(),
-                          KeyCompareFunction key_compare_op = KeyCompareFunction(),
-                          hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
-                          const bool debug_synchronous = false)
+void reduce_by_key(void * temporary_storage,
+                   size_t& storage_size,
+                   KeysInputIterator keys_input,
+                   ValuesInputIterator values_input,
+                   const unsigned int size,
+                   UniqueOutputIterator unique_output,
+                   AggregatesOutputIterator aggregates_output,
+                   UniqueCountOutputIterator unique_count_output,
+                   BinaryFunction reduce_op = BinaryFunction(),
+                   KeyCompareFunction key_compare_op = KeyCompareFunction(),
+                   hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
+                   const bool debug_synchronous = false)
 {
-    detail::device_reduce_by_key_impl(
+    detail::reduce_by_key_impl(
         temporary_storage, storage_size,
         keys_input, values_input, size,
         unique_output, aggregates_output, unique_count_output,
