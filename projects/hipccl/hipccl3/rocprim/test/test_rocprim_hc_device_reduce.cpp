@@ -114,7 +114,7 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
         // temp storage
         size_t temp_storage_size_bytes;
         // Get size of d_temp_storage
-        rocprim::device_reduce(
+        rocprim::reduce(
             nullptr,
             temp_storage_size_bytes,
             d_input.accelerator_pointer(),
@@ -134,7 +134,7 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
         acc_view.wait();
 
         // Run
-        rocprim::device_reduce(
+        rocprim::reduce(
             d_temp_storage.accelerator_pointer(),
             temp_storage_size_bytes,
             d_input.accelerator_pointer(),
@@ -184,7 +184,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
         // temp storage
         size_t temp_storage_size_bytes;
         // Get size of d_temp_storage
-        rocprim::device_reduce(
+        rocprim::reduce(
             nullptr,
             temp_storage_size_bytes,
             d_input.accelerator_pointer(),
@@ -205,7 +205,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
         acc_view.wait();
 
         // Run
-        rocprim::device_reduce(
+        rocprim::reduce(
             d_temp_storage.accelerator_pointer(),
             temp_storage_size_bytes,
             d_input.accelerator_pointer(),

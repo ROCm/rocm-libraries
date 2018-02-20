@@ -104,7 +104,7 @@ void run_benchmark(benchmark::State& state,
     for(size_t i = 0; i < 10; i++)
     {
         HIP_CHECK(
-            rocprim::device_transform(
+            rocprim::transform(
                 d_input, d_output, size,
                 transform_op, stream
             )
@@ -120,7 +120,7 @@ void run_benchmark(benchmark::State& state,
         for(size_t i = 0; i < batch_size; i++)
         {
             HIP_CHECK(
-                rocprim::device_transform(
+                rocprim::transform(
                     d_input, d_output, size,
                     transform_op, stream
                 )
@@ -142,7 +142,7 @@ void run_benchmark(benchmark::State& state,
 
 #define CREATE_BENCHMARK(T, TRANSFORM_OP) \
 benchmark::RegisterBenchmark( \
-    ("device_transform<" #T "," #TRANSFORM_OP ">"), \
+    ("transform<" #T "," #TRANSFORM_OP ">"), \
     run_benchmark<T, TRANSFORM_OP>, size, stream, TRANSFORM_OP() \
 )
 

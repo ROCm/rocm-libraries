@@ -72,7 +72,7 @@ auto run_device_radix_sort(void * d_temporary_storage, size_t& temporary_storage
                            hipStream_t stream)
     -> typename std::enable_if<benchmark_kind == benchmark_kinds::sort_keys, hipError_t>::type
 {
-    return rp::device_radix_sort_keys(
+    return rp::radix_sort_keys(
         d_temporary_storage, temporary_storage_bytes,
         d_keys_input, d_keys_output, size,
         0, sizeof(Key) * 8,
@@ -88,7 +88,7 @@ auto run_device_radix_sort(void * d_temporary_storage, size_t& temporary_storage
                            hipStream_t stream)
     -> typename std::enable_if<benchmark_kind == benchmark_kinds::sort_keys_desc, hipError_t>::type
 {
-    return rp::device_radix_sort_keys_desc(
+    return rp::radix_sort_keys_desc(
         d_temporary_storage, temporary_storage_bytes,
         d_keys_input, d_keys_output, size,
         0, sizeof(Key) * 8,
@@ -104,7 +104,7 @@ auto run_device_radix_sort(void * d_temporary_storage, size_t& temporary_storage
                            hipStream_t stream)
     -> typename std::enable_if<benchmark_kind == benchmark_kinds::sort_pairs, hipError_t>::type
 {
-    return rp::device_radix_sort_pairs(
+    return rp::radix_sort_pairs(
         d_temporary_storage, temporary_storage_bytes,
         d_keys_input, d_keys_output, d_values_input, d_values_output, size,
         0, sizeof(Key) * 8,
@@ -120,7 +120,7 @@ auto run_device_radix_sort(void * d_temporary_storage, size_t& temporary_storage
                            hipStream_t stream)
     -> typename std::enable_if<benchmark_kind == benchmark_kinds::sort_pairs_desc, hipError_t>::type
 {
-    return rp::device_radix_sort_pairs_desc(
+    return rp::radix_sort_pairs_desc(
         d_temporary_storage, temporary_storage_bytes,
         d_keys_input, d_keys_output, d_values_input, d_values_output, size,
         0, sizeof(Key) * 8,

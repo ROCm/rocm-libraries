@@ -193,7 +193,7 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
 
         size_t temporary_storage_bytes;
 
-        rp::device_reduce_by_key(
+        rp::reduce_by_key(
             nullptr, temporary_storage_bytes,
             d_keys_input.accelerator_pointer(), d_values_input.accelerator_pointer(), size,
             d_unique_output.accelerator_pointer(), d_aggregates_output.accelerator_pointer(),
@@ -206,7 +206,7 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
 
         hc::array<char> d_temporary_storage(temporary_storage_bytes, acc_view);
 
-        rp::device_reduce_by_key(
+        rp::reduce_by_key(
             d_temporary_storage.accelerator_pointer(), temporary_storage_bytes,
             d_keys_input.accelerator_pointer(), d_values_input.accelerator_pointer(), size,
             d_unique_output.accelerator_pointer(), d_aggregates_output.accelerator_pointer(),

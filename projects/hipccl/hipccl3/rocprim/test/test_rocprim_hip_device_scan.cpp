@@ -135,7 +135,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
         void * d_temp_storage = nullptr;
         // Get size of d_temp_storage
         HIP_CHECK(
-            rocprim::device_inclusive_scan(
+            rocprim::inclusive_scan(
                 d_temp_storage, temp_storage_size_bytes,
                 d_input, d_output, input.size(),
                 plus_op, stream, debug_synchronous
@@ -152,7 +152,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
 
         // Run
         HIP_CHECK(
-            rocprim::device_inclusive_scan(
+            rocprim::inclusive_scan(
                 d_temp_storage, temp_storage_size_bytes,
                 d_input, d_output, input.size(),
                 plus_op, stream, debug_synchronous
@@ -241,7 +241,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanSum)
         void * d_temp_storage = nullptr;
         // Get size of d_temp_storage
         HIP_CHECK(
-            rocprim::device_exclusive_scan(
+            rocprim::exclusive_scan(
                 d_temp_storage, temp_storage_size_bytes,
                 d_input, d_output, initial_value, input.size(),
                 plus_op, stream, debug_synchronous
@@ -258,7 +258,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanSum)
 
         // Run
         HIP_CHECK(
-            rocprim::device_exclusive_scan(
+            rocprim::exclusive_scan(
                 d_temp_storage, temp_storage_size_bytes,
                 d_input, d_output, initial_value, input.size(),
                 plus_op, stream, debug_synchronous

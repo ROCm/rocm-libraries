@@ -69,7 +69,7 @@ auto run_device_scan(void * temporary_storage,
                      const bool debug = false)
     -> typename std::enable_if<Exclusive, hipError_t>::type
 {
-    return rocprim::device_exclusive_scan(
+    return rocprim::exclusive_scan(
         temporary_storage, storage_size,
         input, output, initial_value, input_size,
         scan_op, stream, debug
@@ -93,7 +93,7 @@ auto run_device_scan(void * temporary_storage,
     -> typename std::enable_if<!Exclusive, hipError_t>::type
 {
     (void) initial_value;
-    return rocprim::device_inclusive_scan(
+    return rocprim::inclusive_scan(
         temporary_storage, storage_size,
         input, output, input_size,
         scan_op, stream, debug
@@ -195,13 +195,13 @@ void run_benchmark(benchmark::State& state,
 
 #define CREATE_INCLUSIVE_BENCHMARK(T, SCAN_OP) \
 benchmark::RegisterBenchmark( \
-    ("device_inclusive_scan<" #T "," #SCAN_OP ">"), \
+    ("inclusive_scan<" #T "," #SCAN_OP ">"), \
     run_benchmark<false, T, SCAN_OP>, size, stream, SCAN_OP() \
 )
 
 #define CREATE_EXCLUSIVE_BENCHMARK(T, SCAN_OP) \
 benchmark::RegisterBenchmark( \
-    ("device_exclusive_scan<" #T "," #SCAN_OP ">"), \
+    ("exclusive_scan<" #T "," #SCAN_OP ">"), \
     run_benchmark<true, T, SCAN_OP>, size, stream, SCAN_OP() \
 )
 

@@ -59,15 +59,15 @@ template<
     class BinaryFunction
 >
 inline
-void device_reduce_impl(void * temporary_storage,
-                        size_t& storage_size,
-                        InputIterator input,
-                        OutputIterator output,
-                        const InitValueType initial_value,
-                        const size_t size,
-                        BinaryFunction reduce_op,
-                        hc::accelerator_view acc_view,
-                        const bool debug_synchronous)
+void reduce_impl(void * temporary_storage,
+                 size_t& storage_size,
+                 InputIterator input,
+                 OutputIterator output,
+                 const InitValueType initial_value,
+                 const size_t size,
+                 BinaryFunction reduce_op,
+                 hc::accelerator_view acc_view,
+                 const bool debug_synchronous)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     #ifdef __cpp_lib_is_invocable
@@ -127,7 +127,7 @@ void device_reduce_impl(void * temporary_storage,
         auto nested_temp_storage_size = storage_size - (number_of_blocks * sizeof(result_type));
 
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-        device_reduce_impl<BlockSize, ItemsPerThread, WithInitialValue>(
+        reduce_impl<BlockSize, ItemsPerThread, WithInitialValue>(
             nested_temp_storage,
             nested_temp_storage_size,
             block_prefixes, // input
@@ -227,7 +227,7 @@ void device_reduce_impl(void * temporary_storage,
 ///
 /// size_t temporary_storage_size_bytes;
 /// // Get required size of the temporary storage
-/// rocprim::device_reduce(
+/// rocprim::reduce(
 ///     nullptr, temporary_storage_size_bytes,
 ///     input.accelerator_pointer(), output.accelerator_pointer(), start_value,
 ///     input.size(), min_op, acc_view, false
@@ -237,7 +237,7 @@ void device_reduce_impl(void * temporary_storage,
 /// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
 ///
 /// // perform reduce
-/// rocprim::device_reduce(
+/// rocprim::reduce(
 ///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
 ///     input.accelerator_pointer(), output.accelerator_pointer(), start_value,
 ///     input.size(), min_op, acc_view, false
@@ -252,20 +252,20 @@ template<
     class BinaryFunction = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>
 >
 inline
-void device_reduce(void * temporary_storage,
-                   size_t& storage_size,
-                   InputIterator input,
-                   OutputIterator output,
-                   const InitValueType initial_value,
-                   const size_t size,
-                   BinaryFunction reduce_op = BinaryFunction(),
-                   hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
-                   bool debug_synchronous = false)
+void reduce(void * temporary_storage,
+            size_t& storage_size,
+            InputIterator input,
+            OutputIterator output,
+            const InitValueType initial_value,
+            const size_t size,
+            BinaryFunction reduce_op = BinaryFunction(),
+            hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
+            bool debug_synchronous = false)
 {
     // TODO: Those values should depend on type size
     constexpr unsigned int block_size = 256;
     constexpr unsigned int items_per_thread = 4;
-    return detail::device_reduce_impl<block_size, items_per_thread, true>(
+    return detail::reduce_impl<block_size, items_per_thread, true>(
         temporary_storage, storage_size,
         input, output, initial_value, size,
         reduce_op, acc_view, debug_synchronous
@@ -327,7 +327,7 @@ void device_reduce(void * temporary_storage,
 ///
 /// size_t temporary_storage_size_bytes;
 /// // Get required size of the temporary storage
-/// rocprim::device_reduce(
+/// rocprim::reduce(
 ///     nullptr, temporary_storage_size_bytes,
 ///     input.accelerator_pointer(), output.accelerator_pointer(), input.size(),
 ///     rocprim::plus<int>(), acc_view, false
@@ -337,7 +337,7 @@ void device_reduce(void * temporary_storage,
 /// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
 ///
 /// // perform reduce
-/// rocprim::device_reduce(
+/// rocprim::reduce(
 ///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
 ///     input.accelerator_pointer(), output.accelerator_pointer(), input.size(),
 ///     rocprim::plus<int>(), acc_view, false
@@ -351,19 +351,19 @@ template<
     class BinaryFunction = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>
 >
 inline
-void device_reduce(void * temporary_storage,
-                   size_t& storage_size,
-                   InputIterator input,
-                   OutputIterator output,
-                   const size_t size,
-                   BinaryFunction reduce_op = BinaryFunction(),
-                   hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
-                   bool debug_synchronous = false)
+void reduce(void * temporary_storage,
+            size_t& storage_size,
+            InputIterator input,
+            OutputIterator output,
+            const size_t size,
+            BinaryFunction reduce_op = BinaryFunction(),
+            hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
+            bool debug_synchronous = false)
 {
     // TODO: Those values should depend on type size
     constexpr unsigned int block_size = 256;
     constexpr unsigned int items_per_thread = 4;
-    return detail::device_reduce_impl<block_size, items_per_thread, false>(
+    return detail::reduce_impl<block_size, items_per_thread, false>(
         temporary_storage, storage_size,
         input, output, char(0), size,
         reduce_op, acc_view, debug_synchronous

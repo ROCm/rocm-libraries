@@ -216,7 +216,7 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
         size_t temporary_storage_bytes;
 
         HIP_CHECK(
-            rp::device_reduce_by_key(
+            rp::reduce_by_key(
                 nullptr, temporary_storage_bytes,
                 d_keys_input, d_values_input, size,
                 d_unique_output, d_aggregates_output,
@@ -232,7 +232,7 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
         HIP_CHECK(
-            rp::device_reduce_by_key(
+            rp::reduce_by_key(
                 d_temporary_storage, temporary_storage_bytes,
                 d_keys_input, d_values_input, size,
                 d_unique_output, d_aggregates_output,
