@@ -153,18 +153,18 @@ template<
     class KeyCompareFunction
 >
 inline
-hipError_t device_reduce_by_key_impl(void * temporary_storage,
-                                     size_t& storage_size,
-                                     KeysInputIterator keys_input,
-                                     ValuesInputIterator values_input,
-                                     const unsigned int size,
-                                     UniqueOutputIterator unique_output,
-                                     AggregatesOutputIterator aggregates_output,
-                                     UniqueCountOutputIterator unique_count_output,
-                                     BinaryFunction reduce_op,
-                                     KeyCompareFunction key_compare_op,
-                                     const hipStream_t stream,
-                                     const bool debug_synchronous)
+hipError_t reduce_by_key_impl(void * temporary_storage,
+                              size_t& storage_size,
+                              KeysInputIterator keys_input,
+                              ValuesInputIterator values_input,
+                              const unsigned int size,
+                              UniqueOutputIterator unique_output,
+                              AggregatesOutputIterator aggregates_output,
+                              UniqueCountOutputIterator unique_count_output,
+                              BinaryFunction reduce_op,
+                              KeyCompareFunction key_compare_op,
+                              const hipStream_t stream,
+                              const bool debug_synchronous)
 {
     using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
     using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
@@ -273,20 +273,20 @@ template<
     class KeyCompareFunction = ::rocprim::equal_to<typename std::iterator_traits<KeysInputIterator>::value_type>
 >
 inline
-hipError_t device_reduce_by_key(void * temporary_storage,
-                                size_t& storage_size,
-                                KeysInputIterator keys_input,
-                                ValuesInputIterator values_input,
-                                const unsigned int size,
-                                UniqueOutputIterator unique_output,
-                                AggregatesOutputIterator aggregates_output,
-                                UniqueCountOutputIterator unique_count_output,
-                                BinaryFunction reduce_op = BinaryFunction(),
-                                KeyCompareFunction key_compare_op = KeyCompareFunction(),
-                                const hipStream_t stream = 0,
-                                const bool debug_synchronous = false)
+hipError_t reduce_by_key(void * temporary_storage,
+                         size_t& storage_size,
+                         KeysInputIterator keys_input,
+                         ValuesInputIterator values_input,
+                         const unsigned int size,
+                         UniqueOutputIterator unique_output,
+                         AggregatesOutputIterator aggregates_output,
+                         UniqueCountOutputIterator unique_count_output,
+                         BinaryFunction reduce_op = BinaryFunction(),
+                         KeyCompareFunction key_compare_op = KeyCompareFunction(),
+                         const hipStream_t stream = 0,
+                         const bool debug_synchronous = false)
 {
-    return detail::device_reduce_by_key_impl(
+    return detail::reduce_by_key_impl(
         temporary_storage, storage_size,
         keys_input, values_input, size,
         unique_output, aggregates_output, unique_count_output,

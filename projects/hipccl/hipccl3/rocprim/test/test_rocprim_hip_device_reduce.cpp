@@ -132,7 +132,7 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
         void * d_temp_storage = nullptr;
         // Get size of d_temp_storage
         HIP_CHECK(
-            rocprim::device_reduce(
+            rocprim::reduce(
                 d_temp_storage, temp_storage_size_bytes,
                 d_input, d_output, input.size(),
                 plus_op, stream, debug_synchronous
@@ -149,7 +149,7 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
 
         // Run
         HIP_CHECK(
-            rocprim::device_reduce(
+            rocprim::reduce(
                 d_temp_storage, temp_storage_size_bytes,
                 d_input, d_output, input.size(),
                 plus_op, stream, debug_synchronous
@@ -228,7 +228,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
         void * d_temp_storage = nullptr;
         // Get size of d_temp_storage
         HIP_CHECK(
-            rocprim::device_reduce(
+            rocprim::reduce(
                 d_temp_storage, temp_storage_size_bytes,
                 d_input, d_output, std::numeric_limits<U>::max(), input.size(),
                 min_op, stream, debug_synchronous
@@ -245,7 +245,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
 
         // Run
         HIP_CHECK(
-            rocprim::device_reduce(
+            rocprim::reduce(
                 d_temp_storage, temp_storage_size_bytes,
                 d_input, d_output, std::numeric_limits<U>::max(), input.size(),
                 min_op, stream, debug_synchronous
