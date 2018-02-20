@@ -68,5 +68,6 @@ add_rocprim_benchmark_hip(benchmark_rocprim_hip_warp_scan.cpp)
 add_rocprim_benchmark_hip(benchmark_rocprim_hip_warp_sort.cpp)
 
 # rocPRIM HC benchmarks
+add_rocprim_benchmark_hc(benchmark_rocprim_hc_device_transform.cpp)
 add_rocprim_benchmark_hc(benchmark_rocprim_hc_warp_scan.cpp)
 add_rocprim_benchmark_hc(benchmark_rocprim_hc_warp_sort.cpp)
