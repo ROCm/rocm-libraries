@@ -136,7 +136,7 @@ TYPED_TEST(RocprimDeviceTransformTests, Transform)
 
         // Run
         HIP_CHECK(
-            rocprim::device_transform(
+            rocprim::transform(
                 d_input, d_output, input.size(),
                 transform<U>(), stream, debug_synchronous
             )

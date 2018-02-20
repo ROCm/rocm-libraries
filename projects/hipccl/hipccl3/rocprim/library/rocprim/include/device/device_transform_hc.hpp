@@ -53,7 +53,7 @@ namespace detail
 
 /// \brief HC parallel transform primitive for device level.
 ///
-/// device_transform function performs a device-wide transformation operation
+/// transform function performs a device-wide transformation operation
 /// using unary \p transform_op operator.
 ///
 /// \par Overview
@@ -103,7 +103,7 @@ namespace detail
 /// hc::array<int> output(input.get_extent(), ...);   // empty array of 8 elements
 ///
 /// // perform transform
-/// rocprim::device_transform(
+/// rocprim::transform(
 ///     input.accelerator_pointer(), output.accelerator_pointer(), input.size(),
 ///     rocprim::plus<U>(), acc_view, false
 /// );
@@ -116,12 +116,12 @@ template<
     class UnaryFunction
 >
 inline
-void device_transform(InputIterator input,
-                      OutputIterator output,
-                      const size_t size,
-                      UnaryFunction transform_op,
-                      hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
-                      bool debug_synchronous = false)
+void transform(InputIterator input,
+               OutputIterator output,
+               const size_t size,
+               UnaryFunction transform_op,
+               hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
+               bool debug_synchronous = false)
 {
     // TODO: Those values should depend on type size
     constexpr unsigned int block_size = 256;

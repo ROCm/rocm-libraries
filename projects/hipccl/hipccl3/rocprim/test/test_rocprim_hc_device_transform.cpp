@@ -117,7 +117,7 @@ TYPED_TEST(RocprimDeviceTransformTests, Transform)
         std::transform(input.begin(), input.end(), expected.begin(), transform<U>());
 
         // Run
-        rocprim::device_transform(
+        rocprim::transform(
             d_input.accelerator_pointer(),
             d_output.accelerator_pointer(),
             input.size(),

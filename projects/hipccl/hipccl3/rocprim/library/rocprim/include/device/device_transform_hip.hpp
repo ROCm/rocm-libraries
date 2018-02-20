@@ -132,7 +132,7 @@ void transform_kernel(InputIterator input,
 /// int * output;         // empty array of 8 elements
 ///
 /// // perform transform
-/// rocprim::device_transform(
+/// rocprim::transform(
 ///     input, output, input_size, transform_op
 /// );
 /// // output: [6, 7, 8, 9, 10, 11, 12, 13]
@@ -144,12 +144,12 @@ template<
     class UnaryFunction
 >
 inline
-hipError_t device_transform(InputIterator input,
-                            OutputIterator output,
-                            const size_t size,
-                            UnaryFunction transform_op,
-                            const hipStream_t stream = 0,
-                            bool debug_synchronous = false)
+hipError_t transform(InputIterator input,
+                     OutputIterator output,
+                     const size_t size,
+                     UnaryFunction transform_op,
+                     const hipStream_t stream = 0,
+                     bool debug_synchronous = false)
 {
     // TODO: Those values should depend on type size
     constexpr unsigned int block_size = 256;
