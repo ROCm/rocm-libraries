@@ -95,15 +95,15 @@ template<
     class BinaryFunction
 >
 inline
-hipError_t device_reduce_impl(void * temporary_storage,
-                              size_t& storage_size,
-                              InputIterator input,
-                              OutputIterator output,
-                              const InitValueType initial_value,
-                              const size_t size,
-                              BinaryFunction reduce_op,
-                              const hipStream_t stream,
-                              bool debug_synchronous)
+hipError_t reduce_impl(void * temporary_storage,
+                       size_t& storage_size,
+                       InputIterator input,
+                       OutputIterator output,
+                       const InitValueType initial_value,
+                       const size_t size,
+                       BinaryFunction reduce_op,
+                       const hipStream_t stream,
+                       bool debug_synchronous)
 
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
@@ -157,7 +157,7 @@ hipError_t device_reduce_impl(void * temporary_storage,
         auto nested_temp_storage_size = storage_size - (number_of_blocks * sizeof(result_type));
 
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-        auto error = device_reduce_impl<BlockSize, ItemsPerThread, WithInitialValue>(
+        auto error = reduce_impl<BlockSize, ItemsPerThread, WithInitialValue>(
             nested_temp_storage,
             nested_temp_storage_size,
             block_prefixes, // input
@@ -263,7 +263,7 @@ hipError_t device_reduce_impl(void * temporary_storage,
 /// size_t temporary_storage_size_bytes;
 /// void * temporary_storage_ptr = nullptr;
 /// // Get required size of the temporary storage
-/// rocprim::device_reduce(
+/// rocprim::reduce(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     input, output, start_value, input_size, min_op
 /// );
@@ -272,7 +272,7 @@ hipError_t device_reduce_impl(void * temporary_storage,
 /// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
 ///
 /// // perform reduce
-/// rocprim::device_reduce(
+/// rocprim::reduce(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     input, output, start_value, input_size, min_op
 /// );
@@ -286,20 +286,20 @@ template<
     class BinaryFunction = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>
 >
 inline
-hipError_t device_reduce(void * temporary_storage,
-                         size_t& storage_size,
-                         InputIterator input,
-                         OutputIterator output,
-                         const InitValueType initial_value,
-                         const size_t size,
-                         BinaryFunction reduce_op = BinaryFunction(),
-                         const hipStream_t stream = 0,
-                         bool debug_synchronous = false)
+hipError_t reduce(void * temporary_storage,
+                 size_t& storage_size,
+                 InputIterator input,
+                 OutputIterator output,
+                 const InitValueType initial_value,
+                 const size_t size,
+                 BinaryFunction reduce_op = BinaryFunction(),
+                 const hipStream_t stream = 0,
+                 bool debug_synchronous = false)
 {
     // TODO: Those values should depend on type size
     constexpr unsigned int block_size = 256;
     constexpr unsigned int items_per_thread = 4;
-    return detail::device_reduce_impl<block_size, items_per_thread, true>(
+    return detail::reduce_impl<block_size, items_per_thread, true>(
         temporary_storage, storage_size,
         input, output, initial_value, size,
         reduce_op, stream, debug_synchronous
@@ -363,7 +363,7 @@ hipError_t device_reduce(void * temporary_storage,
 /// size_t temporary_storage_size_bytes;
 /// void * temporary_storage_ptr = nullptr;
 /// // Get required size of the temporary storage
-/// rocprim::device_reduce(
+/// rocprim::reduce(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     input, output, input_size, rocprim::plus<int>()
 /// );
@@ -372,7 +372,7 @@ hipError_t device_reduce(void * temporary_storage,
 /// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
 ///
 /// // perform reduce
-/// rocprim::device_reduce(
+/// rocprim::reduce(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     input, output, input_size, rocprim::plus<int>()
 /// );
@@ -385,19 +385,19 @@ template<
     class BinaryFunction = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>
 >
 inline
-hipError_t device_reduce(void * temporary_storage,
-                         size_t& storage_size,
-                         InputIterator input,
-                         OutputIterator output,
-                         const size_t size,
-                         BinaryFunction reduce_op = BinaryFunction(),
-                         const hipStream_t stream = 0,
-                         bool debug_synchronous = false)
+hipError_t reduce(void * temporary_storage,
+                  size_t& storage_size,
+                  InputIterator input,
+                  OutputIterator output,
+                  const size_t size,
+                  BinaryFunction reduce_op = BinaryFunction(),
+                  const hipStream_t stream = 0,
+                  bool debug_synchronous = false)
 {
     // TODO: Those values should depend on type size
     constexpr unsigned int block_size = 256;
     constexpr unsigned int items_per_thread = 4;
-    return detail::device_reduce_impl<block_size, items_per_thread, false>(
+    return detail::reduce_impl<block_size, items_per_thread, false>(
         temporary_storage, storage_size,
         input, output, char(0), size,
         reduce_op, stream, debug_synchronous
