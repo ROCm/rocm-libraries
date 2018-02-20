@@ -195,6 +195,9 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, Reduce)
     {
         ASSERT_EQ(output_reductions[i], expected_reductions[i]);
     }
+
+    HIP_CHECK(hipFree(device_output));
+    HIP_CHECK(hipFree(device_output_reductions));
 }
 
 TYPED_TEST_CASE(RocprimBlockReduceSingleValueTests, SingleValueTestParams);
@@ -288,6 +291,9 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceMultiplies)
     {
         ASSERT_EQ(output_reductions[i], expected_reductions[i]);
     }
+
+    HIP_CHECK(hipFree(device_output));
+    HIP_CHECK(hipFree(device_output_reductions));
 }
 
 template<
@@ -375,6 +381,9 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceValid)
     {
         ASSERT_EQ(output_reductions[i], expected_reductions[i]);
     }
+
+    HIP_CHECK(hipFree(device_output));
+    HIP_CHECK(hipFree(device_output_reductions));
 }
 
 
@@ -526,5 +535,8 @@ TYPED_TEST(RocprimBlockReduceInputArrayTests, Reduce)
             static_cast<T>(0.05) * expected_reductions[i]
         );
     }
+
+    HIP_CHECK(hipFree(device_output));
+    HIP_CHECK(hipFree(device_output_reductions));
 }
 
