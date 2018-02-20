@@ -184,7 +184,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
 
         size_t temporary_storage_bytes;
         HIP_CHECK(
-            rp::device_radix_sort_keys(
+            rp::radix_sort_keys(
                 nullptr, temporary_storage_bytes,
                 d_keys_input, d_keys_output, size,
                 start_bit, end_bit
@@ -199,7 +199,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
         if(descending)
         {
             HIP_CHECK(
-                rp::device_radix_sort_keys_desc(
+                rp::radix_sort_keys_desc(
                     d_temporary_storage, temporary_storage_bytes,
                     d_keys_input, d_keys_output, size,
                     start_bit, end_bit,
@@ -210,7 +210,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
         else
         {
             HIP_CHECK(
-                rp::device_radix_sort_keys(
+                rp::radix_sort_keys(
                     d_temporary_storage, temporary_storage_bytes,
                     d_keys_input, d_keys_output, size,
                     start_bit, end_bit,
@@ -322,7 +322,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairs)
 
         void * d_temporary_storage = nullptr;
         size_t temporary_storage_bytes;
-        rp::device_radix_sort_pairs(
+        rp::radix_sort_pairs(
             d_temporary_storage, temporary_storage_bytes,
             d_keys_input, d_keys_output, d_values_input, d_values_output, size,
             start_bit, end_bit
@@ -334,7 +334,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairs)
 
         if(descending)
         {
-            rp::device_radix_sort_pairs_desc(
+            rp::radix_sort_pairs_desc(
                 d_temporary_storage, temporary_storage_bytes,
                 d_keys_input, d_keys_output, d_values_input, d_values_output, size,
                 start_bit, end_bit,
@@ -343,7 +343,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairs)
         }
         else
         {
-            rp::device_radix_sort_pairs(
+            rp::radix_sort_pairs(
                 d_temporary_storage, temporary_storage_bytes,
                 d_keys_input, d_keys_output, d_values_input, d_values_output, size,
                 start_bit, end_bit,
@@ -443,7 +443,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeysDoubleBuffer)
 
         size_t temporary_storage_bytes;
         HIP_CHECK(
-            rp::device_radix_sort_keys(
+            rp::radix_sort_keys(
                 nullptr, temporary_storage_bytes,
                 d_keys, size,
                 start_bit, end_bit
@@ -458,7 +458,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeysDoubleBuffer)
         if(descending)
         {
             HIP_CHECK(
-                rp::device_radix_sort_keys_desc(
+                rp::radix_sort_keys_desc(
                     d_temporary_storage, temporary_storage_bytes,
                     d_keys, size,
                     start_bit, end_bit,
@@ -469,7 +469,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeysDoubleBuffer)
         else
         {
             HIP_CHECK(
-                rp::device_radix_sort_keys(
+                rp::radix_sort_keys(
                     d_temporary_storage, temporary_storage_bytes,
                     d_keys, size,
                     start_bit, end_bit,
@@ -584,7 +584,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairsDoubleBuffer)
 
         void * d_temporary_storage = nullptr;
         size_t temporary_storage_bytes;
-        rp::device_radix_sort_pairs(
+        rp::radix_sort_pairs(
             d_temporary_storage, temporary_storage_bytes,
             d_keys, d_values, size,
             start_bit, end_bit
@@ -596,7 +596,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairsDoubleBuffer)
 
         if(descending)
         {
-            rp::device_radix_sort_pairs_desc(
+            rp::radix_sort_pairs_desc(
                 d_temporary_storage, temporary_storage_bytes,
                 d_keys, d_values, size,
                 start_bit, end_bit,
@@ -605,7 +605,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairsDoubleBuffer)
         }
         else
         {
-            rp::device_radix_sort_pairs(
+            rp::radix_sort_pairs(
                 d_temporary_storage, temporary_storage_bytes,
                 d_keys, d_values, size,
                 start_bit, end_bit,

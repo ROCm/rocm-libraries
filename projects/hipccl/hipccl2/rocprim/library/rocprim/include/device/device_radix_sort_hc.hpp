@@ -64,20 +64,20 @@ template<
     class ValuesOutputIterator
 >
 inline
-void device_radix_sort(void * temporary_storage,
-                       size_t& temporary_storage_bytes,
-                       KeysInputIterator keys_input,
-                       typename std::iterator_traits<KeysInputIterator>::value_type * keys_tmp,
-                       KeysOutputIterator keys_output,
-                       ValuesInputIterator values_input,
-                       typename std::iterator_traits<ValuesInputIterator>::value_type * values_tmp,
-                       ValuesOutputIterator values_output,
-                       unsigned int size,
-                       bool& is_result_in_output,
-                       unsigned int begin_bit,
-                       unsigned int end_bit,
-                       hc::accelerator_view& acc_view,
-                       bool debug_synchronous)
+void radix_sort(void * temporary_storage,
+                size_t& temporary_storage_bytes,
+                KeysInputIterator keys_input,
+                typename std::iterator_traits<KeysInputIterator>::value_type * keys_tmp,
+                KeysOutputIterator keys_output,
+                ValuesInputIterator values_input,
+                typename std::iterator_traits<ValuesInputIterator>::value_type * values_tmp,
+                ValuesOutputIterator values_output,
+                unsigned int size,
+                bool& is_result_in_output,
+                unsigned int begin_bit,
+                unsigned int end_bit,
+                hc::accelerator_view& acc_view,
+                bool debug_synchronous)
 {
     constexpr unsigned int radix_bits = 8;
     constexpr unsigned int radix_size = 1 << radix_bits;
@@ -314,7 +314,7 @@ void device_radix_sort(void * temporary_storage,
 
 /// \brief HC parallel ascending radix sort primitive for device level.
 ///
-/// \p device_radix_sort_keys function performs a device-wide radix sort
+/// \p radix_sort_keys function performs a device-wide radix sort
 /// of keys. Function sorts input keys in ascending order.
 ///
 /// \par Overview
@@ -367,7 +367,7 @@ void device_radix_sort(void * temporary_storage,
 ///
 /// size_t temporary_storage_size_bytes;
 /// // Get required size of the temporary storage
-/// rocprim::device_radix_sort_keys(
+/// rocprim::radix_sort_keys(
 ///     nullptr, temporary_storage_size_bytes,
 ///     input.accelerator_pointer(), output.accelerator_pointer(),
 ///     input_size
@@ -377,7 +377,7 @@ void device_radix_sort(void * temporary_storage,
 /// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
 ///
 /// // perform sort
-/// rocprim::device_radix_sort_keys(
+/// rocprim::radix_sort_keys(
 ///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
 ///     input.accelerator_pointer(), output.accelerator_pointer(),
 ///     input_size, 0, 4 * sizeof(float), acc_view
@@ -391,19 +391,19 @@ template<
     class Key = typename std::iterator_traits<KeysInputIterator>::value_type
 >
 inline
-void device_radix_sort_keys(void * temporary_storage,
-                            size_t& temporary_storage_bytes,
-                            KeysInputIterator keys_input,
-                            KeysOutputIterator keys_output,
-                            unsigned int size,
-                            unsigned int begin_bit = 0,
-                            unsigned int end_bit = 8 * sizeof(Key),
-                            hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
-                            bool debug_synchronous = false)
+void radix_sort_keys(void * temporary_storage,
+                     size_t& temporary_storage_bytes,
+                     KeysInputIterator keys_input,
+                     KeysOutputIterator keys_output,
+                     unsigned int size,
+                     unsigned int begin_bit = 0,
+                     unsigned int end_bit = 8 * sizeof(Key),
+                     hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
+                     bool debug_synchronous = false)
 {
     empty_type * values = nullptr;
     bool ignored;
-    detail::device_radix_sort<false>(
+    detail::radix_sort<false>(
         temporary_storage, temporary_storage_bytes,
         keys_input, nullptr, keys_output,
         values, nullptr, values,
@@ -415,7 +415,7 @@ void device_radix_sort_keys(void * temporary_storage,
 
 /// \brief HC parallel descending radix sort primitive for device level.
 ///
-/// \p device_radix_sort_keys_desc function performs a device-wide radix sort
+/// \p radix_sort_keys_desc function performs a device-wide radix sort
 /// of keys. Function sorts input keys in descending order.
 ///
 /// \par Overview
@@ -468,7 +468,7 @@ void device_radix_sort_keys(void * temporary_storage,
 ///
 /// size_t temporary_storage_size_bytes;
 /// // Get required size of the temporary storage
-/// rocprim::device_radix_sort_keys_desc(
+/// rocprim::radix_sort_keys_desc(
 ///     nullptr, temporary_storage_size_bytes,
 ///     input.accelerator_pointer(), output.accelerator_pointer(),
 ///     input_size
@@ -478,7 +478,7 @@ void device_radix_sort_keys(void * temporary_storage,
 /// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
 ///
 /// // perform sort
-/// rocprim::device_radix_sort_keys_desc(
+/// rocprim::radix_sort_keys_desc(
 ///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
 ///     input.accelerator_pointer(), output.accelerator_pointer(),
 ///     input_size, 0, 4 * sizeof(int), acc_view
@@ -492,19 +492,19 @@ template<
     class Key = typename std::iterator_traits<KeysInputIterator>::value_type
 >
 inline
-void device_radix_sort_keys_desc(void * temporary_storage,
-                                 size_t& temporary_storage_bytes,
-                                 KeysInputIterator keys_input,
-                                 KeysOutputIterator keys_output,
-                                 unsigned int size,
-                                 unsigned int begin_bit = 0,
-                                 unsigned int end_bit = 8 * sizeof(Key),
-                                 hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
-                                 bool debug_synchronous = false)
+void radix_sort_keys_desc(void * temporary_storage,
+                          size_t& temporary_storage_bytes,
+                          KeysInputIterator keys_input,
+                          KeysOutputIterator keys_output,
+                          unsigned int size,
+                          unsigned int begin_bit = 0,
+                          unsigned int end_bit = 8 * sizeof(Key),
+                          hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
+                          bool debug_synchronous = false)
 {
     empty_type * values = nullptr;
     bool ignored;
-    detail::device_radix_sort<true>(
+    detail::radix_sort<true>(
         temporary_storage, temporary_storage_bytes,
         keys_input, nullptr, keys_output,
         values, nullptr, values,
@@ -516,7 +516,7 @@ void device_radix_sort_keys_desc(void * temporary_storage,
 
 /// \brief HC parallel ascending radix sort-by-key primitive for device level.
 ///
-/// \p device_radix_sort_pairs_desc function performs a device-wide radix sort
+/// \p radix_sort_pairs_desc function performs a device-wide radix sort
 /// of (key, value) pairs. Function sorts input pairs in ascending order of keys.
 ///
 /// \par Overview
@@ -582,7 +582,7 @@ void device_radix_sort_keys_desc(void * temporary_storage,
 ///
 /// size_t temporary_storage_size_bytes;
 /// // Get required size of the temporary storage
-/// rocprim::device_radix_sort_pairs(
+/// rocprim::radix_sort_pairs(
 ///     nullptr, temporary_storage_size_bytes,
 ///     keys_input.accelerator_pointer(), keys_output.accelerator_pointer(),
 ///     values_input.accelerator_pointer(), values_output.accelerator_pointer(),
@@ -593,7 +593,7 @@ void device_radix_sort_keys_desc(void * temporary_storage,
 /// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
 ///
 /// // perform sort
-/// rocprim::device_radix_sort_pairs(
+/// rocprim::radix_sort_pairs(
 ///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
 ///     keys_input.accelerator_pointer(), keys_output.accelerator_pointer(),
 ///     values_input.accelerator_pointer(), values_output.accelerator_pointer(),
@@ -611,20 +611,20 @@ template<
     class Key = typename std::iterator_traits<KeysInputIterator>::value_type
 >
 inline
-void device_radix_sort_pairs(void * temporary_storage,
-                             size_t& temporary_storage_bytes,
-                             KeysInputIterator keys_input,
-                             KeysOutputIterator keys_output,
-                             ValuesInputIterator values_input,
-                             ValuesOutputIterator values_output,
-                             unsigned int size,
-                             unsigned int begin_bit = 0,
-                             unsigned int end_bit = 8 * sizeof(Key),
-                             hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
-                             bool debug_synchronous = false)
+void radix_sort_pairs(void * temporary_storage,
+                      size_t& temporary_storage_bytes,
+                      KeysInputIterator keys_input,
+                      KeysOutputIterator keys_output,
+                      ValuesInputIterator values_input,
+                      ValuesOutputIterator values_output,
+                      unsigned int size,
+                      unsigned int begin_bit = 0,
+                      unsigned int end_bit = 8 * sizeof(Key),
+                      hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
+                      bool debug_synchronous = false)
 {
     bool ignored;
-    detail::device_radix_sort<false>(
+    detail::radix_sort<false>(
         temporary_storage, temporary_storage_bytes,
         keys_input, nullptr, keys_output,
         values_input, nullptr, values_output,
@@ -636,7 +636,7 @@ void device_radix_sort_pairs(void * temporary_storage,
 
 /// \brief HC parallel descending radix sort-by-key primitive for device level.
 ///
-/// \p device_radix_sort_pairs_desc function performs a device-wide radix sort
+/// \p radix_sort_pairs_desc function performs a device-wide radix sort
 /// of (key, value) pairs. Function sorts input pairs in descending order of keys.
 ///
 /// \par Overview
@@ -698,7 +698,7 @@ void device_radix_sort_pairs(void * temporary_storage,
 ///
 /// size_t temporary_storage_size_bytes;
 /// // Get required size of the temporary storage
-/// rocprim::device_radix_sort_pairs_desc(
+/// rocprim::radix_sort_pairs_desc(
 ///     nullptr, temporary_storage_size_bytes,
 ///     keys_input.accelerator_pointer(), keys_output.accelerator_pointer(),
 ///     values_input.accelerator_pointer(), values_output.accelerator_pointer(),
@@ -709,7 +709,7 @@ void device_radix_sort_pairs(void * temporary_storage,
 /// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
 ///
 /// // perform sort
-/// rocprim::device_radix_sort_pairs_desc(
+/// rocprim::radix_sort_pairs_desc(
 ///     temporary_storage, temporary_storage_size_bytes,
 ///     keys_input.accelerator_pointer(), keys_output.accelerator_pointer(),
 ///     values_input.accelerator_pointer(), values_output.accelerator_pointer(),
@@ -727,20 +727,20 @@ template<
     class Key = typename std::iterator_traits<KeysInputIterator>::value_type
 >
 inline
-void device_radix_sort_pairs_desc(void * temporary_storage,
-                                  size_t& temporary_storage_bytes,
-                                  KeysInputIterator keys_input,
-                                  KeysOutputIterator keys_output,
-                                  ValuesInputIterator values_input,
-                                  ValuesOutputIterator values_output,
-                                  unsigned int size,
-                                  unsigned int begin_bit = 0,
-                                  unsigned int end_bit = 8 * sizeof(Key),
-                                  hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
-                                  bool debug_synchronous = false)
+void radix_sort_pairs_desc(void * temporary_storage,
+                           size_t& temporary_storage_bytes,
+                           KeysInputIterator keys_input,
+                           KeysOutputIterator keys_output,
+                           ValuesInputIterator values_input,
+                           ValuesOutputIterator values_output,
+                           unsigned int size,
+                           unsigned int begin_bit = 0,
+                           unsigned int end_bit = 8 * sizeof(Key),
+                           hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
+                           bool debug_synchronous = false)
 {
     bool ignored;
-    detail::device_radix_sort<true>(
+    detail::radix_sort<true>(
         temporary_storage, temporary_storage_bytes,
         keys_input, nullptr, keys_output,
         values_input, nullptr, values_output,
@@ -752,7 +752,7 @@ void device_radix_sort_pairs_desc(void * temporary_storage,
 
 /// \brief HC parallel ascending radix sort primitive for device level.
 ///
-/// \p device_radix_sort_keys function performs a device-wide radix sort
+/// \p radix_sort_keys function performs a device-wide radix sort
 /// of keys. Function sorts input keys in ascending order.
 ///
 /// \par Overview
@@ -809,7 +809,7 @@ void device_radix_sort_pairs_desc(void * temporary_storage,
 ///
 /// size_t temporary_storage_size_bytes;
 /// // Get required size of the temporary storage
-/// rocprim::device_radix_sort_keys(
+/// rocprim::radix_sort_keys(
 ///     nullptr, temporary_storage_size_bytes,
 ///     keys, input_size
 /// );
@@ -818,7 +818,7 @@ void device_radix_sort_pairs_desc(void * temporary_storage,
 /// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
 ///
 /// // perform sort
-/// rocprim::device_radix_sort_keys(
+/// rocprim::radix_sort_keys(
 ///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
 ///     keys, input_size,
 ///     0, 8 * sizeof(float), acc_view
@@ -828,18 +828,18 @@ void device_radix_sort_pairs_desc(void * temporary_storage,
 /// \endparblock
 template<class Key>
 inline
-void device_radix_sort_keys(void * temporary_storage,
-                            size_t& temporary_storage_bytes,
-                            double_buffer<Key>& keys,
-                            unsigned int size,
-                            unsigned int begin_bit = 0,
-                            unsigned int end_bit = 8 * sizeof(Key),
-                            hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
-                            bool debug_synchronous = false)
+void radix_sort_keys(void * temporary_storage,
+                     size_t& temporary_storage_bytes,
+                     double_buffer<Key>& keys,
+                     unsigned int size,
+                     unsigned int begin_bit = 0,
+                     unsigned int end_bit = 8 * sizeof(Key),
+                     hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
+                     bool debug_synchronous = false)
 {
     empty_type * values = nullptr;
     bool is_result_in_output;
-    detail::device_radix_sort<false>(
+    detail::radix_sort<false>(
         temporary_storage, temporary_storage_bytes,
         keys.current(), keys.current(), keys.alternate(),
         values, values, values,
@@ -855,7 +855,7 @@ void device_radix_sort_keys(void * temporary_storage,
 
 /// \brief HC parallel descending radix sort primitive for device level.
 ///
-/// \p device_radix_sort_keys_desc function performs a device-wide radix sort
+/// \p radix_sort_keys_desc function performs a device-wide radix sort
 /// of keys. Function sorts input keys in descending order.
 ///
 /// \par Overview
@@ -912,7 +912,7 @@ void device_radix_sort_keys(void * temporary_storage,
 ///
 /// size_t temporary_storage_size_bytes;
 /// // Get required size of the temporary storage
-/// rocprim::device_radix_sort_keys_desc(
+/// rocprim::radix_sort_keys_desc(
 ///     nullptr, temporary_storage_size_bytes,
 ///     keys, input_size
 /// );
@@ -921,7 +921,7 @@ void device_radix_sort_keys(void * temporary_storage,
 /// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
 ///
 /// // perform sort
-/// rocprim::device_radix_sort_keys_desc(
+/// rocprim::radix_sort_keys_desc(
 ///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
 ///     keys, input_size,
 ///     0, 8 * sizeof(int), acc_view
@@ -931,18 +931,18 @@ void device_radix_sort_keys(void * temporary_storage,
 /// \endparblock
 template<class Key>
 inline
-void device_radix_sort_keys_desc(void * temporary_storage,
-                                 size_t& temporary_storage_bytes,
-                                 double_buffer<Key>& keys,
-                                 unsigned int size,
-                                 unsigned int begin_bit = 0,
-                                 unsigned int end_bit = 8 * sizeof(Key),
-                                 hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
-                                 bool debug_synchronous = false)
+void radix_sort_keys_desc(void * temporary_storage,
+                          size_t& temporary_storage_bytes,
+                          double_buffer<Key>& keys,
+                          unsigned int size,
+                          unsigned int begin_bit = 0,
+                          unsigned int end_bit = 8 * sizeof(Key),
+                          hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
+                          bool debug_synchronous = false)
 {
     empty_type * values = nullptr;
     bool is_result_in_output;
-    detail::device_radix_sort<true>(
+    detail::radix_sort<true>(
         temporary_storage, temporary_storage_bytes,
         keys.current(), keys.current(), keys.alternate(),
         values, values, values,
@@ -958,7 +958,7 @@ void device_radix_sort_keys_desc(void * temporary_storage,
 
 /// \brief HC parallel ascending radix sort-by-key primitive for device level.
 ///
-/// \p device_radix_sort_pairs_desc function performs a device-wide radix sort
+/// \p radix_sort_pairs_desc function performs a device-wide radix sort
 /// of (key, value) pairs. Function sorts input pairs in ascending order of keys.
 ///
 /// \par Overview
@@ -1025,7 +1025,7 @@ void device_radix_sort_keys_desc(void * temporary_storage,
 ///
 /// size_t temporary_storage_size_bytes;
 /// // Get required size of the temporary storage
-/// rocprim::device_radix_sort_pairs(
+/// rocprim::radix_sort_pairs(
 ///     nullptr, temporary_storage_size_bytes,
 ///     keys, values, input_size,
 ///     0, 5, acc_view
@@ -1035,7 +1035,7 @@ void device_radix_sort_keys_desc(void * temporary_storage,
 /// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
 ///
 /// // perform sort
-/// rocprim::device_radix_sort_pairs(
+/// rocprim::radix_sort_pairs(
 ///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
 ///     keys, values, input_size,
 ///     0, 5, acc_view
@@ -1046,18 +1046,18 @@ void device_radix_sort_keys_desc(void * temporary_storage,
 /// \endparblock
 template<class Key, class Value>
 inline
-void device_radix_sort_pairs(void * temporary_storage,
-                             size_t& temporary_storage_bytes,
-                             double_buffer<Key>& keys,
-                             double_buffer<Value>& values,
-                             unsigned int size,
-                             unsigned int begin_bit = 0,
-                             unsigned int end_bit = 8 * sizeof(Key),
-                             hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
-                             bool debug_synchronous = false)
+void radix_sort_pairs(void * temporary_storage,
+                      size_t& temporary_storage_bytes,
+                      double_buffer<Key>& keys,
+                      double_buffer<Value>& values,
+                      unsigned int size,
+                      unsigned int begin_bit = 0,
+                      unsigned int end_bit = 8 * sizeof(Key),
+                      hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
+                      bool debug_synchronous = false)
 {
     bool is_result_in_output;
-    detail::device_radix_sort<false>(
+    detail::radix_sort<false>(
         temporary_storage, temporary_storage_bytes,
         keys.current(), keys.current(), keys.alternate(),
         values.current(), values.current(), values.alternate(),
@@ -1074,7 +1074,7 @@ void device_radix_sort_pairs(void * temporary_storage,
 
 /// \brief HC parallel descending radix sort-by-key primitive for device level.
 ///
-/// \p device_radix_sort_pairs_desc function performs a device-wide radix sort
+/// \p radix_sort_pairs_desc function performs a device-wide radix sort
 /// of (key, value) pairs. Function sorts input pairs in descending order of keys.
 ///
 /// \par Overview
@@ -1137,7 +1137,7 @@ void device_radix_sort_pairs(void * temporary_storage,
 ///
 /// size_t temporary_storage_size_bytes;
 /// // Get required size of the temporary storage
-/// rocprim::device_radix_sort_pairs_desc(
+/// rocprim::radix_sort_pairs_desc(
 ///     nullptr, temporary_storage_size_bytes,
 ///     keys, values, input_size,
 ///     0, 4 * sizeof(int), acc_view
@@ -1147,7 +1147,7 @@ void device_radix_sort_pairs(void * temporary_storage,
 /// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
 ///
 /// // perform sort
-/// rocprim::device_radix_sort_pairs_desc(
+/// rocprim::radix_sort_pairs_desc(
 ///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
 ///     keys, values, input_size,
 ///     0, 4 * sizeof(int), acc_view
@@ -1158,18 +1158,18 @@ void device_radix_sort_pairs(void * temporary_storage,
 /// \endparblock
 template<class Key, class Value>
 inline
-void device_radix_sort_pairs_desc(void * temporary_storage,
-                                  size_t& temporary_storage_bytes,
-                                  double_buffer<Key>& keys,
-                                  double_buffer<Value>& values,
-                                  unsigned int size,
-                                  unsigned int begin_bit = 0,
-                                  unsigned int end_bit = 8 * sizeof(Key),
-                                  hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
-                                  bool debug_synchronous = false)
+void radix_sort_pairs_desc(void * temporary_storage,
+                           size_t& temporary_storage_bytes,
+                           double_buffer<Key>& keys,
+                           double_buffer<Value>& values,
+                           unsigned int size,
+                           unsigned int begin_bit = 0,
+                           unsigned int end_bit = 8 * sizeof(Key),
+                           hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
+                           bool debug_synchronous = false)
 {
     bool is_result_in_output;
-    detail::device_radix_sort<true>(
+    detail::radix_sort<true>(
         temporary_storage, temporary_storage_bytes,
         keys.current(), keys.current(), keys.alternate(),
         values.current(), values.current(), values.alternate(),
