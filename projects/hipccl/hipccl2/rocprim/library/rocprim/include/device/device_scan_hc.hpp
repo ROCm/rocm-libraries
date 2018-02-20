@@ -59,15 +59,15 @@ template<
     class BinaryFunction
 >
 inline
-void device_scan_impl(void * temporary_storage,
-                      size_t& storage_size,
-                      InputIterator input,
-                      OutputIterator output,
-                      const InitValueType initial_value,
-                      const size_t size,
-                      BinaryFunction scan_op,
-                      hc::accelerator_view acc_view,
-                      const bool debug_synchronous)
+void scan_impl(void * temporary_storage,
+               size_t& storage_size,
+               InputIterator input,
+               OutputIterator output,
+               const InitValueType initial_value,
+               const size_t size,
+               BinaryFunction scan_op,
+               hc::accelerator_view acc_view,
+               const bool debug_synchronous)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     #ifdef __cpp_lib_is_invocable
@@ -131,7 +131,7 @@ void device_scan_impl(void * temporary_storage,
         auto nested_temp_storage_size = storage_size - (number_of_blocks * sizeof(result_type));
 
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-        device_scan_impl<BlockSize, ItemsPerThread, false>(
+        scan_impl<BlockSize, ItemsPerThread, false>(
             nested_temp_storage,
             nested_temp_storage_size,
             block_prefixes, // input
@@ -183,7 +183,7 @@ void device_scan_impl(void * temporary_storage,
 
 /// \brief HC parallel inclusive scan primitive for device level.
 ///
-/// device_inclusive_scan function performs a device-wide inclusive prefix scan operation
+/// inclusive_scan function performs a device-wide inclusive prefix scan operation
 /// using binary \p scan_op operator.
 ///
 /// \par Overview
@@ -235,7 +235,7 @@ void device_scan_impl(void * temporary_storage,
 ///
 /// size_t temporary_storage_size_bytes;
 /// // Get required size of the temporary storage
-/// rocprim::device_inclusive_scan(
+/// rocprim::inclusive_scan(
 ///     nullptr, temporary_storage_size_bytes,
 ///     input.accelerator_pointer(), output.accelerator_pointer(), input.size(),
 ///     rocprim::plus<U>(), acc_view, false
@@ -245,7 +245,7 @@ void device_scan_impl(void * temporary_storage,
 /// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
 ///
 /// // perform scan
-/// rocprim::device_inclusive_scan(
+/// rocprim::inclusive_scan(
 ///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
 ///     input.accelerator_pointer(), output.accelerator_pointer(), input.size(),
 ///     rocprim::plus<U>(), acc_view, false
@@ -259,19 +259,19 @@ template<
     class BinaryFunction = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>
 >
 inline
-void device_inclusive_scan(void * temporary_storage,
-                           size_t& storage_size,
-                           InputIterator input,
-                           OutputIterator output,
-                           const size_t size,
-                           BinaryFunction scan_op = BinaryFunction(),
-                           hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
-                           const bool debug_synchronous = false)
+void inclusive_scan(void * temporary_storage,
+                    size_t& storage_size,
+                    InputIterator input,
+                    OutputIterator output,
+                    const size_t size,
+                    BinaryFunction scan_op = BinaryFunction(),
+                    hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
+                    const bool debug_synchronous = false)
 {
     // TODO: Those values should depend on type size
     constexpr unsigned int block_size = 256;
     constexpr unsigned int items_per_thread = 4;
-    return detail::device_scan_impl<block_size, items_per_thread, false>(
+    return detail::scan_impl<block_size, items_per_thread, false>(
         temporary_storage, storage_size,
         // char(0) is a dummy initial value
         input, output, char(0), size,
@@ -281,7 +281,7 @@ void device_inclusive_scan(void * temporary_storage,
 
 /// \brief HC parallel exclusive scan primitive for device level.
 ///
-/// device_exclusive_scan function performs a device-wide exclusive prefix scan operation
+/// exclusive_scan function performs a device-wide exclusive prefix scan operation
 /// using binary \p scan_op operator.
 ///
 /// \par Overview
@@ -343,7 +343,7 @@ void device_inclusive_scan(void * temporary_storage,
 ///
 /// size_t temporary_storage_size_bytes;
 /// // Get required size of the temporary storage
-/// rocprim::device_inclusive_scan(
+/// rocprim::inclusive_scan(
 ///     nullptr, temporary_storage_size_bytes,
 ///     input.accelerator_pointer(), output.accelerator_pointer(), start_value,
 ///     input.size(), min_op, acc_view, false
@@ -353,7 +353,7 @@ void device_inclusive_scan(void * temporary_storage,
 /// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
 ///
 /// // perform scan
-/// rocprim::device_inclusive_scan(
+/// rocprim::inclusive_scan(
 ///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
 ///     input.accelerator_pointer(), output.accelerator_pointer(), start_value,
 ///     input.size(), min_op, acc_view, false
@@ -368,20 +368,20 @@ template<
     class BinaryFunction = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>
 >
 inline
-void device_exclusive_scan(void * temporary_storage,
-                           size_t& storage_size,
-                           InputIterator input,
-                           OutputIterator output,
-                           const InitValueType initial_value,
-                           const size_t size,
-                           BinaryFunction scan_op = BinaryFunction(),
-                           hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
-                           const bool debug_synchronous = false)
+void exclusive_scan(void * temporary_storage,
+                    size_t& storage_size,
+                    InputIterator input,
+                    OutputIterator output,
+                    const InitValueType initial_value,
+                    const size_t size,
+                    BinaryFunction scan_op = BinaryFunction(),
+                    hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
+                    const bool debug_synchronous = false)
 {
     // TODO: Those values should depend on type size
     constexpr unsigned int block_size = 256;
     constexpr unsigned int items_per_thread = 4;
-    return detail::device_scan_impl<block_size, items_per_thread, true>(
+    return detail::scan_impl<block_size, items_per_thread, true>(
         temporary_storage, storage_size,
         input, output, initial_value, size,
         scan_op, acc_view, debug_synchronous
