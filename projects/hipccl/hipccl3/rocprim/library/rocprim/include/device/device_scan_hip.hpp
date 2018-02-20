@@ -137,15 +137,15 @@ template<
     class BinaryFunction
 >
 inline
-hipError_t device_scan_impl(void * temporary_storage,
-                            size_t& storage_size,
-                            InputIterator input,
-                            OutputIterator output,
-                            const InitValueType initial_value,
-                            const size_t size,
-                            BinaryFunction scan_op,
-                            const hipStream_t stream,
-                            bool debug_synchronous)
+hipError_t scan_impl(void * temporary_storage,
+                     size_t& storage_size,
+                     InputIterator input,
+                     OutputIterator output,
+                     const InitValueType initial_value,
+                     const size_t size,
+                     BinaryFunction scan_op,
+                     const hipStream_t stream,
+                     bool debug_synchronous)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     #ifdef __cpp_lib_is_invocable
@@ -206,7 +206,7 @@ hipError_t device_scan_impl(void * temporary_storage,
         auto nested_temp_storage_size = storage_size - (number_of_blocks * sizeof(result_type));
 
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-        auto error = device_scan_impl<BlockSize, ItemsPerThread, false>(
+        auto error = scan_impl<BlockSize, ItemsPerThread, false>(
             nested_temp_storage,
             nested_temp_storage_size,
             block_prefixes, // input
@@ -265,7 +265,7 @@ hipError_t device_scan_impl(void * temporary_storage,
 
 /// \brief HIP parallel inclusive scan primitive for device level.
 ///
-/// device_inclusive_scan function performs a device-wide inclusive prefix scan operation
+/// inclusive_scan function performs a device-wide inclusive prefix scan operation
 /// using binary \p scan_op operator.
 ///
 /// \par Overview
@@ -319,7 +319,7 @@ hipError_t device_scan_impl(void * temporary_storage,
 /// size_t temporary_storage_size_bytes;
 /// void * temporary_storage_ptr = nullptr;
 /// // Get required size of the temporary storage
-/// rocprim::device_inclusive_scan(
+/// rocprim::inclusive_scan(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     input, output, input_size, rocprim::plus<U>()
 /// );
@@ -328,7 +328,7 @@ hipError_t device_scan_impl(void * temporary_storage,
 /// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
 ///
 /// // perform scan
-/// rocprim::device_inclusive_scan(
+/// rocprim::inclusive_scan(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     input, output, input_size, rocprim::plus<U>()
 /// );
@@ -341,19 +341,19 @@ template<
     class BinaryFunction = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>
 >
 inline
-hipError_t device_inclusive_scan(void * temporary_storage,
-                                 size_t& storage_size,
-                                 InputIterator input,
-                                 OutputIterator output,
-                                 const size_t size,
-                                 BinaryFunction scan_op = BinaryFunction(),
-                                 const hipStream_t stream = 0,
-                                 bool debug_synchronous = false)
+hipError_t inclusive_scan(void * temporary_storage,
+                          size_t& storage_size,
+                          InputIterator input,
+                          OutputIterator output,
+                          const size_t size,
+                          BinaryFunction scan_op = BinaryFunction(),
+                          const hipStream_t stream = 0,
+                          bool debug_synchronous = false)
 {
     // TODO: Those values should depend on type size
     constexpr unsigned int block_size = 256;
     constexpr unsigned int items_per_thread = 4;
-    return detail::device_scan_impl<block_size, items_per_thread, false>(
+    return detail::scan_impl<block_size, items_per_thread, false>(
         temporary_storage, storage_size,
         // char(0) is a dummy initial value
         input, output, char(0), size,
@@ -363,7 +363,7 @@ hipError_t device_inclusive_scan(void * temporary_storage,
 
 /// \brief HIP parallel exclusive scan primitive for device level.
 ///
-/// device_exclusive_scan function performs a device-wide exclusive prefix scan operation
+/// exclusive_scan function performs a device-wide exclusive prefix scan operation
 /// using binary \p scan_op operator.
 ///
 /// \par Overview
@@ -427,7 +427,7 @@ hipError_t device_inclusive_scan(void * temporary_storage,
 /// size_t temporary_storage_size_bytes;
 /// void * temporary_storage_ptr = nullptr;
 /// // Get required size of the temporary storage
-/// rocprim::device_inclusive_scan(
+/// rocprim::inclusive_scan(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     input, output, start_value, input_size, min_op
 /// );
@@ -436,7 +436,7 @@ hipError_t device_inclusive_scan(void * temporary_storage,
 /// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
 ///
 /// // perform scan
-/// rocprim::device_inclusive_scan(
+/// rocprim::inclusive_scan(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     input, output, start_value, input_size, min_op
 /// );
@@ -450,20 +450,20 @@ template<
     class BinaryFunction = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>
 >
 inline
-hipError_t device_exclusive_scan(void * temporary_storage,
-                                 size_t& storage_size,
-                                 InputIterator input,
-                                 OutputIterator output,
-                                 const InitValueType initial_value,
-                                 const size_t size,
-                                 BinaryFunction scan_op = BinaryFunction(),
-                                 const hipStream_t stream = 0,
-                                 bool debug_synchronous = false)
+hipError_t exclusive_scan(void * temporary_storage,
+                          size_t& storage_size,
+                          InputIterator input,
+                          OutputIterator output,
+                          const InitValueType initial_value,
+                          const size_t size,
+                          BinaryFunction scan_op = BinaryFunction(),
+                          const hipStream_t stream = 0,
+                          bool debug_synchronous = false)
 {
     // TODO: Those values should depend on type size
     constexpr unsigned int block_size = 256;
     constexpr unsigned int items_per_thread = 4;
-    return detail::device_scan_impl<block_size, items_per_thread, true>(
+    return detail::scan_impl<block_size, items_per_thread, true>(
         temporary_storage, storage_size,
         input, output, initial_value, size,
         scan_op, stream, debug_synchronous
