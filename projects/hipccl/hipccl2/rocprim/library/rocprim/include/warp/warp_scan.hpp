@@ -612,6 +612,18 @@ public:
         base_type::scan(input, inclusive_output, exclusive_output, init, storage, scan_op);
     }
 
+    /// \overload
+    template<class BinaryFunction = ::rocprim::plus<T>>
+    ROCPRIM_DEVICE inline
+    void scan(T input,
+              T& inclusive_output,
+              T& exclusive_output,
+              storage_type& storage,
+              BinaryFunction scan_op = BinaryFunction())
+    {
+        base_type::scan(input, inclusive_output, exclusive_output, storage, scan_op);
+    }
+
     /// \brief Performs inclusive and exclusive scan operations, and reduction across
     /// threads in a logical warp.
     ///

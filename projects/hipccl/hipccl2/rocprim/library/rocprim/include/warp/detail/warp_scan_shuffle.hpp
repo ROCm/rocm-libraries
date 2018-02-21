@@ -149,6 +149,17 @@ public:
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE inline
+    void scan(T input, T& inclusive_output, T& exclusive_output,
+              storage_type& storage, BinaryFunction scan_op)
+    {
+        (void) storage; // disables unused parameter warning
+        inclusive_scan(input, inclusive_output, scan_op);
+        // Convert inclusive scan result to exclusive
+        to_exclusive(inclusive_output, exclusive_output);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE inline
     void scan(T input, T& inclusive_output, T& exclusive_output, T init, T& reduction,
               BinaryFunction scan_op)
     {
@@ -184,6 +195,14 @@ private:
         {
             exclusive_output = init;
         }
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE inline
+    void to_exclusive(T inclusive_input, T& exclusive_output)
+    {
+        // shift to get exclusive results
+        exclusive_output = warp_shuffle_up(exclusive_output, 1, WarpSize);
     }
 };
 
