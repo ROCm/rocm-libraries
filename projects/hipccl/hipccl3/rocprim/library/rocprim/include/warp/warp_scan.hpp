@@ -418,6 +418,17 @@ public:
         base_type::exclusive_scan(input, output, init, storage, scan_op);
     }
 
+    /// \overload
+    template<class BinaryFunction = ::rocprim::plus<T>>
+    ROCPRIM_DEVICE inline
+    void exclusive_scan(T input,
+                        T& output,
+                        storage_type& storage,
+                        BinaryFunction scan_op = BinaryFunction())
+    {
+        base_type::exclusive_scan(input, output, storage, scan_op);
+    }
+
     /// \brief Performs exclusive scan and reduction across threads in a logical warp.
     ///
     /// \tparam BinaryFunction - type of binary function used for scan. Default type

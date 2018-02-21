@@ -87,6 +87,15 @@ public:
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE inline
+    void exclusive_scan(T input, T& output,
+                        storage_type& storage, BinaryFunction scan_op)
+    {
+        inclusive_scan(input, output, storage, scan_op);
+        to_exclusive(output, storage);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE inline
     void exclusive_scan(T input, T& output, T init, T& reduction,
                         storage_type& storage, BinaryFunction scan_op)
     {
