@@ -57,14 +57,14 @@ enum class benchmark_kinds
 namespace rp = rocprim;
 
 template<benchmark_kinds benchmark_kind, class Key, class Value>
-auto run_device_radix_sort(void * d_temporary_storage, size_t& temporary_storage_bytes,
+auto run_radix_sort(void * d_temporary_storage, size_t& temporary_storage_bytes,
                            Key * d_keys_input, Key * d_keys_output,
                            Value *, Value *,
                            size_t size,
                            hc::accelerator_view acc_view)
     -> typename std::enable_if<benchmark_kind == benchmark_kinds::sort_keys, void>::type
 {
-    return rp::device_radix_sort_keys(
+    return rp::radix_sort_keys(
         d_temporary_storage, temporary_storage_bytes,
         d_keys_input, d_keys_output, size,
         0, sizeof(Key) * 8,
@@ -73,14 +73,14 @@ auto run_device_radix_sort(void * d_temporary_storage, size_t& temporary_storage
 }
 
 template<benchmark_kinds benchmark_kind, class Key, class Value>
-auto run_device_radix_sort(void * d_temporary_storage, size_t& temporary_storage_bytes,
+auto run_radix_sort(void * d_temporary_storage, size_t& temporary_storage_bytes,
                            Key * d_keys_input, Key * d_keys_output,
                            Value *, Value *,
                            size_t size,
                            hc::accelerator_view acc_view)
     -> typename std::enable_if<benchmark_kind == benchmark_kinds::sort_keys_desc, void>::type
 {
-    return rp::device_radix_sort_keys_desc(
+    return rp::radix_sort_keys_desc(
         d_temporary_storage, temporary_storage_bytes,
         d_keys_input, d_keys_output, size,
         0, sizeof(Key) * 8,
@@ -89,14 +89,14 @@ auto run_device_radix_sort(void * d_temporary_storage, size_t& temporary_storage
 }
 
 template<benchmark_kinds benchmark_kind, class Key, class Value>
-auto run_device_radix_sort(void * d_temporary_storage, size_t& temporary_storage_bytes,
+auto run_radix_sort(void * d_temporary_storage, size_t& temporary_storage_bytes,
                            Key * d_keys_input, Key * d_keys_output,
                            Value * d_values_input, Value * d_values_output,
                            size_t size,
                            hc::accelerator_view acc_view)
     -> typename std::enable_if<benchmark_kind == benchmark_kinds::sort_pairs, void>::type
 {
-    return rp::device_radix_sort_pairs(
+    return rp::radix_sort_pairs(
         d_temporary_storage, temporary_storage_bytes,
         d_keys_input, d_keys_output, d_values_input, d_values_output, size,
         0, sizeof(Key) * 8,
@@ -105,14 +105,14 @@ auto run_device_radix_sort(void * d_temporary_storage, size_t& temporary_storage
 }
 
 template<benchmark_kinds benchmark_kind, class Key, class Value>
-auto run_device_radix_sort(void * d_temporary_storage, size_t& temporary_storage_bytes,
+auto run_radix_sort(void * d_temporary_storage, size_t& temporary_storage_bytes,
                            Key * d_keys_input, Key * d_keys_output,
                            Value * d_values_input, Value * d_values_output,
                            size_t size,
                            hc::accelerator_view acc_view)
     -> typename std::enable_if<benchmark_kind == benchmark_kinds::sort_pairs_desc, void>::type
 {
-    return rp::device_radix_sort_pairs_desc(
+    return rp::radix_sort_pairs_desc(
         d_temporary_storage, temporary_storage_bytes,
         d_keys_input, d_keys_output, d_values_input, d_values_output, size,
         0, sizeof(Key) * 8,
@@ -152,7 +152,7 @@ void run_benchmark(benchmark::State& state, hc::accelerator_view acc_view, size_
 
     size_t temp_storage_size_bytes = 0;
     
-    run_device_radix_sort<benchmark_kind>(
+    run_radix_sort<benchmark_kind>(
         nullptr,
         temp_storage_size_bytes,
         d_keys_input.accelerator_pointer(),
@@ -171,7 +171,7 @@ void run_benchmark(benchmark::State& state, hc::accelerator_view acc_view, size_
     // Warm-up
     for(size_t i = 0; i < 10; i++)
     {
-        run_device_radix_sort<benchmark_kind>(
+        run_radix_sort<benchmark_kind>(
             d_temp_storage.accelerator_pointer(),
             temp_storage_size_bytes,
             d_keys_input.accelerator_pointer(),
@@ -190,7 +190,7 @@ void run_benchmark(benchmark::State& state, hc::accelerator_view acc_view, size_
         auto start = std::chrono::high_resolution_clock::now();
         for(size_t i = 0; i < batch_size; i++)
         {
-            run_device_radix_sort<benchmark_kind>(
+            run_radix_sort<benchmark_kind>(
                 d_temp_storage.accelerator_pointer(),
                 temp_storage_size_bytes,
                 d_keys_input.accelerator_pointer(),
@@ -214,7 +214,7 @@ void run_benchmark(benchmark::State& state, hc::accelerator_view acc_view, size_
 
 #define CREATE_BENCHMARK(T) \
 benchmark::RegisterBenchmark( \
-    (std::string("device_radix_") + name + "<" #T ">").c_str(), \
+    (std::string("radix_") + name + "<" #T ">").c_str(), \
     run_benchmark<benchmark_kind, T>, \
     acc_view, size \
 )

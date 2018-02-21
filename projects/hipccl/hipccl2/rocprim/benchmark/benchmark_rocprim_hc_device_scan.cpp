@@ -49,7 +49,7 @@ template<
     class T,
     class BinaryFunction
 >
-auto run_device_scan(void * temporary_storage,
+auto run_scan(void * temporary_storage,
                      size_t& storage_size,
                      T * input,
                      T * output,
@@ -60,7 +60,7 @@ auto run_device_scan(void * temporary_storage,
                      const bool debug = false)
     -> typename std::enable_if<Exclusive, void>::type
 {
-    return rocprim::device_exclusive_scan(
+    return rocprim::exclusive_scan(
         temporary_storage, storage_size,
         input, output, initial_value, input_size,
         scan_op, acc_view, debug
@@ -72,7 +72,7 @@ template<
     class T,
     class BinaryFunction
 >
-auto run_device_scan(void * temporary_storage,
+auto run_scan(void * temporary_storage,
                      size_t& storage_size,
                      T * input,
                      T * output,
@@ -84,7 +84,7 @@ auto run_device_scan(void * temporary_storage,
     -> typename std::enable_if<!Exclusive, void>::type
 {
     (void) initial_value;
-    return rocprim::device_inclusive_scan(
+    return rocprim::inclusive_scan(
         temporary_storage, storage_size,
         input, output, input_size,
         scan_op, acc_view, debug
@@ -124,7 +124,7 @@ void run_benchmark(benchmark::State& state,
     size_t temp_storage_size_bytes;
 
     // Get size of d_temp_storage
-    run_device_scan<Exclusive>(
+    run_scan<Exclusive>(
         nullptr,
         temp_storage_size_bytes,
         d_input.accelerator_pointer(),
@@ -143,7 +143,7 @@ void run_benchmark(benchmark::State& state,
     // Warm-up
     for(size_t i = 0; i < 10; i++)
     {
-        run_device_scan<Exclusive>(
+        run_scan<Exclusive>(
             d_temp_storage.accelerator_pointer(),
             temp_storage_size_bytes,
             d_input.accelerator_pointer(),
@@ -162,7 +162,7 @@ void run_benchmark(benchmark::State& state,
         auto start = std::chrono::high_resolution_clock::now();
         for(size_t i = 0; i < batch_size; i++)
         {
-            run_device_scan<Exclusive>(
+            run_scan<Exclusive>(
                 d_temp_storage.accelerator_pointer(),
                 temp_storage_size_bytes,
                 d_input.accelerator_pointer(),
@@ -186,13 +186,13 @@ void run_benchmark(benchmark::State& state,
 
 #define CREATE_INCLUSIVE_BENCHMARK(T, SCAN_OP) \
 benchmark::RegisterBenchmark( \
-    ("device_inclusive_scan<" #T "," #SCAN_OP ">"), \
+    ("inclusive_scan<" #T "," #SCAN_OP ">"), \
     run_benchmark<false, T, SCAN_OP>, size, acc_view, SCAN_OP() \
 )
 
 #define CREATE_EXCLUSIVE_BENCHMARK(T, SCAN_OP) \
 benchmark::RegisterBenchmark( \
-    ("device_exclusive_scan<" #T "," #SCAN_OP ">"), \
+    ("exclusive_scan<" #T "," #SCAN_OP ">"), \
     run_benchmark<true, T, SCAN_OP>, size, acc_view, SCAN_OP() \
 )
 
