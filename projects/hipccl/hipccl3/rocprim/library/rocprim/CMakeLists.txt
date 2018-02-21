@@ -35,7 +35,7 @@ target_include_directories(rocprim_headers
     INTERFACE
         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:include>
+        $<INSTALL_INTERFACE:rocprim/include>
 )
 
 # This target allows using only HC interface, links only

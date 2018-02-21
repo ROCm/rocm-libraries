@@ -32,7 +32,7 @@ list(APPEND CMAKE_MODULE_PATH
 )
 
 # Select hcc as a C++ compiler
-include(cmake/hcc-toolchain.cmake)
+include(cmake/SetToolchain.cmake)
 
 # rocPRIM project
 project(rocprim VERSION 0.1.0.0 LANGUAGES CXX)
@@ -63,8 +63,14 @@ include(cmake/Dependencies.cmake)
 # AMD targets
 set(AMDGPU_TARGETS gfx803;gfx900 CACHE STRING "List of specific machine types for library to target")
 
-# rocPRIM library
-add_subdirectory(library/rocprim)
+# rocPRIM works only on hcc
+if(HIP_PLATFORM STREQUAL "hcc")
+  # rocPRIM library
+  add_subdirectory(library/rocprim)
+endif()
+
+# hipCUB library
+add_subdirectory(library/hipcub)
 
 # Tests
 if(BUILD_TEST)
@@ -72,12 +78,15 @@ if(BUILD_TEST)
   add_subdirectory(test)
 endif()
 
-# Benchmarks
-if(BUILD_BENCHMARK)
-  add_subdirectory(benchmark)
-endif()
+# Benchmarks and examples are only for rocPRIM
+if(HIP_PLATFORM STREQUAL "hcc")
+  # Benchmarks
+  if(BUILD_BENCHMARK)
+    add_subdirectory(benchmark)
+  endif()
 
-# Examples
-if(BUILD_EXAMPLE)
-  add_subdirectory(example)
+  # Examples
+  if(BUILD_EXAMPLE)
+    add_subdirectory(example)
+  endif()
 endif()

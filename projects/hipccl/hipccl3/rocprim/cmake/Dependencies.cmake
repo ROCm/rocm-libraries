@@ -31,7 +31,7 @@ endif()
 # HIP and nvcc configuration
 find_package(HIP REQUIRED)
 if(HIP_PLATFORM STREQUAL "nvcc")
-  message(FATAL_ERROR "HIP_PLATFORM must be 'hcc' (AMD ROCm platform).")
+  include(cmake/NVCC.cmake)
 elseif(HIP_PLATFORM STREQUAL "hcc")
   # Workaround until hcc & hip cmake modules fixes symlink logic in their config files.
   # (Thanks to rocBLAS devs for finding workaround for this problem!)
@@ -49,6 +49,23 @@ if (CMAKE_VERSION VERSION_LESS 3.2)
   set(UPDATE_DISCONNECTED_IF_AVAILABLE "")
 else()
   set(UPDATE_DISCONNECTED_IF_AVAILABLE "UPDATE_DISCONNECTED TRUE")
+endif()
+
+# CUB
+if(HIP_PLATFORM STREQUAL "nvcc")
+  if((NOT DEFINED CUB_INCLUDE_DIR) OR DEPENDENCIES_FORCE_DOWNLOAD)
+    download_project(PROJ   cub
+             GIT_REPOSITORY https://github.com/NVlabs/cub.git
+             GIT_TAG        v1.8.0
+             LOG_DOWNLOAD   TRUE
+             LOG_CONFIGURE  TRUE
+             LOG_BUILD      TRUE
+             LOG_INSTALL    TRUE
+             BUILD_PROJECT  FALSE
+             ${UPDATE_DISCONNECTED_IF_AVAILABLE}
+    )
+    set(CUB_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/cub-src/ CACHE PATH "")
+  endif()
 endif()
 
 # Test dependencies
@@ -70,6 +87,7 @@ if(BUILD_TEST)
              LOG_CONFIGURE  TRUE
              LOG_BUILD      TRUE
              LOG_INSTALL    TRUE
+             BUILD_PROJECT  TRUE
              ${UPDATE_DISCONNECTED_IF_AVAILABLE}
     )
   endif()
@@ -95,6 +113,7 @@ if(BUILD_BENCHMARK)
              LOG_CONFIGURE  TRUE
              LOG_BUILD      TRUE
              LOG_INSTALL    TRUE
+             BUILD_PROJECT  TRUE
              ${UPDATE_DISCONNECTED_IF_AVAILABLE}
     )
   endif()
