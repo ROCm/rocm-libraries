@@ -106,6 +106,15 @@ public:
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE inline
+    void scan(T input, T& inclusive_output, T& exclusive_output,
+              storage_type& storage, BinaryFunction scan_op)
+    {
+        inclusive_scan(input, inclusive_output, storage, scan_op);
+        to_exclusive(exclusive_output, storage);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE inline
     void scan(T input, T& inclusive_output, T& exclusive_output, T init, T& reduction,
               storage_type& storage, BinaryFunction scan_op)
     {
@@ -123,7 +132,22 @@ private:
                       storage_type& storage, BinaryFunction scan_op)
     {
         const unsigned int lid = detail::logical_lane_id<WarpSize>();
-        exclusive_output = lid == 0 ? init : scan_op(init, load_volatile(&storage.threads[lid-1]));
+        exclusive_output = init;
+        if(lid != 0)
+        {
+            exclusive_output = scan_op(init, load_volatile(&storage.threads[lid-1]));
+        }
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE inline
+    void to_exclusive(T& exclusive_output, storage_type& storage)
+    {
+        const unsigned int lid = detail::logical_lane_id<WarpSize>();
+        if(lid != 0)
+        {
+            exclusive_output = load_volatile(&storage.threads[lid-1]);
+        }
     }
 };
 
