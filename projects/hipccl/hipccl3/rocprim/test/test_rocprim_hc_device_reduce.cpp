@@ -31,7 +31,7 @@
 #include <hcc/hc.hpp>
 
 // rocPRIM HC API
-#include <device/device_reduce_hc.hpp>
+#include <rocprim.hpp>
 
 #include "test_utils.hpp"
 
@@ -223,5 +223,98 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
         auto diff = std::max<U>(std::abs(0.01f * expected), U(0.01f));
         if(std::is_integral<U>::value) diff = 0;
         ASSERT_NEAR(output[0], expected, diff);
+    }
+}
+
+template<
+    class Key,
+    class Value
+>
+struct arg_min
+{
+    ROCPRIM_HOST_DEVICE inline
+    constexpr rocprim::key_value_pair<Key, Value>
+    operator()(const rocprim::key_value_pair<Key, Value>& a,
+               const rocprim::key_value_pair<Key, Value>& b) const
+    {
+        return ((b.value < a.value) || ((a.value == b.value) && (b.key < a.key))) ? b : a;
+    }
+};
+
+TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
+{
+    using T = typename TestFixture::input_type;
+    using key_value = rocprim::key_value_pair<int, T>;
+    const bool debug_synchronous = TestFixture::debug_synchronous;
+
+    hc::accelerator acc;
+    hc::accelerator_view acc_view = acc.create_view();
+
+    const std::vector<size_t> sizes = get_sizes();
+    for(auto size : sizes)
+    {
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+        // Generate data
+        std::vector<key_value> input(size);
+        for (size_t i = 0; i < size; i++)
+        {
+            input[i].key = i;
+            input[i].value = get_random_value<T>(1, 100);
+        }
+
+        hc::array<key_value> d_input(hc::extent<1>(size), input.begin(), acc_view);
+        hc::array<key_value> d_output(1, acc_view);
+        acc_view.wait();
+
+        arg_min<int, T> reduce_op;
+        const key_value max(std::numeric_limits<int>::max(), std::numeric_limits<T>::max());
+
+        // Calculate expected results on host
+        key_value expected = std::accumulate(input.begin(), input.end(), max, reduce_op);
+
+        // temp storage
+        size_t temp_storage_size_bytes;
+        // Get size of d_temp_storage
+        rocprim::reduce(
+            nullptr,
+            temp_storage_size_bytes,
+            d_input.accelerator_pointer(),
+            d_output.accelerator_pointer(),
+            max,
+            input.size(),
+            reduce_op,
+            acc_view,
+            debug_synchronous
+        );
+        acc_view.wait();
+
+        // temp_storage_size_bytes must be >0
+        ASSERT_GT(temp_storage_size_bytes, 0);
+
+        // allocate temporary storage
+        hc::array<char> d_temp_storage(temp_storage_size_bytes, acc_view);
+        acc_view.wait();
+
+        // Run
+        rocprim::reduce(
+            d_temp_storage.accelerator_pointer(),
+            temp_storage_size_bytes,
+            d_input.accelerator_pointer(),
+            d_output.accelerator_pointer(),
+            max,
+            input.size(),
+            reduce_op,
+            acc_view,
+            debug_synchronous
+        );
+        acc_view.wait();
+
+        // Check if output values are as expected
+        std::vector<key_value> output = d_output;
+        auto diff = std::max<T>(std::abs(0.01f * expected.value), T(0.01f));
+        if(std::is_integral<T>::value) diff = 0;
+        ASSERT_EQ(output[0].key, expected.key);
+        ASSERT_NEAR(output[0].value, expected.value, diff);
     }
 }

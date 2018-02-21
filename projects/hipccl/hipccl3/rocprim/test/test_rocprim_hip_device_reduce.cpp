@@ -279,3 +279,120 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
         HIP_CHECK(hipStreamDestroy(stream));
     }
 }
+
+template<
+    class Key,
+    class Value
+>
+struct arg_min
+{
+    ROCPRIM_HOST_DEVICE inline
+    constexpr rocprim::key_value_pair<Key, Value>
+    operator()(const rocprim::key_value_pair<Key, Value>& a,
+               const rocprim::key_value_pair<Key, Value>& b) const
+    {
+        return ((b.value < a.value) || ((a.value == b.value) && (b.key < a.key))) ? b : a;
+    }
+};
+
+TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
+{
+    using T = typename TestFixture::input_type;
+    using key_value = rocprim::key_value_pair<int, T>;
+    const bool debug_synchronous = TestFixture::debug_synchronous;
+
+    const std::vector<size_t> sizes = get_sizes();
+    for(auto size : sizes)
+    {
+        // HIP
+        hipStream_t stream = 0; // default
+        HIP_CHECK(hipStreamCreate(&stream));
+
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+        // Generate data
+        std::vector<key_value> input(size);
+        for (size_t i = 0; i < size; i++)
+        {
+            input[i].key = i;
+            input[i].value = get_random_value<T>(1, 100);
+        }
+        std::vector<key_value> output(1);
+
+        key_value * d_input;
+        key_value * d_output;
+        HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(key_value)));
+        HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(key_value)));
+        HIP_CHECK(
+            hipMemcpy(
+                d_input, input.data(),
+                input.size() * sizeof(key_value),
+                hipMemcpyHostToDevice
+            )
+        );
+        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK(hipStreamSynchronize(stream));
+
+        arg_min<int, T> reduce_op;
+        const key_value max(std::numeric_limits<int>::max(), std::numeric_limits<T>::max());
+
+        // Calculate expected results on host
+        key_value expected = std::accumulate(input.begin(), input.end(), max, reduce_op);
+
+        // temp storage
+        size_t temp_storage_size_bytes;
+        void * d_temp_storage = nullptr;
+        // Get size of d_temp_storage
+        HIP_CHECK(
+            rocprim::reduce(
+                d_temp_storage, temp_storage_size_bytes,
+                d_input, d_output, max, input.size(),
+                reduce_op, stream, debug_synchronous
+            )
+        );
+
+        // temp_storage_size_bytes must be >0
+        ASSERT_GT(temp_storage_size_bytes, 0);
+
+        // allocate temporary storage
+        HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK(hipStreamSynchronize(stream));
+
+        // Run
+        HIP_CHECK(
+            rocprim::reduce(
+                d_temp_storage, temp_storage_size_bytes,
+                d_input, d_output, max, input.size(),
+                reduce_op, stream, debug_synchronous
+            )
+        );
+        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK(hipStreamSynchronize(stream));
+
+        // Copy output to host
+        HIP_CHECK(
+            hipMemcpy(
+                output.data(), d_output,
+                output.size() * sizeof(key_value),
+                hipMemcpyDeviceToHost
+            )
+        );
+        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK(hipStreamSynchronize(stream));
+
+        // Check if output values are as expected
+        auto diff = std::max<T>(std::abs(0.01f * expected.value), T(0.01f));
+        if(std::is_integral<T>::value) diff = 0;
+        ASSERT_EQ(output[0].key, expected.key);
+        ASSERT_NEAR(output[0].value, expected.value, diff);
+
+        hipFree(d_input);
+        hipFree(d_output);
+        hipFree(d_temp_storage);
+
+        // HIP stream
+        HIP_CHECK(hipStreamDestroy(stream));
+    }
+}
