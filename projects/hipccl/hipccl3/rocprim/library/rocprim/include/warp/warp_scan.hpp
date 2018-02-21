@@ -738,6 +738,24 @@ public:
             storage, scan_op
         );
     }
+
+    /// \brief Broadcasts value from one thread to all threads in logical warp.
+    ///
+    /// \param [in] input - value to broadcast.
+    /// \param [in] src_lane - id of the thread whose value should be broadcasted
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
+    /// universal rocprim::syncthreads().
+    ROCPRIM_DEVICE inline
+    T broadcast(T input,
+                const unsigned int src_lane,
+                storage_type& storage)
+    {
+        return base_type::broadcast(input, src_lane, storage);
+    }
 };
 
 END_ROCPRIM_NAMESPACE
