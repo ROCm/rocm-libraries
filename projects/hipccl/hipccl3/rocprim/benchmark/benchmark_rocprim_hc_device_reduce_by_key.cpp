@@ -86,7 +86,7 @@ void run_benchmark(benchmark::State& state, size_t max_length, hc::accelerator_v
     rp::plus<value_type> reduce_op;
     rp::equal_to<key_type> key_compare_op;
 
-    rp::device_reduce_by_key(
+    rp::reduce_by_key(
         nullptr,
         temp_storage_size_bytes,
         d_keys_input.accelerator_pointer(),
@@ -109,7 +109,7 @@ void run_benchmark(benchmark::State& state, size_t max_length, hc::accelerator_v
     // Warm-up
     for(size_t i = 0; i < 10; i++)
     {
-        rp::device_reduce_by_key(
+        rp::reduce_by_key(
             d_temp_storage.accelerator_pointer(),
             temp_storage_size_bytes,
             d_keys_input.accelerator_pointer(),
@@ -133,7 +133,7 @@ void run_benchmark(benchmark::State& state, size_t max_length, hc::accelerator_v
 
         for(size_t i = 0; i < batch_size; i++)
         {
-            rp::device_reduce_by_key(
+            rp::reduce_by_key(
                 d_temp_storage.accelerator_pointer(),
                 temp_storage_size_bytes,
                 d_keys_input.accelerator_pointer(),
@@ -161,7 +161,7 @@ void run_benchmark(benchmark::State& state, size_t max_length, hc::accelerator_v
 
 #define CREATE_BENCHMARK(Key, Value) \
 benchmark::RegisterBenchmark( \
-    (std::string("device_reduce_by_key") + "<" #Key ", " #Value ">" + \
+    (std::string("reduce_by_key") + "<" #Key ", " #Value ">" + \
         "([1, " + std::to_string(max_length) + "])" \
     ).c_str(), \
     run_benchmark<Key, Value>, \

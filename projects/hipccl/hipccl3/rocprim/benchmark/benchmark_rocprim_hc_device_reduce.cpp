@@ -77,7 +77,7 @@ void run_benchmark(benchmark::State& state,
     size_t temp_storage_size_bytes;
 
     // Get size of d_temp_storage
-    rocprim::device_reduce(
+    rocprim::reduce(
         nullptr,
         temp_storage_size_bytes,
         d_input.accelerator_pointer(),
@@ -96,7 +96,7 @@ void run_benchmark(benchmark::State& state,
     // Warm-up
     for(size_t i = 0; i < 10; i++)
     {
-        rocprim::device_reduce(
+        rocprim::reduce(
             d_temp_storage.accelerator_pointer(),
             temp_storage_size_bytes,
             d_input.accelerator_pointer(),
@@ -116,7 +116,7 @@ void run_benchmark(benchmark::State& state,
 
         for(size_t i = 0; i < batch_size; i++)
         {
-            rocprim::device_reduce(
+            rocprim::reduce(
                 d_temp_storage.accelerator_pointer(),
                 temp_storage_size_bytes,
                 d_input.accelerator_pointer(),
@@ -140,7 +140,7 @@ void run_benchmark(benchmark::State& state,
 
 #define CREATE_BENCHMARK(T, REDUCE_OP) \
 benchmark::RegisterBenchmark( \
-    ("device_reduce<" #T "," #REDUCE_OP ">"), \
+    ("reduce<" #T "," #REDUCE_OP ">"), \
     run_benchmark<T, REDUCE_OP>, size, acc_view, REDUCE_OP() \
 )
 

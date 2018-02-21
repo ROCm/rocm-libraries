@@ -86,7 +86,7 @@ void run_benchmark(benchmark::State& state,
     // Warm-up
     for(size_t i = 0; i < 10; i++)
     {
-        rocprim::device_transform(
+        rocprim::transform(
             d_input.accelerator_pointer(),
             d_output.accelerator_pointer(),
             size,
@@ -103,7 +103,7 @@ void run_benchmark(benchmark::State& state,
 
         for(size_t i = 0; i < batch_size; i++)
         {
-            rocprim::device_transform(
+            rocprim::transform(
                 d_input.accelerator_pointer(),
                 d_output.accelerator_pointer(),
                 size,
@@ -124,7 +124,7 @@ void run_benchmark(benchmark::State& state,
 
 #define CREATE_BENCHMARK(T, TRANSFORM_OP) \
 benchmark::RegisterBenchmark( \
-    ("device_transform<" #T "," #TRANSFORM_OP ">"), \
+    ("transform<" #T "," #TRANSFORM_OP ">"), \
     run_benchmark<T, TRANSFORM_OP>, size, acc_view, TRANSFORM_OP() \
 )
 
