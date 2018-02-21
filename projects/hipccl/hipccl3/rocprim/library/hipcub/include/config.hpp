@@ -18,24 +18,36 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_VERSION_HPP_
-#define ROCPRIM_VERSION_HPP_
+#ifndef HIPCUB_CONFIG_HPP_
+#define HIPCUB_CONFIG_HPP_
 
-/// \def ROCPRIM_VERSION
-/// \brief ROCPRIM library version
-///
-/// Version number may not be visible in the documentation.
-///
-/// ROCPRIM_VERSION % 100 is the patch level,
-/// ROCPRIM_VERSION / 100 % 1000 is the minor version,
-/// ROCPRIM_VERSION / 100000 is the major version.
-///
-/// For example, if ROCPRIM_VERSION is 100500, then the major version is 1,
-/// the minor version is 5, and the patch level is 0.
-#define ROCPRIM_VERSION @rocprim_VERSION_MAJOR@ * 100000 + @rocprim_VERSION_MINOR@ * 100 + @rocprim_VERSION_PATCH@
+#include <hip/hip_runtime.h>
 
-#define ROCPRIM_VERSION_MAJOR @rocprim_VERSION_MAJOR@
-#define ROCPRIM_VERSION_MINOR @rocprim_VERSION_MINOR@
-#define ROCPRIM_VERSION_PATCH @rocprim_VERSION_PATCH@
+#define BEGIN_HIPCUB_NAMESPACE \
+    namespace hipcub {
 
-#endif // ROCPRIM_VERSION_HPP_
+#define END_HIPCUB_NAMESPACE \
+    } /* hipcub */
+
+#ifdef __HIP_PLATFORM_HCC__
+    #ifndef ROCPRIM_HIP_API
+        #define ROCPRIM_HIP_API
+    #endif // ROCPRIM_HIP_API
+    #include <rocprim.hpp>
+
+    #define HIPCUB_ROCPRIM_API 1
+    #define HIPCUB_DEVICE __device__
+    #define HIPCUB_HOST __host__
+    #define HIPCUB_HOST_DEVICE __host__ __device__
+    #define HIPCUB_SHARED_MEMORY __shared__
+#elif defined(__HIP_PLATFORM_NVCC__)
+    #include "cub/cub.cuh"
+
+    #define HIPCUB_CUB_API 1
+    #define HIPCUB_DEVICE __device__
+    #define HIPCUB_HOST __host__
+    #define HIPCUB_HOST_DEVICE __host__ __device__
+    #define HIPCUB_SHARED_MEMORY __shared__
+#endif
+
+#endif // HIPCUB_CONFIG_HPP_

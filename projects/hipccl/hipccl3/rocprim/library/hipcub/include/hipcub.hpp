@@ -18,24 +18,22 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_VERSION_HPP_
-#define ROCPRIM_VERSION_HPP_
+#ifndef HIPCUB_HPP_
+#define HIPCUB_HPP_
 
-/// \def ROCPRIM_VERSION
-/// \brief ROCPRIM library version
+/// \file
 ///
-/// Version number may not be visible in the documentation.
-///
-/// ROCPRIM_VERSION % 100 is the patch level,
-/// ROCPRIM_VERSION / 100 % 1000 is the minor version,
-/// ROCPRIM_VERSION / 100000 is the major version.
-///
-/// For example, if ROCPRIM_VERSION is 100500, then the major version is 1,
-/// the minor version is 5, and the patch level is 0.
-#define ROCPRIM_VERSION @rocprim_VERSION_MAJOR@ * 100000 + @rocprim_VERSION_MINOR@ * 100 + @rocprim_VERSION_PATCH@
+/// Meta-header to include all hipCUB APIs.
 
-#define ROCPRIM_VERSION_MAJOR @rocprim_VERSION_MAJOR@
-#define ROCPRIM_VERSION_MINOR @rocprim_VERSION_MINOR@
-#define ROCPRIM_VERSION_PATCH @rocprim_VERSION_PATCH@
+// Meta configuration for hipCUB
+#include "config.hpp"
+// Version
+#include "hipcub_version.hpp"
 
-#endif // ROCPRIM_VERSION_HPP_
+#ifdef __HIP_PLATFORM_HCC__
+    #include "rocprim/hipcub.hpp"
+#elif defined(__HIP_PLATFORM_NVCC__)
+    #include "cub/hipcub.hpp"
+#endif
+
+#endif // HIPCUB_HPP_
