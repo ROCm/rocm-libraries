@@ -100,7 +100,7 @@ public:
 
     template<typename ScanOp>
     HIPCUB_DEVICE inline
-    void ExclusiveScan(T input, T& exclusive_output,  T initial_value, ScanOp scan_op, T& warp_aggregate)
+    void ExclusiveScan(T input, T& exclusive_output, T initial_value, ScanOp scan_op, T& warp_aggregate)
     {
         base_type::exclusive_scan(
             input, exclusive_output, initial_value, warp_aggregate,
