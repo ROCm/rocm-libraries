@@ -132,6 +132,16 @@ public:
         to_exclusive(exclusive_output, init, storage, scan_op);
     }
 
+    ROCPRIM_DEVICE inline
+    T broadcast(T input, const unsigned int src_lane, storage_type& storage)
+    {
+        if(src_lane == detail::logical_lane_id<WarpSize>())
+        {
+            store_volatile(&storage.threads[src_lane], input);
+        }
+        return load_volatile(&storage.threads[src_lane])
+    }
+
 private:
 
     // Calculate exclusive results base on inclusive scan results in storage.threads[].

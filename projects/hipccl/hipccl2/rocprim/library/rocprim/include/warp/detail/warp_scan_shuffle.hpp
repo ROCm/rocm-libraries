@@ -190,6 +190,13 @@ public:
         scan(input, inclusive_output, exclusive_output, init, reduction, scan_op);
     }
 
+    ROCPRIM_DEVICE inline
+    T broadcast(T input, const unsigned int src_lane, storage_type& storage)
+    {
+        (void) storage;
+        return warp_shuffle(input, src_lane, WarpSize);
+    }
+
 private:
 
     // Changes inclusive scan results to exclusive scan results
