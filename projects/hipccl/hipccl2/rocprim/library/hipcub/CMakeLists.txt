@@ -20,32 +20,39 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# Find HIP package
-find_package(HIP REQUIRED)
+# hipCUB header-only library
 
-# Select toolchain
-if(HIP_PLATFORM STREQUAL "nvcc")
-    message(FATAL_ERROR "CUDA platform is not supported.")
-elseif(HIP_PLATFORM STREQUAL "hcc")
-    # Find HCC executable
-    find_program(
-        HIP_HCC_EXECUTABLE
-        NAMES hcc
-        PATHS
-        "${HIP_ROOT_DIR}"
-        ENV ROCM_PATH
-        ENV HIP_PATH
-        /opt/rocm
-        /opt/rocm/hip
-        PATH_SUFFIXES bin
-        NO_DEFAULT_PATH
+# Configure a header file to pass the hipCUB version
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/hipcub_version.hpp.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/include/hipcub_version.hpp"
+    @ONLY
+)
+
+# Only header target, does not include dependencies
+add_library(hipcub_headers INTERFACE)
+target_include_directories(hipcub_headers
+    INTERFACE
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:hipcub/include>
+)
+
+if(HIP_PLATFORM STREQUAL "hcc")
+    add_library(hipcub INTERFACE)
+    target_link_libraries(hipcub
+        INTERFACE
+            hipcub_headers
+            rocprim_hip
     )
-    if(NOT HIP_HCC_EXECUTABLE)
-        # Now search in default paths
-        find_program(HIP_HCC_EXECUTABLE hcc)
-    endif()
-    mark_as_advanced(HIP_HCC_EXECUTABLE)
-    set(CMAKE_CXX_COMPILER ${HIP_HCC_EXECUTABLE})
 else()
-    message(FATAL_ERROR "HIP_PLATFORM must be 'hcc' (AMD ROCm platform).")
+    add_library(hipcub INTERFACE)
+    target_include_directories(hipcub
+        INTERFACE
+            ${CUB_INCLUDE_DIR}
+    )
+    target_link_libraries(hipcub
+        INTERFACE
+            hipcub_headers
+    )
 endif()
