@@ -130,7 +130,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScan)
     constexpr size_t block_size = TestFixture::block_size;
 
     // Given block size not supported
-    if(block_size > test_utils::hip_get_max_block_size())
+    if(block_size > test_utils::get_max_block_size())
     {
         return;
     }
@@ -218,7 +218,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanReduce)
     constexpr size_t block_size = TestFixture::block_size;
 
     // Given block size not supported
-    if(block_size > test_utils::hip_get_max_block_size())
+    if(block_size > test_utils::get_max_block_size())
     {
         return;
     }
@@ -340,7 +340,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanPrefixCallback)
     constexpr size_t block_size = TestFixture::block_size;
 
     // Given block size not supported
-    if(block_size > test_utils::hip_get_max_block_size())
+    if(block_size > test_utils::get_max_block_size())
     {
         return;
     }
@@ -449,7 +449,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScan)
     constexpr size_t block_size = TestFixture::block_size;
 
     // Given block size not supported
-    if(block_size > test_utils::hip_get_max_block_size())
+    if(block_size > test_utils::get_max_block_size())
     {
         return;
     }
@@ -538,7 +538,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanReduce)
     constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;
 
-    if(block_size > test_utils::hip_get_max_block_size())
+    if(block_size > test_utils::get_max_block_size())
     {
         return;
     }
@@ -670,7 +670,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanPrefixCallback)
     constexpr size_t block_size = TestFixture::block_size;
 
     // Given block size not supported
-    if(block_size > test_utils::hip_get_max_block_size())
+    if(block_size > test_utils::get_max_block_size())
     {
         return;
     }
@@ -771,7 +771,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, CustomStruct)
     constexpr size_t block_size = TestFixture::block_size;
 
     // Given block size not supported
-    if(block_size > test_utils::hip_get_max_block_size())
+    if(block_size > test_utils::get_max_block_size())
     {
         return;
     }
@@ -921,7 +921,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScan)
     constexpr size_t items_per_thread = TestFixture::items_per_thread;
 
     // Given block size not supported
-    if(block_size > test_utils::hip_get_max_block_size())
+    if(block_size > test_utils::get_max_block_size())
     {
         return;
     }
@@ -1028,7 +1028,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScanReduce)
     constexpr size_t items_per_thread = TestFixture::items_per_thread;
 
     // Given block size not supported
-    if(block_size > test_utils::hip_get_max_block_size())
+    if(block_size > test_utils::get_max_block_size())
     {
         return;
     }
@@ -1179,7 +1179,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScanPrefixCallback)
     constexpr size_t items_per_thread = TestFixture::items_per_thread;
 
     // Given block size not supported
-    if(block_size > test_utils::hip_get_max_block_size())
+    if(block_size > test_utils::get_max_block_size())
     {
         return;
     }
@@ -1318,7 +1318,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScan)
     constexpr size_t items_per_thread = TestFixture::items_per_thread;
 
     // Given block size not supported
-    if(block_size > test_utils::hip_get_max_block_size())
+    if(block_size > test_utils::get_max_block_size())
     {
         return;
     }
@@ -1426,7 +1426,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScanReduce)
     constexpr size_t items_per_thread = TestFixture::items_per_thread;
 
     // Given block size not supported
-    if(block_size > test_utils::hip_get_max_block_size())
+    if(block_size > test_utils::get_max_block_size())
     {
         return;
     }
@@ -1577,7 +1577,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScanPrefixCallback)
     constexpr size_t items_per_thread = TestFixture::items_per_thread;
 
     // Given block size not supported
-    if(block_size > test_utils::hip_get_max_block_size())
+    if(block_size > test_utils::get_max_block_size())
     {
         return;
     }
