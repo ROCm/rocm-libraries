@@ -195,13 +195,13 @@ TYPED_TEST(RocprimBlockDiscontinuity, FlagHeads)
     constexpr size_t grid_size = size / items_per_block;
 
     // Given block size not supported
-    if(block_size > hip_get_max_block_size())
+    if(block_size > test_utils::hip_get_max_block_size())
     {
         return;
     }
 
     // Generate data
-    std::vector<type> input = get_random_data<type>(size, type(0), type(10));
+    std::vector<type> input = test_utils::get_random_data<type>(size, type(0), type(10));
     std::vector<long long> heads(size);
 
     // Calculate expected results on host
@@ -324,13 +324,13 @@ TYPED_TEST(RocprimBlockDiscontinuity, FlagTails)
     constexpr size_t grid_size = size / items_per_block;
 
     // Given block size not supported
-    if(block_size > hip_get_max_block_size())
+    if(block_size > test_utils::hip_get_max_block_size())
     {
         return;
     }
 
     // Generate data
-    std::vector<type> input = get_random_data<type>(size, type(0), type(10));
+    std::vector<type> input = test_utils::get_random_data<type>(size, type(0), type(10));
     std::vector<long long> tails(size);
 
     // Calculate expected results on host
@@ -466,13 +466,13 @@ TYPED_TEST(RocprimBlockDiscontinuity, FlagHeadsAndTails)
     constexpr size_t grid_size = size / items_per_block;
 
     // Given block size not supported
-    if(block_size > hip_get_max_block_size())
+    if(block_size > test_utils::hip_get_max_block_size())
     {
         return;
     }
 
     // Generate data
-    std::vector<type> input = get_random_data<type>(size, type(0), type(10));
+    std::vector<type> input = test_utils::get_random_data<type>(size, type(0), type(10));
     std::vector<long long> heads(size);
     std::vector<long long> tails(size);
 

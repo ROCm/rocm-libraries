@@ -122,7 +122,7 @@ struct key_value_comparator
 std::vector<size_t> get_sizes()
 {
     std::vector<size_t> sizes = { 1, 10, 53, 211, 1024, 2345, 4096, 34567, (1 << 16) - 1220, (1 << 23) - 76543 };
-    const std::vector<size_t> random_sizes = get_random_data<size_t>(10, 1, 100000);
+    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(10, 1, 100000);
     sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
     return sizes;
 }
@@ -151,11 +151,11 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
         std::vector<key_type> keys_input;
         if(std::is_floating_point<key_type>::value)
         {
-            keys_input = get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
+            keys_input = test_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
         }
         else
         {
-            keys_input = get_random_data<key_type>(
+            keys_input = test_utils::get_random_data<key_type>(
                 size,
                 std::numeric_limits<key_type>::min(),
                 std::numeric_limits<key_type>::max()
@@ -233,11 +233,11 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairs)
         std::vector<key_type> keys_input;
         if(std::is_floating_point<key_type>::value)
         {
-            keys_input = get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
+            keys_input = test_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
         }
         else
         {
-            keys_input = get_random_data<key_type>(
+            keys_input = test_utils::get_random_data<key_type>(
                 size,
                 std::numeric_limits<key_type>::min(),
                 std::numeric_limits<key_type>::max()
@@ -338,11 +338,11 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeysDoubleBuffer)
         std::vector<key_type> keys_input;
         if(std::is_floating_point<key_type>::value)
         {
-            keys_input = get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
+            keys_input = test_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
         }
         else
         {
-            keys_input = get_random_data<key_type>(
+            keys_input = test_utils::get_random_data<key_type>(
                 size,
                 std::numeric_limits<key_type>::min(),
                 std::numeric_limits<key_type>::max()
@@ -424,11 +424,11 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairsDoubleBuffer)
         std::vector<key_type> keys_input;
         if(std::is_floating_point<key_type>::value)
         {
-            keys_input = get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
+            keys_input = test_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
         }
         else
         {
-            keys_input = get_random_data<key_type>(
+            keys_input = test_utils::get_random_data<key_type>(
                 size,
                 std::numeric_limits<key_type>::min(),
                 std::numeric_limits<key_type>::max()

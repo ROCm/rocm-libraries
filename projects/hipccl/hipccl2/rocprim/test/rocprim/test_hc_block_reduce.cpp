@@ -112,14 +112,14 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, Reduce)
 
     hc::accelerator acc;
     // Given block size not supported
-    if(block_size > get_max_tile_size(acc))
+    if(block_size > test_utils::get_max_tile_size(acc))
     {
         return;
     }
 
     const size_t size = block_size * 113;
     // Generate data
-    std::vector<T> output = get_random_data<T>(size, 2, 200);
+    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200);
     std::vector<T> output_reductions(size / block_size);
 
     // Calculate expected results on host
@@ -172,7 +172,7 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceMultiplies)
 
     hc::accelerator acc;
     // Given block size not supported
-    if(block_size > get_max_tile_size(acc))
+    if(block_size > test_utils::get_max_tile_size(acc))
     {
         return;
     }
@@ -180,7 +180,7 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceMultiplies)
     const size_t size = block_size * 113;
     // Generate data
     std::vector<T> output(size, 1);
-    auto two_places = get_random_data<unsigned int>(size/32, 0, size-1);
+    auto two_places = test_utils::get_random_data<unsigned int>(size/32, 0, size-1);
     for(auto i : two_places)
     {
         output[i] = T(2);
@@ -234,18 +234,18 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceValid)
     using T = typename TestFixture::type;
     constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;
-    const unsigned int valid_items = get_random_value(block_size - 10, block_size);
+    const unsigned int valid_items = test_utils::get_random_value(block_size - 10, block_size);
 
     hc::accelerator acc;
     // Given block size not supported
-    if(block_size > get_max_tile_size(acc))
+    if(block_size > test_utils::get_max_tile_size(acc))
     {
         return;
     }
 
     const size_t size = block_size * 113;
     // Generate data
-    std::vector<T> output = get_random_data<T>(size, 2, 200);
+    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200);
     std::vector<T> output_reductions(size / block_size);
 
     // Calculate expected results on host
@@ -338,7 +338,7 @@ TYPED_TEST(RocprimBlockReduceInputArrayTests, Reduce)
 
     hc::accelerator acc;
     // Given block size not supported
-    if(block_size > get_max_tile_size(acc))
+    if(block_size > test_utils::get_max_tile_size(acc))
     {
         return;
     }
@@ -346,7 +346,7 @@ TYPED_TEST(RocprimBlockReduceInputArrayTests, Reduce)
     const size_t items_per_block = block_size * items_per_thread;
     const size_t size = items_per_block * 37;
     // Generate data
-    std::vector<T> output = get_random_data<T>(size, 2, 200);
+    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200);
 
     // Output reduce results
     std::vector<T> output_reductions(size / block_size);

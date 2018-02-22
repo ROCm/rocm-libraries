@@ -136,7 +136,7 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, Reduce)
     constexpr size_t block_size = TestFixture::block_size;
 
     // Given block size not supported
-    if(block_size > hip_get_max_block_size())
+    if(block_size > test_utils::hip_get_max_block_size())
     {
         return;
     }
@@ -144,7 +144,7 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, Reduce)
     const size_t size = block_size * 113;
     const size_t grid_size = size / block_size;
     // Generate data
-    std::vector<T> output = get_random_data<T>(size, 2, 200);
+    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200);
     std::vector<T> output_reductions(size / block_size);
 
     // Calculate expected results on host
@@ -227,7 +227,7 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceMultiplies)
     constexpr size_t block_size = TestFixture::block_size;
 
     // Given block size not supported
-    if(block_size > hip_get_max_block_size())
+    if(block_size > test_utils::hip_get_max_block_size())
     {
         return;
     }
@@ -236,7 +236,7 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceMultiplies)
     const size_t grid_size = size / block_size;
     // Generate data
     std::vector<T> output(size, 1);
-    auto two_places = get_random_data<unsigned int>(size/32, 0, size-1);
+    auto two_places = test_utils::get_random_data<unsigned int>(size/32, 0, size-1);
     for(auto i : two_places)
     {
         output[i] = T(2);
@@ -319,10 +319,10 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceValid)
     using T = typename TestFixture::type;
     constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;
-    const unsigned int valid_items = get_random_value(block_size - 10, block_size);
+    const unsigned int valid_items = test_utils::get_random_value(block_size - 10, block_size);
 
     // Given block size not supported
-    if(block_size > hip_get_max_block_size())
+    if(block_size > test_utils::hip_get_max_block_size())
     {
         return;
     }
@@ -330,7 +330,7 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceValid)
     const size_t size = block_size * 113;
     const size_t grid_size = size / block_size;
     // Generate data
-    std::vector<T> output = get_random_data<T>(size, 2, 200);
+    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200);
     std::vector<T> output_reductions(size / block_size);
 
     // Calculate expected results on host
@@ -462,7 +462,7 @@ TYPED_TEST(RocprimBlockReduceInputArrayTests, Reduce)
     constexpr size_t items_per_thread = TestFixture::items_per_thread;
 
     // Given block size not supported
-    if(block_size > hip_get_max_block_size())
+    if(block_size > test_utils::hip_get_max_block_size())
     {
         return;
     }
@@ -471,7 +471,7 @@ TYPED_TEST(RocprimBlockReduceInputArrayTests, Reduce)
     const size_t size = items_per_block * 37;
     const size_t grid_size = size / items_per_block;
     // Generate data
-    std::vector<T> output = get_random_data<T>(size, 2, 200);
+    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200);
 
     // Output reduce results
     std::vector<T> output_reductions(size / block_size, 0);

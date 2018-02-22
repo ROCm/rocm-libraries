@@ -61,7 +61,7 @@ function(add_hipcub_test TEST_NAME TEST_SOURCES)
   endif()
   set_target_properties(${TEST_TARGET}
     PROPERTIES
-      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test"
+      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test/hipcub"
   )
   add_test(${TEST_NAME} ${TEST_TARGET})
 endfunction()

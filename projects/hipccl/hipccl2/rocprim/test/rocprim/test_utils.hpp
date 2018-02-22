@@ -29,7 +29,10 @@
 
 #include <rocprim.hpp>
 
-#include "test_utils_host.hpp"
+#include "../test_utils_host.hpp"
+
+namespace test_utils
+{
 
 #ifdef ROCPRIM_HC_API
 inline
@@ -92,5 +95,7 @@ struct custom_test_type
     }
 };
 #endif
+
+} // end test_utils namespace
 
 #endif // TEST_TEST_UTILS_HPP_
