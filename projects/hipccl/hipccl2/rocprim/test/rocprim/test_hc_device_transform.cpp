@@ -74,7 +74,7 @@ std::vector<size_t> get_sizes()
         1512, 3048, 4096,
         27845, (1 << 18) + 1111
     };
-    const std::vector<size_t> random_sizes = get_random_data<size_t>(2, 1, 16384);
+    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(2, 1, 16384);
     sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
     std::sort(sizes.begin(), sizes.end());
     return sizes;
@@ -106,7 +106,7 @@ TYPED_TEST(RocprimDeviceTransformTests, Transform)
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
         // Generate data
-        std::vector<T> input = get_random_data<T>(size, 1, 100);
+        std::vector<T> input = test_utils::get_random_data<T>(size, 1, 100);
 
         hc::array<T> d_input(hc::extent<1>(size), input.begin(), acc_view);
         hc::array<U> d_output(size, acc_view);

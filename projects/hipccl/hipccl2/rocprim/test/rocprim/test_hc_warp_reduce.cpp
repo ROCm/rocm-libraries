@@ -100,7 +100,7 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSum)
     }
 
     // Generate data
-    std::vector<type> input = get_random_data<type>(size, -100, 100); // used for input
+    std::vector<type> input = test_utils::get_random_data<type>(size, -100, 100); // used for input
     std::vector<type> output(input.size() / logical_warp_size, 0);
 
     // Calculate expected results on host
@@ -165,7 +165,7 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSum)
     }
 
     // Generate data
-    std::vector<type> input = get_random_data<type>(size, -100, 100); // used for input
+    std::vector<type> input = test_utils::get_random_data<type>(size, -100, 100); // used for input
     std::vector<type> output(input.size(), 0);
 
     // Calculate expected results on host
@@ -232,7 +232,7 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumValid)
     }
 
     // Generate data
-    std::vector<type> input = get_random_data<type>(size, -100, 100); // used for input
+    std::vector<type> input = test_utils::get_random_data<type>(size, -100, 100); // used for input
     std::vector<type> output(input.size() / logical_warp_size, 0);
 
     // Calculate expected results on host
@@ -298,7 +298,7 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSumValid)
     }
 
     // Generate data
-    std::vector<type> input = get_random_data<type>(size, -100, 100); // used for input
+    std::vector<type> input = test_utils::get_random_data<type>(size, -100, 100); // used for input
     std::vector<type> output(input.size(), 0);
 
     // Calculate expected results on host
@@ -349,7 +349,7 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSumValid)
 TYPED_TEST(RocprimWarpReduceTests, ReduceSumCustomStruct)
 {
     using base_type = typename TestFixture::params::type;
-    using type = custom_test_type<base_type>;
+    using type = test_utils::custom_test_type<base_type>;
 
     // logical warp side for warp primitive, execution warp size is always rp::warp_size()
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
@@ -369,7 +369,7 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumCustomStruct)
     std::vector<type> input(size);
     {
         auto random_values =
-            get_random_data<base_type>(2 * input.size(), 0, 100);
+            test_utils::get_random_data<base_type>(2 * input.size(), 0, 100);
         for(size_t i = 0; i < input.size(); i++)
         {
             input[i].x = random_values[i];

@@ -30,13 +30,15 @@
 
 // Google Test
 #include <gtest/gtest.h>
-
-// HC API
-#include <hcc/hc.hpp>
+// HIP API
+#include <hip/hip_runtime.h>
 // rocPRIM API
 #include <rocprim.hpp>
 
 #include "test_utils.hpp"
+
+#define HIP_CHECK(error)         \
+    ASSERT_EQ(static_cast<hipError_t>(error),hipSuccess)
 
 namespace rp = rocprim;
 
@@ -101,7 +103,7 @@ std::vector<size_t> get_sizes()
         100000,
         (1 << 16) - 1220, (1 << 23) - 76543
     };
-    const std::vector<size_t> random_sizes = get_random_data<size_t>(10, 1, 100000);
+    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(10, 1, 100000);
     sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
     return sizes;
 }
@@ -118,9 +120,6 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
         std::uniform_int_distribution<key_type>
     >::type;
 
-    hc::accelerator acc;
-    hc::accelerator_view acc_view = acc.create_view();
-
     const bool debug_synchronous = false;
 
     reduce_op_type reduce_op;
@@ -135,6 +134,10 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
+        // HIP
+        hipStream_t stream = 0; // default
+        HIP_CHECK(hipStreamCreate(&stream));
+
         // Generate data and calculate expected results
         std::vector<key_type> unique_expected;
         std::vector<value_type> aggregates_expected;
@@ -146,7 +149,7 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
             TestFixture::params::min_segment_length,
             TestFixture::params::max_segment_length
         );
-        std::vector<value_type> values_input = get_random_data<value_type>(size, 0, 100);
+        std::vector<value_type> values_input = test_utils::get_random_data<value_type>(size, 0, 100);
 
         size_t offset = 0;
         key_type current_key = key_distribution_type(0, 100)(gen);
@@ -184,41 +187,93 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
             offset += key_count;
         }
 
-        hc::array<key_type> d_keys_input(hc::extent<1>(size), keys_input.begin(), acc_view);
-        hc::array<value_type> d_values_input(hc::extent<1>(size), values_input.begin(), acc_view);
+        key_type * d_keys_input;
+        value_type * d_values_input;
+        HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
+        HIP_CHECK(hipMalloc(&d_values_input, size * sizeof(value_type)));
+        HIP_CHECK(
+            hipMemcpy(
+                d_keys_input, keys_input.data(),
+                size * sizeof(key_type),
+                hipMemcpyHostToDevice
+            )
+        );
+        HIP_CHECK(
+            hipMemcpy(
+                d_values_input, values_input.data(),
+                size * sizeof(value_type),
+                hipMemcpyHostToDevice
+            )
+        );
 
-        hc::array<key_type> d_unique_output(unique_count_expected, acc_view);
-        hc::array<value_type> d_aggregates_output(unique_count_expected, acc_view);
-        hc::array<unsigned int> d_unique_count_output(1, acc_view);
+        key_type * d_unique_output;
+        value_type * d_aggregates_output;
+        unsigned int * d_unique_count_output;
+        HIP_CHECK(hipMalloc(&d_unique_output, unique_count_expected * sizeof(key_type)));
+        HIP_CHECK(hipMalloc(&d_aggregates_output, unique_count_expected * sizeof(value_type)));
+        HIP_CHECK(hipMalloc(&d_unique_count_output, sizeof(unsigned int)));
 
         size_t temporary_storage_bytes;
 
-        rp::reduce_by_key(
-            nullptr, temporary_storage_bytes,
-            d_keys_input.accelerator_pointer(), d_values_input.accelerator_pointer(), size,
-            d_unique_output.accelerator_pointer(), d_aggregates_output.accelerator_pointer(),
-            d_unique_count_output.accelerator_pointer(),
-            reduce_op, key_compare_op,
-            acc_view, debug_synchronous
+        HIP_CHECK(
+            rp::reduce_by_key(
+                nullptr, temporary_storage_bytes,
+                d_keys_input, d_values_input, size,
+                d_unique_output, d_aggregates_output,
+                d_unique_count_output,
+                reduce_op, key_compare_op,
+                stream, debug_synchronous
+            )
         );
 
         ASSERT_GT(temporary_storage_bytes, 0);
 
-        hc::array<char> d_temporary_storage(temporary_storage_bytes, acc_view);
+        void * d_temporary_storage;
+        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
-        rp::reduce_by_key(
-            d_temporary_storage.accelerator_pointer(), temporary_storage_bytes,
-            d_keys_input.accelerator_pointer(), d_values_input.accelerator_pointer(), size,
-            d_unique_output.accelerator_pointer(), d_aggregates_output.accelerator_pointer(),
-            d_unique_count_output.accelerator_pointer(),
-            reduce_op, key_compare_op,
-            acc_view, debug_synchronous
+        HIP_CHECK(
+            rp::reduce_by_key(
+                d_temporary_storage, temporary_storage_bytes,
+                d_keys_input, d_values_input, size,
+                d_unique_output, d_aggregates_output,
+                d_unique_count_output,
+                reduce_op, key_compare_op,
+                stream, debug_synchronous
+            )
         );
-        acc_view.wait();
 
-        std::vector<key_type> unique_output = d_unique_output;
-        std::vector<value_type> aggregates_output = d_aggregates_output;
-        std::vector<unsigned int> unique_count_output = d_unique_count_output;
+        HIP_CHECK(hipFree(d_temporary_storage));
+
+        std::vector<key_type> unique_output(unique_count_expected);
+        std::vector<value_type> aggregates_output(unique_count_expected);
+        std::vector<unsigned int> unique_count_output(1);
+        HIP_CHECK(
+            hipMemcpy(
+                unique_output.data(), d_unique_output,
+                unique_count_expected * sizeof(key_type),
+                hipMemcpyDeviceToHost
+            )
+        );
+        HIP_CHECK(
+            hipMemcpy(
+                aggregates_output.data(), d_aggregates_output,
+                unique_count_expected * sizeof(value_type),
+                hipMemcpyDeviceToHost
+            )
+        );
+        HIP_CHECK(
+            hipMemcpy(
+                unique_count_output.data(), d_unique_count_output,
+                sizeof(unsigned int),
+                hipMemcpyDeviceToHost
+            )
+        );
+
+        HIP_CHECK(hipFree(d_keys_input));
+        HIP_CHECK(hipFree(d_values_input));
+        HIP_CHECK(hipFree(d_unique_output));
+        HIP_CHECK(hipFree(d_aggregates_output));
+        HIP_CHECK(hipFree(d_unique_count_output));
 
         ASSERT_EQ(unique_count_output[0], unique_count_expected);
 
@@ -231,5 +286,7 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
         {
             ASSERT_EQ(aggregates_output[i], aggregates_expected[i]);
         }
+
+        HIP_CHECK(hipStreamDestroy(stream));
     }
 }

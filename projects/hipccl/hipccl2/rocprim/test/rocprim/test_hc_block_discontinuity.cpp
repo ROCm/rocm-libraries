@@ -153,14 +153,14 @@ TYPED_TEST(RocprimBlockDiscontinuity, FlagHeads)
     using flag_op_type = typename TestFixture::params::flag_op_type;
     constexpr size_t items_per_block = block_size * items_per_thread;
     // Given block size not supported
-    if(block_size > get_max_tile_size(acc))
+    if(block_size > test_utils::get_max_tile_size(acc))
     {
         return;
     }
 
     const size_t size = items_per_block * 2048;
     // Generate data
-    std::vector<type> input = get_random_data<type>(size, type(0), type(10));
+    std::vector<type> input = test_utils::get_random_data<type>(size, type(0), type(10));
     std::vector<long long> heads(size);
 
     // Calculate expected results on host
@@ -232,14 +232,14 @@ TYPED_TEST(RocprimBlockDiscontinuity, FlagTails)
     using flag_op_type = typename TestFixture::params::flag_op_type;
     constexpr size_t items_per_block = block_size * items_per_thread;
     // Given block size not supported
-    if(block_size > get_max_tile_size(acc))
+    if(block_size > test_utils::get_max_tile_size(acc))
     {
         return;
     }
 
     const size_t size = items_per_block * 2048;
     // Generate data
-    std::vector<type> input = get_random_data<type>(size, type(0), type(10));
+    std::vector<type> input = test_utils::get_random_data<type>(size, type(0), type(10));
     std::vector<long long> tails(size);
 
     // Calculate expected results on host
@@ -311,14 +311,14 @@ TYPED_TEST(RocprimBlockDiscontinuity, FlagHeadsAndTails)
     using flag_op_type = typename TestFixture::params::flag_op_type;
     constexpr size_t items_per_block = block_size * items_per_thread;
     // Given block size not supported
-    if(block_size > get_max_tile_size(acc))
+    if(block_size > test_utils::get_max_tile_size(acc))
     {
         return;
     }
 
     const size_t size = items_per_block * 2048;
     // Generate data
-    std::vector<type> input = get_random_data<type>(size, type(0), type(10));
+    std::vector<type> input = test_utils::get_random_data<type>(size, type(0), type(10));
     std::vector<long long> heads(size);
     std::vector<long long> tails(size);
 

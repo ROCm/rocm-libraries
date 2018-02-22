@@ -26,10 +26,8 @@
 
 // Google Test
 #include <gtest/gtest.h>
-
 // HIP API
 #include <hip/hip_runtime.h>
-#include <hip/hip_hcc.h>
 // rocPRIM API
 #include <rocprim.hpp>
 
@@ -45,18 +43,18 @@ template<
     class InputType,
     class OutputType = InputType
 >
-struct DeviceReduceParams
+struct DeviceScanParams
 {
     using input_type = InputType;
     using output_type = OutputType;
 };
 
 // ---------------------------------------------------------
-// Test for reduce ops taking single input value
+// Test for scan ops taking single input value
 // ---------------------------------------------------------
 
 template<class Params>
-class RocprimDeviceReduceTests : public ::testing::Test
+class RocprimDeviceScanTests : public ::testing::Test
 {
 public:
     using input_type = typename Params::input_type;
@@ -68,28 +66,28 @@ typedef ::testing::Types<
     // -----------------------------------------------------------------------
     //
     // -----------------------------------------------------------------------
-    DeviceReduceParams<int>,
-    DeviceReduceParams<unsigned long>,
-    DeviceReduceParams<short, int>,
-    DeviceReduceParams<int, float>
-> RocprimDeviceReduceTestsParams;
+    DeviceScanParams<int>,
+    DeviceScanParams<unsigned long>,
+    DeviceScanParams<short, int>,
+    DeviceScanParams<float, double>
+> RocprimDeviceScanTestsParams;
 
 std::vector<size_t> get_sizes()
 {
     std::vector<size_t> sizes = {
         1, 10, 53, 211,
         1024, 2048, 5096,
-        34567, (1 << 17) - 1220
+        34567, (1 << 18) - 1220
     };
-    const std::vector<size_t> random_sizes = get_random_data<size_t>(2, 1, 16384);
+    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(2, 1, 16384);
     sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
     std::sort(sizes.begin(), sizes.end());
     return sizes;
 }
 
-TYPED_TEST_CASE(RocprimDeviceReduceTests, RocprimDeviceReduceTestsParams);
+TYPED_TEST_CASE(RocprimDeviceScanTests, RocprimDeviceScanTestsParams);
 
-TYPED_TEST(RocprimDeviceReduceTests, Reduce)
+TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
 {
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
@@ -105,8 +103,8 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
         // Generate data
-        std::vector<T> input = get_random_data<T>(size, 1, 100);
-        std::vector<U> output(1, 0);
+        std::vector<T> input = test_utils::get_random_data<T>(size, 1, 1);
+        std::vector<U> output(input.size(), 0);
 
         T * d_input;
         U * d_output;
@@ -121,18 +119,23 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
         );
         HIP_CHECK(hipDeviceSynchronize());
         HIP_CHECK(hipStreamSynchronize(stream));
-
-        // Calculate expected results on host
-        U expected = std::accumulate(input.begin(), input.end(), 0);
 
         // scan function
         ::rocprim::plus<U> plus_op;
+
+        // Calculate expected results on host
+        std::vector<U> expected(input.size());
+        test_utils::host_inclusive_scan(
+            input.begin(), input.end(),
+            expected.begin(), plus_op
+        );
+
         // temp storage
         size_t temp_storage_size_bytes;
         void * d_temp_storage = nullptr;
         // Get size of d_temp_storage
         HIP_CHECK(
-            rocprim::reduce(
+            rocprim::inclusive_scan(
                 d_temp_storage, temp_storage_size_bytes,
                 d_input, d_output, input.size(),
                 plus_op, stream, debug_synchronous
@@ -149,7 +152,7 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
 
         // Run
         HIP_CHECK(
-            rocprim::reduce(
+            rocprim::inclusive_scan(
                 d_temp_storage, temp_storage_size_bytes,
                 d_input, d_output, input.size(),
                 plus_op, stream, debug_synchronous
@@ -171,9 +174,13 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
         HIP_CHECK(hipStreamSynchronize(stream));
 
         // Check if output values are as expected
-        auto diff = std::max<U>(std::abs(0.01f * expected), U(0.01f));
-        if(std::is_integral<U>::value) diff = 0;
-        ASSERT_NEAR(output[0], expected, diff);
+        for(size_t i = 0; i < output.size(); i++)
+        {
+            SCOPED_TRACE(testing::Message() << "where index = " << i);
+            auto diff = std::max<U>(std::abs(0.01f * expected[i]), U(0.01f));
+            if(std::is_integral<U>::value) diff = 0;
+            ASSERT_NEAR(output[i], expected[i], diff);
+        }
 
         hipFree(d_input);
         hipFree(d_output);
@@ -184,7 +191,7 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
     }
 }
 
-TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
+TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanSum)
 {
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
@@ -200,8 +207,8 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
         // Generate data
-        std::vector<T> input = get_random_data<T>(size, 1, 100);
-        std::vector<U> output(1, 0);
+        std::vector<T> input = test_utils::get_random_data<T>(size, 1, 10);
+        std::vector<U> output(input.size());
 
         T * d_input;
         U * d_output;
@@ -218,20 +225,26 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
         HIP_CHECK(hipStreamSynchronize(stream));
 
         // scan function
-        ::rocprim::minimum<U> min_op;
+        ::rocprim::plus<U> plus_op;
 
         // Calculate expected results on host
-        U expected = std::accumulate(input.begin(), input.end(), std::numeric_limits<U>::max(), min_op);
+        std::vector<U> expected(input.size());
+        T initial_value = test_utils::get_random_value<T>(1, 100);
+        test_utils::host_exclusive_scan(
+            input.begin(), input.end(),
+            initial_value, expected.begin(),
+            plus_op
+        );
 
         // temp storage
         size_t temp_storage_size_bytes;
         void * d_temp_storage = nullptr;
         // Get size of d_temp_storage
         HIP_CHECK(
-            rocprim::reduce(
+            rocprim::exclusive_scan(
                 d_temp_storage, temp_storage_size_bytes,
-                d_input, d_output, std::numeric_limits<U>::max(), input.size(),
-                min_op, stream, debug_synchronous
+                d_input, d_output, initial_value, input.size(),
+                plus_op, stream, debug_synchronous
             )
         );
 
@@ -245,10 +258,10 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
 
         // Run
         HIP_CHECK(
-            rocprim::reduce(
+            rocprim::exclusive_scan(
                 d_temp_storage, temp_storage_size_bytes,
-                d_input, d_output, std::numeric_limits<U>::max(), input.size(),
-                min_op, stream, debug_synchronous
+                d_input, d_output, initial_value, input.size(),
+                plus_op, stream, debug_synchronous
             )
         );
         HIP_CHECK(hipPeekAtLastError());
@@ -267,132 +280,18 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
         HIP_CHECK(hipStreamSynchronize(stream));
 
         // Check if output values are as expected
-        auto diff = std::max<U>(std::abs(0.01f * expected), U(0.01f));
-        if(std::is_integral<U>::value) diff = 0;
-        ASSERT_NEAR(output[0], expected, diff);
-
-        hipFree(d_input);
-        hipFree(d_output);
-        hipFree(d_temp_storage);
-
-        // HIP stream
-        HIP_CHECK(hipStreamDestroy(stream));
-    }
-}
-
-template<
-    class Key,
-    class Value
->
-struct arg_min
-{
-    ROCPRIM_HOST_DEVICE inline
-    constexpr rocprim::key_value_pair<Key, Value>
-    operator()(const rocprim::key_value_pair<Key, Value>& a,
-               const rocprim::key_value_pair<Key, Value>& b) const
-    {
-        return ((b.value < a.value) || ((a.value == b.value) && (b.key < a.key))) ? b : a;
-    }
-};
-
-TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
-{
-    using T = typename TestFixture::input_type;
-    using key_value = rocprim::key_value_pair<int, T>;
-    const bool debug_synchronous = TestFixture::debug_synchronous;
-
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
-    {
-        // HIP
-        hipStream_t stream = 0; // default
-        HIP_CHECK(hipStreamCreate(&stream));
-
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
-
-        // Generate data
-        std::vector<key_value> input(size);
-        for (size_t i = 0; i < size; i++)
+        for(size_t i = 0; i < output.size(); i++)
         {
-            input[i].key = i;
-            input[i].value = get_random_value<T>(1, 100);
+            SCOPED_TRACE(testing::Message() << "where index = " << i);
+            auto diff = std::max<U>(std::abs(0.01f * expected[i]), U(0.01f));
+            if(std::is_integral<U>::value) diff = 0;
+            ASSERT_NEAR(output[i], expected[i], diff);
         }
-        std::vector<key_value> output(1);
-
-        key_value * d_input;
-        key_value * d_output;
-        HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(key_value)));
-        HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(key_value)));
-        HIP_CHECK(
-            hipMemcpy(
-                d_input, input.data(),
-                input.size() * sizeof(key_value),
-                hipMemcpyHostToDevice
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipStreamSynchronize(stream));
-
-        arg_min<int, T> reduce_op;
-        const key_value max(std::numeric_limits<int>::max(), std::numeric_limits<T>::max());
-
-        // Calculate expected results on host
-        key_value expected = std::accumulate(input.begin(), input.end(), max, reduce_op);
-
-        // temp storage
-        size_t temp_storage_size_bytes;
-        void * d_temp_storage = nullptr;
-        // Get size of d_temp_storage
-        HIP_CHECK(
-            rocprim::reduce(
-                d_temp_storage, temp_storage_size_bytes,
-                d_input, d_output, max, input.size(),
-                reduce_op, stream, debug_synchronous
-            )
-        );
-
-        // temp_storage_size_bytes must be >0
-        ASSERT_GT(temp_storage_size_bytes, 0);
-
-        // allocate temporary storage
-        HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
-        HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipStreamSynchronize(stream));
-
-        // Run
-        HIP_CHECK(
-            rocprim::reduce(
-                d_temp_storage, temp_storage_size_bytes,
-                d_input, d_output, max, input.size(),
-                reduce_op, stream, debug_synchronous
-            )
-        );
-        HIP_CHECK(hipPeekAtLastError());
-        HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipStreamSynchronize(stream));
-
-        // Copy output to host
-        HIP_CHECK(
-            hipMemcpy(
-                output.data(), d_output,
-                output.size() * sizeof(key_value),
-                hipMemcpyDeviceToHost
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipStreamSynchronize(stream));
-
-        // Check if output values are as expected
-        auto diff = std::max<T>(std::abs(0.01f * expected.value), T(0.01f));
-        if(std::is_integral<T>::value) diff = 0;
-        ASSERT_EQ(output[0].key, expected.key);
-        ASSERT_NEAR(output[0].value, expected.value, diff);
 
         hipFree(d_input);
         hipFree(d_output);
         hipFree(d_temp_storage);
 
-        // HIP stream
         HIP_CHECK(hipStreamDestroy(stream));
     }
 }

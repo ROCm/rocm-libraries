@@ -34,9 +34,6 @@
 
 #include "test_utils.hpp"
 
-#define HIP_CHECK(error)         \
-    EXPECT_EQ(static_cast<hipError_t>(error),hipSuccess)
-
 namespace rp = rocprim;
 
 template<
@@ -243,42 +240,26 @@ typedef ::testing::Types<
 TYPED_TEST_CASE(RocprimBlockLoadStoreClassTests, ClassParams);
 TYPED_TEST_CASE(RocprimVectorizationTests, Params);
 
-template<
-    class Type,
-    rp::block_load_method LoadMethod,
-    rp::block_store_method StoreMethod,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread
->
-__global__
-void load_store_kernel(Type* device_input, Type* device_output)
-{
-    Type items[ItemsPerThread];
-    unsigned int offset = hipBlockIdx_x * BlockSize * ItemsPerThread;
-    rp::block_load<Type, BlockSize, ItemsPerThread, LoadMethod> load;
-    rp::block_store<Type, BlockSize, ItemsPerThread, StoreMethod> store;
-    load.load(device_input + offset, items);
-    store.store(device_output + offset, items);
-}
-
 TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClass)
 {
+    hc::accelerator acc;
+
     using Type = typename TestFixture::params::type;
     constexpr size_t block_size = TestFixture::params::block_size;
     constexpr rp::block_load_method load_method = TestFixture::params::load_method;
     constexpr rp::block_store_method store_method = TestFixture::params::store_method;
-    const size_t items_per_thread = TestFixture::params::items_per_thread;
-    constexpr auto items_per_block = block_size * items_per_thread;
-    const size_t size = items_per_block * 113;
-    const auto grid_size = size / items_per_block;
     // Given block size not supported
-    if(block_size > hip_get_max_block_size() || (block_size & (block_size - 1)) != 0)
+    if(block_size > test_utils::get_max_tile_size(acc) || (block_size & (block_size - 1)) != 0)
     {
         return;
     }
 
+    const size_t items_per_thread = TestFixture::params::items_per_thread;
+    constexpr auto items_per_block = block_size * items_per_thread;
+    const size_t size = items_per_block * 113;
+    const auto grid_size = size / items_per_thread;
     // Generate data
-    std::vector<Type> input = get_random_data<Type>(size, -100, 100);
+    std::vector<Type> input = test_utils::get_random_data<Type>(size, -100, 100);
     std::vector<Type> output(input.size(), 0);
 
     // Calculate expected results on host
@@ -292,88 +273,51 @@ TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClass)
         }
     }
 
-    // Preparing device
-    Type* device_input;
-    HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
-    Type* device_output;
-    HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
-
-    HIP_CHECK(
-        hipMemcpy(
-            device_input, input.data(),
-            input.size() * sizeof(typename decltype(input)::value_type),
-            hipMemcpyHostToDevice
-        )
+    hc::array_view<Type, 1> d_input(input.size(), input.data());
+    hc::array_view<Type, 1> d_output(output.size(), output.data());
+    hc::parallel_for_each(
+        acc.get_default_view(),
+        hc::extent<1>(grid_size).tile(block_size),
+        [=](hc::tiled_index<1> i) [[hc]]
+        {
+            Type t[items_per_thread];
+            int offset = i.tile[0] * block_size * items_per_thread;
+            rp::block_load<Type, block_size, items_per_thread, load_method> load;
+            rp::block_store<Type, block_size, items_per_thread, store_method> store;
+            load.load(d_input.data() + offset, t);
+            store.store(d_output.data() + offset, t);
+        }
     );
 
-    // Running kernel
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(
-            load_store_kernel<
-                Type, load_method, store_method,
-                block_size, items_per_thread
-            >
-        ),
-        dim3(grid_size), dim3(block_size), 0, 0,
-        device_input, device_output
-    );
-
-    // Reading results from device
-    HIP_CHECK(
-        hipMemcpy(
-            output.data(), device_output,
-            output.size() * sizeof(typename decltype(output)::value_type),
-            hipMemcpyDeviceToHost
-        )
-    );
-
-    // Validating results
+    d_input.synchronize();
+    d_output.synchronize();
     for(size_t i = 0; i < output.size(); i++)
     {
         ASSERT_EQ(output[i], expected[i]);
     }
-
-    HIP_CHECK(hipFree(device_input));
-    HIP_CHECK(hipFree(device_output));
-}
-
-template<
-    class Type,
-    rp::block_load_method LoadMethod,
-    rp::block_store_method StoreMethod,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread
->
-__global__
-void load_store_valid_kernel(Type* device_input, Type* device_output, size_t valid)
-{
-    Type items[ItemsPerThread];
-    unsigned int offset = hipBlockIdx_x * BlockSize * ItemsPerThread;
-    rp::block_load<Type, BlockSize, ItemsPerThread, LoadMethod> load;
-    rp::block_store<Type, BlockSize, ItemsPerThread, StoreMethod> store;
-    load.load(device_input + offset, items, valid);
-    store.store(device_output + offset, items, valid);
 }
 
 TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClassValid)
 {
+    hc::accelerator acc;
+
     using Type = typename TestFixture::params::type;
     constexpr size_t block_size = TestFixture::params::block_size;
     constexpr rp::block_load_method load_method = TestFixture::params::load_method;
     constexpr rp::block_store_method store_method = TestFixture::params::store_method;
-    const size_t items_per_thread = TestFixture::params::items_per_thread;
-    constexpr auto items_per_block = block_size * items_per_thread;
-    const size_t size = items_per_block * 113;
-    const auto grid_size = size / items_per_block;
     // Given block size not supported
-    if(block_size > hip_get_max_block_size() || (block_size & (block_size - 1)) != 0)
+    if(block_size > test_utils::get_max_tile_size(acc) || (block_size & (block_size - 1)) != 0)
     {
         return;
     }
 
+    const size_t items_per_thread = TestFixture::params::items_per_thread;
+    constexpr auto items_per_block = block_size * items_per_thread;
+    const size_t size = items_per_block * 113;
+    const auto grid_size = size / items_per_thread;
     const size_t valid = items_per_block - 32;
     // Generate data
-    std::vector<Type> input = get_random_data<Type>(size, -100, 100);
+    std::vector<Type> input = test_utils::get_random_data<Type>(size, -100, 100);
     std::vector<Type> output(input.size(), 0);
 
     // Calculate expected results on host
@@ -390,98 +334,52 @@ TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClassValid)
         }
     }
 
-    // Preparing device
-    Type* device_input;
-    HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
-    Type* device_output;
-    HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
-
-    HIP_CHECK(
-        hipMemcpy(
-            device_input, input.data(),
-            input.size() * sizeof(typename decltype(input)::value_type),
-            hipMemcpyHostToDevice
-        )
+    hc::array_view<Type, 1> d_input(input.size(), input.data());
+    hc::array_view<Type, 1> d_output(output.size(), output.data());
+    hc::parallel_for_each(
+        acc.get_default_view(),
+        hc::extent<1>(grid_size).tile(block_size),
+        [=](hc::tiled_index<1> i) [[hc]]
+        {
+            Type t[items_per_thread];
+            int offset = i.tile[0] * block_size * items_per_thread;
+            rp::block_load<Type, block_size, items_per_thread, load_method> load;
+            rp::block_store<Type, block_size, items_per_thread, store_method> store;
+            load.load(d_input.data() + offset, t, valid);
+            store.store(d_output.data() + offset, t, valid);
+        }
     );
 
-    // Have to initialize output for unvalid data to make sure they are not changed
-    HIP_CHECK(
-        hipMemcpy(
-            device_output, output.data(),
-            output.size() * sizeof(typename decltype(output)::value_type),
-            hipMemcpyHostToDevice
-        )
-    );
-
-    // Running kernel
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(
-            load_store_valid_kernel<
-                Type, load_method, store_method,
-                block_size, items_per_thread
-            >
-        ),
-        dim3(grid_size), dim3(block_size), 0, 0,
-        device_input, device_output, valid
-    );
-
-    // Reading results from device
-    HIP_CHECK(
-        hipMemcpy(
-            output.data(), device_output,
-            output.size() * sizeof(typename decltype(output)::value_type),
-            hipMemcpyDeviceToHost
-        )
-    );
-
-    // Validating results
+    d_input.synchronize();
+    d_output.synchronize();
     for(size_t i = 0; i < output.size(); i++)
     {
         ASSERT_EQ(output[i], expected[i]);
     }
-
-    HIP_CHECK(hipFree(device_input));
-    HIP_CHECK(hipFree(device_output));
-}
-
-template<
-    class Type,
-    rp::block_load_method LoadMethod,
-    rp::block_store_method StoreMethod,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread
->
-__global__
-void load_store_valid_default_kernel(Type* device_input, Type* device_output, size_t valid, int _default)
-{
-    Type items[ItemsPerThread];
-    unsigned int offset = hipBlockIdx_x * BlockSize * ItemsPerThread;
-    rp::block_load<Type, BlockSize, ItemsPerThread, LoadMethod> load;
-    rp::block_store<Type, BlockSize, ItemsPerThread, StoreMethod> store;
-    load.load(device_input + offset, items, valid, _default);
-    store.store(device_output + offset, items);
 }
 
 TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClassDefault)
 {
+    hc::accelerator acc;
+
     using Type = typename TestFixture::params::type;
     constexpr size_t block_size = TestFixture::params::block_size;
     constexpr rp::block_load_method load_method = TestFixture::params::load_method;
     constexpr rp::block_store_method store_method = TestFixture::params::store_method;
-    const size_t items_per_thread = TestFixture::params::items_per_thread;
-    constexpr auto items_per_block = block_size * items_per_thread;
-    const size_t size = items_per_block * 113;
-    const auto grid_size = size / items_per_block;
     // Given block size not supported
-    if(block_size > hip_get_max_block_size() || (block_size & (block_size - 1)) != 0)
+    if(block_size > test_utils::get_max_tile_size(acc) || (block_size & (block_size - 1)) != 0)
     {
         return;
     }
 
+    const size_t items_per_thread = TestFixture::params::items_per_thread;
+    constexpr auto items_per_block = block_size * items_per_thread;
+    const size_t size = items_per_block * 113;
+    const auto grid_size = size / items_per_thread;
     const size_t valid = items_per_thread + 1;
     int _default = -1;
     // Generate data
-    std::vector<Type> input = get_random_data<Type>(size, -100, 100);
+    std::vector<Type> input = test_utils::get_random_data<Type>(size, -100, 100);
     std::vector<Type> output(input.size(), 0);
 
     // Calculate expected results on host
@@ -498,49 +396,28 @@ TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClassDefault)
         }
     }
 
-    // Preparing device
-    Type* device_input;
-    HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
-    Type* device_output;
-    HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
-
-    HIP_CHECK(
-        hipMemcpy(
-            device_input, input.data(),
-            input.size() * sizeof(typename decltype(input)::value_type),
-            hipMemcpyHostToDevice
-        )
+    hc::array_view<Type, 1> d_input(input.size(), input.data());
+    hc::array_view<Type, 1> d_output(output.size(), output.data());
+    hc::parallel_for_each(
+        acc.get_default_view(),
+        hc::extent<1>(grid_size).tile(block_size),
+        [=](hc::tiled_index<1> i) [[hc]]
+        {
+            Type t[items_per_thread];
+            int offset = i.tile[0] * block_size * items_per_thread;
+            rp::block_load<Type, block_size, items_per_thread, load_method> load;
+            rp::block_store<Type, block_size, items_per_thread, store_method> store;
+            load.load(d_input.data() + offset, t, valid, _default);
+            store.store(d_output.data() + offset, t);
+        }
     );
 
-    // Running kernel
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(
-            load_store_valid_default_kernel<
-                Type, load_method, store_method,
-                block_size, items_per_thread
-            >
-        ),
-        dim3(grid_size), dim3(block_size), 0, 0,
-        device_input, device_output, valid, _default
-    );
-
-    // Reading results from device
-    HIP_CHECK(
-        hipMemcpy(
-            output.data(), device_output,
-            output.size() * sizeof(typename decltype(output)::value_type),
-            hipMemcpyDeviceToHost
-        )
-    );
-
-    // Validating results
+    d_input.synchronize();
+    d_output.synchronize();
     for(size_t i = 0; i < output.size(); i++)
     {
         ASSERT_EQ(output[i], expected[i]);
     }
-
-    HIP_CHECK(hipFree(device_input));
-    HIP_CHECK(hipFree(device_output));
 }
 
 TYPED_TEST(RocprimVectorizationTests, IsVectorizable)
@@ -561,5 +438,4 @@ TYPED_TEST(RocprimVectorizationTests, MatchVectorType)
     bool input = std::is_same<Vector, U>::value;
     EXPECT_TRUE(input);
 }
-
 

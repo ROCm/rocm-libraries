@@ -116,7 +116,7 @@ TEST(RocprimIntrinsicsTests, WarpShuffleUpInt)
     const size_t size = warp_size;
 
     // Generate data
-    std::vector<int> output = get_random_data<int>(size, -100, 100);
+    std::vector<int> output = test_utils::get_random_data<int>(size, -100, 100);
 
     // Calculate expected results on host
     std::vector<int> expected(size, 0);
@@ -149,7 +149,7 @@ TEST(RocprimIntrinsicsTests, WarpShuffleUpChar)
     const size_t size = warp_size;
 
     // Generate data
-    std::vector<char> output = get_random_data<char>(size, -2, 2);
+    std::vector<char> output = test_utils::get_random_data<char>(size, -2, 2);
 
     // Calculate expected results on host
     std::vector<char> expected(size, 0);
@@ -182,7 +182,7 @@ TEST(RocprimIntrinsicsTests, WarpShuffleUpFloat)
     const size_t size = warp_size;
 
     // Generate data
-    std::vector<float> output = get_random_data<float>(size, -100, 100);
+    std::vector<float> output = test_utils::get_random_data<float>(size, -100, 100);
 
     // Calculate expected results on host
     std::vector<float> expected(size, 0);
@@ -215,7 +215,7 @@ TEST(RocprimIntrinsicsTests, WarpShuffleUpDouble)
     const size_t size = warp_size;
 
     // Generate data
-    std::vector<double> output = get_random_data<double>(size, -100, 100);
+    std::vector<double> output = test_utils::get_random_data<double>(size, -100, 100);
 
     // Calculate expected results on host
     std::vector<double> expected(size, 0);
@@ -248,7 +248,7 @@ TEST(RocprimIntrinsicsTests, WarpShuffleUpCustomStruct)
     const size_t size = warp_size;
 
     // Generate data
-    std::vector<double> random_data = get_random_data<double>(4 * size, -100, 100);
+    std::vector<double> random_data = test_utils::get_random_data<double>(4 * size, -100, 100);
     std::vector<custom> output(size);
     for(size_t i = 0; i < 4 * output.size(); i+=4)
     {
@@ -289,7 +289,7 @@ TEST(RocprimIntrinsicsTests, WarpShuffleUpCustomAlignedStruct)
     const size_t size = warp_size;
 
     // Generate data
-    std::vector<double> random_data = get_random_data<double>(3 * size, -100, 100);
+    std::vector<double> random_data = test_utils::get_random_data<double>(3 * size, -100, 100);
     std::vector<custom_16aligned> output(size);
     for(size_t i = 0; i < 3 * output.size(); i+=3)
     {
@@ -329,7 +329,7 @@ TEST(RocprimIntrinsicsTests, WarpShuffleDown)
     const size_t size = warp_size;
 
     // Generate data
-    std::vector<int> output = get_random_data<int>(size, -100, 100);
+    std::vector<int> output = test_utils::get_random_data<int>(size, -100, 100);
 
     // Calculate expected results on host
     std::vector<int> expected(size, 0);
@@ -362,7 +362,7 @@ TEST(RocprimIntrinsicsTests, WarpShuffle)
     const size_t size = warp_size;
 
     // Generate data
-    std::vector<int> output = get_random_data<int>(size, -100, 100);
+    std::vector<int> output = test_utils::get_random_data<int>(size, -100, 100);
 
     // Calculate expected results on host
     std::vector<int> expected(size, 0);
@@ -396,7 +396,7 @@ TEST(RocprimIntrinsicsTests, WarpShuffleXor)
     const size_t size = warp_size;
 
     // Generate data
-    std::vector<int> output = get_random_data<int>(size, -100, 100);
+    std::vector<int> output = test_utils::get_random_data<int>(size, -100, 100);
 
     // Calculate expected results on host
     std::vector<int> expected(size, 0);

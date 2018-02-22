@@ -130,7 +130,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScan)
     constexpr size_t block_size = TestFixture::block_size;
 
     // Given block size not supported
-    if(block_size > hip_get_max_block_size())
+    if(block_size > test_utils::hip_get_max_block_size())
     {
         return;
     }
@@ -138,7 +138,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScan)
     const size_t size = block_size * 113;
     const size_t grid_size = size / block_size;
     // Generate data
-    std::vector<T> output = get_random_data<T>(size, 2, 200);
+    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200);
 
     // Calculate expected results on host
     std::vector<T> expected(output.size(), 0);
@@ -218,7 +218,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanReduce)
     constexpr size_t block_size = TestFixture::block_size;
 
     // Given block size not supported
-    if(block_size > hip_get_max_block_size())
+    if(block_size > test_utils::hip_get_max_block_size())
     {
         return;
     }
@@ -226,7 +226,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanReduce)
     const size_t size = block_size * 113;
     const size_t grid_size = size / block_size;
     // Generate data
-    std::vector<T> output = get_random_data<T>(size, 2, 200);
+    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200);
     std::vector<T> output_reductions(size / block_size);
 
     // Calculate expected results on host
@@ -340,7 +340,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanPrefixCallback)
     constexpr size_t block_size = TestFixture::block_size;
 
     // Given block size not supported
-    if(block_size > hip_get_max_block_size())
+    if(block_size > test_utils::hip_get_max_block_size())
     {
         return;
     }
@@ -348,9 +348,9 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanPrefixCallback)
     const size_t size = block_size * 113;
     const size_t grid_size = size / block_size;
     // Generate data
-    std::vector<T> output = get_random_data<T>(size, 2, 200);
+    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200);
     std::vector<T> output_block_prefixes(size / block_size);
-    T block_prefix = get_random_value<T>(0, 100);
+    T block_prefix = test_utils::get_random_value<T>(0, 100);
 
     // Calculate expected results on host
     std::vector<T> expected(output.size(), 0);
@@ -449,7 +449,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScan)
     constexpr size_t block_size = TestFixture::block_size;
 
     // Given block size not supported
-    if(block_size > hip_get_max_block_size())
+    if(block_size > test_utils::hip_get_max_block_size())
     {
         return;
     }
@@ -457,8 +457,8 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScan)
     const size_t size = block_size * 113;
     const size_t grid_size = size / block_size;
     // Generate data
-    std::vector<T> output = get_random_data<T>(size, 2, 241);
-    const T init = get_random_value<T>(0, 100);
+    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 241);
+    const T init = test_utils::get_random_value<T>(0, 100);
 
     // Calculate expected results on host
     std::vector<T> expected(output.size(), 0);
@@ -538,7 +538,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanReduce)
     constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;
 
-    if(block_size > hip_get_max_block_size())
+    if(block_size > test_utils::hip_get_max_block_size())
     {
         return;
     }
@@ -546,8 +546,8 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanReduce)
     const size_t size = block_size * 113;
     const size_t grid_size = size / block_size;
     // Generate data
-    std::vector<T> output = get_random_data<T>(size, 2, 200);
-    const T init = get_random_value<T>(0, 100);
+    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200);
+    const T init = test_utils::get_random_value<T>(0, 100);
 
     // Output reduce results
     std::vector<T> output_reductions(size / block_size);
@@ -670,7 +670,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanPrefixCallback)
     constexpr size_t block_size = TestFixture::block_size;
 
     // Given block size not supported
-    if(block_size > hip_get_max_block_size())
+    if(block_size > test_utils::hip_get_max_block_size())
     {
         return;
     }
@@ -678,9 +678,9 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanPrefixCallback)
     const size_t size = block_size * 113;
     const size_t grid_size = size / block_size;
     // Generate data
-    std::vector<T> output = get_random_data<T>(size, 2, 200);
+    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200);
     std::vector<T> output_block_prefixes(size / block_size);
-    T block_prefix = get_random_value<T>(0, 100);
+    T block_prefix = test_utils::get_random_value<T>(0, 100);
 
     // Calculate expected results on host
     std::vector<T> expected(output.size(), 0);
@@ -746,7 +746,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanPrefixCallback)
             output_block_prefixes.size() * sizeof(T),
             hipMemcpyDeviceToHost
         )
-    );
+    )
 
     // Validating results
     for(size_t i = 0; i < output.size(); i++)
@@ -766,12 +766,12 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanPrefixCallback)
 TYPED_TEST(RocprimBlockScanSingleValueTests, CustomStruct)
 {
     using base_type = typename TestFixture::type;
-    using T = custom_test_type<base_type>;
+    using T = test_utils::custom_test_type<base_type>;
     constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;
 
     // Given block size not supported
-    if(block_size > hip_get_max_block_size())
+    if(block_size > test_utils::hip_get_max_block_size())
     {
         return;
     }
@@ -782,7 +782,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, CustomStruct)
     std::vector<T> output(size);
     {
         std::vector<base_type> random_values =
-            get_random_data<base_type>(2 * output.size(), 2, 200);
+            test_utils::get_random_data<base_type>(2 * output.size(), 2, 200);
         for(size_t i = 0; i < output.size(); i++)
         {
             output[i].x = random_values[i],
@@ -921,7 +921,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScan)
     constexpr size_t items_per_thread = TestFixture::items_per_thread;
 
     // Given block size not supported
-    if(block_size > hip_get_max_block_size())
+    if(block_size > test_utils::hip_get_max_block_size())
     {
         return;
     }
@@ -930,7 +930,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScan)
     const size_t size = items_per_block * 37;
     const size_t grid_size = size / items_per_block;
     // Generate data
-    std::vector<T> output = get_random_data<T>(size, 2, 200);
+    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200);
 
     // Calculate expected results on host
     std::vector<T> expected(output.size(), 0);
@@ -1028,7 +1028,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScanReduce)
     constexpr size_t items_per_thread = TestFixture::items_per_thread;
 
     // Given block size not supported
-    if(block_size > hip_get_max_block_size())
+    if(block_size > test_utils::hip_get_max_block_size())
     {
         return;
     }
@@ -1037,7 +1037,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScanReduce)
     const size_t size = items_per_block * 37;
     const size_t grid_size = size / items_per_block;
     // Generate data
-    std::vector<T> output = get_random_data<T>(size, 2, 200);
+    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200);
 
     // Output reduce results
     std::vector<T> output_reductions(size / block_size, 0);
@@ -1179,7 +1179,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScanPrefixCallback)
     constexpr size_t items_per_thread = TestFixture::items_per_thread;
 
     // Given block size not supported
-    if(block_size > hip_get_max_block_size())
+    if(block_size > test_utils::hip_get_max_block_size())
     {
         return;
     }
@@ -1188,9 +1188,9 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScanPrefixCallback)
     const size_t size = items_per_block * 37;
     const size_t grid_size = size / items_per_block;
     // Generate data
-    std::vector<T> output = get_random_data<T>(size, 2, 200);
+    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200);
     std::vector<T> output_block_prefixes(size / items_per_block, 0);
-    T block_prefix = get_random_value<T>(0, 100);
+    T block_prefix = test_utils::get_random_value<T>(0, 100);
 
     // Calculate expected results on host
     std::vector<T> expected(output.size(), 0);
@@ -1318,7 +1318,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScan)
     constexpr size_t items_per_thread = TestFixture::items_per_thread;
 
     // Given block size not supported
-    if(block_size > hip_get_max_block_size())
+    if(block_size > test_utils::hip_get_max_block_size())
     {
         return;
     }
@@ -1327,8 +1327,8 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScan)
     const size_t size = items_per_block * 37;
     const size_t grid_size = size / items_per_block;
     // Generate data
-    std::vector<T> output = get_random_data<T>(size, 2, 200);
-    const T init = get_random_value<T>(0, 100);
+    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200);
+    const T init = test_utils::get_random_value<T>(0, 100);
 
     // Calculate expected results on host
     std::vector<T> expected(output.size(), 0);
@@ -1426,7 +1426,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScanReduce)
     constexpr size_t items_per_thread = TestFixture::items_per_thread;
 
     // Given block size not supported
-    if(block_size > hip_get_max_block_size())
+    if(block_size > test_utils::hip_get_max_block_size())
     {
         return;
     }
@@ -1435,11 +1435,11 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScanReduce)
     const size_t size = items_per_block * 37;
     const size_t grid_size = size / items_per_block;
     // Generate data
-    std::vector<T> output = get_random_data<T>(size, 2, 200);
+    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200);
 
     // Output reduce results
     std::vector<T> output_reductions(size / block_size);
-    const T init = get_random_value<T>(0, 100);
+    const T init = test_utils::get_random_value<T>(0, 100);
 
     // Calculate expected results on host
     std::vector<T> expected(output.size(), 0);
@@ -1577,7 +1577,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScanPrefixCallback)
     constexpr size_t items_per_thread = TestFixture::items_per_thread;
 
     // Given block size not supported
-    if(block_size > hip_get_max_block_size())
+    if(block_size > test_utils::hip_get_max_block_size())
     {
         return;
     }
@@ -1586,9 +1586,9 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScanPrefixCallback)
     const size_t size = items_per_block * 37;
     const size_t grid_size = size / items_per_block;
     // Generate data
-    std::vector<T> output = get_random_data<T>(size, 2, 200);
+    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200);
     std::vector<T> output_block_prefixes(size / items_per_block);
-    T block_prefix = get_random_value<T>(0, 100);
+    T block_prefix = test_utils::get_random_value<T>(0, 100);
 
     // Calculate expected results on host
     std::vector<T> expected(output.size(), 0);
