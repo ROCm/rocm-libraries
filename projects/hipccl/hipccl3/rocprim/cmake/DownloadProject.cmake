@@ -95,6 +95,7 @@ function(download_project)
         DOWNLOAD_DIR
         SOURCE_DIR
         BINARY_DIR
+        BUILD_PROJECT
     )
     set(multiValueArgs "")
 
@@ -166,5 +167,4 @@ function(download_project)
     if(result)
         message(FATAL_ERROR "Build step for ${DL_ARGS_PROJ} failed: ${result}")
     endif()
-
 endfunction()
