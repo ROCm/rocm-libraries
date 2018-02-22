@@ -196,7 +196,7 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeys)
     constexpr unsigned int end_bit = TestFixture::params::end_bit;
     constexpr size_t items_per_block = block_size * items_per_thread;
     // Given block size not supported
-    if(block_size > hip_get_max_block_size())
+    if(block_size > test_utils::hip_get_max_block_size())
     {
         return;
     }
@@ -207,11 +207,11 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeys)
     std::vector<key_type> keys_output;
     if(std::is_floating_point<key_type>::value)
     {
-        keys_output = get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
+        keys_output = test_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
     }
     else
     {
-        keys_output = get_random_data<key_type>(
+        keys_output = test_utils::get_random_data<key_type>(
             size,
             std::numeric_limits<key_type>::min(),
             std::numeric_limits<key_type>::max()
@@ -328,7 +328,7 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeysValues)
     constexpr unsigned int end_bit = TestFixture::params::end_bit;
     constexpr size_t items_per_block = block_size * items_per_thread;
     // Given block size not supported
-    if(block_size > hip_get_max_block_size())
+    if(block_size > test_utils::hip_get_max_block_size())
     {
         return;
     }
@@ -339,11 +339,11 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeysValues)
     std::vector<key_type> keys_output;
     if(std::is_floating_point<key_type>::value)
     {
-        keys_output = get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
+        keys_output = test_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
     }
     else
     {
-        keys_output = get_random_data<key_type>(
+        keys_output = test_utils::get_random_data<key_type>(
             size,
             std::numeric_limits<key_type>::min(),
             std::numeric_limits<key_type>::max()
@@ -353,11 +353,11 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeysValues)
     std::vector<value_type> values_output;
     if(std::is_floating_point<value_type>::value)
     {
-        values_output = get_random_data<value_type>(size, (value_type)-1000, (value_type)+1000);
+        values_output = test_utils::get_random_data<value_type>(size, (value_type)-1000, (value_type)+1000);
     }
     else
     {
-        values_output = get_random_data<value_type>(
+        values_output = test_utils::get_random_data<value_type>(
             size,
             std::numeric_limits<value_type>::min(),
             std::numeric_limits<value_type>::max()

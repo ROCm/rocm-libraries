@@ -27,6 +27,9 @@
 #include <type_traits>
 #include <cstdlib>
 
+namespace test_utils
+{
+
 template<class T>
 inline auto get_random_data(size_t size, T min, T max)
     -> typename std::enable_if<std::is_integral<T>::value, std::vector<T>>::type
@@ -95,5 +98,7 @@ OutputIt host_exclusive_scan(InputIt first, InputIt last,
     }
     return ++d_first;
 }
+
+} // end test_utils namespace
 
 #endif // TEST_TEST_UTILS_HOST_HPP_

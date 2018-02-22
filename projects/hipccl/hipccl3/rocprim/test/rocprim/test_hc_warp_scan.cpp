@@ -103,7 +103,7 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScan)
     }
 
     // Generate data
-    std::vector<T> output = get_random_data<T>(size, -100, 100); // used for input/output
+    std::vector<T> output = test_utils::get_random_data<T>(size, -100, 100); // used for input/output
 
     // Calculate expected results on host
     std::vector<T> expected(output.size(), 0);
@@ -172,7 +172,7 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScanReduce)
     }
 
     // Generate data
-    std::vector<T> output = get_random_data<T>(size, -100, 100);  // used for input/output
+    std::vector<T> output = test_utils::get_random_data<T>(size, -100, 100);  // used for input/output
     std::vector<T> output_reductions(size / logical_warp_size);
 
     // Calculate expected results on host
@@ -264,8 +264,8 @@ TYPED_TEST(RocprimWarpScanTests, ExclusiveScan)
     }
 
     // Generate data
-    std::vector<T> in_out_array = get_random_data<T>(size, -100, 100);
-    const T init = get_random_value(0, 100);
+    std::vector<T> in_out_array = test_utils::get_random_data<T>(size, -100, 100);
+    const T init = test_utils::get_random_value(0, 100);
 
     // Calculate expected results on host
     std::vector<T> expected(in_out_array.size(), 0);
@@ -335,8 +335,8 @@ TYPED_TEST(RocprimWarpScanTests, ExclusiveScanReduce)
     }
 
     // Generate data
-    std::vector<T> in_out_array = get_random_data<T>(size, -100, 100);
-    const int init = get_random_value(0, 100);
+    std::vector<T> in_out_array = test_utils::get_random_data<T>(size, -100, 100);
+    const int init = test_utils::get_random_value(0, 100);
 
     std::vector<T> output_reductions(size / logical_warp_size);
 
@@ -436,8 +436,8 @@ TYPED_TEST(RocprimWarpScanTests, Scan)
     }
 
     // Generate data
-    std::vector<T> input = get_random_data<T>(size, -100, 100);
-    const T init = get_random_value(0, 100);
+    std::vector<T> input = test_utils::get_random_data<T>(size, -100, 100);
+    const T init = test_utils::get_random_value(0, 100);
 
     std::vector<T> i_output(input.size());
     std::vector<T> e_output(input.size());
@@ -526,8 +526,8 @@ TYPED_TEST(RocprimWarpScanTests, ScanReduce)
     }
 
     // Generate data
-    std::vector<T> input = get_random_data<T>(size, -100, 100);
-    const T init = get_random_value(0, 100);
+    std::vector<T> input = test_utils::get_random_data<T>(size, -100, 100);
+    const T init = test_utils::get_random_value(0, 100);
 
     std::vector<T> i_output(input.size());
     std::vector<T> e_output(input.size());
@@ -621,7 +621,7 @@ TYPED_TEST(RocprimWarpScanTests, ScanReduce)
 TYPED_TEST(RocprimWarpScanTests, InclusiveScanCustomStruct)
 {
     using base_type = typename TestFixture::type;
-    using T = custom_test_type<base_type>;
+    using T = test_utils::custom_test_type<base_type>;
 
     // logical warp side for warp primitive, execution warp size is always rp::warp_size()
     constexpr size_t logical_warp_size = TestFixture::warp_size;
@@ -641,7 +641,7 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScanCustomStruct)
     std::vector<T> output(size); // used for input/output
     {
         auto random_values =
-            get_random_data<base_type>(2 * output.size(), 0, 100);
+            test_utils::get_random_data<base_type>(2 * output.size(), 0, 100);
         for(size_t i = 0; i < output.size(); i++)
         {
             output[i].x = random_values[i];
