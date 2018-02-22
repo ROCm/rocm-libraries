@@ -101,7 +101,7 @@ std::vector<size_t> get_sizes()
         100000,
         (1 << 16) - 1220, (1 << 23) - 76543
     };
-    const std::vector<size_t> random_sizes = get_random_data<size_t>(20, 1, 1000000);
+    const std::vector<size_t> random_sizes = get_random_data<size_t>(10, 1, 100000);
     sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
     return sizes;
 }
