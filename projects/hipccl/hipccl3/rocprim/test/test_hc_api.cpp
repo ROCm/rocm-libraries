@@ -29,8 +29,6 @@
 // HC API
 #include <hcc/hc.hpp>
 
-#define HIP_CHECK(x) ASSERT_EQ(x, hipSuccess)
-
 template<class T>
 T ax(const T a, const T x) [[hc]]
 {

@@ -79,7 +79,7 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortInt)
     }
 
     // Generate data
-    std::vector<int> output = get_random_data<int>(size, -100, 100);
+    std::vector<int> output = test_utils::get_random_data<int>(size, -100, 100);
 
     // Calculate expected results on host
     std::vector<int> expected(output);
@@ -125,7 +125,7 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
     std::vector<int> output_key(size);
     std::iota(output_key.begin(), output_key.end(), 0);
     std::shuffle(output_key.begin(), output_key.end(), std::mt19937{std::random_device{}()});
-    std::vector<int> output_value = get_random_data<int>(size, -100, 100);
+    std::vector<int> output_value = test_utils::get_random_data<int>(size, -100, 100);
 
     // Combine vectors to form pairs with key and value
     std::vector<std::pair<int, int>> target(size);

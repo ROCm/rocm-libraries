@@ -75,7 +75,7 @@ std::vector<size_t> get_sizes()
         1512, 3048, 4096,
         27845, (1 << 18) + 1111
     };
-    const std::vector<size_t> random_sizes = get_random_data<size_t>(2, 1, 16384);
+    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(2, 1, 16384);
     sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
     std::sort(sizes.begin(), sizes.end());
     return sizes;
@@ -98,7 +98,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
         // Generate data
-        std::vector<T> input = get_random_data<T>(size, 1, 100);
+        std::vector<T> input = test_utils::get_random_data<T>(size, 1, 100);
 
         hc::array<T> d_input(hc::extent<1>(size), input.begin(), acc_view);
         hc::array<U> d_output(size, acc_view);
@@ -109,7 +109,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
 
         // Calculate expected results on host
         std::vector<U> expected(input.size());
-        host_inclusive_scan(
+        test_utils::host_inclusive_scan(
             input.begin(), input.end(), expected.begin(), plus_op
         );
 
@@ -175,7 +175,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanSum)
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
         // Generate data
-        std::vector<T> input = get_random_data<T>(size, 1, 100);
+        std::vector<T> input = test_utils::get_random_data<T>(size, 1, 100);
 
         hc::array<T> d_input(hc::extent<1>(size), input.begin(), acc_view);
         hc::array<U> d_output(size, acc_view);
@@ -186,8 +186,8 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanSum)
 
         // Calculate expected results on host
         std::vector<U> expected(input.size(), 0);
-        T initial_value = get_random_value<T>(1, 100);
-        host_exclusive_scan(
+        T initial_value = test_utils::get_random_value<T>(1, 100);
+        test_utils::host_exclusive_scan(
             input.begin(), input.end(),
             initial_value, expected.begin(), plus_op
         );

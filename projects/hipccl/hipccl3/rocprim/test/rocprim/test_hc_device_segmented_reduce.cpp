@@ -83,7 +83,7 @@ std::vector<size_t> get_sizes()
         100000,
         (1 << 16) - 1220
     };
-    const std::vector<size_t> random_sizes = get_random_data<size_t>(5, 1, 1000000);
+    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(5, 1, 1000000);
     sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
     return sizes;
 }
@@ -127,7 +127,7 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
         // Generate data and calculate expected results
         std::vector<output_type> aggregates_expected;
 
-        std::vector<input_type> values_input = get_random_data<input_type>(size, 0, 100);
+        std::vector<input_type> values_input = test_utils::get_random_data<input_type>(size, 0, 100);
 
         std::vector<offset_type> offsets;
         unsigned int segments_count = 0;

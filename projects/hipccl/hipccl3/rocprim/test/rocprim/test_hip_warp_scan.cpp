@@ -133,7 +133,7 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScan)
     }
 
     // Generate data
-    std::vector<T> input = get_random_data<T>(size, -100, 100);
+    std::vector<T> input = test_utils::get_random_data<T>(size, -100, 100);
     std::vector<T> output(size);
     std::vector<T> expected(output.size(), 0);
 
@@ -249,7 +249,7 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScanReduce)
     }
 
     // Generate data
-    std::vector<T> input = get_random_data<T>(size, -100, 100);
+    std::vector<T> input = test_utils::get_random_data<T>(size, -100, 100);
     std::vector<T> output(size);
     std::vector<T> output_reductions(size / logical_warp_size);
     std::vector<T> expected(output.size(), 0);
@@ -387,10 +387,10 @@ TYPED_TEST(RocprimWarpScanTests, ExclusiveScan)
     }
 
     // Generate data
-    std::vector<T> input = get_random_data<T>(size, -100, 100);
+    std::vector<T> input = test_utils::get_random_data<T>(size, -100, 100);
     std::vector<T> output(size);
     std::vector<T> expected(input.size(), 0);
-    const T init = get_random_value(0, 100);
+    const T init = test_utils::get_random_value(0, 100);
 
     // Calculate expected results on host
     for(size_t i = 0; i < input.size() / logical_warp_size; i++)
@@ -506,12 +506,12 @@ TYPED_TEST(RocprimWarpScanTests, ExclusiveReduceScan)
     }
 
     // Generate data
-    std::vector<T> input = get_random_data<T>(size, -100, 100);
+    std::vector<T> input = test_utils::get_random_data<T>(size, -100, 100);
     std::vector<T> output(size);
     std::vector<T> output_reductions(size / logical_warp_size);
     std::vector<T> expected(input.size(), 0);
     std::vector<T> expected_reductions(output_reductions.size(), 0);
-    const T init = get_random_value(0, 100);
+    const T init = test_utils::get_random_value(0, 100);
 
     // Calculate expected results on host
     for(size_t i = 0; i < input.size() / logical_warp_size; i++)
@@ -658,12 +658,12 @@ TYPED_TEST(RocprimWarpScanTests, Scan)
     }
 
     // Generate data
-    std::vector<T> input = get_random_data<T>(size, -100, 100);
+    std::vector<T> input = test_utils::get_random_data<T>(size, -100, 100);
     std::vector<T> output_inclusive(size);
     std::vector<T> output_exclusive(size);
     std::vector<T> expected_inclusive(output_inclusive.size(), 0);
     std::vector<T> expected_exclusive(output_exclusive.size(), 0);
-    const T init = get_random_value(0, 100);
+    const T init = test_utils::get_random_value(0, 100);
 
     // Calculate expected results on host
     for(size_t i = 0; i < input.size() / logical_warp_size; i++)
@@ -810,14 +810,14 @@ TYPED_TEST(RocprimWarpScanTests, ScanReduce)
     }
 
     // Generate data
-    std::vector<T> input = get_random_data<T>(size, -100, 100);
+    std::vector<T> input = test_utils::get_random_data<T>(size, -100, 100);
     std::vector<T> output_inclusive(size);
     std::vector<T> output_exclusive(size);
     std::vector<T> output_reductions(size / logical_warp_size);
     std::vector<T> expected_inclusive(output_inclusive.size(), 0);
     std::vector<T> expected_exclusive(output_exclusive.size(), 0);
     std::vector<T> expected_reductions(output_reductions.size(), 0);
-    const T init = get_random_value(0, 100);
+    const T init = test_utils::get_random_value(0, 100);
 
     // Calculate expected results on host
     for(size_t i = 0; i < input.size() / logical_warp_size; i++)
@@ -944,7 +944,7 @@ TYPED_TEST(RocprimWarpScanTests, ScanReduce)
 TYPED_TEST(RocprimWarpScanTests, InclusiveScanCustomType)
 {
     using base_type = typename TestFixture::type;
-    using T = custom_test_type<base_type>;
+    using T = test_utils::custom_test_type<base_type>;
     // logical warp side for warp primitive, execution warp size is always rp::warp_size()
     constexpr size_t logical_warp_size = TestFixture::warp_size;
     constexpr size_t block_size =
@@ -968,7 +968,7 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScanCustomType)
     // Initializing input data
     {
         auto random_values =
-            get_random_data<base_type>(2 * input.size(), 0, 100);
+            test_utils::get_random_data<base_type>(2 * input.size(), 0, 100);
         for(size_t i = 0; i < input.size(); i++)
         {
             input[i].x = random_values[i];
