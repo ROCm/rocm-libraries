@@ -44,7 +44,8 @@ template<
     class Value,
     bool Descending = false,
     unsigned int StartBit = 0,
-    unsigned int EndBit = sizeof(Key) * 8
+    unsigned int EndBit = sizeof(Key) * 8,
+    bool CheckHugeSizes = false
 >
 struct params
 {
@@ -53,6 +54,7 @@ struct params
     static constexpr bool descending = Descending;
     static constexpr unsigned int start_bit = StartBit;
     static constexpr unsigned int end_bit = EndBit;
+    static constexpr bool check_huge_sizes = CheckHugeSizes;
 };
 
 template<class Params>
@@ -69,7 +71,6 @@ typedef ::testing::Types<
     params<double, unsigned int>,
     params<double, int, true>,
     params<float, int>,
-    params<float, char, true>,
 
     // start_bit and end_bit
     params<unsigned char, int, true, 0, 7>,
@@ -78,7 +79,10 @@ typedef ::testing::Types<
     params<unsigned int, double, true, 4, 21>,
     params<unsigned int, short, true, 0, 15>,
     params<unsigned long long, char, false, 8, 20>,
-    params<unsigned short, double, false, 8, 11>
+    params<unsigned short, double, false, 8, 11>,
+
+    // huge sizes to check correctness of more than 1 block per batch
+    params<float, char, true, 0, 32, true>
 > Params;
 
 TYPED_TEST_CASE(RocprimDeviceRadixSort, Params);
@@ -118,7 +122,7 @@ struct key_value_comparator
 std::vector<size_t> get_sizes()
 {
     std::vector<size_t> sizes = { 1, 10, 53, 211, 1024, 2345, 4096, 34567, (1 << 16) - 1220, (1 << 23) - 76543 };
-    const std::vector<size_t> random_sizes = get_random_data<size_t>(10, 1, 1000000);
+    const std::vector<size_t> random_sizes = get_random_data<size_t>(10, 1, 100000);
     sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
     return sizes;
 }
@@ -129,6 +133,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
     constexpr bool descending = TestFixture::params::descending;
     constexpr unsigned int start_bit = TestFixture::params::start_bit;
     constexpr unsigned int end_bit = TestFixture::params::end_bit;
+    constexpr bool check_huge_sizes = TestFixture::params::check_huge_sizes;
 
     hc::accelerator acc;
     hc::accelerator_view acc_view = acc.create_view();
@@ -138,6 +143,8 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
     const std::vector<size_t> sizes = get_sizes();
     for(size_t size : sizes)
     {
+        if(size > (1 << 20) && !check_huge_sizes) continue;
+
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
         // Generate data
@@ -208,6 +215,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairs)
     constexpr bool descending = TestFixture::params::descending;
     constexpr unsigned int start_bit = TestFixture::params::start_bit;
     constexpr unsigned int end_bit = TestFixture::params::end_bit;
+    constexpr bool check_huge_sizes = TestFixture::params::check_huge_sizes;
 
     hc::accelerator acc;
     hc::accelerator_view acc_view = acc.create_view();
@@ -217,6 +225,8 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairs)
     const std::vector<size_t> sizes = get_sizes();
     for(size_t size : sizes)
     {
+        if(size > (1 << 20) && !check_huge_sizes) continue;
+
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
         // Generate data
@@ -310,6 +320,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeysDoubleBuffer)
     constexpr bool descending = TestFixture::params::descending;
     constexpr unsigned int start_bit = TestFixture::params::start_bit;
     constexpr unsigned int end_bit = TestFixture::params::end_bit;
+    constexpr bool check_huge_sizes = TestFixture::params::check_huge_sizes;
 
     hc::accelerator acc;
     hc::accelerator_view acc_view = acc.create_view();
@@ -319,6 +330,8 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeysDoubleBuffer)
     const std::vector<size_t> sizes = get_sizes();
     for(unsigned int size : sizes)
     {
+        if(size > (1 << 20) && !check_huge_sizes) continue;
+
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
         // Generate data
@@ -393,6 +406,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairsDoubleBuffer)
     constexpr bool descending = TestFixture::params::descending;
     constexpr unsigned int start_bit = TestFixture::params::start_bit;
     constexpr unsigned int end_bit = TestFixture::params::end_bit;
+    constexpr bool check_huge_sizes = TestFixture::params::check_huge_sizes;
 
     hc::accelerator acc;
     hc::accelerator_view acc_view = acc.create_view();
@@ -402,6 +416,8 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairsDoubleBuffer)
     const std::vector<size_t> sizes = get_sizes();
     for(size_t size : sizes)
     {
+        if(size > (1 << 20) && !check_huge_sizes) continue;
+
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
         // Generate data
