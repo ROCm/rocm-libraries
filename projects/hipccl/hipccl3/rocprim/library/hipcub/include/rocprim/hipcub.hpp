@@ -29,4 +29,7 @@
 // Warp
 #include "warp/warp_scan.hpp"
 
+// Block
+#include "block/block_scan.hpp"
+
 #endif // ROCPRIM_HIPCUB_HPP_
