@@ -109,6 +109,17 @@ public:
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE inline
+    void exclusive_scan(T input, T& output,
+                        storage_type& storage, BinaryFunction scan_op)
+    {
+        (void) storage; // disables unused parameter warning
+        inclusive_scan(input, output, scan_op);
+        // Convert inclusive scan result to exclusive
+        to_exclusive(output, output);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE inline
     void exclusive_scan(T input, T& output, T init, T& reduction,
                         BinaryFunction scan_op)
     {
@@ -149,6 +160,17 @@ public:
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE inline
+    void scan(T input, T& inclusive_output, T& exclusive_output,
+              storage_type& storage, BinaryFunction scan_op)
+    {
+        (void) storage; // disables unused parameter warning
+        inclusive_scan(input, inclusive_output, scan_op);
+        // Convert inclusive scan result to exclusive
+        to_exclusive(inclusive_output, exclusive_output);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE inline
     void scan(T input, T& inclusive_output, T& exclusive_output, T init, T& reduction,
               BinaryFunction scan_op)
     {
@@ -168,8 +190,22 @@ public:
         scan(input, inclusive_output, exclusive_output, init, reduction, scan_op);
     }
 
-private:
+    ROCPRIM_DEVICE inline
+    T broadcast(T input, const unsigned int src_lane, storage_type& storage)
+    {
+        (void) storage;
+        return warp_shuffle(input, src_lane, WarpSize);
+    }
 
+protected:
+    ROCPRIM_DEVICE inline
+    void to_exclusive(T inclusive_input, T& exclusive_output, storage_type& storage)
+    {
+        (void) storage;
+        return to_exclusive(inclusive_input, exclusive_output);
+    }
+
+private:
     // Changes inclusive scan results to exclusive scan results
     template<class BinaryFunction>
     ROCPRIM_DEVICE inline
@@ -184,6 +220,13 @@ private:
         {
             exclusive_output = init;
         }
+    }
+
+    ROCPRIM_DEVICE inline
+    void to_exclusive(T inclusive_input, T& exclusive_output)
+    {
+        // shift to get exclusive results
+        exclusive_output = warp_shuffle_up(inclusive_input, 1, WarpSize);
     }
 };
 
