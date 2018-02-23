@@ -69,4 +69,6 @@ endfunction()
 # ****************************************************************************
 # Tests
 # ****************************************************************************
-add_hipcub_test("hipcub.warp_scan" test_hipcub_warp_scan.cpp)
+
+add_hipcub_test("hipcub.BlockScan" test_hipcub_block_scan.cpp)
+add_hipcub_test("hipcub.WarpScan" test_hipcub_warp_scan.cpp)
