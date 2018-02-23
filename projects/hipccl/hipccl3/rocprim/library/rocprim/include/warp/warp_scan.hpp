@@ -418,6 +418,17 @@ public:
         base_type::exclusive_scan(input, output, init, storage, scan_op);
     }
 
+    /// \overload
+    template<class BinaryFunction = ::rocprim::plus<T>>
+    ROCPRIM_DEVICE inline
+    void exclusive_scan(T input,
+                        T& output,
+                        storage_type& storage,
+                        BinaryFunction scan_op = BinaryFunction())
+    {
+        base_type::exclusive_scan(input, output, storage, scan_op);
+    }
+
     /// \brief Performs exclusive scan and reduction across threads in a logical warp.
     ///
     /// \tparam BinaryFunction - type of binary function used for scan. Default type
@@ -612,6 +623,18 @@ public:
         base_type::scan(input, inclusive_output, exclusive_output, init, storage, scan_op);
     }
 
+    /// \overload
+    template<class BinaryFunction = ::rocprim::plus<T>>
+    ROCPRIM_DEVICE inline
+    void scan(T input,
+              T& inclusive_output,
+              T& exclusive_output,
+              storage_type& storage,
+              BinaryFunction scan_op = BinaryFunction())
+    {
+        base_type::scan(input, inclusive_output, exclusive_output, storage, scan_op);
+    }
+
     /// \brief Performs inclusive and exclusive scan operations, and reduction across
     /// threads in a logical warp.
     ///
@@ -714,6 +737,31 @@ public:
             input, inclusive_output, exclusive_output, init, reduction,
             storage, scan_op
         );
+    }
+
+    /// \brief Broadcasts value from one thread to all threads in logical warp.
+    ///
+    /// \param [in] input - value to broadcast.
+    /// \param [in] src_lane - id of the thread whose value should be broadcasted
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
+    /// universal rocprim::syncthreads().
+    ROCPRIM_DEVICE inline
+    T broadcast(T input,
+                const unsigned int src_lane,
+                storage_type& storage)
+    {
+        return base_type::broadcast(input, src_lane, storage);
+    }
+
+protected:
+    ROCPRIM_DEVICE inline
+    void to_exclusive(T inclusive_input, T& exclusive_output, storage_type& storage)
+    {
+        return base_type::to_exclusive(inclusive_input, exclusive_output, storage);
     }
 };
 

@@ -43,7 +43,7 @@ public:
     using TempStorage = typename base_type::storage_type;
 
     HIPCUB_DEVICE inline
-    WarpScan(TempStorage &temp_storage) : temp_storage(temp_storage)
+    WarpScan(TempStorage& temp_storage) : temp_storage(temp_storage)
     {
     }
 
@@ -90,12 +90,30 @@ public:
 
     template<typename ScanOp>
     HIPCUB_DEVICE inline
+    void ExclusiveScan(T input, T& exclusive_output, ScanOp scan_op)
+    {
+        base_type::inclusive_scan(input, exclusive_output, temp_storage, scan_op);
+        base_type::to_exclusive(exclusive_output, exclusive_output, temp_storage);
+    }
+
+    template<typename ScanOp>
+    HIPCUB_DEVICE inline
     void ExclusiveScan(T input, T& exclusive_output, T initial_value, ScanOp scan_op)
     {
         base_type::exclusive_scan(
             input, exclusive_output, initial_value,
             temp_storage, scan_op
         );
+    }
+
+    template<typename ScanOp>
+    HIPCUB_DEVICE inline
+    void ExclusiveScan(T input, T& exclusive_output, ScanOp scan_op, T& warp_aggregate)
+    {
+        base_type::inclusive_scan(
+            input, exclusive_output, warp_aggregate, temp_storage, scan_op
+        );
+        base_type::to_exclusive(exclusive_output, exclusive_output, temp_storage);
     }
 
     template<typename ScanOp>
