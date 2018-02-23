@@ -55,7 +55,7 @@ public:
     }
 
     ROCPRIM_HOST_DEVICE inline
-    counting_iterator operator++()
+    counting_iterator& operator++()
     {
         value_++;
         return *this;
@@ -66,6 +66,21 @@ public:
     {
         counting_iterator old_ci = *this;
         value_++;
+        return old_ci;
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    counting_iterator& operator--()
+    {
+        value_--;
+        return *this;
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    counting_iterator operator--(int)
+    {
+        counting_iterator old_ci = *this;
+        value_--;
         return old_ci;
     }
 
@@ -88,7 +103,7 @@ public:
     }
 
     ROCPRIM_HOST_DEVICE inline
-    counting_iterator& operator+=(difference_type distance) const
+    counting_iterator& operator+=(difference_type distance)
     {
         value_ += static_cast<value_type>(distance);
         return *this;
@@ -101,7 +116,7 @@ public:
     }
 
     ROCPRIM_HOST_DEVICE inline
-    counting_iterator& operator-=(difference_type distance) const
+    counting_iterator& operator-=(difference_type distance)
     {
         value_ -= static_cast<value_type>(distance);
         return *this;
@@ -125,37 +140,37 @@ public:
     ROCPRIM_HOST_DEVICE inline
     bool operator==(counting_iterator other) const
     {
-        return (value_ == other.value_);
+        return this->equal_value(value_, other.value_);
     }
 
     ROCPRIM_HOST_DEVICE inline
     bool operator!=(counting_iterator other) const
     {
-        return (value_ != other.value_);
+        return !(*this == other);
     }
 
     ROCPRIM_HOST_DEVICE inline
     bool operator<(counting_iterator other) const
     {
-        return (value_ < other.value_);
+        return distance_to(other) > 0;
     }
 
     ROCPRIM_HOST_DEVICE inline
     bool operator<=(counting_iterator other) const
     {
-        return (value_ <= other.value_);
+        return distance_to(other) >= 0;
     }
 
     ROCPRIM_HOST_DEVICE inline
     bool operator>(counting_iterator other) const
     {
-        return (value_ > other.value_);
+        return distance_to(other) < 0;
     }
 
     ROCPRIM_HOST_DEVICE inline
     bool operator>=(counting_iterator other) const
     {
-        return (value_ >= other.value_);
+        return distance_to(other) <= 0;
     }
 
     friend std::ostream& operator<<(std::ostream& os, const counting_iterator& iter)
@@ -165,6 +180,28 @@ public:
     }
 
 private:
+    template<class T>
+    inline
+    auto equal_value(const T& x, const T& y) const
+        -> typename std::enable_if<std::is_floating_point<T>::value, bool>::type
+    {
+        return difference_type(y) - difference_type(x) == 0;
+    }
+
+    template<class T>
+    inline
+    auto equal_value(const T& x, const T& y) const
+        -> typename std::enable_if<!std::is_floating_point<T>::value, bool>::type
+    {
+        return (x == y);
+    }
+
+    inline
+    difference_type distance_to(const counting_iterator& other) const
+    {
+        return difference_type(other.value_) - difference_type(value_);
+    }
+
     value_type value_;
 };
 

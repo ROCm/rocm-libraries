@@ -26,4 +26,4 @@
 
 #include "iterator/counting_iterator.hpp"
 
-#endif // ROCPRIM_ITERATOR_WARP_SHUFFLE_HPP_
+#endif // ROCPRIM_ITERATOR_HPP_

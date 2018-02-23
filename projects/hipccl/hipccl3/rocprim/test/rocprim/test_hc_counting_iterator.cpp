@@ -23,6 +23,7 @@
 #include <iostream>
 #include <vector>
 #include <algorithm>
+#include <type_traits>
 
 // Google Test
 #include <gtest/gtest.h>
@@ -69,6 +70,47 @@ struct transform
     }
 };
 
+TYPED_TEST(RocprimCountingIteratorTests, Equal)
+{
+    using T = typename TestFixture::input_type;
+    using Iterator = typename rocprim::counting_iterator<T>;
+
+    Iterator x(test_utils::get_random_value<T>(0, 200));
+    Iterator y = x;
+    ASSERT_EQ(x, y);
+
+    x += 100;
+    for(size_t i = 0; i < 100; i++)
+    {
+        y++;
+    }
+    ASSERT_EQ(x, y);
+
+    y--;
+    ASSERT_NE(x, y);
+
+    Iterator z(T(10.5f));
+    Iterator w(T(10.25f));
+    ASSERT_EQ(z, w);
+}
+
+TYPED_TEST(RocprimCountingIteratorTests, Less)
+{
+    using T = typename TestFixture::input_type;
+    using Iterator = typename rocprim::counting_iterator<T>;
+
+    Iterator x(test_utils::get_random_value<T>(0, 200));
+    Iterator y = x + 1;
+    ASSERT_LT(x, y);
+
+    x += 100;
+    for(size_t i = 0; i < 100; i++)
+    {
+        y++;
+    }
+    ASSERT_LT(x, y);
+}
+
 TYPED_TEST(RocprimCountingIteratorTests, Transform)
 {
     using T = typename TestFixture::input_type;
@@ -111,12 +153,12 @@ TYPED_TEST(RocprimCountingIteratorTests, Transform)
         SCOPED_TRACE(testing::Message() << "where index = " << i);
         if(std::is_integral<T>::value)
         {
-            EXPECT_EQ(output[i], expected[i]);
+            ASSERT_EQ(output[i], expected[i]);
         }
-        else if (std::is_floating_point<T>::value)
+        else if(std::is_floating_point<T>::value)
         {
             auto tolerance = std::max<T>(std::abs(0.1f * expected[i]), T(0.01f));
-            EXPECT_NEAR(output[i], expected[i], tolerance);
+            ASSERT_NEAR(output[i], expected[i], tolerance);
         }
     }
 }
