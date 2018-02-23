@@ -756,6 +756,13 @@ public:
     {
         return base_type::broadcast(input, src_lane, storage);
     }
+
+protected:
+    ROCPRIM_DEVICE inline
+    void to_exclusive(T inclusive_input, T& exclusive_output, storage_type& storage)
+    {
+        return base_type::to_exclusive(inclusive_input, exclusive_output, storage);
+    }
 };
 
 END_ROCPRIM_NAMESPACE
