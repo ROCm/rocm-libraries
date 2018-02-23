@@ -139,11 +139,18 @@ public:
         {
             store_volatile(&storage.threads[src_lane], input);
         }
-        return load_volatile(&storage.threads[src_lane])
+        return load_volatile(&storage.threads[src_lane]);
+    }
+
+protected:
+    ROCPRIM_DEVICE inline
+    void to_exclusive(T inclusive_input, T& exclusive_output, storage_type& storage)
+    {
+        (void) inclusive_input;
+        return to_exclusive(exclusive_output, storage);
     }
 
 private:
-
     // Calculate exclusive results base on inclusive scan results in storage.threads[].
     template<class BinaryFunction>
     ROCPRIM_DEVICE inline
@@ -158,7 +165,6 @@ private:
         }
     }
 
-    template<class BinaryFunction>
     ROCPRIM_DEVICE inline
     void to_exclusive(T& exclusive_output, storage_type& storage)
     {
