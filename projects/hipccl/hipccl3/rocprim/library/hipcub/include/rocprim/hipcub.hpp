@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_HIPCUB_HPP_
-#define ROCPRIM_HIPCUB_HPP_
+#ifndef HIPCUB_ROCPRIM_HPP_
+#define HIPCUB_ROCPRIM_HPP_
 
 #include "../config.hpp"
 
@@ -30,6 +30,9 @@
 #include "warp/warp_scan.hpp"
 
 // Block
+#include "block/block_discontinuity.hpp"
+#include "block/block_load_func.hpp"
 #include "block/block_scan.hpp"
+#include "block/block_store_func.hpp"
 
-#endif // ROCPRIM_HIPCUB_HPP_
+#endif // HIPCUB_ROCPRIM_HPP_

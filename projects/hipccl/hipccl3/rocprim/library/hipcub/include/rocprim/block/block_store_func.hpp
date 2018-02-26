@@ -18,13 +18,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_HIPCUB_BLOCK_BLOCK_STORE_FUNC_HPP_
-#define ROCPRIM_HIPCUB_BLOCK_BLOCK_STORE_FUNC_HPP_
+#ifndef HIPCUB_ROCPRIM_BLOCK_BLOCK_STORE_FUNC_HPP_
+#define HIPCUB_ROCPRIM_BLOCK_BLOCK_STORE_FUNC_HPP_
 
 #include "../../config.hpp"
 
 #include "../intrinsics.hpp"
-#include "../thread/thread_operators.hpp"
 
 BEGIN_HIPCUB_NAMESPACE
 
@@ -84,7 +83,7 @@ void StoreDirectStriped(int linear_id,
                         OutputIteratorT block_iter,
                         T (&items)[ITEMS_PER_THREAD])
 {
-    ::rocprim::block_store_direct_striped(
+    ::rocprim::block_store_direct_striped<BLOCK_THREADS>(
         linear_id, block_iter, items
     );
 }
@@ -101,7 +100,7 @@ void StoreDirectStriped(int linear_id,
                         T (&items)[ITEMS_PER_THREAD],
                         int valid_items)
 {
-    ::rocprim::block_store_direct_striped(
+    ::rocprim::block_store_direct_striped<BLOCK_THREADS>(
         linear_id, block_iter, items, valid_items
     );
 }
@@ -139,4 +138,4 @@ void StoreDirectWarpStriped(int linear_id,
 
 END_HIPCUB_NAMESPACE
 
-#endif // ROCPRIM_HIPCUB_BLOCK_BLOCK_STORE_FUNC_HPP_
+#endif // HIPCUB_ROCPRIM_BLOCK_BLOCK_STORE_FUNC_HPP_
