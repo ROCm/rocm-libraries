@@ -688,6 +688,7 @@ TYPED_TEST(HipcubWarpScanTests, Scan)
     for(size_t i = 0; i < input.size() / logical_warp_size; i++)
     {
         expected_exclusive[i * logical_warp_size] = init;
+        expected_inclusive[i * logical_warp_size] = init;
         for(size_t j = 0; j < logical_warp_size; j++)
         {
             auto idx = i * logical_warp_size + j;
