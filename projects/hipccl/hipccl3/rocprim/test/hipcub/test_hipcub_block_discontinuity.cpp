@@ -34,8 +34,7 @@
 
 #include "test_utils.hpp"
 
-#define HIP_CHECK(error)         \
-    EXPECT_EQ(static_cast<hipError_t>(error),hipSuccess)
+#define HIP_CHECK(error) ASSERT_EQ(static_cast<hipError_t>(error), hipSuccess)
 
 template<
     class T,
@@ -62,7 +61,7 @@ public:
 template<class T>
 struct custom_flag_op1
 {
-    ROCPRIM_HOST_DEVICE
+    HIPCUB_HOST_DEVICE
     bool operator()(const T& a, const T& b)
     {
         return (a == b);
@@ -72,7 +71,7 @@ struct custom_flag_op1
 template<class T>
 struct custom_flag_op2
 {
-    ROCPRIM_HOST_DEVICE
+    HIPCUB_HOST_DEVICE
     bool operator()(const T& a, const T& b) const
     {
         return (a - b > 5);

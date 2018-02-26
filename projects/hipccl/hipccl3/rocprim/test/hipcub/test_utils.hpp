@@ -62,7 +62,7 @@ namespace test_utils
     }
 
     template<class T>
-    ROCPRIM_HOST_DEVICE inline
+    HIPCUB_HOST_DEVICE inline
     constexpr T next_power_of_two(const T x, const T acc = 1)
     {
         static_assert(std::is_unsigned<T>::value, "T must be unsigned type");
@@ -127,7 +127,7 @@ namespace test_utils
     // Select the minimal warp size for block of size block_size, it's
     // useful for blocks smaller than maximal warp size.
     template<class T>
-    ROCPRIM_HOST_DEVICE inline
+    HIPCUB_HOST_DEVICE inline
     constexpr T get_min_warp_size(const T block_size, const T max_warp_size)
     {
         static_assert(std::is_unsigned<T>::value, "T must be unsigned type");

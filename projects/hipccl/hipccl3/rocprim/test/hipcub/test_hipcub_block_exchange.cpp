@@ -33,8 +33,7 @@
 
 #include "test_utils.hpp"
 
-#define HIP_CHECK(error)         \
-    EXPECT_EQ(static_cast<hipError_t>(error),hipSuccess)
+#define HIP_CHECK(error) ASSERT_EQ(static_cast<hipError_t>(error), hipSuccess)
 
 template<
     class T,
@@ -62,17 +61,19 @@ struct dummy
     T x;
     T y;
 
-    ROCPRIM_HOST_DEVICE
+#ifdef HIPCUB_ROCPRIM_API
+    HIPCUB_HOST_DEVICE
+#endif
     dummy() = default;
 
     template<class U>
-    ROCPRIM_HOST_DEVICE
+    HIPCUB_HOST_DEVICE
     dummy(U a) : x(a + 1), y(a * 2) { }
 
-    ROCPRIM_HOST_DEVICE
+    HIPCUB_HOST_DEVICE
     bool operator==(const dummy& rhs) const
     {
-        return std::tie(x, y) == std::tie(rhs.x, rhs.y);
+        return x == rhs.x && y == rhs.y;
     }
 };
 

@@ -30,14 +30,7 @@
 
 #include "test_utils.hpp"
 
-#define HIP_CHECK(condition)         \
-{                                  \
-  hipError_t error = condition;    \
-  if(error != hipSuccess){         \
-      std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
-      exit(error); \
-  } \
-}
+#define HIP_CHECK(error) ASSERT_EQ(static_cast<hipError_t>(error), hipSuccess)
 
 // Params for tests
 template<
@@ -75,7 +68,6 @@ typedef ::testing::Types<
     params<int, 128U>,
     params<int, 256U>,
     params<int, 512U>,
-    params<int, 1024U>,
     params<int, 65U>,
     params<int, 37U>,
     params<int, 162U>,
@@ -95,7 +87,6 @@ typedef ::testing::Types<
     params<int, 128U, 1, hipcub::BLOCK_SCAN_RAKING>,
     params<int, 256U, 1, hipcub::BLOCK_SCAN_RAKING>,
     params<int, 512U, 1, hipcub::BLOCK_SCAN_RAKING>,
-    params<int, 1024U, 1, hipcub::BLOCK_SCAN_RAKING>,
     params<unsigned long, 65U, 1, hipcub::BLOCK_SCAN_RAKING>,
     params<long, 37U, 1, hipcub::BLOCK_SCAN_RAKING>,
     params<short, 162U, 1, hipcub::BLOCK_SCAN_RAKING>,
@@ -750,7 +741,7 @@ TYPED_TEST(HipcubBlockScanSingleValueTests, ExclusiveScanPrefixCallback)
             output_block_prefixes.size() * sizeof(T),
             hipMemcpyDeviceToHost
         )
-    )
+    );
 
     // Validating results
     for(size_t i = 0; i < output.size(); i++)
@@ -867,7 +858,6 @@ typedef ::testing::Types<
     params<float, 32,   2>,
     params<unsigned int, 256,  3>,
     params<int, 512,  4>,
-    params<float, 1024, 1>,
     params<float, 37,   2>,
     params<float, 65,   5>,
     params<float, 162,  7>,
@@ -879,7 +869,6 @@ typedef ::testing::Types<
     params<float, 32,   2,  hipcub::BLOCK_SCAN_RAKING>,
     params<int, 256,  3,  hipcub::BLOCK_SCAN_RAKING>,
     params<unsigned int, 512,  4,  hipcub::BLOCK_SCAN_RAKING>,
-    params<float, 1024, 1,  hipcub::BLOCK_SCAN_RAKING>,
     params<float, 37,   2,  hipcub::BLOCK_SCAN_RAKING>,
     params<float, 65,   5,  hipcub::BLOCK_SCAN_RAKING>,
     params<float, 162,  7,  hipcub::BLOCK_SCAN_RAKING>,
@@ -1133,7 +1122,7 @@ TYPED_TEST(HipcubBlockScanInputArrayTests, InclusiveScanReduce)
     }
 
     HIP_CHECK(hipFree(device_output));
-    HIP_CHECK(hipFree(device_output_reductions))
+    HIP_CHECK(hipFree(device_output_reductions));
 }
 
 template<
