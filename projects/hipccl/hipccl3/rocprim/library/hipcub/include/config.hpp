@@ -39,6 +39,7 @@
     #define HIPCUB_DEVICE __device__
     #define HIPCUB_HOST __host__
     #define HIPCUB_HOST_DEVICE __host__ __device__
+    #define HIPCUB_RUNTIME_FUNCTION __host__
     #define HIPCUB_SHARED_MEMORY __shared__
 #elif defined(__HIP_PLATFORM_NVCC__)
     #include "cub/cub.cuh"
@@ -47,6 +48,7 @@
     #define HIPCUB_DEVICE __device__
     #define HIPCUB_HOST __host__
     #define HIPCUB_HOST_DEVICE __host__ __device__
+    #define HIPCUB_RUNTIME_FUNCTION CUB_RUNTIME_FUNCTION
     #define HIPCUB_SHARED_MEMORY __shared__
 #endif
 
