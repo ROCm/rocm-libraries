@@ -34,13 +34,13 @@ template<
     typename InputIteratorT
 >
 HIPCUB_DEVICE inline
-void LoadDirectBlocked(unsigned int linear_id,
+void LoadDirectBlocked(int linear_id,
                        InputIteratorT block_iter,
                        T (&items)[ITEMS_PER_THREAD])
 {
-    ::rocprim::block_load_direct_blocked(linear_id, 
-                                         block_iter, 
-                                         items);
+    ::rocprim::block_load_direct_blocked(
+        linear_id, block_iter, items
+    );
 }
 
 template<
@@ -49,15 +49,14 @@ template<
     typename InputIteratorT
 >
 HIPCUB_DEVICE inline
-void LoadDirectBlocked(unsigned int linear_id,
+void LoadDirectBlocked(int linear_id,
                        InputIteratorT block_iter,
                        T (&items)[ITEMS_PER_THREAD],
                        int valid_items)
 {
-    ::rocprim::block_load_direct_blocked(linear_id, 
-                                         block_iter, 
-                                         items,
-                                         valid_items);
+    ::rocprim::block_load_direct_blocked(
+        linear_id, block_iter, items, valid_items
+    );
 }
 
 template<
@@ -67,17 +66,15 @@ template<
     typename InputIteratorT
 >
 HIPCUB_DEVICE inline
-void LoadDirectBlocked(unsigned int linear_id,
+void LoadDirectBlocked(int linear_id,
                        InputIteratorT block_iter,
                        T (&items)[ITEMS_PER_THREAD],
                        int valid_items,
                        Default oob_default)
 {
-    ::rocprim::block_load_direct_blocked(linear_id, 
-                                         block_iter, 
-                                         items,
-                                         valid_items,
-                                         oob_default);
+    ::rocprim::block_load_direct_blocked(
+        linear_id, block_iter, items, valid_items, oob_default
+    );
 }
 
 template <
@@ -85,13 +82,13 @@ template <
     int ITEMS_PER_THREAD
 >
 HIPCUB_DEVICE inline
-void InternalLoadDirectBlockedVectorized(unsigned int linear_id,
-                                         T* block_iter,
-                                         T (&items)[ITEMS_PER_THREAD])
+void LoadDirectBlockedVectorized(int linear_id,
+                                 T* block_iter,
+                                 T (&items)[ITEMS_PER_THREAD])
 {
-    ::rocprim::block_load_direct_blocked_vectorized(linear_id,
-                                                    block_iter,
-                                                    items);
+    ::rocprim::block_load_direct_blocked_vectorized(
+        linear_id, block_iter, items
+    );
 }
 
 template<
@@ -101,13 +98,13 @@ template<
     typename InputIteratorT
 >
 HIPCUB_DEVICE inline
-void LoadDirectStriped(unsigned int linear_id,
+void LoadDirectStriped(int linear_id,
                        InputIteratorT block_iter,
                        T (&items)[ITEMS_PER_THREAD])
 {
-    ::rocprim::block_load_direct_striped(linear_id, 
-                                         block_iter, 
-                                         items);
+    ::rocprim::block_load_direct_striped(
+        linear_id, block_iter, items
+    );
 }
 
 template<
@@ -117,15 +114,14 @@ template<
     typename InputIteratorT
 >
 HIPCUB_DEVICE inline
-void LoadDirectStriped(unsigned int linear_id,
+void LoadDirectStriped(int linear_id,
                        InputIteratorT block_iter,
                        T (&items)[ITEMS_PER_THREAD],
                        int valid_items)
 {
-    ::rocprim::block_load_direct_striped(linear_id, 
-                                         block_iter, 
-                                         items,
-                                         valid_items);
+    ::rocprim::block_load_direct_striped(
+        linear_id, block_iter, items, valid_items
+    );
 }
 
 template<
@@ -136,17 +132,15 @@ template<
     typename InputIteratorT
 >
 HIPCUB_DEVICE inline
-void LoadDirectStriped(unsigned int linear_id,
+void LoadDirectStriped(int linear_id,
                        InputIteratorT block_iter,
                        T (&items)[ITEMS_PER_THREAD],
                        int valid_items,
                        Default oob_default)
 {
-    ::rocprim::block_load_direct_striped(linear_id, 
-                                         block_iter, 
-                                         items,
-                                         valid_items,
-                                         oob_default);
+    ::rocprim::block_load_direct_striped(
+        linear_id, block_iter, items, valid_items, oob_default
+    );
 }
 
 template<
@@ -155,13 +149,13 @@ template<
     typename InputIteratorT
 >
 HIPCUB_DEVICE inline
-void LoadDirectWarpStriped(unsigned int linear_id,
+void LoadDirectWarpStriped(int linear_id,
                            InputIteratorT block_iter,
                            T (&items)[ITEMS_PER_THREAD])
 {
-    ::rocprim::block_load_direct_warp_striped(linear_id, 
-                                              block_iter, 
-                                              items);
+    ::rocprim::block_load_direct_warp_striped(
+        linear_id, block_iter, items
+    );
 }
 
 template<
@@ -170,15 +164,14 @@ template<
     typename InputIteratorT
 >
 HIPCUB_DEVICE inline
-void LoadDirectWarpStriped(unsigned int linear_id,
+void LoadDirectWarpStriped(int linear_id,
                            InputIteratorT block_iter,
                            T (&items)[ITEMS_PER_THREAD],
                            int valid_items)
 {
-    ::rocprim::block_load_direct_warp_striped(linear_id, 
-                                              block_iter, 
-                                              items,
-                                              valid_items);
+    ::rocprim::block_load_direct_warp_striped(
+        linear_id, block_iter, items, valid_items
+    );
 }
 
 template<
@@ -188,17 +181,15 @@ template<
     typename InputIteratorT
 >
 HIPCUB_DEVICE inline
-void LoadDirectWarpStriped(unsigned int linear_id,
+void LoadDirectWarpStriped(int linear_id,
                            InputIteratorT block_iter,
                            T (&items)[ITEMS_PER_THREAD],
                            int valid_items,
                            Default oob_default)
 {
-    ::rocprim::block_load_direct_warp_striped(linear_id, 
-                                              block_iter, 
-                                              items,
-                                              valid_items,
-                                              oob_default);
+    ::rocprim::block_load_direct_warp_striped(
+        linear_id, block_iter, items, valid_items, oob_default
+    );
 }
 
 END_HIPCUB_NAMESPACE
