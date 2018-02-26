@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef HIPCUB_ROCPRIM_BLOCK_BLOCK_LOAD_HPP_
-#define HIPCUB_ROCPRIM_BLOCK_BLOCK_LOAD_HPP_
+#ifndef HIPCUB_ROCPRIM_BLOCK_BLOCK_STORE_HPP_
+#define HIPCUB_ROCPRIM_BLOCK_BLOCK_STORE_HPP_
 
 #include <type_traits>
 
@@ -28,49 +28,49 @@
 #include "../intrinsics.hpp"
 #include "../thread/thread_operators.hpp"
 
-#include "block_load_func.hpp"
+#include "block_store_func.hpp"
 
 BEGIN_HIPCUB_NAMESPACE
 
 namespace detail
 {
     inline constexpr
-    typename std::underlying_type<::rocprim::block_load_method>::type
-    to_BlockLoadAlgorithm_enum(::rocprim::block_load_method v)
+    typename std::underlying_type<::rocprim::block_store_method>::type
+    to_BlockStoreAlgorithm_enum(::rocprim::block_store_method v)
     {
-        using utype = std::underlying_type<::rocprim::block_load_method>::type;
+        using utype = std::underlying_type<::rocprim::block_store_method>::type;
         return static_cast<utype>(v);
     }
 }
 
-enum BlockLoadAlgorithm
+enum BlockStoreAlgorithm
 {
-    BLOCK_LOAD_DIRECT
-        = detail::to_BlockLoadAlgorithm_enum(::rocprim::block_load_method::block_load_direct),
-    BLOCK_LOAD_VECTORIZE
-        = detail::to_BlockLoadAlgorithm_enum(::rocprim::block_load_method::block_load_vectorize),
-    BLOCK_LOAD_TRANSPOSE
-        = detail::to_BlockLoadAlgorithm_enum(::rocprim::block_load_method::block_load_transpose),
-    BLOCK_LOAD_WARP_TRANSPOSE
-        = detail::to_BlockLoadAlgorithm_enum(::rocprim::block_load_method::block_load_warp_transpose),
-    BLOCK_LOAD_WARP_TRANSPOSE_TIMESLICED /* ignored */
+    BLOCK_STORE_DIRECT
+        = detail::to_BlockStoreAlgorithm_enum(::rocprim::block_store_method::block_store_direct),
+    BLOCK_STORE_VECTORIZE
+        = detail::to_BlockStoreAlgorithm_enum(::rocprim::block_store_method::block_store_vectorize),
+    BLOCK_STORE_TRANSPOSE
+        = detail::to_BlockStoreAlgorithm_enum(::rocprim::block_store_method::block_store_transpose),
+    BLOCK_STORE_WARP_TRANSPOSE
+        = detail::to_BlockStoreAlgorithm_enum(::rocprim::block_store_method::block_store_warp_transpose),
+    BLOCK_STORE_WARP_TRANSPOSE_TIMESLICED /* ignored */
 };
 
 template<
     typename T,
     int BLOCK_DIM_X,
     int ITEMS_PER_THREAD,
-    BlockLoadAlgorithm ALGORITHM = BLOCK_LOAD_DIRECT,
+    BlockStoreAlgorithm ALGORITHM = BLOCK_STORE_DIRECT,
     int BLOCK_DIM_Y = 1,
     int BLOCK_DIM_Z = 1,
     int ARCH = HIPCUB_ARCH /* ignored */
 >
-class BlockLoad
-    : private ::rocprim::block_load<
+class BlockStore
+    : private ::rocprim::block_store<
         T,
         BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z,
         ITEMS_PER_THREAD,
-        static_cast<::rocprim::block_load_method>(ALGORITHM)
+        static_cast<::rocprim::block_store_method>(ALGORITHM)
       >
 {
     static_assert(
@@ -79,11 +79,11 @@ class BlockLoad
     );
 
     using base_type =
-        typename ::rocprim::block_load<
+        typename ::rocprim::block_store<
             T,
             BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z,
             ITEMS_PER_THREAD,
-            static_cast<::rocprim::block_load_method>(ALGORITHM)
+            static_cast<::rocprim::block_store_method>(ALGORITHM)
         >;
 
     // Reference to temporary storage (usually shared memory)
@@ -94,41 +94,28 @@ public:
     int linear_id;
 
     HIPCUB_DEVICE inline
-    BlockLoad(TempStorage/*& temp_storage*/, int linear_id) : linear_id(linear_id)
+    BlockStore(TempStorage/*& temp_storage*/, int linear_id) : linear_id(linear_id)
     {
     }
 
-    template<class InputIteratorT>
+    template<class OutputIteratorT>
     HIPCUB_DEVICE inline
-    void Load(InputIteratorT block_iter,
-              T (&items)[ItemsPerThread])
+    void Store(OutputIteratorT block_iter,
+               T (&items)[ItemsPerThread])
     {
-        base_type::load(block_iter, items);
+        base_type::store(block_iter, items);
     }
 
-    template<class InputIteratorT>
+    template<class OutputIteratorT>
     HIPCUB_DEVICE inline
-    void Load(InputIteratorT block_iter,
-              T (&items)[ItemsPerThread],
-              int valid_items)
+    void Store(OutputIteratorT block_iter,
+               T (&items)[ItemsPerThread],
+               int valid_items)
     {
-        base_type::load(block_iter, items, valid_items);
-    }
-
-    template<
-        class InputIteratorT,
-        class Default
-    >
-    HIPCUB_DEVICE inline
-    void Load(InputIteratorT block_iter,
-              T (&items)[ItemsPerThread],
-              int valid_items,
-              Default oob_default)
-    {
-        base_type::load(block_iter, items, valid_items, oob_default);
+        base_type::store(block_iter, items, valid_items);
     }
 };
 
 END_HIPCUB_NAMESPACE
 
-#endif // HIPCUB_ROCPRIM_BLOCK_BLOCK_LOAD_HPP_
+#endif // HIPCUB_ROCPRIM_BLOCK_BLOCK_STORE_HPP_
