@@ -34,14 +34,7 @@
 
 #include "test_utils.hpp"
 
-#define HIP_CHECK(condition)         \
-{                                  \
-  hipError_t error = condition;    \
-  if(error != hipSuccess){         \
-      std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
-      exit(error); \
-  } \
-}
+#define HIP_CHECK(error) ASSERT_EQ(static_cast<hipError_t>(error), hipSuccess)
 
 template<
     class Key,
@@ -94,23 +87,39 @@ TYPED_TEST_CASE(HipcubDeviceRadixSort, Params);
 template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
 struct key_comparator
 {
-    static_assert(std::is_unsigned<Key>::value, "Test supports start and bits only for unsigned integers");
+private:
+    template<unsigned int CStartBit, unsigned int CEndBit>
+    constexpr static bool all_bits()
+    {
+        return (CStartBit == 0 && CEndBit == sizeof(Key) * 8);
+    }
 
-    bool operator()(const Key& lhs, const Key& rhs)
+    template<unsigned int CStartBit, unsigned int CEndBit>
+    auto compare(const Key& lhs, const Key& rhs) const
+        -> typename std::enable_if<all_bits<CStartBit, CEndBit>(), bool>::type
+    {
+        return Descending ? (rhs < lhs) : (lhs < rhs);
+    }
+
+    template<unsigned int CStartBit, unsigned int CEndBit>
+    auto compare(const Key& lhs, const Key& rhs) const
+        -> typename std::enable_if<!all_bits<CStartBit, CEndBit>(), bool>::type
     {
         auto mask = (1ull << (EndBit - StartBit)) - 1;
         auto l = (static_cast<unsigned long long>(lhs) >> StartBit) & mask;
         auto r = (static_cast<unsigned long long>(rhs) >> StartBit) & mask;
         return Descending ? (r < l) : (l < r);
     }
-};
 
-template<class Key, bool Descending>
-struct key_comparator<Key, Descending, 0, sizeof(Key) * 8>
-{
+public:
+    static_assert(
+        key_comparator::all_bits<StartBit, EndBit>() || std::is_unsigned<Key>::value,
+        "Test supports start and bits only for unsigned integers"
+    );
+
     bool operator()(const Key& lhs, const Key& rhs)
     {
-        return Descending ? (rhs < lhs) : (lhs < rhs);
+        return this->compare<StartBit, EndBit>(lhs, rhs);
     }
 };
 
@@ -142,8 +151,12 @@ TYPED_TEST(HipcubDeviceRadixSort, SortKeys)
     hipStream_t stream = 0;
     HIP_CHECK(hipStreamCreate(&stream));
 
+    #ifdef HIPCUB_CUB_API
+    const bool debug_synchronous = false;
+    #else
     // WORKAROUND: Tests fail on MI25 without additional syncronization (bug in HIP or ROCm)
     const bool debug_synchronous = true;
+    #endif
 
     const std::vector<size_t> sizes = get_sizes();
     for(size_t size : sizes)
@@ -183,7 +196,7 @@ TYPED_TEST(HipcubDeviceRadixSort, SortKeys)
         std::vector<key_type> expected(keys_input);
         std::stable_sort(expected.begin(), expected.end(), key_comparator<key_type, descending, start_bit, end_bit>());
 
-        size_t temporary_storage_bytes;
+        size_t temporary_storage_bytes = 0;
         HIP_CHECK(
             hipcub::DeviceRadixSort::SortKeys(
                 nullptr, temporary_storage_bytes,
@@ -192,7 +205,7 @@ TYPED_TEST(HipcubDeviceRadixSort, SortKeys)
             )
         );
 
-        ASSERT_GT(temporary_storage_bytes, 0);
+        ASSERT_GT(temporary_storage_bytes, 0U);
 
         void * d_temporary_storage;
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
@@ -259,8 +272,12 @@ TYPED_TEST(HipcubDeviceRadixSort, SortPairs)
     hipStream_t stream = 0;
     HIP_CHECK(hipStreamCreate(&stream));
 
+    #ifdef HIPCUB_CUB_API
+    const bool debug_synchronous = false;
+    #else
     // WORKAROUND: Tests fail on MI25 without additional syncronization (bug in HIP or ROCm)
     const bool debug_synchronous = true;
+    #endif
 
     const std::vector<size_t> sizes = get_sizes();
     for(size_t size : sizes)
@@ -325,14 +342,14 @@ TYPED_TEST(HipcubDeviceRadixSort, SortPairs)
         );
 
         void * d_temporary_storage = nullptr;
-        size_t temporary_storage_bytes;
+        size_t temporary_storage_bytes = 0;
         hipcub::DeviceRadixSort::SortPairs(
             d_temporary_storage, temporary_storage_bytes,
             d_keys_input, d_keys_output, d_values_input, d_values_output, size,
             start_bit, end_bit
         );
 
-        ASSERT_GT(temporary_storage_bytes, 0);
+        ASSERT_GT(temporary_storage_bytes, 0U);
 
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
@@ -405,8 +422,12 @@ TYPED_TEST(HipcubDeviceRadixSort, SortKeysDoubleBuffer)
     hipStream_t stream = 0;
     HIP_CHECK(hipStreamCreate(&stream));
 
+    #ifdef HIPCUB_CUB_API
+    const bool debug_synchronous = false;
+    #else
     // WORKAROUND: Tests fail on MI25 without additional syncronization (bug in HIP or ROCm)
     const bool debug_synchronous = true;
+    #endif
 
     const std::vector<size_t> sizes = get_sizes();
     for(size_t size : sizes)
@@ -448,7 +469,7 @@ TYPED_TEST(HipcubDeviceRadixSort, SortKeysDoubleBuffer)
 
         hipcub::DoubleBuffer<key_type> d_keys(d_keys_input, d_keys_output);
 
-        size_t temporary_storage_bytes;
+        size_t temporary_storage_bytes = 0;
         HIP_CHECK(
             hipcub::DeviceRadixSort::SortKeys(
                 nullptr, temporary_storage_bytes,
@@ -457,7 +478,7 @@ TYPED_TEST(HipcubDeviceRadixSort, SortKeysDoubleBuffer)
             )
         );
 
-        ASSERT_GT(temporary_storage_bytes, 0);
+        ASSERT_GT(temporary_storage_bytes, 0U);
 
         void * d_temporary_storage;
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
@@ -524,8 +545,12 @@ TYPED_TEST(HipcubDeviceRadixSort, SortPairsDoubleBuffer)
     hipStream_t stream = 0;
     HIP_CHECK(hipStreamCreate(&stream));
 
+    #ifdef HIPCUB_CUB_API
+    const bool debug_synchronous = false;
+    #else
     // WORKAROUND: Tests fail on MI25 without additional syncronization (bug in HIP or ROCm)
     const bool debug_synchronous = true;
+    #endif
 
     const std::vector<size_t> sizes = get_sizes();
     for(size_t size : sizes)
@@ -593,14 +618,14 @@ TYPED_TEST(HipcubDeviceRadixSort, SortPairsDoubleBuffer)
         hipcub::DoubleBuffer<value_type> d_values(d_values_input, d_values_output);
 
         void * d_temporary_storage = nullptr;
-        size_t temporary_storage_bytes;
+        size_t temporary_storage_bytes = 0;
         hipcub::DeviceRadixSort::SortPairs(
             d_temporary_storage, temporary_storage_bytes,
             d_keys, d_values, size,
             start_bit, end_bit
         );
 
-        ASSERT_GT(temporary_storage_bytes, 0);
+        ASSERT_GT(temporary_storage_bytes, 0U);
 
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
