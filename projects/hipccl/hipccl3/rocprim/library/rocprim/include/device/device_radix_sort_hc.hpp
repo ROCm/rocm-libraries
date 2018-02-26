@@ -849,7 +849,7 @@ void radix_sort_keys(void * temporary_storage,
     );
     if(temporary_storage != nullptr && is_result_in_output)
     {
-        keys.selector ^= 1;
+        keys.swap();
     }
 }
 
@@ -952,7 +952,7 @@ void radix_sort_keys_desc(void * temporary_storage,
     );
     if(temporary_storage != nullptr && is_result_in_output)
     {
-        keys.selector ^= 1;
+        keys.swap();
     }
 }
 
@@ -1067,8 +1067,8 @@ void radix_sort_pairs(void * temporary_storage,
     );
     if(temporary_storage != nullptr && is_result_in_output)
     {
-        keys.selector ^= 1;
-        values.selector ^= 1;
+        keys.swap();
+        values.swap();
     }
 }
 
@@ -1179,8 +1179,8 @@ void radix_sort_pairs_desc(void * temporary_storage,
     );
     if(temporary_storage != nullptr && is_result_in_output)
     {
-        keys.selector ^= 1;
-        values.selector ^= 1;
+        keys.swap();
+        values.swap();
     }
 }
 
