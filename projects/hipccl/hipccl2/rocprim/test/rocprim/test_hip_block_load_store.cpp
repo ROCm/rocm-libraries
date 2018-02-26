@@ -272,7 +272,7 @@ TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClass)
     const size_t size = items_per_block * 113;
     const auto grid_size = size / items_per_block;
     // Given block size not supported
-    if(block_size > test_utils::hip_get_max_block_size() || (block_size & (block_size - 1)) != 0)
+    if(block_size > test_utils::get_max_block_size() || (block_size & (block_size - 1)) != 0)
     {
         return;
     }
@@ -366,7 +366,7 @@ TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClassValid)
     const size_t size = items_per_block * 113;
     const auto grid_size = size / items_per_block;
     // Given block size not supported
-    if(block_size > test_utils::hip_get_max_block_size() || (block_size & (block_size - 1)) != 0)
+    if(block_size > test_utils::get_max_block_size() || (block_size & (block_size - 1)) != 0)
     {
         return;
     }
@@ -473,7 +473,7 @@ TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClassDefault)
     const size_t size = items_per_block * 113;
     const auto grid_size = size / items_per_block;
     // Given block size not supported
-    if(block_size > test_utils::hip_get_max_block_size() || (block_size & (block_size - 1)) != 0)
+    if(block_size > test_utils::get_max_block_size() || (block_size & (block_size - 1)) != 0)
     {
         return;
     }

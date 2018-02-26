@@ -44,7 +44,7 @@ size_t get_max_tile_size(hc::accelerator acc = hc::accelerator())
 
 #ifdef ROCPRIM_HIP_API
 inline
-size_t hip_get_max_block_size()
+size_t get_max_block_size()
 {
     hipDeviceProp_t device_properties;
     hipError_t error = hipGetDeviceProperties(&device_properties, 0);

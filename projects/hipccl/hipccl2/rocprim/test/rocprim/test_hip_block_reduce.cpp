@@ -136,7 +136,7 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, Reduce)
     constexpr size_t block_size = TestFixture::block_size;
 
     // Given block size not supported
-    if(block_size > test_utils::hip_get_max_block_size())
+    if(block_size > test_utils::get_max_block_size())
     {
         return;
     }
@@ -227,7 +227,7 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceMultiplies)
     constexpr size_t block_size = TestFixture::block_size;
 
     // Given block size not supported
-    if(block_size > test_utils::hip_get_max_block_size())
+    if(block_size > test_utils::get_max_block_size())
     {
         return;
     }
@@ -322,7 +322,7 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceValid)
     const unsigned int valid_items = test_utils::get_random_value(block_size - 10, block_size);
 
     // Given block size not supported
-    if(block_size > test_utils::hip_get_max_block_size())
+    if(block_size > test_utils::get_max_block_size())
     {
         return;
     }
@@ -462,7 +462,7 @@ TYPED_TEST(RocprimBlockReduceInputArrayTests, Reduce)
     constexpr size_t items_per_thread = TestFixture::items_per_thread;
 
     // Given block size not supported
-    if(block_size > test_utils::hip_get_max_block_size())
+    if(block_size > test_utils::get_max_block_size())
     {
         return;
     }
