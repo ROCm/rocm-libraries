@@ -32,10 +32,10 @@
 // Block
 #include "block/block_discontinuity.hpp"
 #include "block/block_exchange.hpp"
-#include "block/block_load_func.hpp"
+#include "block/block_load.hpp"
 #include "block/block_radix_sort.hpp"
 #include "block/block_scan.hpp"
-#include "block/block_store_func.hpp"
+#include "block/block_store.hpp"
 
 // Device
 #include "device/device_radix_sort.hpp"

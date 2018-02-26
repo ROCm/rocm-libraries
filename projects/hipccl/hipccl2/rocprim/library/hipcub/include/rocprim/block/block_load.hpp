@@ -53,7 +53,8 @@ enum BlockLoadAlgorithm
         = detail::to_BlockLoadAlgorithm_enum(::rocprim::block_load_method::block_load_transpose),
     BLOCK_LOAD_WARP_TRANSPOSE
         = detail::to_BlockLoadAlgorithm_enum(::rocprim::block_load_method::block_load_warp_transpose),
-    BLOCK_LOAD_WARP_TRANSPOSE_TIMESLICED /* ignored */
+    BLOCK_LOAD_WARP_TRANSPOSE_TIMESLICED
+        = detail::to_BlockLoadAlgorithm_enum(::rocprim::block_load_method::block_load_warp_transpose)
 };
 
 template<
@@ -91,28 +92,32 @@ class BlockLoad
 
 public:
     using TempStorage = typename base_type::storage_type;
-    int linear_id;
 
     HIPCUB_DEVICE inline
-    BlockLoad(TempStorage/*& temp_storage*/, int linear_id) : linear_id(linear_id)
+    BlockLoad() : temp_storage_(private_storage())
+    {
+    }
+
+    HIPCUB_DEVICE inline
+    BlockLoad(TempStorage& temp_storage) : temp_storage_(temp_storage)
     {
     }
 
     template<class InputIteratorT>
     HIPCUB_DEVICE inline
     void Load(InputIteratorT block_iter,
-              T (&items)[ItemsPerThread])
+              T (&items)[ITEMS_PER_THREAD])
     {
-        base_type::load(block_iter, items);
+        base_type::load(block_iter, items, temp_storage_);
     }
 
     template<class InputIteratorT>
     HIPCUB_DEVICE inline
     void Load(InputIteratorT block_iter,
-              T (&items)[ItemsPerThread],
+              T (&items)[ITEMS_PER_THREAD],
               int valid_items)
     {
-        base_type::load(block_iter, items, valid_items);
+        base_type::load(block_iter, items, valid_items, temp_storage_);
     }
 
     template<
@@ -121,11 +126,19 @@ public:
     >
     HIPCUB_DEVICE inline
     void Load(InputIteratorT block_iter,
-              T (&items)[ItemsPerThread],
+              T (&items)[ITEMS_PER_THREAD],
               int valid_items,
               Default oob_default)
     {
-        base_type::load(block_iter, items, valid_items, oob_default);
+        base_type::load(block_iter, items, valid_items, oob_default, temp_storage_);
+    }
+    
+private:
+    HIPCUB_DEVICE inline
+    TempStorage& private_storage()
+    {
+        HIPCUB_SHARED_MEMORY TempStorage private_storage;
+        return private_storage;
     }
 };
 
