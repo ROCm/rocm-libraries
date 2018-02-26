@@ -31,6 +31,7 @@
 
 // Block
 #include "block/block_discontinuity.hpp"
+#include "block/block_exchange.hpp"
 #include "block/block_load_func.hpp"
 #include "block/block_scan.hpp"
 #include "block/block_store_func.hpp"

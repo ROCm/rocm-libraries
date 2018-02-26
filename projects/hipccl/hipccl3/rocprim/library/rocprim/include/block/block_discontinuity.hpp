@@ -39,7 +39,7 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-// Trait checks if FlagOp cam be be called with 3 arguments (a, b, b_index)
+// Trait checks if FlagOp can be called with 3 arguments (a, b, b_index)
 template<class T, class FlagOp, class = void>
 struct with_b_index_arg
     : std::false_type
