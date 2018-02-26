@@ -326,7 +326,7 @@ void radix_sort(void * temporary_storage,
 /// * Ranges specified by \p keys_input and \p keys_output must have at least \p size elements.
 /// * If \p Key is an integer type and the range of keys is known in advance, the performance
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
-/// [100, 10000], <tt>begin_bit = 5</tt> and <tt>end_bit = 14</tt> will cover the whole range.
+/// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
 /// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
@@ -427,7 +427,7 @@ void radix_sort_keys(void * temporary_storage,
 /// * Ranges specified by \p keys_input and \p keys_output must have at least \p size elements.
 /// * If \p Key is an integer type and the range of keys is known in advance, the performance
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
-/// [100, 10000], <tt>begin_bit = 5</tt> and <tt>end_bit = 14</tt> will cover the whole range.
+/// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
 /// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
@@ -529,7 +529,7 @@ void radix_sort_keys_desc(void * temporary_storage,
 /// have at least \p size elements.
 /// * If \p Key is an integer type and the range of keys is known in advance, the performance
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
-/// [100, 10000], <tt>begin_bit = 5</tt> and <tt>end_bit = 14</tt> will cover the whole range.
+/// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
 /// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
@@ -649,7 +649,7 @@ void radix_sort_pairs(void * temporary_storage,
 /// have at least \p size elements.
 /// * If \p Key is an integer type and the range of keys is known in advance, the performance
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
-/// [100, 10000], <tt>begin_bit = 5</tt> and <tt>end_bit = 14</tt> will cover the whole range.
+/// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
 /// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
@@ -769,7 +769,7 @@ void radix_sort_pairs_desc(void * temporary_storage,
 /// * Buffers of \p keys must have at least \p size elements.
 /// * If \p Key is an integer type and the range of keys is known in advance, the performance
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
-/// [100, 10000], <tt>begin_bit = 5</tt> and <tt>end_bit = 14</tt> will cover the whole range.
+/// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
 /// \tparam Key - key type. Must be an integral type or a floating-point type.
 ///
@@ -872,7 +872,7 @@ void radix_sort_keys(void * temporary_storage,
 /// * Buffers of \p keys must have at least \p size elements.
 /// * If \p Key is an integer type and the range of keys is known in advance, the performance
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
-/// [100, 10000], <tt>begin_bit = 5</tt> and <tt>end_bit = 14</tt> will cover the whole range.
+/// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
 /// \tparam Key - key type. Must be an integral type or a floating-point type.
 ///
@@ -975,7 +975,7 @@ void radix_sort_keys_desc(void * temporary_storage,
 /// * Buffers of \p keys must have at least \p size elements.
 /// * If \p Key is an integer type and the range of keys is known in advance, the performance
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
-/// [100, 10000], <tt>begin_bit = 5</tt> and <tt>end_bit = 14</tt> will cover the whole range.
+/// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
 /// \tparam Key - key type. Must be an integral type or a floating-point type.
 /// \tparam Value - value type.
@@ -1091,7 +1091,7 @@ void radix_sort_pairs(void * temporary_storage,
 /// * Buffers of \p keys must have at least \p size elements.
 /// * If \p Key is an integer type and the range of keys is known in advance, the performance
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
-/// [100, 10000], <tt>begin_bit = 5</tt> and <tt>end_bit = 14</tt> will cover the whole range.
+/// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
 /// \tparam Key - key type. Must be an integral type or a floating-point type.
 /// \tparam Value - value type.
