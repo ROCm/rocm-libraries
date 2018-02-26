@@ -128,12 +128,25 @@ public:
 
     template<typename ScanOp>
     HIPCUB_DEVICE inline
+    void Scan(T input, T& inclusive_output, T& exclusive_output, ScanOp scan_op)
+    {
+        base_type::inclusive_scan(input, inclusive_output, temp_storage, scan_op);
+        base_type::to_exclusive(inclusive_output, exclusive_output, temp_storage);
+    }
+
+    template<typename ScanOp>
+    HIPCUB_DEVICE inline
     void Scan(T input, T& inclusive_output, T& exclusive_output, T initial_value, ScanOp scan_op)
     {
         base_type::scan(
             input, inclusive_output, exclusive_output, initial_value,
             temp_storage, scan_op
         );
+        // In CUB documentation it's unclear if inclusive_output should include initial_value,
+        // however,the implementation includes initial_value in inclusive_output in WarpScan::Scan().
+        // In rocPRIM it's not included, and this is a fix to match CUB implementation.
+        // After confirmation from CUB's developers we will most probably change rocPRIM too.
+        inclusive_output = scan_op(initial_value, inclusive_output);
     }
 };
 
