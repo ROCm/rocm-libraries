@@ -136,7 +136,7 @@ TYPED_TEST(RocprimBlockExchangeTests, BlockedToStriped)
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
     constexpr size_t items_per_block = block_size * items_per_thread;
     // Given block size not supported
-    if(block_size > test_utils::hip_get_max_block_size())
+    if(block_size > test_utils::get_max_block_size())
     {
         return;
     }
@@ -238,7 +238,7 @@ TYPED_TEST(RocprimBlockExchangeTests, StripedToBlocked)
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
     constexpr size_t items_per_block = block_size * items_per_thread;
     // Given block size not supported
-    if(block_size > test_utils::hip_get_max_block_size())
+    if(block_size > test_utils::get_max_block_size())
     {
         return;
     }
@@ -340,7 +340,7 @@ TYPED_TEST(RocprimBlockExchangeTests, BlockedToWarpStriped)
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
     constexpr size_t items_per_block = block_size * items_per_thread;
     // Given block size not supported
-    if(block_size > test_utils::hip_get_max_block_size())
+    if(block_size > test_utils::get_max_block_size())
     {
         return;
     }
@@ -455,7 +455,7 @@ TYPED_TEST(RocprimBlockExchangeTests, WarpStripedToBlocked)
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
     constexpr size_t items_per_block = block_size * items_per_thread;
     // Given block size not supported
-    if(block_size > test_utils::hip_get_max_block_size())
+    if(block_size > test_utils::get_max_block_size())
     {
         return;
     }
@@ -570,7 +570,7 @@ TYPED_TEST(RocprimBlockExchangeTests, ScatterToBlocked)
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
     constexpr size_t items_per_block = block_size * items_per_thread;
     // Given block size not supported
-    if(block_size > test_utils::hip_get_max_block_size())
+    if(block_size > test_utils::get_max_block_size())
     {
         return;
     }
@@ -692,7 +692,7 @@ TYPED_TEST(RocprimBlockExchangeTests, ScatterToStriped)
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
     constexpr size_t items_per_block = block_size * items_per_thread;
     // Given block size not supported
-    if(block_size > test_utils::hip_get_max_block_size())
+    if(block_size > test_utils::get_max_block_size())
     {
         return;
     }

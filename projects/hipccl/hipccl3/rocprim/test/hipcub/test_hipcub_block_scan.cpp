@@ -25,8 +25,8 @@
 
 // Google Test
 #include <gtest/gtest.h>
-// rocPRIM API
-#include <rocprim.hpp>
+// hipCUB API
+#include <hipcub.hpp>
 
 #include "test_utils.hpp"
 
@@ -39,19 +39,17 @@
   } \
 }
 
-namespace rp = rocprim;
-
 // Params for tests
 template<
     class T,
     unsigned int BlockSize = 256U,
     unsigned int ItemsPerThread = 1U,
-    rocprim::block_scan_algorithm Algorithm = rocprim::block_scan_algorithm::using_warp_scan
+    hipcub::BlockScanAlgorithm Algorithm = hipcub::BLOCK_SCAN_WARP_SCANS
 >
 struct params
 {
     using type = T;
-    static constexpr rocprim::block_scan_algorithm algorithm = Algorithm;
+    static constexpr hipcub::BlockScanAlgorithm algorithm = Algorithm;
     static constexpr unsigned int block_size = BlockSize;
     static constexpr unsigned int items_per_thread = ItemsPerThread;
 };
@@ -61,17 +59,17 @@ struct params
 // ---------------------------------------------------------
 
 template<class Params>
-class RocprimBlockScanSingleValueTests : public ::testing::Test
+class HipcubBlockScanSingleValueTests : public ::testing::Test
 {
 public:
     using type = typename Params::type;
-    static constexpr rocprim::block_scan_algorithm algorithm = Params::algorithm;
+    static constexpr hipcub::BlockScanAlgorithm algorithm = Params::algorithm;
     static constexpr unsigned int block_size = Params::block_size;
 };
 
 typedef ::testing::Types<
     // -----------------------------------------------------------------------
-    // rocprim::block_scan_algorithm::using_warp_scan
+    // hipcub::BLOCK_SCAN_WARP_SCANS
     // -----------------------------------------------------------------------
     params<int, 64U>,
     params<int, 128U>,
@@ -91,26 +89,26 @@ typedef ::testing::Types<
     params<long, 256U>,
     params<long, 377U>,
     // -----------------------------------------------------------------------
-    // rocprim::block_scan_algorithm::reduce_then_scan
+    // hipcub::BLOCK_SCAN_RAKING
     // -----------------------------------------------------------------------
-    params<int, 64U, 1, rocprim::block_scan_algorithm::reduce_then_scan>,
-    params<int, 128U, 1, rocprim::block_scan_algorithm::reduce_then_scan>,
-    params<int, 256U, 1, rocprim::block_scan_algorithm::reduce_then_scan>,
-    params<int, 512U, 1, rocprim::block_scan_algorithm::reduce_then_scan>,
-    params<int, 1024U, 1, rocprim::block_scan_algorithm::reduce_then_scan>,
-    params<unsigned long, 65U, 1, rocprim::block_scan_algorithm::reduce_then_scan>,
-    params<long, 37U, 1, rocprim::block_scan_algorithm::reduce_then_scan>,
-    params<short, 162U, 1, rocprim::block_scan_algorithm::reduce_then_scan>,
-    params<unsigned int, 255U, 1, rocprim::block_scan_algorithm::reduce_then_scan>,
-    params<int, 377U, 1, rocprim::block_scan_algorithm::reduce_then_scan>,
-    params<unsigned char, 377U, 1, rocprim::block_scan_algorithm::reduce_then_scan>
+    params<int, 64U, 1, hipcub::BLOCK_SCAN_RAKING>,
+    params<int, 128U, 1, hipcub::BLOCK_SCAN_RAKING>,
+    params<int, 256U, 1, hipcub::BLOCK_SCAN_RAKING>,
+    params<int, 512U, 1, hipcub::BLOCK_SCAN_RAKING>,
+    params<int, 1024U, 1, hipcub::BLOCK_SCAN_RAKING>,
+    params<unsigned long, 65U, 1, hipcub::BLOCK_SCAN_RAKING>,
+    params<long, 37U, 1, hipcub::BLOCK_SCAN_RAKING>,
+    params<short, 162U, 1, hipcub::BLOCK_SCAN_RAKING>,
+    params<unsigned int, 255U, 1, hipcub::BLOCK_SCAN_RAKING>,
+    params<int, 377U, 1, hipcub::BLOCK_SCAN_RAKING>,
+    params<unsigned char, 377U, 1, hipcub::BLOCK_SCAN_RAKING>
 > SingleValueTestParams;
 
-TYPED_TEST_CASE(RocprimBlockScanSingleValueTests, SingleValueTestParams);
+TYPED_TEST_CASE(HipcubBlockScanSingleValueTests, SingleValueTestParams);
 
 template<
     unsigned int BlockSize,
-    rocprim::block_scan_algorithm Algorithm,
+    hipcub::BlockScanAlgorithm Algorithm,
     class T
 >
 __global__
@@ -118,12 +116,15 @@ void inclusive_scan_kernel(T* device_output)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
     T value = device_output[index];
-    rp::block_scan<T, BlockSize, Algorithm> bscan;
-    bscan.inclusive_scan(value, value);
+
+    using bscan_t = hipcub::BlockScan<T, BlockSize, Algorithm>;
+    __shared__ typename bscan_t::TempStorage temp_storage;
+    bscan_t(temp_storage).InclusiveScan(value, value, hipcub::Sum());
+
     device_output[index] = value;
 }
 
-TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScan)
+TYPED_TEST(HipcubBlockScanSingleValueTests, InclusiveScan)
 {
     using T = typename TestFixture::type;
     constexpr auto algorithm = TestFixture::algorithm;
@@ -193,7 +194,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScan)
 
 template<
     unsigned int BlockSize,
-    rocprim::block_scan_algorithm Algorithm,
+    hipcub::BlockScanAlgorithm Algorithm,
     class T
 >
 __global__
@@ -202,8 +203,9 @@ void inclusive_scan_reduce_kernel(T* device_output, T* device_output_reductions)
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
     T value = device_output[index];
     T reduction;
-    rp::block_scan<T, BlockSize, Algorithm> bscan;
-    bscan.inclusive_scan(value, value, reduction);
+    using bscan_t = hipcub::BlockScan<T, BlockSize, Algorithm>;
+    __shared__ typename bscan_t::TempStorage temp_storage;
+    bscan_t(temp_storage).InclusiveScan(value, value, hipcub::Sum(), reduction);
     device_output[index] = value;
     if(hipThreadIdx_x == 0)
     {
@@ -211,7 +213,7 @@ void inclusive_scan_reduce_kernel(T* device_output, T* device_output_reductions)
     }
 }
 
-TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanReduce)
+TYPED_TEST(HipcubBlockScanSingleValueTests, InclusiveScanReduce)
 {
     using T = typename TestFixture::type;
     constexpr auto algorithm = TestFixture::algorithm;
@@ -305,7 +307,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanReduce)
 
 template<
     unsigned int BlockSize,
-    rocprim::block_scan_algorithm Algorithm,
+    hipcub::BlockScanAlgorithm Algorithm,
     class T
 >
 __global__
@@ -322,9 +324,9 @@ void inclusive_scan_prefix_callback_kernel(T* device_output, T* device_output_bp
 
     T value = device_output[index];
 
-    using bscan_t = rp::block_scan<T, BlockSize, Algorithm>;
-    __shared__ typename bscan_t::storage_type storage;
-    bscan_t().inclusive_scan(value, value, storage, prefix_callback, rp::plus<T>());
+    using bscan_t = hipcub::BlockScan<T, BlockSize, Algorithm>;
+    __shared__ typename bscan_t::TempStorage temp_storage;
+    bscan_t(temp_storage).InclusiveScan(value, value, hipcub::Sum(), prefix_callback);
 
     device_output[index] = value;
     if(hipThreadIdx_x == 0)
@@ -333,7 +335,7 @@ void inclusive_scan_prefix_callback_kernel(T* device_output, T* device_output_bp
     }
 }
 
-TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanPrefixCallback)
+TYPED_TEST(HipcubBlockScanSingleValueTests, InclusiveScanPrefixCallback)
 {
     using T = typename TestFixture::type;
     constexpr auto algorithm = TestFixture::algorithm;
@@ -429,7 +431,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanPrefixCallback)
 
 template<
     unsigned int BlockSize,
-    rocprim::block_scan_algorithm Algorithm,
+    hipcub::BlockScanAlgorithm Algorithm,
     class T
 >
 __global__
@@ -437,12 +439,13 @@ void exclusive_scan_kernel(T* device_output, T init)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
     T value = device_output[index];
-    rp::block_scan<T, BlockSize, Algorithm> bscan;
-    bscan.exclusive_scan(value, value, init);
+    using bscan_t = hipcub::BlockScan<T, BlockSize, Algorithm>;
+    __shared__ typename bscan_t::TempStorage temp_storage;
+    bscan_t(temp_storage).ExclusiveScan(value, value, init, hipcub::Sum());
     device_output[index] = value;
 }
 
-TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScan)
+TYPED_TEST(HipcubBlockScanSingleValueTests, ExclusiveScan)
 {
     using T = typename TestFixture::type;
     constexpr auto algorithm = TestFixture::algorithm;
@@ -514,7 +517,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScan)
 
 template<
     unsigned int BlockSize,
-    rocprim::block_scan_algorithm Algorithm,
+    hipcub::BlockScanAlgorithm Algorithm,
     class T
 >
 __global__
@@ -523,8 +526,9 @@ void exclusive_scan_reduce_kernel(T* device_output, T* device_output_reductions,
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
     T value = device_output[index];
     T reduction;
-    rp::block_scan<T, BlockSize, Algorithm> bscan;
-    bscan.exclusive_scan(value, value, init, reduction);
+    using bscan_t = hipcub::BlockScan<T, BlockSize, Algorithm>;
+    __shared__ typename bscan_t::TempStorage temp_storage;
+    bscan_t(temp_storage).ExclusiveScan(value, value, init, hipcub::Sum(), reduction);
     device_output[index] = value;
     if(hipThreadIdx_x == 0)
     {
@@ -532,7 +536,7 @@ void exclusive_scan_reduce_kernel(T* device_output, T* device_output_reductions,
     }
 }
 
-TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanReduce)
+TYPED_TEST(HipcubBlockScanSingleValueTests, ExclusiveScanReduce)
 {
     using T = typename TestFixture::type;
     constexpr auto algorithm = TestFixture::algorithm;
@@ -635,7 +639,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanReduce)
 
 template<
     unsigned int BlockSize,
-    rocprim::block_scan_algorithm Algorithm,
+    hipcub::BlockScanAlgorithm Algorithm,
     class T
 >
 __global__
@@ -652,9 +656,9 @@ void exclusive_scan_prefix_callback_kernel(T* device_output, T* device_output_bp
 
     T value = device_output[index];
 
-    using bscan_t = rp::block_scan<T, BlockSize, Algorithm>;
-    __shared__ typename bscan_t::storage_type storage;
-    bscan_t().exclusive_scan(value, value, storage, prefix_callback, rp::plus<T>());
+    using bscan_t = hipcub::BlockScan<T, BlockSize, Algorithm>;
+    __shared__ typename bscan_t::TempStorage temp_storage;
+    bscan_t(temp_storage).ExclusiveScan(value, value, hipcub::Sum(), prefix_callback);
 
     device_output[index] = value;
     if(hipThreadIdx_x == 0)
@@ -663,7 +667,7 @@ void exclusive_scan_prefix_callback_kernel(T* device_output, T* device_output_bp
     }
 }
 
-TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanPrefixCallback)
+TYPED_TEST(HipcubBlockScanSingleValueTests, ExclusiveScanPrefixCallback)
 {
     using T = typename TestFixture::type;
     constexpr auto algorithm = TestFixture::algorithm;
@@ -763,7 +767,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanPrefixCallback)
     HIP_CHECK(hipFree(device_output_bp));
 }
 
-TYPED_TEST(RocprimBlockScanSingleValueTests, CustomStruct)
+TYPED_TEST(HipcubBlockScanSingleValueTests, CustomStruct)
 {
     using base_type = typename TestFixture::type;
     using T = test_utils::custom_test_type<base_type>;
@@ -841,23 +845,23 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, CustomStruct)
     HIP_CHECK(hipFree(device_output));
 }
 
-// ---------------------------------------------------------
-// Test for scan ops taking array of values as input
-// ---------------------------------------------------------
+// // ---------------------------------------------------------
+// // Test for scan ops taking array of values as input
+// // ---------------------------------------------------------
 
 template<class Params>
-class RocprimBlockScanInputArrayTests : public ::testing::Test
+class HipcubBlockScanInputArrayTests : public ::testing::Test
 {
 public:
     using type = typename Params::type;
     static constexpr unsigned int block_size = Params::block_size;
-    static constexpr rocprim::block_scan_algorithm algorithm = Params::algorithm;
+    static constexpr hipcub::BlockScanAlgorithm algorithm = Params::algorithm;
     static constexpr unsigned int items_per_thread = Params::items_per_thread;
 };
 
 typedef ::testing::Types<
     // -----------------------------------------------------------------------
-    // rocprim::block_scan_algorithm::using_warp_scan
+    // hipcub::BlockScanAlgorithm::using_warp_scan
     // -----------------------------------------------------------------------
     params<float, 6U,   32>,
     params<float, 32,   2>,
@@ -869,25 +873,25 @@ typedef ::testing::Types<
     params<float, 162,  7>,
     params<float, 255,  15>,
     // -----------------------------------------------------------------------
-    // rocprim::block_scan_algorithm::reduce_then_scan
+    // hipcub::BLOCK_SCAN_RAKING
     // -----------------------------------------------------------------------
-    params<float, 6U,   32, rocprim::block_scan_algorithm::reduce_then_scan>,
-    params<float, 32,   2,  rocprim::block_scan_algorithm::reduce_then_scan>,
-    params<int, 256,  3,  rocprim::block_scan_algorithm::reduce_then_scan>,
-    params<unsigned int, 512,  4,  rocprim::block_scan_algorithm::reduce_then_scan>,
-    params<float, 1024, 1,  rocprim::block_scan_algorithm::reduce_then_scan>,
-    params<float, 37,   2,  rocprim::block_scan_algorithm::reduce_then_scan>,
-    params<float, 65,   5,  rocprim::block_scan_algorithm::reduce_then_scan>,
-    params<float, 162,  7,  rocprim::block_scan_algorithm::reduce_then_scan>,
-    params<float, 255,  15, rocprim::block_scan_algorithm::reduce_then_scan>
+    params<float, 6U,   32, hipcub::BLOCK_SCAN_RAKING>,
+    params<float, 32,   2,  hipcub::BLOCK_SCAN_RAKING>,
+    params<int, 256,  3,  hipcub::BLOCK_SCAN_RAKING>,
+    params<unsigned int, 512,  4,  hipcub::BLOCK_SCAN_RAKING>,
+    params<float, 1024, 1,  hipcub::BLOCK_SCAN_RAKING>,
+    params<float, 37,   2,  hipcub::BLOCK_SCAN_RAKING>,
+    params<float, 65,   5,  hipcub::BLOCK_SCAN_RAKING>,
+    params<float, 162,  7,  hipcub::BLOCK_SCAN_RAKING>,
+    params<float, 255,  15, hipcub::BLOCK_SCAN_RAKING>
 > InputArrayTestParams;
 
-TYPED_TEST_CASE(RocprimBlockScanInputArrayTests, InputArrayTestParams);
+TYPED_TEST_CASE(HipcubBlockScanInputArrayTests, InputArrayTestParams);
 
 template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
-    rocprim::block_scan_algorithm Algorithm,
+    hipcub::BlockScanAlgorithm Algorithm,
     class T
 >
 __global__
@@ -902,8 +906,9 @@ void inclusive_scan_array_kernel(T* device_output)
         in_out[j] = device_output[index + j];
     }
 
-    rp::block_scan<T, BlockSize, Algorithm> bscan;
-    bscan.inclusive_scan(in_out, in_out);
+    using bscan_t = hipcub::BlockScan<T, BlockSize, Algorithm>;
+    __shared__ typename bscan_t::TempStorage temp_storage;
+    bscan_t(temp_storage).InclusiveScan(in_out, in_out, hipcub::Sum());
 
     // store
     for(unsigned int j = 0; j < ItemsPerThread; j++)
@@ -913,7 +918,7 @@ void inclusive_scan_array_kernel(T* device_output)
 
 }
 
-TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScan)
+TYPED_TEST(HipcubBlockScanInputArrayTests, InclusiveScan)
 {
     using T = typename TestFixture::type;
     constexpr auto algorithm = TestFixture::algorithm;
@@ -989,7 +994,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScan)
 template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
-    rocprim::block_scan_algorithm Algorithm,
+    hipcub::BlockScanAlgorithm Algorithm,
     class T
 >
 __global__
@@ -1004,9 +1009,10 @@ void inclusive_scan_reduce_array_kernel(T* device_output, T* device_output_reduc
         in_out[j] = device_output[index + j];
     }
 
-    rp::block_scan<T, BlockSize, Algorithm> bscan;
+    using bscan_t = hipcub::BlockScan<T, BlockSize, Algorithm>;
+    __shared__ typename bscan_t::TempStorage temp_storage;
     T reduction;
-    bscan.inclusive_scan(in_out, in_out, reduction);
+    bscan_t(temp_storage).InclusiveScan(in_out, in_out, hipcub::Sum(), reduction);
 
     // store
     for(unsigned int j = 0; j < ItemsPerThread; j++)
@@ -1020,7 +1026,7 @@ void inclusive_scan_reduce_array_kernel(T* device_output, T* device_output_reduc
     }
 }
 
-TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScanReduce)
+TYPED_TEST(HipcubBlockScanInputArrayTests, InclusiveScanReduce)
 {
     using T = typename TestFixture::type;
     constexpr auto algorithm = TestFixture::algorithm;
@@ -1133,7 +1139,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScanReduce)
 template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
-    rocprim::block_scan_algorithm Algorithm,
+    hipcub::BlockScanAlgorithm Algorithm,
     class T
 >
 __global__
@@ -1155,9 +1161,9 @@ void inclusive_scan_array_prefix_callback_kernel(T* device_output, T* device_out
         in_out[j] = device_output[index + j];
     }
 
-    using bscan_t = rp::block_scan<T, BlockSize, Algorithm>;
-    __shared__ typename bscan_t::storage_type storage;
-    bscan_t().inclusive_scan(in_out, in_out, storage, prefix_callback, rp::plus<T>());
+    using bscan_t = hipcub::BlockScan<T, BlockSize, Algorithm>;
+    __shared__ typename bscan_t::TempStorage temp_storage;
+    bscan_t(temp_storage).InclusiveScan(in_out, in_out, hipcub::Sum(), prefix_callback);
 
     // store
     for(unsigned int j = 0; j < ItemsPerThread; j++)
@@ -1171,7 +1177,7 @@ void inclusive_scan_array_prefix_callback_kernel(T* device_output, T* device_out
     }
 }
 
-TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScanPrefixCallback)
+TYPED_TEST(HipcubBlockScanInputArrayTests, InclusiveScanPrefixCallback)
 {
     using T = typename TestFixture::type;
     constexpr auto algorithm = TestFixture::algorithm;
@@ -1286,7 +1292,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScanPrefixCallback)
 template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
-    rocprim::block_scan_algorithm Algorithm,
+    hipcub::BlockScanAlgorithm Algorithm,
     class T
 >
 __global__
@@ -1300,8 +1306,9 @@ void exclusive_scan_array_kernel(T* device_output, T init)
         in_out[j] = device_output[index + j];
     }
 
-    rp::block_scan<T, BlockSize, Algorithm> bscan;
-    bscan.exclusive_scan(in_out, in_out, init);
+    using bscan_t = hipcub::BlockScan<T, BlockSize, Algorithm>;
+    __shared__ typename bscan_t::TempStorage temp_storage;
+    bscan_t(temp_storage).ExclusiveScan(in_out, in_out, init, hipcub::Sum());
 
     // store
     for(unsigned int j = 0; j < ItemsPerThread; j++)
@@ -1310,7 +1317,7 @@ void exclusive_scan_array_kernel(T* device_output, T init)
     }
 }
 
-TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScan)
+TYPED_TEST(HipcubBlockScanInputArrayTests, ExclusiveScan)
 {
     using T = typename TestFixture::type;
     constexpr auto algorithm = TestFixture::algorithm;
@@ -1388,7 +1395,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScan)
 template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
-    rocprim::block_scan_algorithm Algorithm,
+    hipcub::BlockScanAlgorithm Algorithm,
     class T
 >
 __global__
@@ -1402,9 +1409,10 @@ void exclusive_scan_reduce_array_kernel(T* device_output, T* device_output_reduc
         in_out[j] = device_output[index + j];
     }
 
-    rp::block_scan<T, BlockSize, Algorithm> bscan;
+    using bscan_t = hipcub::BlockScan<T, BlockSize, Algorithm>;
+    __shared__ typename bscan_t::TempStorage temp_storage;
     T reduction;
-    bscan.exclusive_scan(in_out, in_out, init, reduction);
+    bscan_t(temp_storage).ExclusiveScan(in_out, in_out, init, hipcub::Sum(), reduction);
 
     // store
     for(unsigned int j = 0; j < ItemsPerThread; j++)
@@ -1418,7 +1426,7 @@ void exclusive_scan_reduce_array_kernel(T* device_output, T* device_output_reduc
     }
 }
 
-TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScanReduce)
+TYPED_TEST(HipcubBlockScanInputArrayTests, ExclusiveScanReduce)
 {
     using T = typename TestFixture::type;
     constexpr auto algorithm = TestFixture::algorithm;
@@ -1527,7 +1535,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScanReduce)
 template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
-    rocprim::block_scan_algorithm Algorithm,
+    hipcub::BlockScanAlgorithm Algorithm,
     class T
 >
 __global__
@@ -1553,9 +1561,9 @@ void exclusive_scan_prefix_callback_array_kernel(
         in_out[j] = device_output[index+ j];
     }
 
-    using bscan_t = rp::block_scan<T, BlockSize, Algorithm>;
-    __shared__ typename bscan_t::storage_type storage;
-    bscan_t().exclusive_scan(in_out, in_out, storage, prefix_callback, rp::plus<T>());
+    using bscan_t = hipcub::BlockScan<T, BlockSize, Algorithm>;
+    __shared__ typename bscan_t::TempStorage temp_storage;
+    bscan_t(temp_storage).ExclusiveScan(in_out, in_out, hipcub::Sum(), prefix_callback);
 
     // store
     for(unsigned int j = 0; j < ItemsPerThread; j++)
@@ -1569,7 +1577,7 @@ void exclusive_scan_prefix_callback_array_kernel(
     }
 }
 
-TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScanPrefixCallback)
+TYPED_TEST(HipcubBlockScanInputArrayTests, ExclusiveScanPrefixCallback)
 {
     using T = typename TestFixture::type;
     constexpr auto algorithm = TestFixture::algorithm;

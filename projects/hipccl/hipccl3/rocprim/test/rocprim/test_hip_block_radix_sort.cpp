@@ -196,7 +196,7 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeys)
     constexpr unsigned int end_bit = TestFixture::params::end_bit;
     constexpr size_t items_per_block = block_size * items_per_thread;
     // Given block size not supported
-    if(block_size > test_utils::hip_get_max_block_size())
+    if(block_size > test_utils::get_max_block_size())
     {
         return;
     }
@@ -328,7 +328,7 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeysValues)
     constexpr unsigned int end_bit = TestFixture::params::end_bit;
     constexpr size_t items_per_block = block_size * items_per_thread;
     // Given block size not supported
-    if(block_size > test_utils::hip_get_max_block_size())
+    if(block_size > test_utils::get_max_block_size())
     {
         return;
     }
