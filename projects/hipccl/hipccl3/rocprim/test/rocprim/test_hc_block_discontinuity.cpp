@@ -70,9 +70,9 @@ struct custom_flag_op1
     }
 };
 
-template<class T>
 struct custom_flag_op2
 {
+    template<class T>
     ROCPRIM_HOST_DEVICE
     bool operator()(const T& a, const T& b) const
     {
@@ -98,7 +98,7 @@ apply(FlagOp flag_op, const T& a, const T& b, unsigned int)
 TEST(RocprimBlockDiscontinuity, Traits)
 {
     ASSERT_FALSE((rp::detail::with_b_index_arg<int, rocprim::less<int>>::value));
-    ASSERT_FALSE((rp::detail::with_b_index_arg<int, custom_flag_op2<int>>::value));
+    ASSERT_FALSE((rp::detail::with_b_index_arg<int, custom_flag_op2>::value));
     ASSERT_TRUE((rp::detail::with_b_index_arg<int, custom_flag_op1<int>>::value));
 
     auto f1 = [](const int& a, const int& b, unsigned int b_index) { return (a == b) || (b_index % 10 == 0); };
@@ -106,7 +106,7 @@ TEST(RocprimBlockDiscontinuity, Traits)
     ASSERT_TRUE((rp::detail::with_b_index_arg<int, decltype(f1)>::value));
     ASSERT_FALSE((rp::detail::with_b_index_arg<int, decltype(f2)>::value));
 
-    auto f3 = [](int a, int b, unsigned int b_index) { return (a == b) || (b_index % 10 == 0); };
+    auto f3 = [](int a, int b, int b_index) { return (a == b) || (b_index % 10 == 0); };
     auto f4 = [](const int a, const int b) { return (a == b); };
     ASSERT_TRUE((rp::detail::with_b_index_arg<int, decltype(f3)>::value));
     ASSERT_FALSE((rp::detail::with_b_index_arg<int, decltype(f4)>::value));
@@ -128,13 +128,13 @@ typedef ::testing::Types<
     params<unsigned char, bool, 255U, 1, rocprim::equal_to<unsigned char> >,
 
     // Power of 2 BlockSize and ItemsPerThread > 1
-    params<int, char, 64U, 2, custom_flag_op2<int> >,
+    params<int, char, 64U, 2, custom_flag_op2>,
     params<int, short, 128U, 4, rocprim::less<int> >,
-    params<unsigned short, unsigned char, 256U, 7, custom_flag_op2<unsigned short> >,
+    params<unsigned short, unsigned char, 256U, 7, custom_flag_op2>,
     params<short, short, 512U, 8, rocprim::equal_to<short> >,
 
     // Non-power of 2 BlockSize and ItemsPerThread > 1
-    params<double, int, 33U, 5, custom_flag_op2<double> >,
+    params<double, int, 33U, 5, custom_flag_op2>,
     params<double, unsigned int, 464U, 2, rocprim::equal_to<double> >,
     params<unsigned short, int, 100U, 3, rocprim::greater<unsigned short> >,
     params<short, bool, 234U, 9, custom_flag_op1<short> >
