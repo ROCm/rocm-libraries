@@ -18,13 +18,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_HIPCUB_BLOCK_BLOCK_LOAD_FUNC_HPP_
-#define ROCPRIM_HIPCUB_BLOCK_BLOCK_LOAD_FUNC_HPP_
+#ifndef HIPCUB_ROCPRIM_BLOCK_BLOCK_LOAD_FUNC_HPP_
+#define HIPCUB_ROCPRIM_BLOCK_BLOCK_LOAD_FUNC_HPP_
 
 #include "../../config.hpp"
 
 #include "../intrinsics.hpp"
-#include "../thread/thread_operators.hpp"
 
 BEGIN_HIPCUB_NAMESPACE
 
@@ -102,7 +101,7 @@ void LoadDirectStriped(int linear_id,
                        InputIteratorT block_iter,
                        T (&items)[ITEMS_PER_THREAD])
 {
-    ::rocprim::block_load_direct_striped(
+    ::rocprim::block_load_direct_striped<BLOCK_THREADS>(
         linear_id, block_iter, items
     );
 }
@@ -119,7 +118,7 @@ void LoadDirectStriped(int linear_id,
                        T (&items)[ITEMS_PER_THREAD],
                        int valid_items)
 {
-    ::rocprim::block_load_direct_striped(
+    ::rocprim::block_load_direct_striped<BLOCK_THREADS>(
         linear_id, block_iter, items, valid_items
     );
 }
@@ -138,7 +137,7 @@ void LoadDirectStriped(int linear_id,
                        int valid_items,
                        Default oob_default)
 {
-    ::rocprim::block_load_direct_striped(
+    ::rocprim::block_load_direct_striped<BLOCK_THREADS>(
         linear_id, block_iter, items, valid_items, oob_default
     );
 }
@@ -194,4 +193,4 @@ void LoadDirectWarpStriped(int linear_id,
 
 END_HIPCUB_NAMESPACE
 
-#endif // ROCPRIM_HIPCUB_BLOCK_BLOCK_LOAD_FUNC_HPP_
+#endif // HIPCUB_ROCPRIM_BLOCK_BLOCK_LOAD_FUNC_HPP_

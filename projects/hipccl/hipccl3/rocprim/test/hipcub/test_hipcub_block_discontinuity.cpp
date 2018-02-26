@@ -29,15 +29,13 @@
 
 // Google Test
 #include <gtest/gtest.h>
-// rocPRIM API
-#include <rocprim.hpp>
+// hipCUB API
+#include <hipcub.hpp>
 
 #include "test_utils.hpp"
 
 #define HIP_CHECK(error)         \
     EXPECT_EQ(static_cast<hipError_t>(error),hipSuccess)
-
-namespace rp = rocprim;
 
 template<
     class T,
@@ -56,7 +54,7 @@ struct params
 };
 
 template<class Params>
-class RocprimBlockDiscontinuity : public ::testing::Test {
+class HipcubBlockDiscontinuity : public ::testing::Test {
 public:
     using params = Params;
 };
@@ -65,15 +63,15 @@ template<class T>
 struct custom_flag_op1
 {
     ROCPRIM_HOST_DEVICE
-    bool operator()(const T& a, const T& b, unsigned int b_index)
+    bool operator()(const T& a, const T& b)
     {
-        return (a == b) || (b_index % 10 == 0);
+        return (a == b);
     }
 };
 
+template<class T>
 struct custom_flag_op2
 {
-    template<class T>
     ROCPRIM_HOST_DEVICE
     bool operator()(const T& a, const T& b) const
     {
@@ -81,67 +79,81 @@ struct custom_flag_op2
     }
 };
 
-// Host (CPU) implementaions of the wrapping function that allows to pass 3 args
-template<class T, class FlagOp>
-typename std::enable_if<rp::detail::with_b_index_arg<T, FlagOp>::value, bool>::type
-apply(FlagOp flag_op, const T& a, const T& b, unsigned int b_index)
+struct less
 {
-    return flag_op(a, b, b_index);
-}
+    template<class T>
+    HIPCUB_HOST_DEVICE inline
+    constexpr bool operator()(const T& a, const T& b) const
+    {
+        return a < b;
+    }
+};
+
+struct less_equal
+{
+    template<class T>
+    HIPCUB_HOST_DEVICE inline
+    constexpr bool operator()(const T& a, const T& b) const
+    {
+        return a <= b;
+    }
+};
+
+struct greater
+{
+    template<class T>
+    HIPCUB_HOST_DEVICE inline
+    constexpr bool operator()(const T& a, const T& b) const
+    {
+        return a > b;
+    }
+};
+
+struct greater_equal
+{
+    template<class T>
+    HIPCUB_HOST_DEVICE inline
+    constexpr bool operator()(const T& a, const T& b) const
+    {
+        return a >= b;
+    }
+};
 
 template<class T, class FlagOp>
-typename std::enable_if<!rp::detail::with_b_index_arg<T, FlagOp>::value, bool>::type
-apply(FlagOp flag_op, const T& a, const T& b, unsigned int)
+bool apply(FlagOp flag_op, const T& a, const T& b, unsigned int)
 {
     return flag_op(a, b);
 }
 
-TEST(RocprimBlockDiscontinuity, Traits)
-{
-    ASSERT_FALSE((rp::detail::with_b_index_arg<int, rocprim::less<int>>::value));
-    ASSERT_FALSE((rp::detail::with_b_index_arg<int, custom_flag_op2>::value));
-    ASSERT_TRUE((rp::detail::with_b_index_arg<int, custom_flag_op1<int>>::value));
-
-    auto f1 = [](const int& a, const int& b, unsigned int b_index) { return (a == b) || (b_index % 10 == 0); };
-    auto f2 = [](const int& a, const int& b) { return (a == b); };
-    ASSERT_TRUE((rp::detail::with_b_index_arg<int, decltype(f1)>::value));
-    ASSERT_FALSE((rp::detail::with_b_index_arg<int, decltype(f2)>::value));
-
-    auto f3 = [](int a, int b, int b_index) { return (a == b) || (b_index % 10 == 0); };
-    auto f4 = [](const int a, const int b) { return (a == b); };
-    ASSERT_TRUE((rp::detail::with_b_index_arg<int, decltype(f3)>::value));
-    ASSERT_FALSE((rp::detail::with_b_index_arg<int, decltype(f4)>::value));
-}
-
 typedef ::testing::Types<
     // Power of 2 BlockSize
-    params<unsigned int, int, 64U, 1, rocprim::equal_to<unsigned int> >,
-    params<int, bool, 128U, 1, rocprim::not_equal_to<int> >,
-    params<float, int, 256U, 1, rocprim::less<float> >,
-    params<char, char, 1024U, 1, rocprim::less_equal<char> >,
+    params<unsigned int, int, 64U, 1, hipcub::Equality>,
+    params<int, bool, 128U, 1, hipcub::Inequality>,
+    params<float, int, 256U, 1, less>,
+    params<char, char, 1024U, 1, less_equal>,
     params<int, bool, 256U, 1, custom_flag_op1<int> >,
 
     // Non-power of 2 BlockSize
-    params<double, unsigned int, 65U, 1, rocprim::greater<double> >,
+    params<double, unsigned int, 65U, 1, greater>,
     params<float, int, 37U, 1, custom_flag_op1<float> >,
-    params<long long, char, 510U, 1, rocprim::greater_equal<long long> >,
-    params<unsigned int, long long, 162U, 1, rocprim::not_equal_to<unsigned int> >,
-    params<unsigned char, bool, 255U, 1, rocprim::equal_to<unsigned char> >,
+    params<long long, char, 510U, 1, greater_equal>,
+    params<unsigned int, long long, 162U, 1, hipcub::Inequality>,
+    params<unsigned char, bool, 255U, 1, hipcub::Equality>,
 
     // Power of 2 BlockSize and ItemsPerThread > 1
-    params<int, char, 64U, 2, custom_flag_op2>,
-    params<int, short, 128U, 4, rocprim::less<int> >,
-    params<unsigned short, unsigned char, 256U, 7, custom_flag_op2>,
-    params<short, short, 512U, 8, rocprim::equal_to<short> >,
+    params<int, char, 64U, 2, custom_flag_op2<int> >,
+    params<int, short, 128U, 4, less>,
+    params<unsigned short, unsigned char, 256U, 7, custom_flag_op2<unsigned short> >,
+    params<short, short, 512U, 8, hipcub::Equality>,
 
     // Non-power of 2 BlockSize and ItemsPerThread > 1
-    params<double, int, 33U, 5, custom_flag_op2>,
-    params<double, unsigned int, 464U, 2, rocprim::equal_to<double> >,
-    params<unsigned short, int, 100U, 3, rocprim::greater<unsigned short> >,
+    params<double, int, 33U, 5, custom_flag_op2<double> >,
+    params<double, unsigned int, 464U, 2, hipcub::Equality>,
+    params<unsigned short, int, 100U, 3, greater>,
     params<short, bool, 234U, 9, custom_flag_op1<short> >
 > Params;
 
-TYPED_TEST_CASE(RocprimBlockDiscontinuity, Params);
+TYPED_TEST_CASE(HipcubBlockDiscontinuity, Params);
 
 template<
     class Type,
@@ -158,25 +170,25 @@ void flag_heads_kernel(Type* device_input, long long* device_heads)
     const unsigned int block_offset = hipBlockIdx_x * items_per_block;
 
     Type input[ItemsPerThread];
-    rp::block_load_direct_blocked(lid, device_input + block_offset, input);
+    hipcub::LoadDirectBlocked(lid, device_input + block_offset, input);
 
-    rp::block_discontinuity<Type, BlockSize> bdiscontinuity;
+    hipcub::BlockDiscontinuity<Type, BlockSize> bdiscontinuity;
 
     FlagType head_flags[ItemsPerThread];
     if(hipBlockIdx_x % 2 == 1)
     {
         const Type tile_predecessor_item = device_input[block_offset - 1];
-        bdiscontinuity.flag_heads(head_flags, tile_predecessor_item, input, FlagOpType());
+        bdiscontinuity.FlagHeads(head_flags, input, FlagOpType(), tile_predecessor_item);
     }
     else
     {
-        bdiscontinuity.flag_heads(head_flags, input, FlagOpType());
+        bdiscontinuity.FlagHeads(head_flags, input, FlagOpType());
     }
 
-    rp::block_store_direct_blocked(lid, device_heads + block_offset, head_flags);
+    hipcub::StoreDirectBlocked(lid, device_heads + block_offset, head_flags);
 }
 
-TYPED_TEST(RocprimBlockDiscontinuity, FlagHeads)
+TYPED_TEST(HipcubBlockDiscontinuity, FlagHeads)
 {
     using type = typename TestFixture::params::type;
     // std::vector<bool> is a special case that will cause an error in hipMemcpy
@@ -287,25 +299,25 @@ void flag_tails_kernel(Type* device_input, long long* device_tails)
     const unsigned int block_offset = hipBlockIdx_x * items_per_block;
 
     Type input[ItemsPerThread];
-    rp::block_load_direct_blocked(lid, device_input + block_offset, input);
+    hipcub::LoadDirectBlocked(lid, device_input + block_offset, input);
 
-    rp::block_discontinuity<Type, BlockSize> bdiscontinuity;
+    hipcub::BlockDiscontinuity<Type, BlockSize> bdiscontinuity;
 
     FlagType tail_flags[ItemsPerThread];
     if(hipBlockIdx_x % 2 == 0)
     {
         const Type tile_predecessor_item = device_input[block_offset + items_per_block];
-        bdiscontinuity.flag_tails(tail_flags, tile_predecessor_item, input, FlagOpType());
+        bdiscontinuity.FlagTails(tail_flags, input, FlagOpType(), tile_predecessor_item);
     }
     else
     {
-        bdiscontinuity.flag_tails(tail_flags, input, FlagOpType());
+        bdiscontinuity.FlagTails(tail_flags, input, FlagOpType());
     }
 
-    rp::block_store_direct_blocked(lid, device_tails + block_offset, tail_flags);
+    hipcub::StoreDirectBlocked(lid, device_tails + block_offset, tail_flags);
 }
 
-TYPED_TEST(RocprimBlockDiscontinuity, FlagTails)
+TYPED_TEST(HipcubBlockDiscontinuity, FlagTails)
 {
     using type = typename TestFixture::params::type;
     // std::vector<bool> is a special case that will cause an error in hipMemcpy
@@ -416,38 +428,38 @@ void flag_heads_and_tails_kernel(Type* device_input, long long* device_heads, lo
     const unsigned int block_offset = hipBlockIdx_x * items_per_block;
 
     Type input[ItemsPerThread];
-    rp::block_load_direct_blocked(lid, device_input + block_offset, input);
+    hipcub::LoadDirectBlocked(lid, device_input + block_offset, input);
 
-    rp::block_discontinuity<Type, BlockSize> bdiscontinuity;
+    hipcub::BlockDiscontinuity<Type, BlockSize> bdiscontinuity;
 
     FlagType head_flags[ItemsPerThread];
     FlagType tail_flags[ItemsPerThread];
     if(hipBlockIdx_x % 4 == 0)
     {
         const Type tile_successor_item = device_input[block_offset + items_per_block];
-        bdiscontinuity.flag_heads_and_tails(head_flags, tail_flags, tile_successor_item, input, FlagOpType());
+        bdiscontinuity.FlagHeadsAndTails(head_flags, tail_flags, tile_successor_item, input, FlagOpType());
     }
     else if(hipBlockIdx_x % 4 == 1)
     {
         const Type tile_predecessor_item = device_input[block_offset - 1];
         const Type tile_successor_item = device_input[block_offset + items_per_block];
-        bdiscontinuity.flag_heads_and_tails(head_flags, tile_predecessor_item, tail_flags, tile_successor_item, input, FlagOpType());
+        bdiscontinuity.FlagHeadsAndTails(head_flags, tile_predecessor_item, tail_flags, tile_successor_item, input, FlagOpType());
     }
     else if(hipBlockIdx_x % 4 == 2)
     {
         const Type tile_predecessor_item = device_input[block_offset - 1];
-        bdiscontinuity.flag_heads_and_tails(head_flags, tile_predecessor_item, tail_flags, input, FlagOpType());
+        bdiscontinuity.FlagHeadsAndTails(head_flags, tile_predecessor_item, tail_flags, input, FlagOpType());
     }
     else if(hipBlockIdx_x % 4 == 3)
     {
-        bdiscontinuity.flag_heads_and_tails(head_flags, tail_flags, input, FlagOpType());
+        bdiscontinuity.FlagHeadsAndTails(head_flags, tail_flags, input, FlagOpType());
     }
 
-    rp::block_store_direct_blocked(lid, device_heads + block_offset, head_flags);
-    rp::block_store_direct_blocked(lid, device_tails + block_offset, tail_flags);
+    hipcub::StoreDirectBlocked(lid, device_heads + block_offset, head_flags);
+    hipcub::StoreDirectBlocked(lid, device_tails + block_offset, tail_flags);
 }
 
-TYPED_TEST(RocprimBlockDiscontinuity, FlagHeadsAndTails)
+TYPED_TEST(HipcubBlockDiscontinuity, FlagHeadsAndTails)
 {
     using type = typename TestFixture::params::type;
     // std::vector<bool> is a special case that will cause an error in hipMemcpy

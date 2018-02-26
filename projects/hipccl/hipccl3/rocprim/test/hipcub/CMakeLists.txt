@@ -70,5 +70,8 @@ endfunction()
 # Tests
 # ****************************************************************************
 
+add_hipcub_test("hipcub.BlockDiscontinuity" test_hipcub_block_discontinuity.cpp)
+add_hipcub_test("hipcub.BlockExchange" test_hipcub_block_exchange.cpp)
 add_hipcub_test("hipcub.BlockScan" test_hipcub_block_scan.cpp)
+
 add_hipcub_test("hipcub.WarpScan" test_hipcub_warp_scan.cpp)

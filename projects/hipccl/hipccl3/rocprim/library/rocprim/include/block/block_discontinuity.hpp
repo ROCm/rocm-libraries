@@ -22,6 +22,7 @@
 #define ROCPRIM_BLOCK_BLOCK_DISCONTINUITY_HPP_
 
 #include <type_traits>
+#include <utility>
 
 #include "../config.hpp"
 #include "../detail/various.hpp"
@@ -38,15 +39,21 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-// Trait checks if FlagOp has 3 arguments (a, b, b_index)
-template<class T, class FlagOp, class Decl = decltype(&FlagOp::operator())>
+// Trait checks if FlagOp can be called with 3 arguments (a, b, b_index)
+template<class T, class FlagOp, class = void>
 struct with_b_index_arg
-    : std::integral_constant<bool,
-        std::is_same<Decl, bool (FlagOp::*)(const T&, const T&, unsigned int) const>::value ||
-        std::is_same<Decl, bool (FlagOp::*)(const T&, const T&, unsigned int)>::value ||
-        std::is_same<Decl, bool (FlagOp::*)(T, T, unsigned int) const>::value ||
-        std::is_same<Decl, bool (FlagOp::*)(T, T, unsigned int)>::value
-    >
+    : std::false_type
+{ };
+
+template<class T, class FlagOp>
+struct with_b_index_arg<
+        T, FlagOp,
+        typename std::conditional<
+           true,
+           void,
+           decltype(std::declval<FlagOp>()(std::declval<T>(), std::declval<T>(), 0))
+        >::type
+    > : std::true_type
 { };
 
 // Wrapping function that allows to call FlagOp of any of these signatures:
