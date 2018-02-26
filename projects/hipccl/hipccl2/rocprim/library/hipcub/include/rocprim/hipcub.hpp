@@ -37,4 +37,7 @@
 #include "block/block_scan.hpp"
 #include "block/block_store_func.hpp"
 
+// Device
+#include "device/device_radix_sort.hpp"
+
 #endif // HIPCUB_ROCPRIM_HPP_
