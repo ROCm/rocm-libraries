@@ -72,6 +72,7 @@ endfunction()
 
 add_hipcub_test("hipcub.BlockDiscontinuity" test_hipcub_block_discontinuity.cpp)
 add_hipcub_test("hipcub.BlockExchange" test_hipcub_block_exchange.cpp)
+add_hipcub_test("hipcub.BlockRadixSort" test_hipcub_block_radix_sort.cpp)
 add_hipcub_test("hipcub.BlockScan" test_hipcub_block_scan.cpp)
-
+add_hipcub_test("hipcub.DeviceRadixSort" test_hipcub_device_radix_sort.cpp)
 add_hipcub_test("hipcub.WarpScan" test_hipcub_warp_scan.cpp)

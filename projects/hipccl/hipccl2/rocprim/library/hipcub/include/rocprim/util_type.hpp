@@ -18,57 +18,73 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_TYPES_DOUBLE_BUFFER_HPP_
-#define ROCPRIM_TYPES_DOUBLE_BUFFER_HPP_
+#ifndef HIPCUB_ROCPRIM_UTIL_TYPE_HPP_
+#define HIPCUB_ROCPRIM_UTIL_TYPE_HPP_
 
 #include "../config.hpp"
 
-BEGIN_ROCPRIM_NAMESPACE
+BEGIN_HIPCUB_NAMESPACE
 
-template<class T>
-class double_buffer
+using NullType = ::rocprim::empty_type;
+
+template<typename T>
+struct DoubleBuffer
 {
-    T * buffers[2];
+    T * d_buffers[2];
 
-    unsigned int selector;
+    int selector;
 
-public:
-
-    ROCPRIM_HOST_DEVICE inline
-    double_buffer()
+    HIPCUB_HOST_DEVICE inline
+    DoubleBuffer()
     {
         selector = 0;
-        buffers[0] = nullptr;
-        buffers[1] = nullptr;
+        d_buffers[0] = nullptr;
+        d_buffers[1] = nullptr;
     }
 
-    ROCPRIM_HOST_DEVICE inline
-    double_buffer(T * current, T * alternate)
+    HIPCUB_HOST_DEVICE inline
+    DoubleBuffer(T * d_current, T * d_alternate)
     {
         selector = 0;
-        buffers[0] = current;
-        buffers[1] = alternate;
+        d_buffers[0] = d_current;
+        d_buffers[1] = d_alternate;
     }
 
-    ROCPRIM_HOST_DEVICE inline
-    T * current() const
+    HIPCUB_HOST_DEVICE inline
+    T * Current()
     {
-        return buffers[selector];
+        return d_buffers[selector];
     }
 
-    ROCPRIM_HOST_DEVICE inline
-    T * alternate() const
+    HIPCUB_HOST_DEVICE inline
+    T * Alternate()
     {
-        return buffers[selector ^ 1];
-    }
-
-    ROCPRIM_HOST_DEVICE inline
-    void swap()
-    {
-        selector ^= 1;
+        return d_buffers[selector ^ 1];
     }
 };
 
-END_ROCPRIM_NAMESPACE
+namespace detail
+{
 
-#endif // ROCPRIM_TYPES_DOUBLE_BUFFER_HPP_
+template<typename T>
+inline
+::rocprim::double_buffer<T> to_double_buffer(DoubleBuffer<T>& source)
+{
+    return ::rocprim::double_buffer<T>(source.Current(), source.Alternate());
+}
+
+template<typename T>
+inline
+void update_double_buffer(DoubleBuffer<T>& target, ::rocprim::double_buffer<T>& source)
+{
+    if(target.Current() != source.current())
+    {
+        target.selector ^= 1;
+    }
+}
+
+}
+
+END_HIPCUB_NAMESPACE
+
+#endif // HIPCUB_ROCPRIM_UTIL_TYPE_HPP_
