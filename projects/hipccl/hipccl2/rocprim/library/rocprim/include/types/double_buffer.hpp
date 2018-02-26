@@ -26,38 +26,46 @@
 BEGIN_ROCPRIM_NAMESPACE
 
 template<class T>
-struct double_buffer
+class double_buffer
 {
-    T * d_buffers[2];
+    T * buffers[2];
 
-    int selector;
+    unsigned int selector;
+
+public:
 
     ROCPRIM_HOST_DEVICE inline
     double_buffer()
     {
         selector = 0;
-        d_buffers[0] = nullptr;
-        d_buffers[1] = nullptr;
+        buffers[0] = nullptr;
+        buffers[1] = nullptr;
     }
 
     ROCPRIM_HOST_DEVICE inline
-    double_buffer(T * d_current, T * d_alternate)
+    double_buffer(T * current, T * alternate)
     {
         selector = 0;
-        d_buffers[0] = d_current;
-        d_buffers[1] = d_alternate;
+        buffers[0] = current;
+        buffers[1] = alternate;
     }
 
     ROCPRIM_HOST_DEVICE inline
     T * current() const
     {
-        return d_buffers[selector];
+        return buffers[selector];
     }
 
     ROCPRIM_HOST_DEVICE inline
     T * alternate() const
     {
-        return d_buffers[selector ^ 1];
+        return buffers[selector ^ 1];
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    void swap()
+    {
+        selector ^= 1;
     }
 };
 
