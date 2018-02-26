@@ -232,7 +232,7 @@ public:
 ///   that occupancy will fall too low, decreasing the performance.
 ///   * If \p Key is an integer type and the range of keys is known in advance, the performance
 ///   can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
-///   [100, 10000], <tt>begin_bit = 5</tt> and <tt>end_bit = 14</tt> will cover the whole range.
+///   [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
 /// \par Examples
 /// \parblock
