@@ -30,14 +30,7 @@
 
 #include "test_utils.hpp"
 
-#define HIP_CHECK(condition)         \
-{                                  \
-  hipError_t error = condition;    \
-  if(error != hipSuccess){         \
-      std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
-      exit(error); \
-  } \
-}
+#define HIP_CHECK(error) ASSERT_EQ(static_cast<hipError_t>(error), hipSuccess)
 
 namespace rp = rocprim;
 
@@ -746,7 +739,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanPrefixCallback)
             output_block_prefixes.size() * sizeof(T),
             hipMemcpyDeviceToHost
         )
-    )
+    );
 
     // Validating results
     for(size_t i = 0; i < output.size(); i++)
@@ -1127,7 +1120,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScanReduce)
     }
 
     HIP_CHECK(hipFree(device_output));
-    HIP_CHECK(hipFree(device_output_reductions))
+    HIP_CHECK(hipFree(device_output_reductions));
 }
 
 template<

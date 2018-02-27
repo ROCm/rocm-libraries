@@ -337,7 +337,15 @@ TYPED_TEST(HipcubBlockExchangeTests, BlockedToWarpStriped)
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
     constexpr size_t items_per_block = block_size * items_per_thread;
     // Given block size not supported
-    if(block_size > test_utils::get_max_block_size())
+    bool is_block_size_unsupported = block_size > test_utils::get_max_block_size();
+#ifdef HIPCUB_CUB_API
+    // CUB does not support exchanges to/from warp-striped arrangements
+    // for incomplete blocks (not divisible by warp size)
+    // Workaround for nvcc warning: "dynamic initialization in unreachable code"
+    // (not a simple if with compile-time expression)
+    is_block_size_unsupported |= block_size % HIPCUB_WARP_THREADS != 0;
+#endif
+    if(is_block_size_unsupported)
     {
         return;
     }
@@ -451,7 +459,15 @@ TYPED_TEST(HipcubBlockExchangeTests, WarpStripedToBlocked)
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
     constexpr size_t items_per_block = block_size * items_per_thread;
     // Given block size not supported
-    if(block_size > test_utils::get_max_block_size())
+    bool is_block_size_unsupported = block_size > test_utils::get_max_block_size();
+#ifdef HIPCUB_CUB_API
+    // CUB does not support exchanges to/from warp-striped arrangements
+    // for incomplete blocks (not divisible by warp size)
+    // Workaround for nvcc warning: "dynamic initialization in unreachable code"
+    // (not a simple if with compile-time expression)
+    is_block_size_unsupported |= block_size % HIPCUB_WARP_THREADS != 0;
+#endif
+    if(is_block_size_unsupported)
     {
         return;
     }
