@@ -25,9 +25,6 @@
 
 #include "../../config.hpp"
 
-#include "../intrinsics.hpp"
-#include "../thread/thread_operators.hpp"
-
 #include "block_load_func.hpp"
 
 BEGIN_HIPCUB_NAMESPACE
@@ -132,7 +129,7 @@ public:
     {
         base_type::load(block_iter, items, valid_items, oob_default, temp_storage_);
     }
-    
+
 private:
     HIPCUB_DEVICE inline
     TempStorage& private_storage()
