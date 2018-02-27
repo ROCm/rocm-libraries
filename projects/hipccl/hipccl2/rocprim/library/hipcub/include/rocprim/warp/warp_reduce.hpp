@@ -37,27 +37,27 @@ class WarpReduce : private ::rocprim::warp_reduce<T, LOGICAL_WARP_THREADS>
     static_assert(LOGICAL_WARP_THREADS > 0, "LOGICAL_WARP_THREADS must be greater than 0");
     using base_type = typename ::rocprim::warp_reduce<T, LOGICAL_WARP_THREADS>;
 
-    typename base_type::storage_type &temp_storage;
+    typename base_type::storage_type &temp_storage_;
 
 public:
     using TempStorage = typename base_type::storage_type;
 
     HIPCUB_DEVICE inline
-    WarpReduce(TempStorage& temp_storage) : temp_storage(temp_storage)
+    WarpReduce(TempStorage& temp_storage) : temp_storage_(temp_storage)
     {
     }
     
     HIPCUB_DEVICE inline
     T Sum(T input)
     {
-        base_type::reduce(input, input, temp_storage);
+        base_type::reduce(input, input, temp_storage_);
         return input;
     }
     
     HIPCUB_DEVICE inline
     T Sum(T input, int valid_items)
     {
-        base_type::reduce(input, input, valid_items, temp_storage);
+        base_type::reduce(input, input, valid_items, temp_storage_);
         return input;
     }
     
@@ -65,7 +65,7 @@ public:
     HIPCUB_DEVICE inline
     T Reduce(T input, ReduceOp reduce_op)
     {
-        base_type::reduce(input, input, temp_storage, reduce_op);
+        base_type::reduce(input, input, temp_storage_, reduce_op);
         return input;
     }
     
@@ -73,7 +73,7 @@ public:
     HIPCUB_DEVICE inline
     T Reduce(T input, ReduceOp reduce_op, int valid_items)
     {
-        base_type::reduce(input, input, valid_items, temp_storage, reduce_op);
+        base_type::reduce(input, input, valid_items, temp_storage_, reduce_op);
         return input;
     }
 };
