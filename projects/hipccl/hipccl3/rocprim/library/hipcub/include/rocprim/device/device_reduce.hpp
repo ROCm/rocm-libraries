@@ -18,12 +18,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_HIPCUB_DEVICE_DEVICE_REDUCE_HPP_
-#define ROCPRIM_HIPCUB_DEVICE_DEVICE_REDUCE_HPP_
+#ifndef HIPCUB_ROCPRIM_DEVICE_DEVICE_REDUCE_HPP_
+#define HIPCUB_ROCPRIM_DEVICE_DEVICE_REDUCE_HPP_
+
+#include <limits>
+#include <iterator>
 
 #include "../../config.hpp"
 
-#include "../intrinsics.hpp"
 #include "../thread/thread_operators.hpp"
 
 BEGIN_HIPCUB_NAMESPACE
@@ -57,7 +59,7 @@ public:
     
     template <
         typename InputIteratorT,
-        typename OutputIteratorT,
+        typename OutputIteratorT
     >
     HIPCUB_RUNTIME_FUNCTION static
     hipError_t Sum(void *d_temp_storage,
@@ -68,17 +70,17 @@ public:
                    hipStream_t stream = 0,
                    bool debug_synchronous = false)
     {
-        using output_type = typename std::iterator_traits<OutputIteratorT>::value_type;
+        using T = typename std::iterator_traits<InputIteratorT>::value_type;
         return ::rocprim::reduce(
             d_temp_storage, temp_storage_bytes,
-            d_in, d_out, output_type(), num_items, Sum(),
+            d_in, d_out, T(0), num_items, ::hipcub::Sum(),
             stream, debug_synchronous
         );
     }
     
     template <
         typename InputIteratorT,
-        typename OutputIteratorT,
+        typename OutputIteratorT
     >
     HIPCUB_RUNTIME_FUNCTION static
     hipError_t Min(void *d_temp_storage,
@@ -89,17 +91,17 @@ public:
                    hipStream_t stream = 0,
                    bool debug_synchronous = false)
     {
-        using output_type = typename std::iterator_traits<OutputIteratorT>::value_type;
+        using T = typename std::iterator_traits<InputIteratorT>::value_type;
         return ::rocprim::reduce(
             d_temp_storage, temp_storage_bytes,
-            d_in, d_out, std::numeric_limits<output_type>::max(), num_items, Min(),
+            d_in, d_out, std::numeric_limits<T>::max(), num_items, ::hipcub::Min(),
             stream, debug_synchronous
         );
     }
     
     template <
         typename InputIteratorT,
-        typename OutputIteratorT,
+        typename OutputIteratorT
     >
     HIPCUB_RUNTIME_FUNCTION static
     hipError_t ArgMin(void *d_temp_storage,
@@ -115,9 +117,7 @@ public:
         (void) temp_storage_bytes;
         (void) d_in;
         (void) d_out;
-        (void) num_segments;
-        (void) d_begin_offsets;
-        (void) d_end_offsets;
+        (void) num_items;
         (void) stream;
         (void) debug_synchronous;
         return hipErrorUnknown;
@@ -125,7 +125,7 @@ public:
     
     template <
         typename InputIteratorT,
-        typename OutputIteratorT,
+        typename OutputIteratorT
     >
     HIPCUB_RUNTIME_FUNCTION static
     hipError_t Max(void *d_temp_storage,
@@ -136,17 +136,17 @@ public:
                    hipStream_t stream = 0,
                    bool debug_synchronous = false)
     {
-        using output_type = typename std::iterator_traits<OutputIteratorT>::value_type;
+        using T = typename std::iterator_traits<InputIteratorT>::value_type;
         return ::rocprim::reduce(
             d_temp_storage, temp_storage_bytes,
-            d_in, d_out, std::numeric_limits<output_type>::min(), num_items, Max(),
+            d_in, d_out, std::numeric_limits<T>::min(), num_items, ::hipcub::Max(),
             stream, debug_synchronous
         );
     }
     
     template <
         typename InputIteratorT,
-        typename OutputIteratorT,
+        typename OutputIteratorT
     >
     HIPCUB_RUNTIME_FUNCTION static
     hipError_t ArgMax(void *d_temp_storage,
@@ -162,9 +162,7 @@ public:
         (void) temp_storage_bytes;
         (void) d_in;
         (void) d_out;
-        (void) num_segments;
-        (void) d_begin_offsets;
-        (void) d_end_offsets;
+        (void) num_items;
         (void) stream;
         (void) debug_synchronous;
         return hipErrorUnknown;
@@ -173,4 +171,4 @@ public:
 
 END_HIPCUB_NAMESPACE
 
-#endif // ROCPRIM_HIPCUB_DEVICE_DEVICE_REDUCE_HPP_
+#endif // HIPCUB_ROCPRIM_DEVICE_DEVICE_REDUCE_HPP_
