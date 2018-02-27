@@ -23,7 +23,8 @@
 
 #include "../config.hpp"
 
-#include "intrinsics.hpp"
+#include "util_type.hpp"
+#include "util_ptx.hpp"
 #include "thread/thread_operators.hpp"
 
 // Warp

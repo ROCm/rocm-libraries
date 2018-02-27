@@ -25,7 +25,6 @@
 
 #include "../../config.hpp"
 
-#include "../intrinsics.hpp"
 #include "../thread/thread_operators.hpp"
 
 BEGIN_HIPCUB_NAMESPACE
