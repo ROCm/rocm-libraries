@@ -23,7 +23,6 @@
 
 #include "../../config.hpp"
 
-#include "../intrinsics.hpp"
 #include "../util_type.hpp"
 
 #include "block_scan.hpp"

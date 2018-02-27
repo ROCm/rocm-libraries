@@ -25,7 +25,6 @@
 #include <iterator>
 
 #include "../../config.hpp"
-
 #include "../thread/thread_operators.hpp"
 
 BEGIN_HIPCUB_NAMESPACE
@@ -37,26 +36,26 @@ public:
         typename InputIteratorT,
         typename OutputIteratorT,
         typename ReduceOpT,
-        typename InitValueT
+        typename T
     >
     HIPCUB_RUNTIME_FUNCTION static
     hipError_t Reduce(void *d_temp_storage,
                       size_t &temp_storage_bytes,
                       InputIteratorT d_in,
                       OutputIteratorT d_out,
-                      ReduceOpT reduce_op,
-                      InitValueT init_value,
                       int num_items,
+                      ReduceOpT reduction_op,
+                      T init,
                       hipStream_t stream = 0,
                       bool debug_synchronous = false)
     {
         return ::rocprim::reduce(
             d_temp_storage, temp_storage_bytes,
-            d_in, d_out, init_value, num_items, reduce_op,
+            d_in, d_out, init, num_items, reduction_op,
             stream, debug_synchronous
         );
     }
-    
+
     template <
         typename InputIteratorT,
         typename OutputIteratorT
@@ -77,7 +76,7 @@ public:
             stream, debug_synchronous
         );
     }
-    
+
     template <
         typename InputIteratorT,
         typename OutputIteratorT
@@ -98,7 +97,7 @@ public:
             stream, debug_synchronous
         );
     }
-    
+
     template <
         typename InputIteratorT,
         typename OutputIteratorT
@@ -122,7 +121,7 @@ public:
         (void) debug_synchronous;
         return hipErrorUnknown;
     }
-    
+
     template <
         typename InputIteratorT,
         typename OutputIteratorT
@@ -143,7 +142,7 @@ public:
             stream, debug_synchronous
         );
     }
-    
+
     template <
         typename InputIteratorT,
         typename OutputIteratorT
@@ -166,6 +165,38 @@ public:
         (void) stream;
         (void) debug_synchronous;
         return hipErrorUnknown;
+    }
+
+    template<
+        typename KeysInputIteratorT,
+        typename UniqueOutputIteratorT,
+        typename ValuesInputIteratorT,
+        typename AggregatesOutputIteratorT,
+        typename NumRunsOutputIteratorT,
+        typename ReductionOpT
+    >
+    HIPCUB_RUNTIME_FUNCTION static
+    hipError_t ReduceByKey(void * d_temp_storage,
+                           size_t& temp_storage_bytes,
+                           KeysInputIteratorT d_keys_in,
+                           UniqueOutputIteratorT d_unique_out,
+                           ValuesInputIteratorT d_values_in,
+                           AggregatesOutputIteratorT d_aggregates_out,
+                           NumRunsOutputIteratorT d_num_runs_out,
+                           ReductionOpT reduction_op,
+                           int num_items,
+                           hipStream_t stream = 0,
+                           bool debug_synchronous = false)
+    {
+        using key_compare_op =
+            ::rocprim::equal_to<typename std::iterator_traits<KeysInputIteratorT>::value_type>;
+        return ::rocprim::reduce_by_key(
+            d_temp_storage, temp_storage_bytes,
+            d_keys_in, d_values_in, num_items,
+            d_unique_out, d_aggregates_out, d_num_runs_out,
+            reduction_op, key_compare_op(),
+            stream, debug_synchronous
+        );
     }
 };
 

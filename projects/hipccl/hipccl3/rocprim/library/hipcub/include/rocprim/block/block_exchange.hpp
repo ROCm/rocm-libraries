@@ -23,8 +23,6 @@
 
 #include "../../config.hpp"
 
-#include "../intrinsics.hpp"
-
 BEGIN_HIPCUB_NAMESPACE
 
 template<

@@ -25,9 +25,6 @@
 
 #include "../../config.hpp"
 
-#include "../intrinsics.hpp"
-#include "../thread/thread_operators.hpp"
-
 #include "block_store_func.hpp"
 
 BEGIN_HIPCUB_NAMESPACE
@@ -119,7 +116,7 @@ public:
     {
         base_type::store(block_iter, items, valid_items, temp_storage_);
     }
-    
+
 private:
     HIPCUB_DEVICE inline
     TempStorage& private_storage()
