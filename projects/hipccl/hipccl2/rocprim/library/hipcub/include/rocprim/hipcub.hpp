@@ -27,6 +27,7 @@
 #include "thread/thread_operators.hpp"
 
 // Warp
+#include "warp/warp_reduce.hpp"
 #include "warp/warp_scan.hpp"
 
 // Block
