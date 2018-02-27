@@ -34,14 +34,7 @@
 
 #include "test_utils.hpp"
 
-#define HIP_CHECK(condition)         \
-{                                  \
-  hipError_t error = condition;    \
-  if(error != hipSuccess){         \
-      std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
-      exit(error); \
-  } \
-}
+#define HIP_CHECK(error) ASSERT_EQ(static_cast<hipError_t>(error), hipSuccess)
 
 template<
     class Key,
@@ -112,23 +105,39 @@ TYPED_TEST_CASE(HipcubBlockRadixSort, Params);
 template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
 struct key_comparator
 {
-    static_assert(std::is_unsigned<Key>::value, "Test supports start and bits only for unsigned integers");
+private:
+    template<unsigned int CStartBit, unsigned int CEndBit>
+    constexpr static bool all_bits()
+    {
+        return (CStartBit == 0 && CEndBit == sizeof(Key) * 8);
+    }
 
-    bool operator()(const Key& lhs, const Key& rhs)
+    template<unsigned int CStartBit, unsigned int CEndBit>
+    auto compare(const Key& lhs, const Key& rhs) const
+        -> typename std::enable_if<all_bits<CStartBit, CEndBit>(), bool>::type
+    {
+        return Descending ? (rhs < lhs) : (lhs < rhs);
+    }
+
+    template<unsigned int CStartBit, unsigned int CEndBit>
+    auto compare(const Key& lhs, const Key& rhs) const
+        -> typename std::enable_if<!all_bits<CStartBit, CEndBit>(), bool>::type
     {
         auto mask = (1ull << (EndBit - StartBit)) - 1;
         auto l = (static_cast<unsigned long long>(lhs) >> StartBit) & mask;
         auto r = (static_cast<unsigned long long>(rhs) >> StartBit) & mask;
         return Descending ? (r < l) : (l < r);
     }
-};
 
-template<class Key, bool Descending>
-struct key_comparator<Key, Descending, 0, sizeof(Key) * 8>
-{
+public:
+    static_assert(
+        key_comparator::all_bits<StartBit, EndBit>() || std::is_unsigned<Key>::value,
+        "Test supports start and bits only for unsigned integers"
+    );
+
     bool operator()(const Key& lhs, const Key& rhs)
     {
-        return Descending ? (rhs < lhs) : (lhs < rhs);
+        return this->compare<StartBit, EndBit>(lhs, rhs);
     }
 };
 
@@ -313,8 +322,6 @@ void sort_key_value_kernel(
 
 TYPED_TEST(HipcubBlockRadixSort, SortKeysValues)
 {
-    hc::accelerator acc;
-
     using key_type = typename TestFixture::params::key_type;
     using value_type = typename TestFixture::params::value_type;
     constexpr size_t block_size = TestFixture::params::block_size;

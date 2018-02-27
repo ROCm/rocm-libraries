@@ -316,8 +316,6 @@ void sort_key_value_kernel(
 
 TYPED_TEST(RocprimBlockRadixSort, SortKeysValues)
 {
-    hc::accelerator acc;
-
     using key_type = typename TestFixture::params::key_type;
     using value_type = typename TestFixture::params::value_type;
     constexpr size_t block_size = TestFixture::params::block_size;
