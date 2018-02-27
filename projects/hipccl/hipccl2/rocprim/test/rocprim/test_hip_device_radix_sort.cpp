@@ -40,14 +40,7 @@
 
 namespace rp = rocprim;
 
-#define HIP_CHECK(condition)         \
-{                                  \
-  hipError_t error = condition;    \
-  if(error != hipSuccess){         \
-      std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
-      exit(error); \
-  } \
-}
+#define HIP_CHECK(error) ASSERT_EQ(static_cast<hipError_t>(error), hipSuccess)
 
 template<
     class Key,
