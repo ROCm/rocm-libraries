@@ -82,8 +82,7 @@ test:rocm243:
     - build:rocm
   script:
     - cd build
-    - ctest --output-on-failure
-    - ctest --output-on-failure
+    - ctest --output-on-failure --repeat-until-fail 2
 
 test:rocm244:
   tags:
@@ -97,11 +96,10 @@ test:rocm244:
     - build:rocm
   script:
     - cd build
-    - ctest --output-on-failure
-    - ctest --output-on-failure
+    - ctest --output-on-failure --repeat-until-fail 2
 
 build:rocm-rc:
-  image: ourrocm/rocm:1.7.119rc
+  image: ourrocm/rocm:1.7.131
   allow_failure: true
   tags:
     - tag241
@@ -130,7 +128,7 @@ build:rocm-rc:
     expire_in: 4 week
 
 test:rocm241-rc:
-  image: ourrocm/rocm:1.7.119rc
+  image: ourrocm/rocm:1.7.131
   allow_failure: true
   tags:
     - tag241
@@ -143,5 +141,4 @@ test:rocm241-rc:
     - build:rocm-rc
   script:
     - cd build
-    - ctest --output-on-failure
-    - ctest --output-on-failure
+    - ctest --output-on-failure --repeat-until-fail 2
