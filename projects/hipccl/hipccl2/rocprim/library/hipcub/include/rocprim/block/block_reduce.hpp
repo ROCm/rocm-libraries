@@ -25,7 +25,6 @@
 
 #include "../../config.hpp"
 
-#include "../intrinsics.hpp"
 #include "../thread/thread_operators.hpp"
 
 BEGIN_HIPCUB_NAMESPACE
@@ -93,21 +92,21 @@ public:
     BlockReduce(TempStorage& temp_storage) : temp_storage_(temp_storage)
     {
     }
-    
+
     HIPCUB_DEVICE inline
     T Sum(T input)
     {
         base_type::reduce(input, input, temp_storage_);
         return input;
     }
-    
+
     HIPCUB_DEVICE inline
     T Sum(T input, int valid_items)
     {
         base_type::reduce(input, input, valid_items, temp_storage_);
         return input;
     }
-    
+
     template<int ITEMS_PER_THREAD>
     HIPCUB_DEVICE inline
     T Sum(T(&input)[ITEMS_PER_THREAD])
@@ -116,7 +115,7 @@ public:
         base_type::reduce(input, output, temp_storage_);
         return output;
     }
-    
+
     template<typename ReduceOp>
     HIPCUB_DEVICE inline
     T Reduce(T input, ReduceOp reduce_op)
@@ -124,7 +123,7 @@ public:
         base_type::reduce(input, input, temp_storage_, reduce_op);
         return input;
     }
-    
+
     template<typename ReduceOp>
     HIPCUB_DEVICE inline
     T Reduce(T input, ReduceOp reduce_op, int valid_items)
@@ -132,7 +131,7 @@ public:
         base_type::reduce(input, input, valid_items, temp_storage_, reduce_op);
         return input;
     }
-    
+
     template<int ITEMS_PER_THREAD, typename ReduceOp>
     HIPCUB_DEVICE inline
     T Reduce(T(&input)[ITEMS_PER_THREAD], ReduceOp reduce_op)

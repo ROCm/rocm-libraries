@@ -225,7 +225,9 @@ TYPED_TEST(HipcubDeviceSegmentedReduceOp, Reduce)
             }
             else
             {
-                auto diff = std::max<output_type>(std::abs(0.01 * aggregates_expected[i]), 0.01);
+                auto diff = std::max<output_type>(
+                    std::abs(0.01 * aggregates_expected[i]), output_type(0.01)
+                );
                 ASSERT_NEAR(aggregates_output[i], aggregates_expected[i], diff);
             }
         }
@@ -402,7 +404,9 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Sum)
             }
             else
             {
-                auto diff = std::max<output_type>(std::abs(0.01 * aggregates_expected[i]), 0.01);
+                auto diff = std::max<output_type>(
+                    std::abs(0.01 * aggregates_expected[i]), output_type(0.01)
+                );
                 ASSERT_NEAR(aggregates_output[i], aggregates_expected[i], diff);
             }
         }
