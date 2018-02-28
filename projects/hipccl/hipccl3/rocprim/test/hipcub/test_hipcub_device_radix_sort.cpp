@@ -325,10 +325,12 @@ TYPED_TEST(HipcubDeviceRadixSort, SortPairs)
 
         void * d_temporary_storage = nullptr;
         size_t temporary_storage_bytes = 0;
-        hipcub::DeviceRadixSort::SortPairs(
-            d_temporary_storage, temporary_storage_bytes,
-            d_keys_input, d_keys_output, d_values_input, d_values_output, size,
-            start_bit, end_bit
+        HIP_CHECK(
+            hipcub::DeviceRadixSort::SortPairs(
+                d_temporary_storage, temporary_storage_bytes,
+                d_keys_input, d_keys_output, d_values_input, d_values_output, size,
+                start_bit, end_bit
+            )
         );
 
         ASSERT_GT(temporary_storage_bytes, 0U);
@@ -337,20 +339,24 @@ TYPED_TEST(HipcubDeviceRadixSort, SortPairs)
 
         if(descending)
         {
-            hipcub::DeviceRadixSort::SortPairsDescending(
-                d_temporary_storage, temporary_storage_bytes,
-                d_keys_input, d_keys_output, d_values_input, d_values_output, size,
-                start_bit, end_bit,
-                stream, debug_synchronous
+            HIP_CHECK(
+                hipcub::DeviceRadixSort::SortPairsDescending(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_keys_input, d_keys_output, d_values_input, d_values_output, size,
+                    start_bit, end_bit,
+                    stream, debug_synchronous
+                )
             );
         }
         else
         {
-            hipcub::DeviceRadixSort::SortPairs(
-                d_temporary_storage, temporary_storage_bytes,
-                d_keys_input, d_keys_output, d_values_input, d_values_output, size,
-                start_bit, end_bit,
-                stream, debug_synchronous
+            HIP_CHECK(
+                hipcub::DeviceRadixSort::SortPairs(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_keys_input, d_keys_output, d_values_input, d_values_output, size,
+                    start_bit, end_bit,
+                    stream, debug_synchronous
+                )
             );
         }
 
@@ -577,10 +583,12 @@ TYPED_TEST(HipcubDeviceRadixSort, SortPairsDoubleBuffer)
 
         void * d_temporary_storage = nullptr;
         size_t temporary_storage_bytes = 0;
-        hipcub::DeviceRadixSort::SortPairs(
-            d_temporary_storage, temporary_storage_bytes,
-            d_keys, d_values, size,
-            start_bit, end_bit
+        HIP_CHECK(
+            hipcub::DeviceRadixSort::SortPairs(
+                d_temporary_storage, temporary_storage_bytes,
+                d_keys, d_values, size,
+                start_bit, end_bit
+            )
         );
 
         ASSERT_GT(temporary_storage_bytes, 0U);
@@ -589,20 +597,24 @@ TYPED_TEST(HipcubDeviceRadixSort, SortPairsDoubleBuffer)
 
         if(descending)
         {
-            hipcub::DeviceRadixSort::SortPairsDescending(
-                d_temporary_storage, temporary_storage_bytes,
-                d_keys, d_values, size,
-                start_bit, end_bit,
-                stream, debug_synchronous
+            HIP_CHECK(
+                hipcub::DeviceRadixSort::SortPairsDescending(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_keys, d_values, size,
+                    start_bit, end_bit,
+                    stream, debug_synchronous
+                )
             );
         }
         else
         {
-            hipcub::DeviceRadixSort::SortPairs(
-                d_temporary_storage, temporary_storage_bytes,
-                d_keys, d_values, size,
-                start_bit, end_bit,
-                stream, debug_synchronous
+            HIP_CHECK(
+                hipcub::DeviceRadixSort::SortPairs(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_keys, d_values, size,
+                    start_bit, end_bit,
+                    stream, debug_synchronous
+                )
             );
         }
 

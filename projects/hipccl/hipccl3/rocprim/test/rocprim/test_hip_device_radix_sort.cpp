@@ -315,10 +315,12 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairs)
 
         void * d_temporary_storage = nullptr;
         size_t temporary_storage_bytes;
-        rp::radix_sort_pairs(
-            d_temporary_storage, temporary_storage_bytes,
-            d_keys_input, d_keys_output, d_values_input, d_values_output, size,
-            start_bit, end_bit
+        HIP_CHECK(
+            rp::radix_sort_pairs(
+                d_temporary_storage, temporary_storage_bytes,
+                d_keys_input, d_keys_output, d_values_input, d_values_output, size,
+                start_bit, end_bit
+            )
         );
 
         ASSERT_GT(temporary_storage_bytes, 0);
@@ -327,20 +329,24 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairs)
 
         if(descending)
         {
-            rp::radix_sort_pairs_desc(
-                d_temporary_storage, temporary_storage_bytes,
-                d_keys_input, d_keys_output, d_values_input, d_values_output, size,
-                start_bit, end_bit,
-                stream, debug_synchronous
+            HIP_CHECK(
+                rp::radix_sort_pairs_desc(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_keys_input, d_keys_output, d_values_input, d_values_output, size,
+                    start_bit, end_bit,
+                    stream, debug_synchronous
+                )
             );
         }
         else
         {
-            rp::radix_sort_pairs(
-                d_temporary_storage, temporary_storage_bytes,
-                d_keys_input, d_keys_output, d_values_input, d_values_output, size,
-                start_bit, end_bit,
-                stream, debug_synchronous
+            HIP_CHECK(
+                rp::radix_sort_pairs(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_keys_input, d_keys_output, d_values_input, d_values_output, size,
+                    start_bit, end_bit,
+                    stream, debug_synchronous
+                )
             );
         }
 
@@ -567,10 +573,12 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairsDoubleBuffer)
 
         void * d_temporary_storage = nullptr;
         size_t temporary_storage_bytes;
-        rp::radix_sort_pairs(
-            d_temporary_storage, temporary_storage_bytes,
-            d_keys, d_values, size,
-            start_bit, end_bit
+        HIP_CHECK(
+            rp::radix_sort_pairs(
+                d_temporary_storage, temporary_storage_bytes,
+                d_keys, d_values, size,
+                start_bit, end_bit
+            )
         );
 
         ASSERT_GT(temporary_storage_bytes, 0);
@@ -579,20 +587,24 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairsDoubleBuffer)
 
         if(descending)
         {
-            rp::radix_sort_pairs_desc(
-                d_temporary_storage, temporary_storage_bytes,
-                d_keys, d_values, size,
-                start_bit, end_bit,
-                stream, debug_synchronous
+            HIP_CHECK(
+                rp::radix_sort_pairs_desc(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_keys, d_values, size,
+                    start_bit, end_bit,
+                    stream, debug_synchronous
+                )
             );
         }
         else
         {
-            rp::radix_sort_pairs(
-                d_temporary_storage, temporary_storage_bytes,
-                d_keys, d_values, size,
-                start_bit, end_bit,
-                stream, debug_synchronous
+            HIP_CHECK(
+                rp::radix_sort_pairs(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_keys, d_values, size,
+                    start_bit, end_bit,
+                    stream, debug_synchronous
+                )
             );
         }
 
