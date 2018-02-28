@@ -27,38 +27,45 @@
 #include <type_traits>
 
 #include "../config.hpp"
+#include "../types/key_value_pair.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
 template<
-    class IteratorT,
+    class InputIterator,
     class Difference = std::ptrdiff_t,
-    class ValueT = typename std::iterator_traits<IteratorT>::value_type;
+    class Value = typename std::iterator_traits<InputIterator>::value_type
 >
 class arg_index_iterator
 {
-public:
-    using difference_type = Difference;
-    using value_type = ::rocprim::key_value_pair<Difference, ValueT>;
-    using reference = value_type;
-    using pointer = value_type*;
-    using iterator_category = std::random_access_iterator_tag;
+private:
+    using input_category = typename std::iterator_traits<InputIterator>::iterator_category;
     
+public:
+    using value_type = ::rocprim::key_value_pair<Difference, Value>;
+    using reference = const value_type&;
+    using pointer = const value_type*;
+    using difference_type = Difference;
+    using iterator_category = std::random_access_iterator_tag;
+    static_assert(std::is_same<input_category, iterator_category>::value,
+                  "InputIterator must be a random-access iterator");
+
     ROCPRIM_HOST_DEVICE inline
     arg_index_iterator() = default;
 
     ROCPRIM_HOST_DEVICE inline
     ~arg_index_iterator() = default;
-    
+
     ROCPRIM_HOST_DEVICE inline
-    arg_index_iterator(IteratorT iter, difference_type offset = 0) : iter_(iter),
-                                                                     offset_(offset)
+    arg_index_iterator(InputIterator iterator, difference_type offset = 0)
+        : iterator_(iterator), offset_(offset)
     {
     }
-    
+
     ROCPRIM_HOST_DEVICE inline
     arg_index_iterator& operator++()
     {
+        iterator_++;
         offset_++;
         return *this;
     }
@@ -67,17 +74,18 @@ public:
     arg_index_iterator operator++(int)
     {
         arg_index_iterator old_ai = *this;
+        iterator_++;
         offset_++;
         return old_ai;
     }
 
     ROCPRIM_HOST_DEVICE inline
-    reference operator*() const
+    value_type operator*() const
     {
-        value_type ret(offset_, iter_[offset_]);
+        value_type ret(offset_, *iterator_);
         return ret;
     }
-    
+
     ROCPRIM_HOST_DEVICE inline
     pointer operator->() const
     {
@@ -87,71 +95,115 @@ public:
     ROCPRIM_HOST_DEVICE inline
     arg_index_iterator operator+(difference_type distance) const
     {
-        return arg_index_iterator(iter_, offset_ + distance);
+        return arg_index_iterator(iterator_ + distance, offset_ + distance);
     }
 
     ROCPRIM_HOST_DEVICE inline
     arg_index_iterator& operator+=(difference_type distance)
     {
+        iterator_ += distance;
         offset_ += distance;
         return *this;
     }
-    
+
     ROCPRIM_HOST_DEVICE inline
     arg_index_iterator operator-(difference_type distance) const
     {
-        return arg_index_iterator(iter_, offset_ - distance);
+        return arg_index_iterator(iterator_ - distance, offset_ - distance);
     }
 
     ROCPRIM_HOST_DEVICE inline
     arg_index_iterator& operator-=(difference_type distance)
     {
+        iterator_ -= distance;
         offset_ -= distance;
         return *this;
     }
-    
+
     ROCPRIM_HOST_DEVICE inline
     difference_type operator-(arg_index_iterator other) const
     {
-        return offset_ - other.offset_;
+        return iterator_ - other.iterator_;
     }
-    
+
     ROCPRIM_HOST_DEVICE inline
-    reference operator[](difference_type distance) const
+    value_type operator[](difference_type distance) const
     {
-        arg_index_iterator offset = (*this) + distance;
-        return *offset;
+        arg_index_iterator i = (*this) + distance;
+        return *i;
     }
 
     ROCPRIM_HOST_DEVICE inline
     bool operator==(arg_index_iterator other) const
     {
-        return (iter_ == other.iter_) && (offset_ == other.offset_);
+        return (iterator_ == other.iterator_) && (offset_ == other.offset_);
     }
 
     ROCPRIM_HOST_DEVICE inline
     bool operator!=(arg_index_iterator other) const
     {
-        return (iter_ != other.iter_) || (offset_ != other.offset_);
+        return (iterator_ != other.iterator_) || (offset_ != other.offset_);
     }
-    
+
+    ROCPRIM_HOST_DEVICE inline
+    bool operator<(arg_index_iterator other) const
+    {
+        return (iterator_ - other.iterator_) > 0;
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    bool operator<=(arg_index_iterator other) const
+    {
+        return (iterator_ - other.iterator_) >= 0;
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    bool operator>(arg_index_iterator other) const
+    {
+        return (iterator_ - other.iterator_) < 0;
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    bool operator>=(arg_index_iterator other) const
+    {
+        return (iterator_ - other.iterator_) <= 0;
+    }
+
     ROCPRIM_HOST_DEVICE inline
     void normalize()
     {
-        iter_ += offset_;
         offset_ = 0;
     }
-    
-    friend std::ostream& operator<<(std::ostream& os, const counting_iterator& iter)
-    {
-        os << "[" << iter.value_ << "]";
-        return os;
-    }
-    
+
 private:
-    IteratorT iter_;
+    InputIterator iterator_;
     difference_type offset_;
 };
+
+template<
+    class InputIterator,
+    class Difference,
+    class Value
+>
+ROCPRIM_HOST_DEVICE inline
+arg_index_iterator<InputIterator, Difference, Value>
+operator+(typename arg_index_iterator<InputIterator, Difference, Value>::difference_type distance,
+          const arg_index_iterator<InputIterator, Difference, Value>& iterator)
+{
+    return iterator + distance;
+}
+
+template<
+    class InputIterator,
+    class Difference = std::ptrdiff_t,
+    class Value = typename std::iterator_traits<InputIterator>::value_type
+>
+ROCPRIM_HOST_DEVICE inline
+arg_index_iterator<InputIterator, Difference, Value>
+make_arg_index_iterator(InputIterator iterator, Difference offset = 0)
+{
+    return arg_index_iterator<InputIterator, Difference, Value>(iterator, offset);
+}
 
 END_ROCPRIM_NAMESPACE
 
