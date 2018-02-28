@@ -207,17 +207,6 @@ private:
 
 template<
     class Incrementable,
-    class Difference = std::ptrdiff_t
->
-ROCPRIM_HOST_DEVICE inline
-counting_iterator<Incrementable, Difference>
-make_counting_iterator(Incrementable value)
-{
-    return counting_iterator<Incrementable, Difference>(value);
-}
-
-template<
-    class Incrementable,
     class Difference
 >
 ROCPRIM_HOST_DEVICE inline
@@ -226,6 +215,17 @@ operator+(typename counting_iterator<Incrementable, Difference>::difference_type
           const counting_iterator<Incrementable, Difference>& iter)
 {
     return iter + distance;
+}
+
+template<
+    class Incrementable,
+    class Difference = std::ptrdiff_t
+>
+ROCPRIM_HOST_DEVICE inline
+counting_iterator<Incrementable, Difference>
+make_counting_iterator(Incrementable value)
+{
+    return counting_iterator<Incrementable, Difference>(value);
 }
 
 END_ROCPRIM_NAMESPACE
