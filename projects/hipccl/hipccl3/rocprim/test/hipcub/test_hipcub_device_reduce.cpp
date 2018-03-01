@@ -280,7 +280,9 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceMinimum)
 TYPED_TEST(HipcubDeviceReduceTests, ReduceArgMinimum)
 {
     using T = typename TestFixture::input_type;
-    using key_value = hipcub::KeyValuePair<int, T>;
+    using Iterator = typename hipcub::ArgIndexInputIterator<T*>;
+    using key_value = typename Iterator::value_type;
+    using difference_type = typename Iterator::difference_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
     const std::vector<size_t> sizes = get_sizes();
@@ -293,33 +295,30 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceArgMinimum)
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
         // Generate data
-        std::vector<key_value> input(size);
-        for (size_t i = 0; i < size; i++)
-        {
-            input[i].key = i;
-            input[i].value = test_utils::get_random_value<T>(1, 100);
-        }
+        std::vector<T> input = test_utils::get_random_data<T>(size, 1, 200);
         std::vector<key_value> output(1);
 
-        key_value * d_input;
+        T * d_input;
         key_value * d_output;
-        HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(key_value)));
+        HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
         HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(key_value)));
         HIP_CHECK(
             hipMemcpy(
                 d_input, input.data(),
-                input.size() * sizeof(key_value),
+                input.size() * sizeof(T),
                 hipMemcpyHostToDevice
             )
         );
         HIP_CHECK(hipDeviceSynchronize());
         HIP_CHECK(hipStreamSynchronize(stream));
+        
+        Iterator d_iter(d_input);
 
-        //arg_min reduce_op;
-        const key_value max(std::numeric_limits<int>::max(), std::numeric_limits<T>::max());
+        const key_value max(std::numeric_limits<difference_type>::max(), std::numeric_limits<T>::max());
 
         // Calculate expected results on host
-        key_value expected = std::accumulate(input.begin(), input.end(), max, hipcub::ArgMin());
+        Iterator x(input.data());
+        key_value expected = std::accumulate(x, x + size, max, hipcub::ArgMin());
 
         // temp storage
         size_t temp_storage_size_bytes;
@@ -328,7 +327,7 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceArgMinimum)
         HIP_CHECK(
             hipcub::DeviceReduce::Reduce(
                 d_temp_storage, temp_storage_size_bytes,
-                d_input, d_output, input.size(), hipcub::ArgMin(),
+                d_iter, d_output, input.size(), hipcub::ArgMin(),
                 max, stream, debug_synchronous
             )
         );
@@ -345,7 +344,7 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceArgMinimum)
         HIP_CHECK(
             hipcub::DeviceReduce::Reduce(
                 d_temp_storage, temp_storage_size_bytes,
-                d_input, d_output, input.size(), hipcub::ArgMin(),
+                d_iter, d_output, input.size(), hipcub::ArgMin(),
                 max, stream, debug_synchronous
             )
         );

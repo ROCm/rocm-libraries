@@ -31,7 +31,6 @@
 #include <hcc/hc.hpp>
 // rocPRIM API
 #include <rocprim.hpp>
-#include "iterator/arg_index_iterator.hpp"
 
 #include "test_utils.hpp"
 
