@@ -26,11 +26,14 @@
 BEGIN_ROCPRIM_NAMESPACE
 
 template<
-    class Key,
-    class Value
+    class Key_,
+    class Value_
 >
 struct key_value_pair
 {
+    using Key = Key_;
+    using Value = Value_;
+
     Key key;
     Value value;
 

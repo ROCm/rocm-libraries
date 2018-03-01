@@ -25,6 +25,7 @@
 #include <iterator>
 
 #include "../../config.hpp"
+#include "../iterator/arg_index_input_iterator.hpp"
 #include "../thread/thread_operators.hpp"
 
 BEGIN_HIPCUB_NAMESPACE
@@ -111,15 +112,26 @@ public:
                       hipStream_t stream = 0,
                       bool debug_synchronous = false)
     {
-        // TODO implement when ArgIndexInputIterator is ready
-        (void) d_temp_storage;
-        (void) temp_storage_bytes;
-        (void) d_in;
-        (void) d_out;
-        (void) num_items;
-        (void) stream;
-        (void) debug_synchronous;
-        return hipErrorUnknown;
+        using OffsetT = int;
+        using T = typename std::iterator_traits<InputIteratorT>::value_type;
+        using O = typename std::iterator_traits<OutputIteratorT>::value_type;
+        using OutputTupleT = typename std::conditional<
+                                 std::is_same<O, void>::value,
+                                 KeyValuePair<OffsetT, T>,
+                                 O
+                             >::type;
+        
+        using OutputValueT = typename OutputTupleT::Value;
+        using IteratorT = ArgIndexInputIterator<InputIteratorT, OffsetT, OutputValueT>;
+        
+        IteratorT d_indexed_in(d_in);
+        const OutputTupleT init(1, std::numeric_limits<T>::max());
+        
+        return ::rocprim::reduce(
+            d_temp_storage, temp_storage_bytes,
+            d_indexed_in, d_out, init, num_items, ::hipcub::ArgMin(),
+            stream, debug_synchronous
+        );
     }
 
     template <
@@ -156,15 +168,26 @@ public:
                       hipStream_t stream = 0,
                       bool debug_synchronous = false)
     {
-        // TODO implement when ArgIndexInputIterator is ready
-        (void) d_temp_storage;
-        (void) temp_storage_bytes;
-        (void) d_in;
-        (void) d_out;
-        (void) num_items;
-        (void) stream;
-        (void) debug_synchronous;
-        return hipErrorUnknown;
+        using OffsetT = int;
+        using T = typename std::iterator_traits<InputIteratorT>::value_type;
+        using O = typename std::iterator_traits<OutputIteratorT>::value_type;
+        using OutputTupleT = typename std::conditional<
+                                 std::is_same<O, void>::value,
+                                 KeyValuePair<OffsetT, T>,
+                                 O
+                             >::type;
+        
+        using OutputValueT = typename OutputTupleT::Value;
+        using IteratorT = ArgIndexInputIterator<InputIteratorT, OffsetT, OutputValueT>;
+        
+        IteratorT d_indexed_in(d_in);
+        const OutputTupleT init(1, std::numeric_limits<T>::min());
+        
+        return ::rocprim::reduce(
+            d_temp_storage, temp_storage_bytes,
+            d_indexed_in, d_out, init, num_items, ::hipcub::ArgMax(),
+            stream, debug_synchronous
+        );
     }
 
     template<
