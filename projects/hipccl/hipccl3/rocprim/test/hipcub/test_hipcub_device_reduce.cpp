@@ -277,21 +277,6 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceMinimum)
     }
 }
 
-struct arg_min
-{
-    template<
-        class Key,
-        class Value
-    >
-    HIPCUB_HOST_DEVICE inline
-    constexpr hipcub::KeyValuePair<Key, Value>
-    operator()(const hipcub::KeyValuePair<Key, Value>& a,
-               const hipcub::KeyValuePair<Key, Value>& b) const
-    {
-        return ((b.value < a.value) || ((a.value == b.value) && (b.key < a.key))) ? b : a;
-    }
-};
-
 TYPED_TEST(HipcubDeviceReduceTests, ReduceArgMinimum)
 {
     using T = typename TestFixture::input_type;
@@ -330,11 +315,11 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceArgMinimum)
         HIP_CHECK(hipDeviceSynchronize());
         HIP_CHECK(hipStreamSynchronize(stream));
 
-        arg_min reduce_op;
+        //arg_min reduce_op;
         const key_value max(std::numeric_limits<int>::max(), std::numeric_limits<T>::max());
 
         // Calculate expected results on host
-        key_value expected = std::accumulate(input.begin(), input.end(), max, reduce_op);
+        key_value expected = std::accumulate(input.begin(), input.end(), max, hipcub::ArgMin());
 
         // temp storage
         size_t temp_storage_size_bytes;
@@ -343,7 +328,7 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceArgMinimum)
         HIP_CHECK(
             hipcub::DeviceReduce::Reduce(
                 d_temp_storage, temp_storage_size_bytes,
-                d_input, d_output, input.size(), reduce_op,
+                d_input, d_output, input.size(), hipcub::ArgMin(),
                 max, stream, debug_synchronous
             )
         );
@@ -360,7 +345,7 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceArgMinimum)
         HIP_CHECK(
             hipcub::DeviceReduce::Reduce(
                 d_temp_storage, temp_storage_size_bytes,
-                d_input, d_output, input.size(), reduce_op,
+                d_input, d_output, input.size(), hipcub::ArgMin(),
                 max, stream, debug_synchronous
             )
         );
