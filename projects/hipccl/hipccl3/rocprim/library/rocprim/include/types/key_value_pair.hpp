@@ -31,11 +31,16 @@ template<
 >
 struct key_value_pair
 {
+    #ifndef DOXYGEN_SHOULD_SKIP_THIS
     using Key = Key_;
     using Value = Value_;
+    #endif
+    
+    using key_type = Key_;
+    using value_type = Value_;
 
-    Key key;
-    Value value;
+    key_type key;
+    value_type value;
 
     ROCPRIM_HOST_DEVICE inline
     key_value_pair() = default;
@@ -44,7 +49,7 @@ struct key_value_pair
     ~key_value_pair() = default;
 
     ROCPRIM_HOST_DEVICE inline
-    key_value_pair(const Key key, const Value value) : key(key), value(value)
+    key_value_pair(const key_type key, const value_type value) : key(key), value(value)
     {
     }
 

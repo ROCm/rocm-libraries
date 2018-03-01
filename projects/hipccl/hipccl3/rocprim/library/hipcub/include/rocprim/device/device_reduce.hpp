@@ -181,7 +181,7 @@ public:
         using IteratorT = ArgIndexInputIterator<InputIteratorT, OffsetT, OutputValueT>;
         
         IteratorT d_indexed_in(d_in);
-        const OutputTupleT init(1, std::numeric_limits<T>::min());
+        const OutputTupleT init(1, std::numeric_limits<T>::lowest());
         
         return ::rocprim::reduce(
             d_temp_storage, temp_storage_bytes,
