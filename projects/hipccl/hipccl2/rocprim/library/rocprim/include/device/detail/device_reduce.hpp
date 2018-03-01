@@ -77,6 +77,7 @@ template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
     bool WithInitialValue,
+    class ResultType,
     class InputIterator,
     class OutputIterator,
     class InitValueType,
@@ -89,7 +90,13 @@ void block_reduce_kernel_impl(InputIterator input,
                               InitValueType initial_value,
                               BinaryFunction reduce_op)
 {
-    using output_type = typename std::iterator_traits<OutputIterator>::value_type;
+    using O = typename std::iterator_traits<OutputIterator>::value_type;
+    using output_type = typename std::conditional<
+                                 std::is_same<O, void>::value,
+                                 ResultType,
+                                 O
+                             >::type;
+
     using block_reduce_type = ::rocprim::block_reduce<
         output_type, BlockSize,
         ::rocprim::block_reduce_algorithm::using_warp_reduce
