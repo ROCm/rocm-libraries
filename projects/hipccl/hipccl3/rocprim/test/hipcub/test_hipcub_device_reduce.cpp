@@ -280,9 +280,8 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceMinimum)
 TYPED_TEST(HipcubDeviceReduceTests, ReduceArgMinimum)
 {
     using T = typename TestFixture::input_type;
-    using Iterator = typename hipcub::ArgIndexInputIterator<T*>;
+    using Iterator = typename hipcub::ArgIndexInputIterator<T*, int>;
     using key_value = typename Iterator::value_type;
-    using difference_type = typename Iterator::difference_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
     const std::vector<size_t> sizes = get_sizes();
@@ -312,9 +311,7 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceArgMinimum)
         HIP_CHECK(hipDeviceSynchronize());
         HIP_CHECK(hipStreamSynchronize(stream));
         
-        Iterator d_iter(d_input);
-
-        const key_value max(std::numeric_limits<difference_type>::max(), std::numeric_limits<T>::max());
+        const key_value max(1, std::numeric_limits<T>::max());
 
         // Calculate expected results on host
         Iterator x(input.data());
@@ -325,10 +322,10 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceArgMinimum)
         void * d_temp_storage = nullptr;
         // Get size of d_temp_storage
         HIP_CHECK(
-            hipcub::DeviceReduce::Reduce(
+            hipcub::DeviceReduce::ArgMin(
                 d_temp_storage, temp_storage_size_bytes,
-                d_iter, d_output, input.size(), hipcub::ArgMin(),
-                max, stream, debug_synchronous
+                d_input, d_output, input.size(),
+                stream, debug_synchronous
             )
         );
 
@@ -342,10 +339,10 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceArgMinimum)
 
         // Run
         HIP_CHECK(
-            hipcub::DeviceReduce::Reduce(
+            hipcub::DeviceReduce::ArgMin(
                 d_temp_storage, temp_storage_size_bytes,
-                d_iter, d_output, input.size(), hipcub::ArgMin(),
-                max, stream, debug_synchronous
+                d_input, d_output, input.size(),
+                stream, debug_synchronous
             )
         );
         HIP_CHECK(hipPeekAtLastError());
