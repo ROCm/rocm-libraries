@@ -30,7 +30,7 @@
 // HC API
 #include <hcc/hc.hpp>
 // rocPRIM API
-#include "iterator/counting_iterator.hpp"
+#include <rocprim.hpp>
 
 #include "test_utils.hpp"
 
