@@ -215,10 +215,13 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceMinimum)
         );
         HIP_CHECK(hipDeviceSynchronize());
         HIP_CHECK(hipStreamSynchronize(stream));
-        
+
         hipcub::Min min_op;
         // Calculate expected results on host
-        U expected = std::accumulate(input.begin(), input.end(), std::numeric_limits<U>::max(), min_op);
+        U expected = std::accumulate(
+            input.begin(), input.end(),
+            std::numeric_limits<U>::max(), min_op
+        );
 
         // temp storage
         size_t temp_storage_size_bytes;
@@ -308,7 +311,7 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceArgMinimum)
         );
         HIP_CHECK(hipDeviceSynchronize());
         HIP_CHECK(hipStreamSynchronize(stream));
-        
+
         const key_value max(1, std::numeric_limits<T>::max());
 
         // Calculate expected results on host
@@ -404,7 +407,7 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceArgMaximum)
         );
         HIP_CHECK(hipDeviceSynchronize());
         HIP_CHECK(hipStreamSynchronize(stream));
-        
+
         const key_value max(1, std::numeric_limits<T>::lowest());
 
         // Calculate expected results on host
