@@ -312,19 +312,19 @@ template<
 >
 inline
 hipError_t segmented_radix_sort_pairs(void * temporary_storage,
-                            size_t& temporary_storage_bytes,
-                            KeysInputIterator keys_input,
-                            KeysOutputIterator keys_output,
-                            ValuesInputIterator values_input,
-                            ValuesOutputIterator values_output,
-                            unsigned int size,
-                            unsigned int segments,
-                            OffsetIterator begin_offsets,
-                            OffsetIterator end_offsets,
-                            unsigned int begin_bit = 0,
-                            unsigned int end_bit = 8 * sizeof(Key),
-                            hipStream_t stream = 0,
-                            bool debug_synchronous = false)
+                                      size_t& temporary_storage_bytes,
+                                      KeysInputIterator keys_input,
+                                      KeysOutputIterator keys_output,
+                                      ValuesInputIterator values_input,
+                                      ValuesOutputIterator values_output,
+                                      unsigned int size,
+                                      unsigned int segments,
+                                      OffsetIterator begin_offsets,
+                                      OffsetIterator end_offsets,
+                                      unsigned int begin_bit = 0,
+                                      unsigned int end_bit = 8 * sizeof(Key),
+                                      hipStream_t stream = 0,
+                                      bool debug_synchronous = false)
 {
     bool ignored;
     return detail::segmented_radix_sort_impl<false>(

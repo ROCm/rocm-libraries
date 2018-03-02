@@ -77,6 +77,7 @@ add_rocprim_test_hc("rocprim.hc.device_radix_sort" test_hc_device_radix_sort.cpp
 add_rocprim_test_hc("rocprim.hc.device_reduce_by_key" test_hc_device_reduce_by_key.cpp)
 add_rocprim_test_hc("rocprim.hc.device_reduce" test_hc_device_reduce.cpp)
 add_rocprim_test_hc("rocprim.hc.device_scan" test_hc_device_scan.cpp)
+add_rocprim_test_hc("rocprim.hc.device_segmented_radix_sort" test_hc_device_segmented_radix_sort.cpp)
 add_rocprim_test_hc("rocprim.hc.device_segmented_reduce" test_hc_device_segmented_reduce.cpp)
 add_rocprim_test_hc("rocprim.hc.device_transform" test_hc_device_transform.cpp)
 add_rocprim_test_hc("rocprim.hc.intrinsics" test_hc_intrinsics.cpp)
