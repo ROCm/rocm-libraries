@@ -113,9 +113,9 @@ void shuffle_up_kernel(T* data, unsigned int src_offset)
     // first_thread argument is ignored in hipCUB with rocPRIM-backend
     const unsigned int first_thread = 0;
     // Using mask is not supported in rocPRIM, so we don't test other masks
-    const unsigned int memeber_mask = 0xffffffff;
+    const unsigned int member_mask = 0xffffffff;
     value = hipcub::ShuffleUp<LOGICAL_WARP_THREADS>(
-        value, src_offset, first_thread, memeber_mask
+        value, src_offset, first_thread, member_mask
     );
 
     data[index] = value;
@@ -135,7 +135,7 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleUp)
     auto src_offsets = test_utils::get_random_data<unsigned int>(
         std::max<size_t>(1, logical_warp_size/2),
         1U,
-        logical_warp_size - 1
+        std::max<unsigned int>(1, logical_warp_size - 1)
     );
 
     T* device_data;
@@ -207,9 +207,9 @@ void shuffle_down_kernel(T* data, unsigned int src_offset)
     // last_thread argument is ignored in hipCUB with rocPRIM-backend
     const unsigned int last_thread = LOGICAL_WARP_THREADS - 1;
     // Using mask is not supported in rocPRIM, so we don't test other masks
-    const unsigned int memeber_mask = 0xffffffff;
+    const unsigned int member_mask = 0xffffffff;
     value = hipcub::ShuffleDown<LOGICAL_WARP_THREADS>(
-        value, src_offset, last_thread, memeber_mask
+        value, src_offset, last_thread, member_mask
     );
 
     data[index] = value;
@@ -229,7 +229,7 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleDown)
     auto src_offsets = test_utils::get_random_data<unsigned int>(
         std::max<size_t>(1, logical_warp_size/2),
         1U,
-        logical_warp_size - 1
+        std::max<unsigned int>(1, logical_warp_size - 1)
     );
 
     T * device_data;
@@ -299,9 +299,9 @@ void shuffle_index_kernel(T* data, int* src_offsets)
     T value = data[index];
 
     // Using mask is not supported in rocPRIM, so we don't test other masks
-    const unsigned int memeber_mask = 0xffffffff;
+    const unsigned int member_mask = 0xffffffff;
     value = hipcub::ShuffleIndex<LOGICAL_WARP_THREADS>(
-        value, src_offsets[hipThreadIdx_x/LOGICAL_WARP_THREADS], memeber_mask
+        value, src_offsets[hipThreadIdx_x/LOGICAL_WARP_THREADS], member_mask
     );
 
     data[index] = value;
@@ -319,7 +319,7 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleIndex)
     std::vector<T> output(input.size());
 
     auto src_offsets = test_utils::get_random_data<int>(
-        hardware_warp_size/logical_warp_size, 0, logical_warp_size-1
+        hardware_warp_size/logical_warp_size, 0, std::max<int>(1, logical_warp_size - 1)
     );
 
     // Calculate expected results on host
@@ -415,7 +415,7 @@ TEST(HipcubUtilPtxTests, ShuffleUpCustomStruct)
     auto src_offsets = test_utils::get_random_data<unsigned int>(
         std::max<size_t>(1, logical_warp_size/2),
         1U,
-        logical_warp_size - 1
+        std::max<unsigned int>(1, logical_warp_size - 1)
     );
 
     T* device_data;
@@ -497,7 +497,7 @@ TEST(HipcubUtilPtxTests, ShuffleUpCustomAlignedStruct)
     auto src_offsets = test_utils::get_random_data<unsigned int>(
         std::max<size_t>(1, logical_warp_size/2),
         1U,
-        logical_warp_size - 1
+        std::max<unsigned int>(1, logical_warp_size - 1)
     );
 
     T* device_data;
