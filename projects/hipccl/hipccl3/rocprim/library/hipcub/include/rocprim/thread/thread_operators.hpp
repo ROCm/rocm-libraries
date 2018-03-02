@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_THREAD_THREAD_OPERATORS_HPP_
-#define ROCPRIM_THREAD_THREAD_OPERATORS_HPP_
+#ifndef HIBCUB_ROCPRIM_THREAD_THREAD_OPERATORS_HPP_
+#define HIBCUB_ROCPRIM_THREAD_THREAD_OPERATORS_HPP_
 
 #include "../../config.hpp"
 
@@ -91,6 +91,36 @@ struct Min
     }
 };
 
+struct ArgMax
+{
+    template<
+        class Key,
+        class Value
+    >
+    HIPCUB_HOST_DEVICE inline
+    constexpr KeyValuePair<Key, Value>
+    operator()(const KeyValuePair<Key, Value>& a,
+               const KeyValuePair<Key, Value>& b) const
+    {
+        return ((b.value > a.value) || ((a.value == b.value) && (b.key < a.key))) ? b : a;
+    }
+};
+
+struct ArgMin
+{
+    template<
+        class Key,
+        class Value
+    >
+    HIPCUB_HOST_DEVICE inline
+    constexpr KeyValuePair<Key, Value>
+    operator()(const KeyValuePair<Key, Value>& a,
+               const KeyValuePair<Key, Value>& b) const
+    {
+        return ((b.value < a.value) || ((a.value == b.value) && (b.key < a.key))) ? b : a;
+    }
+};
+
 END_HIPCUB_NAMESPACE
 
-#endif // ROCPRIM_THREAD_THREAD_OPERATORS_HPP_
+#endif // HIBCUB_ROCPRIM_THREAD_THREAD_OPERATORS_HPP_

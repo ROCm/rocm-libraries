@@ -32,7 +32,7 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_hcc.h>
 // rocPRIM API
-#include "iterator/counting_iterator.hpp"
+#include <rocprim.hpp>
 
 #include "test_utils.hpp"
 

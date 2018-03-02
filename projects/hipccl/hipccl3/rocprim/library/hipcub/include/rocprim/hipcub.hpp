@@ -27,6 +27,9 @@
 #include "util_ptx.hpp"
 #include "thread/thread_operators.hpp"
 
+// Iterator
+#include "iterator/arg_index_input_iterator.hpp"
+
 // Warp
 #include "warp/warp_reduce.hpp"
 #include "warp/warp_scan.hpp"

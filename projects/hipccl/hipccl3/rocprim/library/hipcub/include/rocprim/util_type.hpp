@@ -63,6 +63,12 @@ struct DoubleBuffer
     }
 };
 
+template<
+    class Key,
+    class Value
+>
+using KeyValuePair = ::rocprim::key_value_pair<Key, Value>;
+
 namespace detail
 {
 
