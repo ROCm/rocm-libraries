@@ -90,12 +90,12 @@ void block_reduce_kernel_impl(InputIterator input,
                               InitValueType initial_value,
                               BinaryFunction reduce_op)
 {
-    using O = typename std::iterator_traits<OutputIterator>::value_type;
+    using output_value_type = typename std::iterator_traits<OutputIterator>::value_type;
     using output_type = typename std::conditional<
-                                 std::is_same<O, void>::value,
-                                 ResultType,
-                                 O
-                             >::type;
+        std::is_same<output_value_type, void>::value,
+        ResultType,
+        output_value_type
+    >::type;
 
     using block_reduce_type = ::rocprim::block_reduce<
         output_type, BlockSize,
