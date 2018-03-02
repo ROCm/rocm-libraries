@@ -55,6 +55,9 @@ const size_t DEFAULT_N = 1024 * 1024 * 32;
 
 namespace rp = rocprim;
 
+const unsigned int batch_size = 10;
+const unsigned int warmup_size = 5;
+
 template<class T>
 void run_benchmark(benchmark::State& state, size_t desired_segments, hipStream_t stream, size_t size)
 {
@@ -127,7 +130,7 @@ void run_benchmark(benchmark::State& state, size_t desired_segments, hipStream_t
     HIP_CHECK(hipDeviceSynchronize());
 
     // Warm-up
-    for(size_t i = 0; i < 10; i++)
+    for(size_t i = 0; i < warmup_size; i++)
     {
         HIP_CHECK(
             rp::segmented_reduce(
@@ -142,7 +145,6 @@ void run_benchmark(benchmark::State& state, size_t desired_segments, hipStream_t
     }
     HIP_CHECK(hipDeviceSynchronize());
 
-    const unsigned int batch_size = 10;
     for (auto _ : state)
     {
         auto start = std::chrono::high_resolution_clock::now();
@@ -176,24 +178,51 @@ void run_benchmark(benchmark::State& state, size_t desired_segments, hipStream_t
     HIP_CHECK(hipFree(d_aggregates_output));
 }
 
-#define CREATE_BENCHMARK(T) \
+#define CREATE_BENCHMARK(T, SEGMENTS) \
 benchmark::RegisterBenchmark( \
     (std::string("segmented_reduce") + "<" #T ">" + \
-        "(~" + std::to_string(segments) + " segments)" \
+        "(~" + std::to_string(SEGMENTS) + " segments)" \
     ).c_str(), \
     run_benchmark<T>, \
-    segments, stream, size \
+    SEGMENTS, stream, size \
 )
 
-void add_benchmarks(size_t segments,
-                    std::vector<benchmark::internal::Benchmark*>& benchmarks,
+void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                     hipStream_t stream,
                     size_t size)
 {
+    using custom_float2 = custom_type<float, float>;
+    using custom_double2 = custom_type<double, double>;
+
     std::vector<benchmark::internal::Benchmark*> bs =
     {
-        CREATE_BENCHMARK(float),
-        CREATE_BENCHMARK(double),
+        CREATE_BENCHMARK(float, 1),
+        CREATE_BENCHMARK(float, 10),
+        CREATE_BENCHMARK(float, 100),
+        CREATE_BENCHMARK(float, 1000),
+        CREATE_BENCHMARK(float, 10000),
+        CREATE_BENCHMARK(float, 100000),
+
+        CREATE_BENCHMARK(double, 1),
+        CREATE_BENCHMARK(double, 10),
+        CREATE_BENCHMARK(double, 100),
+        CREATE_BENCHMARK(double, 1000),
+        CREATE_BENCHMARK(double, 10000),
+        CREATE_BENCHMARK(double, 100000),
+
+        CREATE_BENCHMARK(custom_float2, 1),
+        CREATE_BENCHMARK(custom_float2, 10),
+        CREATE_BENCHMARK(custom_float2, 100),
+        CREATE_BENCHMARK(custom_float2, 1000),
+        CREATE_BENCHMARK(custom_float2, 10000),
+        CREATE_BENCHMARK(custom_float2, 100000),
+
+        CREATE_BENCHMARK(custom_double2, 1),
+        CREATE_BENCHMARK(custom_double2, 10),
+        CREATE_BENCHMARK(custom_double2, 100),
+        CREATE_BENCHMARK(custom_double2, 1000),
+        CREATE_BENCHMARK(custom_double2, 10000),
+        CREATE_BENCHMARK(custom_double2, 100000),
     };
 
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
@@ -221,12 +250,7 @@ int main(int argc, char *argv[])
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_benchmarks(1, benchmarks, stream, size);
-    add_benchmarks(10, benchmarks, stream, size);
-    add_benchmarks(100, benchmarks, stream, size);
-    add_benchmarks(1000, benchmarks, stream, size);
-    add_benchmarks(10000, benchmarks, stream, size);
-    add_benchmarks(100000, benchmarks, stream, size);
+    add_benchmarks(benchmarks, stream, size);
 
     // Use manual timing
     for(auto& b : benchmarks)
