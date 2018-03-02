@@ -42,6 +42,7 @@
 namespace rp = rocprim;
 
 #define HIP_CHECK(error) ASSERT_EQ(static_cast<hipError_t>(error), hipSuccess)
+
 template<
     class Key,
     class Value,
