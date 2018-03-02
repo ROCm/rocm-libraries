@@ -81,6 +81,7 @@ add_rocprim_test_hc("rocprim.hc.device_segmented_radix_sort" test_hc_device_segm
 add_rocprim_test_hc("rocprim.hc.device_segmented_reduce" test_hc_device_segmented_reduce.cpp)
 add_rocprim_test_hc("rocprim.hc.device_transform" test_hc_device_transform.cpp)
 add_rocprim_test_hc("rocprim.hc.intrinsics" test_hc_intrinsics.cpp)
+add_rocprim_test_hc("rocprim.hc.transform_iterator" test_hc_transform_iterator.cpp)
 add_rocprim_test_hc("rocprim.hc.warp_reduce" test_hc_warp_reduce.cpp)
 add_rocprim_test_hc("rocprim.hc.warp_scan" test_hc_warp_scan.cpp)
 add_rocprim_test_hc("rocprim.hc.warp_sort" test_hc_warp_sort.cpp)
