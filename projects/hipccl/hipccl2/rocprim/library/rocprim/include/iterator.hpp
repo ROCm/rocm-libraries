@@ -25,5 +25,6 @@
 #include "config.hpp"
 
 #include "iterator/counting_iterator.hpp"
+#include "iterator/arg_index_iterator.hpp"
 
 #endif // ROCPRIM_ITERATOR_HPP_

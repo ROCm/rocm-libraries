@@ -28,10 +28,12 @@
 // Meta configuration for rocPRIM
 #include "config.hpp"
 
+#include "rocprim_version.hpp"
+
 #include "intrinsics.hpp"
 #include "functional.hpp"
 #include "types.hpp"
-#include "rocprim_version.hpp"
+#include "iterator.hpp"
 
 #include "warp/warp_reduce.hpp"
 #include "warp/warp_scan.hpp"
