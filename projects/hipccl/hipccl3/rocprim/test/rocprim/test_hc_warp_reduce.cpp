@@ -333,7 +333,7 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSumValid)
             tile_static typename wreduce_t::storage_type storage[warps_no];
             wreduce_t().reduce(value, value, valid, storage[warp_id]);
 
-             d_output[i] = value;
+            d_output[i] = value;
         }
     );
     d_input.synchronize();
