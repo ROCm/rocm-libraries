@@ -48,6 +48,10 @@ public:
     using difference_type = Difference;
     using iterator_category = std::random_access_iterator_tag;
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+    using self_type = arg_index_iterator;
+#endif
+
     static_assert(
         std::is_same<input_category, iterator_category>::value,
         "InputIterator must be a random-access iterator"
@@ -173,6 +177,11 @@ public:
     void normalize()
     {
         offset_ = 0;
+    }
+
+    friend std::ostream& operator<<(std::ostream& os, const arg_index_iterator& /* iter */)
+    {
+        return os;
     }
 
 private:
