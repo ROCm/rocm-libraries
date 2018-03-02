@@ -115,18 +115,19 @@ public:
         using OffsetT = int;
         using T = typename std::iterator_traits<InputIteratorT>::value_type;
         using O = typename std::iterator_traits<OutputIteratorT>::value_type;
-        using OutputTupleT = typename std::conditional<
-                                 std::is_same<O, void>::value,
-                                 KeyValuePair<OffsetT, T>,
-                                 O
-                             >::type;
-        
+        using OutputTupleT =
+            typename std::conditional<
+                std::is_same<O, void>::value,
+                KeyValuePair<OffsetT, T>,
+                O
+            >::type;
+
         using OutputValueT = typename OutputTupleT::Value;
         using IteratorT = ArgIndexInputIterator<InputIteratorT, OffsetT, OutputValueT>;
-        
+
         IteratorT d_indexed_in(d_in);
         const OutputTupleT init(1, std::numeric_limits<T>::max());
-        
+
         return ::rocprim::reduce(
             d_temp_storage, temp_storage_bytes,
             d_indexed_in, d_out, init, num_items, ::hipcub::ArgMin(),
@@ -171,18 +172,19 @@ public:
         using OffsetT = int;
         using T = typename std::iterator_traits<InputIteratorT>::value_type;
         using O = typename std::iterator_traits<OutputIteratorT>::value_type;
-        using OutputTupleT = typename std::conditional<
-                                 std::is_same<O, void>::value,
-                                 KeyValuePair<OffsetT, T>,
-                                 O
-                             >::type;
-        
+        using OutputTupleT =
+            typename std::conditional<
+                std::is_same<O, void>::value,
+                KeyValuePair<OffsetT, T>,
+                O
+            >::type;
+
         using OutputValueT = typename OutputTupleT::Value;
         using IteratorT = ArgIndexInputIterator<InputIteratorT, OffsetT, OutputValueT>;
-        
+
         IteratorT d_indexed_in(d_in);
         const OutputTupleT init(1, std::numeric_limits<T>::lowest());
-        
+
         return ::rocprim::reduce(
             d_temp_storage, temp_storage_bytes,
             d_indexed_in, d_out, init, num_items, ::hipcub::ArgMax(),
