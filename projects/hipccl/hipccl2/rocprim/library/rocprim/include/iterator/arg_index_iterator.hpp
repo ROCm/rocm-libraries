@@ -40,18 +40,18 @@ class arg_index_iterator
 {
 private:
     using input_category = typename std::iterator_traits<InputIterator>::iterator_category;
-    
+
 public:
     using value_type = ::rocprim::key_value_pair<Difference, Value>;
     using reference = const value_type&;
     using pointer = const value_type*;
     using difference_type = Difference;
     using iterator_category = std::random_access_iterator_tag;
-    static_assert(std::is_same<input_category, iterator_category>::value,
-                  "InputIterator must be a random-access iterator");
 
-    ROCPRIM_HOST_DEVICE inline
-    arg_index_iterator() = default;
+    static_assert(
+        std::is_same<input_category, iterator_category>::value,
+        "InputIterator must be a random-access iterator"
+    );
 
     ROCPRIM_HOST_DEVICE inline
     ~arg_index_iterator() = default;
