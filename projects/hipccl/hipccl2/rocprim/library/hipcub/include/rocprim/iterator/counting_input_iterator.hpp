@@ -18,20 +18,19 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef HIPCUB_ROCPRIM_ITERATOR_ARG_INDEX_INPUT_ITERATOR_HPP_
-#define HIPCUB_ROCPRIM_ITERATOR_ARG_INDEX_INPUT_ITERATOR_HPP_
+#ifndef HIPCUB_ROCPRIM_ITERATOR_COUNTING_INPUT_ITERATOR_HPP_
+#define HIPCUB_ROCPRIM_ITERATOR_COUNTING_INPUT_ITERATOR_HPP_
 
 #include "../../config.hpp"
 
 BEGIN_HIPCUB_NAMESPACE
 
 template<
-    typename InputIterator,
-    typename Difference = std::ptrdiff_t,
-    typename Value = typename std::iterator_traits<InputIterator>::value_type
+    typename ValueType,
+    typename OffsetT = std::ptrdiff_t
 >
-using ArgIndexInputIterator = ::rocprim::arg_index_iterator<InputIterator, Difference, Value>;
+using CountingInputIterator = ::rocprim::counting_iterator<ValueType, OffsetT>;
 
 END_HIPCUB_NAMESPACE
 
-#endif // HIPCUB_ROCPRIM_ITERATOR_ARG_INDEX_INPUT_ITERATOR_HPP_
+#endif // HIPCUB_ROCPRIM_ITERATOR_COUNTING_INPUT_ITERATOR_HPP_
