@@ -43,6 +43,10 @@ public:
     using difference_type = Difference;
     using iterator_category = std::random_access_iterator_tag;
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+    using self_type = counting_iterator;
+#endif
+
     ROCPRIM_HOST_DEVICE inline
     counting_iterator() = default;
 

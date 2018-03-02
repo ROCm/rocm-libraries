@@ -61,6 +61,10 @@ public:
     using iterator_category = std::random_access_iterator_tag;
     using unary_function = UnaryFunction;
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+    using self_type = transform_iterator;
+#endif
+
     ROCPRIM_HOST_DEVICE inline
     ~transform_iterator() = default;
 
@@ -170,6 +174,11 @@ public:
     bool operator>=(transform_iterator other) const
     {
         return iterator_ >= other.iterator_;
+    }
+
+    friend std::ostream& operator<<(std::ostream& os, const transform_iterator& /* iter */)
+    {
+        return os;
     }
 
 private:
