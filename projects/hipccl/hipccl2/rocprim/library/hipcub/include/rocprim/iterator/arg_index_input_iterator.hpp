@@ -18,58 +18,20 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_TYPES_KEY_VALUE_PAIR_HPP_
-#define ROCPRIM_TYPES_KEY_VALUE_PAIR_HPP_
+#ifndef HIPCUB_ROCPRIM_ITERATOR_ARG_INDEX_INPUT_ITERATOR_HPP_
+#define HIPCUB_ROCPRIM_ITERATOR_ARG_INDEX_INPUT_ITERATOR_HPP_
 
-#include "../config.hpp"
+#include "../../config.hpp"
 
-BEGIN_ROCPRIM_NAMESPACE
+BEGIN_HIPCUB_NAMESPACE
 
 template<
-    class Key_,
-    class Value_
+    class InputIterator,
+    class Difference = std::ptrdiff_t,
+    class Value = typename std::iterator_traits<InputIterator>::value_type
 >
-struct key_value_pair
-{
-    #ifndef DOXYGEN_SHOULD_SKIP_THIS
-    using Key = Key_;
-    using Value = Value_;
-    #endif
-    
-    using key_type = Key_;
-    using value_type = Value_;
+using ArgIndexInputIterator = ::rocprim::arg_index_iterator<InputIterator, Difference, Value>;
 
-    key_type key;
-    value_type value;
+END_HIPCUB_NAMESPACE
 
-    ROCPRIM_HOST_DEVICE inline
-    key_value_pair() = default;
-
-    ROCPRIM_HOST_DEVICE inline
-    ~key_value_pair() = default;
-
-    ROCPRIM_HOST_DEVICE inline
-    key_value_pair(const key_type key, const value_type value) : key(key), value(value)
-    {
-    }
-
-    #if __hcc_major__ < 1 || __hcc_major__ == 1 && __hcc_minor__ < 2
-    ROCPRIM_HOST_DEVICE inline
-    key_value_pair& operator =(const key_value_pair& kvb)
-    {
-        key = kvb.key;
-        value = kvb.value;
-        return *this;
-    }
-    #endif
-
-    ROCPRIM_HOST_DEVICE inline
-    bool operator !=(const key_value_pair& kvb)
-    {
-        return (key != kvb.key) || (value != kvb.value);
-    }
-};
-
-END_ROCPRIM_NAMESPACE
-
-#endif // ROCPRIM_TYPES_KEY_VALUE_PAIR_HPP_
+#endif // HIPCUB_ROCPRIM_ITERATOR_ARG_INDEX_INPUT_ITERATOR_HPP_

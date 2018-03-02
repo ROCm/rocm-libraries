@@ -116,7 +116,7 @@ void reduce_impl(void * temporary_storage,
             hc::tiled_extent<1>(grid_size, block_size),
             [=](hc::tiled_index<1>) [[hc]]
             {
-                block_reduce_kernel_impl<block_size, items_per_thread, false>(
+                block_reduce_kernel_impl<block_size, items_per_thread, false, result_type>(
                     input, size, block_prefixes, initial_value, reduce_op
                 );
             }
@@ -149,7 +149,7 @@ void reduce_impl(void * temporary_storage,
             hc::tiled_extent<1>(block_size, block_size),
             [=](hc::tiled_index<1>) [[hc]]
             {
-                block_reduce_kernel_impl<block_size, items_per_thread, WithInitialValue>(
+                block_reduce_kernel_impl<block_size, items_per_thread, WithInitialValue, result_type>(
                     input, size, output, initial_value, reduce_op
                 );
             }

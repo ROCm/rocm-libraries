@@ -41,6 +41,7 @@ template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
     bool WithInitialValue,
+    class ResultType,
     class InputIterator,
     class OutputIterator,
     class InitValueType,
@@ -53,7 +54,7 @@ void block_reduce_kernel(InputIterator input,
                          InitValueType initial_value,
                          BinaryFunction reduce_op)
 {
-    block_reduce_kernel_impl<BlockSize, ItemsPerThread, WithInitialValue>(
+    block_reduce_kernel_impl<BlockSize, ItemsPerThread, WithInitialValue, ResultType>(
         input, size, output, initial_value, reduce_op
     );
 }
@@ -145,7 +146,7 @@ hipError_t reduce_impl(void * temporary_storage,
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(detail::block_reduce_kernel<
-                block_size, items_per_thread, false,
+                block_size, items_per_thread, false, result_type,
                 InputIterator, OutputIterator, InitValueType, BinaryFunction
             >),
             dim3(grid_size), dim3(block_size), 0, stream,
@@ -180,7 +181,7 @@ hipError_t reduce_impl(void * temporary_storage,
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(detail::block_reduce_kernel<
                 single_reduce_block_size, single_reduce_items_per_thread, WithInitialValue,
-                InputIterator, OutputIterator, InitValueType, BinaryFunction
+                result_type, InputIterator, OutputIterator, InitValueType, BinaryFunction
             >),
             dim3(1), dim3(single_reduce_block_size), 0, stream,
             input, size, output, initial_value, reduce_op
