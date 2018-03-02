@@ -24,11 +24,45 @@
 #include <limits>
 #include <iterator>
 
+#include <hip/hip_fp16.h> // __half
+
 #include "../../config.hpp"
 #include "../iterator/arg_index_input_iterator.hpp"
 #include "../thread/thread_operators.hpp"
 
 BEGIN_HIPCUB_NAMESPACE
+namespace detail
+{
+
+template<class T>
+T get_lowest_value()
+{
+    return std::numeric_limits<T>::lowest();
+}
+
+template<>
+__half get_lowest_value<__half>()
+{
+    unsigned short lowest_half = 0xfbff;
+    __half lowest_value = *reinterpret_cast<__half*>(&lowest_half);
+    return lowest_value;
+}
+
+template<class T>
+T get_max_value()
+{
+    return std::numeric_limits<T>::max();
+}
+
+template<>
+__half get_max_value<__half>()
+{
+    unsigned short max_half = 0x7bff;
+    __half max_value = *reinterpret_cast<__half*>(&max_half);
+    return max_value;
+}
+
+} // end detail namespace
 
 class DeviceReduce
 {
@@ -94,7 +128,7 @@ public:
         using T = typename std::iterator_traits<InputIteratorT>::value_type;
         return ::rocprim::reduce(
             d_temp_storage, temp_storage_bytes,
-            d_in, d_out, std::numeric_limits<T>::max(), num_items, ::hipcub::Min(),
+            d_in, d_out, detail::get_max_value<T>(), num_items, ::hipcub::Min(),
             stream, debug_synchronous
         );
     }
@@ -115,18 +149,19 @@ public:
         using OffsetT = int;
         using T = typename std::iterator_traits<InputIteratorT>::value_type;
         using O = typename std::iterator_traits<OutputIteratorT>::value_type;
-        using OutputTupleT = typename std::conditional<
-                                 std::is_same<O, void>::value,
-                                 KeyValuePair<OffsetT, T>,
-                                 O
-                             >::type;
-        
+        using OutputTupleT =
+            typename std::conditional<
+                std::is_same<O, void>::value,
+                KeyValuePair<OffsetT, T>,
+                O
+            >::type;
+
         using OutputValueT = typename OutputTupleT::Value;
         using IteratorT = ArgIndexInputIterator<InputIteratorT, OffsetT, OutputValueT>;
-        
+
         IteratorT d_indexed_in(d_in);
-        const OutputTupleT init(1, std::numeric_limits<T>::max());
-        
+        OutputTupleT init(1, detail::get_max_value<T>());
+
         return ::rocprim::reduce(
             d_temp_storage, temp_storage_bytes,
             d_indexed_in, d_out, init, num_items, ::hipcub::ArgMin(),
@@ -150,7 +185,7 @@ public:
         using T = typename std::iterator_traits<InputIteratorT>::value_type;
         return ::rocprim::reduce(
             d_temp_storage, temp_storage_bytes,
-            d_in, d_out, std::numeric_limits<T>::min(), num_items, ::hipcub::Max(),
+            d_in, d_out, detail::get_lowest_value<T>(), num_items, ::hipcub::Max(),
             stream, debug_synchronous
         );
     }
@@ -171,18 +206,19 @@ public:
         using OffsetT = int;
         using T = typename std::iterator_traits<InputIteratorT>::value_type;
         using O = typename std::iterator_traits<OutputIteratorT>::value_type;
-        using OutputTupleT = typename std::conditional<
-                                 std::is_same<O, void>::value,
-                                 KeyValuePair<OffsetT, T>,
-                                 O
-                             >::type;
-        
+        using OutputTupleT =
+            typename std::conditional<
+                std::is_same<O, void>::value,
+                KeyValuePair<OffsetT, T>,
+                O
+            >::type;
+
         using OutputValueT = typename OutputTupleT::Value;
         using IteratorT = ArgIndexInputIterator<InputIteratorT, OffsetT, OutputValueT>;
-        
+
         IteratorT d_indexed_in(d_in);
-        const OutputTupleT init(1, std::numeric_limits<T>::lowest());
-        
+        OutputTupleT init(1, detail::get_lowest_value<T>());
+
         return ::rocprim::reduce(
             d_temp_storage, temp_storage_bytes,
             d_indexed_in, d_out, init, num_items, ::hipcub::ArgMax(),

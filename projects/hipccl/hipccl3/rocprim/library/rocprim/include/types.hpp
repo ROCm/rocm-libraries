@@ -26,9 +26,6 @@
 // Meta configuration for rocPRIM
 #include "config.hpp"
 
-#include "iterator/arg_index_iterator.hpp"
-#include "iterator/counting_iterator.hpp"
-
 #include "types/double_buffer.hpp"
 #include "types/key_value_pair.hpp"
 
