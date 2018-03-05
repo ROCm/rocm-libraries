@@ -99,7 +99,7 @@ test:rocm244:
     - ctest --output-on-failure --repeat-until-fail 2
 
 build:rocm-rc:
-  image: ourrocm/rocm:1.7.131
+  image: ourrocm/rocm:1.7.137
   allow_failure: true
   tags:
     - tag241
@@ -128,7 +128,7 @@ build:rocm-rc:
     expire_in: 4 week
 
 test:rocm241-rc:
-  image: ourrocm/rocm:1.7.131
+  image: ourrocm/rocm:1.7.137
   allow_failure: true
   tags:
     - tag241
