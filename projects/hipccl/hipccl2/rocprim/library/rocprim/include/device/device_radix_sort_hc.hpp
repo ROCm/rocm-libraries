@@ -986,7 +986,7 @@ void radix_sort_keys_desc(void * temporary_storage,
 /// \param [in,out] temporary_storage_bytes - reference to a size (in bytes) of \p temporary_storage.
 /// \param [in,out] keys - reference to the double-buffer of keys, its \p current()
 /// contains the input range and will be updated to point to the output range.
-/// \param [in,out] keys - reference to the double-buffer of values, its \p current()
+/// \param [in,out] values - reference to the double-buffer of values, its \p current()
 /// contains the input range and will be updated to point to the output range.
 /// \param [in] size - number of element in the input range.
 /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
@@ -1102,7 +1102,7 @@ void radix_sort_pairs(void * temporary_storage,
 /// \param [in,out] temporary_storage_bytes - reference to a size (in bytes) of \p temporary_storage.
 /// \param [in,out] keys - reference to the double-buffer of keys, its \p current()
 /// contains the input range and will be updated to point to the output range.
-/// \param [in,out] keys - reference to the double-buffer of values, its \p current()
+/// \param [in,out] values - reference to the double-buffer of values, its \p current()
 /// contains the input range and will be updated to point to the output range.
 /// \param [in] size - number of element in the input range.
 /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in

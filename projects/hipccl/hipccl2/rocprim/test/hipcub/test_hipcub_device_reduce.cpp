@@ -358,7 +358,7 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceArgMaximum)
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, -100, 100);
+        std::vector<T> input = test_utils::get_random_data<T>(size, T(-100), T(100));
         std::vector<key_value> output(1);
 
         T * d_input;
