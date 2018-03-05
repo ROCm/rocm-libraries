@@ -162,10 +162,8 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeys)
     using offset_type = unsigned int;
 
     hipStream_t stream = 0;
-    HIP_CHECK(hipStreamCreate(&stream));
 
-    // WORKAROUND: Tests fail on MI25 without additional syncronization (bug in HIP or ROCm)
-    const bool debug_synchronous = true;
+    const bool debug_synchronous = false;
 
     std::random_device rd;
     std::default_random_engine gen(rd());
@@ -289,10 +287,6 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeys)
             )
         );
 
-        if(debug_synchronous)
-        {
-            HIP_CHECK(hipStreamSynchronize(stream));
-        }
         HIP_CHECK(hipFree(d_temporary_storage));
         HIP_CHECK(hipFree(d_keys_input));
         HIP_CHECK(hipFree(d_keys_output));
@@ -303,8 +297,6 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeys)
             ASSERT_EQ(keys_output[i], expected[i]);
         }
     }
-
-    HIP_CHECK(hipStreamDestroy(stream));
 }
 
 TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairs)
@@ -318,10 +310,8 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairs)
     using offset_type = unsigned int;
 
     hipStream_t stream = 0;
-    HIP_CHECK(hipStreamCreate(&stream));
 
-    // WORKAROUND: Tests fail on MI25 without additional syncronization (bug in HIP or ROCm)
-    const bool debug_synchronous = true;
+    const bool debug_synchronous = false;
 
     std::random_device rd;
     std::default_random_engine gen(rd());
@@ -475,10 +465,6 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairs)
             )
         );
 
-        if(debug_synchronous)
-        {
-            HIP_CHECK(hipStreamSynchronize(stream));
-        }
         HIP_CHECK(hipFree(d_temporary_storage));
         HIP_CHECK(hipFree(d_keys_input));
         HIP_CHECK(hipFree(d_values_input));
@@ -492,8 +478,6 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairs)
             ASSERT_EQ(values_output[i], expected[i].second);
         }
     }
-
-    HIP_CHECK(hipStreamDestroy(stream));
 }
 
 TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
@@ -506,10 +490,8 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
     using offset_type = unsigned int;
 
     hipStream_t stream = 0;
-    HIP_CHECK(hipStreamCreate(&stream));
 
-    // WORKAROUND: Tests fail on MI25 without additional syncronization (bug in HIP or ROCm)
-    const bool debug_synchronous = true;
+    const bool debug_synchronous = false;
 
     std::random_device rd;
     std::default_random_engine gen(rd());
@@ -635,10 +617,6 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
             )
         );
 
-        if(debug_synchronous)
-        {
-            HIP_CHECK(hipStreamSynchronize(stream));
-        }
         HIP_CHECK(hipFree(d_temporary_storage));
         HIP_CHECK(hipFree(d_keys_input));
         HIP_CHECK(hipFree(d_keys_output));
@@ -649,8 +627,6 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
             ASSERT_EQ(keys_output[i], expected[i]);
         }
     }
-
-    HIP_CHECK(hipStreamDestroy(stream));
 }
 
 TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
@@ -664,10 +640,8 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
     using offset_type = unsigned int;
 
     hipStream_t stream = 0;
-    HIP_CHECK(hipStreamCreate(&stream));
 
-    // WORKAROUND: Tests fail on MI25 without additional syncronization (bug in HIP or ROCm)
-    const bool debug_synchronous = true;
+    const bool debug_synchronous = false;
 
     std::random_device rd;
     std::default_random_engine gen(rd());
@@ -824,10 +798,6 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
             )
         );
 
-        if(debug_synchronous)
-        {
-            HIP_CHECK(hipStreamSynchronize(stream));
-        }
         HIP_CHECK(hipFree(d_temporary_storage));
         HIP_CHECK(hipFree(d_keys_input));
         HIP_CHECK(hipFree(d_keys_output));
@@ -841,6 +811,4 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
             ASSERT_EQ(values_output[i], expected[i].second);
         }
     }
-
-    HIP_CHECK(hipStreamDestroy(stream));
 }
