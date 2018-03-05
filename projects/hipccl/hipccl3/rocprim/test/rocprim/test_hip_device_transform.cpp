@@ -59,7 +59,7 @@ class RocprimDeviceTransformTests : public ::testing::Test
 public:
     using input_type = typename Params::input_type;
     using output_type = typename Params::output_type;
-    const bool debug_synchronous = !false;
+    const bool debug_synchronous = false;
 };
 
 typedef ::testing::Types<
@@ -106,9 +106,7 @@ TYPED_TEST(RocprimDeviceTransformTests, Transform)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        // HIP
         hipStream_t stream = 0; // default
-        HIP_CHECK(hipStreamCreate(&stream));
 
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
@@ -128,7 +126,6 @@ TYPED_TEST(RocprimDeviceTransformTests, Transform)
             )
         );
         HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipStreamSynchronize(stream));
 
         // Calculate expected results on host
         std::vector<U> expected(input.size());
@@ -143,7 +140,6 @@ TYPED_TEST(RocprimDeviceTransformTests, Transform)
         );
         HIP_CHECK(hipPeekAtLastError());
         HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipStreamSynchronize(stream));
 
         // Copy output to host
         HIP_CHECK(
@@ -154,7 +150,6 @@ TYPED_TEST(RocprimDeviceTransformTests, Transform)
             )
         );
         HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipStreamSynchronize(stream));
 
         // Check if output values are as expected
         for(size_t i = 0; i < output.size(); i++)
@@ -167,8 +162,5 @@ TYPED_TEST(RocprimDeviceTransformTests, Transform)
 
         hipFree(d_input);
         hipFree(d_output);
-
-        // HIP stream
-        HIP_CHECK(hipStreamDestroy(stream));
     }
 }

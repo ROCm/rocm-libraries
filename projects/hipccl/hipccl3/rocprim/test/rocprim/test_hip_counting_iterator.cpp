@@ -85,9 +85,8 @@ TYPED_TEST(RocprimCountingIteratorTests, Transform)
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
     const size_t size = 1024;
-    // HIP
+
     hipStream_t stream = 0; // default
-    HIP_CHECK(hipStreamCreate(&stream));
 
     // Create counting_iterator<U> with random starting point
     Iterator input_begin(test_utils::get_random_value<T>(0, 200));
@@ -115,7 +114,6 @@ TYPED_TEST(RocprimCountingIteratorTests, Transform)
     );
     HIP_CHECK(hipPeekAtLastError());
     HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipStreamSynchronize(stream));
 
     // Copy output to host
     HIP_CHECK(
@@ -126,7 +124,6 @@ TYPED_TEST(RocprimCountingIteratorTests, Transform)
         )
     );
     HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipStreamSynchronize(stream));
 
     // Validating results
     for(size_t i = 0; i < output.size(); i++)
@@ -144,7 +141,4 @@ TYPED_TEST(RocprimCountingIteratorTests, Transform)
     }
 
     hipFree(d_output);
-
-    // HIP stream
-    HIP_CHECK(hipStreamDestroy(stream));
 }

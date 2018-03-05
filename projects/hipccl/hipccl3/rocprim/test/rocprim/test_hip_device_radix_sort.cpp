@@ -139,10 +139,8 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
     constexpr bool check_huge_sizes = TestFixture::params::check_huge_sizes;
 
     hipStream_t stream = 0;
-    HIP_CHECK(hipStreamCreate(&stream));
 
-    // WORKAROUND: Tests fail on MI25 without additional syncronization (bug in HIP or ROCm)
-    const bool debug_synchronous = true;
+    const bool debug_synchronous = false;
 
     const std::vector<size_t> sizes = get_sizes();
     for(size_t size : sizes)
@@ -231,10 +229,6 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
             )
         );
 
-        if(debug_synchronous)
-        {
-            HIP_CHECK(hipStreamSynchronize(stream));
-        }
         HIP_CHECK(hipFree(d_keys_output));
 
         for(size_t i = 0; i < size; i++)
@@ -242,8 +236,6 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
             ASSERT_EQ(keys_output[i], expected[i]);
         }
     }
-
-    HIP_CHECK(hipStreamDestroy(stream));
 }
 
 TYPED_TEST(RocprimDeviceRadixSort, SortPairs)
@@ -256,10 +248,8 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairs)
     constexpr bool check_huge_sizes = TestFixture::params::check_huge_sizes;
 
     hipStream_t stream = 0;
-    HIP_CHECK(hipStreamCreate(&stream));
 
-    // WORKAROUND: Tests fail on MI25 without additional syncronization (bug in HIP or ROCm)
-    const bool debug_synchronous = true;
+    const bool debug_synchronous = false;
 
     const std::vector<size_t> sizes = get_sizes();
     for(size_t size : sizes)
@@ -376,10 +366,6 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairs)
             )
         );
 
-        if(debug_synchronous)
-        {
-            HIP_CHECK(hipStreamSynchronize(stream));
-        }
         HIP_CHECK(hipFree(d_keys_output));
         HIP_CHECK(hipFree(d_values_output));
 
@@ -389,8 +375,6 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairs)
             ASSERT_EQ(values_output[i], expected[i].second);
         }
     }
-
-    HIP_CHECK(hipStreamDestroy(stream));
 }
 
 TYPED_TEST(RocprimDeviceRadixSort, SortKeysDoubleBuffer)
@@ -402,10 +386,8 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeysDoubleBuffer)
     constexpr bool check_huge_sizes = TestFixture::params::check_huge_sizes;
 
     hipStream_t stream = 0;
-    HIP_CHECK(hipStreamCreate(&stream));
 
-    // WORKAROUND: Tests fail on MI25 without additional syncronization (bug in HIP or ROCm)
-    const bool debug_synchronous = true;
+    const bool debug_synchronous = false;
 
     const std::vector<size_t> sizes = get_sizes();
     for(size_t size : sizes)
@@ -495,10 +477,6 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeysDoubleBuffer)
             )
         );
 
-        if(debug_synchronous)
-        {
-            HIP_CHECK(hipStreamSynchronize(stream));
-        }
         HIP_CHECK(hipFree(d_keys_input));
         HIP_CHECK(hipFree(d_keys_output));
 
@@ -507,8 +485,6 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeysDoubleBuffer)
             ASSERT_EQ(keys_output[i], expected[i]);
         }
     }
-
-    HIP_CHECK(hipStreamDestroy(stream));
 }
 
 TYPED_TEST(RocprimDeviceRadixSort, SortPairsDoubleBuffer)
@@ -521,10 +497,8 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairsDoubleBuffer)
     constexpr bool check_huge_sizes = TestFixture::params::check_huge_sizes;
 
     hipStream_t stream = 0;
-    HIP_CHECK(hipStreamCreate(&stream));
 
-    // WORKAROUND: Tests fail on MI25 without additional syncronization (bug in HIP or ROCm)
-    const bool debug_synchronous = true;
+    const bool debug_synchronous = false;
 
     const std::vector<size_t> sizes = get_sizes();
     for(size_t size : sizes)
@@ -642,10 +616,6 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairsDoubleBuffer)
             )
         );
 
-        if(debug_synchronous)
-        {
-            HIP_CHECK(hipStreamSynchronize(stream));
-        }
         HIP_CHECK(hipFree(d_keys_input));
         HIP_CHECK(hipFree(d_keys_output));
         HIP_CHECK(hipFree(d_values_input));
@@ -657,6 +627,4 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairsDoubleBuffer)
             ASSERT_EQ(values_output[i], expected[i].second);
         }
     }
-
-    HIP_CHECK(hipStreamDestroy(stream));
 }
