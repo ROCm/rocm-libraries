@@ -69,7 +69,7 @@ TYPED_TEST(RocprimArgIndexIteratorTests, Equal)
 {
     using T = typename TestFixture::input_type;
     using Iterator = typename rocprim::arg_index_iterator<T*>;
-    
+
     std::vector<T> input = test_utils::get_random_data<T>(5, 1, 200);
 
     Iterator x(input.data());
@@ -113,9 +113,8 @@ TYPED_TEST(RocprimArgIndexIteratorTests, ReduceArgMinimum)
     const bool debug_synchronous = false;
 
     const size_t size = 1024;
-    // HIP
+
     hipStream_t stream = 0; // default
-    HIP_CHECK(hipStreamCreate(&stream));
 
     // Generate data
     std::vector<T> input = test_utils::get_random_data<T>(size, 1, 200);
@@ -133,8 +132,7 @@ TYPED_TEST(RocprimArgIndexIteratorTests, ReduceArgMinimum)
         )
     );
     HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipStreamSynchronize(stream));
-    
+
     Iterator d_iter(d_input);
 
     arg_min reduce_op;
@@ -162,7 +160,6 @@ TYPED_TEST(RocprimArgIndexIteratorTests, ReduceArgMinimum)
     // allocate temporary storage
     HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
     HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipStreamSynchronize(stream));
 
     // Run
     HIP_CHECK(
@@ -174,7 +171,6 @@ TYPED_TEST(RocprimArgIndexIteratorTests, ReduceArgMinimum)
     );
     HIP_CHECK(hipPeekAtLastError());
     HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipStreamSynchronize(stream));
 
     // Copy output to host
     HIP_CHECK(
@@ -185,7 +181,6 @@ TYPED_TEST(RocprimArgIndexIteratorTests, ReduceArgMinimum)
         )
     );
     HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipStreamSynchronize(stream));
 
     // Check if output values are as expected
     auto diff = std::max<T>(std::abs(0.01f * expected.value), T(0.01f));
@@ -196,7 +191,4 @@ TYPED_TEST(RocprimArgIndexIteratorTests, ReduceArgMinimum)
     hipFree(d_input);
     hipFree(d_output);
     hipFree(d_temp_storage);
-
-    // HIP stream
-    HIP_CHECK(hipStreamDestroy(stream));
 }
