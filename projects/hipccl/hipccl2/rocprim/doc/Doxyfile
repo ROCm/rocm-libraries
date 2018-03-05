@@ -778,6 +778,7 @@ INPUT                  = mainpage.dox \
                          devicemodulehc.dox \
                          devicemodulehip.dox \
                          utilsmodule.dox \
+                         hipcub.dox \
                          ../library/rocprim/include
 
 # This tag can be used to specify the character encoding of the source files
