@@ -134,9 +134,7 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
-        // HIP
         hipStream_t stream = 0; // default
-        HIP_CHECK(hipStreamCreate(&stream));
 
         // Generate data and calculate expected results
         std::vector<key_type> unique_expected;
@@ -286,7 +284,5 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
         {
             ASSERT_EQ(aggregates_output[i], aggregates_expected[i]);
         }
-
-        HIP_CHECK(hipStreamDestroy(stream));
     }
 }

@@ -149,14 +149,8 @@ TYPED_TEST(HipcubDeviceRadixSort, SortKeys)
     constexpr bool check_huge_sizes = TestFixture::params::check_huge_sizes;
 
     hipStream_t stream = 0;
-    HIP_CHECK(hipStreamCreate(&stream));
 
-    #ifdef HIPCUB_CUB_API
     const bool debug_synchronous = false;
-    #else
-    // WORKAROUND: Tests fail on MI25 without additional syncronization (bug in HIP or ROCm)
-    const bool debug_synchronous = true;
-    #endif
 
     const std::vector<size_t> sizes = get_sizes();
     for(size_t size : sizes)
@@ -245,10 +239,6 @@ TYPED_TEST(HipcubDeviceRadixSort, SortKeys)
             )
         );
 
-        if(debug_synchronous)
-        {
-            HIP_CHECK(hipStreamSynchronize(stream));
-        }
         HIP_CHECK(hipFree(d_keys_output));
 
         for(size_t i = 0; i < size; i++)
@@ -256,8 +246,6 @@ TYPED_TEST(HipcubDeviceRadixSort, SortKeys)
             ASSERT_EQ(keys_output[i], expected[i]);
         }
     }
-
-    HIP_CHECK(hipStreamDestroy(stream));
 }
 
 TYPED_TEST(HipcubDeviceRadixSort, SortPairs)
@@ -270,14 +258,8 @@ TYPED_TEST(HipcubDeviceRadixSort, SortPairs)
     constexpr bool check_huge_sizes = TestFixture::params::check_huge_sizes;
 
     hipStream_t stream = 0;
-    HIP_CHECK(hipStreamCreate(&stream));
 
-    #ifdef HIPCUB_CUB_API
     const bool debug_synchronous = false;
-    #else
-    // WORKAROUND: Tests fail on MI25 without additional syncronization (bug in HIP or ROCm)
-    const bool debug_synchronous = true;
-    #endif
 
     const std::vector<size_t> sizes = get_sizes();
     for(size_t size : sizes)
@@ -394,10 +376,6 @@ TYPED_TEST(HipcubDeviceRadixSort, SortPairs)
             )
         );
 
-        if(debug_synchronous)
-        {
-            HIP_CHECK(hipStreamSynchronize(stream));
-        }
         HIP_CHECK(hipFree(d_keys_output));
         HIP_CHECK(hipFree(d_values_output));
 
@@ -407,8 +385,6 @@ TYPED_TEST(HipcubDeviceRadixSort, SortPairs)
             ASSERT_EQ(values_output[i], expected[i].second);
         }
     }
-
-    HIP_CHECK(hipStreamDestroy(stream));
 }
 
 TYPED_TEST(HipcubDeviceRadixSort, SortKeysDoubleBuffer)
@@ -420,14 +396,8 @@ TYPED_TEST(HipcubDeviceRadixSort, SortKeysDoubleBuffer)
     constexpr bool check_huge_sizes = TestFixture::params::check_huge_sizes;
 
     hipStream_t stream = 0;
-    HIP_CHECK(hipStreamCreate(&stream));
 
-    #ifdef HIPCUB_CUB_API
     const bool debug_synchronous = false;
-    #else
-    // WORKAROUND: Tests fail on MI25 without additional syncronization (bug in HIP or ROCm)
-    const bool debug_synchronous = true;
-    #endif
 
     const std::vector<size_t> sizes = get_sizes();
     for(size_t size : sizes)
@@ -517,10 +487,6 @@ TYPED_TEST(HipcubDeviceRadixSort, SortKeysDoubleBuffer)
             )
         );
 
-        if(debug_synchronous)
-        {
-            HIP_CHECK(hipStreamSynchronize(stream));
-        }
         HIP_CHECK(hipFree(d_keys_input));
         HIP_CHECK(hipFree(d_keys_output));
 
@@ -529,8 +495,6 @@ TYPED_TEST(HipcubDeviceRadixSort, SortKeysDoubleBuffer)
             ASSERT_EQ(keys_output[i], expected[i]);
         }
     }
-
-    HIP_CHECK(hipStreamDestroy(stream));
 }
 
 TYPED_TEST(HipcubDeviceRadixSort, SortPairsDoubleBuffer)
@@ -543,14 +507,8 @@ TYPED_TEST(HipcubDeviceRadixSort, SortPairsDoubleBuffer)
     constexpr bool check_huge_sizes = TestFixture::params::check_huge_sizes;
 
     hipStream_t stream = 0;
-    HIP_CHECK(hipStreamCreate(&stream));
 
-    #ifdef HIPCUB_CUB_API
     const bool debug_synchronous = false;
-    #else
-    // WORKAROUND: Tests fail on MI25 without additional syncronization (bug in HIP or ROCm)
-    const bool debug_synchronous = true;
-    #endif
 
     const std::vector<size_t> sizes = get_sizes();
     for(size_t size : sizes)
@@ -668,10 +626,6 @@ TYPED_TEST(HipcubDeviceRadixSort, SortPairsDoubleBuffer)
             )
         );
 
-        if(debug_synchronous)
-        {
-            HIP_CHECK(hipStreamSynchronize(stream));
-        }
         HIP_CHECK(hipFree(d_keys_input));
         HIP_CHECK(hipFree(d_keys_output));
         HIP_CHECK(hipFree(d_values_input));
@@ -683,6 +637,4 @@ TYPED_TEST(HipcubDeviceRadixSort, SortPairsDoubleBuffer)
             ASSERT_EQ(values_output[i], expected[i].second);
         }
     }
-
-    HIP_CHECK(hipStreamDestroy(stream));
 }
