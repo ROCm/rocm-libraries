@@ -59,7 +59,7 @@ class RocprimDeviceScanTests : public ::testing::Test
 public:
     using input_type = typename Params::input_type;
     using output_type = typename Params::output_type;
-    const bool debug_synchronous = !false;
+    const bool debug_synchronous = false;
 };
 
 typedef ::testing::Types<
@@ -96,9 +96,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        // HIP
         hipStream_t stream = 0; // default
-        HIP_CHECK(hipStreamCreate(&stream));
 
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
@@ -118,7 +116,6 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
             )
         );
         HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipStreamSynchronize(stream));
 
         // scan function
         ::rocprim::plus<U> plus_op;
@@ -148,7 +145,6 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
         // allocate temporary storage
         HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
         HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipStreamSynchronize(stream));
 
         // Run
         HIP_CHECK(
@@ -160,7 +156,6 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
         );
         HIP_CHECK(hipPeekAtLastError());
         HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipStreamSynchronize(stream));
 
         // Copy output to host
         HIP_CHECK(
@@ -171,7 +166,6 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
             )
         );
         HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipStreamSynchronize(stream));
 
         // Check if output values are as expected
         for(size_t i = 0; i < output.size(); i++)
@@ -185,9 +179,6 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
         hipFree(d_input);
         hipFree(d_output);
         hipFree(d_temp_storage);
-
-        // HIP stream
-        HIP_CHECK(hipStreamDestroy(stream));
     }
 }
 
@@ -200,9 +191,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanSum)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        // HIP
         hipStream_t stream = 0; // default
-        HIP_CHECK(hipStreamCreate(&stream));
 
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
@@ -222,7 +211,6 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanSum)
             )
         );
         HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipStreamSynchronize(stream));
 
         // scan function
         ::rocprim::plus<U> plus_op;
@@ -254,7 +242,6 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanSum)
         // allocate temporary storage
         HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
         HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipStreamSynchronize(stream));
 
         // Run
         HIP_CHECK(
@@ -266,7 +253,6 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanSum)
         );
         HIP_CHECK(hipPeekAtLastError());
         HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipStreamSynchronize(stream));
 
         // Copy output to host
         HIP_CHECK(
@@ -277,7 +263,6 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanSum)
             )
         );
         HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipStreamSynchronize(stream));
 
         // Check if output values are as expected
         for(size_t i = 0; i < output.size(); i++)
@@ -291,7 +276,5 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanSum)
         hipFree(d_input);
         hipFree(d_output);
         hipFree(d_temp_storage);
-
-        HIP_CHECK(hipStreamDestroy(stream));
     }
 }

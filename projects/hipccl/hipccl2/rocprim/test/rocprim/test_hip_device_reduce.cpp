@@ -61,7 +61,7 @@ class RocprimDeviceReduceTests : public ::testing::Test
 public:
     using input_type = typename Params::input_type;
     using output_type = typename Params::output_type;
-    const bool debug_synchronous = !false;
+    const bool debug_synchronous = false;
 };
 
 typedef ::testing::Types<
@@ -98,9 +98,7 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        // HIP
         hipStream_t stream = 0; // default
-        HIP_CHECK(hipStreamCreate(&stream));
 
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
@@ -120,7 +118,6 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
             )
         );
         HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipStreamSynchronize(stream));
 
         // Calculate expected results on host
         U expected = std::accumulate(input.begin(), input.end(), 0);
@@ -145,7 +142,6 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
         // allocate temporary storage
         HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
         HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipStreamSynchronize(stream));
 
         // Run
         HIP_CHECK(
@@ -157,7 +153,6 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
         );
         HIP_CHECK(hipPeekAtLastError());
         HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipStreamSynchronize(stream));
 
         // Copy output to host
         HIP_CHECK(
@@ -168,7 +163,6 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
             )
         );
         HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipStreamSynchronize(stream));
 
         // Check if output values are as expected
         auto diff = std::max<U>(std::abs(0.01f * expected), U(0.01f));
@@ -178,9 +172,6 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
         hipFree(d_input);
         hipFree(d_output);
         hipFree(d_temp_storage);
-
-        // HIP stream
-        HIP_CHECK(hipStreamDestroy(stream));
     }
 }
 
@@ -193,9 +184,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        // HIP
         hipStream_t stream = 0; // default
-        HIP_CHECK(hipStreamCreate(&stream));
 
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
@@ -215,7 +204,6 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
             )
         );
         HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipStreamSynchronize(stream));
 
         // scan function
         ::rocprim::minimum<U> min_op;
@@ -241,7 +229,6 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
         // allocate temporary storage
         HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
         HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipStreamSynchronize(stream));
 
         // Run
         HIP_CHECK(
@@ -253,7 +240,6 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
         );
         HIP_CHECK(hipPeekAtLastError());
         HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipStreamSynchronize(stream));
 
         // Copy output to host
         HIP_CHECK(
@@ -264,7 +250,6 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
             )
         );
         HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipStreamSynchronize(stream));
 
         // Check if output values are as expected
         auto diff = std::max<U>(std::abs(0.01f * expected), U(0.01f));
@@ -274,9 +259,6 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
         hipFree(d_input);
         hipFree(d_output);
         hipFree(d_temp_storage);
-
-        // HIP stream
-        HIP_CHECK(hipStreamDestroy(stream));
     }
 }
 
@@ -304,9 +286,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        // HIP
         hipStream_t stream = 0; // default
-        HIP_CHECK(hipStreamCreate(&stream));
 
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
@@ -331,7 +311,6 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
             )
         );
         HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipStreamSynchronize(stream));
 
         arg_min<int, T> reduce_op;
         const key_value max(std::numeric_limits<int>::max(), std::numeric_limits<T>::max());
@@ -357,7 +336,6 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
         // allocate temporary storage
         HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
         HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipStreamSynchronize(stream));
 
         // Run
         HIP_CHECK(
@@ -369,7 +347,6 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
         );
         HIP_CHECK(hipPeekAtLastError());
         HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipStreamSynchronize(stream));
 
         // Copy output to host
         HIP_CHECK(
@@ -380,7 +357,6 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
             )
         );
         HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipStreamSynchronize(stream));
 
         // Check if output values are as expected
         auto diff = std::max<T>(std::abs(0.01f * expected.value), T(0.01f));
@@ -391,8 +367,5 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
         hipFree(d_input);
         hipFree(d_output);
         hipFree(d_temp_storage);
-
-        // HIP stream
-        HIP_CHECK(hipStreamDestroy(stream));
     }
 }

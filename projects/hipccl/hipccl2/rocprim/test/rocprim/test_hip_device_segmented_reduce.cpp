@@ -124,9 +124,7 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
-        // HIP
         hipStream_t stream = 0; // default
-        HIP_CHECK(hipStreamCreate(&stream));
 
         // Generate data and calculate expected results
         std::vector<output_type> aggregates_expected;
@@ -233,7 +231,5 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
                 ASSERT_NEAR(aggregates_output[i], aggregates_expected[i], diff);
             }
         }
-
-        HIP_CHECK(hipStreamDestroy(stream));
     }
 }
