@@ -51,6 +51,7 @@
     #include "device/device_reduce_by_key_hc.hpp"
     #include "device/device_reduce_hc.hpp"
     #include "device/device_scan_hc.hpp"
+    #include "device/device_segmented_radix_sort_hc.hpp"
     #include "device/device_segmented_reduce_hc.hpp"
     #include "device/device_transform_hc.hpp"
 #else
@@ -58,6 +59,7 @@
     #include "device/device_reduce_by_key_hip.hpp"
     #include "device/device_reduce_hip.hpp"
     #include "device/device_scan_hip.hpp"
+    #include "device/device_segmented_radix_sort_hip.hpp"
     #include "device/device_segmented_reduce_hip.hpp"
     #include "device/device_transform_hip.hpp"
 #endif

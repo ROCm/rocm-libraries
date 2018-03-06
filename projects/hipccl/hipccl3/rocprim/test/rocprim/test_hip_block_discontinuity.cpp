@@ -294,8 +294,8 @@ void flag_tails_kernel(Type* device_input, long long* device_tails)
     FlagType tail_flags[ItemsPerThread];
     if(hipBlockIdx_x % 2 == 0)
     {
-        const Type tile_predecessor_item = device_input[block_offset + items_per_block];
-        bdiscontinuity.flag_tails(tail_flags, tile_predecessor_item, input, FlagOpType());
+        const Type tile_successor_item = device_input[block_offset + items_per_block];
+        bdiscontinuity.flag_tails(tail_flags, tile_successor_item, input, FlagOpType());
     }
     else
     {

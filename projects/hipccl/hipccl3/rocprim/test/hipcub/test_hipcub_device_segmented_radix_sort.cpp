@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <functional>
 #include <iostream>
+#include <random>
 #include <type_traits>
 #include <vector>
 #include <utility>
@@ -39,10 +40,11 @@
 template<
     class Key,
     class Value,
-    bool Descending = false,
-    unsigned int StartBit = 0,
-    unsigned int EndBit = sizeof(Key) * 8,
-    bool CheckHugeSizes = false
+    bool Descending,
+    unsigned int StartBit,
+    unsigned int EndBit,
+    unsigned int MinSegmentLength,
+    unsigned int MaxSegmentLength
 >
 struct params
 {
@@ -51,38 +53,36 @@ struct params
     static constexpr bool descending = Descending;
     static constexpr unsigned int start_bit = StartBit;
     static constexpr unsigned int end_bit = EndBit;
-    static constexpr bool check_huge_sizes = CheckHugeSizes;
+    static constexpr unsigned int min_segment_length = MinSegmentLength;
+    static constexpr unsigned int max_segment_length = MaxSegmentLength;
 };
 
 template<class Params>
-class HipcubDeviceRadixSort : public ::testing::Test {
+class HipcubDeviceSegmentedRadixSort : public ::testing::Test {
 public:
     using params = Params;
 };
 
 typedef ::testing::Types<
-    params<signed char, double, true>,
-    params<int, short>,
-    params<short, int, true>,
-    params<long long, char>,
-    params<double, unsigned int>,
-    params<double, int, true>,
-    params<float, int>,
+    params<signed char, double, true, 0, 8, 0, 1000>,
+    params<int, short, false, 0, 32, 0, 100>,
+    params<short, int, true, 0, 16, 0, 10000>,
+    params<long long, char, false, 0, 64, 4000, 8000>,
+    params<double, unsigned int, false, 0, 64, 2, 10>,
+    params<double, int, true, 0, 64, 2000, 10000>,
+    params<float, int, false, 0, 32, 0, 1000>,
 
     // start_bit and end_bit
-    params<unsigned char, int, true, 0, 7>,
-    params<unsigned short, int, true, 4, 10>,
-    params<unsigned int, short, false, 3, 22>,
-    params<unsigned int, double, true, 4, 21>,
-    params<unsigned int, short, true, 0, 15>,
-    params<unsigned long long, char, false, 8, 20>,
-    params<unsigned short, double, false, 8, 11>,
-
-    // huge sizes to check correctness of more than 1 block per batch
-    params<float, char, true, 0, 32, true>
+    params<unsigned char, int, true, 2, 5, 0, 100>,
+    params<unsigned short, int, true, 4, 10, 0, 10000>,
+    params<unsigned int, short, false, 3, 22, 1000, 10000>,
+    params<unsigned int, double, true, 4, 21, 100, 100000>,
+    params<unsigned int, short, true, 0, 15, 100000, 200000>,
+    params<unsigned long long, char, false, 8, 20, 0, 1000>,
+    params<unsigned short, double, false, 8, 11, 50, 200>
 > Params;
 
-TYPED_TEST_CASE(HipcubDeviceRadixSort, Params);
+TYPED_TEST_CASE(HipcubDeviceSegmentedRadixSort, Params);
 
 template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
 struct key_comparator
@@ -134,29 +134,42 @@ struct key_value_comparator
 
 std::vector<size_t> get_sizes()
 {
-    std::vector<size_t> sizes = { 1, 10, 53, 211, 1024, 2345, 4096, 34567, (1 << 16) - 1220, (1 << 23) - 76543 };
-    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(10, 1, 100000);
+    std::vector<size_t> sizes = {
+        1024, 2048, 4096, 1792,
+        1, 10, 53, 211, 500,
+        2345, 11001, 34567,
+        1000000,
+        (1 << 16) - 1220
+    };
+    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(5, 1, 100000);
     sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
     return sizes;
 }
 
-TYPED_TEST(HipcubDeviceRadixSort, SortKeys)
+TYPED_TEST(HipcubDeviceSegmentedRadixSort, SortKeys)
 {
     using key_type = typename TestFixture::params::key_type;
     constexpr bool descending = TestFixture::params::descending;
     constexpr unsigned int start_bit = TestFixture::params::start_bit;
     constexpr unsigned int end_bit = TestFixture::params::end_bit;
-    constexpr bool check_huge_sizes = TestFixture::params::check_huge_sizes;
+
+    using offset_type = unsigned int;
 
     hipStream_t stream = 0;
 
     const bool debug_synchronous = false;
 
+    std::random_device rd;
+    std::default_random_engine gen(rd());
+
+    std::uniform_int_distribution<size_t> segment_length_dis(
+        TestFixture::params::min_segment_length,
+        TestFixture::params::max_segment_length
+    );
+
     const std::vector<size_t> sizes = get_sizes();
     for(size_t size : sizes)
     {
-        if(size > (1 << 20) && !check_huge_sizes) continue;
-
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
         // Generate data
@@ -173,6 +186,18 @@ TYPED_TEST(HipcubDeviceRadixSort, SortKeys)
                 std::numeric_limits<key_type>::max()
             );
         }
+
+        std::vector<offset_type> offsets;
+        unsigned int segments_count = 0;
+        size_t offset = 0;
+        while(offset < size)
+        {
+            const size_t segment_length = segment_length_dis(gen);
+            offsets.push_back(offset);
+            segments_count++;
+            offset += segment_length;
+        }
+        offsets.push_back(size);
 
         key_type * d_keys_input;
         key_type * d_keys_output;
@@ -186,15 +211,33 @@ TYPED_TEST(HipcubDeviceRadixSort, SortKeys)
             )
         );
 
+        offset_type * d_offsets;
+        HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
+        HIP_CHECK(
+            hipMemcpy(
+                d_offsets, offsets.data(),
+                (segments_count + 1) * sizeof(offset_type),
+                hipMemcpyHostToDevice
+            )
+        );
+
         // Calculate expected results on host
         std::vector<key_type> expected(keys_input);
-        std::stable_sort(expected.begin(), expected.end(), key_comparator<key_type, descending, start_bit, end_bit>());
+        for(size_t i = 0; i < segments_count; i++)
+        {
+            std::stable_sort(
+                expected.begin() + offsets[i],
+                expected.begin() + offsets[i + 1],
+                key_comparator<key_type, descending, start_bit, end_bit>()
+            );
+        }
 
         size_t temporary_storage_bytes = 0;
         HIP_CHECK(
-            hipcub::DeviceRadixSort::SortKeys(
+            hipcub::DeviceSegmentedRadixSort::SortKeys(
                 nullptr, temporary_storage_bytes,
                 d_keys_input, d_keys_output, size,
+                segments_count, d_offsets, d_offsets + 1,
                 start_bit, end_bit
             )
         );
@@ -207,9 +250,10 @@ TYPED_TEST(HipcubDeviceRadixSort, SortKeys)
         if(descending)
         {
             HIP_CHECK(
-                hipcub::DeviceRadixSort::SortKeysDescending(
+                hipcub::DeviceSegmentedRadixSort::SortKeysDescending(
                     d_temporary_storage, temporary_storage_bytes,
                     d_keys_input, d_keys_output, size,
+                    segments_count, d_offsets, d_offsets + 1,
                     start_bit, end_bit,
                     stream, debug_synchronous
                 )
@@ -218,17 +262,15 @@ TYPED_TEST(HipcubDeviceRadixSort, SortKeys)
         else
         {
             HIP_CHECK(
-                hipcub::DeviceRadixSort::SortKeys(
+                hipcub::DeviceSegmentedRadixSort::SortKeys(
                     d_temporary_storage, temporary_storage_bytes,
                     d_keys_input, d_keys_output, size,
+                    segments_count, d_offsets, d_offsets + 1,
                     start_bit, end_bit,
                     stream, debug_synchronous
                 )
             );
         }
-
-        HIP_CHECK(hipFree(d_temporary_storage));
-        HIP_CHECK(hipFree(d_keys_input));
 
         std::vector<key_type> keys_output(size);
         HIP_CHECK(
@@ -239,7 +281,10 @@ TYPED_TEST(HipcubDeviceRadixSort, SortKeys)
             )
         );
 
+        HIP_CHECK(hipFree(d_temporary_storage));
+        HIP_CHECK(hipFree(d_keys_input));
         HIP_CHECK(hipFree(d_keys_output));
+        HIP_CHECK(hipFree(d_offsets));
 
         for(size_t i = 0; i < size; i++)
         {
@@ -248,24 +293,31 @@ TYPED_TEST(HipcubDeviceRadixSort, SortKeys)
     }
 }
 
-TYPED_TEST(HipcubDeviceRadixSort, SortPairs)
+TYPED_TEST(HipcubDeviceSegmentedRadixSort, SortPairs)
 {
     using key_type = typename TestFixture::params::key_type;
     using value_type = typename TestFixture::params::value_type;
     constexpr bool descending = TestFixture::params::descending;
     constexpr unsigned int start_bit = TestFixture::params::start_bit;
     constexpr unsigned int end_bit = TestFixture::params::end_bit;
-    constexpr bool check_huge_sizes = TestFixture::params::check_huge_sizes;
+
+    using offset_type = unsigned int;
 
     hipStream_t stream = 0;
 
     const bool debug_synchronous = false;
 
+    std::random_device rd;
+    std::default_random_engine gen(rd());
+
+    std::uniform_int_distribution<size_t> segment_length_dis(
+        TestFixture::params::min_segment_length,
+        TestFixture::params::max_segment_length
+    );
+
     const std::vector<size_t> sizes = get_sizes();
     for(size_t size : sizes)
     {
-        if(size > (1 << 20) && !check_huge_sizes) continue;
-
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
         // Generate data
@@ -282,6 +334,18 @@ TYPED_TEST(HipcubDeviceRadixSort, SortPairs)
                 std::numeric_limits<key_type>::max()
             );
         }
+
+        std::vector<offset_type> offsets;
+        unsigned int segments_count = 0;
+        size_t offset = 0;
+        while(offset < size)
+        {
+            const size_t segment_length = segment_length_dis(gen);
+            offsets.push_back(offset);
+            segments_count++;
+            offset += segment_length;
+        }
+        offsets.push_back(size);
 
         std::vector<value_type> values_input(size);
         std::iota(values_input.begin(), values_input.end(), 0);
@@ -310,6 +374,16 @@ TYPED_TEST(HipcubDeviceRadixSort, SortPairs)
             )
         );
 
+        offset_type * d_offsets;
+        HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
+        HIP_CHECK(
+            hipMemcpy(
+                d_offsets, offsets.data(),
+                (segments_count + 1) * sizeof(offset_type),
+                hipMemcpyHostToDevice
+            )
+        );
+
         using key_value = std::pair<key_type, value_type>;
 
         // Calculate expected results on host
@@ -318,17 +392,22 @@ TYPED_TEST(HipcubDeviceRadixSort, SortPairs)
         {
             expected[i] = key_value(keys_input[i], values_input[i]);
         }
-        std::stable_sort(
-            expected.begin(), expected.end(),
-            key_value_comparator<key_type, value_type, descending, start_bit, end_bit>()
-        );
+        for(size_t i = 0; i < segments_count; i++)
+        {
+            std::stable_sort(
+                expected.begin() + offsets[i],
+                expected.begin() + offsets[i + 1],
+                key_value_comparator<key_type, value_type, descending, start_bit, end_bit>()
+            );
+        }
 
         void * d_temporary_storage = nullptr;
         size_t temporary_storage_bytes = 0;
         HIP_CHECK(
-            hipcub::DeviceRadixSort::SortPairs(
+            hipcub::DeviceSegmentedRadixSort::SortPairs(
                 d_temporary_storage, temporary_storage_bytes,
                 d_keys_input, d_keys_output, d_values_input, d_values_output, size,
+                segments_count, d_offsets, d_offsets + 1,
                 start_bit, end_bit
             )
         );
@@ -340,9 +419,10 @@ TYPED_TEST(HipcubDeviceRadixSort, SortPairs)
         if(descending)
         {
             HIP_CHECK(
-                hipcub::DeviceRadixSort::SortPairsDescending(
+                hipcub::DeviceSegmentedRadixSort::SortPairsDescending(
                     d_temporary_storage, temporary_storage_bytes,
                     d_keys_input, d_keys_output, d_values_input, d_values_output, size,
+                    segments_count, d_offsets, d_offsets + 1,
                     start_bit, end_bit,
                     stream, debug_synchronous
                 )
@@ -351,18 +431,15 @@ TYPED_TEST(HipcubDeviceRadixSort, SortPairs)
         else
         {
             HIP_CHECK(
-                hipcub::DeviceRadixSort::SortPairs(
+                hipcub::DeviceSegmentedRadixSort::SortPairs(
                     d_temporary_storage, temporary_storage_bytes,
                     d_keys_input, d_keys_output, d_values_input, d_values_output, size,
+                    segments_count, d_offsets, d_offsets + 1,
                     start_bit, end_bit,
                     stream, debug_synchronous
                 )
             );
         }
-
-        HIP_CHECK(hipFree(d_temporary_storage));
-        HIP_CHECK(hipFree(d_keys_input));
-        HIP_CHECK(hipFree(d_values_input));
 
         std::vector<key_type> keys_output(size);
         HIP_CHECK(
@@ -382,8 +459,12 @@ TYPED_TEST(HipcubDeviceRadixSort, SortPairs)
             )
         );
 
+        HIP_CHECK(hipFree(d_temporary_storage));
+        HIP_CHECK(hipFree(d_keys_input));
+        HIP_CHECK(hipFree(d_values_input));
         HIP_CHECK(hipFree(d_keys_output));
         HIP_CHECK(hipFree(d_values_output));
+        HIP_CHECK(hipFree(d_offsets));
 
         for(size_t i = 0; i < size; i++)
         {
@@ -393,23 +474,30 @@ TYPED_TEST(HipcubDeviceRadixSort, SortPairs)
     }
 }
 
-TYPED_TEST(HipcubDeviceRadixSort, SortKeysDoubleBuffer)
+TYPED_TEST(HipcubDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
 {
     using key_type = typename TestFixture::params::key_type;
     constexpr bool descending = TestFixture::params::descending;
     constexpr unsigned int start_bit = TestFixture::params::start_bit;
     constexpr unsigned int end_bit = TestFixture::params::end_bit;
-    constexpr bool check_huge_sizes = TestFixture::params::check_huge_sizes;
+
+    using offset_type = unsigned int;
 
     hipStream_t stream = 0;
 
     const bool debug_synchronous = false;
 
+    std::random_device rd;
+    std::default_random_engine gen(rd());
+
+    std::uniform_int_distribution<size_t> segment_length_dis(
+        TestFixture::params::min_segment_length,
+        TestFixture::params::max_segment_length
+    );
+
     const std::vector<size_t> sizes = get_sizes();
     for(size_t size : sizes)
     {
-        if(size > (1 << 20) && !check_huge_sizes) continue;
-
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
         // Generate data
@@ -426,6 +514,18 @@ TYPED_TEST(HipcubDeviceRadixSort, SortKeysDoubleBuffer)
                 std::numeric_limits<key_type>::max()
             );
         }
+
+        std::vector<offset_type> offsets;
+        unsigned int segments_count = 0;
+        size_t offset = 0;
+        while(offset < size)
+        {
+            const size_t segment_length = segment_length_dis(gen);
+            offsets.push_back(offset);
+            segments_count++;
+            offset += segment_length;
+        }
+        offsets.push_back(size);
 
         key_type * d_keys_input;
         key_type * d_keys_output;
@@ -439,17 +539,35 @@ TYPED_TEST(HipcubDeviceRadixSort, SortKeysDoubleBuffer)
             )
         );
 
+        offset_type * d_offsets;
+        HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
+        HIP_CHECK(
+            hipMemcpy(
+                d_offsets, offsets.data(),
+                (segments_count + 1) * sizeof(offset_type),
+                hipMemcpyHostToDevice
+            )
+        );
+
         // Calculate expected results on host
         std::vector<key_type> expected(keys_input);
-        std::stable_sort(expected.begin(), expected.end(), key_comparator<key_type, descending, start_bit, end_bit>());
+        for(size_t i = 0; i < segments_count; i++)
+        {
+            std::stable_sort(
+                expected.begin() + offsets[i],
+                expected.begin() + offsets[i + 1],
+                key_comparator<key_type, descending, start_bit, end_bit>()
+            );
+        }
 
         hipcub::DoubleBuffer<key_type> d_keys(d_keys_input, d_keys_output);
 
         size_t temporary_storage_bytes = 0;
         HIP_CHECK(
-            hipcub::DeviceRadixSort::SortKeys(
+            hipcub::DeviceSegmentedRadixSort::SortKeys(
                 nullptr, temporary_storage_bytes,
                 d_keys, size,
+                segments_count, d_offsets, d_offsets + 1,
                 start_bit, end_bit
             )
         );
@@ -462,9 +580,10 @@ TYPED_TEST(HipcubDeviceRadixSort, SortKeysDoubleBuffer)
         if(descending)
         {
             HIP_CHECK(
-                hipcub::DeviceRadixSort::SortKeysDescending(
+                hipcub::DeviceSegmentedRadixSort::SortKeysDescending(
                     d_temporary_storage, temporary_storage_bytes,
                     d_keys, size,
+                    segments_count, d_offsets, d_offsets + 1,
                     start_bit, end_bit,
                     stream, debug_synchronous
                 )
@@ -473,16 +592,15 @@ TYPED_TEST(HipcubDeviceRadixSort, SortKeysDoubleBuffer)
         else
         {
             HIP_CHECK(
-                hipcub::DeviceRadixSort::SortKeys(
+                hipcub::DeviceSegmentedRadixSort::SortKeys(
                     d_temporary_storage, temporary_storage_bytes,
                     d_keys, size,
+                    segments_count, d_offsets, d_offsets + 1,
                     start_bit, end_bit,
                     stream, debug_synchronous
                 )
             );
         }
-
-        HIP_CHECK(hipFree(d_temporary_storage));
 
         std::vector<key_type> keys_output(size);
         HIP_CHECK(
@@ -493,8 +611,10 @@ TYPED_TEST(HipcubDeviceRadixSort, SortKeysDoubleBuffer)
             )
         );
 
+        HIP_CHECK(hipFree(d_temporary_storage));
         HIP_CHECK(hipFree(d_keys_input));
         HIP_CHECK(hipFree(d_keys_output));
+        HIP_CHECK(hipFree(d_offsets));
 
         for(size_t i = 0; i < size; i++)
         {
@@ -503,24 +623,31 @@ TYPED_TEST(HipcubDeviceRadixSort, SortKeysDoubleBuffer)
     }
 }
 
-TYPED_TEST(HipcubDeviceRadixSort, SortPairsDoubleBuffer)
+TYPED_TEST(HipcubDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
 {
     using key_type = typename TestFixture::params::key_type;
     using value_type = typename TestFixture::params::value_type;
     constexpr bool descending = TestFixture::params::descending;
     constexpr unsigned int start_bit = TestFixture::params::start_bit;
     constexpr unsigned int end_bit = TestFixture::params::end_bit;
-    constexpr bool check_huge_sizes = TestFixture::params::check_huge_sizes;
+
+    using offset_type = unsigned int;
 
     hipStream_t stream = 0;
 
     const bool debug_synchronous = false;
 
+    std::random_device rd;
+    std::default_random_engine gen(rd());
+
+    std::uniform_int_distribution<size_t> segment_length_dis(
+        TestFixture::params::min_segment_length,
+        TestFixture::params::max_segment_length
+    );
+
     const std::vector<size_t> sizes = get_sizes();
     for(size_t size : sizes)
     {
-        if(size > (1 << 20) && !check_huge_sizes) continue;
-
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
         // Generate data
@@ -537,6 +664,18 @@ TYPED_TEST(HipcubDeviceRadixSort, SortPairsDoubleBuffer)
                 std::numeric_limits<key_type>::max()
             );
         }
+
+        std::vector<offset_type> offsets;
+        unsigned int segments_count = 0;
+        size_t offset = 0;
+        while(offset < size)
+        {
+            const size_t segment_length = segment_length_dis(gen);
+            offsets.push_back(offset);
+            segments_count++;
+            offset += segment_length;
+        }
+        offsets.push_back(size);
 
         std::vector<value_type> values_input(size);
         std::iota(values_input.begin(), values_input.end(), 0);
@@ -565,6 +704,16 @@ TYPED_TEST(HipcubDeviceRadixSort, SortPairsDoubleBuffer)
             )
         );
 
+        offset_type * d_offsets;
+        HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
+        HIP_CHECK(
+            hipMemcpy(
+                d_offsets, offsets.data(),
+                (segments_count + 1) * sizeof(offset_type),
+                hipMemcpyHostToDevice
+            )
+        );
+
         using key_value = std::pair<key_type, value_type>;
 
         // Calculate expected results on host
@@ -573,10 +722,14 @@ TYPED_TEST(HipcubDeviceRadixSort, SortPairsDoubleBuffer)
         {
             expected[i] = key_value(keys_input[i], values_input[i]);
         }
-        std::stable_sort(
-            expected.begin(), expected.end(),
-            key_value_comparator<key_type, value_type, descending, start_bit, end_bit>()
-        );
+        for(size_t i = 0; i < segments_count; i++)
+        {
+            std::stable_sort(
+                expected.begin() + offsets[i],
+                expected.begin() + offsets[i + 1],
+                key_value_comparator<key_type, value_type, descending, start_bit, end_bit>()
+            );
+        }
 
         hipcub::DoubleBuffer<key_type> d_keys(d_keys_input, d_keys_output);
         hipcub::DoubleBuffer<value_type> d_values(d_values_input, d_values_output);
@@ -584,9 +737,10 @@ TYPED_TEST(HipcubDeviceRadixSort, SortPairsDoubleBuffer)
         void * d_temporary_storage = nullptr;
         size_t temporary_storage_bytes = 0;
         HIP_CHECK(
-            hipcub::DeviceRadixSort::SortPairs(
+            hipcub::DeviceSegmentedRadixSort::SortPairs(
                 d_temporary_storage, temporary_storage_bytes,
                 d_keys, d_values, size,
+                segments_count, d_offsets, d_offsets + 1,
                 start_bit, end_bit
             )
         );
@@ -598,9 +752,10 @@ TYPED_TEST(HipcubDeviceRadixSort, SortPairsDoubleBuffer)
         if(descending)
         {
             HIP_CHECK(
-                hipcub::DeviceRadixSort::SortPairsDescending(
+                hipcub::DeviceSegmentedRadixSort::SortPairsDescending(
                     d_temporary_storage, temporary_storage_bytes,
                     d_keys, d_values, size,
+                    segments_count, d_offsets, d_offsets + 1,
                     start_bit, end_bit,
                     stream, debug_synchronous
                 )
@@ -609,16 +764,15 @@ TYPED_TEST(HipcubDeviceRadixSort, SortPairsDoubleBuffer)
         else
         {
             HIP_CHECK(
-                hipcub::DeviceRadixSort::SortPairs(
+                hipcub::DeviceSegmentedRadixSort::SortPairs(
                     d_temporary_storage, temporary_storage_bytes,
                     d_keys, d_values, size,
+                    segments_count, d_offsets, d_offsets + 1,
                     start_bit, end_bit,
                     stream, debug_synchronous
                 )
             );
         }
-
-        HIP_CHECK(hipFree(d_temporary_storage));
 
         std::vector<key_type> keys_output(size);
         HIP_CHECK(
@@ -638,10 +792,12 @@ TYPED_TEST(HipcubDeviceRadixSort, SortPairsDoubleBuffer)
             )
         );
 
+        HIP_CHECK(hipFree(d_temporary_storage));
         HIP_CHECK(hipFree(d_keys_input));
         HIP_CHECK(hipFree(d_keys_output));
         HIP_CHECK(hipFree(d_values_input));
         HIP_CHECK(hipFree(d_values_output));
+        HIP_CHECK(hipFree(d_offsets));
 
         for(size_t i = 0; i < size; i++)
         {
