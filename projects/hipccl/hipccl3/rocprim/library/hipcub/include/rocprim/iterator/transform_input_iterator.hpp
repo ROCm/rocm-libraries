@@ -18,14 +18,21 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_ITERATOR_HPP_
-#define ROCPRIM_ITERATOR_HPP_
+#ifndef HIPCUB_ROCPRIM_ITERATOR_TRANSFORM_INPUT_ITERATOR_HPP_
+#define HIPCUB_ROCPRIM_ITERATOR_TRANSFORM_INPUT_ITERATOR_HPP_
 
-// Meta configuration for rocPRIM
-#include "config.hpp"
+#include "../../config.hpp"
 
-#include "iterator/arg_index_iterator.hpp"
-#include "iterator/counting_iterator.hpp"
-#include "iterator/transform_iterator.hpp"
+BEGIN_HIPCUB_NAMESPACE
 
-#endif // ROCPRIM_ITERATOR_HPP_
+template<
+    typename ValueType,
+    typename ConversionOp,
+    typename InputIteratorT,
+    typename OffsetT = std::ptrdiff_t // ignored
+>
+using TransformInputIterator = ::rocprim::transform_iterator<InputIteratorT, ConversionOp, ValueType>;
+
+END_HIPCUB_NAMESPACE
+
+#endif // HIPCUB_ROCPRIM_ITERATOR_TRANSFORM_INPUT_ITERATOR_HPP_
