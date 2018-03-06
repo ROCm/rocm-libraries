@@ -29,12 +29,29 @@
 #include "../config.hpp"
 #include "../types/key_value_pair.hpp"
 
+/// \addtogroup iteratormodule
+/// @{
+
 BEGIN_ROCPRIM_NAMESPACE
 
+/// \class arg_index_iterator
+/// \brief A random-access input (read-only) iterator adaptor for pairing dereferenced values
+/// with their indices.
+///
+/// \par Overview
+/// * Dereferencing arg_index_iterator return a value of \p key_value_pair<Difference, InputValueType>
+/// type, which includes value from the underlying range and its index in that range.
+/// * \p std::iterator_traits<InputIterator>::value_type should be convertible to \p InputValueType.
+///
+/// \tparam InputIterator - type of the underlying random-access input iterator. Must be
+/// a random-access iterator.
+/// \tparam Difference - type used for identify distance between iterators and as the index type
+/// in the output pair type (see \p value_type).
+/// \tparam InputValueType - value type used in the output pair type (see \p value_type).
 template<
     class InputIterator,
     class Difference = std::ptrdiff_t,
-    class Value = typename std::iterator_traits<InputIterator>::value_type
+    class InputValueType = typename std::iterator_traits<InputIterator>::value_type
 >
 class arg_index_iterator
 {
@@ -42,10 +59,17 @@ private:
     using input_category = typename std::iterator_traits<InputIterator>::iterator_category;
 
 public:
-    using value_type = ::rocprim::key_value_pair<Difference, Value>;
+    /// The type of the value that can be obtained by dereferencing the iterator.
+    using value_type = ::rocprim::key_value_pair<Difference, InputValueType>;
+    /// \brief A reference type of the type iterated over (\p value_type).
+    /// It's `const` since arg_index_iterator is a read-only iterator.
     using reference = const value_type&;
+    /// \brief A pointer type of the type iterated over (\p value_type).
+    /// It's `const` since arg_index_iterator is a read-only iterator.
     using pointer = const value_type*;
+    /// A type used for identify distance between iterators.
     using difference_type = Difference;
+    /// The category of the iterator.
     using iterator_category = std::random_access_iterator_tag;
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
@@ -60,6 +84,10 @@ public:
     ROCPRIM_HOST_DEVICE inline
     ~arg_index_iterator() = default;
 
+    /// \brief Creates a new arg_index_iterator.
+    ///
+    /// \param iterator input iterator pointing to the input range.
+    /// \param offset index of the \p iterator in the input range.
     ROCPRIM_HOST_DEVICE inline
     arg_index_iterator(InputIterator iterator, difference_type offset = 0)
         : iterator_(iterator), offset_(offset)
@@ -192,28 +220,45 @@ private:
 template<
     class InputIterator,
     class Difference,
-    class Value
+    class InputValueType
 >
 ROCPRIM_HOST_DEVICE inline
-arg_index_iterator<InputIterator, Difference, Value>
-operator+(typename arg_index_iterator<InputIterator, Difference, Value>::difference_type distance,
-          const arg_index_iterator<InputIterator, Difference, Value>& iterator)
+arg_index_iterator<InputIterator, Difference, InputValueType>
+operator+(typename arg_index_iterator<InputIterator, Difference, InputValueType>::difference_type distance,
+          const arg_index_iterator<InputIterator, Difference, InputValueType>& iterator)
 {
     return iterator + distance;
 }
 
+
+/// make_arg_index_iterator creates a arg_index_iterator using \p iterator as
+/// the underlying iterator and \p offset as the position (index) of \p iterator
+/// in the input range.
+///
+/// \tparam InputIterator - type of the underlying random-access input iterator. Must be
+/// a random-access iterator.
+/// \tparam Difference - type used for identify distance between iterators and as the index type
+/// in the output pair type (see \p value_type in arg_index_iterator).
+/// \tparam InputValueType - value type used in the output pair type (see \p value_type
+/// in arg_index_iterator).
+///
+/// \param iterator input iterator pointing to the input range.
+/// \param offset index of the \p iterator in the input range.
 template<
     class InputIterator,
     class Difference = std::ptrdiff_t,
-    class Value = typename std::iterator_traits<InputIterator>::value_type
+    class InputValueType = typename std::iterator_traits<InputIterator>::value_type
 >
 ROCPRIM_HOST_DEVICE inline
-arg_index_iterator<InputIterator, Difference, Value>
+arg_index_iterator<InputIterator, Difference, InputValueType>
 make_arg_index_iterator(InputIterator iterator, Difference offset = 0)
 {
-    return arg_index_iterator<InputIterator, Difference, Value>(iterator, offset);
+    return arg_index_iterator<InputIterator, Difference, InputValueType>(iterator, offset);
 }
 
 END_ROCPRIM_NAMESPACE
+
+/// @}
+// end of group iteratormodule
 
 #endif // ROCPRIM_ITERATOR_ARG_INDEX_ITERATOR_HPP_
