@@ -1,0 +1,11 @@
+/**
+@brief rocPRIM Block-wide parallel primitives
+@author
+@file
+*/
+
+/**
+ * \defgroup blockmodule Block-wide
+ * \ingroup primitivesmodule
+ *
+ */

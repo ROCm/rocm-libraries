@@ -30,7 +30,7 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// \addtogroup collectiveblockmodule
+/// \addtogroup blockmodule
 /// @{
 
 /// \brief Loads data from continuous memory into a blocked arrangement of items
@@ -505,6 +505,6 @@ void block_load_direct_warp_striped(unsigned int flat_id,
 END_ROCPRIM_NAMESPACE
 
 /// @}
-// end of group collectiveblockmodule
+// end of group blockmodule
 
 #endif // ROCPRIM_BLOCK_BLOCK_LOAD_FUNC_HPP_

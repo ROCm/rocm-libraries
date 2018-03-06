@@ -5,6 +5,6 @@
 */
 
 /**
- * \defgroup devicemodule_hip rocPRIM HIP device-wide primitives
- *
+ * \defgroup devicemodule_hip HIP device-wide
+ * \ingroup primitivesmodule
  */
