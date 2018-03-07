@@ -321,7 +321,7 @@ hipError_t scan_impl(void * temporary_storage,
 /// // Get required size of the temporary storage
 /// rocprim::inclusive_scan(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
-///     input, output, input_size, rocprim::plus<U>()
+///     input, output, input_size, rocprim::plus<int>()
 /// );
 ///
 /// // allocate temporary storage
@@ -330,7 +330,7 @@ hipError_t scan_impl(void * temporary_storage,
 /// // perform scan
 /// rocprim::inclusive_scan(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
-///     input, output, input_size, rocprim::plus<U>()
+///     input, output, input_size, rocprim::plus<int>()
 /// );
 /// // output: [1, 3, 6, 10, 15, 21, 28, 36]
 /// \endcode

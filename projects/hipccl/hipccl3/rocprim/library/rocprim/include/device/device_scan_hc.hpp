@@ -238,7 +238,7 @@ void scan_impl(void * temporary_storage,
 /// rocprim::inclusive_scan(
 ///     nullptr, temporary_storage_size_bytes,
 ///     input.accelerator_pointer(), output.accelerator_pointer(), input.size(),
-///     rocprim::plus<U>(), acc_view, false
+///     rocprim::plus<int>(), acc_view, false
 /// );
 ///
 /// // allocate temporary storage
@@ -248,7 +248,7 @@ void scan_impl(void * temporary_storage,
 /// rocprim::inclusive_scan(
 ///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
 ///     input.accelerator_pointer(), output.accelerator_pointer(), input.size(),
-///     rocprim::plus<U>(), acc_view, false
+///     rocprim::plus<int>(), acc_view, false
 /// );
 /// // output: [1, 3, 6, 10, 15, 21, 28, 36]
 /// \endcode

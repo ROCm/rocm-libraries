@@ -85,13 +85,10 @@ void transform_kernel(InputIterator input,
 
 /// \brief HIP parallel transform primitive for device level.
 ///
-/// device_transform function performs a device-wide transformation operation
+/// transform function performs a device-wide transformation operation
 /// using unary \p transform_op operator.
 ///
 /// \par Overview
-/// * Supports non-commutative transform operators. However, a transform operator should be
-/// associative. When used with non-associative functions the results may be non-deterministic
-/// and/or vary in precision.
 /// * Ranges specified by \p input and \p output must have at least \p size elements.
 ///
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
@@ -105,8 +102,8 @@ void transform_kernel(InputIterator input,
 /// \param [in] size - number of element in the input range.
 /// \param [in] transform_op - unary operation function object that will be used for transform.
 /// The signature of the function should be equivalent to the following:
-/// <tt>T f(const T &a);</tt>. The signature does not need to have
-/// <tt>const &</tt>, but function object must not modify the objects passed to it.
+/// <tt>U f(const T &a);</tt>. The signature does not need to have
+/// <tt>const &</tt>, but function object must not modify the object passed to it.
 /// \param [in] stream - [optional] HIP stream object. The default is \p 0 (default stream).
 /// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. The default value is \p false.
