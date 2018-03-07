@@ -164,7 +164,7 @@ void reduce_impl(void * temporary_storage,
 
 /// \brief HC parallel reduction primitive for device level.
 ///
-/// device_reduce function performs a device-wide reduction operation
+/// reduce function performs a device-wide reduction operation
 /// using binary \p reduce_op operator.
 ///
 /// \par Overview
@@ -274,7 +274,7 @@ void reduce(void * temporary_storage,
 
 /// \brief HC parallel reduction primitive for device level.
 ///
-/// device_reduce function performs a device-wide reduction operation
+/// reduce function performs a device-wide reduction operation
 /// using binary \p reduce_op operator.
 ///
 /// \par Overview

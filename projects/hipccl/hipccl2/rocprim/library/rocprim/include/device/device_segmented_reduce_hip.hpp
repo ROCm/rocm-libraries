@@ -135,12 +135,104 @@ hipError_t segmented_reduce_impl(void * temporary_storage,
 
 } // end of detail namespace
 
+/// \brief HIP parallel segmented reduction primitive for device level.
+///
+/// segmented_reduce function performs a device-wide reduction operation across multiple sequences
+/// using binary \p reduce_op operator.
+///
+/// \par Overview
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage in a null pointer.
+/// * Ranges specified by \p input must have at least \p size elements, \p output must have
+/// \p segments elements.
+/// * Ranges specified by \p begin_offsets and \p end_offsets must have
+/// at least \p segments elements. They may use the same sequence <tt>offsets</tt> of at least
+/// <tt>segments + 1</tt> elements: <tt>offsets</tt> for \p begin_offsets and
+/// <tt>offsets + 1</tt> for \p end_offsets.
+///
+/// \tparam InputIterator - random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam OffsetIterator - random-access iterator type of segment offsets. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam BinaryFunction - type of binary function used for reduction. Default type
+/// is \p rocprim::plus<T>, where \p T is a \p value_type of \p InputIterator.
+/// \tparam InitValueType - type of the initial value.
+///
+/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the reduction operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input - iterator to the first element in the range to reduce.
+/// \param [out] output - iterator to the first element in the output range.
+/// \param [in] segments - number of segments in the input range.
+/// \param [in] begin_offsets - iterator to the first element in the range of beginning offsets.
+/// \param [in] end_offsets - iterator to the first element in the range of ending offsets.
+/// \param [in] initial_value - initial value to start the reduction.
+/// \param [in] reduce_op - binary operation function object that will be used for reduction.
+/// The signature of the function should be equivalent to the following:
+/// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
+/// <tt>const &</tt>, but function object must not modify the objects passed to it.
+/// The default value is \p BinaryFunction().
+/// \param [in] stream - [optional] HIP stream object. The default is \p 0 (default stream).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. The default value is \p false.
+///
+/// \returns \p hipSuccess (\p 0) after successful reduction; otherwise a HIP runtime error of
+/// type \p hipError_t.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level segmented min-reduction operation is performed on an array of
+/// integer values (<tt>short</tt>s are reduced into <tt>int</tt>s) using custom operator.
+///
+/// \code{.cpp}
+/// #include <rocprim.hpp>
+///
+/// // custom reduce function
+/// auto min_op =
+///     [] __device__ (int a, int b) -> int
+///     {
+///         return a < b ? a : b;
+///     };
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// unsigned int segments;   // e.g., 3
+/// short * input;           // e.g., [4, 7, 6, 2, 5, 1, 3, 8]
+/// int * output;            // empty array of 3 elements
+/// int * offsets;           // e.g. [0, 2, 3, 8]
+/// int init_value;          // e.g., 9
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::segmented_reduce(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, output,
+///     segments, offsets, offsets + 1,
+///     min_op, init_value
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform segmented reduction
+/// rocprim::segmented_reduce(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, output,
+///     segments, offsets, offsets + 1,
+///     min_op, init_value
+/// );
+/// // output: [4, 6, 1]
+/// \endcode
+/// \endparblock
 template<
     class InputIterator,
     class OutputIterator,
     class OffsetIterator,
-    class InitValueType,
-    class BinaryFunction = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>
+    class BinaryFunction = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>,
+    class InitValueType = typename std::iterator_traits<InputIterator>::value_type
 >
 inline
 hipError_t segmented_reduce(void * temporary_storage,

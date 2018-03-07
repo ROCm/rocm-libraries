@@ -65,7 +65,7 @@ template<
 >
 inline
 void radix_sort(void * temporary_storage,
-                size_t& temporary_storage_bytes,
+                size_t& storage_size,
                 KeysInputIterator keys_input,
                 typename std::iterator_traits<KeysInputIterator>::value_type * keys_tmp,
                 KeysOutputIterator keys_output,
@@ -111,10 +111,10 @@ void radix_sort(void * temporary_storage,
     const size_t values_bytes = with_values ? ::rocprim::detail::align_size(size * sizeof(value_type)) : 0;
     if(temporary_storage == nullptr)
     {
-        temporary_storage_bytes = batch_digit_counts_bytes + digit_counts_bytes;
+        storage_size = batch_digit_counts_bytes + digit_counts_bytes;
         if(!with_double_buffer)
         {
-            temporary_storage_bytes += keys_bytes + values_bytes;
+            storage_size += keys_bytes + values_bytes;
         }
         return;
     }
@@ -319,7 +319,7 @@ void radix_sort(void * temporary_storage,
 ///
 /// \par Overview
 /// * The contents of the inputs are not altered by the sorting function.
-/// * Returns the required size of \p temporary_storage in \p temporary_storage_bytes
+/// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 /// * \p Key type (a \p value_type of \p KeysInputIterator and \p KeysOutputIterator) must be
 /// an arithmetic type (that is, an integral type or a floating-point type).
@@ -335,8 +335,8 @@ void radix_sort(void * temporary_storage,
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
-/// \p temporary_storage_bytes and function returns without performing the sort operation.
-/// \param [in,out] temporary_storage_bytes - reference to a size (in bytes) of \p temporary_storage.
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
 /// \param [in] keys_input - pointer to the first element in the range to sort.
 /// \param [out] keys_output - pointer to the first element in the output range.
 /// \param [in] size - number of element in the input range.
@@ -380,7 +380,7 @@ void radix_sort(void * temporary_storage,
 /// rocprim::radix_sort_keys(
 ///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
 ///     input.accelerator_pointer(), output.accelerator_pointer(),
-///     input_size, 0, 4 * sizeof(float), acc_view
+///     input_size, 0, 8 * sizeof(float), acc_view
 /// );
 /// // keys_output: [0.08, 0.2, 0.3, 0.4, 0.6, 0.65, 0.7, 1]
 /// \endcode
@@ -392,7 +392,7 @@ template<
 >
 inline
 void radix_sort_keys(void * temporary_storage,
-                     size_t& temporary_storage_bytes,
+                     size_t& storage_size,
                      KeysInputIterator keys_input,
                      KeysOutputIterator keys_output,
                      unsigned int size,
@@ -404,7 +404,7 @@ void radix_sort_keys(void * temporary_storage,
     empty_type * values = nullptr;
     bool ignored;
     detail::radix_sort<false>(
-        temporary_storage, temporary_storage_bytes,
+        temporary_storage, storage_size,
         keys_input, nullptr, keys_output,
         values, nullptr, values,
         size, ignored,
@@ -420,7 +420,7 @@ void radix_sort_keys(void * temporary_storage,
 ///
 /// \par Overview
 /// * The contents of the inputs are not altered by the sorting function.
-/// * Returns the required size of \p temporary_storage in \p temporary_storage_bytes
+/// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 /// * \p Key type (a \p value_type of \p KeysInputIterator and \p KeysOutputIterator) must be
 /// an arithmetic type (that is, an integral type or a floating-point type).
@@ -436,8 +436,8 @@ void radix_sort_keys(void * temporary_storage,
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
-/// \p temporary_storage_bytes and function returns without performing the sort operation.
-/// \param [in,out] temporary_storage_bytes - reference to a size (in bytes) of \p temporary_storage.
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
 /// \param [in] keys_input - pointer to the first element in the range to sort.
 /// \param [out] keys_output - pointer to the first element in the output range.
 /// \param [in] size - number of element in the input range.
@@ -481,7 +481,7 @@ void radix_sort_keys(void * temporary_storage,
 /// rocprim::radix_sort_keys_desc(
 ///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
 ///     input.accelerator_pointer(), output.accelerator_pointer(),
-///     input_size, 0, 4 * sizeof(int), acc_view
+///     input_size, 0, 8 * sizeof(int), acc_view
 /// );
 /// // keys_output: [8, 7, 6, 5, 4, 3, 2, 1]
 /// \endcode
@@ -493,7 +493,7 @@ template<
 >
 inline
 void radix_sort_keys_desc(void * temporary_storage,
-                          size_t& temporary_storage_bytes,
+                          size_t& storage_size,
                           KeysInputIterator keys_input,
                           KeysOutputIterator keys_output,
                           unsigned int size,
@@ -505,7 +505,7 @@ void radix_sort_keys_desc(void * temporary_storage,
     empty_type * values = nullptr;
     bool ignored;
     detail::radix_sort<true>(
-        temporary_storage, temporary_storage_bytes,
+        temporary_storage, storage_size,
         keys_input, nullptr, keys_output,
         values, nullptr, values,
         size, ignored,
@@ -521,7 +521,7 @@ void radix_sort_keys_desc(void * temporary_storage,
 ///
 /// \par Overview
 /// * The contents of the inputs are not altered by the sorting function.
-/// * Returns the required size of \p temporary_storage in \p temporary_storage_bytes
+/// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 /// * \p Key type (a \p value_type of \p KeysInputIterator and \p KeysOutputIterator) must be
 /// an arithmetic type (that is, an integral type or a floating-point type).
@@ -542,8 +542,8 @@ void radix_sort_keys_desc(void * temporary_storage,
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
-/// \p temporary_storage_bytes and function returns without performing the sort operation.
-/// \param [in,out] temporary_storage_bytes - reference to a size (in bytes) of \p temporary_storage.
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
 /// \param [in] keys_input - pointer to the first element in the range to sort.
 /// \param [out] keys_output - pointer to the first element in the output range.
 /// \param [in] values_input - pointer to the first element in the range to sort.
@@ -577,7 +577,7 @@ void radix_sort_keys_desc(void * temporary_storage,
 /// hc::array<double> values_output;     // empty array of 8 elements
 ///
 /// // Keys are in range [0; 8], so we can limit compared bit to bits on indexes
-/// // 0, 1, 2, 3, and 4. In order to do this \p begin_bit is set to 0 and \p end_bit
+/// // 0, 1, 2, 3, and 4. In order to do this begin_bit is set to 0 and end_bit
 /// // is set to 5.
 ///
 /// size_t temporary_storage_size_bytes;
@@ -612,7 +612,7 @@ template<
 >
 inline
 void radix_sort_pairs(void * temporary_storage,
-                      size_t& temporary_storage_bytes,
+                      size_t& storage_size,
                       KeysInputIterator keys_input,
                       KeysOutputIterator keys_output,
                       ValuesInputIterator values_input,
@@ -625,7 +625,7 @@ void radix_sort_pairs(void * temporary_storage,
 {
     bool ignored;
     detail::radix_sort<false>(
-        temporary_storage, temporary_storage_bytes,
+        temporary_storage, storage_size,
         keys_input, nullptr, keys_output,
         values_input, nullptr, values_output,
         size, ignored,
@@ -641,7 +641,7 @@ void radix_sort_pairs(void * temporary_storage,
 ///
 /// \par Overview
 /// * The contents of the inputs are not altered by the sorting function.
-/// * Returns the required size of \p temporary_storage in \p temporary_storage_bytes
+/// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 /// * \p Key type (a \p value_type of \p KeysInputIterator and \p KeysOutputIterator) must be
 /// an arithmetic type (that is, an integral type or a floating-point type).
@@ -662,8 +662,8 @@ void radix_sort_pairs(void * temporary_storage,
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
-/// \p temporary_storage_bytes and function returns without performing the sort operation.
-/// \param [in,out] temporary_storage_bytes - reference to a size (in bytes) of \p temporary_storage.
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
 /// \param [in] keys_input - pointer to the first element in the range to sort.
 /// \param [out] keys_output - pointer to the first element in the output range.
 /// \param [in] values_input - pointer to the first element in the range to sort.
@@ -702,7 +702,7 @@ void radix_sort_pairs(void * temporary_storage,
 ///     nullptr, temporary_storage_size_bytes,
 ///     keys_input.accelerator_pointer(), keys_output.accelerator_pointer(),
 ///     values_input.accelerator_pointer(), values_output.accelerator_pointer(),
-///     input_size, 0, 4 * sizeof(int), acc_view
+///     input_size, 0, 8 * sizeof(int), acc_view
 /// );
 ///
 /// // allocate temporary storage
@@ -713,7 +713,7 @@ void radix_sort_pairs(void * temporary_storage,
 ///     temporary_storage, temporary_storage_size_bytes,
 ///     keys_input.accelerator_pointer(), keys_output.accelerator_pointer(),
 ///     values_input.accelerator_pointer(), values_output.accelerator_pointer(),
-///     input_size, 0, 4 * sizeof(int), acc_view
+///     input_size, 0, 8 * sizeof(int), acc_view
 /// );
 /// // keys_output:   [ 8, 7,  6,  5, 4, 3,  1,  1]
 /// // values_output: [-8, 7, -5, -4, 3, 2, -1, -2]
@@ -728,7 +728,7 @@ template<
 >
 inline
 void radix_sort_pairs_desc(void * temporary_storage,
-                           size_t& temporary_storage_bytes,
+                           size_t& storage_size,
                            KeysInputIterator keys_input,
                            KeysOutputIterator keys_output,
                            ValuesInputIterator values_input,
@@ -741,7 +741,7 @@ void radix_sort_pairs_desc(void * temporary_storage,
 {
     bool ignored;
     detail::radix_sort<true>(
-        temporary_storage, temporary_storage_bytes,
+        temporary_storage, storage_size,
         keys_input, nullptr, keys_output,
         values_input, nullptr, values_output,
         size, ignored,
@@ -760,7 +760,7 @@ void radix_sort_pairs_desc(void * temporary_storage,
 /// * \p current() of \p keys is used as the input.
 /// * The function will update \p current() of \p keys to point to the buffer
 /// that contains the output range.
-/// * Returns the required size of \p temporary_storage in \p temporary_storage_bytes
+/// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 /// * The function requires small \p temporary_storage as it does not need
 /// a temporary buffer of \p size elements.
@@ -775,8 +775,8 @@ void radix_sort_pairs_desc(void * temporary_storage,
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
-/// \p temporary_storage_bytes and function returns without performing the sort operation.
-/// \param [in,out] temporary_storage_bytes - reference to a size (in bytes) of \p temporary_storage.
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
 /// \param [in,out] keys - reference to the double-buffer of keys, its \p current()
 /// contains the input range and will be updated to point to the output range.
 /// \param [in] size - number of element in the input range.
@@ -829,7 +829,7 @@ void radix_sort_pairs_desc(void * temporary_storage,
 template<class Key>
 inline
 void radix_sort_keys(void * temporary_storage,
-                     size_t& temporary_storage_bytes,
+                     size_t& storage_size,
                      double_buffer<Key>& keys,
                      unsigned int size,
                      unsigned int begin_bit = 0,
@@ -840,7 +840,7 @@ void radix_sort_keys(void * temporary_storage,
     empty_type * values = nullptr;
     bool is_result_in_output;
     detail::radix_sort<false>(
-        temporary_storage, temporary_storage_bytes,
+        temporary_storage, storage_size,
         keys.current(), keys.current(), keys.alternate(),
         values, values, values,
         size, is_result_in_output,
@@ -863,7 +863,7 @@ void radix_sort_keys(void * temporary_storage,
 /// * \p current() of \p keys is used as the input.
 /// * The function will update \p current() of \p keys to point to the buffer
 /// that contains the output range.
-/// * Returns the required size of \p temporary_storage in \p temporary_storage_bytes
+/// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 /// * The function requires small \p temporary_storage as it does not need
 /// a temporary buffer of \p size elements.
@@ -878,8 +878,8 @@ void radix_sort_keys(void * temporary_storage,
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
-/// \p temporary_storage_bytes and function returns without performing the sort operation.
-/// \param [in,out] temporary_storage_bytes - reference to a size (in bytes) of \p temporary_storage.
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
 /// \param [in,out] keys - reference to the double-buffer of keys, its \p current()
 /// contains the input range and will be updated to point to the output range.
 /// \param [in] size - number of element in the input range.
@@ -932,7 +932,7 @@ void radix_sort_keys(void * temporary_storage,
 template<class Key>
 inline
 void radix_sort_keys_desc(void * temporary_storage,
-                          size_t& temporary_storage_bytes,
+                          size_t& storage_size,
                           double_buffer<Key>& keys,
                           unsigned int size,
                           unsigned int begin_bit = 0,
@@ -943,7 +943,7 @@ void radix_sort_keys_desc(void * temporary_storage,
     empty_type * values = nullptr;
     bool is_result_in_output;
     detail::radix_sort<true>(
-        temporary_storage, temporary_storage_bytes,
+        temporary_storage, storage_size,
         keys.current(), keys.current(), keys.alternate(),
         values, values, values,
         size, is_result_in_output,
@@ -966,7 +966,7 @@ void radix_sort_keys_desc(void * temporary_storage,
 /// * \p current() of \p keys and \p values are used as the input.
 /// * The function will update \p current() of \p keys and \p values to point to buffers
 /// that contains the output range.
-/// * Returns the required size of \p temporary_storage in \p temporary_storage_bytes
+/// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 /// * The function requires small \p temporary_storage as it does not need
 /// a temporary buffer of \p size elements.
@@ -982,8 +982,8 @@ void radix_sort_keys_desc(void * temporary_storage,
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
-/// \p temporary_storage_bytes and function returns without performing the sort operation.
-/// \param [in,out] temporary_storage_bytes - reference to a size (in bytes) of \p temporary_storage.
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
 /// \param [in,out] keys - reference to the double-buffer of keys, its \p current()
 /// contains the input range and will be updated to point to the output range.
 /// \param [in,out] values - reference to the double-buffer of values, its \p current()
@@ -1020,7 +1020,7 @@ void radix_sort_keys_desc(void * temporary_storage,
 /// rocprim::double_buffer<double> values(values_input.accelerator_pointer(), values_tmp.accelerator_pointer());
 ///
 /// // Keys are in range [0; 8], so we can limit compared bit to bits on indexes
-/// // 0, 1, 2, 3, and 4. In order to do this \p begin_bit is set to 0 and \p end_bit
+/// // 0, 1, 2, 3, and 4. In order to do this begin_bit is set to 0 and end_bit
 /// // is set to 5.
 ///
 /// size_t temporary_storage_size_bytes;
@@ -1047,7 +1047,7 @@ void radix_sort_keys_desc(void * temporary_storage,
 template<class Key, class Value>
 inline
 void radix_sort_pairs(void * temporary_storage,
-                      size_t& temporary_storage_bytes,
+                      size_t& storage_size,
                       double_buffer<Key>& keys,
                       double_buffer<Value>& values,
                       unsigned int size,
@@ -1058,7 +1058,7 @@ void radix_sort_pairs(void * temporary_storage,
 {
     bool is_result_in_output;
     detail::radix_sort<false>(
-        temporary_storage, temporary_storage_bytes,
+        temporary_storage, storage_size,
         keys.current(), keys.current(), keys.alternate(),
         values.current(), values.current(), values.alternate(),
         size, is_result_in_output,
@@ -1082,7 +1082,7 @@ void radix_sort_pairs(void * temporary_storage,
 /// * \p current() of \p keys and \p values are used as the input.
 /// * The function will update \p current() of \p keys and \p values to point to buffers
 /// that contains the output range.
-/// * Returns the required size of \p temporary_storage in \p temporary_storage_bytes
+/// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 /// * The function requires small \p temporary_storage as it does not need
 /// a temporary buffer of \p size elements.
@@ -1098,8 +1098,8 @@ void radix_sort_pairs(void * temporary_storage,
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
-/// \p temporary_storage_bytes and function returns without performing the sort operation.
-/// \param [in,out] temporary_storage_bytes - reference to a size (in bytes) of \p temporary_storage.
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
 /// \param [in,out] keys - reference to the double-buffer of keys, its \p current()
 /// contains the input range and will be updated to point to the output range.
 /// \param [in,out] values - reference to the double-buffer of values, its \p current()
@@ -1140,7 +1140,7 @@ void radix_sort_pairs(void * temporary_storage,
 /// rocprim::radix_sort_pairs_desc(
 ///     nullptr, temporary_storage_size_bytes,
 ///     keys, values, input_size,
-///     0, 4 * sizeof(int), acc_view
+///     0, 8 * sizeof(int), acc_view
 /// );
 ///
 /// // allocate temporary storage
@@ -1150,7 +1150,7 @@ void radix_sort_pairs(void * temporary_storage,
 /// rocprim::radix_sort_pairs_desc(
 ///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
 ///     keys, values, input_size,
-///     0, 4 * sizeof(int), acc_view
+///     0, 8 * sizeof(int), acc_view
 /// );
 /// // keys.current():   [ 8, 7,  6,  5, 4, 3,  1,  1]
 /// // values.current(): [-8, 7, -5, -4, 3, 2, -1, -2]
@@ -1159,7 +1159,7 @@ void radix_sort_pairs(void * temporary_storage,
 template<class Key, class Value>
 inline
 void radix_sort_pairs_desc(void * temporary_storage,
-                           size_t& temporary_storage_bytes,
+                           size_t& storage_size,
                            double_buffer<Key>& keys,
                            double_buffer<Value>& values,
                            unsigned int size,
@@ -1170,7 +1170,7 @@ void radix_sort_pairs_desc(void * temporary_storage,
 {
     bool is_result_in_output;
     detail::radix_sort<true>(
-        temporary_storage, temporary_storage_bytes,
+        temporary_storage, storage_size,
         keys.current(), keys.current(), keys.alternate(),
         values.current(), values.current(), values.alternate(),
         size, is_result_in_output,

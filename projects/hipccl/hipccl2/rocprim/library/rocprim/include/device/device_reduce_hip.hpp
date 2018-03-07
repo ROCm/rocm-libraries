@@ -199,7 +199,7 @@ hipError_t reduce_impl(void * temporary_storage,
 
 /// \brief HIP parallel reduction primitive for device level.
 ///
-/// device_reduce function performs a device-wide reduction operation
+/// reduce function performs a device-wide reduction operation
 /// using binary \p reduce_op operator.
 ///
 /// \par Overview
@@ -309,7 +309,7 @@ hipError_t reduce(void * temporary_storage,
 
 /// \brief HIP parallel reduce primitive for device level.
 ///
-/// device_reduce function performs a device-wide reduction operation
+/// reduce function performs a device-wide reduction operation
 /// using binary \p reduce_op operator.
 ///
 /// \par Overview
