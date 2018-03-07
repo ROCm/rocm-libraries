@@ -772,12 +772,13 @@ WARN_LOGFILE           =
 # Note: If this tag is empty the current directory is searched.
 
 INPUT                  = mainpage.dox \
-                         collectivemodule.dox \
-                         collectivewarpmodule.dox \
-                         collectiveblockmodule.dox \
+                         primitivesmodule.dox \
+                         warpmodule.dox \
+                         blockmodule.dox \
                          devicemodulehc.dox \
                          devicemodulehip.dox \
                          utilsmodule.dox \
+                         iteratormodule.dox \
                          hipcub.dox \
                          ../library/rocprim/include
 

@@ -26,7 +26,7 @@
 #include "../config.hpp"
 #include "thread.hpp"
 
-/// \addtogroup collectivewarpmodule
+/// \addtogroup warpmodule
 /// @{
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -176,4 +176,4 @@ END_ROCPRIM_NAMESPACE
 #endif // ROCPRIM_INTRINSICS_WARP_SHUFFLE_HPP_
 
 /// @}
-// end of group collectivewarpmodule
+// end of group warpmodule

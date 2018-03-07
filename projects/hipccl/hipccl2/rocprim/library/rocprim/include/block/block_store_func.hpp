@@ -30,7 +30,7 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// \addtogroup collectiveblockmodule
+/// \addtogroup blockmodule
 /// @{
 
 /// \brief Stores a blocked arrangement of items from across the thread block
@@ -361,6 +361,6 @@ void block_store_direct_warp_striped(unsigned int flat_id,
 END_ROCPRIM_NAMESPACE
 
 /// @}
-// end of group collectiveblockmodule
+// end of group blockmodule
 
 #endif // ROCPRIM_BLOCK_BLOCK_STORE_FUNC_HPP_

@@ -27,8 +27,25 @@
 
 #include "../config.hpp"
 
+/// \addtogroup iteratormodule
+/// @{
+
 BEGIN_ROCPRIM_NAMESPACE
 
+/// \class transform_iterator
+/// \brief A random-access input (read-only) iterator adaptor for transforming dereferenced values.
+///
+/// \par Overview
+/// * A transform_iterator uses functor of type UnaryFunction to transform value obtained
+/// by dereferencing underlying iterator.
+/// * Using it for simulating a range filled with results of applying functor of type
+/// \p UnaryFunction to another range saves memory capacity and/or bandwidth.
+///
+/// \tparam InputIterator - type of the underlying random-access input iterator. Must be
+/// a random-access iterator.
+/// \tparam UnaryFunction - type of the transform functor.
+/// \tparam ValueType - type of value that can be obtained by dereferencing the iterator.
+/// By default it is the return type of \p UnaryFunction.
 template<
     class InputIterator,
     class UnaryFunction,
@@ -54,11 +71,19 @@ private:
     );
 
 public:
+    /// The type of the value that can be obtained by dereferencing the iterator.
     using value_type = ValueType;
+    /// \brief A reference type of the type iterated over (\p value_type).
+    /// It's `const` since transform_iterator is a read-only iterator.
     using reference = const value_type&;
+    /// \brief A pointer type of the type iterated over (\p value_type).
+    /// It's `const` since transform_iterator is a read-only iterator.
     using pointer = const value_type*;
+    /// A type used for identify distance between iterators.
     using difference_type = typename std::iterator_traits<InputIterator>::difference_type;
+    /// The category of the iterator.
     using iterator_category = std::random_access_iterator_tag;
+    /// The type of unary function used to transform input range.
     using unary_function = UnaryFunction;
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
@@ -68,6 +93,11 @@ public:
     ROCPRIM_HOST_DEVICE inline
     ~transform_iterator() = default;
 
+    /// \brief Creates a new transform_iterator.
+    ///
+    /// \param iterator input iterator to iterate over and transform.
+    /// \param transform unary function used to transform values obtained
+    /// from range pointed by \p iterator.
     ROCPRIM_HOST_DEVICE inline
     transform_iterator(InputIterator iterator, UnaryFunction transform)
         : iterator_(iterator), transform_(transform)
@@ -199,6 +229,16 @@ operator+(typename transform_iterator<InputIterator, UnaryFunction, ValueType>::
     return iterator + distance;
 }
 
+/// make_transform_iterator creates a transform_iterator using \p iterator as
+/// the underlying iterator and \p transform as the unary function.
+///
+/// \tparam InputIterator - type of the underlying random-access input iterator.
+/// \tparam UnaryFunction - type of the transform functor.
+///
+/// \param iterator - input iterator.
+/// \param transform - transform functor to use in created transform_iterator.
+/// \return A new transform_iterator object which transforms the range pointed
+/// by \p iterator using \p transform functor.
 template<
     class InputIterator,
     class UnaryFunction
@@ -209,6 +249,9 @@ make_transform_iterator(InputIterator iterator, UnaryFunction transform)
 {
     return transform_iterator<InputIterator, UnaryFunction>(iterator, transform);
 }
+
+/// @}
+// end of group iteratormodule
 
 END_ROCPRIM_NAMESPACE
 

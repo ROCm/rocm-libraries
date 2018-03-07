@@ -5,6 +5,6 @@
 */
 
 /**
- * \defgroup collectivemodule rocPRIM parallel primitives
- * 
+ * \defgroup primitivesmodule Parallel primitives
+ *
  */

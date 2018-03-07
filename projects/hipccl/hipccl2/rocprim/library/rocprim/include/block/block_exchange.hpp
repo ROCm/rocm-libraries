@@ -28,7 +28,7 @@
 #include "../functional.hpp"
 #include "../types.hpp"
 
-/// \addtogroup collectiveblockmodule
+/// \addtogroup blockmodule
 /// @{
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -750,6 +750,6 @@ private:
 END_ROCPRIM_NAMESPACE
 
 /// @}
-// end of group collectiveblockmodule
+// end of group blockmodule
 
 #endif // ROCPRIM_BLOCK_BLOCK_EXCHANGE_HPP_
