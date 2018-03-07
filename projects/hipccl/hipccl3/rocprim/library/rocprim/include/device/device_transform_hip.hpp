@@ -85,7 +85,7 @@ void transform_kernel(InputIterator input,
 
 /// \brief HIP parallel transform primitive for device level.
 ///
-/// device_transform function performs a device-wide transformation operation
+/// transform function performs a device-wide transformation operation
 /// using unary \p transform_op operator.
 ///
 /// \par Overview
