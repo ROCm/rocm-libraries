@@ -254,7 +254,6 @@ void reduce_by_key_impl(void * temporary_storage,
 /// \code{.cpp}
 /// #include <rocprim.hpp>
 ///
-///
 /// hc::accelerator_view acc_view = ...;
 ///
 /// // Prepare input and output (declare pointers, allocate device memory etc.)
@@ -269,8 +268,9 @@ void reduce_by_key_impl(void * temporary_storage,
 /// // Get required size of the temporary storage
 /// rocprim::reduce_by_key(
 ///     nullptr, temporary_storage_size_bytes,
-///     keys_input, values_input, input_size,
-///     unique_output, aggregates_output, unique_count_output
+///     keys_input.accelerator_pointer(), values_input.accelerator_pointer(), input_size,
+///     unique_output.accelerator_pointer(), aggregates_output.accelerator_pointer(),
+///     unique_count_output.accelerator_pointer()
 /// );
 ///
 /// // allocate temporary storage

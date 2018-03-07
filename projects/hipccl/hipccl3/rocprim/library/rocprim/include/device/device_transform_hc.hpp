@@ -57,9 +57,6 @@ namespace detail
 /// using unary \p transform_op operator.
 ///
 /// \par Overview
-/// * Supports non-commutative transform operators. However, a transform operator should be
-/// associative. When used with non-associative functions the results may be non-deterministic
-/// and/or vary in precision.
 /// * Ranges specified by \p input and \p output must have at least \p size elements.
 ///
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
@@ -73,8 +70,8 @@ namespace detail
 /// \param [in] size - number of element in the input range.
 /// \param [in] transform_op - unary operation function object that will be used for transform.
 /// The signature of the function should be equivalent to the following:
-/// <tt>T f(const T &a);</tt>. The signature does not need to have
-/// <tt>const &</tt>, but function object must not modify the objects passed to it.
+/// <tt>U f(const T &a);</tt>. The signature does not need to have
+/// <tt>const &</tt>, but function object must not modify the object passed to it.
 /// \param [in] acc_view - [optional] \p hc::accelerator_view object. The default value
 /// is \p hc::accelerator().get_default_view() (default view of the default accelerator).
 /// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
@@ -105,7 +102,7 @@ namespace detail
 /// // perform transform
 /// rocprim::transform(
 ///     input.accelerator_pointer(), output.accelerator_pointer(), input.size(),
-///     rocprim::plus<U>(), acc_view, false
+///     transform_op, acc_view, false
 /// );
 /// // output: [6, 7, 8, 9, 10, 11, 12, 13]
 /// \endcode
