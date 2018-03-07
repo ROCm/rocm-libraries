@@ -53,7 +53,7 @@ auto reduce_with_initial(T& output,
                          BinaryFunction reduce_op)
     -> typename std::enable_if<WithInitialValue, T>::type
 {
-    return reduce_op(output, initial_value);
+    return reduce_op(initial_value, output);
 }
 
 template<
