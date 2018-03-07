@@ -380,7 +380,7 @@ void radix_sort(void * temporary_storage,
 /// rocprim::radix_sort_keys(
 ///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
 ///     input.accelerator_pointer(), output.accelerator_pointer(),
-///     input_size, 0, 4 * sizeof(float), acc_view
+///     input_size, 0, 8 * sizeof(float), acc_view
 /// );
 /// // keys_output: [0.08, 0.2, 0.3, 0.4, 0.6, 0.65, 0.7, 1]
 /// \endcode
@@ -481,7 +481,7 @@ void radix_sort_keys(void * temporary_storage,
 /// rocprim::radix_sort_keys_desc(
 ///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
 ///     input.accelerator_pointer(), output.accelerator_pointer(),
-///     input_size, 0, 4 * sizeof(int), acc_view
+///     input_size, 0, 8 * sizeof(int), acc_view
 /// );
 /// // keys_output: [8, 7, 6, 5, 4, 3, 2, 1]
 /// \endcode
@@ -577,7 +577,7 @@ void radix_sort_keys_desc(void * temporary_storage,
 /// hc::array<double> values_output;     // empty array of 8 elements
 ///
 /// // Keys are in range [0; 8], so we can limit compared bit to bits on indexes
-/// // 0, 1, 2, 3, and 4. In order to do this \p begin_bit is set to 0 and \p end_bit
+/// // 0, 1, 2, 3, and 4. In order to do this begin_bit is set to 0 and end_bit
 /// // is set to 5.
 ///
 /// size_t temporary_storage_size_bytes;
@@ -702,7 +702,7 @@ void radix_sort_pairs(void * temporary_storage,
 ///     nullptr, temporary_storage_size_bytes,
 ///     keys_input.accelerator_pointer(), keys_output.accelerator_pointer(),
 ///     values_input.accelerator_pointer(), values_output.accelerator_pointer(),
-///     input_size, 0, 4 * sizeof(int), acc_view
+///     input_size, 0, 8 * sizeof(int), acc_view
 /// );
 ///
 /// // allocate temporary storage
@@ -713,7 +713,7 @@ void radix_sort_pairs(void * temporary_storage,
 ///     temporary_storage, temporary_storage_size_bytes,
 ///     keys_input.accelerator_pointer(), keys_output.accelerator_pointer(),
 ///     values_input.accelerator_pointer(), values_output.accelerator_pointer(),
-///     input_size, 0, 4 * sizeof(int), acc_view
+///     input_size, 0, 8 * sizeof(int), acc_view
 /// );
 /// // keys_output:   [ 8, 7,  6,  5, 4, 3,  1,  1]
 /// // values_output: [-8, 7, -5, -4, 3, 2, -1, -2]
@@ -1020,7 +1020,7 @@ void radix_sort_keys_desc(void * temporary_storage,
 /// rocprim::double_buffer<double> values(values_input.accelerator_pointer(), values_tmp.accelerator_pointer());
 ///
 /// // Keys are in range [0; 8], so we can limit compared bit to bits on indexes
-/// // 0, 1, 2, 3, and 4. In order to do this \p begin_bit is set to 0 and \p end_bit
+/// // 0, 1, 2, 3, and 4. In order to do this begin_bit is set to 0 and end_bit
 /// // is set to 5.
 ///
 /// size_t temporary_storage_size_bytes;
@@ -1140,7 +1140,7 @@ void radix_sort_pairs(void * temporary_storage,
 /// rocprim::radix_sort_pairs_desc(
 ///     nullptr, temporary_storage_size_bytes,
 ///     keys, values, input_size,
-///     0, 4 * sizeof(int), acc_view
+///     0, 8 * sizeof(int), acc_view
 /// );
 ///
 /// // allocate temporary storage
@@ -1150,7 +1150,7 @@ void radix_sort_pairs(void * temporary_storage,
 /// rocprim::radix_sort_pairs_desc(
 ///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
 ///     keys, values, input_size,
-///     0, 4 * sizeof(int), acc_view
+///     0, 8 * sizeof(int), acc_view
 /// );
 /// // keys.current():   [ 8, 7,  6,  5, 4, 3,  1,  1]
 /// // values.current(): [-8, 7, -5, -4, 3, 2, -1, -2]
