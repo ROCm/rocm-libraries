@@ -601,7 +601,7 @@ void scan_and_scatter_carry_outs(const CarryOut * carry_outs,
             }
             else
             {
-                aggregates_output[dst] = reduce_op(aggregates_output[dst], aggregate);
+                aggregates_output[dst] = reduce_op(aggregate, aggregates_output[dst]);
             }
         }
     }
