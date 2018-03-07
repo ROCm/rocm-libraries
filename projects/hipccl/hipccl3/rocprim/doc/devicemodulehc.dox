@@ -5,6 +5,6 @@
 */
 
 /**
- * \defgroup devicemodule_hc rocPRIM HC device-wide primitives
- *
+ * \defgroup devicemodule_hc HC device-wide
+ * \ingroup primitivesmodule
  */

@@ -33,7 +33,7 @@
 #include "detail/warp_scan_shuffle.hpp"
 #include "detail/warp_scan_shared_mem.hpp"
 
-/// \addtogroup collectivewarpmodule
+/// \addtogroup warpmodule
 /// @{
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -745,6 +745,6 @@ protected:
 END_ROCPRIM_NAMESPACE
 
 /// @}
-// end of group collectivewarpmodule
+// end of group warpmodule
 
 #endif // ROCPRIM_WARP_WARP_SCAN_HPP_

@@ -31,7 +31,7 @@
 
 #include "detail/warp_sort_shuffle.hpp"
 
-/// \addtogroup collectivewarpmodule
+/// \addtogroup warpmodule
 /// @{
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -264,6 +264,6 @@ public:
 END_ROCPRIM_NAMESPACE
 
 /// @}
-// end of group collectivewarpmodule
+// end of group warpmodule
 
 #endif // ROCPRIM_WARP_WARP_SORT_HPP_

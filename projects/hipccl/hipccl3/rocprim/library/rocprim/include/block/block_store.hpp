@@ -31,7 +31,7 @@
 #include "block_store_func.hpp"
 #include "block_exchange.hpp"
 
-/// \addtogroup collectiveblockmodule
+/// \addtogroup blockmodule
 /// @{
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -312,7 +312,7 @@ public:
 };
 
 /// @}
-// end of group collectiveblockmodule
+// end of group blockmodule
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 

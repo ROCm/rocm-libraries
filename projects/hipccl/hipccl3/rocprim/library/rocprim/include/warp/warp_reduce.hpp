@@ -33,7 +33,7 @@
 #include "detail/warp_reduce_shuffle.hpp"
 #include "detail/warp_reduce_shared_mem.hpp"
 
-/// \addtogroup collectivewarpmodule
+/// \addtogroup warpmodule
 /// @{
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -327,6 +327,6 @@ public:
 END_ROCPRIM_NAMESPACE
 
 /// @}
-// end of group collectivewarpmodule
+// end of group warpmodule
 
 #endif // ROCPRIM_WARP_WARP_REDUCE_HPP_

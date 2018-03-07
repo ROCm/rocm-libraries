@@ -32,7 +32,7 @@
 #include "detail/block_scan_warp_scan.hpp"
 #include "detail/block_scan_reduce_then_scan.hpp"
 
-/// \addtogroup collectiveblockmodule
+/// \addtogroup blockmodule
 /// @{
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -1701,6 +1701,6 @@ public:
 END_ROCPRIM_NAMESPACE
 
 /// @}
-// end of group collectiveblockmodule
+// end of group blockmodule
 
 #endif // ROCPRIM_BLOCK_BLOCK_SCAN_HPP_

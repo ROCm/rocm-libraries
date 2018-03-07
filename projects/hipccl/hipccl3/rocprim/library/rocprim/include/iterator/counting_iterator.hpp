@@ -28,8 +28,21 @@
 
 #include "../config.hpp"
 
+/// \addtogroup iteratormodule
+/// @{
+
 BEGIN_ROCPRIM_NAMESPACE
 
+/// \class counting_iterator
+/// \brief A random-access input (read-only) iterator over a sequence of consecutive values.
+///
+/// \par Overview
+/// * A counting_iterator represents a pointer into a range of sequentially increasing values.
+/// * Using it for simulating a range filled with a sequence of consecutive values saves
+/// memory capacity and bandwidth.
+///
+/// \tparam Incrementable - type of value that can be obtained by dereferencing the iterator.
+/// \tparam Difference - a type used for identify distance between iterators
 template<
     class Incrementable,
     class Difference = std::ptrdiff_t
@@ -37,10 +50,17 @@ template<
 class counting_iterator
 {
 public:
+    /// The type of the value that can be obtained by dereferencing the iterator.
     using value_type = typename std::remove_const<Incrementable>::type;
+    /// \brief A reference type of the type iterated over (\p value_type).
+    /// It's `const` since counting_iterator is a read-only iterator.
     using reference = const value_type&; // counting_iterator is not writable
+    /// \brief A pointer type of the type iterated over (\p value_type).
+    /// It's `const` since counting_iterator is a read-only iterator.
     using pointer = const value_type*; // counting_iterator is not writable
+    /// A type used for identify distance between iterators.
     using difference_type = Difference;
+    /// The category of the iterator.
     using iterator_category = std::random_access_iterator_tag;
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
@@ -50,11 +70,15 @@ public:
     ROCPRIM_HOST_DEVICE inline
     counting_iterator() = default;
 
+    /// \brief Creates counting_iterator with its initial value initialized
+    /// to its default value (usually 0).
     ROCPRIM_HOST_DEVICE inline
     ~counting_iterator() = default;
 
+    /// \brief Creates counting_iterator and sets its initial value to \p value_.
+    /// \param value_ initial value
     ROCPRIM_HOST_DEVICE inline
-    counting_iterator(const value_type value_) : value_(value_)
+    explicit counting_iterator(const value_type value_) : value_(value_)
     {
     }
 
@@ -221,6 +245,13 @@ operator+(typename counting_iterator<Incrementable, Difference>::difference_type
     return iter + distance;
 }
 
+/// make_counting_iterator creates a counting_iterator with its initial value
+/// set to \p value.
+///
+/// \tparam Incrementable - type of value that can be obtained by dereferencing created iterator.
+/// \tparam Difference - a type used for identify distance between counting_iterator iterators.
+///
+/// \param value - initial value for counting_iterator.
 template<
     class Incrementable,
     class Difference = std::ptrdiff_t
@@ -233,5 +264,8 @@ make_counting_iterator(Incrementable value)
 }
 
 END_ROCPRIM_NAMESPACE
+
+/// @}
+// end of group iteratormodule
 
 #endif // ROCPRIM_ITERATOR_COUNTING_ITERATOR_HPP_
