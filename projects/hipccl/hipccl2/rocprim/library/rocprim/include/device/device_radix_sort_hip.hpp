@@ -417,7 +417,7 @@ hipError_t radix_sort(void * temporary_storage,
 /// #include <rocprim.hpp>
 ///
 /// // Prepare input and output (declare pointers, allocate device memory etc.)
-/// size_t input_size;    // e.g., 8
+/// size_t input_size;      // e.g., 8
 /// float * input;          // e.g., [0.6, 0.3, 0.65, 0.4, 0.2, 0.08, 1, 0.7]
 /// float * output;         // empty array of 8 elements
 ///
@@ -631,7 +631,7 @@ hipError_t radix_sort_keys_desc(void * temporary_storage,
 /// double * values_output;     // empty array of 8 elements
 ///
 /// // Keys are in range [0; 8], so we can limit compared bit to bits on indexes
-/// // 0, 1, 2, 3, and 4. In order to do this \p begin_bit is set to 0 and \p end_bit
+/// // 0, 1, 2, 3, and 4. In order to do this begin_bit is set to 0 and end_bit
 /// // is set to 5.
 ///
 /// size_t temporary_storage_size_bytes;
@@ -1074,7 +1074,7 @@ hipError_t radix_sort_keys_desc(void * temporary_storage,
 /// rocprim::double_buffer<double> values(values_input, values_tmp);
 ///
 /// // Keys are in range [0; 8], so we can limit compared bit to bits on indexes
-/// // 0, 1, 2, 3, and 4. In order to do this \p begin_bit is set to 0 and \p end_bit
+/// // 0, 1, 2, 3, and 4. In order to do this begin_bit is set to 0 and end_bit
 /// // is set to 5.
 ///
 /// size_t temporary_storage_size_bytes;
