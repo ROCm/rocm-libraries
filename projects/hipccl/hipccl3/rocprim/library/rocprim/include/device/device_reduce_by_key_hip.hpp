@@ -33,6 +33,9 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
+/// \addtogroup devicemodule_hip
+/// @{
+
 namespace detail
 {
 
@@ -263,6 +266,105 @@ hipError_t reduce_by_key_impl(void * temporary_storage,
 
 } // end of detail namespace
 
+/// \brief HIP parallel reduce-by-key primitive for device level.
+///
+/// reduce_by_key function performs a device-wide reduction operation of groups
+/// of consecutive values having the same key using binary \p reduce_op operator. The first key of each group
+/// is copied to \p unique_output and reduction of the group is written to \p aggregates_output.
+/// The total number of group is written to \p unique_count_output.
+///
+/// \par Overview
+/// * Supports non-commutative reduction operators. However, a reduction operator should be
+/// associative. When used with non-associative functions the results may be non-deterministic
+/// and/or vary in precision.
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage in a null pointer.
+/// * Ranges specified by \p keys_input and \p values_input must have at least \p size elements.
+/// * Range specified by \p unique_count_output must have at least 1 element.
+/// * Ranges specified by \p unique_output and \p aggregates_output must have at least
+/// <tt>*unique_count_output</tt> (i.e. the number of unique keys) elements.
+///
+/// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam ValuesInputIterator - random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam UniqueOutputIterator - random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam AggregatesOutputIterator - random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam UniqueCountOutputIterator - random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam BinaryFunction - type of binary function used for reduction. Default type
+/// is \p rocprim::plus<T>, where \p T is a \p value_type of \p ValuesInputIterator.
+/// \tparam KeyCompareFunction - type of binary function used to determine keys equality. Default type
+/// is \p rocprim::equal_to<T>, where \p T is a \p value_type of \p KeysInputIterator.
+///
+/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the reduction operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] keys_input - iterator to the first element in the range of keys.
+/// \param [in] values_input - iterator to the first element in the range of values to reduce.
+/// \param [in] size - number of element in the input range.
+/// \param [out] unique_output - iterator to the first element in the output range of unique keys.
+/// \param [out] aggregates_output - iterator to the first element in the output range of reductions.
+/// \param [out] unique_count_output - iterator to total number of groups.
+/// \param [in] reduce_op - binary operation function object that will be used for reduction.
+/// The signature of the function should be equivalent to the following:
+/// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
+/// <tt>const &</tt>, but function object must not modify the objects passed to it.
+/// Default is BinaryFunction().
+/// \param [in] key_compare_op - binary operation function object that will be used to determine keys equality.
+/// The signature of the function should be equivalent to the following:
+/// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
+/// <tt>const &</tt>, but function object must not modify the objects passed to it.
+/// Default is KeyCompareFunction().
+/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \returns \p hipSuccess (\p 0) after successful reduction; otherwise a HIP runtime error of
+/// type \p hipError_t.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level sum operation is performed on an array of
+/// integer values and integer keys.
+///
+/// \code{.cpp}
+/// #include <rocprim.hpp>
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t input_size;          // e.g., 8
+/// int * keys_input;           // e.g., [1, 1, 1, 2, 10, 10, 10, 88]
+/// int * values_input;         // e.g., [1, 2, 3, 4,  5,  6,  7,  8]
+/// int * unique_output;        // empty array of at least 4 elements
+/// int * aggregates_output;    // empty array of at least 4 elements
+/// int * unique_count_output;  // empty array of 1 element
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::reduce_by_key(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     keys_input, values_input, input_size,
+///     unique_output, aggregates_output, unique_count_output
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform reduction
+/// rocprim::reduce_by_key(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     keys_input, values_input, input_size,
+///     unique_output, aggregates_output, unique_count_output
+/// );
+/// // unique_output:       [1, 2, 10, 88]
+/// // aggregates_output:   [6, 4, 18,  8]
+/// // unique_count_output: [4]
+/// \endcode
+/// \endparblock
 template<
     class KeysInputIterator,
     class ValuesInputIterator,
@@ -277,14 +379,14 @@ hipError_t reduce_by_key(void * temporary_storage,
                          size_t& storage_size,
                          KeysInputIterator keys_input,
                          ValuesInputIterator values_input,
-                         const unsigned int size,
+                         unsigned int size,
                          UniqueOutputIterator unique_output,
                          AggregatesOutputIterator aggregates_output,
                          UniqueCountOutputIterator unique_count_output,
                          BinaryFunction reduce_op = BinaryFunction(),
                          KeyCompareFunction key_compare_op = KeyCompareFunction(),
-                         const hipStream_t stream = 0,
-                         const bool debug_synchronous = false)
+                         hipStream_t stream = 0,
+                         bool debug_synchronous = false)
 {
     return detail::reduce_by_key_impl(
         temporary_storage, storage_size,
@@ -294,6 +396,9 @@ hipError_t reduce_by_key(void * temporary_storage,
         stream, debug_synchronous
     );
 }
+
+/// @}
+// end of group devicemodule_hip
 
 END_ROCPRIM_NAMESPACE
 
