@@ -116,9 +116,6 @@ void segmented_reduce_impl(void * temporary_storage,
 /// using binary \p reduce_op operator.
 ///
 /// \par Overview
-/// * Supports non-commutative reduction operators. However, a reduction operator should be
-/// associative. When used with non-associative functions the results may be non-deterministic
-/// and/or vary in precision.
 /// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 /// * Ranges specified by \p input must have at least \p size elements, \p output must have

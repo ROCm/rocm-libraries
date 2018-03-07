@@ -284,7 +284,7 @@ void segmented_radix_sort_impl(void * temporary_storage,
 ///     nullptr, temporary_storage_size_bytes,
 ///     input.accelerator_pointer(), output.accelerator_pointer(),
 ///     input_size,
-///     segments, offsets, offsets + 1,
+///     segments, offsets.accelerator_pointer(), offsets.accelerator_pointer() + 1,
 ///     0, 8 * sizeof(float), acc_view
 /// );
 ///
@@ -296,7 +296,7 @@ void segmented_radix_sort_impl(void * temporary_storage,
 ///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
 ///     input.accelerator_pointer(), output.accelerator_pointer(),
 ///     input_size,
-///     segments, offsets, offsets + 1,
+///     segments, offsets.accelerator_pointer(), offsets.accelerator_pointer() + 1,
 ///     0, 8 * sizeof(float), acc_view
 /// );
 /// // keys_output: [0.3, 0.6, 0.65, 0.08, 0.2, 0.4, 0.7, 1]
@@ -405,7 +405,7 @@ void segmented_radix_sort_keys(void * temporary_storage,
 ///     nullptr, temporary_storage_size_bytes,
 ///     input.accelerator_pointer(), output.accelerator_pointer(),
 ///     input_size,
-///     segments, offsets, offsets + 1,
+///     segments, offsets.accelerator_pointer(), offsets.accelerator_pointer() + 1,
 ///     0, 8 * sizeof(int), acc_view
 /// );
 ///
@@ -417,7 +417,7 @@ void segmented_radix_sort_keys(void * temporary_storage,
 ///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
 ///     input.accelerator_pointer(), output.accelerator_pointer(),
 ///     input_size,
-///     segments, offsets, offsets + 1,
+///     segments, offsets.accelerator_pointer(), offsets.accelerator_pointer() + 1,
 ///     0, 8 * sizeof(int), acc_view
 /// );
 /// // keys_output: [6, 3, 5, 8, 7, 4, 2, 1]
@@ -538,7 +538,7 @@ void segmented_radix_sort_keys_desc(void * temporary_storage,
 ///     keys_input.accelerator_pointer(), keys_output.accelerator_pointer(),
 ///     values_input.accelerator_pointer(), values_output.accelerator_pointer(),
 ///     input_size,
-///     segments, offsets, offsets + 1,
+///     segments, offsets.accelerator_pointer(), offsets.accelerator_pointer() + 1,
 ///     0, 5, acc_view
 /// );
 ///
@@ -551,7 +551,7 @@ void segmented_radix_sort_keys_desc(void * temporary_storage,
 ///     keys_input.accelerator_pointer(), keys_output.accelerator_pointer(),
 ///     values_input.accelerator_pointer(), values_output.accelerator_pointer(),
 ///     input_size,
-///     segments, offsets, offsets + 1,
+///     segments, offsets.accelerator_pointer(), offsets.accelerator_pointer() + 1,
 ///     0, 5, acc_view
 /// );
 /// // keys_output:   [3,  6,  5,  1,  1, 4, 7,  8]
@@ -674,7 +674,7 @@ void segmented_radix_sort_pairs(void * temporary_storage,
 ///     keys_input.accelerator_pointer(), keys_output.accelerator_pointer(),
 ///     values_input.accelerator_pointer(), values_output.accelerator_pointer(),
 ///     input_size,
-///     segments, offsets, offsets + 1,
+///     segments, offsets.accelerator_pointer(), offsets.accelerator_pointer() + 1,
 ///     0, 8 * sizeof(int), acc_view
 /// );
 ///
@@ -687,7 +687,7 @@ void segmented_radix_sort_pairs(void * temporary_storage,
 ///     keys_input.accelerator_pointer(), keys_output.accelerator_pointer(),
 ///     values_input.accelerator_pointer(), values_output.accelerator_pointer(),
 ///     input_size,
-///     segments, offsets, offsets + 1,
+///     segments, offsets.accelerator_pointer(), offsets.accelerator_pointer() + 1,
 ///     0, 8 * sizeof(int), acc_view
 /// );
 /// // keys_output:   [ 6, 3,  5,  8, 7, 4,  1,  1]
@@ -803,7 +803,7 @@ void segmented_radix_sort_pairs_desc(void * temporary_storage,
 /// rocprim::segmented_radix_sort_keys(
 ///     nullptr, temporary_storage_size_bytes,
 ///     keys, input_size,
-///     segments, offsets, offsets + 1,
+///     segments, offsets.accelerator_pointer(), offsets.accelerator_pointer() + 1,
 ///     0, 8 * sizeof(float), acc_view
 /// );
 ///
@@ -814,7 +814,7 @@ void segmented_radix_sort_pairs_desc(void * temporary_storage,
 /// rocprim::segmented_radix_sort_keys(
 ///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
 ///     keys, input_size,
-///     segments, offsets, offsets + 1,
+///     segments, offsets.accelerator_pointer(), offsets.accelerator_pointer() + 1,
 ///     0, 8 * sizeof(float), acc_view
 /// );
 /// // keys.current(): [0.3, 0.6, 0.65, 0.08, 0.2, 0.4, 0.7, 1]
@@ -924,7 +924,7 @@ void segmented_radix_sort_keys(void * temporary_storage,
 /// rocprim::segmented_radix_sort_keys_desc(
 ///     nullptr, temporary_storage_size_bytes,
 ///     keys, input_size,
-///     segments, offsets, offsets + 1,
+///     segments, offsets.accelerator_pointer(), offsets.accelerator_pointer() + 1,
 ///     0, 8 * sizeof(int), acc_view
 /// );
 ///
@@ -935,7 +935,7 @@ void segmented_radix_sort_keys(void * temporary_storage,
 /// rocprim::segmented_radix_sort_keys_desc(
 ///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
 ///     keys, input_size,
-///     segments, offsets, offsets + 1,
+///     segments, offsets.accelerator_pointer(), offsets.accelerator_pointer() + 1,
 ///     0, 8 * sizeof(int), acc_view
 /// );
 /// // keys.current(): [6, 3, 5, 8, 7, 4, 2, 1]
@@ -1055,7 +1055,7 @@ void segmented_radix_sort_keys_desc(void * temporary_storage,
 /// rocprim::segmented_radix_sort_pairs(
 ///     nullptr, temporary_storage_size_bytes,
 ///     keys, values, input_size,
-///     segments, offsets, offsets + 1
+///     segments, offsets.accelerator_pointer(), offsets.accelerator_pointer() + 1
 ///     0, 5, acc_view
 /// );
 ///
@@ -1066,7 +1066,7 @@ void segmented_radix_sort_keys_desc(void * temporary_storage,
 /// rocprim::segmented_radix_sort_pairs(
 ///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
 ///     keys, values, input_size,
-///     segments, offsets, offsets + 1
+///     segments, offsets.accelerator_pointer(), offsets.accelerator_pointer() + 1
 ///     0, 5, acc_view
 /// );
 /// // keys.current():   [3,  6,  5,  1,  1, 4, 7,  8]
@@ -1184,7 +1184,7 @@ void segmented_radix_sort_pairs(void * temporary_storage,
 /// rocprim::segmented_radix_sort_pairs_desc(
 ///     nullptr, temporary_storage_size_bytes,
 ///     keys, values, input_size,
-///     segments, offsets, offsets + 1,
+///     segments, offsets.accelerator_pointer(), offsets.accelerator_pointer() + 1,
 ///     0, 8 * sizeof(int), acc_view
 /// );
 ///
@@ -1195,7 +1195,7 @@ void segmented_radix_sort_pairs(void * temporary_storage,
 /// rocprim::segmented_radix_sort_pairs_desc(
 ///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
 ///     keys, values, input_size,
-///     segments, offsets, offsets + 1,
+///     segments, offsets.accelerator_pointer(), offsets.accelerator_pointer() + 1,
 ///     0, 8 * sizeof(int), acc_view
 /// );
 /// // keys.current():   [ 6, 3,  5,  8, 7, 4,  1,  1]
