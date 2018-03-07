@@ -66,7 +66,7 @@ template<
 >
 inline
 void segmented_radix_sort_impl(void * temporary_storage,
-                               size_t& temporary_storage_bytes,
+                               size_t& storage_size,
                                KeysInputIterator keys_input,
                                typename std::iterator_traits<KeysInputIterator>::value_type * keys_tmp,
                                KeysOutputIterator keys_output,
@@ -102,11 +102,11 @@ void segmented_radix_sort_impl(void * temporary_storage,
     {
         if(!with_double_buffer)
         {
-            temporary_storage_bytes = keys_bytes + values_bytes;
+            storage_size = keys_bytes + values_bytes;
         }
         else
         {
-            temporary_storage_bytes = 4;
+            storage_size = 4;
         }
         return;
     }
@@ -221,7 +221,7 @@ void segmented_radix_sort_impl(void * temporary_storage,
 ///
 /// \par Overview
 /// * The contents of the inputs are not altered by the sorting function.
-/// * Returns the required size of \p temporary_storage in \p temporary_storage_bytes
+/// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 /// * \p Key type (a \p value_type of \p KeysInputIterator and \p KeysOutputIterator) must be
 /// an arithmetic type (that is, an integral type or a floating-point type).
@@ -243,8 +243,8 @@ void segmented_radix_sort_impl(void * temporary_storage,
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
-/// \p temporary_storage_bytes and function returns without performing the sort operation.
-/// \param [in,out] temporary_storage_bytes - reference to a size (in bytes) of \p temporary_storage.
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
 /// \param [in] keys_input - pointer to the first element in the range to sort.
 /// \param [out] keys_output - pointer to the first element in the output range.
 /// \param [in] size - number of element in the input range.
@@ -310,7 +310,7 @@ template<
 >
 inline
 void segmented_radix_sort_keys(void * temporary_storage,
-                               size_t& temporary_storage_bytes,
+                               size_t& storage_size,
                                KeysInputIterator keys_input,
                                KeysOutputIterator keys_output,
                                unsigned int size,
@@ -325,7 +325,7 @@ void segmented_radix_sort_keys(void * temporary_storage,
     empty_type * values = nullptr;
     bool ignored;
     detail::segmented_radix_sort_impl<false>(
-        temporary_storage, temporary_storage_bytes,
+        temporary_storage, storage_size,
         keys_input, nullptr, keys_output,
         values, nullptr, values,
         size, ignored,
@@ -342,7 +342,7 @@ void segmented_radix_sort_keys(void * temporary_storage,
 ///
 /// \par Overview
 /// * The contents of the inputs are not altered by the sorting function.
-/// * Returns the required size of \p temporary_storage in \p temporary_storage_bytes
+/// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 /// * \p Key type (a \p value_type of \p KeysInputIterator and \p KeysOutputIterator) must be
 /// an arithmetic type (that is, an integral type or a floating-point type).
@@ -364,8 +364,8 @@ void segmented_radix_sort_keys(void * temporary_storage,
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
-/// \p temporary_storage_bytes and function returns without performing the sort operation.
-/// \param [in,out] temporary_storage_bytes - reference to a size (in bytes) of \p temporary_storage.
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
 /// \param [in] keys_input - pointer to the first element in the range to sort.
 /// \param [out] keys_output - pointer to the first element in the output range.
 /// \param [in] size - number of element in the input range.
@@ -431,7 +431,7 @@ template<
 >
 inline
 void segmented_radix_sort_keys_desc(void * temporary_storage,
-                                    size_t& temporary_storage_bytes,
+                                    size_t& storage_size,
                                     KeysInputIterator keys_input,
                                     KeysOutputIterator keys_output,
                                     unsigned int size,
@@ -446,7 +446,7 @@ void segmented_radix_sort_keys_desc(void * temporary_storage,
     empty_type * values = nullptr;
     bool ignored;
     detail::segmented_radix_sort_impl<true>(
-        temporary_storage, temporary_storage_bytes,
+        temporary_storage, storage_size,
         keys_input, nullptr, keys_output,
         values, nullptr, values,
         size, ignored,
@@ -463,7 +463,7 @@ void segmented_radix_sort_keys_desc(void * temporary_storage,
 ///
 /// \par Overview
 /// * The contents of the inputs are not altered by the sorting function.
-/// * Returns the required size of \p temporary_storage in \p temporary_storage_bytes
+/// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 /// * \p Key type (a \p value_type of \p KeysInputIterator and \p KeysOutputIterator) must be
 /// an arithmetic type (that is, an integral type or a floating-point type).
@@ -490,8 +490,8 @@ void segmented_radix_sort_keys_desc(void * temporary_storage,
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
-/// \p temporary_storage_bytes and function returns without performing the sort operation.
-/// \param [in,out] temporary_storage_bytes - reference to a size (in bytes) of \p temporary_storage.
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
 /// \param [in] keys_input - pointer to the first element in the range to sort.
 /// \param [out] keys_output - pointer to the first element in the output range.
 /// \param [in] values_input - pointer to the first element in the range to sort.
@@ -568,7 +568,7 @@ template<
 >
 inline
 void segmented_radix_sort_pairs(void * temporary_storage,
-                                size_t& temporary_storage_bytes,
+                                size_t& storage_size,
                                 KeysInputIterator keys_input,
                                 KeysOutputIterator keys_output,
                                 ValuesInputIterator values_input,
@@ -584,7 +584,7 @@ void segmented_radix_sort_pairs(void * temporary_storage,
 {
     bool ignored;
     detail::segmented_radix_sort_impl<false>(
-        temporary_storage, temporary_storage_bytes,
+        temporary_storage, storage_size,
         keys_input, nullptr, keys_output,
         values_input, nullptr, values_output,
         size, ignored,
@@ -601,7 +601,7 @@ void segmented_radix_sort_pairs(void * temporary_storage,
 ///
 /// \par Overview
 /// * The contents of the inputs are not altered by the sorting function.
-/// * Returns the required size of \p temporary_storage in \p temporary_storage_bytes
+/// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 /// * \p Key type (a \p value_type of \p KeysInputIterator and \p KeysOutputIterator) must be
 /// an arithmetic type (that is, an integral type or a floating-point type).
@@ -628,8 +628,8 @@ void segmented_radix_sort_pairs(void * temporary_storage,
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
-/// \p temporary_storage_bytes and function returns without performing the sort operation.
-/// \param [in,out] temporary_storage_bytes - reference to a size (in bytes) of \p temporary_storage.
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
 /// \param [in] keys_input - pointer to the first element in the range to sort.
 /// \param [out] keys_output - pointer to the first element in the output range.
 /// \param [in] values_input - pointer to the first element in the range to sort.
@@ -704,7 +704,7 @@ template<
 >
 inline
 void segmented_radix_sort_pairs_desc(void * temporary_storage,
-                                     size_t& temporary_storage_bytes,
+                                     size_t& storage_size,
                                      KeysInputIterator keys_input,
                                      KeysOutputIterator keys_output,
                                      ValuesInputIterator values_input,
@@ -720,7 +720,7 @@ void segmented_radix_sort_pairs_desc(void * temporary_storage,
 {
     bool ignored;
     detail::segmented_radix_sort_impl<true>(
-        temporary_storage, temporary_storage_bytes,
+        temporary_storage, storage_size,
         keys_input, nullptr, keys_output,
         values_input, nullptr, values_output,
         size, ignored,
@@ -740,7 +740,7 @@ void segmented_radix_sort_pairs_desc(void * temporary_storage,
 /// * \p current() of \p keys is used as the input.
 /// * The function will update \p current() of \p keys to point to the buffer
 /// that contains the output range.
-/// * Returns the required size of \p temporary_storage in \p temporary_storage_bytes
+/// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 /// * The function requires small \p temporary_storage as it does not need
 /// a temporary buffer of \p size elements.
@@ -761,8 +761,8 @@ void segmented_radix_sort_pairs_desc(void * temporary_storage,
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
-/// \p temporary_storage_bytes and function returns without performing the sort operation.
-/// \param [in,out] temporary_storage_bytes - reference to a size (in bytes) of \p temporary_storage.
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
 /// \param [in,out] keys - reference to the double-buffer of keys, its \p current()
 /// contains the input range and will be updated to point to the output range.
 /// \param [in] size - number of element in the input range.
@@ -823,7 +823,7 @@ void segmented_radix_sort_pairs_desc(void * temporary_storage,
 template<class Key, class OffsetIterator>
 inline
 void segmented_radix_sort_keys(void * temporary_storage,
-                               size_t& temporary_storage_bytes,
+                               size_t& storage_size,
                                double_buffer<Key>& keys,
                                unsigned int size,
                                unsigned int segments,
@@ -837,7 +837,7 @@ void segmented_radix_sort_keys(void * temporary_storage,
     empty_type * values = nullptr;
     bool is_result_in_output;
     detail::segmented_radix_sort_impl<false>(
-        temporary_storage, temporary_storage_bytes,
+        temporary_storage, storage_size,
         keys.current(), keys.current(), keys.alternate(),
         values, values, values,
         size, is_result_in_output,
@@ -861,7 +861,7 @@ void segmented_radix_sort_keys(void * temporary_storage,
 /// * \p current() of \p keys is used as the input.
 /// * The function will update \p current() of \p keys to point to the buffer
 /// that contains the output range.
-/// * Returns the required size of \p temporary_storage in \p temporary_storage_bytes
+/// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 /// * The function requires small \p temporary_storage as it does not need
 /// a temporary buffer of \p size elements.
@@ -882,8 +882,8 @@ void segmented_radix_sort_keys(void * temporary_storage,
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
-/// \p temporary_storage_bytes and function returns without performing the sort operation.
-/// \param [in,out] temporary_storage_bytes - reference to a size (in bytes) of \p temporary_storage.
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
 /// \param [in,out] keys - reference to the double-buffer of keys, its \p current()
 /// contains the input range and will be updated to point to the output range.
 /// \param [in] size - number of element in the input range.
@@ -944,7 +944,7 @@ void segmented_radix_sort_keys(void * temporary_storage,
 template<class Key, class OffsetIterator>
 inline
 void segmented_radix_sort_keys_desc(void * temporary_storage,
-                                    size_t& temporary_storage_bytes,
+                                    size_t& storage_size,
                                     double_buffer<Key>& keys,
                                     unsigned int size,
                                     unsigned int segments,
@@ -958,7 +958,7 @@ void segmented_radix_sort_keys_desc(void * temporary_storage,
     empty_type * values = nullptr;
     bool is_result_in_output;
     detail::segmented_radix_sort_impl<true>(
-        temporary_storage, temporary_storage_bytes,
+        temporary_storage, storage_size,
         keys.current(), keys.current(), keys.alternate(),
         values, values, values,
         size, is_result_in_output,
@@ -982,7 +982,7 @@ void segmented_radix_sort_keys_desc(void * temporary_storage,
 /// * \p current() of \p keys and \p values are used as the input.
 /// * The function will update \p current() of \p keys and \p values to point to buffers
 /// that contains the output range.
-/// * Returns the required size of \p temporary_storage in \p temporary_storage_bytes
+/// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 /// * The function requires small \p temporary_storage as it does not need
 /// a temporary buffer of \p size elements.
@@ -1004,8 +1004,8 @@ void segmented_radix_sort_keys_desc(void * temporary_storage,
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
-/// \p temporary_storage_bytes and function returns without performing the sort operation.
-/// \param [in,out] temporary_storage_bytes - reference to a size (in bytes) of \p temporary_storage.
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
 /// \param [in,out] keys - reference to the double-buffer of keys, its \p current()
 /// contains the input range and will be updated to point to the output range.
 /// \param [in,out] values - reference to the double-buffer of values, its \p current()
@@ -1076,7 +1076,7 @@ void segmented_radix_sort_keys_desc(void * temporary_storage,
 template<class Key, class Value, class OffsetIterator>
 inline
 void segmented_radix_sort_pairs(void * temporary_storage,
-                                size_t& temporary_storage_bytes,
+                                size_t& storage_size,
                                 double_buffer<Key>& keys,
                                 double_buffer<Value>& values,
                                 unsigned int size,
@@ -1090,7 +1090,7 @@ void segmented_radix_sort_pairs(void * temporary_storage,
 {
     bool is_result_in_output;
     detail::segmented_radix_sort_impl<false>(
-        temporary_storage, temporary_storage_bytes,
+        temporary_storage, storage_size,
         keys.current(), keys.current(), keys.alternate(),
         values.current(), values.current(), values.alternate(),
         size, is_result_in_output,
@@ -1115,7 +1115,7 @@ void segmented_radix_sort_pairs(void * temporary_storage,
 /// * \p current() of \p keys and \p values are used as the input.
 /// * The function will update \p current() of \p keys and \p values to point to buffers
 /// that contains the output range.
-/// * Returns the required size of \p temporary_storage in \p temporary_storage_bytes
+/// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 /// * The function requires small \p temporary_storage as it does not need
 /// a temporary buffer of \p size elements.
@@ -1137,8 +1137,8 @@ void segmented_radix_sort_pairs(void * temporary_storage,
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
-/// \p temporary_storage_bytes and function returns without performing the sort operation.
-/// \param [in,out] temporary_storage_bytes - reference to a size (in bytes) of \p temporary_storage.
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
 /// \param [in,out] keys - reference to the double-buffer of keys, its \p current()
 /// contains the input range and will be updated to point to the output range.
 /// \param [in,out] values - reference to the double-buffer of values, its \p current()
@@ -1205,7 +1205,7 @@ void segmented_radix_sort_pairs(void * temporary_storage,
 template<class Key, class Value, class OffsetIterator>
 inline
 void segmented_radix_sort_pairs_desc(void * temporary_storage,
-                                     size_t& temporary_storage_bytes,
+                                     size_t& storage_size,
                                      double_buffer<Key>& keys,
                                      double_buffer<Value>& values,
                                      unsigned int size,
@@ -1219,7 +1219,7 @@ void segmented_radix_sort_pairs_desc(void * temporary_storage,
 {
     bool is_result_in_output;
     detail::segmented_radix_sort_impl<true>(
-        temporary_storage, temporary_storage_bytes,
+        temporary_storage, storage_size,
         keys.current(), keys.current(), keys.alternate(),
         values.current(), values.current(), values.alternate(),
         size, is_result_in_output,
