@@ -71,6 +71,24 @@ inline auto get_random_data(size_t size, T min, T max)
 }
 
 template<class T>
+inline std::vector<T> get_random_data01(size_t size, float p)
+{
+    std::random_device rd;
+    std::default_random_engine gen(rd());
+    std::bernoulli_distribution distribution(p);
+    std::vector<T> data(size);
+    std::generate(
+        data.begin(), data.begin() + std::min(size, max_random_size),
+        [&]() { return distribution(gen); }
+    );
+    for(size_t i = max_random_size; i < size; i += max_random_size)
+    {
+        std::copy_n(data.begin(), std::min(size - i, max_random_size), data.begin() + i);
+    }
+    return data;
+}
+
+template<class T>
 inline T get_random_value(T min, T max)
 {
     return get_random_data(1, min, max)[0];
