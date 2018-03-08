@@ -44,68 +44,19 @@
 const size_t DEFAULT_N = 1024 * 1024 * 128;
 #endif
 
-template<
-    bool Exclusive,
-    class T,
-    class BinaryFunction
->
-auto run_scan(void * temporary_storage,
-             size_t& storage_size,
-             T * input,
-             T * output,
-             const T initial_value,
-             const size_t input_size,
-             BinaryFunction scan_op,
-             hc::accelerator_view acc_view,
-             const bool debug = false)
-    -> typename std::enable_if<Exclusive, void>::type
-{
-    return rocprim::exclusive_scan(
-        temporary_storage, storage_size,
-        input, output, initial_value, input_size,
-        scan_op, acc_view, debug
-    );
-}
-
-template<
-    bool Exclusive,
-    class T,
-    class BinaryFunction
->
-auto run_scan(void * temporary_storage,
-             size_t& storage_size,
-             T * input,
-             T * output,
-             const T initial_value,
-             const size_t input_size,
-             BinaryFunction scan_op,
-             hc::accelerator_view acc_view,
-             const bool debug = false)
-    -> typename std::enable_if<!Exclusive, void>::type
-{
-    (void) initial_value;
-    return rocprim::inclusive_scan(
-        temporary_storage, storage_size,
-        input, output, input_size,
-        scan_op, acc_view, debug
-    );
-}
-
-template<
-    bool Exclusive,
-    class T,
-    class BinaryFunction
->
-void run_benchmark(benchmark::State& state,
-                   size_t size,
-                   hc::accelerator_view acc_view,
-                   BinaryFunction scan_op)
+template<class T, class FlagType>
+void run_flagged_benchmark(benchmark::State& state,
+                           size_t size,
+                           hc::accelerator_view acc_view,
+                           float true_probability)
 {
     std::vector<T> input;
+    std::vector<FlagType> flags;
     std::vector<T> output(size);
+    std::vector<unsigned int> selected_count_output(1);
     if(std::is_floating_point<T>::value)
     {
-        input = get_random_data<T>(size, (T)-1000, (T)+1000);
+        input = get_random_data<T>(size, T(-1000), T(1000));
     }
     else
     {
@@ -115,23 +66,25 @@ void run_benchmark(benchmark::State& state,
             std::numeric_limits<T>::max()
         );
     }
-    T initial_value = get_random_value<T>((T)-1000, (T)+1000);
+    flags = get_random_data01<FlagType>(size, true_probability);
     hc::array<T> d_input(hc::extent<1>(size), input.begin(), acc_view);
+    hc::array<FlagType> d_flags(hc::extent<1>(size), flags.begin(), acc_view);
     hc::array<T> d_output(size, acc_view);
+    hc::array<T> d_selected_count_output(1, acc_view);
     acc_view.wait();
 
     // Allocate temporary storage memory
     size_t temp_storage_size_bytes;
 
     // Get size of d_temp_storage
-    run_scan<Exclusive>(
+    rocprim::select(
         nullptr,
         temp_storage_size_bytes,
         d_input.accelerator_pointer(),
+        d_flags.accelerator_pointer(),
         d_output.accelerator_pointer(),
-        initial_value,
+        d_selected_count_output.accelerator_pointer(),
         input.size(),
-        scan_op,
         acc_view
     );
     acc_view.wait();
@@ -143,14 +96,14 @@ void run_benchmark(benchmark::State& state,
     // Warm-up
     for(size_t i = 0; i < 10; i++)
     {
-        run_scan<Exclusive>(
+        rocprim::select(
             d_temp_storage.accelerator_pointer(),
             temp_storage_size_bytes,
             d_input.accelerator_pointer(),
+            d_flags.accelerator_pointer(),
             d_output.accelerator_pointer(),
-            initial_value,
+            d_selected_count_output.accelerator_pointer(),
             input.size(),
-            scan_op,
             acc_view
         );
     }
@@ -162,14 +115,14 @@ void run_benchmark(benchmark::State& state,
         auto start = std::chrono::high_resolution_clock::now();
         for(size_t i = 0; i < batch_size; i++)
         {
-            run_scan<Exclusive>(
+            rocprim::select(
                 d_temp_storage.accelerator_pointer(),
                 temp_storage_size_bytes,
                 d_input.accelerator_pointer(),
+                d_flags.accelerator_pointer(),
                 d_output.accelerator_pointer(),
-                initial_value,
+                d_selected_count_output.accelerator_pointer(),
                 input.size(),
-                scan_op,
                 acc_view
             );
         }
@@ -184,16 +137,10 @@ void run_benchmark(benchmark::State& state,
     state.SetItemsProcessed(state.iterations() * batch_size * size);
 }
 
-#define CREATE_INCLUSIVE_BENCHMARK(T, SCAN_OP) \
+#define CREATE_SELECT_FLAGGED_BENCHMARK(T, F, p) \
 benchmark::RegisterBenchmark( \
-    ("inclusive_scan<" #T "," #SCAN_OP ">"), \
-    run_benchmark<false, T, SCAN_OP>, size, acc_view, SCAN_OP() \
-)
-
-#define CREATE_EXCLUSIVE_BENCHMARK(T, SCAN_OP) \
-benchmark::RegisterBenchmark( \
-    ("exclusive_scan<" #T "," #SCAN_OP ">"), \
-    run_benchmark<true, T, SCAN_OP>, size, acc_view, SCAN_OP() \
+    ("select_flagged<" #T "," #F ", "#T", unsigned int>(p = " #p")"), \
+    run_flagged_benchmark<T, F>, size, acc_view, p \
 )
 
 int main(int argc, char *argv[])
@@ -220,19 +167,15 @@ int main(int argc, char *argv[])
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks =
     {
-        CREATE_INCLUSIVE_BENCHMARK(int, rocprim::plus<int>),
-        CREATE_EXCLUSIVE_BENCHMARK(int, rocprim::plus<int>),
+        CREATE_SELECT_FLAGGED_BENCHMARK(int, unsigned char, 0.5f),
+        CREATE_SELECT_FLAGGED_BENCHMARK(float, unsigned char, 0.5f),
+        CREATE_SELECT_FLAGGED_BENCHMARK(double, unsigned char, 0.5f),
+        CREATE_SELECT_FLAGGED_BENCHMARK(custom_double2, unsigned char, 0.5f),
+        CREATE_SELECT_FLAGGED_BENCHMARK(custom_int_double, unsigned char, 0.5f),
 
-        CREATE_INCLUSIVE_BENCHMARK(float, rocprim::plus<float>),
-        CREATE_EXCLUSIVE_BENCHMARK(float, rocprim::plus<float>),
-
-        CREATE_INCLUSIVE_BENCHMARK(double, rocprim::plus<double>),
-        CREATE_EXCLUSIVE_BENCHMARK(double, rocprim::plus<double>),
-
-        CREATE_INCLUSIVE_BENCHMARK(custom_double2, rocprim::plus<custom_double2>),
-        CREATE_EXCLUSIVE_BENCHMARK(custom_double2, rocprim::plus<custom_double2>),
-        CREATE_INCLUSIVE_BENCHMARK(custom_int_double, rocprim::plus<custom_int_double>),
-        CREATE_EXCLUSIVE_BENCHMARK(custom_int_double, rocprim::plus<custom_int_double>)
+        CREATE_SELECT_FLAGGED_BENCHMARK(int, unsigned char, 0.75f),
+        CREATE_SELECT_FLAGGED_BENCHMARK(int, unsigned char, 0.25f),
+        CREATE_SELECT_FLAGGED_BENCHMARK(int, unsigned char, 0.10f),
     };
 
     // Use manual timing
