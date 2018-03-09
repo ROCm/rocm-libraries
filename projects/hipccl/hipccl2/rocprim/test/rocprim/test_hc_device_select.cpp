@@ -71,11 +71,8 @@ typedef ::testing::Types<
 std::vector<size_t> get_sizes()
 {
     std::vector<size_t> sizes = {
-        2,
-        32,
-        64, 256,
-        1024,
-        2048,
+        2, 32, 64, 256,
+        1024, 2048,
         3072, 4096,
         27845, (1 << 18) + 1111
     };
@@ -123,7 +120,6 @@ TYPED_TEST(RocprimDeviceSelectTests, Flagged)
             }
         }
 
-
         // temp storage
         size_t temp_storage_size_bytes;
         // Get size of d_temp_storage
@@ -156,6 +152,96 @@ TYPED_TEST(RocprimDeviceSelectTests, Flagged)
             d_output.accelerator_pointer(),
             d_selected_count_output.accelerator_pointer(),
             input.size(),
+            acc_view,
+            debug_synchronous
+        );
+        acc_view.wait();
+
+        // Check if number of selected value is as expected
+        std::vector<unsigned int> selected_count_output = d_selected_count_output;
+        ASSERT_EQ(selected_count_output[0], expected.size());
+
+        // Check if output values are as expected
+        std::vector<U> output = d_output;
+        for(size_t i = 0; i < expected.size(); i++)
+        {
+            SCOPED_TRACE(testing::Message() << "where index = " << i);
+            EXPECT_EQ(output[i], expected[i]);
+        }
+    }
+}
+
+TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
+{
+    using T = typename TestFixture::input_type;
+    using U = typename TestFixture::output_type;
+    const bool debug_synchronous = TestFixture::debug_synchronous;
+
+    hc::accelerator acc;
+    hc::accelerator_view acc_view = acc.create_view();
+
+    auto select_op = [](const T& value) [[hc,cpu]] -> bool
+        {
+            if(value > 50) return true;
+            return false;
+        };
+
+    const std::vector<size_t> sizes = get_sizes();
+    for(auto size : sizes)
+    {
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+        // Generate data
+        std::vector<T> input = test_utils::get_random_data<T>(size, 1, 100);
+
+        hc::array<T> d_input(hc::extent<1>(size), input.begin(), acc_view);
+        hc::array<U> d_output(size, acc_view);
+        hc::array<unsigned int> d_selected_count_output(1, acc_view);
+        acc_view.wait();
+
+        // Calculate expected results on host
+        std::vector<U> expected;
+        expected.reserve(input.size());
+        for(size_t i = 0; i < input.size(); i++)
+        {
+            if(select_op(input[i]))
+            {
+                expected.push_back(input[i]);
+            }
+        }
+
+        // temp storage
+        size_t temp_storage_size_bytes;
+        // Get size of d_temp_storage
+        rocprim::select(
+            nullptr,
+            temp_storage_size_bytes,
+            d_input.accelerator_pointer(),
+            d_output.accelerator_pointer(),
+            d_selected_count_output.accelerator_pointer(),
+            input.size(),
+            select_op,
+            acc_view,
+            debug_synchronous
+        );
+        acc_view.wait();
+
+        // temp_storage_size_bytes must be >0
+        ASSERT_GT(temp_storage_size_bytes, 0);
+
+        // allocate temporary storage
+        hc::array<char> d_temp_storage(temp_storage_size_bytes, acc_view);
+        acc_view.wait();
+
+        // Run
+        rocprim::select(
+            d_temp_storage.accelerator_pointer(),
+            temp_storage_size_bytes,
+            d_input.accelerator_pointer(),
+            d_output.accelerator_pointer(),
+            d_selected_count_output.accelerator_pointer(),
+            input.size(),
+            select_op,
             acc_view,
             debug_synchronous
         );

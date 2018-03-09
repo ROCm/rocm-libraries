@@ -41,7 +41,7 @@
 #include "benchmark_utils.hpp"
 
 #ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 128;
+const size_t DEFAULT_N = 1024 * 1024 * 32;
 #endif
 
 template<class T, class FlagType>
@@ -137,10 +137,101 @@ void run_flagged_benchmark(benchmark::State& state,
     state.SetItemsProcessed(state.iterations() * batch_size * size);
 }
 
+template<class T>
+void run_selectop_benchmark(benchmark::State& state,
+                            size_t size,
+                            hc::accelerator_view acc_view,
+                            float true_probability)
+{
+    std::vector<T> input = get_random_data<T>(size, T(0), T(1000));
+    std::vector<T> output(size);
+    std::vector<unsigned int> selected_count_output(1);
+
+    auto select_op = [true_probability](const T& value) [[hc,cpu]] -> bool
+    {
+        if(value < T(1000 * true_probability)) return true;
+        return false;
+    };
+
+    hc::array<T> d_input(hc::extent<1>(size), input.begin(), acc_view);
+    hc::array<T> d_output(size, acc_view);
+    hc::array<T> d_selected_count_output(1, acc_view);
+    acc_view.wait();
+
+    // Allocate temporary storage memory
+    size_t temp_storage_size_bytes;
+
+    // Get size of d_temp_storage
+    rocprim::select(
+        nullptr,
+        temp_storage_size_bytes,
+        d_input.accelerator_pointer(),
+        d_output.accelerator_pointer(),
+        d_selected_count_output.accelerator_pointer(),
+        input.size(),
+        select_op,
+        acc_view
+    );
+    acc_view.wait();
+
+    // allocate temporary storage
+    hc::array<char> d_temp_storage(temp_storage_size_bytes, acc_view);
+    acc_view.wait();
+
+    // Warm-up
+    for(size_t i = 0; i < 10; i++)
+    {
+        rocprim::select(
+            d_temp_storage.accelerator_pointer(),
+            temp_storage_size_bytes,
+            d_input.accelerator_pointer(),
+            d_output.accelerator_pointer(),
+            d_selected_count_output.accelerator_pointer(),
+            input.size(),
+            select_op,
+            acc_view
+        );
+    }
+    acc_view.wait();
+
+    const unsigned int batch_size = 10;
+    for(auto _ : state)
+    {
+        auto start = std::chrono::high_resolution_clock::now();
+        for(size_t i = 0; i < batch_size; i++)
+        {
+            rocprim::select(
+                d_temp_storage.accelerator_pointer(),
+                temp_storage_size_bytes,
+                d_input.accelerator_pointer(),
+                d_output.accelerator_pointer(),
+                d_selected_count_output.accelerator_pointer(),
+                input.size(),
+                select_op,
+                acc_view
+            );
+        }
+        acc_view.wait();
+
+        auto end = std::chrono::high_resolution_clock::now();
+        auto elapsed_seconds =
+            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+        state.SetIterationTime(elapsed_seconds.count());
+    }
+    state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
+    state.SetItemsProcessed(state.iterations() * batch_size * size);
+}
+
 #define CREATE_SELECT_FLAGGED_BENCHMARK(T, F, p) \
 benchmark::RegisterBenchmark( \
     ("select_flagged<" #T "," #F ", "#T", unsigned int>(p = " #p")"), \
     run_flagged_benchmark<T, F>, size, acc_view, p \
+)
+
+#define CREATE_SELECT_IF_BENCHMARK(T, p) \
+benchmark::RegisterBenchmark( \
+    ("select_if<" #T ", "#T", unsigned int>(p = " #p")"), \
+    run_selectop_benchmark<T>, size, acc_view, p \
 )
 
 int main(int argc, char *argv[])
@@ -176,6 +267,17 @@ int main(int argc, char *argv[])
         CREATE_SELECT_FLAGGED_BENCHMARK(int, unsigned char, 0.75f),
         CREATE_SELECT_FLAGGED_BENCHMARK(int, unsigned char, 0.25f),
         CREATE_SELECT_FLAGGED_BENCHMARK(int, unsigned char, 0.10f),
+
+        CREATE_SELECT_IF_BENCHMARK(unsigned char, 0.5f),
+        CREATE_SELECT_IF_BENCHMARK(int, 0.5f),
+        CREATE_SELECT_IF_BENCHMARK(float, 0.5f),
+        CREATE_SELECT_IF_BENCHMARK(double, 0.5f),
+        CREATE_SELECT_IF_BENCHMARK(custom_double2, 0.5f),
+        CREATE_SELECT_IF_BENCHMARK(custom_int_double, 0.5f),
+
+        CREATE_SELECT_IF_BENCHMARK(int, 0.75f),
+        CREATE_SELECT_IF_BENCHMARK(int, 0.25f),
+        CREATE_SELECT_IF_BENCHMARK(int, 0.10f),
     };
 
     // Use manual timing
