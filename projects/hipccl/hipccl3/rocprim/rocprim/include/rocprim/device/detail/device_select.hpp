@@ -33,6 +33,7 @@
 
 #include "../../block/block_load.hpp"
 #include "../../block/block_store.hpp"
+#include "../../block/block_discontinuity.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -219,6 +220,118 @@ void scatter_if_kernel_impl(InputIterator input,
     {
         *selected_count_output =
             output_indices[input_size - 1] + select_op(input[input_size - 1]);
+    }
+}
+
+template<
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    class InputIterator,
+    class OutputFlagIterator,
+    class InequalityOp
+>
+ROCPRIM_DEVICE inline
+void flag_unique_kernel_impl(InputIterator input,
+                             size_t input_size,
+                             OutputFlagIterator output_flags,
+                             InequalityOp inequality_op)
+{
+    using input_type = typename std::iterator_traits<InputIterator>::value_type;
+    // using flag_type = typename std::iterator_traits<OutputFlagIterator>::value_type;
+
+    constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
+
+    using block_load_type = ::rocprim::block_load<
+        input_type, BlockSize, ItemsPerThread,
+        ::rocprim::block_load_method::block_load_transpose
+    >;
+    using block_store_type = ::rocprim::block_store<
+        bool, BlockSize, ItemsPerThread,
+        ::rocprim::block_store_method::block_store_transpose
+    >;
+    using block_discontinuity_type = ::rocprim::block_discontinuity<
+        input_type, BlockSize
+    >;
+
+    ROCPRIM_SHARED_MEMORY union
+    {
+        typename block_load_type::storage_type load;
+        typename block_store_type::storage_type store;
+        typename block_discontinuity_type::storage_type discontinuity;
+    } storage;
+
+    const unsigned int flat_block_id = ::rocprim::detail::block_id<0>();
+    const unsigned int block_offset = flat_block_id * items_per_block;
+    const unsigned int number_of_blocks = (input_size + items_per_block - 1)/items_per_block;
+    auto valid_in_last_block = input_size - items_per_block * (number_of_blocks - 1);
+
+    input_type values[ItemsPerThread];
+    input_type predecessor;
+
+    // load input values into values
+    if(flat_block_id == (number_of_blocks - 1)) // last block
+    {
+        block_load_type()
+            .load(
+                input + block_offset,
+                values,
+                valid_in_last_block,
+                storage.load
+            );
+    }
+    else
+    {
+        block_load_type()
+            .load(
+                input + block_offset,
+                values,
+                storage.load
+            );
+    }
+    ::rocprim::syncthreads(); // sync threads to reuse shared memory
+
+    bool flags[ItemsPerThread];
+    if(flat_block_id > 0)
+    {
+        predecessor = input[block_offset - 1];
+        block_discontinuity_type()
+            .flag_heads(
+                flags,
+                predecessor,
+                values,
+                inequality_op
+            );
+    }
+    else
+    {
+        block_discontinuity_type()
+            .flag_heads(
+                flags,
+                values,
+                inequality_op
+            );
+    }
+    ::rocprim::syncthreads(); // sync threads to reuse shared memory
+
+    // Save values into output array
+    if(flat_block_id == (number_of_blocks - 1)) // last block
+    {
+        block_store_type()
+            .store(
+                output_flags + block_offset,
+                flags,
+                valid_in_last_block,
+                storage.store
+            );
+    }
+    else
+    {
+        block_store_type()
+            .store(
+                output_flags + block_offset,
+                flags,
+                storage.store
+            );
     }
 }
 

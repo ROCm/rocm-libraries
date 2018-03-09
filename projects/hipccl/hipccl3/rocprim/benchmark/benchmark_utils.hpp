@@ -122,6 +122,12 @@ struct custom_type
     {
         return std::tie(x, y) < std::tie(rhs.x, rhs.y);
     }
+
+    ROCPRIM_HOST_DEVICE inline
+    bool operator==(const custom_type& rhs) const
+    {
+        return x == rhs.x && y == rhs.y;
+    }
 };
 
 template<typename>

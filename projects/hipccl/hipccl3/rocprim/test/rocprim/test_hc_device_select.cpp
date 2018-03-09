@@ -166,7 +166,7 @@ TYPED_TEST(RocprimDeviceSelectTests, Flagged)
         for(size_t i = 0; i < expected.size(); i++)
         {
             SCOPED_TRACE(testing::Message() << "where index = " << i);
-            EXPECT_EQ(output[i], expected[i]);
+            ASSERT_EQ(output[i], expected[i]);
         }
     }
 }
@@ -192,7 +192,7 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, 1, 100);
+        std::vector<T> input = test_utils::get_random_data<T>(size, 0, 1);
 
         hc::array<T> d_input(hc::extent<1>(size), input.begin(), acc_view);
         hc::array<U> d_output(size, acc_view);
@@ -256,7 +256,112 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
         for(size_t i = 0; i < expected.size(); i++)
         {
             SCOPED_TRACE(testing::Message() << "where index = " << i);
-            EXPECT_EQ(output[i], expected[i]);
+            ASSERT_EQ(output[i], expected[i]);
+        }
+    }
+}
+
+std::vector<float> get_discontinuity_probabilities()
+{
+    std::vector<float> probabilities = {
+        0.5, 0.25, 0.5, 0.75, 0.95
+    };
+    return probabilities;
+}
+
+TYPED_TEST(RocprimDeviceSelectTests, Unique)
+{
+    using T = typename TestFixture::input_type;
+    using U = typename TestFixture::output_type;
+    const bool debug_synchronous = TestFixture::debug_synchronous;
+
+    hc::accelerator acc;
+    hc::accelerator_view acc_view = acc.create_view();
+
+    const auto sizes = get_sizes();
+    const auto probabilities = get_discontinuity_probabilities();
+    for(auto size : sizes)
+    {
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
+        for(auto p : probabilities)
+        {
+            SCOPED_TRACE(testing::Message() << "with p = " << p);
+
+            // Generate data
+            std::vector<T> input(size);
+            {
+                std::vector<T> input01 = test_utils::get_random_data01<T>(size, p);
+                test_utils::host_inclusive_scan(
+                    input01.begin(), input01.end(), input.begin(), rocprim::plus<T>()
+                );
+            }
+
+            // Allocate and copy to device
+            hc::array<T> d_input(hc::extent<1>(size), input.begin(), acc_view);
+            hc::array<U> d_output(size, acc_view);
+            hc::array<unsigned int> d_selected_count_output(1, acc_view);
+            acc_view.wait();
+
+            // Calculate expected results on host
+            std::vector<U> expected;
+            expected.reserve(input.size());
+            expected.push_back(input[0]);
+            for(size_t i = 1; i < input.size(); i++)
+            {
+                if(!(input[i-1] == input[i]))
+                {
+                    expected.push_back(input[i]);
+                }
+            }
+
+            // temp storage
+            size_t temp_storage_size_bytes;
+            // Get size of d_temp_storage
+            rocprim::unique(
+                nullptr,
+                temp_storage_size_bytes,
+                d_input.accelerator_pointer(),
+                d_output.accelerator_pointer(),
+                d_selected_count_output.accelerator_pointer(),
+                input.size(),
+                ::rocprim::equal_to<T>(),
+                acc_view,
+                debug_synchronous
+            );
+            acc_view.wait();
+
+            // temp_storage_size_bytes must be >0
+            ASSERT_GT(temp_storage_size_bytes, 0);
+
+            // allocate temporary storage
+            hc::array<unsigned char> d_temp_storage(temp_storage_size_bytes, acc_view);
+            acc_view.wait();
+
+            // Run
+            rocprim::unique(
+                d_temp_storage.accelerator_pointer(),
+                temp_storage_size_bytes,
+                d_input.accelerator_pointer(),
+                d_output.accelerator_pointer(),
+                d_selected_count_output.accelerator_pointer(),
+                input.size(),
+                ::rocprim::equal_to<T>(),
+                acc_view,
+                debug_synchronous
+            );
+            acc_view.wait();
+
+            // Check if number of selected value is as expected
+            std::vector<unsigned int> selected_count_output = d_selected_count_output;
+            ASSERT_EQ(selected_count_output[0], expected.size());
+
+            // Check if output values are as expected
+            std::vector<U> output = d_output;
+            for(size_t i = 0; i < expected.size(); i++)
+            {
+                SCOPED_TRACE(testing::Message() << "where index = " << i);
+                ASSERT_EQ(output[i], expected[i]);
+            }
         }
     }
 }
