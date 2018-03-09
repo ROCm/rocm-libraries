@@ -27,6 +27,8 @@
 #include "../config.hpp"
 #include "../detail/various.hpp"
 
+#include "../iterator/transform_iterator.hpp"
+
 #include "detail/device_select.hpp"
 #include "device_scan_hc.hpp"
 
@@ -96,7 +98,7 @@ void select(void * temporary_storage,
         flags, indices, 0U, size, ::rocprim::plus<unsigned int>(),
         acc_view, debug_synchronous
     );
-    ROCPRIM_DETAIL_HC_SYNC("rocprim::inclusive_scan", size, start)
+    ROCPRIM_DETAIL_HC_SYNC("rocprim::exclusive_scan", size, start)
 
     // TODO: Those values should depend on type size
     constexpr unsigned int block_size = 256;
@@ -124,7 +126,88 @@ void select(void * temporary_storage,
             );
         }
     );
-    ROCPRIM_DETAIL_HC_SYNC("select_kernel", size, start)
+    ROCPRIM_DETAIL_HC_SYNC("scatter_kernel", size, start)
+}
+
+template<
+    class InputIterator,
+    class OutputIterator,
+    class SelectedCountOutputIterator,
+    class SelectOp
+>
+inline
+void select(void * temporary_storage,
+            size_t& storage_size,
+            InputIterator input,
+            OutputIterator output,
+            SelectedCountOutputIterator selected_count_output,
+            const size_t size,
+            SelectOp select_op,
+            hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
+            bool debug_synchronous = false)
+{
+    // Calculate required temporary storage
+    if(temporary_storage == nullptr)
+    {
+        // Get temporary storage required by scan operation
+        unsigned char * dummy_in_ptr = nullptr;
+        unsigned int *  dummy_out_ptr = nullptr;
+        ::rocprim::exclusive_scan(
+            nullptr, storage_size,
+            dummy_in_ptr, dummy_out_ptr,
+            0U, size
+        );
+        // Add storage required for indexes
+        storage_size += size * sizeof(unsigned int);
+        // Make sure user won't try to allocate 0 bytes memory, otherwise
+        // user may again pass nullptr as temporary_storage
+        storage_size = storage_size == 0 ? 4 : storage_size;
+        return;
+    }
+
+    // Return for empty input
+    if(size == 0) return;
+
+    // Start point for time measurements
+    std::chrono::high_resolution_clock::time_point start;
+
+    // Calculate output indices to scatter selected values
+    unsigned int * indices = static_cast<unsigned int*>(temporary_storage);
+    ::rocprim::exclusive_scan(
+        static_cast<void *>(indices + size), storage_size,
+        ::rocprim::make_transform_iterator(input, select_op),
+        indices, 0U, size, ::rocprim::plus<unsigned int>(),
+        acc_view, debug_synchronous
+    );
+    ROCPRIM_DETAIL_HC_SYNC("rocprim::exclusive_scan", size, start)
+
+    // TODO: Those values should depend on type size
+    constexpr unsigned int block_size = 256;
+    constexpr unsigned int items_per_thread = 4;
+    constexpr auto items_per_block = block_size * items_per_thread;
+
+    auto number_of_blocks = (size + items_per_block - 1)/items_per_block;
+    if(debug_synchronous)
+    {
+        std::cout << "block_size " << block_size << '\n';
+        std::cout << "number of blocks " << number_of_blocks << '\n';
+        std::cout << "items_per_block " << items_per_block << '\n';
+        std::cout << "temporary storage size " << storage_size << '\n';
+    }
+
+    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
+    hc::parallel_for_each(
+        acc_view,
+        hc::tiled_extent<1>(number_of_blocks * block_size, block_size),
+        [=](hc::tiled_index<1>) [[hc]]
+        {
+            detail::scatter_if_kernel_impl<block_size, items_per_thread>(
+                input, size, select_op, indices,
+                output, selected_count_output
+            );
+        }
+    );
+    ROCPRIM_DETAIL_HC_SYNC("scatter_if_kernel", size, start)
 }
 
 #undef ROCPRIM_DETAIL_HC_SYNC
