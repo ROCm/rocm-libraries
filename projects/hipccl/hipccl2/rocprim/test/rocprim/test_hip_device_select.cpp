@@ -27,14 +27,14 @@
 // Google Test
 #include <gtest/gtest.h>
 
-// HC API
-#include <hcc/hc.hpp>
+// HIP API
+#include <hip/hip_runtime.h>
 // rocPRIM API
 #include <rocprim/rocprim.hpp>
 
 #include "test_utils.hpp"
 
-namespace rp = rocprim;
+#define HIP_CHECK(error) ASSERT_EQ(static_cast<hipError_t>(error),hipSuccess)
 
 // Params for tests
 template<
@@ -91,8 +91,7 @@ TYPED_TEST(RocprimDeviceSelectTests, Flagged)
     using F = typename TestFixture::flag_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
-    hc::accelerator acc;
-    hc::accelerator_view acc_view = acc.create_view();
+    hipStream_t stream = 0; // default stream
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -103,11 +102,29 @@ TYPED_TEST(RocprimDeviceSelectTests, Flagged)
         std::vector<T> input = test_utils::get_random_data<T>(size, 1, 100);
         std::vector<F> flags = test_utils::get_random_data<F>(size, 0, 1);
 
-        hc::array<T> d_input(hc::extent<1>(size), input.begin(), acc_view);
-        hc::array<F> d_flags(hc::extent<1>(size), flags.begin(), acc_view);
-        hc::array<U> d_output(size, acc_view);
-        hc::array<unsigned int> d_selected_count_output(1, acc_view);
-        acc_view.wait();
+        T * d_input;
+        F * d_flags;
+        U * d_output;
+        unsigned int * d_selected_count_output;
+        HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
+        HIP_CHECK(hipMalloc(&d_flags, flags.size() * sizeof(F)));
+        HIP_CHECK(hipMalloc(&d_output, input.size() * sizeof(U)));
+        HIP_CHECK(hipMalloc(&d_selected_count_output, sizeof(unsigned int)));
+        HIP_CHECK(
+            hipMemcpy(
+                d_input, input.data(),
+                input.size() * sizeof(T),
+                hipMemcpyHostToDevice
+            )
+        );
+        HIP_CHECK(
+            hipMemcpy(
+                d_flags, flags.data(),
+                flags.size() * sizeof(F),
+                hipMemcpyHostToDevice
+            )
+        );
+        HIP_CHECK(hipDeviceSynchronize());
 
         // Calculate expected results on host
         std::vector<U> expected;
@@ -123,51 +140,78 @@ TYPED_TEST(RocprimDeviceSelectTests, Flagged)
         // temp storage
         size_t temp_storage_size_bytes;
         // Get size of d_temp_storage
-        rocprim::select(
-            nullptr,
-            temp_storage_size_bytes,
-            d_input.accelerator_pointer(),
-            d_flags.accelerator_pointer(),
-            d_output.accelerator_pointer(),
-            d_selected_count_output.accelerator_pointer(),
-            input.size(),
-            acc_view,
-            debug_synchronous
+        HIP_CHECK(
+            rocprim::select(
+                nullptr,
+                temp_storage_size_bytes,
+                d_input,
+                d_flags,
+                d_output,
+                d_selected_count_output,
+                input.size(),
+                stream,
+                debug_synchronous
+            )
         );
-        acc_view.wait();
+        HIP_CHECK(hipDeviceSynchronize());
 
         // temp_storage_size_bytes must be >0
         ASSERT_GT(temp_storage_size_bytes, 0);
 
         // allocate temporary storage
-        hc::array<char> d_temp_storage(temp_storage_size_bytes, acc_view);
-        acc_view.wait();
+        void * d_temp_storage = nullptr;
+        HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+        HIP_CHECK(hipDeviceSynchronize());
 
         // Run
-        rocprim::select(
-            d_temp_storage.accelerator_pointer(),
-            temp_storage_size_bytes,
-            d_input.accelerator_pointer(),
-            d_flags.accelerator_pointer(),
-            d_output.accelerator_pointer(),
-            d_selected_count_output.accelerator_pointer(),
-            input.size(),
-            acc_view,
-            debug_synchronous
+        HIP_CHECK(
+            rocprim::select(
+                d_temp_storage,
+                temp_storage_size_bytes,
+                d_input,
+                d_flags,
+                d_output,
+                d_selected_count_output,
+                input.size(),
+                stream,
+                debug_synchronous
+            )
         );
-        acc_view.wait();
+        HIP_CHECK(hipDeviceSynchronize());
 
         // Check if number of selected value is as expected
-        std::vector<unsigned int> selected_count_output = d_selected_count_output;
-        ASSERT_EQ(selected_count_output[0], expected.size());
+        unsigned int selected_count_output = 0;
+        HIP_CHECK(
+            hipMemcpy(
+                &selected_count_output, d_selected_count_output,
+                sizeof(unsigned int),
+                hipMemcpyDeviceToHost
+            )
+        );
+        HIP_CHECK(hipDeviceSynchronize());
+        ASSERT_EQ(selected_count_output, expected.size());
 
         // Check if output values are as expected
-        std::vector<U> output = d_output;
+        std::vector<U> output(input.size());
+        HIP_CHECK(
+            hipMemcpy(
+                output.data(), d_output,
+                output.size() * sizeof(U),
+                hipMemcpyDeviceToHost
+            )
+        );
+        HIP_CHECK(hipDeviceSynchronize());
         for(size_t i = 0; i < expected.size(); i++)
         {
             SCOPED_TRACE(testing::Message() << "where index = " << i);
             ASSERT_EQ(output[i], expected[i]);
         }
+
+        hipFree(d_input);
+        hipFree(d_flags);
+        hipFree(d_output);
+        hipFree(d_selected_count_output);
+        hipFree(d_temp_storage);
     }
 }
 
@@ -177,10 +221,9 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
     using U = typename TestFixture::output_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
-    hc::accelerator acc;
-    hc::accelerator_view acc_view = acc.create_view();
+    hipStream_t stream = 0; // default stream
 
-    auto select_op = [](const T& value) [[hc,cpu]] -> bool
+    auto select_op = [] __host__ __device__ (const T& value) -> bool
         {
             if(value > 50) return true;
             return false;
@@ -194,10 +237,20 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
         // Generate data
         std::vector<T> input = test_utils::get_random_data<T>(size, 0, 1);
 
-        hc::array<T> d_input(hc::extent<1>(size), input.begin(), acc_view);
-        hc::array<U> d_output(size, acc_view);
-        hc::array<unsigned int> d_selected_count_output(1, acc_view);
-        acc_view.wait();
+        T * d_input;
+        U * d_output;
+        unsigned int * d_selected_count_output;
+        HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
+        HIP_CHECK(hipMalloc(&d_output, input.size() * sizeof(U)));
+        HIP_CHECK(hipMalloc(&d_selected_count_output, sizeof(unsigned int)));
+        HIP_CHECK(
+            hipMemcpy(
+                d_input, input.data(),
+                input.size() * sizeof(T),
+                hipMemcpyHostToDevice
+            )
+        );
+        HIP_CHECK(hipDeviceSynchronize());
 
         // Calculate expected results on host
         std::vector<U> expected;
@@ -213,51 +266,77 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
         // temp storage
         size_t temp_storage_size_bytes;
         // Get size of d_temp_storage
-        rocprim::select(
-            nullptr,
-            temp_storage_size_bytes,
-            d_input.accelerator_pointer(),
-            d_output.accelerator_pointer(),
-            d_selected_count_output.accelerator_pointer(),
-            input.size(),
-            select_op,
-            acc_view,
-            debug_synchronous
+        HIP_CHECK(
+            rocprim::select(
+                nullptr,
+                temp_storage_size_bytes,
+                d_input,
+                d_output,
+                d_selected_count_output,
+                input.size(),
+                select_op,
+                stream,
+                debug_synchronous
+            )
         );
-        acc_view.wait();
+        HIP_CHECK(hipDeviceSynchronize());
 
         // temp_storage_size_bytes must be >0
         ASSERT_GT(temp_storage_size_bytes, 0);
 
         // allocate temporary storage
-        hc::array<char> d_temp_storage(temp_storage_size_bytes, acc_view);
-        acc_view.wait();
+        void * d_temp_storage = nullptr;
+        HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+        HIP_CHECK(hipDeviceSynchronize());
 
         // Run
-        rocprim::select(
-            d_temp_storage.accelerator_pointer(),
-            temp_storage_size_bytes,
-            d_input.accelerator_pointer(),
-            d_output.accelerator_pointer(),
-            d_selected_count_output.accelerator_pointer(),
-            input.size(),
-            select_op,
-            acc_view,
-            debug_synchronous
+        HIP_CHECK(
+            rocprim::select(
+                d_temp_storage,
+                temp_storage_size_bytes,
+                d_input,
+                d_output,
+                d_selected_count_output,
+                input.size(),
+                select_op,
+                stream,
+                debug_synchronous
+            )
         );
-        acc_view.wait();
+        HIP_CHECK(hipDeviceSynchronize());
 
         // Check if number of selected value is as expected
-        std::vector<unsigned int> selected_count_output = d_selected_count_output;
-        ASSERT_EQ(selected_count_output[0], expected.size());
+        unsigned int selected_count_output = 0;
+        HIP_CHECK(
+            hipMemcpy(
+                &selected_count_output, d_selected_count_output,
+                sizeof(unsigned int),
+                hipMemcpyDeviceToHost
+            )
+        );
+        HIP_CHECK(hipDeviceSynchronize());
+        ASSERT_EQ(selected_count_output, expected.size());
 
         // Check if output values are as expected
-        std::vector<U> output = d_output;
+        std::vector<U> output(input.size());
+        HIP_CHECK(
+            hipMemcpy(
+                output.data(), d_output,
+                output.size() * sizeof(U),
+                hipMemcpyDeviceToHost
+            )
+        );
+        HIP_CHECK(hipDeviceSynchronize());
         for(size_t i = 0; i < expected.size(); i++)
         {
             SCOPED_TRACE(testing::Message() << "where index = " << i);
             ASSERT_EQ(output[i], expected[i]);
         }
+
+        hipFree(d_input);
+        hipFree(d_output);
+        hipFree(d_selected_count_output);
+        hipFree(d_temp_storage);
     }
 }
 
@@ -275,8 +354,7 @@ TYPED_TEST(RocprimDeviceSelectTests, Unique)
     using U = typename TestFixture::output_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
-    hc::accelerator acc;
-    hc::accelerator_view acc_view = acc.create_view();
+    hipStream_t stream = 0; // default stream
 
     const auto sizes = get_sizes();
     const auto probabilities = get_discontinuity_probabilities();
@@ -297,10 +375,20 @@ TYPED_TEST(RocprimDeviceSelectTests, Unique)
             }
 
             // Allocate and copy to device
-            hc::array<T> d_input(hc::extent<1>(size), input.begin(), acc_view);
-            hc::array<U> d_output(size, acc_view);
-            hc::array<unsigned int> d_selected_count_output(1, acc_view);
-            acc_view.wait();
+            T * d_input;
+            U * d_output;
+            unsigned int * d_selected_count_output;
+            HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
+            HIP_CHECK(hipMalloc(&d_output, input.size() * sizeof(U)));
+            HIP_CHECK(hipMalloc(&d_selected_count_output, sizeof(unsigned int)));
+            HIP_CHECK(
+                hipMemcpy(
+                    d_input, input.data(),
+                    input.size() * sizeof(T),
+                    hipMemcpyHostToDevice
+                )
+            );
+            HIP_CHECK(hipDeviceSynchronize());
 
             // Calculate expected results on host
             std::vector<U> expected;
@@ -317,51 +405,77 @@ TYPED_TEST(RocprimDeviceSelectTests, Unique)
             // temp storage
             size_t temp_storage_size_bytes;
             // Get size of d_temp_storage
-            rocprim::unique(
-                nullptr,
-                temp_storage_size_bytes,
-                d_input.accelerator_pointer(),
-                d_output.accelerator_pointer(),
-                d_selected_count_output.accelerator_pointer(),
-                input.size(),
-                ::rocprim::equal_to<T>(),
-                acc_view,
-                debug_synchronous
+            HIP_CHECK(
+                rocprim::unique(
+                    nullptr,
+                    temp_storage_size_bytes,
+                    d_input,
+                    d_output,
+                    d_selected_count_output,
+                    input.size(),
+                    ::rocprim::equal_to<T>(),
+                    stream,
+                    debug_synchronous
+                )
             );
-            acc_view.wait();
+            HIP_CHECK(hipDeviceSynchronize());
 
             // temp_storage_size_bytes must be >0
             ASSERT_GT(temp_storage_size_bytes, 0);
 
             // allocate temporary storage
-            hc::array<unsigned char> d_temp_storage(temp_storage_size_bytes, acc_view);
-            acc_view.wait();
+            void * d_temp_storage = nullptr;
+            HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+            HIP_CHECK(hipDeviceSynchronize());
 
             // Run
-            rocprim::unique(
-                d_temp_storage.accelerator_pointer(),
-                temp_storage_size_bytes,
-                d_input.accelerator_pointer(),
-                d_output.accelerator_pointer(),
-                d_selected_count_output.accelerator_pointer(),
-                input.size(),
-                ::rocprim::equal_to<T>(),
-                acc_view,
-                debug_synchronous
+            HIP_CHECK(
+                rocprim::unique(
+                    d_temp_storage,
+                    temp_storage_size_bytes,
+                    d_input,
+                    d_output,
+                    d_selected_count_output,
+                    input.size(),
+                    ::rocprim::equal_to<T>(),
+                    stream,
+                    debug_synchronous
+                )
             );
-            acc_view.wait();
+            HIP_CHECK(hipDeviceSynchronize());
 
             // Check if number of selected value is as expected
-            std::vector<unsigned int> selected_count_output = d_selected_count_output;
-            ASSERT_EQ(selected_count_output[0], expected.size());
+            unsigned int selected_count_output = 0;
+            HIP_CHECK(
+                hipMemcpy(
+                    &selected_count_output, d_selected_count_output,
+                    sizeof(unsigned int),
+                    hipMemcpyDeviceToHost
+                )
+            );
+            HIP_CHECK(hipDeviceSynchronize());
+            ASSERT_EQ(selected_count_output, expected.size());
 
             // Check if output values are as expected
-            std::vector<U> output = d_output;
+            std::vector<U> output(input.size());
+            HIP_CHECK(
+                hipMemcpy(
+                    output.data(), d_output,
+                    output.size() * sizeof(U),
+                    hipMemcpyDeviceToHost
+                )
+            );
+            HIP_CHECK(hipDeviceSynchronize());
             for(size_t i = 0; i < expected.size(); i++)
             {
                 SCOPED_TRACE(testing::Message() << "where index = " << i);
                 ASSERT_EQ(output[i], expected[i]);
             }
+
+            hipFree(d_input);
+            hipFree(d_output);
+            hipFree(d_selected_count_output);
+            hipFree(d_temp_storage);
         }
     }
 }
