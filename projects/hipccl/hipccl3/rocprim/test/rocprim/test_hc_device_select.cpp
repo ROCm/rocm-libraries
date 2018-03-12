@@ -49,10 +49,6 @@ struct DeviceSelectParams
     using flag_type = FlagType;
 };
 
-// ---------------------------------------------------------
-// Test for scan ops taking single input value
-// ---------------------------------------------------------
-
 template<class Params>
 class RocprimDeviceSelectTests : public ::testing::Test
 {
