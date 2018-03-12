@@ -27,14 +27,14 @@
 // Google Test
 #include <gtest/gtest.h>
 
-// HIP API
-#include <hip/hip_runtime.h>
-// rocPRIM API
-#include <rocprim/rocprim.hpp>
+// Google Test
+#include <gtest/gtest.h>
+// hipCUB API
+#include <hipcub/hipcub.hpp>
 
 #include "test_utils.hpp"
 
-#define HIP_CHECK(error) ASSERT_EQ(static_cast<hipError_t>(error),hipSuccess)
+#define HIP_CHECK(error) ASSERT_EQ(static_cast<hipError_t>(error), hipSuccess)
 
 // Params for tests
 template<
@@ -50,7 +50,7 @@ struct DeviceSelectParams
 };
 
 template<class Params>
-class RocprimDeviceSelectTests : public ::testing::Test
+class HipcubDeviceSelectTests : public ::testing::Test
 {
 public:
     using input_type = typename Params::input_type;
@@ -62,7 +62,7 @@ public:
 typedef ::testing::Types<
     DeviceSelectParams<int, long>,
     DeviceSelectParams<unsigned char, float>
-> RocprimDeviceSelectTestsParams;
+> HipcubDeviceSelectTestsParams;
 
 std::vector<size_t> get_sizes()
 {
@@ -78,9 +78,9 @@ std::vector<size_t> get_sizes()
     return sizes;
 }
 
-TYPED_TEST_CASE(RocprimDeviceSelectTests, RocprimDeviceSelectTestsParams);
+TYPED_TEST_CASE(HipcubDeviceSelectTests, HipcubDeviceSelectTestsParams);
 
-TYPED_TEST(RocprimDeviceSelectTests, Flagged)
+TYPED_TEST(HipcubDeviceSelectTests, Flagged)
 {
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
@@ -137,7 +137,7 @@ TYPED_TEST(RocprimDeviceSelectTests, Flagged)
         size_t temp_storage_size_bytes;
         // Get size of d_temp_storage
         HIP_CHECK(
-            rocprim::select(
+            hipcub::DeviceSelect::Flagged(
                 nullptr,
                 temp_storage_size_bytes,
                 d_input,
@@ -161,7 +161,7 @@ TYPED_TEST(RocprimDeviceSelectTests, Flagged)
 
         // Run
         HIP_CHECK(
-            rocprim::select(
+            hipcub::DeviceSelect::Flagged(
                 d_temp_storage,
                 temp_storage_size_bytes,
                 d_input,
@@ -211,7 +211,7 @@ TYPED_TEST(RocprimDeviceSelectTests, Flagged)
     }
 }
 
-TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
+TYPED_TEST(HipcubDeviceSelectTests, SelectOp)
 {
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
@@ -263,7 +263,7 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
         size_t temp_storage_size_bytes;
         // Get size of d_temp_storage
         HIP_CHECK(
-            rocprim::select(
+            hipcub::DeviceSelect::If(
                 nullptr,
                 temp_storage_size_bytes,
                 d_input,
@@ -287,7 +287,7 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
 
         // Run
         HIP_CHECK(
-            rocprim::select(
+            hipcub::DeviceSelect::If(
                 d_temp_storage,
                 temp_storage_size_bytes,
                 d_input,
@@ -344,7 +344,7 @@ std::vector<float> get_discontinuity_probabilities()
     return probabilities;
 }
 
-TYPED_TEST(RocprimDeviceSelectTests, Unique)
+TYPED_TEST(HipcubDeviceSelectTests, Unique)
 {
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
@@ -366,7 +366,7 @@ TYPED_TEST(RocprimDeviceSelectTests, Unique)
             {
                 std::vector<T> input01 = test_utils::get_random_data01<T>(size, p);
                 test_utils::host_inclusive_scan(
-                    input01.begin(), input01.end(), input.begin(), rocprim::plus<T>()
+                    input01.begin(), input01.end(), input.begin(), hipcub::Sum()
                 );
             }
 
@@ -402,14 +402,13 @@ TYPED_TEST(RocprimDeviceSelectTests, Unique)
             size_t temp_storage_size_bytes;
             // Get size of d_temp_storage
             HIP_CHECK(
-                rocprim::unique(
+                hipcub::DeviceSelect::Unique(
                     nullptr,
                     temp_storage_size_bytes,
                     d_input,
                     d_output,
                     d_selected_count_output,
                     input.size(),
-                    ::rocprim::equal_to<T>(),
                     stream,
                     debug_synchronous
                 )
@@ -426,14 +425,13 @@ TYPED_TEST(RocprimDeviceSelectTests, Unique)
 
             // Run
             HIP_CHECK(
-                rocprim::unique(
+                hipcub::DeviceSelect::Unique(
                     d_temp_storage,
                     temp_storage_size_bytes,
                     d_input,
                     d_output,
                     d_selected_count_output,
                     input.size(),
-                    ::rocprim::equal_to<T>(),
                     stream,
                     debug_synchronous
                 )
