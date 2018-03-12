@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_DEVICE_DEVICE_SELECT_HC_HPP_
-#define ROCPRIM_DEVICE_DEVICE_SELECT_HC_HPP_
+#ifndef ROCPRIM_DEVICE_DEVICE_SELECT_HIP_HPP_
+#define ROCPRIM_DEVICE_DEVICE_SELECT_HIP_HPP_
 
 #include <type_traits>
 #include <iterator>
@@ -30,19 +30,89 @@
 #include "../iterator/transform_iterator.hpp"
 
 #include "detail/device_select.hpp"
-#include "device_scan_hc.hpp"
+#include "device_scan_hip.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// \addtogroup devicemodule_hc
+/// \addtogroup devicemodule_hip
 /// @{
 
-#define ROCPRIM_DETAIL_HC_SYNC(name, size, start) \
+namespace detail
+{
+
+template<
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    class InputIterator,
+    class FlagIterator,
+    class OutputIterator,
+    class SelectedCountOutputIterator
+>
+__global__
+void scatter_kernel(InputIterator input,
+                    const size_t size,
+                    FlagIterator flags,
+                    unsigned int * indices,
+                    OutputIterator output,
+                    SelectedCountOutputIterator selected_count_output)
+{
+    detail::scatter_kernel_impl<BlockSize, ItemsPerThread>(
+        input, size, flags, indices,
+        output, selected_count_output
+    );
+}
+
+template<
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    class InputIterator,
+    class OutputIterator,
+    class SelectedCountOutputIterator,
+    class SelectOp
+>
+__global__
+void scatter_if_kernel(InputIterator input,
+                       const size_t size,
+                       unsigned int * indices,
+                       OutputIterator output,
+                       SelectedCountOutputIterator selected_count_output,
+                       SelectOp select_op)
+{
+    detail::scatter_if_kernel_impl<BlockSize, ItemsPerThread>(
+        input, size, indices,
+        output, selected_count_output,
+        select_op
+    );
+}
+
+template<
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    class InputIterator,
+    class OutputFlagIterator,
+    class InequalityOp
+>
+__global__
+void flag_unique_kernel(InputIterator input,
+                        const size_t size,
+                        OutputFlagIterator flags,
+                        InequalityOp inequality_op)
+{
+    detail::flag_unique_kernel_impl<BlockSize, ItemsPerThread>(
+        input, size, flags, inequality_op
+    );
+}
+
+} // end detail namespace
+
+#define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start) \
     { \
+        if(error != hipSuccess) return error; \
         if(debug_synchronous) \
         { \
             std::cout << name << "(" << size << ")"; \
-            acc_view.wait(); \
+            auto error = hipStreamSynchronize(stream); \
+            if(error != hipSuccess) return error; \
             auto end = std::chrono::high_resolution_clock::now(); \
             auto d = std::chrono::duration_cast<std::chrono::duration<double>>(end - start); \
             std::cout << " " << d.count() * 1000 << " ms" << '\n'; \
@@ -56,24 +126,25 @@ template<
     class SelectedCountOutputIterator
 >
 inline
-void select(void * temporary_storage,
-            size_t& storage_size,
-            InputIterator input,
-            FlagIterator flags,
-            OutputIterator output,
-            SelectedCountOutputIterator selected_count_output,
-            const size_t size,
-            hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
-            const bool debug_synchronous = false)
+hipError_t select(void * temporary_storage,
+                  size_t& storage_size,
+                  InputIterator input,
+                  FlagIterator flags,
+                  OutputIterator output,
+                  SelectedCountOutputIterator selected_count_output,
+                  const size_t size,
+                  const hipStream_t stream = 0,
+                  const bool debug_synchronous = false)
 {
     // Get temporary storage required by scan operation
     size_t scan_storage_size = 0;
     unsigned int * dummy_ptr = nullptr;
-    ::rocprim::exclusive_scan(
+    auto error = ::rocprim::exclusive_scan(
         nullptr, scan_storage_size,
         flags, dummy_ptr, 0U, size, ::rocprim::plus<unsigned int>(),
-        acc_view, debug_synchronous
+        stream, debug_synchronous
     );
+    if(error != hipSuccess) return error;
     // Align
     scan_storage_size = ::rocprim::detail::align_size(scan_storage_size);
 
@@ -86,11 +157,11 @@ void select(void * temporary_storage,
         // Make sure user won't try to allocate 0 bytes memory, otherwise
         // user may again pass nullptr as temporary_storage
         storage_size = storage_size == 0 ? 4 : storage_size;
-        return;
+        return hipSuccess;
     }
 
     // Return for empty input
-    if(size == 0) return;
+    if(size == 0) return hipSuccess;
 
     // Start point for time measurements
     std::chrono::high_resolution_clock::time_point start;
@@ -99,12 +170,12 @@ void select(void * temporary_storage,
     auto indices = reinterpret_cast<unsigned int*>(
         static_cast<unsigned char*>(temporary_storage) + scan_storage_size
     );
-    ::rocprim::exclusive_scan(
+    error = ::rocprim::exclusive_scan(
         temporary_storage, scan_storage_size,
         flags, indices, 0U, size, ::rocprim::plus<unsigned int>(),
-        acc_view, debug_synchronous
+        stream, debug_synchronous
     );
-    ROCPRIM_DETAIL_HC_SYNC("rocprim::exclusive_scan", size, start)
+    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("rocprim::exclusive_scan", size, start)
 
     // TODO: Those values should depend on type size
     constexpr unsigned int block_size = 256;
@@ -121,18 +192,19 @@ void select(void * temporary_storage,
     }
 
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    hc::parallel_for_each(
-        acc_view,
-        hc::tiled_extent<1>(number_of_blocks * block_size, block_size),
-        [=](hc::tiled_index<1>) [[hc]]
-        {
-            detail::scatter_kernel_impl<block_size, items_per_thread>(
-                input, size, flags, indices,
-                output, selected_count_output
-            );
-        }
+    hipLaunchKernelGGL(
+        HIP_KERNEL_NAME(detail::scatter_kernel<
+            block_size, items_per_thread,
+            InputIterator, FlagIterator,
+            OutputIterator, SelectedCountOutputIterator
+        >),
+        dim3(number_of_blocks), dim3(block_size), 0, stream,
+        input, size, flags, indices, output, selected_count_output
     );
-    ROCPRIM_DETAIL_HC_SYNC("scatter_kernel", size, start)
+    error = hipPeekAtLastError();
+    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("scatter_kernel", size, start)
+
+    return hipSuccess;
 }
 
 template<
@@ -142,25 +214,25 @@ template<
     class SelectOp
 >
 inline
-void select(void * temporary_storage,
-            size_t& storage_size,
-            InputIterator input,
-            OutputIterator output,
-            SelectedCountOutputIterator selected_count_output,
-            const size_t size,
-            SelectOp select_op,
-            hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
-            const bool debug_synchronous = false)
+hipError_t select(void * temporary_storage,
+                  size_t& storage_size,
+                  InputIterator input,
+                  OutputIterator output,
+                  SelectedCountOutputIterator selected_count_output,
+                  const size_t size,
+                  SelectOp select_op,
+                  const hipStream_t stream = 0,
+                  const bool debug_synchronous = false)
 {
     // Get temporary storage required by scan operation
     size_t scan_storage_size = 0;
     unsigned char * dummy_in_ptr = nullptr;
     unsigned int *  dummy_out_ptr = nullptr;
-    ::rocprim::exclusive_scan(
+    auto error = ::rocprim::exclusive_scan(
         nullptr, scan_storage_size,
         dummy_in_ptr, dummy_out_ptr,
         0U, size, ::rocprim::plus<unsigned int>(),
-        acc_view, debug_synchronous
+        stream, debug_synchronous
     );
     // Align
     scan_storage_size = ::rocprim::detail::align_size(scan_storage_size);
@@ -174,11 +246,11 @@ void select(void * temporary_storage,
         // Make sure user won't try to allocate 0 bytes memory, otherwise
         // user may again pass nullptr as temporary_storage
         storage_size = storage_size == 0 ? 4 : storage_size;
-        return;
+        return hipSuccess;
     }
 
     // Return for empty input
-    if(size == 0) return;
+    if(size == 0) return hipSuccess;
 
     // Start point for time measurements
     std::chrono::high_resolution_clock::time_point start;
@@ -187,13 +259,13 @@ void select(void * temporary_storage,
     auto indices = reinterpret_cast<unsigned int*>(
         static_cast<unsigned char*>(temporary_storage) + scan_storage_size
     );
-    ::rocprim::exclusive_scan(
+    error = ::rocprim::exclusive_scan(
         temporary_storage, scan_storage_size,
         ::rocprim::make_transform_iterator(input, select_op),
         indices, 0U, size, ::rocprim::plus<unsigned int>(),
-        acc_view, debug_synchronous
+        stream, debug_synchronous
     );
-    ROCPRIM_DETAIL_HC_SYNC("rocprim::exclusive_scan", size, start)
+    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("rocprim::exclusive_scan", size, start)
 
     // TODO: Those values should depend on type size
     constexpr unsigned int block_size = 256;
@@ -210,19 +282,20 @@ void select(void * temporary_storage,
     }
 
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    hc::parallel_for_each(
-        acc_view,
-        hc::tiled_extent<1>(number_of_blocks * block_size, block_size),
-        [=](hc::tiled_index<1>) [[hc]]
-        {
-            detail::scatter_if_kernel_impl<block_size, items_per_thread>(
-                input, size, indices,
-                output, selected_count_output,
-                select_op
-            );
-        }
+    hipLaunchKernelGGL(
+        HIP_KERNEL_NAME(detail::scatter_if_kernel<
+            block_size, items_per_thread,
+            InputIterator,
+            OutputIterator, SelectedCountOutputIterator,
+            SelectOp
+        >),
+        dim3(number_of_blocks), dim3(block_size), 0, stream,
+        input, size, indices, output, selected_count_output, select_op
     );
-    ROCPRIM_DETAIL_HC_SYNC("scatter_if_kernel", size, start)
+    error = hipPeekAtLastError();
+    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("scatter_if_kernel", size, start)
+
+    return hipSuccess;
 }
 
 template<
@@ -232,25 +305,25 @@ template<
     class EqualityOp = ::rocprim::equal_to<typename std::iterator_traits<InputIterator>::value_type>
 >
 inline
-void unique(void * temporary_storage,
-            size_t& storage_size,
-            InputIterator input,
-            OutputIterator output,
-            UniqueCountOutputIterator unique_count_output,
-            const size_t size,
-            EqualityOp equality_op = EqualityOp(),
-            hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
-            const bool debug_synchronous = false)
+hipError_t unique(void * temporary_storage,
+                  size_t& storage_size,
+                  InputIterator input,
+                  OutputIterator output,
+                  UniqueCountOutputIterator unique_count_output,
+                  const size_t size,
+                  EqualityOp equality_op = EqualityOp(),
+                  const hipStream_t stream = 0,
+                  const bool debug_synchronous = false)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
 
     // Get temporary storage required by select operation
     size_t select_storage_size = 0;
     unsigned char * dummy_flags_ptr = nullptr;
-    ::rocprim::select(
+    auto error = ::rocprim::select(
         static_cast<void*>(nullptr), select_storage_size,
         input, dummy_flags_ptr, output, unique_count_output, size,
-        acc_view, debug_synchronous
+        stream, debug_synchronous
     );
     // Align
     select_storage_size = ::rocprim::detail::align_size(select_storage_size);
@@ -264,11 +337,11 @@ void unique(void * temporary_storage,
         // Make sure user won't try to allocate 0 bytes memory, otherwise
         // user may again pass nullptr as temporary_storage
         storage_size = storage_size == 0 ? 4 : storage_size;
-        return;
+        return hipSuccess;
     }
 
     // Return for empty input
-    if(size == 0) return;
+    if(size == 0) return hipSuccess;
 
     // TODO: Those values should depend on type size
     constexpr unsigned int block_size = 256;
@@ -289,37 +362,38 @@ void unique(void * temporary_storage,
 
     auto flags = static_cast<unsigned char*>(temporary_storage) + select_storage_size;
     auto inequality_op =
-        [equality_op](const input_type& a, const input_type& b) [[hc]] -> bool
+        [equality_op] __device__ (const input_type& a, const input_type& b) -> bool
         {
             return !equality_op(a, b);
         };
-    hc::parallel_for_each(
-        acc_view,
-        hc::tiled_extent<1>(number_of_blocks * block_size, block_size),
-        [=](hc::tiled_index<1>) [[hc]]
-        {
-            detail::flag_unique_kernel_impl<block_size, items_per_thread>(
-                input, size, flags, inequality_op
-            );
-        }
+    hipLaunchKernelGGL(
+        HIP_KERNEL_NAME(detail::flag_unique_kernel<
+            block_size, items_per_thread,
+            InputIterator, decltype(flags), decltype(inequality_op)
+        >),
+        dim3(number_of_blocks), dim3(block_size), 0, stream,
+        input, size, flags, inequality_op
     );
-    ROCPRIM_DETAIL_HC_SYNC("flag_unique_kernel", size, start)
+    error = hipPeekAtLastError();
+    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("flag_unique_kernel", size, start)
 
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
     // select unique values
-    ::rocprim::select(
+    error = ::rocprim::select(
         temporary_storage, select_storage_size,
         input, flags, output, unique_count_output, size,
-        acc_view, debug_synchronous
+        stream, debug_synchronous
     );
-    ROCPRIM_DETAIL_HC_SYNC("rocprim::select", size, start)
+    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("rocprim::select", size, start)
+
+    return hipSuccess;
 }
 
-#undef ROCPRIM_DETAIL_HC_SYNC
+#undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
 
 /// @}
-// end of group devicemodule_hc
+// end of group devicemodule_hip
 
 END_ROCPRIM_NAMESPACE
 
-#endif // ROCPRIM_DEVICE_DEVICE_SELECT_HC_HPP_
+#endif // ROCPRIM_DEVICE_DEVICE_SELECT_HIP_HPP_

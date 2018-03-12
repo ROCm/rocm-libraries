@@ -146,17 +146,17 @@ template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
     class InputIterator,
-    class SelectOp,
     class OutputIterator,
-    class SelectedCountOutputIterator
+    class SelectedCountOutputIterator,
+    class SelectOp
 >
 ROCPRIM_DEVICE inline
 void scatter_if_kernel_impl(InputIterator input,
                             size_t input_size,
-                            SelectOp select_op,
                             unsigned int * output_indices,
                             OutputIterator output,
-                            SelectedCountOutputIterator selected_count_output)
+                            SelectedCountOutputIterator selected_count_output,
+                            SelectOp select_op)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
