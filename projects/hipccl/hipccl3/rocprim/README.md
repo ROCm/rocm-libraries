@@ -48,9 +48,57 @@ ctest --output-on-failure
 ```
 ## Running Unit Tests
 
+```
+# Go to rocPRIM build directory
+cd rocPRIM; cd build
+
+# To run all tests
+ctest
+
+# To run unit tests for hipCUB
+./test/hipcub/<unit-test-name>
+
+# To run unit tests for rocPRIM
+./test/rocprim/<unit-test-name>
+```
+
 ## Running Benchmarks
 
+```
+# Go to rocPRIM build directory
+cd rocPRIM; cd build
+
+# To run benchmark for warp functions:
+# Further option can be found using --help
+# [] Fields are optional
+./benchmark/benchmark_hc_warp_<function_name> [--size <size>] [--trials <trials>]
+./benchmark/benchmark_hip_warp_<function_name> [--size <size>] [--trials <trials>]
+
+# To run benchmark for block functions:
+# Further option can be found using --help
+# [] Fields are optional
+./benchmark/benchmark_hc_block_<function_name> [--size <size>] [--trials <trials>]
+./benchmark/benchmark_hip_block_<function_name> [--size <size>] [--trials <trials>]
+
+# To run benchmark for device functions:
+# Further option can be found using --help
+# [] Fields are optional
+./benchmark/benchmark_hc_device_<function_name> [--size <size>] [--trials <trials>]
+./benchmark/benchmark_hip_device_<function_name> [--size <size>] [--trials <trials>]
+```
+
 ## Documentation
+
+```
+# go to rocPRIM doc directory
+cd rocPRIM; cd doc
+
+# run doxygen
+doxygen Doxyfile
+
+# open html/index.html
+
+```
 
 ## Support
 
