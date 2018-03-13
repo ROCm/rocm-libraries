@@ -24,35 +24,74 @@
 
 # Configure a header file to pass the hipCUB version
 configure_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/hipcub_version.hpp.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/include/hipcub_version.hpp"
-    @ONLY
+  "${CMAKE_CURRENT_SOURCE_DIR}/include/hipcub_version.hpp.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/include/hipcub_version.hpp"
+  @ONLY
 )
 
 # Only header target, does not include dependencies
-add_library(hipcub_headers INTERFACE)
-target_include_directories(hipcub_headers
-    INTERFACE
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:hipcub/include>
+add_library(hipcub INTERFACE)
+target_include_directories(hipcub
+  INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:hipcub/include/hipcub>
 )
 
 if(HIP_PLATFORM STREQUAL "hcc")
-    add_library(hipcub INTERFACE)
-    target_link_libraries(hipcub
-        INTERFACE
-            hipcub_headers
-            rocprim_hip
-    )
+  target_link_libraries(hipcub
+    INTERFACE
+      rocprim_hip
+  )
 else()
-    add_library(hipcub INTERFACE)
-    target_include_directories(hipcub
-        INTERFACE
-            ${CUB_INCLUDE_DIR}
-    )
-    target_link_libraries(hipcub
-        INTERFACE
-            hipcub_headers
-    )
+  # On CUDA platform we don't want to export hipcub targer with
+  # INTERFACE_INCLUDE_DIRECTORIES property containing a path to
+  # CUB library headers.
+  # hipcub_cub target is only for internal use.
+  add_library(hipcub_cub INTERFACE)
+  target_link_libraries(hipcub_cub
+    INTERFACE
+      hipcub
+  )
+  target_include_directories(hipcub_cub SYSTEM
+    INTERFACE
+      ${CUB_INCLUDE_DIR}
+  )
 endif()
+
+# Installation
+
+include(GNUInstallDirs)
+set(INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_INCLUDEDIR})
+
+# We need to install headers manually as rocm_install_targets
+# does not support header-only libraries (INTERFACE targets)
+rocm_install_targets(
+  TARGETS hipcub
+  EXPORT hipcub-targets
+#   INCLUDE
+#   ${CMAKE_SOURCE_DIR}/library/hipcub/include
+#   ${CMAKE_BINARY_DIR}/library/hipcub/include
+  PREFIX hipcub
+)
+install(
+  DIRECTORY
+    "include/"
+    "${PROJECT_BINARY_DIR}/library/hipcub/include/"
+  DESTINATION hipcub/include/hipcub
+  FILES_MATCHING
+  PATTERN "*.h"
+  PATTERN "*.hpp"
+  PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ
+)
+
+# Export targets
+rocm_export_targets(
+  TARGETS hipcub-targets
+  NAME hipcub
+  PREFIX hipcub
+  NAMESPACE hip::
+)
+
+# Create symlinks
+rocm_install_symlink_subdir(hipcub)

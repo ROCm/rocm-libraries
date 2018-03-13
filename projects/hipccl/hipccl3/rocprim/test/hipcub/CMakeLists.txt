@@ -55,7 +55,7 @@ function(add_hipcub_test TEST_NAME TEST_SOURCES)
         ${GTEST_INCLUDE_DIRS}
     )
     target_link_libraries(${TEST_TARGET}
-      hipcub
+      hipcub_cub
       ${GTEST_BOTH_LIBRARIES}
     )
   endif()
