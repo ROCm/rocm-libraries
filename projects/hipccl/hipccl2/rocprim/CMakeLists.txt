@@ -27,15 +27,15 @@ set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended 
 
 # CMake modules
 list(APPEND CMAKE_MODULE_PATH
-    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/Modules
-    ${HIP_PATH}/cmake /opt/rocm/hip/cmake # FindHIP.cmake
+  ${CMAKE_CURRENT_SOURCE_DIR}/cmake
+  ${HIP_PATH}/cmake /opt/rocm/hip/cmake # FindHIP.cmake
 )
 
 # Select hcc as a C++ compiler
 include(cmake/SetToolchain.cmake)
 
 # rocPRIM project
-project(rocprim VERSION 0.1.0.0 LANGUAGES CXX)
+project(rocprim VERSION 0.2.1.0 LANGUAGES CXX)
 
 # Set a default build type if none was specified
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -56,9 +56,14 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror")
 option(BUILD_TEST "Build tests (requires googletest)" ON)
 option(BUILD_BENCHMARK "Build benchmarks" OFF)
 option(BUILD_EXAMPLE "Build examples" OFF)
+# Disables building tests, benchmarks, examples
+option(ONLY_INSTALL "Only install" OFF)
 
 # Get dependencies
 include(cmake/Dependencies.cmake)
+
+include(cmake/Summary.cmake)
+print_configuration_summary()
 
 # AMD targets
 set(AMDGPU_TARGETS gfx803;gfx900 CACHE STRING "List of specific machine types for library to target")
@@ -73,7 +78,7 @@ endif()
 add_subdirectory(library/hipcub)
 
 # Tests
-if(BUILD_TEST)
+if(BUILD_TEST AND NOT ONLY_INSTALL)
   enable_testing()
   add_subdirectory(test)
 endif()
@@ -81,12 +86,43 @@ endif()
 # Benchmarks and examples are only for rocPRIM
 if(HIP_PLATFORM STREQUAL "hcc")
   # Benchmarks
-  if(BUILD_BENCHMARK)
+  if(BUILD_BENCHMARK AND NOT ONLY_INSTALL)
     add_subdirectory(benchmark)
   endif()
 
   # Examples
-  if(BUILD_EXAMPLE)
+  if(BUILD_EXAMPLE AND NOT ONLY_INSTALL)
     add_subdirectory(example)
   endif()
+endif()
+
+# Package
+
+if(HIP_PLATFORM STREQUAL "hcc")
+  set(CPACK_DEBIAN_PACKAGE_DEPENDS "hip_hcc (>= 1.4)")
+  set(CPACK_RPM_PACKAGE_REQUIRES "hip_hcc >= 1.4")
+else()
+  set(CPACK_DEBIAN_PACKAGE_DEPENDS "hip_nvcc (>= 1.3)")
+  set(CPACK_RPM_PACKAGE_REQUIRES "hip_nvcc >= 1.3")
+endif()
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt")
+if(NOT CPACK_PACKAGING_INSTALL_PREFIX)
+  set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
+endif()
+
+set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" "\${CPACK_PACKAGING_INSTALL_PREFIX}/include" )
+
+# For CUDA backend the package contains only hipcub
+if(HIP_PLATFORM STREQUAL "hcc")
+  rocm_create_package(
+    NAME rocprim
+    DESCRIPTION "Radeon Open Compute Parallel Primitives Libary"
+    MAINTAINER "Jakub Szuppe <jakub@streamhpc.com>"
+  )
+else()
+  rocm_create_package(
+    NAME rocprim-hipcub
+    DESCRIPTION "Radeon Open Compute Parallel Primitives Libary (hipCUB only)"
+    MAINTAINER "Jakub Szuppe <jakub@streamhpc.com>"
+  )
 endif()

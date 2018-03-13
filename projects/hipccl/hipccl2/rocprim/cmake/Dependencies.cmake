@@ -45,7 +45,7 @@ endif()
 # For downloading, building, and installing required dependencies
 include(cmake/DownloadProject.cmake)
 
-if (CMAKE_VERSION VERSION_LESS 3.2)
+if(CMAKE_VERSION VERSION_LESS 3.2)
   set(UPDATE_DISCONNECTED_IF_AVAILABLE "")
 else()
   set(UPDATE_DISCONNECTED_IF_AVAILABLE "UPDATE_DISCONNECTED TRUE")
@@ -119,3 +119,24 @@ if(BUILD_BENCHMARK)
   endif()
   find_package(benchmark REQUIRED CONFIG PATHS ${GOOGLEBENCHMARK_ROOT})
 endif()
+
+# Find or download/install rocm-cmake project
+find_package(ROCM QUIET CONFIG PATHS /opt/rocm)
+if(NOT ROCM_FOUND)
+  set(rocm_cmake_tag "master" CACHE STRING "rocm-cmake tag to download")
+  file(
+    DOWNLOAD https://github.com/RadeonOpenCompute/rocm-cmake/archive/${rocm_cmake_tag}.zip
+    ${CMAKE_CURRENT_BINARY_DIR}/rocm-cmake-${rocm_cmake_tag}.zip
+  )
+  execute_process(
+    COMMAND ${CMAKE_COMMAND} -E tar xzf ${CMAKE_CURRENT_BINARY_DIR}/rocm-cmake-${rocm_cmake_tag}.zip
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+  )
+  find_package(ROCM REQUIRED CONFIG PATHS ${CMAKE_CURRENT_BINARY_DIR}/rocm-cmake-${rocm_cmake_tag})
+endif()
+
+include(ROCMSetupVersion)
+include(ROCMCreatePackage)
+include(ROCMInstallTargets)
+include(ROCMPackageConfigHelpers)
+include(ROCMInstallSymlinks)
