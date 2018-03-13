@@ -34,7 +34,6 @@ BEGIN_HIPCUB_NAMESPACE
 // Missing compared to CUB:
 // * ThreadExit - not supported
 // * ThreadTrap - not supported
-// * PRMT
 // * FFMA_RZ, FMUL_RZ - not in CUB public API
 // * WARP_SYNC - not supported, not CUB public API
 // * CTA_SYNC_AND - not supported, not CUB public API
@@ -242,6 +241,12 @@ HIPCUB_DEVICE inline
 unsigned int IADD3(unsigned int x, unsigned int y, unsigned int z)
 {
     return x + y + z;
+}
+
+HIPCUB_DEVICE inline
+int PRMT(unsigned int a, unsigned int b, unsigned int index)
+{
+    return ::__byte_perm(a, b, index);
 }
 
 HIPCUB_DEVICE inline
