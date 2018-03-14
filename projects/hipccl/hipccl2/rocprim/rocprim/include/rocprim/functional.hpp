@@ -28,6 +28,9 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
+/// \addtogroup utilsmodule
+/// @{
+
 template<class T>
 ROCPRIM_HOST_DEVICE inline
 constexpr T max(const T& a, const T& b)
@@ -160,6 +163,9 @@ struct minimum
         return a < b ? a : b;
     }
 };
+
+/// @}
+// end of group utilsmodule
 
 END_ROCPRIM_NAMESPACE
 
