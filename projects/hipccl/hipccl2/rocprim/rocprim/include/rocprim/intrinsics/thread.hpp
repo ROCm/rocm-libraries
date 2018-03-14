@@ -26,6 +26,9 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
+/// \addtogroup intrinsicsmodule
+/// @{
+
 // Sizes
 
 /// \brief Returns a number of threads in a hardware warp.
@@ -253,6 +256,9 @@ namespace detail
         return warp_id();
     }
 }
+
+/// @}
+// end of group intrinsicsmodule
 
 END_ROCPRIM_NAMESPACE
 

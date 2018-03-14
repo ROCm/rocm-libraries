@@ -25,6 +25,9 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
+/// \addtogroup intrinsicsmodule
+/// @{
+
 /// Evaluate predicate for all active work-items in the warp and return an integer
 /// whose <tt>i</tt>-th bit is set if and only if \p predicate is <tt>true</tt>
 /// for the <tt>i</tt>-th thread of the warp and the <tt>i</tt>-th thread is active.
@@ -60,6 +63,9 @@ unsigned int masked_bit_count(unsigned long long x)
         return c;
     #endif
 }
+
+/// @}
+// end of group intrinsicsmodule
 
 END_ROCPRIM_NAMESPACE
 

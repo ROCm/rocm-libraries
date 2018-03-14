@@ -779,6 +779,7 @@ INPUT                  = mainpage.dox \
                          devicemodulehip.dox \
                          utilsmodule.dox \
                          iteratormodule.dox \
+                         intrinsicsmodule.dox \
                          hipcub.dox \
                          glossary.dox \
                          ../library/rocprim/include
