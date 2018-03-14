@@ -780,6 +780,7 @@ INPUT                  = mainpage.dox \
                          utilsmodule.dox \
                          iteratormodule.dox \
                          hipcub.dox \
+                         glossary.dox \
                          ../library/rocprim/include
 
 # This tag can be used to specify the character encoding of the source files
