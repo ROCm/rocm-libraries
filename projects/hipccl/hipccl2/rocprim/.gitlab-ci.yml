@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-image: ourrocm/rocm:1.7.60
+image: rocm/rocm-terminal:1.7.1
 
 variables:
   SUDO_CMD: "" # Must be "sudo" on images which don't use root user
@@ -32,12 +32,10 @@ variables:
   # Local build options
   LOCAL_CXXFLAGS: ""
   LOCAL_CMAKE_OPTIONS: ""
-  # TERM
-  TERM: xterm
 
 before_script:
   - $SUDO_CMD apt-get update -qq
-  - $SUDO_CMD apt-get install -y libnuma-dev ca-certificates
+  - $SUDO_CMD apt-get install -y -qq libnuma-dev libunwind-dev git wget tar xz-utils bzip2 build-essential pkg-config ca-certificates
   - hipconfig
   # cmake
   - mkdir -p $DEPS_DIR/cmake
@@ -82,7 +80,7 @@ test:rocm243:
     - build:rocm
   script:
     - cd build
-    - ctest --output-on-failure --repeat-until-fail 2
+    - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 2
 
 test:rocm244:
   tags:
@@ -90,55 +88,8 @@ test:rocm244:
   stage: test
   variables:
     SUDO_CMD: "sudo -E"
-    HIP_LAUNCH_BLOCKING: 1
-    HCC_OPT_FLUSH: 0
   dependencies:
     - build:rocm
   script:
     - cd build
-    - ctest --output-on-failure --repeat-until-fail 2
-
-build:rocm-rc:
-  image: ourrocm/rocm:1.7.137
-  allow_failure: true
-  tags:
-    - tag241
-  stage: build
-  variables:
-    SUDO_CMD: "sudo -E"
-  script:
-    - mkdir build
-    - cd build
-    - cmake -DBUILD_TEST=ON -DBUILD_EXAMPLE=ON -DBUILD_BENCHMARK=ON -DDEPENDENCIES_FORCE_DOWNLOAD=ON ../.
-    - make -j16
-  artifacts:
-    paths:
-    - build/library/
-    - build/test/test_*
-    - build/test/rocprim/test_*
-    - build/test/hipcub/test_*
-    - build/test/CTestTestfile.cmake
-    - build/test/rocprim/CTestTestfile.cmake
-    - build/test/hipcub/CTestTestfile.cmake
-    - build/gtest/
-    - build/CMakeCache.txt
-    - build/CTestTestfile.cmake
-    - build/*.deb
-    - build/*.zip
-    expire_in: 4 week
-
-test:rocm241-rc:
-  image: ourrocm/rocm:1.7.137
-  allow_failure: true
-  tags:
-    - tag241
-  stage: test
-  variables:
-    SUDO_CMD: "sudo -E"
-    HIP_LAUNCH_BLOCKING: 1
-    HCC_OPT_FLUSH: 0
-  dependencies:
-    - build:rocm-rc
-  script:
-    - cd build
-    - ctest --output-on-failure --repeat-until-fail 2
+    - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 2
