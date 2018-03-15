@@ -33,7 +33,7 @@
 // HIP API
 #include <hip/hip_runtime.h>
 // rocPRIM API
-#include <rocprim.hpp>
+#include <rocprim/rocprim.hpp>
 
 #include "test_utils.hpp"
 

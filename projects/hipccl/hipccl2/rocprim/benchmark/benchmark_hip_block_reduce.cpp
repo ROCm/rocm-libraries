@@ -39,7 +39,7 @@
 #include <hip/hip_hcc.h>
 
 // rocPRIM
-#include <block/block_reduce.hpp>
+#include <rocprim/block/block_reduce.hpp>
 
 #define HIP_CHECK(condition)         \
   {                                  \

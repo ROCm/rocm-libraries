@@ -31,7 +31,7 @@
 // Google Test
 #include <gtest/gtest.h>
 // hipCUB API
-#include <hipcub.hpp>
+#include <hipcub/hipcub.hpp>
 
 #include "test_utils.hpp"
 

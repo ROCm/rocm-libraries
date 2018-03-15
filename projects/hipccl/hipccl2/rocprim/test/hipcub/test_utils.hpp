@@ -27,7 +27,7 @@
 #include <type_traits>
 #include <cstdlib>
 
-#include <hipcub.hpp>
+#include <hipcub/hipcub.hpp>
 
 #include "../test_utils_host.hpp"
 

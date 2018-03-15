@@ -27,7 +27,7 @@
 #include <cstdio>
 
 // rocPRIM API
-#include <rocprim.hpp>
+#include <rocprim/rocprim.hpp>
 
 #ifdef ROCPRIM_HIP_API
     #define HIP_CHECK(condition)         \

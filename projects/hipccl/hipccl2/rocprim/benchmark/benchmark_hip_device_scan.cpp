@@ -36,7 +36,7 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_hcc.h>
 // rocPRIM
-#include <device/device_scan_hip.hpp>
+#include <rocprim/device/device_scan_hip.hpp>
 
 #include "benchmark_utils.hpp"
 
