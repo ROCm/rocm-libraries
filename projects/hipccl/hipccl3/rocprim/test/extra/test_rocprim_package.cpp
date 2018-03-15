@@ -19,6 +19,8 @@
 // THE SOFTWARE.
 
 #include <iostream>
+#include <vector>
+#include <algorithm>
 
 #include <hip/hip_runtime.h>
 #include <rocprim/rocprim.hpp>
