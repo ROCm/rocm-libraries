@@ -34,6 +34,7 @@ list(APPEND CMAKE_MODULE_PATH
 
 # Select hcc as a C++ compiler
 include(SetToolchain)
+
 # HIP and nvcc configuration
 if(HIP_PLATFORM STREQUAL "nvcc")
   include(NVCC)
@@ -47,8 +48,28 @@ elseif(HIP_PLATFORM STREQUAL "hcc")
   find_package(hip REQUIRED CONFIG PATHS /opt/rocm)
 endif()
 
-# Find rocPRIM
-find_package(rocprim REQUIRED CONFIG HINTS ${rocprim_DIR} PATHS "/opt/rocm/rocprim")
+# Download CUB
+include(DownloadProject)
+if(HIP_PLATFORM STREQUAL "nvcc")
+  if((NOT DEFINED CUB_INCLUDE_DIR) OR DEPENDENCIES_FORCE_DOWNLOAD)
+    download_project(PROJ   cub
+             GIT_REPOSITORY https://github.com/NVlabs/cub.git
+             GIT_TAG        v1.8.0
+             LOG_DOWNLOAD   TRUE
+             LOG_CONFIGURE  TRUE
+             LOG_BUILD      TRUE
+             LOG_INSTALL    TRUE
+             BUILD_PROJECT  FALSE
+             ${UPDATE_DISCONNECTED_IF_AVAILABLE}
+    )
+    set(CUB_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/cub-src/ CACHE PATH "")
+  endif()
+endif()
+
+if(HIP_PLATFORM STREQUAL "hcc")
+  # Find rocPRIM
+  find_package(rocprim REQUIRED CONFIG HINTS ${rocprim_DIR} PATHS "/opt/rocm/rocprim")
+endif()
 # Find hipCUB
 find_package(hipcub REQUIRED CONFIG HINTS ${hipcub_DIR} PATHS "/opt/rocm/hipcub")
 
@@ -98,17 +119,17 @@ function(add_hipcub_test TEST_NAME TEST_SOURCES)
       )
     endforeach()
   else() # CUDA/nvcc
-  set_source_files_properties(${TEST_SOURCES}
-    PROPERTIES
-      CUDA_SOURCE_PROPERTY_FORMAT OBJ
-    )
-    CUDA_ADD_EXECUTABLE(${TEST_TARGET}
-      ${TEST_SOURCES}
-      OPTIONS
-        --expt-extended-lambda
+    set_source_files_properties(${TEST_SOURCES}
+      PROPERTIES
+        CUDA_SOURCE_PROPERTY_FORMAT OBJ
+      )
+      CUDA_ADD_EXECUTABLE(${TEST_TARGET}
+        ${TEST_SOURCES}
+        OPTIONS
+          --expt-extended-lambda
     )
     target_link_libraries(${TEST_TARGET} hip::hipcub)
-    target_include_directories(${TEST_TARGET} SYSTEM ${CUB_INCLUDE_DIR})
+    target_include_directories(${TEST_TARGET} SYSTEM PRIVATE ${CUB_INCLUDE_DIR})
   endif()
   add_test(${TEST_NAME} ${TEST_TARGET})
 endfunction()
