@@ -19,14 +19,15 @@
 // THE SOFTWARE.
 
 #include <iostream>
+#include <vector>
+#include <algorithm>
 
 #include <hip/hip_runtime.h>
 #include <hipcub/hipcub.hpp>
 
-#define HIP_CHECK(condition)         \
+#define HIP_CHECK(error)         \
   {                                  \
-    hipError_t error = condition;    \
-    if(error != hipSuccess){         \
+    if(error != 0){         \
         std::cout << error << std::endl; \
         exit(error); \
     } \
