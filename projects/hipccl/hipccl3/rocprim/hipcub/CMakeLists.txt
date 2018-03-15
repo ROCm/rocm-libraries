@@ -24,8 +24,8 @@
 
 # Configure a header file to pass the hipCUB version
 configure_file(
-  "${CMAKE_CURRENT_SOURCE_DIR}/include/hipcub_version.hpp.in"
-  "${CMAKE_CURRENT_BINARY_DIR}/include/hipcub_version.hpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/include/hipcub/hipcub_version.hpp.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/include/hipcub/hipcub_version.hpp"
   @ONLY
 )
 
@@ -34,8 +34,9 @@ add_library(hipcub INTERFACE)
 target_include_directories(hipcub
   INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include/hipcub>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:hipcub/include/hipcub>
+    $<INSTALL_INTERFACE:hipcub/include/>
 )
 
 if(HIP_PLATFORM STREQUAL "hcc")
@@ -70,15 +71,15 @@ rocm_install_targets(
   TARGETS hipcub
   EXPORT hipcub-targets
 #   INCLUDE
-#   ${CMAKE_SOURCE_DIR}/library/hipcub/include
-#   ${CMAKE_BINARY_DIR}/library/hipcub/include
+#   ${CMAKE_SOURCE_DIR}/hipcub/include
+#   ${CMAKE_BINARY_DIR}/hipcub/include
   PREFIX hipcub
 )
 install(
   DIRECTORY
     "include/"
-    "${PROJECT_BINARY_DIR}/library/hipcub/include/"
-  DESTINATION hipcub/include/hipcub
+    "${PROJECT_BINARY_DIR}/hipcub/include/"
+  DESTINATION hipcub/include/
   FILES_MATCHING
   PATTERN "*.h"
   PATTERN "*.hpp"

@@ -71,11 +71,11 @@ set(AMDGPU_TARGETS gfx803;gfx900 CACHE STRING "List of specific machine types fo
 # rocPRIM works only on hcc
 if(HIP_PLATFORM STREQUAL "hcc")
   # rocPRIM library
-  add_subdirectory(library/rocprim)
+  add_subdirectory(rocprim)
 endif()
 
 # hipCUB library
-add_subdirectory(library/hipcub)
+add_subdirectory(hipcub)
 
 # Tests
 if(BUILD_TEST AND NOT ONLY_INSTALL)

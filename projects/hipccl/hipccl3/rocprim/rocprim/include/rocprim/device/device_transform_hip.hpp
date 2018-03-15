@@ -114,7 +114,7 @@ void transform_kernel(InputIterator input,
 /// integer values (<tt>short</tt>s are transformed into <tt>int</tt>s).
 ///
 /// \code{.cpp}
-/// #include <rocprim.hpp>
+/// #include <rocprim/rocprim.hpp>
 ///
 /// // custom transform function
 /// auto transform_op =

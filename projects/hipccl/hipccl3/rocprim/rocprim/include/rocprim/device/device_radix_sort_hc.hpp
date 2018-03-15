@@ -356,7 +356,7 @@ void radix_sort(void * temporary_storage,
 /// \p float values.
 ///
 /// \code{.cpp}
-/// #include <rocprim.hpp>
+/// #include <rocprim/rocprim.hpp>
 ///
 /// hc::accelerator_view acc_view = ...;
 ///
@@ -457,7 +457,7 @@ void radix_sort_keys(void * temporary_storage,
 /// integer values.
 ///
 /// \code{.cpp}
-/// #include <rocprim.hpp>
+/// #include <rocprim/rocprim.hpp>
 ///
 /// hc::accelerator_view acc_view = ...;
 ///
@@ -565,7 +565,7 @@ void radix_sort_keys_desc(void * temporary_storage,
 /// represented by an array of unsigned integers and input values by an array of <tt>double</tt>s.
 ///
 /// \code{.cpp}
-/// #include <rocprim.hpp>
+/// #include <rocprim/rocprim.hpp>
 ///
 /// hc::accelerator_view acc_view = ...;
 ///
@@ -685,7 +685,7 @@ void radix_sort_pairs(void * temporary_storage,
 /// represented by an array of integers and input values by an array of <tt>double</tt>s.
 ///
 /// \code{.cpp}
-/// #include <rocprim.hpp>
+/// #include <rocprim/rocprim.hpp>
 ///
 /// hc::accelerator_view acc_view = ...;
 ///
@@ -796,7 +796,7 @@ void radix_sort_pairs_desc(void * temporary_storage,
 /// \p float values.
 ///
 /// \code{.cpp}
-/// #include <rocprim.hpp>
+/// #include <rocprim/rocprim.hpp>
 ///
 /// hc::accelerator_view acc_view = ...;
 ///
@@ -899,7 +899,7 @@ void radix_sort_keys(void * temporary_storage,
 /// integer values.
 ///
 /// \code{.cpp}
-/// #include <rocprim.hpp>
+/// #include <rocprim/rocprim.hpp>
 ///
 /// hc::accelerator_view acc_view = ...;
 ///
@@ -1005,7 +1005,7 @@ void radix_sort_keys_desc(void * temporary_storage,
 /// represented by an array of unsigned integers and input values by an array of <tt>double</tt>s.
 ///
 /// \code{.cpp}
-/// #include <rocprim.hpp>
+/// #include <rocprim/rocprim.hpp>
 ///
 /// hc::accelerator_view acc_view = ...;
 ///
@@ -1121,7 +1121,7 @@ void radix_sort_pairs(void * temporary_storage,
 /// represented by an array of integers and input values by an array of <tt>double</tt>s.
 ///
 /// \code{.cpp}
-/// #include <rocprim.hpp>
+/// #include <rocprim/rocprim.hpp>
 ///
 /// hc::accelerator_view acc_view = ...;
 ///
