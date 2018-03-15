@@ -208,7 +208,7 @@ void reduce_impl(void * temporary_storage,
 /// integer values (<tt>short</tt>s are reduced into <tt>int</tt>s) using custom operator.
 ///
 /// \code{.cpp}
-/// #include <rocprim.hpp>
+/// #include <rocprim/rocprim.hpp>
 ///
 /// // custom reduce function
 /// auto min_op =
@@ -316,7 +316,7 @@ void reduce(void * temporary_storage,
 /// integer values (<tt>short</tt>s are reduced into <tt>int</tt>s).
 ///
 /// \code{.cpp}
-/// #include <rocprim.hpp>
+/// #include <rocprim/rocprim.hpp>
 ///
 /// hc::accelerator_view acc_view = ...;
 ///

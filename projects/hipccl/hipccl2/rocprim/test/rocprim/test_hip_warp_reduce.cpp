@@ -28,7 +28,7 @@
 // Google Test
 #include <gtest/gtest.h>
 // rocPRIM API
-#include <rocprim.hpp>
+#include <rocprim/rocprim.hpp>
 
 #include "test_utils.hpp"
 

@@ -38,7 +38,7 @@
 #include <hcc/hc.hpp>
 
 // rocPRIM
-#include <rocprim.hpp>
+#include <rocprim/rocprim.hpp>
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 32;

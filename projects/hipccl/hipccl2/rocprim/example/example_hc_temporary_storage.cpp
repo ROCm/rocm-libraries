@@ -22,7 +22,7 @@
 #include <vector>
 
 // rocPRIM HC API
-#include <rocprim_hc.hpp>
+#include <rocprim/rocprim_hc.hpp>
 
 #include "example_utils.hpp"
 

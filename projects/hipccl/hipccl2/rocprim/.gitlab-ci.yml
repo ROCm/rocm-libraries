@@ -54,6 +54,7 @@ build:rocm:
     - cd build
     - cmake -DBUILD_TEST=ON -DBUILD_EXAMPLE=ON -DBUILD_BENCHMARK=ON -DDEPENDENCIES_FORCE_DOWNLOAD=ON ../.
     - make -j16
+    - make package
   artifacts:
     paths:
     - build/library/
@@ -66,8 +67,8 @@ build:rocm:
     - build/gtest/
     - build/CMakeCache.txt
     - build/CTestTestfile.cmake
-    - build/*.deb
-    - build/*.zip
+    - build/rocprim*.deb
+    - build/rocprim*.zip
     expire_in: 4 week
 
 test:rocm243:
@@ -92,4 +93,33 @@ test:rocm244:
     - build:rocm
   script:
     - cd build
+    - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 2
+
+test:rocm_package:
+  stage: test
+  variables:
+    SUDO_CMD: "sudo -E"
+  dependencies:
+    - build:rocm
+  script:
+    - cd build
+    - $SUDO_CMD dpkg -i rocprim-*.deb
+    - mkdir ../package_test && cd ../package_test
+    - cmake ../test/extra/.
+    - make VERBOSE=1
+    - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 2
+    - $SUDO_CMD dpkg -r rocprim
+
+test:rocm_install:
+  stage: test
+  variables:
+    SUDO_CMD: "sudo -E"
+  script:
+    - mkdir build_only_install
+    - cd build_only_install
+    - cmake -DONLY_INSTALL=ON ../.
+    - $SUDO_CMD make install
+    - mkdir ../install_test && cd ../install_test
+    - cmake ../test/extra/.
+    - make VERBOSE=1
     - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 2

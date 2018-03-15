@@ -20,39 +20,18 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# hipCUB header-only library
-
-# Configure a header file to pass the hipCUB version
-configure_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/hipcub_version.hpp.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/include/hipcub_version.hpp"
-    @ONLY
-)
-
-# Only header target, does not include dependencies
-add_library(hipcub_headers INTERFACE)
-target_include_directories(hipcub_headers
-    INTERFACE
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:hipcub/include>
-)
-
-if(HIP_PLATFORM STREQUAL "hcc")
-    add_library(hipcub INTERFACE)
-    target_link_libraries(hipcub
-        INTERFACE
-            hipcub_headers
-            rocprim_hip
-    )
-else()
-    add_library(hipcub INTERFACE)
-    target_include_directories(hipcub
-        INTERFACE
-            ${CUB_INCLUDE_DIR}
-    )
-    target_link_libraries(hipcub
-        INTERFACE
-            hipcub_headers
-    )
-endif()
+function(print_configuration_summary)
+  message(STATUS "******** Summary ********")
+  message(STATUS "General:")
+  message(STATUS "  System                : ${CMAKE_SYSTEM_NAME}")
+  message(STATUS "  HIP ROOT              : ${HIP_ROOT_DIR}")
+  message(STATUS "  C++ compiler          : ${CMAKE_CXX_COMPILER}")
+  message(STATUS "  C++ compiler version  : ${CMAKE_CXX_COMPILER_VERSION}")
+  message(STATUS "  CXX flags             : ${CMAKE_CXX_FLAGS_STRIP}")
+  message(STATUS "  Build type            : ${CMAKE_BUILD_TYPE}")
+  message(STATUS "  Install prefix        : ${CMAKE_INSTALL_PREFIX}")
+  message(STATUS "")
+  message(STATUS "  BUILD_TEST            : ${BUILD_TEST}")
+  message(STATUS "  BUILD_BENCHMARK       : ${BUILD_BENCHMARK}")
+  message(STATUS "  BUILD_EXAMPLE         : ${BUILD_EXAMPLE}")
+endfunction()
