@@ -24,8 +24,8 @@
 
 # Configure a header file to pass the rocPRIM version
 configure_file(
-  "${CMAKE_CURRENT_SOURCE_DIR}/include/rocprim_version.hpp.in"
-  "${CMAKE_CURRENT_BINARY_DIR}/include/rocprim_version.hpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/include/rocprim/rocprim_version.hpp.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/include/rocprim/rocprim_version.hpp"
   @ONLY
 )
 
@@ -34,8 +34,9 @@ add_library(rocprim INTERFACE)
 target_include_directories(rocprim
   INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include/rocprim>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:rocprim/include/rocprim>
+    $<INSTALL_INTERFACE:rocprim/include/>
 )
 
 # This target allows using only HC interface, links only
@@ -76,15 +77,15 @@ set(INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_INCLUDEDIR})
 rocm_install_targets(
   TARGETS rocprim rocprim_hip rocprim_hc
 #   INCLUDE
-#   ${CMAKE_SOURCE_DIR}/library/rocprim/include
-#   ${CMAKE_BINARY_DIR}/library/rocprim/include
+#   ${CMAKE_SOURCE_DIR}/rocprim/include
+#   ${CMAKE_BINARY_DIR}/rocprim/include
   PREFIX rocprim
 )
 install(
   DIRECTORY
     "include/"
-    "${PROJECT_BINARY_DIR}/library/rocprim/include/"
-  DESTINATION rocprim/include/rocprim
+    "${PROJECT_BINARY_DIR}/rocprim/include/"
+  DESTINATION rocprim/include/
   FILES_MATCHING
   PATTERN "*.h"
   PATTERN "*.hpp"

@@ -33,7 +33,7 @@
     #ifndef ROCPRIM_HIP_API
         #define ROCPRIM_HIP_API
     #endif // ROCPRIM_HIP_API
-    #include <rocprim.hpp>
+    #include <rocprim/rocprim.hpp>
 
     #define HIPCUB_ROCPRIM_API 1
     #define HIPCUB_DEVICE __device__
@@ -42,7 +42,7 @@
     #define HIPCUB_RUNTIME_FUNCTION __host__
     #define HIPCUB_SHARED_MEMORY __shared__
 #elif defined(__HIP_PLATFORM_NVCC__)
-    #include "cub/cub.cuh"
+    #include <cub/cub.cuh>
 
     #define HIPCUB_CUB_API 1
     #define HIPCUB_DEVICE __device__

@@ -224,7 +224,7 @@ void scan_impl(void * temporary_storage,
 /// integer values (<tt>short</tt>s are scanned into <tt>int</tt>s).
 ///
 /// \code{.cpp}
-/// #include <rocprim.hpp>
+/// #include <rocprim/rocprim.hpp>
 ///
 /// hc::accelerator_view acc_view = ...;
 ///
@@ -324,7 +324,7 @@ void inclusive_scan(void * temporary_storage,
 /// integer values (<tt>short</tt>s are scanned into <tt>int</tt>s) using custom operator.
 ///
 /// \code{.cpp}
-/// #include <rocprim.hpp>
+/// #include <rocprim/rocprim.hpp>
 ///
 /// // custom scan function
 /// auto min_op =

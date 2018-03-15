@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_DEVICE_DEVICE_REDUCE_BY_KEY_HIP_HPP_
-#define ROCPRIM_DEVICE_DEVICE_REDUCE_BY_KEY_HIP_HPP_
+#ifndef ROCPRIM_DEVICE_DEVICE_REDUCE_BY_KEY_HC_HPP_
+#define ROCPRIM_DEVICE_DEVICE_REDUCE_BY_KEY_HC_HPP_
 
 #include <iterator>
 #include <iostream>
@@ -33,113 +33,18 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// \addtogroup devicemodule_hip
+/// \addtogroup devicemodule_hc
 /// @{
 
 namespace detail
 {
 
-template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    class KeysInputIterator,
-    class KeyCompareFunction
->
-__global__
-void fill_unique_counts_kernel(KeysInputIterator keys_input,
-                               unsigned int size,
-                               unsigned int * unique_counts,
-                               KeyCompareFunction key_compare_op,
-                               unsigned int blocks_per_full_batch,
-                               unsigned int full_batches,
-                               unsigned int blocks)
-{
-    fill_unique_counts<BlockSize, ItemsPerThread>(
-        keys_input, size,
-        unique_counts,
-        key_compare_op,
-        blocks_per_full_batch, full_batches, blocks
-    );
-}
-
-template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    class UniqueCountOutputIterator
->
-__global__
-void scan_unique_counts_kernel(unsigned int * unique_counts,
-                               UniqueCountOutputIterator unique_count_output,
-                               unsigned int batches)
-{
-    scan_unique_counts<BlockSize, ItemsPerThread>(unique_counts, unique_count_output, batches);
-}
-
-template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    class KeysInputIterator,
-    class ValuesInputIterator,
-    class UniqueOutputIterator,
-    class AggregatesOutputIterator,
-    class CarryOut,
-    class KeyCompareFunction,
-    class BinaryFunction
->
-__global__
-void reduce_by_key_kernel(KeysInputIterator keys_input,
-                          ValuesInputIterator values_input,
-                          unsigned int size,
-                          const unsigned int * unique_starts,
-                          CarryOut * carry_outs,
-                          UniqueOutputIterator unique_output,
-                          AggregatesOutputIterator aggregates_output,
-                          KeyCompareFunction key_compare_op,
-                          BinaryFunction reduce_op,
-                          unsigned int blocks_per_full_batch,
-                          unsigned int full_batches,
-                          unsigned int blocks)
-{
-    reduce_by_key<BlockSize, ItemsPerThread>(
-        keys_input, values_input, size,
-        unique_starts, carry_outs,
-        unique_output, aggregates_output,
-        key_compare_op, reduce_op,
-        blocks_per_full_batch, full_batches, blocks
-    );
-}
-
-template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    class AggregatesOutputIterator,
-    class CarryOut,
-    class KeyCompareFunction,
-    class BinaryFunction
->
-__global__
-void scan_and_scatter_carry_outs_kernel(const CarryOut * carry_outs,
-                                        AggregatesOutputIterator aggregates_output,
-                                        KeyCompareFunction key_compare_op,
-                                        BinaryFunction reduce_op,
-                                        unsigned int batches)
-{
-    scan_and_scatter_carry_outs<BlockSize, ItemsPerThread>(
-        carry_outs, aggregates_output,
-        key_compare_op, reduce_op,
-        batches
-    );
-}
-
-#define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start) \
+#define ROCPRIM_DETAIL_HC_SYNC(name, size, start) \
     { \
-        auto error = hipPeekAtLastError(); \
-        if(error != hipSuccess) return error; \
         if(debug_synchronous) \
         { \
             std::cout << name << "(" << size << ")"; \
-            auto error = hipStreamSynchronize(stream); \
-            if(error != hipSuccess) return error; \
+            acc_view.wait(); \
             auto end = std::chrono::high_resolution_clock::now(); \
             auto d = std::chrono::duration_cast<std::chrono::duration<double>>(end - start); \
             std::cout << " " << d.count() * 1000 << " ms" << '\n'; \
@@ -156,18 +61,18 @@ template<
     class KeyCompareFunction
 >
 inline
-hipError_t reduce_by_key_impl(void * temporary_storage,
-                              size_t& storage_size,
-                              KeysInputIterator keys_input,
-                              ValuesInputIterator values_input,
-                              const unsigned int size,
-                              UniqueOutputIterator unique_output,
-                              AggregatesOutputIterator aggregates_output,
-                              UniqueCountOutputIterator unique_count_output,
-                              BinaryFunction reduce_op,
-                              KeyCompareFunction key_compare_op,
-                              const hipStream_t stream,
-                              const bool debug_synchronous)
+void reduce_by_key_impl(void * temporary_storage,
+                        size_t& storage_size,
+                        KeysInputIterator keys_input,
+                        ValuesInputIterator values_input,
+                        const unsigned int size,
+                        UniqueOutputIterator unique_output,
+                        AggregatesOutputIterator aggregates_output,
+                        UniqueCountOutputIterator unique_count_output,
+                        BinaryFunction reduce_op,
+                        KeyCompareFunction key_compare_op,
+                        hc::accelerator_view acc_view,
+                        const bool debug_synchronous)
 {
     using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
     using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
@@ -194,7 +99,7 @@ hipError_t reduce_by_key_impl(void * temporary_storage,
     if(temporary_storage == nullptr)
     {
         storage_size = unique_counts_bytes + carry_outs_bytes;
-        return hipSuccess;
+        return;
     }
 
     if(debug_synchronous)
@@ -206,8 +111,7 @@ hipError_t reduce_by_key_impl(void * temporary_storage,
         std::cout << "full_batches " << full_batches << '\n';
         std::cout << "batches " << batches << '\n';
         std::cout << "storage_size " << storage_size << '\n';
-        hipError_t error = hipStreamSynchronize(stream);
-        if(error != hipSuccess) return error;
+        acc_view.wait();
     }
 
     char * ptr = reinterpret_cast<char *>(temporary_storage);
@@ -219,54 +123,72 @@ hipError_t reduce_by_key_impl(void * temporary_storage,
     std::chrono::high_resolution_clock::time_point start;
 
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(fill_unique_counts_kernel<block_size, items_per_thread>),
-        dim3(batches), dim3(block_size), 0, stream,
-        keys_input, size, unique_counts, key_compare_op,
-        blocks_per_full_batch, full_batches, blocks
+    hc::parallel_for_each(
+        acc_view,
+        hc::tiled_extent<1>(batches * block_size, block_size),
+        [=](hc::tiled_index<1>) [[hc]]
+        {
+            fill_unique_counts<block_size, items_per_thread>(
+                keys_input, size, unique_counts, key_compare_op,
+                blocks_per_full_batch, full_batches, blocks
+            );
+        }
     );
-    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("fill_unique_counts", size, start)
+    ROCPRIM_DETAIL_HC_SYNC("fill_unique_counts", size, start)
 
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(scan_unique_counts_kernel<scan_block_size, scan_items_per_thread>),
-        dim3(1), dim3(scan_block_size), 0, stream,
-        unique_counts, unique_count_output,
-        batches
+    hc::parallel_for_each(
+        acc_view,
+        hc::tiled_extent<1>(scan_block_size, scan_block_size),
+        [=](hc::tiled_index<1>) [[hc]]
+        {
+            scan_unique_counts<scan_block_size, scan_items_per_thread>(
+                unique_counts, unique_count_output,
+                batches
+            );
+        }
     );
-    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("scan_unique_counts", scan_block_size, start)
+    ROCPRIM_DETAIL_HC_SYNC("scan_unique_counts", scan_block_size, start)
 
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(reduce_by_key_kernel<block_size, items_per_thread>),
-        dim3(batches), dim3(block_size), 0, stream,
-        keys_input, values_input, size,
-        const_cast<const unsigned int *>(unique_counts), carry_outs,
-        unique_output, aggregates_output,
-        key_compare_op, reduce_op,
-        blocks_per_full_batch, full_batches, blocks
+    hc::parallel_for_each(
+        acc_view,
+        hc::tiled_extent<1>(batches * block_size, block_size),
+        [=](hc::tiled_index<1>) [[hc]]
+        {
+            reduce_by_key<block_size, items_per_thread>(
+                keys_input, values_input, size,
+                unique_counts, carry_outs,
+                unique_output, aggregates_output,
+                key_compare_op, reduce_op,
+                blocks_per_full_batch, full_batches, blocks
+            );
+        }
     );
-    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("reduce_by_key", size, start)
+    ROCPRIM_DETAIL_HC_SYNC("reduce_by_key", size, start)
 
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(scan_and_scatter_carry_outs_kernel<scan_block_size, scan_items_per_thread>),
-        dim3(1), dim3(scan_block_size), 0, stream,
-        const_cast<const carry_out_type *>(carry_outs),
-        aggregates_output,
-        key_compare_op, reduce_op,
-        batches
+    hc::parallel_for_each(
+        acc_view,
+        hc::tiled_extent<1>(scan_block_size, scan_block_size),
+        [=](hc::tiled_index<1>) [[hc]]
+        {
+            scan_and_scatter_carry_outs<scan_block_size, scan_items_per_thread>(
+                carry_outs,
+                aggregates_output,
+                key_compare_op, reduce_op,
+                batches
+            );
+        }
     );
-    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("scan_and_scatter_carry_outs", scan_block_size, start)
-
-    return hipSuccess;
+    ROCPRIM_DETAIL_HC_SYNC("scan_and_scatter_carry_outs", scan_block_size, start)
 }
 
-#undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
+#undef ROCPRIM_DETAIL_HC_SYNC
 
 } // end of detail namespace
 
-/// \brief HIP parallel reduce-by-key primitive for device level.
+/// \brief HC parallel reduce-by-key primitive for device level.
 ///
 /// reduce_by_key function performs a device-wide reduction operation of groups
 /// of consecutive values having the same key using binary \p reduce_op operator. The first key of each group
@@ -319,12 +241,10 @@ hipError_t reduce_by_key_impl(void * temporary_storage,
 /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
 /// <tt>const &</tt>, but function object must not modify the objects passed to it.
 /// Default is KeyCompareFunction().
-/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] acc_view - [optional] \p hc::accelerator_view object. The default value
+/// is \p hc::accelerator().get_default_view() (default view of the default accelerator).
 /// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
-///
-/// \returns \p hipSuccess (\p 0) after successful reduction; otherwise a HIP runtime error of
-/// type \p hipError_t.
 ///
 /// \par Example
 /// \parblock
@@ -332,33 +252,36 @@ hipError_t reduce_by_key_impl(void * temporary_storage,
 /// integer values and integer keys.
 ///
 /// \code{.cpp}
-/// #include <rocprim.hpp>
+/// #include <rocprim/rocprim.hpp>
+///
+/// hc::accelerator_view acc_view = ...;
 ///
 /// // Prepare input and output (declare pointers, allocate device memory etc.)
-/// size_t input_size;          // e.g., 8
-/// int * keys_input;           // e.g., [1, 1, 1, 2, 10, 10, 10, 88]
-/// int * values_input;         // e.g., [1, 2, 3, 4,  5,  6,  7,  8]
-/// int * unique_output;        // empty array of at least 4 elements
-/// int * aggregates_output;    // empty array of at least 4 elements
-/// int * unique_count_output;  // empty array of 1 element
+/// size_t input_size;                       // e.g., 8
+/// hc::array<int> keys_input(...);          // e.g., [1, 1, 1, 2, 10, 10, 10, 88]
+/// hc::array<int> values_input(...);        // e.g., [1, 2, 3, 4,  5,  6,  7,  8]
+/// hc::array<int> unique_output(...);       // empty array of at least 4 elements
+/// hc::array<int> aggregates_output(...);   // empty array of at least 4 elements
+/// hc::array<int> unique_count_output(...); // empty array of 1 element
 ///
 /// size_t temporary_storage_size_bytes;
-/// void * temporary_storage_ptr = nullptr;
 /// // Get required size of the temporary storage
 /// rocprim::reduce_by_key(
-///     temporary_storage_ptr, temporary_storage_size_bytes,
-///     keys_input, values_input, input_size,
-///     unique_output, aggregates_output, unique_count_output
+///     nullptr, temporary_storage_size_bytes,
+///     keys_input.accelerator_pointer(), values_input.accelerator_pointer(), input_size,
+///     unique_output.accelerator_pointer(), aggregates_output.accelerator_pointer(),
+///     unique_count_output.accelerator_pointer()
 /// );
 ///
 /// // allocate temporary storage
-/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+/// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
 ///
 /// // perform reduction
 /// rocprim::reduce_by_key(
-///     temporary_storage_ptr, temporary_storage_size_bytes,
-///     keys_input, values_input, input_size,
-///     unique_output, aggregates_output, unique_count_output
+///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
+///     keys_input.accelerator_pointer(), values_input.accelerator_pointer(), input_size,
+///     unique_output.accelerator_pointer(), aggregates_output.accelerator_pointer(),
+///     unique_count_output.accelerator_pointer()
 /// );
 /// // unique_output:       [1, 2, 10, 88]
 /// // aggregates_output:   [6, 4, 18,  8]
@@ -375,31 +298,31 @@ template<
     class KeyCompareFunction = ::rocprim::equal_to<typename std::iterator_traits<KeysInputIterator>::value_type>
 >
 inline
-hipError_t reduce_by_key(void * temporary_storage,
-                         size_t& storage_size,
-                         KeysInputIterator keys_input,
-                         ValuesInputIterator values_input,
-                         unsigned int size,
-                         UniqueOutputIterator unique_output,
-                         AggregatesOutputIterator aggregates_output,
-                         UniqueCountOutputIterator unique_count_output,
-                         BinaryFunction reduce_op = BinaryFunction(),
-                         KeyCompareFunction key_compare_op = KeyCompareFunction(),
-                         hipStream_t stream = 0,
-                         bool debug_synchronous = false)
+void reduce_by_key(void * temporary_storage,
+                   size_t& storage_size,
+                   KeysInputIterator keys_input,
+                   ValuesInputIterator values_input,
+                   unsigned int size,
+                   UniqueOutputIterator unique_output,
+                   AggregatesOutputIterator aggregates_output,
+                   UniqueCountOutputIterator unique_count_output,
+                   BinaryFunction reduce_op = BinaryFunction(),
+                   KeyCompareFunction key_compare_op = KeyCompareFunction(),
+                   hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
+                   bool debug_synchronous = false)
 {
-    return detail::reduce_by_key_impl(
+    detail::reduce_by_key_impl(
         temporary_storage, storage_size,
         keys_input, values_input, size,
         unique_output, aggregates_output, unique_count_output,
         reduce_op, key_compare_op,
-        stream, debug_synchronous
+        acc_view, debug_synchronous
     );
 }
 
 /// @}
-// end of group devicemodule_hip
+// end of group devicemodule_hc
 
 END_ROCPRIM_NAMESPACE
 
-#endif // ROCPRIM_DEVICE_DEVICE_REDUCE_BY_KEY_HIP_HPP_
+#endif // ROCPRIM_DEVICE_DEVICE_REDUCE_BY_KEY_HC_HPP_
