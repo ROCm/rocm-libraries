@@ -104,8 +104,22 @@ test:rocm_package:
   script:
     - cd build
     - $SUDO_CMD dpkg -i rocprim-*.deb
-    - mkdir ../build_package_test && cd ../build_package_test
+    - mkdir ../package_test && cd ../package_test
     - cmake ../test/extra/.
     - make VERBOSE=1
     - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 2
     - $SUDO_CMD dpkg -r rocprim
+
+test:rocm_install:
+  stage: test
+  variables:
+    SUDO_CMD: "sudo -E"
+  script:
+    - mkdir build_only_install
+    - cd build_only_install
+    - cmake -DONLY_INSTALL=ON ../.
+    - $SUDO_CMD make install
+    - mkdir ../install_test && cd ../install_test
+    - cmake ../test/extra/.
+    - make VERBOSE=1
+    - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 2
