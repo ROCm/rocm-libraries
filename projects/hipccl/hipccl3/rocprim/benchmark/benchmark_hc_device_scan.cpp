@@ -36,7 +36,7 @@
 // HC API
 #include <hcc/hc.hpp>
 // rocPRIM
-#include <rocprim.hpp>
+#include <rocprim/rocprim.hpp>
 
 #include "benchmark_utils.hpp"
 
@@ -135,7 +135,7 @@ void run_benchmark(benchmark::State& state,
         acc_view
     );
     acc_view.wait();
-    
+
     // allocate temporary storage
     hc::array<char> d_temp_storage(temp_storage_size_bytes, acc_view);
     acc_view.wait();

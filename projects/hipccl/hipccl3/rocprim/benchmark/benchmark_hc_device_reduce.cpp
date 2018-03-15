@@ -35,7 +35,7 @@
 #include <hcc/hc.hpp>
 
 // rocPRIM HIP API
-#include <rocprim.hpp>
+#include <rocprim/rocprim.hpp>
 
 // CmdParser
 #include "cmdparser.hpp"
@@ -88,7 +88,7 @@ void run_benchmark(benchmark::State& state,
         acc_view
     );
     acc_view.wait();
-    
+
     // allocate temporary storage
     hc::array<char> d_temp_storage(temp_storage_size_bytes, acc_view);
     acc_view.wait();

@@ -26,7 +26,7 @@
 #include <random>
 #include <type_traits>
 
-#include <rocprim.hpp>
+#include <rocprim/rocprim.hpp>
 
 // get_random_data() generates only part of sequence and replicates it,
 // because benchmarks do not need "true" random sequence.

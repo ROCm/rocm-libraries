@@ -31,7 +31,7 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_hcc.h>
 // rocPRIM API
-#include <rocprim.hpp>
+#include <rocprim/rocprim.hpp>
 
 #include "test_utils.hpp"
 

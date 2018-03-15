@@ -40,7 +40,7 @@
 #include <hcc/hc.hpp>
 
 // rocPRIM
-#include <rocprim.hpp>
+#include <rocprim/rocprim.hpp>
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 32;
@@ -151,7 +151,7 @@ void run_benchmark(benchmark::State& state, hc::accelerator_view acc_view, size_
     acc_view.wait();
 
     size_t temp_storage_size_bytes = 0;
-    
+
     run_radix_sort<benchmark_kind>(
         nullptr,
         temp_storage_size_bytes,

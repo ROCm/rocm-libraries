@@ -22,7 +22,7 @@
 #include <random>
 
 // rocPRIM HIP API
-#include <rocprim_hip.hpp>
+#include <rocprim/rocprim_hip.hpp>
 
 #include "example_utils.hpp"
 

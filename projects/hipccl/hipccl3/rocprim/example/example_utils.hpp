@@ -26,7 +26,7 @@
 #include <random>
 #include <type_traits>
 
-#include <rocprim.hpp>
+#include <rocprim/rocprim.hpp>
 
 #ifdef ROCPRIM_HIP_API
     #define HIP_CHECK(condition)         \

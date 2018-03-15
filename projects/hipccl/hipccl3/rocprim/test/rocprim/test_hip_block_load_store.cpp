@@ -30,7 +30,7 @@
 #include <hcc/hc.hpp>
 #include <hcc/hc_short_vector.hpp>
 // rocPRIM API
-#include <rocprim.hpp>
+#include <rocprim/rocprim.hpp>
 
 #include "test_utils.hpp"
 

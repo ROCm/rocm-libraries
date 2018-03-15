@@ -34,7 +34,7 @@
 // HC API
 #include <hcc/hc.hpp>
 // rocPRIM
-#include <warp/warp_scan.hpp>
+#include <rocprim/warp/warp_scan.hpp>
 
 #include "benchmark_utils.hpp"
 
