@@ -267,7 +267,7 @@ void segmented_radix_sort_impl(void * temporary_storage,
 /// \p float values.
 ///
 /// \code{.cpp}
-/// #include <rocprim.hpp>
+/// #include <rocprim/rocprim.hpp>
 ///
 /// hc::accelerator_view acc_view = ...;
 ///
@@ -388,7 +388,7 @@ void segmented_radix_sort_keys(void * temporary_storage,
 /// integer values.
 ///
 /// \code{.cpp}
-/// #include <rocprim.hpp>
+/// #include <rocprim/rocprim.hpp>
 ///
 /// hc::accelerator_view acc_view = ...;
 ///
@@ -516,7 +516,7 @@ void segmented_radix_sort_keys_desc(void * temporary_storage,
 /// represented by an array of unsigned integers and input values by an array of <tt>double</tt>s.
 ///
 /// \code{.cpp}
-/// #include <rocprim.hpp>
+/// #include <rocprim/rocprim.hpp>
 ///
 /// // Prepare input and output (declare pointers, allocate device memory etc.)
 /// size_t input_size;          // e.g., 8
@@ -654,7 +654,7 @@ void segmented_radix_sort_pairs(void * temporary_storage,
 /// represented by an array of integers and input values by an array of <tt>double</tt>s.
 ///
 /// \code{.cpp}
-/// #include <rocprim.hpp>
+/// #include <rocprim/rocprim.hpp>
 ///
 /// hc::accelerator_view acc_view = ...;
 ///
@@ -785,7 +785,7 @@ void segmented_radix_sort_pairs_desc(void * temporary_storage,
 /// \p float values.
 ///
 /// \code{.cpp}
-/// #include <rocprim.hpp>
+/// #include <rocprim/rocprim.hpp>
 ///
 /// hc::accelerator_view acc_view = ...;
 ///
@@ -906,7 +906,7 @@ void segmented_radix_sort_keys(void * temporary_storage,
 /// integer values.
 ///
 /// \code{.cpp}
-/// #include <rocprim.hpp>
+/// #include <rocprim/rocprim.hpp>
 ///
 /// hc::accelerator_view acc_view = ...;
 ///
@@ -1030,7 +1030,7 @@ void segmented_radix_sort_keys_desc(void * temporary_storage,
 /// represented by an array of unsigned integers and input values by an array of <tt>double</tt>s.
 ///
 /// \code{.cpp}
-/// #include <rocprim.hpp>
+/// #include <rocprim/rocprim.hpp>
 ///
 /// hc::accelerator_view acc_view = ...;
 ///
@@ -1163,7 +1163,7 @@ void segmented_radix_sort_pairs(void * temporary_storage,
 /// represented by an array of integers and input values by an array of <tt>double</tt>s.
 ///
 /// \code{.cpp}
-/// #include <rocprim.hpp>
+/// #include <rocprim/rocprim.hpp>
 ///
 /// hc::accelerator_view acc_view = ...;
 ///

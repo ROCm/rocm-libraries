@@ -36,7 +36,7 @@
 // HC API
 #include <hcc/hc.hpp>
 // rocPRIM
-#include <rocprim.hpp>
+#include <rocprim/rocprim.hpp>
 
 #include "benchmark_utils.hpp"
 

@@ -27,7 +27,7 @@
 #include <gtest/gtest.h>
 
 // rocPRIM HIP API
-#include <rocprim.hpp>
+#include <rocprim/rocprim.hpp>
 
 #include "detail/get_rocprim_version.hpp"
 

@@ -36,7 +36,7 @@
 // HC API
 #include <hcc/hc.hpp>
 // rocPRIM
-#include <warp/warp_sort.hpp>
+#include <rocprim/warp/warp_sort.hpp>
 
 #include "benchmark_utils.hpp"
 

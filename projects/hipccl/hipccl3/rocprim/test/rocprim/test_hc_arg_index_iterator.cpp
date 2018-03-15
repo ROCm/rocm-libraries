@@ -30,7 +30,7 @@
 // HC API
 #include <hcc/hc.hpp>
 // rocPRIM API
-#include <rocprim.hpp>
+#include <rocprim/rocprim.hpp>
 
 #include "test_utils.hpp"
 
@@ -66,7 +66,7 @@ TYPED_TEST(RocprimArgIndexIteratorTests, Equal)
     using T = typename TestFixture::input_type;
     using Iterator = typename rocprim::arg_index_iterator<T*>;
     //using key_value = typename Iterator::value_type;
-    
+
     std::vector<T> input = test_utils::get_random_data<T>(5, 1, 200);
 
     Iterator x(input.data());
@@ -126,7 +126,7 @@ TYPED_TEST(RocprimArgIndexIteratorTests, ReduceArgMinimum)
     // Calculate expected results on host
     Iterator x(input.data());
     key_value expected = std::accumulate(x, x + size, max, reduce_op);
-    
+
     Iterator d_iter(d_input.accelerator_pointer());
 
     // temp storage

@@ -33,7 +33,7 @@
 // HC API
 #include <hcc/hc.hpp>
 // rocPRIM API
-#include <rocprim.hpp>
+#include <rocprim/rocprim.hpp>
 
 #include "test_utils.hpp"
 

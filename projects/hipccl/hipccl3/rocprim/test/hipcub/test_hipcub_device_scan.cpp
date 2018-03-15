@@ -29,7 +29,7 @@
 // HIP API
 #include <hip/hip_runtime.h>
 // hipCUB API
-#include <hipcub.hpp>
+#include <hipcub/hipcub.hpp>
 
 #include "test_utils.hpp"
 
