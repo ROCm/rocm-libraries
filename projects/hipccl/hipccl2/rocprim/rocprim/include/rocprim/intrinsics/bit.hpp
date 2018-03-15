@@ -25,6 +25,9 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
+/// \addtogroup intrinsicsmodule
+/// @{
+
 /// \brief Returns a single bit at 'i' from 'x'
 ROCPRIM_DEVICE inline
 int get_bit(int x, int i)
@@ -57,6 +60,9 @@ unsigned int bit_count(unsigned long long x)
         return __popcll(x);
     #endif
 }
+
+/// @}
+// end of group intrinsicsmodule
 
 END_ROCPRIM_NAMESPACE
 
