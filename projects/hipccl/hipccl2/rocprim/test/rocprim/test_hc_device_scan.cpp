@@ -71,7 +71,7 @@ typedef ::testing::Types<
 std::vector<size_t> get_sizes()
 {
     std::vector<size_t> sizes = {
-        2, 32, 65, 378,
+        2, 32, 32, 32, 65, 378,
         1512, 3048, 4096,
         27845, (1 << 18) + 1111
     };
