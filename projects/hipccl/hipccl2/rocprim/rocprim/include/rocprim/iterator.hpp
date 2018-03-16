@@ -25,6 +25,7 @@
 #include "config.hpp"
 
 #include "iterator/arg_index_iterator.hpp"
+#include "iterator/constant_iterator.hpp"
 #include "iterator/counting_iterator.hpp"
 #include "iterator/discard_iterator.hpp"
 #include "iterator/transform_iterator.hpp"

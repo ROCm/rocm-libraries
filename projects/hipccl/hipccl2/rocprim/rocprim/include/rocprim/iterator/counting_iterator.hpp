@@ -76,9 +76,10 @@ public:
     ~counting_iterator() = default;
 
     /// \brief Creates counting_iterator and sets its initial value to \p value_.
-    /// \param value_ initial value
+    ///
+    /// \param value initial value
     ROCPRIM_HOST_DEVICE inline
-    explicit counting_iterator(const value_type value_) : value_(value_)
+    explicit counting_iterator(const value_type value) : value_(value)
     {
     }
 
