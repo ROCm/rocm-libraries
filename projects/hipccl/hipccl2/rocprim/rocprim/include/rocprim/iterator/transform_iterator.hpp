@@ -120,6 +120,21 @@ public:
     }
 
     ROCPRIM_HOST_DEVICE inline
+    transform_iterator& operator--()
+    {
+        iterator_--;
+        return *this;
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    transform_iterator operator--(int)
+    {
+        transform_iterator old = *this;
+        iterator_--;
+        return old;
+    }
+
+    ROCPRIM_HOST_DEVICE inline
     value_type operator*() const
     {
         return transform_(*iterator_);
