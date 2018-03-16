@@ -27,7 +27,7 @@
 
 #define HIP_CHECK(error)         \
   {                                  \
-    if(error != 0){         \
+    if(error != hipSuccess){         \
         std::cout << error << std::endl; \
         exit(error); \
     } \
