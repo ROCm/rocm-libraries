@@ -50,14 +50,14 @@ template<
     class BinaryFunction
 >
 auto run_scan(void * temporary_storage,
-                     size_t& storage_size,
-                     T * input,
-                     T * output,
-                     const T initial_value,
-                     const size_t input_size,
-                     BinaryFunction scan_op,
-                     hc::accelerator_view acc_view,
-                     const bool debug = false)
+             size_t& storage_size,
+             T * input,
+             T * output,
+             const T initial_value,
+             const size_t input_size,
+             BinaryFunction scan_op,
+             hc::accelerator_view acc_view,
+             const bool debug = false)
     -> typename std::enable_if<Exclusive, void>::type
 {
     return rocprim::exclusive_scan(
@@ -73,14 +73,14 @@ template<
     class BinaryFunction
 >
 auto run_scan(void * temporary_storage,
-                     size_t& storage_size,
-                     T * input,
-                     T * output,
-                     const T initial_value,
-                     const size_t input_size,
-                     BinaryFunction scan_op,
-                     hc::accelerator_view acc_view,
-                     const bool debug = false)
+             size_t& storage_size,
+             T * input,
+             T * output,
+             const T initial_value,
+             const size_t input_size,
+             BinaryFunction scan_op,
+             hc::accelerator_view acc_view,
+             const bool debug = false)
     -> typename std::enable_if<!Exclusive, void>::type
 {
     (void) initial_value;
