@@ -32,4 +32,12 @@ using namespace cub;
 
 END_HIPCUB_NAMESPACE
 
+// Device functions must be wrapped so they return
+// hipError_t instead of cudaError_t
+#include "device/device_radix_sort.hpp"
+#include "device/device_reduce.hpp"
+#include "device/device_segmented_radix_sort.hpp"
+#include "device/device_segmented_reduce.hpp"
+#include "device/device_scan.hpp"
+
 #endif // CUB_HIPCUB_HPP_

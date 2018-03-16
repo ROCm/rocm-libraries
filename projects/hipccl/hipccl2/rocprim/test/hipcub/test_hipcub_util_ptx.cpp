@@ -31,7 +31,7 @@
 
 #include "test_utils.hpp"
 
-#define HIP_CHECK(error) ASSERT_EQ(static_cast<hipError_t>(error), hipSuccess)
+#define HIP_CHECK(error) ASSERT_EQ(error, hipSuccess)
 
 // Custom structure
 struct custom_notaligned
