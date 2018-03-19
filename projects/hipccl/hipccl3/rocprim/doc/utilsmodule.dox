@@ -8,3 +8,13 @@
  * \defgroup utilsmodule Utilities
  *
  */
+
+ /**
+ * \defgroup utilsmodule_functional Functional
+ * \ingroup utilsmodule
+ */
+
+ /**
+ * \defgroup utilsmodule_tuple Tuple
+ * \ingroup utilsmodule
+ */

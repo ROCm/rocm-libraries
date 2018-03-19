@@ -28,7 +28,7 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// \addtogroup utilsmodule
+/// \addtogroup utilsmodule_functional
 /// @{
 
 template<class T>
@@ -165,7 +165,7 @@ struct minimum
 };
 
 /// @}
-// end of group utilsmodule
+// end of group utilsmodule_functional
 
 END_ROCPRIM_NAMESPACE
 
