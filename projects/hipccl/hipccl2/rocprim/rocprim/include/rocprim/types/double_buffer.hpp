@@ -23,6 +23,9 @@
 
 #include "../config.hpp"
 
+/// \addtogroup utilsmodule
+/// @{
+
 BEGIN_ROCPRIM_NAMESPACE
 
 template<class T>
@@ -70,5 +73,8 @@ public:
 };
 
 END_ROCPRIM_NAMESPACE
+
+/// @}
+// end of group utilsmodule
 
 #endif // ROCPRIM_TYPES_DOUBLE_BUFFER_HPP_
