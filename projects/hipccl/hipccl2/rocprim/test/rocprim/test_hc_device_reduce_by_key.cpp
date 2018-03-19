@@ -86,6 +86,7 @@ typedef ::testing::Types<
     params<double, int, rp::plus<int>, 100, 2000, custom_key_compare_op1<double>>,
     params<int, unsigned int, rp::plus<unsigned int>, 1000, 5000>,
     params<unsigned int, int, rp::plus<int>, 2048, 2048>,
+    params<long long, long long, rp::plus<long long>, 1000, 10000>,
     params<unsigned int, double, rp::minimum<double>, 1000, 50000>,
     params<unsigned long long, unsigned long long, rp::plus<unsigned long long>, 100000, 100000>
 > Params;
