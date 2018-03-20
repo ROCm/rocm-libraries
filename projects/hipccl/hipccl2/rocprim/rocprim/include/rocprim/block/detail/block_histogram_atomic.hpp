@@ -59,7 +59,7 @@ public:
         #pragma unroll
         for (unsigned int i = 0; i < ItemsPerThread; ++i)
         {
-              hc::atomic_fetch_add(hist + input[i], 1);
+              ::rocprim::atomic_add(hist + input[i], 1);
         }
     }
 };
