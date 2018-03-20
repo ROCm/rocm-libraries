@@ -68,6 +68,7 @@ add_rocprim_test_hc("rocprim.hc.basic_test" "test_hc_basic.cpp;detail/get_rocpri
 add_rocprim_test_hc("rocprim.hc.arg_index_iterator" test_hc_arg_index_iterator.cpp)
 add_rocprim_test_hc("rocprim.hc.block_discontinuity" test_hc_block_discontinuity.cpp)
 add_rocprim_test_hc("rocprim.hc.block_exchange" test_hc_block_exchange.cpp)
+add_rocprim_test_hc("rocprim.hc.block_histogram" test_hc_block_histogram.cpp)
 add_rocprim_test_hc("rocprim.hc.block_load_store" test_hc_block_load_store.cpp)
 add_rocprim_test_hc("rocprim.hc.block_radix_sort" test_hc_block_radix_sort.cpp)
 add_rocprim_test_hc("rocprim.hc.block_reduce" test_hc_block_reduce.cpp)
