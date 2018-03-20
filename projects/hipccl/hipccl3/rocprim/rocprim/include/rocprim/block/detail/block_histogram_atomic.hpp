@@ -36,6 +36,7 @@ namespace detail
 
 template<
     class T,
+    unsigned int BlockSize,
     unsigned int ItemsPerThread,
     unsigned int Bins
 >
@@ -61,6 +62,16 @@ public:
         {
               ::rocprim::atomic_add(hist + input[i], 1);
         }
+    }
+    
+    template<class Counter>
+    ROCPRIM_DEVICE inline
+    void composite(T (&input)[ItemsPerThread],
+                   Counter (&hist)[Bins],
+                   storage_type& storage)
+    {
+        (void) storage;
+        this->composite(input, hist);
     }
 };
 
