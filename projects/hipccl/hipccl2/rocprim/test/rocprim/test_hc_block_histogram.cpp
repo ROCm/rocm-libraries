@@ -71,7 +71,19 @@ typedef ::testing::Types<
     params<unsigned int, 37,   2>,
     params<unsigned int, 65,   5>,
     params<unsigned int, 162,  7>,
-    params<unsigned int, 255,  15>
+    params<unsigned int, 255,  15>,
+    // -----------------------------------------------------------------------
+    // rocprim::block_histogram_algorithm::using_sort
+    // -----------------------------------------------------------------------
+    params<unsigned int, 6U,   32, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned int, 32,   2, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned int, 256,  3, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned int, 512,  4, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned int, 1024, 1, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned int, 37,   2, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned int, 65,   5, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned int, 162,  7, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned int, 255,  15, rocprim::block_histogram_algorithm::using_sort>
 > InputArrayTestParams;
 
 TYPED_TEST_CASE(RocprimBlockHistogramInputArrayTests, InputArrayTestParams);
@@ -135,7 +147,6 @@ TYPED_TEST(RocprimBlockHistogramInputArrayTests, Histogram)
 
             rp::block_histogram<T, block_size, items_per_thread, bin, algorithm> bhist;
             bhist.histogram(in_out, hist);
-            rp::syncthreads();
             d_output_h[i.global[0]] = hist[i.local[0]];
         }
     );
@@ -144,9 +155,8 @@ TYPED_TEST(RocprimBlockHistogramInputArrayTests, Histogram)
     d_output_h.synchronize();
     for(size_t i = 0; i < output_bin.size(); i++)
     {
-        ASSERT_NEAR(
-            output_bin[i], expected_bin[i],
-            static_cast<T>(0.05) * expected_bin[i]
+        ASSERT_EQ(
+            output_bin[i], expected_bin[i]
         );
     }
 }

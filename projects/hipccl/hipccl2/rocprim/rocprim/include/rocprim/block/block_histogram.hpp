@@ -30,6 +30,7 @@
 #include "../functional.hpp"
 
 #include "detail/block_histogram_atomic.hpp"
+#include "detail/block_histogram_sort.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -51,14 +52,15 @@ struct select_block_histogram_impl;
 template<>
 struct select_block_histogram_impl<block_histogram_algorithm::using_atomic>
 {
-    template<class T, unsigned int ItemsPerThread, unsigned int Bins>
-    using type = block_histogram_atomic<T, ItemsPerThread, Bins>;
+    template<class T, unsigned BlockSize, unsigned int ItemsPerThread, unsigned int Bins>
+    using type = block_histogram_atomic<T, BlockSize, ItemsPerThread, Bins>;
 };
 
 template<>
 struct select_block_histogram_impl<block_histogram_algorithm::using_sort>
 {
-
+    template<class T, unsigned BlockSize, unsigned int ItemsPerThread, unsigned int Bins>
+    using type = block_histogram_sort<T, BlockSize, ItemsPerThread, Bins>;
 };
 
 } // end namespace detail
@@ -72,10 +74,10 @@ template<
 >
 class block_histogram
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
-    : private detail::select_block_histogram_impl<Algorithm>::template type<T, ItemsPerThread, Bins>
+    : private detail::select_block_histogram_impl<Algorithm>::template type<T, BlockSize, ItemsPerThread, Bins>
 #endif
 {
-    using base_type = typename detail::select_block_histogram_impl<Algorithm>::template type<T, ItemsPerThread, Bins>;
+    using base_type = typename detail::select_block_histogram_impl<Algorithm>::template type<T, BlockSize, ItemsPerThread, Bins>;
 public:
     using storage_type = typename base_type::storage_type;
 
@@ -83,8 +85,9 @@ public:
     ROCPRIM_DEVICE inline
     void init_histogram(Counter (&hist)[Bins])
     {
-        unsigned int offset = 0;
+        constexpr bool check = (Bins % BlockSize == 0);
         const auto flat_tid = ::rocprim::flat_block_thread_id();
+        unsigned int offset = 0;
 
         #pragma unroll
         for (offset = 0; offset + BlockSize <= Bins; offset += BlockSize)
@@ -92,7 +95,7 @@ public:
             hist[offset + flat_tid] = Counter();
         }
 
-        if ((Bins % BlockSize == 0) && (offset + flat_tid <= Bins))
+        if ((offset + flat_tid < Bins) && check)
         {
             hist[offset + flat_tid] = Counter();
         }
@@ -114,6 +117,7 @@ public:
         init_histogram(hist);
         ::rocprim::syncthreads();
         composite(input, hist);
+        ::rocprim::syncthreads();
     }
 };
 
