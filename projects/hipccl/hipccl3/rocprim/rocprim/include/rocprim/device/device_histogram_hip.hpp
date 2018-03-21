@@ -112,8 +112,8 @@ hipError_t histogram_even_impl(void * temporary_storage,
                                unsigned int levels,
                                Level lower_level,
                                Level upper_level,
-                               hipStream_t stream = 0,
-                               bool debug_synchronous = false)
+                               hipStream_t stream,
+                               bool debug_synchronous)
 {
     constexpr unsigned int block_size = 256;
     constexpr unsigned int items_per_thread = 8;
@@ -191,8 +191,8 @@ hipError_t histogram_range_impl(void * temporary_storage,
                                 Counter * histogram,
                                 unsigned int levels,
                                 const Level * level_values,
-                                hipStream_t stream = 0,
-                                bool debug_synchronous = false)
+                                hipStream_t stream,
+                                bool debug_synchronous)
 {
     constexpr unsigned int block_size = 256;
     constexpr unsigned int items_per_thread = 8;
