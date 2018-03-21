@@ -77,28 +77,22 @@ public:
                    storage_type& storage)
     {
         constexpr auto tile_size = BlockSize * ItemsPerThread;
-        constexpr bool check = (Bins % BlockSize == 0);
         const auto flat_tid = ::rocprim::flat_block_thread_id();
         unsigned int head_flags[ItemsPerThread];
-        unsigned int offset = 0;
         discontinuity_op flags_op(storage);
 
         radix_sort().sort(input, storage.sort);
         ::rocprim::syncthreads();
 
         #pragma unroll
-        for(offset = 0; offset + BlockSize <= Bins; offset += BlockSize)
+        for(unsigned int offset = 0; offset < Bins; offset += BlockSize)
         {
             const unsigned int offset_tid = offset + flat_tid;
-            storage.start[offset_tid] = tile_size;
-            storage.end[offset_tid] = tile_size;
-        }
-
-        if((offset + flat_tid < Bins) && check)
-        {
-            const unsigned int offset_tid = offset + flat_tid;
-            storage.start[offset_tid] = tile_size;
-            storage.end[offset_tid] = tile_size;
+            if(offset_tid < Bins)
+            {
+                storage.start[offset_tid] = tile_size;
+                storage.end[offset_tid] = tile_size;
+            }
         }
         ::rocprim::syncthreads();
 
@@ -106,25 +100,19 @@ public:
 
         if(flat_tid == 0)
         {
-            storage.start[input[0]] = 0;
+            storage.start[static_cast<unsigned int>(input[0])] = 0;
         }
         ::rocprim::syncthreads();
 
-        offset = 0;
-
         #pragma unroll
-        for(offset = 0; offset + BlockSize <= Bins; offset += BlockSize)
+        for(unsigned int offset = 0; offset < Bins; offset += BlockSize)
         {
             const unsigned int offset_tid = offset + flat_tid;
-            Counter count = static_cast<Counter>(storage.end[offset_tid] - storage.start[offset_tid]);
-            hist[offset_tid] += count;
-        }
-
-        if((offset + flat_tid < Bins) && check)
-        {
-            const unsigned int offset_tid = offset + flat_tid;
-            Counter count = static_cast<Counter>(storage.end[offset_tid] - storage.start[offset_tid]);
-            hist[offset_tid] += count;
+            if(offset_tid < Bins)
+            {
+                Counter count = static_cast<Counter>(storage.end[offset_tid] - storage.start[offset_tid]);
+                hist[offset_tid] += count;
+            }
         }
         ::rocprim::syncthreads();
     }
@@ -142,8 +130,8 @@ private:
         ROCPRIM_HOST_DEVICE inline
         bool test(const T& a, const T& b, unsigned int b_index) const
         {
-            storage.start[b] = b_index;
-            storage.end[a] = b_index;
+            storage.start[static_cast<unsigned int>(b)] = b_index;
+            storage.end[static_cast<unsigned int>(a)] = b_index;
             return true;
         }
 

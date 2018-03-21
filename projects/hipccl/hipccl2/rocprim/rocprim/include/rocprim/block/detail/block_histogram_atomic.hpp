@@ -60,7 +60,7 @@ public:
         #pragma unroll
         for (unsigned int i = 0; i < ItemsPerThread; ++i)
         {
-              ::rocprim::atomic_add(hist + input[i], 1);
+              ::rocprim::atomic_add(&hist[static_cast<unsigned int>(input[i])], Counter(1));
         }
         ::rocprim::syncthreads();
     }
