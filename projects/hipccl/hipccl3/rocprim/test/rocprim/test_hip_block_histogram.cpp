@@ -25,12 +25,12 @@
 
 // Google Test
 #include <gtest/gtest.h>
-// HC API
-#include <hcc/hc.hpp>
 // rocPRIM API
 #include <rocprim/block/block_histogram.hpp>
 
 #include "test_utils.hpp"
+
+#define HIP_CHECK(error) ASSERT_EQ(static_cast<hipError_t>(error), hipSuccess)
 
 namespace rp = rocprim;
 
@@ -91,6 +91,44 @@ typedef ::testing::Types<
 
 TYPED_TEST_CASE(RocprimBlockHistogramInputArrayTests, InputArrayTestParams);
 
+template<
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    unsigned int BinSize,
+    rocprim::block_histogram_algorithm Algorithm,
+    class T
+>
+__global__
+void histogram_kernel(T* device_output, T* device_output_bin)
+{
+    constexpr bool check = (BinSize % BlockSize == 0);
+    const unsigned int index = ((hipBlockIdx_x * BlockSize) + hipThreadIdx_x) * ItemsPerThread;
+    unsigned int offset = 0;
+    unsigned int global_offset = hipBlockIdx_x * BinSize;
+    __shared__ T hist[BinSize];
+    // load
+    T in_out[ItemsPerThread];
+    for(unsigned int j = 0; j < ItemsPerThread; j++)
+    {
+        in_out[j] = device_output[index + j];
+    }
+    
+    rp::block_histogram<T, BlockSize, ItemsPerThread, BinSize, Algorithm> bhist;
+    bhist.histogram(in_out, hist);
+
+    #pragma unroll
+    for (; offset + BlockSize <= BinSize; offset += BlockSize)
+    {
+        device_output_bin[global_offset + hipThreadIdx_x] = hist[offset + hipThreadIdx_x];
+        global_offset += BlockSize;
+    }
+
+    if ((offset + hipThreadIdx_x < BinSize) && check)
+    {
+        device_output_bin[global_offset + hipThreadIdx_x] = hist[offset + hipThreadIdx_x];
+    }
+}
+
 TYPED_TEST(RocprimBlockHistogramInputArrayTests, Histogram)
 {
     using T = typename TestFixture::type;
@@ -98,11 +136,9 @@ TYPED_TEST(RocprimBlockHistogramInputArrayTests, Histogram)
     constexpr size_t block_size = TestFixture::block_size;
     constexpr size_t items_per_thread = TestFixture::items_per_thread;
     constexpr size_t bin = TestFixture::bin_size;
-    constexpr bool check = (bin % block_size == 0);
 
-    hc::accelerator acc;
     // Given block size not supported
-    if(block_size > test_utils::get_max_tile_size(acc))
+    if(block_size > test_utils::get_max_block_size())
     {
         return;
     }
@@ -110,6 +146,7 @@ TYPED_TEST(RocprimBlockHistogramInputArrayTests, Histogram)
     const size_t items_per_block = block_size * items_per_thread;
     const size_t size = items_per_block * 37;
     const size_t bin_sizes = bin * 37;
+    const size_t grid_size = size / items_per_block;
     // Generate data
     std::vector<T> output = test_utils::get_random_data<T>(size, 0, bin - 1);
 
@@ -128,52 +165,51 @@ TYPED_TEST(RocprimBlockHistogramInputArrayTests, Histogram)
         }
     }
 
-    // global/grid size
-    const size_t global_size = output.size()/items_per_thread;
-    hc::array_view<T, 1> d_output(output.size(), output.data());
-    hc::array_view<T, 1> d_output_h(
-        output_bin.size(), output_bin.data()
-    );
-    hc::parallel_for_each(
-        acc.get_default_view(),
-        hc::extent<1>(global_size).tile(block_size),
-        [=](hc::tiled_index<1> i) [[hc]]
-        {
-            size_t offset = 0;
-            size_t global_offset = i.tile[0] * bin;
-            size_t idx = i.global[0] * items_per_thread;
-            tile_static T hist[bin];
+    // Preparing device
+    T* device_output;
+    HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(T)));
+    T* device_output_bin;
+    HIP_CHECK(hipMalloc(&device_output_bin, output_bin.size() * sizeof(T)));
 
-            // load
-            T in_out[items_per_thread];
-            for(unsigned int j = 0; j < items_per_thread; j++)
-            {
-                in_out[j] = d_output[idx + j];
-            }
-
-            rp::block_histogram<T, block_size, items_per_thread, bin, algorithm> bhist;
-            bhist.histogram(in_out, hist);
-        
-            #pragma unroll
-            for (; offset + block_size <= bin; offset += block_size)
-            {
-                d_output_h[global_offset + i.local[0]] = hist[offset + i.local[0]];
-                global_offset += block_size;
-            }
-
-            if ((offset + i.local[0] < bin) && check)
-            {
-                d_output_h[global_offset + i.local[0]] = hist[offset + i.local[0]];
-            }
-        }
+    HIP_CHECK(
+        hipMemcpy(
+            device_output, output.data(),
+            output.size() * sizeof(T),
+            hipMemcpyHostToDevice
+        )
     );
 
-    d_output.synchronize();
-    d_output_h.synchronize();
+    HIP_CHECK(
+        hipMemcpy(
+            device_output_bin, output_bin.data(),
+            output_bin.size() * sizeof(T),
+            hipMemcpyHostToDevice
+        )
+    );
+    
+    // Running kernel
+    hipLaunchKernelGGL(
+        HIP_KERNEL_NAME(histogram_kernel<block_size, items_per_thread, bin, algorithm, T>),
+        dim3(grid_size), dim3(block_size), 0, 0,
+        device_output, device_output_bin
+    );
+    
+    // Reading results back
+    HIP_CHECK(
+        hipMemcpy(
+            output_bin.data(), device_output_bin,
+            output_bin.size() * sizeof(T),
+            hipMemcpyDeviceToHost
+        )
+    );
+    
     for(size_t i = 0; i < output_bin.size(); i++)
     {
         ASSERT_EQ(
             output_bin[i], expected_bin[i]
         );
     }
+    
+    HIP_CHECK(hipFree(device_output));
+    HIP_CHECK(hipFree(device_output_bin));
 }

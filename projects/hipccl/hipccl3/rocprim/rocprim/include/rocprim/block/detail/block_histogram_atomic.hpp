@@ -62,8 +62,9 @@ public:
         {
               ::rocprim::atomic_add(hist + input[i], 1);
         }
+        ::rocprim::syncthreads();
     }
-    
+
     template<class Counter>
     ROCPRIM_DEVICE inline
     void composite(T (&input)[ItemsPerThread],

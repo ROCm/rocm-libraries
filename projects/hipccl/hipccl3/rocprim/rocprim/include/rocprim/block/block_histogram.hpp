@@ -117,7 +117,6 @@ public:
         init_histogram(hist);
         ::rocprim::syncthreads();
         composite(input, hist);
-        ::rocprim::syncthreads();
     }
 };
 
