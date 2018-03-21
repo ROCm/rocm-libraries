@@ -39,5 +39,6 @@ END_HIPCUB_NAMESPACE
 #include "device/device_segmented_radix_sort.hpp"
 #include "device/device_segmented_reduce.hpp"
 #include "device/device_scan.hpp"
+#include "device/device_select.hpp"
 
 #endif // CUB_HIPCUB_HPP_
