@@ -48,8 +48,8 @@ class block_histogram_sort
 private:
     using radix_sort = block_radix_sort<T, BlockSize, ItemsPerThread>;
     using discontinuity = block_discontinuity<T, BlockSize>;
-    
-public: 
+
+public:
     union storage_type
     {
         typename radix_sort::storage_type sort;
@@ -60,31 +60,7 @@ public:
             unsigned int end[Bins];
         };
     };
-    
-    struct discontinuity_op
-    {
-        storage_type &storage;
-        
-        ROCPRIM_HOST_DEVICE inline
-        discontinuity_op(storage_type &storage) : storage(storage)
-        {
-        }
-        
-        ROCPRIM_HOST_DEVICE inline
-        bool test(const T& a, const T& b, unsigned int b_index) const
-        {
-            storage.start[b] = b_index;
-            storage.end[a] = b_index;
-            return true;
-        }
-        
-        ROCPRIM_HOST_DEVICE inline
-        constexpr bool operator()(const T& a, const T& b, unsigned int b_index) const
-        {
-            return (a != b) ? test(a, b, b_index) : false;
-        }
-    };
-    
+
     template<class Counter>
     ROCPRIM_DEVICE inline
     void composite(T (&input)[ItemsPerThread],
@@ -93,7 +69,7 @@ public:
         ROCPRIM_SHARED_MEMORY storage_type storage;
         this->composite(input, hist, storage);
     }
-    
+
     template<class Counter>
     ROCPRIM_DEVICE inline
     void composite(T (&input)[ItemsPerThread],
@@ -125,17 +101,17 @@ public:
             storage.end[offset_tid] = tile_size;
         }
         ::rocprim::syncthreads();
-        
+
         discontinuity().flag_heads(head_flags, input, flags_op, storage.flag);
-        
+
         if(flat_tid == 0)
         {
             storage.start[input[0]] = 0;
         }
         ::rocprim::syncthreads();
-        
+
         offset = 0;
-        
+
         #pragma unroll
         for(offset = 0; offset + BlockSize <= Bins; offset += BlockSize)
         {
@@ -150,7 +126,33 @@ public:
             Counter count = static_cast<Counter>(storage.end[offset_tid] - storage.start[offset_tid]);
             hist[offset_tid] += count;
         }
+        ::rocprim::syncthreads();
     }
+
+private:
+    struct discontinuity_op
+    {
+        storage_type &storage;
+
+        ROCPRIM_HOST_DEVICE inline
+        discontinuity_op(storage_type &storage) : storage(storage)
+        {
+        }
+
+        ROCPRIM_HOST_DEVICE inline
+        bool test(const T& a, const T& b, unsigned int b_index) const
+        {
+            storage.start[b] = b_index;
+            storage.end[a] = b_index;
+            return true;
+        }
+
+        ROCPRIM_HOST_DEVICE inline
+        constexpr bool operator()(const T& a, const T& b, unsigned int b_index) const
+        {
+            return (a != b) ? test(a, b, b_index) : false;
+        }
+    };
 };
 
 } // end namespace detail
