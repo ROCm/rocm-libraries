@@ -152,7 +152,7 @@ TYPED_TEST(HipcubDeviceSelectTests, Flagged)
         HIP_CHECK(hipDeviceSynchronize());
 
         // temp_storage_size_bytes must be >0
-        ASSERT_GT(temp_storage_size_bytes, 0);
+        ASSERT_GT(temp_storage_size_bytes, 0U);
 
         // allocate temporary storage
         void * d_temp_storage = nullptr;
@@ -211,6 +211,17 @@ TYPED_TEST(HipcubDeviceSelectTests, Flagged)
     }
 }
 
+struct TestSelectOp
+{
+    template<class T>
+    __host__ __device__ inline
+    bool operator()(const T& value) const
+    {
+        if(value > T(50)) return true;
+        return false;
+    }
+};
+
 TYPED_TEST(HipcubDeviceSelectTests, SelectOp)
 {
     using T = typename TestFixture::input_type;
@@ -219,11 +230,7 @@ TYPED_TEST(HipcubDeviceSelectTests, SelectOp)
 
     hipStream_t stream = 0; // default stream
 
-    auto select_op = [] __host__ __device__ (const T& value) -> bool
-        {
-            if(value > 50) return true;
-            return false;
-        };
+    TestSelectOp select_op;
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -231,7 +238,7 @@ TYPED_TEST(HipcubDeviceSelectTests, SelectOp)
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, 0, 1);
+        std::vector<T> input = test_utils::get_random_data<T>(size, 0, 100);
 
         T * d_input;
         U * d_output;
@@ -278,7 +285,7 @@ TYPED_TEST(HipcubDeviceSelectTests, SelectOp)
         HIP_CHECK(hipDeviceSynchronize());
 
         // temp_storage_size_bytes must be >0
-        ASSERT_GT(temp_storage_size_bytes, 0);
+        ASSERT_GT(temp_storage_size_bytes, 0U);
 
         // allocate temporary storage
         void * d_temp_storage = nullptr;
@@ -416,7 +423,7 @@ TYPED_TEST(HipcubDeviceSelectTests, Unique)
             HIP_CHECK(hipDeviceSynchronize());
 
             // temp_storage_size_bytes must be >0
-            ASSERT_GT(temp_storage_size_bytes, 0);
+            ASSERT_GT(temp_storage_size_bytes, 0U);
 
             // allocate temporary storage
             void * d_temp_storage = nullptr;
