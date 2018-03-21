@@ -46,6 +46,7 @@
 #include "block/block_store.hpp"
 
 // Device
+#include "device/device_histogram.hpp"
 #include "device/device_radix_sort.hpp"
 #include "device/device_reduce.hpp"
 #include "device/device_scan.hpp"
