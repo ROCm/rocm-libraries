@@ -85,19 +85,16 @@ public:
     ROCPRIM_DEVICE inline
     void init_histogram(Counter (&hist)[Bins])
     {
-        constexpr bool check = (Bins % BlockSize == 0);
         const auto flat_tid = ::rocprim::flat_block_thread_id();
-        unsigned int offset = 0;
 
         #pragma unroll
-        for (offset = 0; offset + BlockSize <= Bins; offset += BlockSize)
+        for(unsigned int offset = 0; offset < Bins; offset += BlockSize)
         {
-            hist[offset + flat_tid] = Counter();
-        }
-
-        if ((offset + flat_tid < Bins) && check)
-        {
-            hist[offset + flat_tid] = Counter();
+            const unsigned int offset_tid = offset + flat_tid;
+            if(offset_tid < Bins)
+            {
+                hist[offset_tid] = Counter();
+            }
         }
     }
 
@@ -117,6 +114,26 @@ public:
         init_histogram(hist);
         ::rocprim::syncthreads();
         composite(input, hist);
+    }
+
+    template<class Counter>
+    ROCPRIM_DEVICE inline
+    void composite(T (&input)[ItemsPerThread],
+                   Counter (&hist)[Bins],
+                   storage_type& storage)
+    {
+        base_type::composite(input, hist, storage);
+    }
+
+    template<class Counter>
+    ROCPRIM_DEVICE inline
+    void histogram(T (&input)[ItemsPerThread],
+                   Counter (&hist)[Bins],
+                   storage_type& storage)
+    {
+        init_histogram(hist);
+        ::rocprim::syncthreads();
+        composite(input, hist, storage);
     }
 };
 

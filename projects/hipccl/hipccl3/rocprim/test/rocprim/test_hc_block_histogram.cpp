@@ -28,7 +28,7 @@
 // HC API
 #include <hcc/hc.hpp>
 // rocPRIM API
-#include <rocprim/block/block_histogram.hpp>
+#include <rocprim/rocprim.hpp>
 
 #include "test_utils.hpp"
 
@@ -75,6 +75,11 @@ typedef ::testing::Types<
     params<unsigned int, 65,   5>,
     params<unsigned int, 162,  7>,
     params<unsigned int, 255,  15>,
+    params<float, 6U,   32, 18U>,
+    params<float, 32,   2, 64>,
+    params<float, 256,  3, 512>,
+    params<float, 512,  4>,
+    params<float, 1024, 1>,
     // -----------------------------------------------------------------------
     // rocprim::block_histogram_algorithm::using_sort
     // -----------------------------------------------------------------------
@@ -86,7 +91,17 @@ typedef ::testing::Types<
     params<unsigned int, 37,   2,   37, rocprim::block_histogram_algorithm::using_sort>,
     params<unsigned int, 65,   5,   65, rocprim::block_histogram_algorithm::using_sort>,
     params<unsigned int, 162,  7,  162, rocprim::block_histogram_algorithm::using_sort>,
-    params<unsigned int, 255,  15, 255, rocprim::block_histogram_algorithm::using_sort>
+    params<unsigned int, 255,  15, 255, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned char, 6U,   32,  18U, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned char, 32,   2,   64, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned char, 256,  3,  512, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned char, 512,  4,  512, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned char, 1024, 1, 1024, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned short, 6U,   32,  18U, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned short, 32,   2,   64, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned short, 256,  3,  512, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned short, 512,  4,  512, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned short, 1024, 1, 1024, rocprim::block_histogram_algorithm::using_sort>
 > InputArrayTestParams;
 
 TYPED_TEST_CASE(RocprimBlockHistogramInputArrayTests, InputArrayTestParams);
@@ -98,7 +113,6 @@ TYPED_TEST(RocprimBlockHistogramInputArrayTests, Histogram)
     constexpr size_t block_size = TestFixture::block_size;
     constexpr size_t items_per_thread = TestFixture::items_per_thread;
     constexpr size_t bin = TestFixture::bin_size;
-    constexpr bool check = (bin % block_size == 0);
 
     hc::accelerator acc;
     // Given block size not supported
@@ -120,11 +134,11 @@ TYPED_TEST(RocprimBlockHistogramInputArrayTests, Histogram)
     std::vector<T> expected_bin(output_bin.size(), 0);
     for(size_t i = 0; i < output.size() / items_per_block; i++)
     {
+        auto bin_idx = i * bin;
         for(size_t j = 0; j < items_per_block; j++)
         {
-            auto bin_idx = i * bin;
             auto idx = i * items_per_block + j;
-            expected_bin[bin_idx + output[idx]]++;
+            expected_bin[bin_idx + static_cast<unsigned int>(output[idx])]++;
         }
     }
 
@@ -139,7 +153,6 @@ TYPED_TEST(RocprimBlockHistogramInputArrayTests, Histogram)
         hc::extent<1>(global_size).tile(block_size),
         [=](hc::tiled_index<1> i) [[hc]]
         {
-            size_t offset = 0;
             size_t global_offset = i.tile[0] * bin;
             size_t idx = i.global[0] * items_per_thread;
             tile_static T hist[bin];
@@ -155,15 +168,13 @@ TYPED_TEST(RocprimBlockHistogramInputArrayTests, Histogram)
             bhist.histogram(in_out, hist);
         
             #pragma unroll
-            for (; offset + block_size <= bin; offset += block_size)
+            for (unsigned int offset = 0; offset < bin; offset += block_size)
             {
-                d_output_h[global_offset + i.local[0]] = hist[offset + i.local[0]];
-                global_offset += block_size;
-            }
-
-            if ((offset + i.local[0] < bin) && check)
-            {
-                d_output_h[global_offset + i.local[0]] = hist[offset + i.local[0]];
+                if(offset + i.local[0] < bin)
+                {
+                    d_output_h[global_offset + i.local[0]] = hist[offset + i.local[0]];
+                    global_offset += block_size;
+                }    
             }
         }
     );
