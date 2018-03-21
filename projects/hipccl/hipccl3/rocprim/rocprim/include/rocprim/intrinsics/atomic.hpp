@@ -18,16 +18,39 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_INTRINSICS_HPP_
-#define ROCPRIM_INTRINSICS_HPP_
+#ifndef ROCPRIM_INTRINSICS_ATOMIC_HPP_
+#define ROCPRIM_INTRINSICS_ATOMIC_HPP_
 
-// Meta configuration for rocPRIM
-#include "config.hpp"
+#include "../config.hpp"
 
-#include "intrinsics/atomic.hpp"
-#include "intrinsics/bit.hpp"
-#include "intrinsics/thread.hpp"
-#include "intrinsics/warp.hpp"
-#include "intrinsics/warp_shuffle.hpp"
+BEGIN_ROCPRIM_NAMESPACE
 
-#endif // ROCPRIM_INTRINSICS_WARP_SHUFFLE_HPP_
+/// \addtogroup intrinsicsmodule
+/// @{
+
+ROCPRIM_DEVICE inline
+unsigned int atomic_add(unsigned int * address, unsigned int value)
+{
+    #ifdef ROCPRIM_HC_API
+        return hc::atomic_fetch_add(address, value);
+    #else
+        return atomicAdd(address, value);
+    #endif
+}
+
+ROCPRIM_DEVICE inline
+int atomic_add(int * address, int value)
+{
+    #ifdef ROCPRIM_HC_API
+        return hc::atomic_fetch_add(address, value);
+    #else
+        return atomicAdd(address, value);
+    #endif
+}
+
+/// @}
+// end of group intrinsicsmodule
+
+END_ROCPRIM_NAMESPACE
+
+#endif // ROCPRIM_INTRINSICS_ATOMIC_HPP_
