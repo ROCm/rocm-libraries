@@ -123,6 +123,22 @@ typedef ::testing::Types<
 
 TYPED_TEST_CASE(RocprimDeviceHistogramEven, Params1);
 
+TEST(RocprimDeviceHistogramEven, IncorrectInput)
+{
+    size_t temporary_storage_bytes = 0;
+    int * d_input = nullptr;
+    int * d_histogram = nullptr;
+    ASSERT_EQ(
+        rp::histogram_even(
+            nullptr, temporary_storage_bytes,
+            d_input, 123,
+            d_histogram,
+            1, 1, 2
+        ),
+        hipErrorInvalidValue
+    );
+}
+
 TYPED_TEST(RocprimDeviceHistogramEven, Even)
 {
     using sample_type = typename TestFixture::params::sample_type;
@@ -253,6 +269,23 @@ typedef ::testing::Types<
 > Params2;
 
 TYPED_TEST_CASE(RocprimDeviceHistogramRange, Params2);
+
+TEST(RocprimDeviceHistogramRange, IncorrectInput)
+{
+    size_t temporary_storage_bytes = 0;
+    int * d_input = nullptr;
+    int * d_histogram = nullptr;
+    int * d_levels = nullptr;
+    ASSERT_EQ(
+        rp::histogram_range(
+            nullptr, temporary_storage_bytes,
+            d_input, 123,
+            d_histogram,
+            1, d_levels
+        ),
+        hipErrorInvalidValue
+    );
+}
 
 TYPED_TEST(RocprimDeviceHistogramRange, Range)
 {
