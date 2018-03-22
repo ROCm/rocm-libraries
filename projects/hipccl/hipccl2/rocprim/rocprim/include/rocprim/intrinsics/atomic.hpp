@@ -18,40 +18,39 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef HIPCUB_ROCPRIM_HPP_
-#define HIPCUB_ROCPRIM_HPP_
+#ifndef ROCPRIM_INTRINSICS_ATOMIC_HPP_
+#define ROCPRIM_INTRINSICS_ATOMIC_HPP_
 
 #include "../config.hpp"
 
-#include "util_type.hpp"
-#include "util_ptx.hpp"
-#include "thread/thread_operators.hpp"
+BEGIN_ROCPRIM_NAMESPACE
 
-// Iterator
-#include "iterator/arg_index_input_iterator.hpp"
-#include "iterator/counting_input_iterator.hpp"
-#include "iterator/transform_input_iterator.hpp"
+/// \addtogroup intrinsicsmodule
+/// @{
 
-// Warp
-#include "warp/warp_reduce.hpp"
-#include "warp/warp_scan.hpp"
+ROCPRIM_DEVICE inline
+unsigned int atomic_add(unsigned int * address, unsigned int value)
+{
+    #ifdef ROCPRIM_HC_API
+        return hc::atomic_fetch_add(address, value);
+    #else
+        return atomicAdd(address, value);
+    #endif
+}
 
-// Block
-#include "block/block_discontinuity.hpp"
-#include "block/block_exchange.hpp"
-#include "block/block_load.hpp"
-#include "block/block_radix_sort.hpp"
-#include "block/block_reduce.hpp"
-#include "block/block_scan.hpp"
-#include "block/block_store.hpp"
+ROCPRIM_DEVICE inline
+int atomic_add(int * address, int value)
+{
+    #ifdef ROCPRIM_HC_API
+        return hc::atomic_fetch_add(address, value);
+    #else
+        return atomicAdd(address, value);
+    #endif
+}
 
-// Device
-#include "device/device_histogram.hpp"
-#include "device/device_radix_sort.hpp"
-#include "device/device_reduce.hpp"
-#include "device/device_scan.hpp"
-#include "device/device_segmented_radix_sort.hpp"
-#include "device/device_segmented_reduce.hpp"
-#include "device/device_select.hpp"
+/// @}
+// end of group intrinsicsmodule
 
-#endif // HIPCUB_ROCPRIM_HPP_
+END_ROCPRIM_NAMESPACE
+
+#endif // ROCPRIM_INTRINSICS_ATOMIC_HPP_
