@@ -75,6 +75,12 @@ void histogram_even_impl(void * temporary_storage,
 
     constexpr unsigned int items_per_block = block_size * items_per_thread;
 
+    if(levels < 2)
+    {
+        // Histogram must have at least 1 bin
+        throw hc::runtime_exception("`levels` must be at least 2", 0);
+    }
+
     const unsigned int blocks = ::rocprim::detail::ceiling_div(size, items_per_block);
 
     if(temporary_storage == nullptr)
@@ -170,6 +176,12 @@ void histogram_range_impl(void * temporary_storage,
     constexpr unsigned int shared_impl_max_bins = 1024;
 
     constexpr unsigned int items_per_block = block_size * items_per_thread;
+
+    if(levels < 2)
+    {
+        // Histogram must have at least 1 bin
+        throw hc::runtime_exception("`levels` must be at least 2", 0);
+    }
 
     const unsigned int blocks = ::rocprim::detail::ceiling_div(size, items_per_block);
 
