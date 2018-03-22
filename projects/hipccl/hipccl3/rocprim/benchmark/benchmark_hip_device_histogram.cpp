@@ -1,0 +1,385 @@
+// MIT License
+//
+// Copyright (c) 2017 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+#include <iostream>
+#include <chrono>
+#include <vector>
+#include <locale>
+#include <string>
+#include <limits>
+
+// Google Benchmark
+#include "benchmark/benchmark.h"
+// CmdParser
+#include "cmdparser.hpp"
+#include "benchmark_utils.hpp"
+
+// HIP API
+#include <hip/hip_runtime.h>
+#include <hip/hip_hcc.h>
+
+// rocPRIM
+#include <rocprim/rocprim.hpp>
+
+#define HIP_CHECK(condition)         \
+  {                                  \
+    hipError_t error = condition;    \
+    if(error != hipSuccess){         \
+        std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
+        exit(error); \
+    } \
+  }
+
+#ifndef DEFAULT_N
+const size_t DEFAULT_N = 1024 * 1024 * 32;
+#endif
+
+namespace rp = rocprim;
+
+const unsigned int batch_size = 10;
+const unsigned int warmup_size = 5;
+
+unsigned int entropies[] = { 100, 81, 54, 33, 20, 0 };
+
+template<class T>
+std::vector<T> generate(size_t size, int entropy_reduction, int lower_level, int upper_level)
+{
+    if(entropy_reduction >= 5)
+    {
+        return std::vector<T>(size, (lower_level + upper_level) / 2);
+    }
+
+    std::random_device rd;
+    std::default_random_engine gen(rd());
+    std::vector<T> data(size);
+    std::generate(
+        data.begin(), data.begin() + std::min(size, max_random_size),
+        [&]()
+        {
+            // Reduce enthropy by applying bitwise AND to random bits
+            // "An Improved Supercomputer Sorting Benchmark", 1992
+            // Kurt Thearling & Stephen Smith
+            auto v = gen();
+            for(int e = 0; e < entropy_reduction; e++)
+            {
+                v &= gen();
+            }
+            return T(lower_level + v % (upper_level - lower_level));
+        }
+    );
+    for(size_t i = max_random_size; i < size; i += max_random_size)
+    {
+        std::copy_n(data.begin(), std::min(size - i, max_random_size), data.begin() + i);
+    }
+    return data;
+}
+
+template<class T>
+void run_even_benchmark(benchmark::State& state,
+                        size_t bins,
+                        int entropy_reduction,
+                        hipStream_t stream,
+                        size_t size)
+{
+    using counter_type = unsigned int;
+
+    const int input_size = size;
+    const int lower_level = 0;
+    const int upper_level = bins;
+
+    // Generate data
+    std::vector<T> input = generate<T>(size, entropy_reduction, lower_level, upper_level);
+
+    T * d_input;
+    counter_type * d_histogram;
+    HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
+    HIP_CHECK(hipMalloc(&d_histogram, size * sizeof(counter_type)));
+    HIP_CHECK(
+        hipMemcpy(
+            d_input, input.data(),
+            size * sizeof(T),
+            hipMemcpyHostToDevice
+        )
+    );
+
+    void * d_temporary_storage = nullptr;
+    size_t temporary_storage_bytes = 0;
+    HIP_CHECK(
+        rp::histogram_even(
+            d_temporary_storage, temporary_storage_bytes,
+            d_input, input_size,
+            d_histogram,
+            bins + 1, lower_level, upper_level,
+            stream, false
+        )
+    );
+
+    HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+    HIP_CHECK(hipDeviceSynchronize());
+
+    // Warm-up
+    for(size_t i = 0; i < warmup_size; i++)
+    {
+        HIP_CHECK(
+            rp::histogram_even(
+                d_temporary_storage, temporary_storage_bytes,
+                d_input, input_size,
+                d_histogram,
+                bins + 1, lower_level, upper_level,
+                stream, false
+            )
+        );
+    }
+    HIP_CHECK(hipDeviceSynchronize());
+
+    for (auto _ : state)
+    {
+        auto start = std::chrono::high_resolution_clock::now();
+
+        for(size_t i = 0; i < batch_size; i++)
+        {
+            HIP_CHECK(
+                rp::histogram_even(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_input, input_size,
+                    d_histogram,
+                    bins + 1, lower_level, upper_level,
+                    stream, false
+                )
+            );
+        }
+        HIP_CHECK(hipDeviceSynchronize());
+
+        auto end = std::chrono::high_resolution_clock::now();
+        auto elapsed_seconds =
+            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+        state.SetIterationTime(elapsed_seconds.count());
+    }
+    state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
+    state.SetItemsProcessed(state.iterations() * batch_size * size);
+
+    HIP_CHECK(hipFree(d_temporary_storage));
+    HIP_CHECK(hipFree(d_input));
+    HIP_CHECK(hipFree(d_histogram));
+}
+
+template<class T>
+void run_range_benchmark(benchmark::State& state, size_t bins, hipStream_t stream, size_t size)
+{
+    using counter_type = unsigned int;
+
+    const int input_size = size;
+
+    // Generate data
+    std::vector<T> input = get_random_data<T>(size, 0, bins);
+
+    std::vector<T> levels(bins + 1);
+    std::iota(levels.begin(), levels.end(), 0);
+
+    T * d_input;
+    T * d_levels;
+    counter_type * d_histogram;
+    HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
+    HIP_CHECK(hipMalloc(&d_levels, (bins + 1) * sizeof(T)));
+    HIP_CHECK(hipMalloc(&d_histogram, size * sizeof(counter_type)));
+    HIP_CHECK(
+        hipMemcpy(
+            d_input, input.data(),
+            size * sizeof(T),
+            hipMemcpyHostToDevice
+        )
+    );
+    HIP_CHECK(
+        hipMemcpy(
+            d_levels, levels.data(),
+            (bins + 1) * sizeof(T),
+            hipMemcpyHostToDevice
+        )
+    );
+
+    void * d_temporary_storage = nullptr;
+    size_t temporary_storage_bytes = 0;
+    HIP_CHECK(
+        rp::histogram_range(
+            d_temporary_storage, temporary_storage_bytes,
+            d_input, input_size,
+            d_histogram,
+            bins + 1, d_levels,
+            stream, false
+        )
+    );
+
+    HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+    HIP_CHECK(hipDeviceSynchronize());
+
+    // Warm-up
+    for(size_t i = 0; i < warmup_size; i++)
+    {
+        HIP_CHECK(
+            rp::histogram_range(
+                d_temporary_storage, temporary_storage_bytes,
+                d_input, input_size,
+                d_histogram,
+                bins + 1, d_levels,
+                stream, false
+            )
+        );
+    }
+    HIP_CHECK(hipDeviceSynchronize());
+
+    for (auto _ : state)
+    {
+        auto start = std::chrono::high_resolution_clock::now();
+
+        for(size_t i = 0; i < batch_size; i++)
+        {
+            HIP_CHECK(
+                rp::histogram_range(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_input, input_size,
+                    d_histogram,
+                    bins + 1, d_levels,
+                    stream, false
+                )
+            );
+        }
+        HIP_CHECK(hipDeviceSynchronize());
+
+        auto end = std::chrono::high_resolution_clock::now();
+        auto elapsed_seconds =
+            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+        state.SetIterationTime(elapsed_seconds.count());
+    }
+    state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
+    state.SetItemsProcessed(state.iterations() * batch_size * size);
+
+    HIP_CHECK(hipFree(d_temporary_storage));
+    HIP_CHECK(hipFree(d_input));
+    HIP_CHECK(hipFree(d_levels));
+    HIP_CHECK(hipFree(d_histogram));
+}
+
+#define CREATE_EVEN_BENCHMARK(T, BINS) \
+benchmark::RegisterBenchmark( \
+    (std::string("histogram_even") + "<" #T ">" + \
+        "(" + std::to_string(entropies[entropy_reduction]) + "% entropy, " + \
+        std::to_string(BINS) + " bins)" \
+    ).c_str(), \
+    [=](benchmark::State& state) { \
+        run_even_benchmark<T>(state, BINS, entropy_reduction, stream, size); } \
+)
+
+void add_even_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
+                         hipStream_t stream,
+                         size_t size)
+{
+    for(int entropy_reduction = 0; entropy_reduction <= 5; entropy_reduction++)
+    {
+        std::vector<benchmark::internal::Benchmark*> bs =
+        {
+            CREATE_EVEN_BENCHMARK(int, 10),
+            CREATE_EVEN_BENCHMARK(int, 100),
+            CREATE_EVEN_BENCHMARK(int, 1000),
+            CREATE_EVEN_BENCHMARK(int, 10000),
+            CREATE_EVEN_BENCHMARK(int, 100000),
+            CREATE_EVEN_BENCHMARK(int, 1000000),
+
+            CREATE_EVEN_BENCHMARK(unsigned char, 16),
+            CREATE_EVEN_BENCHMARK(unsigned char, 256),
+
+            CREATE_EVEN_BENCHMARK(unsigned short, 16),
+            CREATE_EVEN_BENCHMARK(unsigned short, 256),
+            CREATE_EVEN_BENCHMARK(unsigned short, 65536),
+        };
+        benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
+    };
+}
+
+#define CREATE_RANGE_BENCHMARK(T, BINS) \
+benchmark::RegisterBenchmark( \
+    (std::string("histogram_range") + "<" #T ">" + \
+        "(" + std::to_string(BINS) + " bins)" \
+    ).c_str(), \
+    [=](benchmark::State& state) { run_range_benchmark<T>(state, BINS, stream, size); } \
+)
+
+void add_range_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
+                          hipStream_t stream,
+                          size_t size)
+{
+    std::vector<benchmark::internal::Benchmark*> bs =
+    {
+        CREATE_RANGE_BENCHMARK(float, 10),
+        CREATE_RANGE_BENCHMARK(float, 100),
+        CREATE_RANGE_BENCHMARK(float, 1000),
+        CREATE_RANGE_BENCHMARK(float, 10000),
+        CREATE_RANGE_BENCHMARK(float, 100000),
+        CREATE_RANGE_BENCHMARK(float, 1000000),
+    };
+    benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
+}
+
+int main(int argc, char *argv[])
+{
+    cli::Parser parser(argc, argv);
+    parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
+    parser.set_optional<int>("trials", "trials", -1, "number of iterations");
+    parser.run_and_exit_if_error();
+
+    // Parse argv
+    benchmark::Initialize(&argc, argv);
+    const size_t size = parser.get<size_t>("size");
+    const int trials = parser.get<int>("trials");
+
+    // HIP
+    hipStream_t stream = 0; // default
+    hipDeviceProp_t devProp;
+    int device_id = 0;
+    HIP_CHECK(hipGetDevice(&device_id));
+    HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
+    std::cout << "[HIP] Device name: " << devProp.name << std::endl;
+
+    // Add benchmarks
+    std::vector<benchmark::internal::Benchmark*> benchmarks;
+    add_even_benchmarks(benchmarks, stream, size);
+    add_range_benchmarks(benchmarks, stream, size);
+
+    // Use manual timing
+    for(auto& b : benchmarks)
+    {
+        b->UseManualTime();
+        b->Unit(benchmark::kMillisecond);
+    }
+
+    // Force number of iterations
+    if(trials > 0)
+    {
+        for(auto& b : benchmarks)
+        {
+            b->Iterations(trials);
+        }
+    }
+
+    // Run benchmarks
+    benchmark::RunSpecifiedBenchmarks();
+    return 0;
+}

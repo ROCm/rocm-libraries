@@ -24,6 +24,7 @@
 // Meta configuration for rocPRIM
 #include "config.hpp"
 
+#include "intrinsics/atomic.hpp"
 #include "intrinsics/bit.hpp"
 #include "intrinsics/thread.hpp"
 #include "intrinsics/warp.hpp"

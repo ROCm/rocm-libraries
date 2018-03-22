@@ -47,6 +47,7 @@
 #include "block/block_store.hpp"
 
 #ifdef ROCPRIM_HC_API
+    #include "device/device_histogram_hc.hpp"
     #include "device/device_radix_sort_hc.hpp"
     #include "device/device_reduce_by_key_hc.hpp"
     #include "device/device_reduce_hc.hpp"
@@ -56,6 +57,7 @@
     #include "device/device_select_hc.hpp"
     #include "device/device_transform_hc.hpp"
 #else
+    #include "device/device_histogram_hip.hpp"
     #include "device/device_radix_sort_hip.hpp"
     #include "device/device_reduce_by_key_hip.hpp"
     #include "device/device_reduce_hip.hpp"
