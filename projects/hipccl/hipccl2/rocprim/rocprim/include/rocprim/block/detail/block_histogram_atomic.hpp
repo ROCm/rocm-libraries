@@ -42,21 +42,25 @@ template<
 >
 class block_histogram_atomic
 {
-private:
-    using storage_type_ = typename ::rocprim::detail::empty_storage_type;
+    static_assert(
+        std::is_convertible<T, unsigned int>::value,
+        "T must be convertible to unsigned int"
+    );
 
 public:
-    #ifndef DOXYGEN_SHOULD_SKIP_THIS // hides storage_type implementation for Doxygen
     using storage_type = typename ::rocprim::detail::empty_storage_type;
-    #else
-    using storage_type = storage_type_; // only for Doxygen
-    #endif
 
     template<class Counter>
     ROCPRIM_DEVICE inline
     void composite(T (&input)[ItemsPerThread],
-                   Counter (&hist)[Bins])
+                   Counter hist[Bins])
     {
+        static_assert(
+            std::is_same<Counter, unsigned int>::value || std::is_same<Counter, int>::value ||
+            std::is_same<Counter, float>::value || std::is_same<Counter, double>::value ||
+            std::is_same<Counter, unsigned long long>::value,
+            "Counter must be type that is supported by atomics (float, int, unsigned int, double, unsigned long long)"
+        );
         #pragma unroll
         for (unsigned int i = 0; i < ItemsPerThread; ++i)
         {
@@ -68,7 +72,7 @@ public:
     template<class Counter>
     ROCPRIM_DEVICE inline
     void composite(T (&input)[ItemsPerThread],
-                   Counter (&hist)[Bins],
+                   Counter hist[Bins],
                    storage_type& storage)
     {
         (void) storage;

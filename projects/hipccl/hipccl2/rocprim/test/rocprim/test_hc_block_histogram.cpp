@@ -37,6 +37,7 @@ namespace rp = rocprim;
 // Params for tests
 template<
     class T,
+    class BinType,
     unsigned int BlockSize = 256U,
     unsigned int ItemsPerThread = 1U,
     unsigned int BinSize = BlockSize,
@@ -45,6 +46,7 @@ template<
 struct params
 {
     using type = T;
+    using bin_type = BinType;
     static constexpr rocprim::block_histogram_algorithm algorithm = Algorithm;
     static constexpr unsigned int block_size = BlockSize;
     static constexpr unsigned int items_per_thread = ItemsPerThread;
@@ -56,6 +58,7 @@ class RocprimBlockHistogramInputArrayTests : public ::testing::Test
 {
 public:
     using type = typename Params::type;
+    using bin_type = typename Params::bin_type;
     static constexpr unsigned int block_size = Params::block_size;
     static constexpr rocprim::block_histogram_algorithm algorithm = Params::algorithm;
     static constexpr unsigned int items_per_thread = Params::items_per_thread;
@@ -66,42 +69,42 @@ typedef ::testing::Types<
     // -----------------------------------------------------------------------
     // rocprim::block_histogram_algorithm::using_atomic
     // -----------------------------------------------------------------------
-    params<unsigned int, 6U,   32, 18U>,
-    params<unsigned int, 32,   2, 64>,
-    params<unsigned int, 256,  3, 512>,
-    params<unsigned int, 512,  4>,
-    params<unsigned int, 1024, 1>,
-    params<unsigned int, 37,   2>,
-    params<unsigned int, 65,   5>,
-    params<unsigned int, 162,  7>,
-    params<unsigned int, 255,  15>,
-    params<float, 6U,   32, 18U>,
-    params<float, 32,   2, 64>,
-    params<float, 256,  3, 512>,
-    params<float, 512,  4>,
-    params<float, 1024, 1>,
+    params<unsigned int, unsigned int, 6U,   32, 18U>,
+    params<unsigned int, unsigned int, 32,   2, 64>,
+    params<unsigned int, unsigned int, 256,  3, 512>,
+    params<unsigned int, unsigned int, 512,  4>,
+    params<unsigned int, unsigned int, 1024, 1>,
+    params<unsigned int, unsigned int, 37,   2>,
+    params<unsigned int, unsigned int, 65,   5>,
+    params<unsigned int, unsigned int, 162,  7>,
+    params<unsigned int, unsigned int, 255,  15>,
+    params<float, float, 6U,   32, 18U>,
+    params<float, float, 32,   2, 64>,
+    params<float, float, 256,  3, 512>,
+    params<float, unsigned int, 512,  4>,
+    params<float, unsigned int, 1024, 1>,
     // -----------------------------------------------------------------------
     // rocprim::block_histogram_algorithm::using_sort
     // -----------------------------------------------------------------------
-    params<unsigned int, 6U,   32,  18U, rocprim::block_histogram_algorithm::using_sort>,
-    params<unsigned int, 32,   2,   64, rocprim::block_histogram_algorithm::using_sort>,
-    params<unsigned int, 256,  3,  512, rocprim::block_histogram_algorithm::using_sort>,
-    params<unsigned int, 512,  4,  512, rocprim::block_histogram_algorithm::using_sort>,
-    params<unsigned int, 1024, 1, 1024, rocprim::block_histogram_algorithm::using_sort>,
-    params<unsigned int, 37,   2,   37, rocprim::block_histogram_algorithm::using_sort>,
-    params<unsigned int, 65,   5,   65, rocprim::block_histogram_algorithm::using_sort>,
-    params<unsigned int, 162,  7,  162, rocprim::block_histogram_algorithm::using_sort>,
-    params<unsigned int, 255,  15, 255, rocprim::block_histogram_algorithm::using_sort>,
-    params<unsigned char, 6U,   32,  18U, rocprim::block_histogram_algorithm::using_sort>,
-    params<unsigned char, 32,   2,   64, rocprim::block_histogram_algorithm::using_sort>,
-    params<unsigned char, 256,  3,  512, rocprim::block_histogram_algorithm::using_sort>,
-    params<unsigned char, 512,  4,  512, rocprim::block_histogram_algorithm::using_sort>,
-    params<unsigned char, 1024, 1, 1024, rocprim::block_histogram_algorithm::using_sort>,
-    params<unsigned short, 6U,   32,  18U, rocprim::block_histogram_algorithm::using_sort>,
-    params<unsigned short, 32,   2,   64, rocprim::block_histogram_algorithm::using_sort>,
-    params<unsigned short, 256,  3,  512, rocprim::block_histogram_algorithm::using_sort>,
-    params<unsigned short, 512,  4,  512, rocprim::block_histogram_algorithm::using_sort>,
-    params<unsigned short, 1024, 1, 1024, rocprim::block_histogram_algorithm::using_sort>
+    params<unsigned int, unsigned int, 6U,   32,  18U, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned int, unsigned int, 32,   2,   64, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned int, unsigned int, 256,  3,  512, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned int, unsigned int, 512,  4,  512, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned int, unsigned int, 1024, 1, 1024, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned int, unsigned int, 37,   2,   37, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned int, unsigned int, 65,   5,   65, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned int, unsigned int, 162,  7,  162, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned int, unsigned int, 255,  15, 255, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned char, unsigned int, 6U,   32,  18U, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned char, unsigned int, 32,   2,   64, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned char, unsigned int, 256,  3,  512, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned char, unsigned char, 512,  4,  512, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned char, unsigned char, 1024, 1, 1024, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned short, unsigned int, 6U,   32,  18U, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned short, unsigned int, 32,   2,   64, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned short, unsigned int, 256,  3,  512, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned short, unsigned short, 512,  4,  512, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned short, unsigned short, 1024, 1, 1024, rocprim::block_histogram_algorithm::using_sort>
 > InputArrayTestParams;
 
 TYPED_TEST_CASE(RocprimBlockHistogramInputArrayTests, InputArrayTestParams);
@@ -109,6 +112,7 @@ TYPED_TEST_CASE(RocprimBlockHistogramInputArrayTests, InputArrayTestParams);
 TYPED_TEST(RocprimBlockHistogramInputArrayTests, Histogram)
 {
     using T = typename TestFixture::type;
+    using BinType = typename TestFixture::bin_type;
     constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;
     constexpr size_t items_per_thread = TestFixture::items_per_thread;
@@ -155,7 +159,7 @@ TYPED_TEST(RocprimBlockHistogramInputArrayTests, Histogram)
         {
             size_t global_offset = i.tile[0] * bin;
             size_t idx = i.global[0] * items_per_thread;
-            tile_static T hist[bin];
+            tile_static BinType hist[bin];
 
             // load
             T in_out[items_per_thread];

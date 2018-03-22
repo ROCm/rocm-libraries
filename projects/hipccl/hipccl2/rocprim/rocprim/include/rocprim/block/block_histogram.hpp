@@ -83,7 +83,7 @@ public:
 
     template<class Counter>
     ROCPRIM_DEVICE inline
-    void init_histogram(Counter (&hist)[Bins])
+    void init_histogram(Counter hist[Bins])
     {
         const auto flat_tid = ::rocprim::flat_block_thread_id();
 
@@ -101,7 +101,7 @@ public:
     template<class Counter>
     ROCPRIM_DEVICE inline
     void composite(T (&input)[ItemsPerThread],
-                   Counter (&hist)[Bins])
+                   Counter hist[Bins])
     {
         base_type::composite(input, hist);
     }
@@ -109,7 +109,7 @@ public:
     template<class Counter>
     ROCPRIM_DEVICE inline
     void histogram(T (&input)[ItemsPerThread],
-                   Counter (&hist)[Bins])
+                   Counter hist[Bins])
     {
         init_histogram(hist);
         ::rocprim::syncthreads();
@@ -119,7 +119,7 @@ public:
     template<class Counter>
     ROCPRIM_DEVICE inline
     void composite(T (&input)[ItemsPerThread],
-                   Counter (&hist)[Bins],
+                   Counter hist[Bins],
                    storage_type& storage)
     {
         base_type::composite(input, hist, storage);
@@ -128,7 +128,7 @@ public:
     template<class Counter>
     ROCPRIM_DEVICE inline
     void histogram(T (&input)[ItemsPerThread],
-                   Counter (&hist)[Bins],
+                   Counter hist[Bins],
                    storage_type& storage)
     {
         init_histogram(hist);
