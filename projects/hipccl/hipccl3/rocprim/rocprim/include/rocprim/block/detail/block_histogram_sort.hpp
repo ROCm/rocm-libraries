@@ -45,6 +45,11 @@ template<
 >
 class block_histogram_sort
 {
+    static_assert(
+        std::is_convertible<T, unsigned int>::value,
+        "T must be convertible to unsigned int"
+    );
+
 private:
     using radix_sort = block_radix_sort<T, BlockSize, ItemsPerThread>;
     using discontinuity = block_discontinuity<T, BlockSize>;
@@ -64,7 +69,7 @@ public:
     template<class Counter>
     ROCPRIM_DEVICE inline
     void composite(T (&input)[ItemsPerThread],
-                   Counter (&hist)[Bins])
+                   Counter hist[Bins])
     {
         ROCPRIM_SHARED_MEMORY storage_type storage;
         this->composite(input, hist, storage);
@@ -73,16 +78,19 @@ public:
     template<class Counter>
     ROCPRIM_DEVICE inline
     void composite(T (&input)[ItemsPerThread],
-                   Counter (&hist)[Bins],
+                   Counter hist[Bins],
                    storage_type& storage)
     {
+        static_assert(
+            std::is_convertible<unsigned int, Counter>::value,
+            "unsigned int must be convertible to Counter"
+        );
         constexpr auto tile_size = BlockSize * ItemsPerThread;
         const auto flat_tid = ::rocprim::flat_block_thread_id();
         unsigned int head_flags[ItemsPerThread];
         discontinuity_op flags_op(storage);
 
         radix_sort().sort(input, storage.sort);
-        ::rocprim::syncthreads();
 
         #pragma unroll
         for(unsigned int offset = 0; offset < Bins; offset += BlockSize)
@@ -98,6 +106,8 @@ public:
 
         discontinuity().flag_heads(head_flags, input, flags_op, storage.flag);
 
+        // update the start of the first item, ::rocprim::syncthreads() isn't necessary before this
+        // as all threads are finished by the end of the discontinuity operation
         if(flat_tid == 0)
         {
             storage.start[static_cast<unsigned int>(input[0])] = 0;
@@ -114,7 +124,6 @@ public:
                 hist[offset_tid] += count;
             }
         }
-        ::rocprim::syncthreads();
     }
 
 private:
@@ -122,23 +131,24 @@ private:
     {
         storage_type &storage;
 
-        ROCPRIM_HOST_DEVICE inline
+        ROCPRIM_DEVICE inline
         discontinuity_op(storage_type &storage) : storage(storage)
         {
         }
 
-        ROCPRIM_HOST_DEVICE inline
-        bool test(const T& a, const T& b, unsigned int b_index) const
+        ROCPRIM_DEVICE inline
+        bool operator()(const T& a, const T& b, unsigned int b_index) const
         {
-            storage.start[static_cast<unsigned int>(b)] = b_index;
-            storage.end[static_cast<unsigned int>(a)] = b_index;
-            return true;
-        }
-
-        ROCPRIM_HOST_DEVICE inline
-        constexpr bool operator()(const T& a, const T& b, unsigned int b_index) const
-        {
-            return (a != b) ? test(a, b, b_index) : false;
+            if(a != b)
+            {
+                storage.start[static_cast<unsigned int>(b)] = b_index;
+                storage.end[static_cast<unsigned int>(a)] = b_index;
+                return true;
+            }
+            else
+            {
+                return false;
+            }
         }
     };
 };
