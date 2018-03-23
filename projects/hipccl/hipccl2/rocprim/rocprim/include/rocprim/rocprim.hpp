@@ -41,6 +41,7 @@
 
 #include "block/block_discontinuity.hpp"
 #include "block/block_exchange.hpp"
+#include "block/block_histogram.hpp"
 #include "block/block_load.hpp"
 #include "block/block_radix_sort.hpp"
 #include "block/block_scan.hpp"
