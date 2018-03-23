@@ -25,7 +25,7 @@
 
 // Google Test
 #include <gtest/gtest.h>
-// HC API
+// rocPRIM API
 #include <rocprim/rocprim.hpp>
 
 #include "test_utils.hpp"
@@ -446,7 +446,6 @@ void reduce_array_kernel(T* device_output, T* device_output_reductions)
     }
 }
 
-
 TYPED_TEST(RocprimBlockReduceInputArrayTests, Reduce)
 {
     using T = typename TestFixture::type;
@@ -532,4 +531,3 @@ TYPED_TEST(RocprimBlockReduceInputArrayTests, Reduce)
     HIP_CHECK(hipFree(device_output));
     HIP_CHECK(hipFree(device_output_reductions));
 }
-

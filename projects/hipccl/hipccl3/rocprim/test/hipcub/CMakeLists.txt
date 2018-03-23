@@ -72,6 +72,7 @@ endfunction()
 
 add_hipcub_test("hipcub.BlockDiscontinuity" test_hipcub_block_discontinuity.cpp)
 add_hipcub_test("hipcub.BlockExchange" test_hipcub_block_exchange.cpp)
+add_hipcub_test("hipcub.BlockHistogram" test_hipcub_block_histogram.cpp)
 add_hipcub_test("hipcub.BlockLoadStore" test_hipcub_block_load_store.cpp)
 add_hipcub_test("hipcub.BlockRadixSort" test_hipcub_block_radix_sort.cpp)
 add_hipcub_test("hipcub.BlockReduce" test_hipcub_block_reduce.cpp)

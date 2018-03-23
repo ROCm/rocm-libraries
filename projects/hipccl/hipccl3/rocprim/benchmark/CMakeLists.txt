@@ -55,6 +55,7 @@ endfunction()
 # rocPRIM HIP benchmarks
 add_rocprim_benchmark_hip(benchmark_hip_block_discontinuity.cpp)
 add_rocprim_benchmark_hip(benchmark_hip_block_exchange.cpp)
+add_rocprim_benchmark_hip(benchmark_hip_block_histogram.cpp)
 add_rocprim_benchmark_hip(benchmark_hip_block_radix_sort.cpp)
 add_rocprim_benchmark_hip(benchmark_hip_block_reduce.cpp)
 add_rocprim_benchmark_hip(benchmark_hip_block_scan.cpp)
