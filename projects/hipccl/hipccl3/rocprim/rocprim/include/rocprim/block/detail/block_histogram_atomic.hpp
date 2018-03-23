@@ -57,14 +57,13 @@ public:
     {
         static_assert(
             std::is_same<Counter, unsigned int>::value || std::is_same<Counter, int>::value ||
-            std::is_same<Counter, float>::value || std::is_same<Counter, double>::value ||
-            std::is_same<Counter, unsigned long long>::value,
-            "Counter must be type that is supported by atomics (float, int, unsigned int, double, unsigned long long)"
+            std::is_same<Counter, float>::value || std::is_same<Counter, unsigned long long>::value,
+            "Counter must be type that is supported by atomics (float, int, unsigned int, unsigned long long)"
         );
         #pragma unroll
         for (unsigned int i = 0; i < ItemsPerThread; ++i)
         {
-              ::rocprim::atomic_add(&hist[static_cast<unsigned int>(input[i])], Counter(1));
+              ::rocprim::detail::atomic_add(&hist[static_cast<unsigned int>(input[i])], Counter(1));
         }
         ::rocprim::syncthreads();
     }

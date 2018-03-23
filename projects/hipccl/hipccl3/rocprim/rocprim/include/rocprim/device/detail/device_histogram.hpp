@@ -172,7 +172,7 @@ void histogram_shared(SampleIterator samples,
                 const int bin = sample_to_bin_op(values[i]);
                 if(bin != -1)
                 {
-                    ::rocprim::atomic_add(&block_histogram[bin], 1);
+                    ::rocprim::detail::atomic_add(&block_histogram[bin], 1);
                 }
             }
         }
@@ -185,7 +185,7 @@ void histogram_shared(SampleIterator samples,
     {
         if(block_histogram[bin] > 0)
         {
-            ::rocprim::atomic_add(&histogram[bin], block_histogram[bin]);
+            ::rocprim::detail::atomic_add(&histogram[bin], block_histogram[bin]);
         }
     }
 }
@@ -245,7 +245,7 @@ void histogram_global(SampleIterator samples,
             {
                 // Write the number of lanes having this bin,
                 // if the current lane is the first (and maybe only) lane with this bin.
-                ::rocprim::atomic_add(&histogram[bin], same_bin_count);
+                ::rocprim::detail::atomic_add(&histogram[bin], same_bin_count);
             }
         }
     }

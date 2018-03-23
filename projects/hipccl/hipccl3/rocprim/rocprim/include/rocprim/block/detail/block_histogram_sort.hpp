@@ -105,9 +105,9 @@ public:
         ::rocprim::syncthreads();
 
         discontinuity().flag_heads(head_flags, input, flags_op, storage.flag);
-
-        // update the start of the first item, ::rocprim::syncthreads() isn't necessary before this
-        // as all threads are finished by the end of the discontinuity operation
+        
+        // ::rocprim::syncthreads() isn't required here as input is sorted by this point
+        // and it's impossible that flags_op will be called where b = input[0] and a != b
         if(flat_tid == 0)
         {
             storage.start[static_cast<unsigned int>(input[0])] = 0;
