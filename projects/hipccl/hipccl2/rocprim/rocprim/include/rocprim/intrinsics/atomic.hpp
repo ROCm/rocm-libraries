@@ -23,44 +23,51 @@
 
 #include "../config.hpp"
 
-/// \addtogroup intrinsicsmodule
-/// @{
-
 BEGIN_ROCPRIM_NAMESPACE
 
-ROCPRIM_DEVICE inline
-unsigned int atomic_add(unsigned int * address, unsigned int value)
+namespace detail
 {
-    #ifdef ROCPRIM_HC_API
-        return hc::atomic_fetch_add(address, value);
-    #else
-        return atomicAdd(address, value);
-    #endif
-}
+    ROCPRIM_DEVICE inline
+    unsigned int atomic_add(unsigned int * address, unsigned int value)
+    {
+        #ifdef ROCPRIM_HC_API
+            return hc::atomic_fetch_add(address, value);
+        #else
+            return atomicAdd(address, value);
+        #endif
+    }
 
-ROCPRIM_DEVICE inline
-int atomic_add(int * address, int value)
-{
-    #ifdef ROCPRIM_HC_API
-        return hc::atomic_fetch_add(address, value);
-    #else
-        return atomicAdd(address, value);
-    #endif
-}
+    ROCPRIM_DEVICE inline
+    int atomic_add(int * address, int value)
+    {
+        #ifdef ROCPRIM_HC_API
+            return hc::atomic_fetch_add(address, value);
+        #else
+            return atomicAdd(address, value);
+        #endif
+    }
 
-ROCPRIM_DEVICE inline
-float atomic_add(float * address, float value)
-{
-    #ifdef ROCPRIM_HC_API
-        return hc::atomic_fetch_add(address, value);
-    #else
-        return atomicAdd(address, value);
-    #endif
+    ROCPRIM_DEVICE inline
+    float atomic_add(float * address, float value)
+    {
+        #ifdef ROCPRIM_HC_API
+            return hc::atomic_fetch_add(address, value);
+        #else
+            return atomicAdd(address, value);
+        #endif
+    }
+    
+    ROCPRIM_DEVICE inline
+    unsigned long long atomic_add(unsigned long long * address, unsigned long long value)
+    {
+        #ifdef ROCPRIM_HC_API
+            return hc::atomic_fetch_add(reinterpret_cast<uint64_t*>(address), static_cast<uint64_t>(value));
+        #else
+            return atomicAdd(address, value);
+        #endif
+    }
 }
 
 END_ROCPRIM_NAMESPACE
-
-/// @}
-// end of group intrinsicsmodule
 
 #endif // ROCPRIM_INTRINSICS_ATOMIC_HPP_
