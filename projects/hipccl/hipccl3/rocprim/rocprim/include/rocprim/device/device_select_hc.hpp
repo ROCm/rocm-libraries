@@ -37,6 +37,9 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \addtogroup devicemodule_hc
 /// @{
 
+namespace detail
+{
+
 #define ROCPRIM_DETAIL_HC_SYNC(name, size, start) \
     { \
         if(debug_synchronous) \
@@ -48,6 +51,8 @@ BEGIN_ROCPRIM_NAMESPACE
             std::cout << " " << d.count() * 1000 << " ms" << '\n'; \
         } \
     }
+
+} // end detail namespace
 
 template<
     class InputIterator,

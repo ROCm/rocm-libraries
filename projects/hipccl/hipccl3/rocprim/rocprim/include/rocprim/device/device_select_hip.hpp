@@ -103,8 +103,6 @@ void flag_unique_kernel(InputIterator input,
     );
 }
 
-} // end detail namespace
-
 #define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start) \
     { \
         if(error != hipSuccess) return error; \
@@ -118,6 +116,8 @@ void flag_unique_kernel(InputIterator input,
             std::cout << " " << d.count() * 1000 << " ms" << '\n'; \
         } \
     }
+
+} // end detail namespace
 
 template<
     class InputIterator,
