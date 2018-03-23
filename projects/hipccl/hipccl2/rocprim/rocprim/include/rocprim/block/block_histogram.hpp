@@ -34,6 +34,9 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
+/// \addtogroup blockmodule
+/// @{
+
 enum class block_histogram_algorithm
 {
     using_atomic,
@@ -138,5 +141,8 @@ public:
 };
 
 END_ROCPRIM_NAMESPACE
+
+/// @}
+// end of group blockmodule
 
 #endif // ROCPRIM_BLOCK_BLOCK_HISTOGRAM_HPP_
