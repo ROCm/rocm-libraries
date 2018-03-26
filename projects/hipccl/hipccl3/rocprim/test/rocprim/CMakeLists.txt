@@ -91,6 +91,7 @@ add_rocprim_test_hc("rocprim.hc.tuple" test_hc_tuple.cpp)
 add_rocprim_test_hc("rocprim.hc.warp_reduce" test_hc_warp_reduce.cpp)
 add_rocprim_test_hc("rocprim.hc.warp_scan" test_hc_warp_scan.cpp)
 add_rocprim_test_hc("rocprim.hc.warp_sort" test_hc_warp_sort.cpp)
+add_rocprim_test_hc("rocprim.hc.zip_iterator" test_hc_zip_iterator.cpp)
 
 #
 # rocPRIM HIP API tests
