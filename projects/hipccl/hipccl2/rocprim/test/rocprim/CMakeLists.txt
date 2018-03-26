@@ -118,6 +118,7 @@ add_rocprim_test_hip("rocprim.hip.device_segmented_reduce" test_hip_device_segme
 add_rocprim_test_hip("rocprim.hip.device_select" test_hip_device_select.cpp)
 add_rocprim_test_hip("rocprim.hip.device_transform" test_hip_device_transform.cpp)
 add_rocprim_test_hip("rocprim.hip.discard_iterator" test_hip_discard_iterator.cpp)
+add_rocprim_test_hip("rocprim.hip.texture_cache_iterator" test_hip_texture_cache_iterator.cpp)
 add_rocprim_test_hip("rocprim.hip.transform_iterator" test_hip_transform_iterator.cpp)
 add_rocprim_test_hip("rocprim.hip.intrinsics" test_hip_intrinsics.cpp)
 add_rocprim_test_hip("rocprim.hip.warp_reduce" test_hip_warp_reduce.cpp)
