@@ -60,7 +60,10 @@ typedef ::testing::Types<
     RocprimTextureCacheIteratorParams<int>,
     RocprimTextureCacheIteratorParams<unsigned int>,
     RocprimTextureCacheIteratorParams<unsigned char>,
-    RocprimTextureCacheIteratorParams<float>
+    RocprimTextureCacheIteratorParams<float>,
+    RocprimTextureCacheIteratorParams<unsigned long long>,
+    RocprimTextureCacheIteratorParams<test_utils::custom_test_type<int>>,
+    RocprimTextureCacheIteratorParams<test_utils::custom_test_type<float>>
 > RocprimTextureCacheIteratorTestsParams;
 
 TYPED_TEST_CASE(RocprimTextureCacheIteratorTests, RocprimTextureCacheIteratorTestsParams);
@@ -71,7 +74,7 @@ struct transform
     __device__ __host__
     constexpr T operator()(const T& a) const
     {
-        return 5 + a;
+        return a + 5;
     }
 };
 
@@ -85,7 +88,12 @@ TYPED_TEST(RocprimTextureCacheIteratorTests, Transform)
 
     hipStream_t stream = 0; // default
 
-    std::vector<T> input = test_utils::get_random_data<T>(size, 1, 200);
+    std::vector<T> input(size);
+
+    for(size_t i = 0; i < size; i++)
+    {
+        input[i] = T(test_utils::get_random_value(1, 200));
+    }
 
     std::vector<T> output(size);
     T * d_input;
@@ -100,7 +108,7 @@ TYPED_TEST(RocprimTextureCacheIteratorTests, Transform)
         )
     );
     HIP_CHECK(hipDeviceSynchronize());
-    
+
     Iterator x;
     x.bind_texture(d_input, sizeof(T) * input.size());
 
@@ -137,15 +145,7 @@ TYPED_TEST(RocprimTextureCacheIteratorTests, Transform)
     for(size_t i = 0; i < output.size(); i++)
     {
         SCOPED_TRACE(testing::Message() << "where index = " << i);
-        if(std::is_integral<T>::value)
-        {
-            ASSERT_EQ(output[i], expected[i]);
-        }
-        else if(std::is_floating_point<T>::value)
-        {
-            auto tolerance = std::max<T>(std::abs(0.1f * expected[i]), T(0.01f));
-            ASSERT_NEAR(output[i], expected[i], tolerance);
-        }
+        ASSERT_EQ(output[i], expected[i]);
     }
 
     x.unbind_texture();

@@ -18,42 +18,19 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef HIPCUB_ROCPRIM_HPP_
-#define HIPCUB_ROCPRIM_HPP_
+#ifndef HIPCUB_ROCPRIM_ITERATOR_TEX_OBJ_INPUT_ITERATOR_HPP_
+#define HIPCUB_ROCPRIM_ITERATOR_TEX_OBJ_INPUT_ITERATOR_HPP_
 
-#include "../config.hpp"
+#include "../../config.hpp"
 
-#include "util_type.hpp"
-#include "util_ptx.hpp"
-#include "thread/thread_operators.hpp"
+BEGIN_HIPCUB_NAMESPACE
 
-// Iterator
-#include "iterator/arg_index_input_iterator.hpp"
-#include "iterator/counting_input_iterator.hpp"
-#include "iterator/tex_obj_input_iterator.hpp"
-#include "iterator/transform_input_iterator.hpp"
+template<
+    typename T,
+    typename OffsetT = std::ptrdiff_t
+>
+using TexObjInputIterator = ::rocprim::texture_cache_iterator<T, OffsetT>;
 
-// Warp
-#include "warp/warp_reduce.hpp"
-#include "warp/warp_scan.hpp"
+END_HIPCUB_NAMESPACE
 
-// Block
-#include "block/block_discontinuity.hpp"
-#include "block/block_exchange.hpp"
-#include "block/block_histogram.hpp"
-#include "block/block_load.hpp"
-#include "block/block_radix_sort.hpp"
-#include "block/block_reduce.hpp"
-#include "block/block_scan.hpp"
-#include "block/block_store.hpp"
-
-// Device
-#include "device/device_histogram.hpp"
-#include "device/device_radix_sort.hpp"
-#include "device/device_reduce.hpp"
-#include "device/device_scan.hpp"
-#include "device/device_segmented_radix_sort.hpp"
-#include "device/device_segmented_reduce.hpp"
-#include "device/device_select.hpp"
-
-#endif // HIPCUB_ROCPRIM_HPP_
+#endif // HIPCUB_ROCPRIM_ITERATOR_TEX_OBJ_INPUT_ITERATOR_HPP_
