@@ -22,6 +22,8 @@
 
 #include <iostream>
 #include <type_traits>
+#include <iterator>
+#include <tuple>
 
 // Google Test
 #include <gtest/gtest.h>
@@ -312,4 +314,36 @@ TEST(RocprimTupleTests, TupleMakeTie)
     rocprim::tie(rocprim::ignore, a) = t1;
     ASSERT_EQ(a, 2);
     ASSERT_EQ(b, 2);
+}
+
+TEST(RocprimTupleTests, Conversions)
+{
+    ASSERT_EQ(
+        (std::is_convertible<
+            std::tuple<int&, int&>,
+            std::tuple<int, int>
+        >::value),
+        (std::is_convertible<
+            rocprim::tuple<int&, int&>,
+            rocprim::tuple<int, int>
+        >::value)
+    );
+    using T1R = std::iterator_traits<std::vector<int>::iterator>::reference;
+    using T1V = std::iterator_traits<std::vector<int>::iterator>::value_type;
+    ASSERT_EQ(
+        (std::is_convertible<
+            std::tuple<T1R, T1R>,
+            std::tuple<T1V, T1V>
+        >::value),
+        (std::is_convertible<
+            rocprim::tuple<T1R, T1R>,
+            rocprim::tuple<T1V, T1V>
+        >::value)
+    );
+
+    int x = 1;
+    std::tuple<int&, int&> tx = std::tie(x, x);
+    std::tuple<int, int> ux(tx); (void) ux;
+    rocprim::tuple<int, int> rtx = rocprim::tie(x, x);
+    rocprim::tuple<int, int> rux(rtx); (void) rux;
 }
