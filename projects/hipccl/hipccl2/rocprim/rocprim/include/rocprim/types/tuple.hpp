@@ -396,6 +396,21 @@ struct tuple_impl<::rocprim::index_sequence<Indices...>, Types...>
     {
     }
 
+    template<
+        class... UTypes,
+        typename = typename std::enable_if<
+            sizeof...(UTypes) == sizeof...(Types)
+        >::type,
+        typename = typename std::enable_if<
+            sizeof...(Types) >= 1
+        >::type
+    >
+    ROCPRIM_HOST_DEVICE inline
+    tuple_impl(::rocprim::tuple<UTypes...>&& other)
+        : tuple_value<Indices, Types>(std::forward<UTypes>(::rocprim::get<Indices>(other)))...
+    {
+    }
+
     ROCPRIM_HOST_DEVICE inline
     ~tuple_impl() = default;
 
@@ -617,7 +632,7 @@ public:
         #endif
     >
     ROCPRIM_HOST_DEVICE inline
-    explicit tuple(const tuple<UTypes...>& other) noexcept
+    tuple(const tuple<UTypes...>& other) noexcept
         : base(other)
     {
     }
@@ -644,8 +659,8 @@ public:
         #endif
     >
     ROCPRIM_HOST_DEVICE inline
-    explicit tuple(tuple<UTypes...>&& other) noexcept
-        : base(std::move(other))
+    tuple(tuple<UTypes...>&& other) noexcept
+        : base(std::forward<tuple<UTypes...>>(other))
     {
     }
 
