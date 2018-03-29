@@ -159,7 +159,7 @@ TEST(RocprimZipIteratorTests, Transform)
     acc_view.wait();
 
     auto transform_op =
-        [](const rocprim::tuple<int, double, unsigned char>& t) [[hc]] [[cpu]] -> int
+        [](const rocprim::tuple<T1, T2, T3>& t) [[hc]] [[cpu]] -> int
         {
             return rocprim::get<0>(t) + rocprim::get<1>(t) + rocprim::get<2>(t);
         };
@@ -203,4 +203,131 @@ TEST(RocprimZipIteratorTests, Transform)
         if(std::is_integral<U>::value) diff = 0;
         ASSERT_NEAR(output[i], expected[i], diff);
     }
+}
+
+TEST(RocprimZipIteratorTests, TransformReduce)
+{
+    using T1 = int;
+    using T2 = unsigned int;
+    using T3 = unsigned char;
+    using U1 = T1;
+    using U2 = T2;
+    const bool debug_synchronous = false;
+    const size_t size = 1024 * 16;
+
+    hc::accelerator acc;
+    hc::accelerator_view acc_view = acc.create_view();
+
+    // Generate data
+    std::vector<T1> input1 = test_utils::get_random_data<T1>(size, 1, 100);
+    std::vector<T2> input2 = test_utils::get_random_data<T2>(size, 1, 50);
+    std::vector<T3> input3 = test_utils::get_random_data<T3>(size, 1, 10);
+
+    hc::array<T1> d_input1(hc::extent<1>(size), input1.begin(), acc_view);
+    hc::array<T2> d_input2(hc::extent<1>(size), input2.begin(), acc_view);
+    hc::array<T3> d_input3(hc::extent<1>(size), input3.begin(), acc_view);
+    hc::array<U1> d_output1(1, acc_view);
+    hc::array<U2> d_output2(1, acc_view);
+    acc_view.wait();
+
+    // transform function
+    auto transform_op =
+        [](const rocprim::tuple<T1, T2, T3>& t) [[hc]] [[cpu]]
+            -> rocprim::tuple<T1, T2>
+        {
+            return rocprim::make_tuple(
+                rocprim::get<0>(t), T2(rocprim::get<1>(t) + rocprim::get<2>(t))
+            );
+        };
+
+    // reduce function
+    auto reduce_op =
+        [](const rocprim::tuple<T1, T2>& t1,
+           const rocprim::tuple<T1, T2>& t2) [[hc]] [[cpu]]
+            -> rocprim::tuple<T1, T2>
+        {
+            return rocprim::make_tuple(
+                rocprim::get<0>(t1) + rocprim::get<0>(t2),
+                rocprim::get<1>(t1) + rocprim::get<1>(t2)
+            );
+        };
+
+    // Calculate expected results on host
+    U1 expected1 = std::accumulate(input1.begin(), input1.end(), T1(0));
+    U2 expected2 = std::accumulate(input2.begin(), input2.end(), T2(0))
+        + std::accumulate(input3.begin(), input3.end(), T2(0));
+
+    // temp storage
+    size_t temp_storage_size_bytes;
+    // Get size of d_temp_storage
+    rocprim::reduce(
+        nullptr,
+        temp_storage_size_bytes,
+        rocprim::make_transform_iterator(
+            rocprim::make_zip_iterator(
+                rocprim::make_tuple(
+                    d_input1.accelerator_pointer(),
+                    d_input2.accelerator_pointer(),
+                    d_input3.accelerator_pointer()
+                )
+            ),
+            transform_op
+        ),
+        rocprim::make_zip_iterator(
+            rocprim::make_tuple(
+                d_output1.accelerator_pointer(),
+                d_output2.accelerator_pointer()
+            )
+        ),
+        input1.size(),
+        reduce_op,
+        acc_view,
+        debug_synchronous
+    );
+    acc_view.wait();
+
+    // temp_storage_size_bytes must be >0
+    ASSERT_GT(temp_storage_size_bytes, 0);
+
+    // allocate temporary storage
+    hc::array<char> d_temp_storage(temp_storage_size_bytes, acc_view);
+    acc_view.wait();
+
+    // Run
+    rocprim::reduce(
+        d_temp_storage.accelerator_pointer(),
+        temp_storage_size_bytes,
+        rocprim::make_transform_iterator(
+            rocprim::make_zip_iterator(
+                rocprim::make_tuple(
+                    d_input1.accelerator_pointer(),
+                    d_input2.accelerator_pointer(),
+                    d_input3.accelerator_pointer()
+                )
+            ),
+            transform_op
+        ),
+        rocprim::make_zip_iterator(
+            rocprim::make_tuple(
+                d_output1.accelerator_pointer(),
+                d_output2.accelerator_pointer()
+            )
+        ),
+        input1.size(),
+        reduce_op,
+        acc_view,
+        debug_synchronous
+    );
+    acc_view.wait();
+
+    // Check if output values are as expected
+    std::vector<U1> output1 = d_output1;
+    auto diff1 = std::max<U1>(std::abs(0.01f * expected1), U1(0.01f));
+    if(std::is_integral<U1>::value) diff1 = 0;
+    ASSERT_NEAR(output1[0], expected1, diff1);
+
+    std::vector<U2> output2 = d_output2;
+    auto diff2 = std::max<U2>(std::abs(0.01f * expected2), U2(0.01f));
+    if(std::is_integral<U2>::value) diff2 = 0;
+    ASSERT_NEAR(output2[0], expected2, diff2);
 }
