@@ -39,6 +39,38 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
+// Wrapper for unpacking tuple to be used with BinaryFunction.
+// See transform function which accepts two input iterators.
+template<class T1, class T2, class BinaryFunction>
+struct unpack_binary_op
+{
+    #ifdef __cpp_lib_is_invocable
+    using result_type = typename std::invoke_result<BinaryFunction, T1, T2>::type;
+    #else
+    using result_type = typename std::result_of<BinaryFunction(T1, T2)>::type;
+    #endif
+
+    ROCPRIM_HOST_DEVICE inline
+    unpack_binary_op() = default;
+
+    ROCPRIM_HOST_DEVICE inline
+    unpack_binary_op(BinaryFunction f) : _f(f)
+    {
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    ~unpack_binary_op() = default;
+
+    ROCPRIM_HOST_DEVICE inline
+    result_type operator()(const ::rocprim::tuple<T1, T2>& t) const
+    {
+        return _f(::rocprim::get<0>(t), ::rocprim::get<1>(t));
+    }
+
+private:
+    BinaryFunction _f;
+};
+
 template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,

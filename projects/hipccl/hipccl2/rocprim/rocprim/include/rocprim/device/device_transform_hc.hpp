@@ -26,6 +26,8 @@
 
 #include "../config.hpp"
 #include "../detail/various.hpp"
+#include "../types/tuple.hpp"
+#include "../iterator/zip_iterator.hpp"
 
 #include "detail/device_transform.hpp"
 
@@ -150,6 +152,91 @@ void transform(InputIterator input,
         }
     );
     ROCPRIM_DETAIL_HC_SYNC("transform_kernel", size, start)
+}
+
+/// \brief HC parallel device-level transform primitive for two inputs.
+///
+/// transform function performs a device-wide transformation operation
+/// on two input ranges using binary \p transform_op operator.
+///
+/// \par Overview
+/// * Ranges specified by \p input1, \p input2, and \p output must have at least \p size elements.
+///
+/// \tparam InputIterator1 - random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam InputIterator2 - random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam BinaryFunction - type of binary function used for transform.
+///
+/// \param [in] input1 - iterator to the first element in the 1st range to transform.
+/// \param [in] input2 - iterator to the first element in the 2nd range to transform.
+/// \param [out] output - iterator to the first element in the output range.
+/// \param [in] size - number of element in the input range.
+/// \param [in] transform_op - binary operation function object that will be used for transform.
+/// The signature of the function should be equivalent to the following:
+/// <tt>U f(const T1& a, const T2& b);</tt>. The signature does not need to have
+/// <tt>const &</tt>, but function object must not modify the object passed to it.
+/// \param [in] acc_view - [optional] \p hc::accelerator_view object. The default value
+/// is \p hc::accelerator().get_default_view() (default view of the default accelerator).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced. Default value is \p false.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level transform operation is performed on two arrays of
+/// integer values (element-wise sum is performed).
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// // custom transform function
+/// auto transform_op =
+///     [](int a, int b) [[hc]]
+///     {
+///         return a + b;
+///     };
+///
+/// hc::accelerator_view acc_view = ...;
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t size;                                      // e.g., 8
+/// hc::array<int> input1(hc::extent<1>(size), ...); // e.g., [1, 2, 3, 4, 5, 6, 7, 8]
+/// hc::array<int> input2(hc::extent<1>(size), ...); // e.g., [1, 2, 3, 4, 5, 6, 7, 8]
+/// hc::array<int> output(input.get_extent(), ...);  // empty array of 8 elements
+///
+/// // perform transform
+/// rocprim::transform(
+///     input1.accelerator_pointer(), input2.accelerator_pointer(),
+///     output.accelerator_pointer(), input1.size(),
+///     transform_op, acc_view, false
+/// );
+/// // output: [2, 4, 6, 8, 10, 12, 14, 16]
+/// \endcode
+/// \endparblock
+template<
+    class InputIterator1,
+    class InputIterator2,
+    class OutputIterator,
+    class BinaryFunction
+>
+inline
+void transform(InputIterator1 input1,
+               InputIterator2 input2,
+               OutputIterator output,
+               const size_t size,
+               BinaryFunction transform_op,
+               hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
+               bool debug_synchronous = false)
+{
+    using value_type1 = typename std::iterator_traits<InputIterator1>::value_type;
+    using value_type2 = typename std::iterator_traits<InputIterator2>::value_type;
+    return transform(
+        ::rocprim::make_zip_iterator(::rocprim::make_tuple(input1, input2)), output,
+        size, detail::unpack_binary_op<value_type1, value_type2, BinaryFunction>(transform_op),
+        acc_view, debug_synchronous
+    );
 }
 
 #undef ROCPRIM_DETAIL_HC_SYNC
