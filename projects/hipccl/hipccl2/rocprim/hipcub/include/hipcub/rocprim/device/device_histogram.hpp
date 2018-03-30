@@ -57,6 +57,40 @@ struct DeviceHistogram
     }
 
     template<
+        int NUM_CHANNELS,
+        int NUM_ACTIVE_CHANNELS,
+        typename SampleIteratorT,
+        typename CounterT,
+        typename LevelT,
+        typename OffsetT
+    >
+    HIPCUB_RUNTIME_FUNCTION static
+    hipError_t MultiHistogramEven(void * d_temp_storage,
+                                  size_t& temp_storage_bytes,
+                                  SampleIteratorT d_samples,
+                                  CounterT * d_histogram[NUM_ACTIVE_CHANNELS],
+                                  int num_levels[NUM_ACTIVE_CHANNELS],
+                                  LevelT lower_level[NUM_ACTIVE_CHANNELS],
+                                  LevelT upper_level[NUM_ACTIVE_CHANNELS],
+                                  OffsetT num_pixels,
+                                  hipStream_t stream = 0,
+                                  bool debug_synchronous = false)
+    {
+        unsigned int levels[NUM_ACTIVE_CHANNELS];
+        for(unsigned int channel = 0; channel < NUM_ACTIVE_CHANNELS; channel++)
+        {
+            levels[channel] = num_levels[channel];
+        }
+        return ::rocprim::multi_histogram_even<NUM_CHANNELS, NUM_ACTIVE_CHANNELS>(
+            d_temp_storage, temp_storage_bytes,
+            d_samples, num_pixels,
+            d_histogram,
+            levels, lower_level, upper_level,
+            stream, debug_synchronous
+        );
+    }
+
+    template<
         typename SampleIteratorT,
         typename CounterT,
         typename LevelT,
@@ -78,6 +112,39 @@ struct DeviceHistogram
             d_samples, num_samples,
             d_histogram,
             num_levels, d_levels,
+            stream, debug_synchronous
+        );
+    }
+
+    template<
+        int NUM_CHANNELS,
+        int NUM_ACTIVE_CHANNELS,
+        typename SampleIteratorT,
+        typename CounterT,
+        typename LevelT,
+        typename OffsetT
+    >
+    HIPCUB_RUNTIME_FUNCTION static
+    hipError_t MultiHistogramRange(void * d_temp_storage,
+                                   size_t& temp_storage_bytes,
+                                   SampleIteratorT d_samples,
+                                   CounterT * d_histogram[NUM_ACTIVE_CHANNELS],
+                                   int num_levels[NUM_ACTIVE_CHANNELS],
+                                   LevelT * d_levels[NUM_ACTIVE_CHANNELS],
+                                   OffsetT num_pixels,
+                                   hipStream_t stream = 0,
+                                   bool debug_synchronous = false)
+    {
+        unsigned int levels[NUM_ACTIVE_CHANNELS];
+        for(unsigned int channel = 0; channel < NUM_ACTIVE_CHANNELS; channel++)
+        {
+            levels[channel] = num_levels[channel];
+        }
+        return ::rocprim::multi_histogram_range<NUM_CHANNELS, NUM_ACTIVE_CHANNELS>(
+            d_temp_storage, temp_storage_bytes,
+            d_samples, num_pixels,
+            d_histogram,
+            levels, d_levels,
             stream, debug_synchronous
         );
     }
