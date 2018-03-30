@@ -60,9 +60,6 @@ public:
 };
 
 typedef ::testing::Types<
-    // -----------------------------------------------------------------------
-    //
-    // -----------------------------------------------------------------------
     DeviceTransformParams<int, long>,
     DeviceTransformParams<unsigned char, float>
 > RocprimDeviceTransformTestsParams;
@@ -85,6 +82,7 @@ TYPED_TEST_CASE(RocprimDeviceTransformTests, RocprimDeviceTransformTestsParams);
 template<class T>
 struct transform
 {
+    inline
     constexpr T operator()(const T& a) const [[hc]] [[cpu]]
     {
         return a + 5;
@@ -122,6 +120,71 @@ TYPED_TEST(RocprimDeviceTransformTests, Transform)
             d_output.accelerator_pointer(),
             input.size(),
             transform<U>(),
+            acc_view,
+            debug_synchronous
+        );
+        acc_view.wait();
+
+        // Check if output values are as expected
+        std::vector<U> output = d_output;
+        for(size_t i = 0; i < output.size(); i++)
+        {
+            SCOPED_TRACE(testing::Message() << "where index = " << i);
+            auto diff = std::max<U>(std::abs(0.01f * expected[i]), U(0.01f));
+            if(std::is_integral<U>::value) diff = 0;
+            ASSERT_NEAR(output[i], expected[i], diff);
+        }
+    }
+}
+
+template<class T1, class T2, class U>
+struct binary_transform
+{
+    inline
+    constexpr U operator()(const T1& a, const T2& b) const [[hc]] [[cpu]]
+    {
+        return a + b;
+    }
+};
+
+TYPED_TEST(RocprimDeviceTransformTests, BinaryTransform)
+{
+    using T1 = typename TestFixture::input_type;
+    using T2 = typename TestFixture::input_type;
+    using U = typename TestFixture::output_type;
+    const bool debug_synchronous = TestFixture::debug_synchronous;
+
+    hc::accelerator acc;
+    hc::accelerator_view acc_view = acc.create_view();
+
+    const std::vector<size_t> sizes = get_sizes();
+    for(auto size : sizes)
+    {
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+        // Generate data
+        std::vector<T1> input1 = test_utils::get_random_data<T1>(size, 1, 100);
+        std::vector<T2> input2 = test_utils::get_random_data<T2>(size, 1, 100);
+
+        hc::array<T1> d_input1(hc::extent<1>(size), input1.begin(), acc_view);
+        hc::array<T2> d_input2(hc::extent<1>(size), input2.begin(), acc_view);
+        hc::array<U> d_output(size, acc_view);
+        acc_view.wait();
+
+        // Calculate expected results on host
+        std::vector<U> expected(input1.size());
+        std::transform(
+            input1.begin(), input1.end(), input2.begin(),
+            expected.begin(), binary_transform<T1, T2, U>()
+        );
+
+        // Run
+        rocprim::transform(
+            d_input1.accelerator_pointer(),
+            d_input2.accelerator_pointer(),
+            d_output.accelerator_pointer(),
+            input1.size(),
+            binary_transform<T1, T2, U>(),
             acc_view,
             debug_synchronous
         );
