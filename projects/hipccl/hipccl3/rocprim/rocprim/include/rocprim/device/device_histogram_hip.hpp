@@ -41,7 +41,21 @@ namespace detail
 
 template<
     unsigned int BlockSize,
+    unsigned int ActiveChannels,
+    class Counter
+>
+__global__
+void init_histogram_kernel(fixed_array<Counter *, ActiveChannels> histogram,
+                           fixed_array<unsigned int, ActiveChannels> bins)
+{
+    init_histogram<BlockSize, ActiveChannels>(histogram, bins);
+}
+
+template<
+    unsigned int BlockSize,
     unsigned int ItemsPerThread,
+    unsigned int Channels,
+    unsigned int ActiveChannels,
     class SampleIterator,
     class Counter,
     class SampleToBinOp
@@ -49,22 +63,25 @@ template<
 __global__
 void histogram_shared_kernel(SampleIterator samples,
                              unsigned int size,
-                             Counter * histogram,
-                             SampleToBinOp sample_to_bin_op,
-                             unsigned int bins)
+                             fixed_array<Counter *, ActiveChannels> histogram,
+                             fixed_array<SampleToBinOp, ActiveChannels> sample_to_bin_op,
+                             fixed_array<unsigned int, ActiveChannels> bins)
 {
     HIP_DYNAMIC_SHARED(unsigned int, block_histogram);
 
-    histogram_shared<BlockSize, ItemsPerThread>(
+    histogram_shared<BlockSize, ItemsPerThread, Channels, ActiveChannels>(
         samples, size,
-        histogram, block_histogram,
-        sample_to_bin_op, bins
+        histogram,
+        sample_to_bin_op, bins,
+        block_histogram
     );
 }
 
 template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
+    unsigned int Channels,
+    unsigned int ActiveChannels,
     class SampleIterator,
     class Counter,
     class SampleToBinOp
@@ -72,11 +89,11 @@ template<
 __global__
 void histogram_global_kernel(SampleIterator samples,
                              unsigned int size,
-                             Counter * histogram,
-                             SampleToBinOp sample_to_bin_op,
-                             unsigned int bins_bits)
+                             fixed_array<Counter *, ActiveChannels> histogram,
+                             fixed_array<SampleToBinOp, ActiveChannels> sample_to_bin_op,
+                             fixed_array<unsigned int, ActiveChannels> bins_bits)
 {
-    histogram_global<BlockSize, ItemsPerThread>(
+    histogram_global<BlockSize, ItemsPerThread, Channels, ActiveChannels>(
         samples, size,
         histogram,
         sample_to_bin_op, bins_bits
@@ -99,6 +116,113 @@ void histogram_global_kernel(SampleIterator samples,
     }
 
 template<
+    unsigned int Channels,
+    unsigned int ActiveChannels,
+    class SampleIterator,
+    class Counter,
+    class SampleToBinOp
+>
+inline
+hipError_t histogram_impl(void * temporary_storage,
+                          size_t& storage_size,
+                          SampleIterator samples,
+                          unsigned int size,
+                          Counter * histogram[ActiveChannels],
+                          unsigned int levels[ActiveChannels],
+                          SampleToBinOp sample_to_bin_op[ActiveChannels],
+                          hipStream_t stream,
+                          bool debug_synchronous)
+{
+    constexpr unsigned int block_size = 256;
+    constexpr unsigned int items_per_thread = 8;
+    constexpr unsigned int max_grid_size = 1024;
+    constexpr unsigned int shared_impl_max_bins = 1024;
+
+    constexpr unsigned int items_per_block = block_size * items_per_thread;
+
+    for(unsigned int channel = 0; channel < ActiveChannels; channel++)
+    {
+        if(levels[channel] < 2)
+        {
+            // Histogram must have at least 1 bin
+            return hipErrorInvalidValue;
+        }
+    }
+
+    const unsigned int blocks = ::rocprim::detail::ceiling_div(size, items_per_block);
+
+    if(temporary_storage == nullptr)
+    {
+        // Make sure user won't try to allocate 0 bytes memory, because
+        // hipMalloc will return nullptr when size is zero.
+        storage_size = 4;
+        return hipSuccess;
+    }
+
+    if(debug_synchronous)
+    {
+        std::cout << "blocks " << blocks << '\n';
+        hipError_t error = hipStreamSynchronize(stream);
+        if(error != hipSuccess) return error;
+    }
+
+    unsigned int bins[ActiveChannels];
+    unsigned int bins_bits[ActiveChannels];
+    unsigned int total_bins = 0;
+    unsigned int max_bins = 0;
+    for(unsigned int channel = 0; channel < ActiveChannels; channel++)
+    {
+        bins[channel] = levels[channel] - 1;
+        bins_bits[channel] = static_cast<unsigned int>(std::log2(detail::next_power_of_two(bins[channel])));
+        total_bins += bins[channel];
+        max_bins = std::max(max_bins, bins[channel]);
+    }
+
+    std::chrono::high_resolution_clock::time_point start;
+
+    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
+    hipLaunchKernelGGL(
+        HIP_KERNEL_NAME(init_histogram_kernel<block_size, ActiveChannels>),
+        dim3(::rocprim::detail::ceiling_div(max_bins, block_size)), dim3(block_size), 0, stream,
+        fixed_array<Counter *, ActiveChannels>(histogram),
+        fixed_array<unsigned int, ActiveChannels>(bins)
+    );
+    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_histogram", max_bins, start);
+
+    if(total_bins <= shared_impl_max_bins)
+    {
+        const size_t block_histogram_bytes = total_bins * sizeof(unsigned int);
+        if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(histogram_shared_kernel<block_size, items_per_thread, Channels, ActiveChannels>),
+            dim3(std::min(max_grid_size, blocks)), dim3(block_size), block_histogram_bytes, stream,
+            samples, size,
+            fixed_array<Counter *, ActiveChannels>(histogram),
+            fixed_array<SampleToBinOp, ActiveChannels>(sample_to_bin_op),
+            fixed_array<unsigned int, ActiveChannels>(bins)
+        );
+        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("histogram_shared", size, start);
+    }
+    else
+    {
+        if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(histogram_global_kernel<block_size, items_per_thread, Channels, ActiveChannels>),
+            dim3(blocks), dim3(block_size), 0, stream,
+            samples, size,
+            fixed_array<Counter *, ActiveChannels>(histogram),
+            fixed_array<SampleToBinOp, ActiveChannels>(sample_to_bin_op),
+            fixed_array<unsigned int, ActiveChannels>(bins_bits)
+        );
+        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("histogram_global", size, start);
+    }
+
+    return hipSuccess;
+}
+
+template<
+    unsigned int Channels,
+    unsigned int ActiveChannels,
     class SampleIterator,
     class Counter,
     class Level
@@ -108,83 +232,34 @@ hipError_t histogram_even_impl(void * temporary_storage,
                                size_t& storage_size,
                                SampleIterator samples,
                                unsigned int size,
-                               Counter * histogram,
-                               unsigned int levels,
-                               Level lower_level,
-                               Level upper_level,
+                               Counter * histogram[ActiveChannels],
+                               unsigned int levels[ActiveChannels],
+                               Level lower_level[ActiveChannels],
+                               Level upper_level[ActiveChannels],
                                hipStream_t stream,
                                bool debug_synchronous)
 {
-    constexpr unsigned int block_size = 256;
-    constexpr unsigned int items_per_thread = 8;
-    constexpr unsigned int max_grid_size = 1024;
-    constexpr unsigned int shared_impl_max_bins = 1024;
-
-    constexpr unsigned int items_per_block = block_size * items_per_thread;
-
-    if(levels < 2)
+    sample_to_bin_even<Level> sample_to_bin_op[ActiveChannels];
+    for(unsigned int channel = 0; channel < ActiveChannels; channel++)
     {
-        // Histogram must have at least 1 bin
-        return hipErrorInvalidValue;
-    }
-
-    const unsigned int blocks = ::rocprim::detail::ceiling_div(size, items_per_block);
-
-    if(temporary_storage == nullptr)
-    {
-        // Make sure user won't try to allocate 0 bytes memory, because
-        // hipMalloc will return nullptr when size is zero.
-        storage_size = 4;
-        return hipSuccess;
-    }
-
-    if(debug_synchronous)
-    {
-        std::cout << "blocks " << blocks << '\n';
-        hipError_t error = hipStreamSynchronize(stream);
-        if(error != hipSuccess) return error;
-    }
-
-    const unsigned int bins = levels - 1;
-    const unsigned int bins_bits = static_cast<unsigned int>(std::log2(detail::next_power_of_two(bins)));
-
-    std::chrono::high_resolution_clock::time_point start;
-
-    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    hipMemset(histogram, 0, bins * sizeof(Counter));
-    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init histogram", bins, start);
-
-    sample_to_bin_even<Level> sample_to_bin_op(bins, lower_level, upper_level);
-    if(bins <= shared_impl_max_bins)
-    {
-        const size_t block_histogram_bytes = bins * sizeof(unsigned int);
-        if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(histogram_shared_kernel<block_size, items_per_thread>),
-            dim3(std::min(max_grid_size, blocks)), dim3(block_size), block_histogram_bytes, stream,
-            samples, size, histogram,
-            sample_to_bin_op,
-            bins
+        sample_to_bin_op[channel] = sample_to_bin_even<Level>(
+            levels[channel] - 1,
+            lower_level[channel], upper_level[channel]
         );
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("histogram_shared", size, start);
-    }
-    else
-    {
-        if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(histogram_global_kernel<block_size, items_per_thread>),
-            dim3(blocks), dim3(block_size), 0, stream,
-            samples, size, histogram,
-            sample_to_bin_op,
-            bins_bits
-        );
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("histogram_global", size, start);
     }
 
-    return hipSuccess;
+    return histogram_impl<Channels, ActiveChannels>(
+        temporary_storage, storage_size,
+        samples, size,
+        histogram,
+        levels, sample_to_bin_op,
+        stream, debug_synchronous
+    );
 }
 
 template<
+    unsigned int Channels,
+    unsigned int ActiveChannels,
     class SampleIterator,
     class Counter,
     class Level
@@ -194,79 +269,28 @@ hipError_t histogram_range_impl(void * temporary_storage,
                                 size_t& storage_size,
                                 SampleIterator samples,
                                 unsigned int size,
-                                Counter * histogram,
-                                unsigned int levels,
-                                const Level * level_values,
+                                Counter * histogram[ActiveChannels],
+                                unsigned int levels[ActiveChannels],
+                                Level * level_values[ActiveChannels],
                                 hipStream_t stream,
                                 bool debug_synchronous)
 {
-    constexpr unsigned int block_size = 256;
-    constexpr unsigned int items_per_thread = 8;
-    constexpr unsigned int max_grid_size = 1024;
-    constexpr unsigned int shared_impl_max_bins = 1024;
-
-    constexpr unsigned int items_per_block = block_size * items_per_thread;
-
-    if(levels < 2)
+    sample_to_bin_range<Level> sample_to_bin_op[ActiveChannels];
+    for(unsigned int channel = 0; channel < ActiveChannels; channel++)
     {
-        // Histogram must have at least 1 bin
-        return hipErrorInvalidValue;
-    }
-
-    const unsigned int blocks = ::rocprim::detail::ceiling_div(size, items_per_block);
-
-    if(temporary_storage == nullptr)
-    {
-        // Make sure user won't try to allocate 0 bytes memory, because
-        // hipMalloc will return nullptr when size is zero.
-        storage_size = 4;
-        return hipSuccess;
-    }
-
-    if(debug_synchronous)
-    {
-        std::cout << "blocks " << blocks << '\n';
-        hipError_t error = hipStreamSynchronize(stream);
-        if(error != hipSuccess) return error;
-    }
-
-    const unsigned int bins = levels - 1;
-    const unsigned int bins_bits = static_cast<unsigned int>(std::log2(detail::next_power_of_two(bins)));
-
-    std::chrono::high_resolution_clock::time_point start;
-
-    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    hipMemset(histogram, 0, bins * sizeof(Counter));
-    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init histogram", bins, start);
-
-    sample_to_bin_range<Level> sample_to_bin_op(bins, level_values);
-    if(bins <= shared_impl_max_bins)
-    {
-        const size_t block_histogram_bytes = bins * sizeof(unsigned int);
-        if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(histogram_shared_kernel<block_size, items_per_thread>),
-            dim3(std::min(max_grid_size, blocks)), dim3(block_size), block_histogram_bytes, stream,
-            samples, size, histogram,
-            sample_to_bin_op,
-            bins
+        sample_to_bin_op[channel] = sample_to_bin_range<Level>(
+            levels[channel] - 1,
+            level_values[channel]
         );
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("histogram_shared", size, start);
-    }
-    else
-    {
-        if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(histogram_global_kernel<block_size, items_per_thread>),
-            dim3(blocks), dim3(block_size), 0, stream,
-            samples, size, histogram,
-            sample_to_bin_op,
-            bins_bits
-        );
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("histogram_global", size, start);
     }
 
-    return hipSuccess;
+    return histogram_impl<Channels, ActiveChannels>(
+        temporary_storage, storage_size,
+        samples, size,
+        histogram,
+        levels, sample_to_bin_op,
+        stream, debug_synchronous
+    );
 }
 
 #undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
@@ -290,7 +314,40 @@ hipError_t histogram_even(void * temporary_storage,
                           hipStream_t stream = 0,
                           bool debug_synchronous = false)
 {
-    return detail::histogram_even_impl(
+    Counter * histogram_single[1] = { histogram };
+    unsigned int levels_single[1] = { levels };
+    Level lower_level_single[1] = { lower_level };
+    Level upper_level_single[1] = { upper_level };
+
+    return detail::histogram_even_impl<1, 1>(
+        temporary_storage, storage_size,
+        samples, size,
+        histogram_single,
+        levels_single, lower_level_single, upper_level_single,
+        stream, debug_synchronous
+    );
+}
+
+template<
+    unsigned int Channels,
+    unsigned int ActiveChannels,
+    class SampleIterator,
+    class Counter,
+    class Level
+>
+inline
+hipError_t multi_histogram_even(void * temporary_storage,
+                                size_t& storage_size,
+                                SampleIterator samples,
+                                unsigned int size,
+                                Counter * histogram[ActiveChannels],
+                                unsigned int levels[ActiveChannels],
+                                Level lower_level[ActiveChannels],
+                                Level upper_level[ActiveChannels],
+                                hipStream_t stream = 0,
+                                bool debug_synchronous = false)
+{
+    return detail::histogram_even_impl<Channels, ActiveChannels>(
         temporary_storage, storage_size,
         samples, size,
         histogram,
@@ -311,11 +368,42 @@ hipError_t histogram_range(void * temporary_storage,
                            unsigned int size,
                            Counter * histogram,
                            unsigned int levels,
-                           const Level * level_values,
+                           Level * level_values,
                            hipStream_t stream = 0,
                            bool debug_synchronous = false)
 {
-    return detail::histogram_range_impl(
+    Counter * histogram_single[1] = { histogram };
+    unsigned int levels_single[1] = { levels };
+    Level * level_values_single[1] = { level_values };
+
+    return detail::histogram_range_impl<1, 1>(
+        temporary_storage, storage_size,
+        samples, size,
+        histogram_single,
+        levels_single, level_values_single,
+        stream, debug_synchronous
+    );
+}
+
+template<
+    unsigned int Channels,
+    unsigned int ActiveChannels,
+    class SampleIterator,
+    class Counter,
+    class Level
+>
+inline
+hipError_t multi_histogram_range(void * temporary_storage,
+                                 size_t& storage_size,
+                                 SampleIterator samples,
+                                 unsigned int size,
+                                 Counter * histogram[ActiveChannels],
+                                 unsigned int levels[ActiveChannels],
+                                 Level * level_values[ActiveChannels],
+                                 hipStream_t stream = 0,
+                                 bool debug_synchronous = false)
+{
+    return detail::histogram_range_impl<Channels, ActiveChannels>(
         temporary_storage, storage_size,
         samples, size,
         histogram,
