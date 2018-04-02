@@ -18,17 +18,35 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_ITERATOR_HPP_
-#define ROCPRIM_ITERATOR_HPP_
+#ifndef ROCPRIM_DETAIL_ALL_TRUE_HPP_
+#define ROCPRIM_DETAIL_ALL_TRUE_HPP_
 
-// Meta configuration for rocPRIM
-#include "config.hpp"
+#include <type_traits>
 
-#include "iterator/arg_index_iterator.hpp"
-#include "iterator/constant_iterator.hpp"
-#include "iterator/counting_iterator.hpp"
-#include "iterator/discard_iterator.hpp"
-#include "iterator/transform_iterator.hpp"
-#include "iterator/zip_iterator.hpp"
+#include "../config.hpp"
 
-#endif // ROCPRIM_ITERATOR_HPP_
+BEGIN_ROCPRIM_NAMESPACE
+namespace detail
+{
+
+
+// all_of
+template<bool... values>
+struct all_true : std::true_type
+{
+};
+
+template<bool... values>
+struct all_true<true, values...> : all_true<values...>
+{
+};
+
+template<bool... values>
+struct all_true<false, values...> : std::false_type
+{
+};
+
+} // end namespace detail
+END_ROCPRIM_NAMESPACE
+
+#endif // ROCPRIM_DETAIL_ALL_TRUE_HPP_
