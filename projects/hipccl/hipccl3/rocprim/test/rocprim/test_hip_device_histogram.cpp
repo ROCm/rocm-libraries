@@ -59,8 +59,9 @@ std::vector<std::tuple<size_t, size_t, size_t>> get_dims()
         std::make_tuple(128, 1289, 0),
         std::make_tuple(12, 1000, 24),
         std::make_tuple(123, 3000, 121),
-        std::make_tuple(1024, 1024, 0),
-        std::make_tuple(2345, 79, 2),
+        std::make_tuple(1024, 512, 0),
+        std::make_tuple(2345, 49, 2),
+        std::make_tuple(17867, 41, 13),
     };
     return sizes;
 }

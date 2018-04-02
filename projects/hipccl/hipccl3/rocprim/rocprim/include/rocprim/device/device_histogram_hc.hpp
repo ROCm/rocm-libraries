@@ -62,13 +62,17 @@ inline
 void histogram_impl(void * temporary_storage,
                     size_t& storage_size,
                     SampleIterator samples,
-                    unsigned int size,
+                    unsigned int columns,
+                    unsigned int rows,
+                    size_t row_stride_bytes,
                     Counter * histogram[ActiveChannels],
                     unsigned int levels[ActiveChannels],
                     SampleToBinOp sample_to_bin_op[ActiveChannels],
                     hc::accelerator_view& acc_view,
                     bool debug_synchronous)
 {
+    using sample_type = typename std::iterator_traits<SampleIterator>::value_type;
+
     constexpr unsigned int block_size = 256;
     constexpr unsigned int items_per_thread = 8;
     constexpr unsigned int max_grid_size = 1024;
@@ -85,7 +89,14 @@ void histogram_impl(void * temporary_storage,
         }
     }
 
-    const unsigned int blocks = ::rocprim::detail::ceiling_div(size, items_per_block);
+    if(row_stride_bytes % sizeof(sample_type) != 0)
+    {
+        // Row stride must be a whole multiple of the sample data type size
+        throw hc::runtime_exception("Row stride must be a whole multiple of the sample data type size", 0);
+    }
+
+    const unsigned int blocks_x = ::rocprim::detail::ceiling_div(columns, items_per_block);
+    const unsigned int row_stride = row_stride_bytes / sizeof(sample_type);
 
     if(temporary_storage == nullptr)
     {
@@ -97,7 +108,9 @@ void histogram_impl(void * temporary_storage,
 
     if(debug_synchronous)
     {
-        std::cout << "blocks " << blocks << '\n';
+        std::cout << "columns " << columns << '\n';
+        std::cout << "rows " << rows << '\n';
+        std::cout << "blocks_x " << blocks_x << '\n';
         acc_view.wait();
     }
 
@@ -126,11 +139,6 @@ void histogram_impl(void * temporary_storage,
     auto sample_to_bin_op2 = sample_to_bin_op[std::min(2u, ActiveChannels - 1)];
     auto sample_to_bin_op3 = sample_to_bin_op[std::min(3u, ActiveChannels - 1)];
 
-    // auto sample_to_bin_op0 = sample_to_bin_op[0];
-    // auto sample_to_bin_op1 = sample_to_bin_op[1];
-    // auto sample_to_bin_op2 = sample_to_bin_op[2];
-    // auto sample_to_bin_op3 = sample_to_bin_op[3];
-
     std::chrono::high_resolution_clock::time_point start;
 
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
@@ -146,12 +154,14 @@ void histogram_impl(void * temporary_storage,
 
     if(total_bins <= shared_impl_max_bins)
     {
+        const unsigned int grid_size_x = std::min(max_grid_size, blocks_x);
+        const unsigned int grid_size_y = std::min(rows, max_grid_size / grid_size_x);
         const size_t block_histogram_bytes = total_bins * sizeof(unsigned int);
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         hc::parallel_for_each(
             acc_view,
-            hc::tiled_extent<1>(std::min(max_grid_size, blocks) * block_size, block_size, block_histogram_bytes),
-            [=](hc::tiled_index<1>) [[hc]]
+            hc::tiled_extent<2>(grid_size_y, grid_size_x * block_size, 1, block_size, block_histogram_bytes),
+            [=](hc::tiled_index<2>) [[hc]]
             {
                 fixed_array<SampleToBinOp, ActiveChannels> sample_to_bin_op_fixed(
                     sample_to_bin_op0, sample_to_bin_op1, sample_to_bin_op2, sample_to_bin_op3
@@ -162,7 +172,7 @@ void histogram_impl(void * temporary_storage,
                 );
 
                 histogram_shared<block_size, items_per_thread, Channels, ActiveChannels>(
-                    samples, size,
+                    samples, columns, rows, row_stride,
                     histogram_fixed,
                     sample_to_bin_op_fixed,
                     bins_fixed,
@@ -170,29 +180,29 @@ void histogram_impl(void * temporary_storage,
                 );
             }
         );
-        ROCPRIM_DETAIL_HC_SYNC("histogram_shared", size, start);
+        ROCPRIM_DETAIL_HC_SYNC("histogram_shared", grid_size_x * grid_size_y * block_size, start);
     }
     else
     {
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         hc::parallel_for_each(
             acc_view,
-            hc::tiled_extent<1>(blocks * block_size, block_size),
-            [=](hc::tiled_index<1>) [[hc]]
+            hc::tiled_extent<2>(rows, blocks_x * block_size, 1, block_size),
+            [=](hc::tiled_index<2>) [[hc]]
             {
                 fixed_array<SampleToBinOp, ActiveChannels> sample_to_bin_op_fixed(
                     sample_to_bin_op0, sample_to_bin_op1, sample_to_bin_op2, sample_to_bin_op3
                 );
 
                 histogram_global<block_size, items_per_thread, Channels, ActiveChannels>(
-                    samples, size,
+                    samples, columns, row_stride,
                     histogram_fixed,
                     sample_to_bin_op_fixed,
                     bins_bits_fixed
                 );
             }
         );
-        ROCPRIM_DETAIL_HC_SYNC("histogram_global", size, start);
+        ROCPRIM_DETAIL_HC_SYNC("histogram_global", blocks_x * block_size * rows, start);
     }
 }
 
@@ -207,7 +217,9 @@ inline
 void histogram_even_impl(void * temporary_storage,
                          size_t& storage_size,
                          SampleIterator samples,
-                         unsigned int size,
+                         unsigned int columns,
+                         unsigned int rows,
+                         size_t row_stride_bytes,
                          Counter * histogram[ActiveChannels],
                          unsigned int levels[ActiveChannels],
                          Level lower_level[ActiveChannels],
@@ -226,7 +238,7 @@ void histogram_even_impl(void * temporary_storage,
 
     histogram_impl<Channels, ActiveChannels>(
         temporary_storage, storage_size,
-        samples, size,
+        samples, columns, rows, row_stride_bytes,
         histogram,
         levels, sample_to_bin_op,
         acc_view, debug_synchronous
@@ -244,7 +256,9 @@ inline
 void histogram_range_impl(void * temporary_storage,
                           size_t& storage_size,
                           SampleIterator samples,
-                          unsigned int size,
+                          unsigned int columns,
+                          unsigned int rows,
+                          size_t row_stride_bytes,
                           Counter * histogram[ActiveChannels],
                           unsigned int levels[ActiveChannels],
                           Level * level_values[ActiveChannels],
@@ -262,7 +276,7 @@ void histogram_range_impl(void * temporary_storage,
 
     histogram_impl<Channels, ActiveChannels>(
         temporary_storage, storage_size,
-        samples, size,
+        samples, columns, rows, row_stride_bytes,
         histogram,
         levels, sample_to_bin_op,
         acc_view, debug_synchronous
@@ -297,7 +311,40 @@ void histogram_even(void * temporary_storage,
 
     detail::histogram_even_impl<1, 1>(
         temporary_storage, storage_size,
-        samples, size,
+        samples, size, 1, 0,
+        histogram_single,
+        levels_single, lower_level_single, upper_level_single,
+        acc_view, debug_synchronous
+    );
+}
+
+template<
+    class SampleIterator,
+    class Counter,
+    class Level
+>
+inline
+void histogram_even(void * temporary_storage,
+                    size_t& storage_size,
+                    SampleIterator samples,
+                    unsigned int columns,
+                    unsigned int rows,
+                    size_t row_stride_bytes,
+                    Counter * histogram,
+                    unsigned int levels,
+                    Level lower_level,
+                    Level upper_level,
+                    hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
+                    bool debug_synchronous = false)
+{
+    Counter * histogram_single[1] = { histogram };
+    unsigned int levels_single[1] = { levels };
+    Level lower_level_single[1] = { lower_level };
+    Level upper_level_single[1] = { upper_level };
+
+    detail::histogram_even_impl<1, 1>(
+        temporary_storage, storage_size,
+        samples, columns, rows, row_stride_bytes,
         histogram_single,
         levels_single, lower_level_single, upper_level_single,
         acc_view, debug_synchronous
@@ -325,7 +372,37 @@ void multi_histogram_even(void * temporary_storage,
 {
     detail::histogram_even_impl<Channels, ActiveChannels>(
         temporary_storage, storage_size,
-        samples, size,
+        samples, size, 1, 0,
+        histogram,
+        levels, lower_level, upper_level,
+        acc_view, debug_synchronous
+    );
+}
+
+template<
+    unsigned int Channels,
+    unsigned int ActiveChannels,
+    class SampleIterator,
+    class Counter,
+    class Level
+>
+inline
+void multi_histogram_even(void * temporary_storage,
+                          size_t& storage_size,
+                          SampleIterator samples,
+                          unsigned int columns,
+                          unsigned int rows,
+                          size_t row_stride_bytes,
+                          Counter * histogram[ActiveChannels],
+                          unsigned int levels[ActiveChannels],
+                          Level lower_level[ActiveChannels],
+                          Level upper_level[ActiveChannels],
+                          hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
+                          bool debug_synchronous = false)
+{
+    detail::histogram_even_impl<Channels, ActiveChannels>(
+        temporary_storage, storage_size,
+        samples, columns, rows, row_stride_bytes,
         histogram,
         levels, lower_level, upper_level,
         acc_view, debug_synchronous
@@ -354,7 +431,38 @@ void histogram_range(void * temporary_storage,
 
     detail::histogram_range_impl<1, 1>(
         temporary_storage, storage_size,
-        samples, size,
+        samples, size, 1, 0,
+        histogram_single,
+        levels_single, level_values_single,
+        acc_view, debug_synchronous
+    );
+}
+
+template<
+    class SampleIterator,
+    class Counter,
+    class Level
+>
+inline
+void histogram_range(void * temporary_storage,
+                     size_t& storage_size,
+                     SampleIterator samples,
+                     unsigned int columns,
+                     unsigned int rows,
+                     size_t row_stride_bytes,
+                     Counter * histogram,
+                     unsigned int levels,
+                     Level * level_values,
+                     hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
+                     bool debug_synchronous = false)
+{
+    Counter * histogram_single[1] = { histogram };
+    unsigned int levels_single[1] = { levels };
+    Level * level_values_single[1] = { level_values };
+
+    detail::histogram_range_impl<1, 1>(
+        temporary_storage, storage_size,
+        samples, columns, rows, row_stride_bytes,
         histogram_single,
         levels_single, level_values_single,
         acc_view, debug_synchronous
@@ -381,7 +489,36 @@ void multi_histogram_range(void * temporary_storage,
 {
     detail::histogram_range_impl<Channels, ActiveChannels>(
         temporary_storage, storage_size,
-        samples, size,
+        samples, size, 1, 0,
+        histogram,
+        levels, level_values,
+        acc_view, debug_synchronous
+    );
+}
+
+template<
+    unsigned int Channels,
+    unsigned int ActiveChannels,
+    class SampleIterator,
+    class Counter,
+    class Level
+>
+inline
+void multi_histogram_range(void * temporary_storage,
+                           size_t& storage_size,
+                           SampleIterator samples,
+                           unsigned int columns,
+                           unsigned int rows,
+                           size_t row_stride_bytes,
+                           Counter * histogram[ActiveChannels],
+                           unsigned int levels[ActiveChannels],
+                           Level * level_values[ActiveChannels],
+                           hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
+                           bool debug_synchronous = false)
+{
+    detail::histogram_range_impl<Channels, ActiveChannels>(
+        temporary_storage, storage_size,
+        samples, columns, rows, row_stride_bytes,
         histogram,
         levels, level_values,
         acc_view, debug_synchronous
