@@ -24,6 +24,7 @@
 #include <functional>
 #include <iostream>
 #include <type_traits>
+#include <tuple>
 #include <vector>
 #include <utility>
 
@@ -42,15 +43,25 @@ namespace rp = rocprim;
 
 #define HIP_CHECK(error) ASSERT_EQ(error, hipSuccess)
 
-std::vector<size_t> get_sizes()
+// rows, columns, (row_stride - columns * Channels)
+std::vector<std::tuple<size_t, size_t, size_t>> get_dims()
 {
-    std::vector<size_t> sizes = {
-        1, 10, 53, 211,
-        1024, 2048, 5096,
-        34567, (1 << 18) - 1220
+    std::vector<std::tuple<size_t, size_t, size_t>> sizes = {
+        // Linear
+        std::make_tuple(1, 53, 0),
+        std::make_tuple(1, 5096, 0),
+        std::make_tuple(1, 34567, 0),
+        std::make_tuple(1, (1 << 18) - 1220, 0),
+        // Strided
+        std::make_tuple(2, 1, 0),
+        std::make_tuple(10, 10, 11),
+        std::make_tuple(111, 111, 111),
+        std::make_tuple(128, 1289, 0),
+        std::make_tuple(12, 1000, 24),
+        std::make_tuple(123, 3000, 121),
+        std::make_tuple(1024, 1024, 0),
+        std::make_tuple(2345, 79, 2),
     };
-    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(5, 1, 100000);
-    sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
     return sizes;
 }
 
@@ -163,10 +174,19 @@ TYPED_TEST(RocprimDeviceHistogramEven, Even)
 
     const bool debug_synchronous = false;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(size_t size : sizes)
+    for(auto dim : get_dims())
     {
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
+        SCOPED_TRACE(
+            testing::Message() << "with dim = {" <<
+            std::get<0>(dim) << ", " << std::get<1>(dim) << ", " << std::get<2>(dim) << "}"
+        );
+
+        const size_t rows = std::get<0>(dim);
+        const size_t columns = std::get<1>(dim);
+        const size_t row_stride = columns + std::get<2>(dim);
+
+        const size_t row_stride_bytes = row_stride * sizeof(sample_type);
+        const size_t size = rows * row_stride;
 
         // Generate data
         std::vector<sample_type> input = get_random_samples<sample_type>(size, lower_level, upper_level);
@@ -186,41 +206,75 @@ TYPED_TEST(RocprimDeviceHistogramEven, Even)
         // Calculate expected results on host
         std::vector<counter_type> histogram_expected(bins, 0);
         const level_type scale = (upper_level - lower_level) / bins;
-        for(sample_type sample : input)
+        for(size_t row = 0; row < rows; row++)
         {
-            const level_type s = static_cast<level_type>(sample);
-            if(s >= lower_level && s < upper_level)
+            for(size_t column = 0; column < columns; column++)
             {
-                const int bin = (s - lower_level) / scale;
-                histogram_expected[bin]++;
+                const sample_type sample = input[row * row_stride + column];
+                const level_type s = static_cast<level_type>(sample);
+                if(s >= lower_level && s < upper_level)
+                {
+                    const int bin = (s - lower_level) / scale;
+                    histogram_expected[bin]++;
+                }
             }
         }
 
         size_t temporary_storage_bytes = 0;
-        HIP_CHECK(
-            rp::histogram_even(
-                nullptr, temporary_storage_bytes,
-                d_input, size,
-                d_histogram,
-                bins + 1, lower_level, upper_level,
-                stream, debug_synchronous
-            )
-        );
+        if(rows == 1)
+        {
+            HIP_CHECK(
+                rp::histogram_even(
+                    nullptr, temporary_storage_bytes,
+                    d_input, columns,
+                    d_histogram,
+                    bins + 1, lower_level, upper_level,
+                    stream, debug_synchronous
+                )
+            );
+        }
+        else
+        {
+            HIP_CHECK(
+                rp::histogram_even(
+                    nullptr, temporary_storage_bytes,
+                    d_input, columns, rows, row_stride_bytes,
+                    d_histogram,
+                    bins + 1, lower_level, upper_level,
+                    stream, debug_synchronous
+                )
+            );
+        }
 
         ASSERT_GT(temporary_storage_bytes, 0U);
 
         void * d_temporary_storage;
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
-        HIP_CHECK(
-            rp::histogram_even(
-                d_temporary_storage, temporary_storage_bytes,
-                d_input, size,
-                d_histogram,
-                bins + 1, lower_level, upper_level,
-                stream, debug_synchronous
-            )
-        );
+        if(rows == 1)
+        {
+            HIP_CHECK(
+                rp::histogram_even(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_input, columns,
+                    d_histogram,
+                    bins + 1, lower_level, upper_level,
+                    stream, debug_synchronous
+                )
+            );
+        }
+        else
+        {
+            HIP_CHECK(
+                rp::histogram_even(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_input, columns, rows, row_stride_bytes,
+                    d_histogram,
+                    bins + 1, lower_level, upper_level,
+                    stream, debug_synchronous
+                )
+            );
+        }
 
         std::vector<counter_type> histogram(bins);
         HIP_CHECK(
@@ -317,10 +371,19 @@ TYPED_TEST(RocprimDeviceHistogramRange, Range)
         TestFixture::params::max_bin_length
     );
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(size_t size : sizes)
+    for(auto dim : get_dims())
     {
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
+        SCOPED_TRACE(
+            testing::Message() << "with dim = {" <<
+            std::get<0>(dim) << ", " << std::get<1>(dim) << ", " << std::get<2>(dim) << "}"
+        );
+
+        const size_t rows = std::get<0>(dim);
+        const size_t columns = std::get<1>(dim);
+        const size_t row_stride = columns + std::get<2>(dim);
+
+        const size_t row_stride_bytes = row_stride * sizeof(sample_type);
+        const size_t size = rows * row_stride;
 
         // Generate data
         std::vector<level_type> levels;
@@ -357,13 +420,17 @@ TYPED_TEST(RocprimDeviceHistogramRange, Range)
 
         // Calculate expected results on host
         std::vector<counter_type> histogram_expected(bins, 0);
-        for(sample_type sample : input)
+        for(size_t row = 0; row < rows; row++)
         {
-            const level_type s = static_cast<level_type>(sample);
-            if(s >= levels[0] && s < levels[bins])
+            for(size_t column = 0; column < columns; column++)
             {
-                const auto bin_iter = std::upper_bound(levels.begin(), levels.end(), s);
-                histogram_expected[bin_iter - levels.begin() - 1]++;
+                const sample_type sample = input[row * row_stride + column];
+                const level_type s = static_cast<level_type>(sample);
+                if(s >= levels[0] && s < levels[bins])
+                {
+                    const auto bin_iter = std::upper_bound(levels.begin(), levels.end(), s);
+                    histogram_expected[bin_iter - levels.begin() - 1]++;
+                }
             }
         }
 
@@ -373,30 +440,60 @@ TYPED_TEST(RocprimDeviceHistogramRange, Range)
         );
 
         size_t temporary_storage_bytes = 0;
-        HIP_CHECK(
-            rp::histogram_range(
-                nullptr, temporary_storage_bytes,
-                d_input2, size,
-                d_histogram,
-                bins + 1, d_levels,
-                stream, debug_synchronous
-            )
-        );
+        if(rows == 1)
+        {
+            HIP_CHECK(
+                rp::histogram_range(
+                    nullptr, temporary_storage_bytes,
+                    d_input2, columns,
+                    d_histogram,
+                    bins + 1, d_levels,
+                    stream, debug_synchronous
+                )
+            );
+        }
+        else
+        {
+            HIP_CHECK(
+                rp::histogram_range(
+                    nullptr, temporary_storage_bytes,
+                    d_input2, columns, rows, row_stride_bytes,
+                    d_histogram,
+                    bins + 1, d_levels,
+                    stream, debug_synchronous
+                )
+            );
+        }
 
         ASSERT_GT(temporary_storage_bytes, 0U);
 
         void * d_temporary_storage;
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
-        HIP_CHECK(
-            rp::histogram_range(
-                d_temporary_storage, temporary_storage_bytes,
-                d_input2, size,
-                d_histogram,
-                bins + 1, d_levels,
-                stream, debug_synchronous
-            )
-        );
+        if(rows == 1)
+        {
+            HIP_CHECK(
+                rp::histogram_range(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_input2, columns,
+                    d_histogram,
+                    bins + 1, d_levels,
+                    stream, debug_synchronous
+                )
+            );
+        }
+        else
+        {
+            HIP_CHECK(
+                rp::histogram_range(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_input2, columns, rows, row_stride_bytes,
+                    d_histogram,
+                    bins + 1, d_levels,
+                    stream, debug_synchronous
+                )
+            );
+        }
 
         std::vector<counter_type> histogram(bins);
         HIP_CHECK(
@@ -491,38 +588,53 @@ TYPED_TEST(RocprimDeviceHistogramMultiEven, MultiEven)
 
     const bool debug_synchronous = false;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(size_t size : sizes)
+    for(auto dim : get_dims())
     {
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
+        SCOPED_TRACE(
+            testing::Message() << "with dim = {" <<
+            std::get<0>(dim) << ", " << std::get<1>(dim) << ", " << std::get<2>(dim) << "}"
+        );
+
+        const size_t rows = std::get<0>(dim);
+        const size_t columns = std::get<1>(dim);
+        const size_t row_stride = columns * channels + std::get<2>(dim);
+
+        const size_t row_stride_bytes = row_stride * sizeof(sample_type);
+        const size_t size = rows * row_stride;
 
         // Generate data
-        std::vector<sample_type> inputs[channels];
+        std::vector<sample_type> input(size);
         for(unsigned int channel = 0; channel < channels; channel++)
         {
+            const size_t gen_columns = (row_stride + channels - 1) / channels;
+            const size_t gen_size = rows * gen_columns;
+
+            std::vector<sample_type> channel_input;
             if(channel < active_channels)
             {
-                inputs[channel] = get_random_samples<sample_type>(size, lower_level[channel], upper_level[channel]);
+                channel_input = get_random_samples<sample_type>(gen_size, lower_level[channel], upper_level[channel]);
             }
             else
             {
-                inputs[channel] = get_random_samples<sample_type>(size, lower_level[0], upper_level[0]);
+                channel_input = get_random_samples<sample_type>(gen_size, lower_level[0], upper_level[0]);
             }
-        }
-
-        std::vector<sample_type> input(size * channels);
-        for(unsigned int channel = 0; channel < channels; channel++)
-        {
             // Interleave values
-            for(size_t i = 0; i < size; i++)
+            for(size_t row = 0; row < rows; row++)
             {
-                input[i * channels + channel] = inputs[channel][i];
+                for(size_t column = 0; column < gen_columns; column++)
+                {
+                    const size_t index = column * channels + channel;
+                    if(index < row_stride)
+                    {
+                        input[row * row_stride + index] = channel_input[row * gen_columns + column];
+                    }
+                }
             }
         }
 
         sample_type * d_input;
         counter_type * d_histogram[active_channels];
-        HIP_CHECK(hipMalloc(&d_input, size * channels * sizeof(sample_type)));
+        HIP_CHECK(hipMalloc(&d_input, size * sizeof(sample_type)));
         for(unsigned int channel = 0; channel < active_channels; channel++)
         {
             HIP_CHECK(hipMalloc(&d_histogram[channel], bins[channel] * sizeof(counter_type)));
@@ -530,7 +642,7 @@ TYPED_TEST(RocprimDeviceHistogramMultiEven, MultiEven)
         HIP_CHECK(
             hipMemcpy(
                 d_input, input.data(),
-                size * channels * sizeof(sample_type),
+                size * sizeof(sample_type),
                 hipMemcpyHostToDevice
             )
         );
@@ -542,13 +654,17 @@ TYPED_TEST(RocprimDeviceHistogramMultiEven, MultiEven)
             histogram_expected[channel] = std::vector<counter_type>(bins[channel], 0);
             const level_type scale = (upper_level[channel] - lower_level[channel]) / bins[channel];
 
-            for(sample_type sample : inputs[channel])
+            for(size_t row = 0; row < rows; row++)
             {
-                const level_type s = static_cast<level_type>(sample);
-                if(s >= lower_level[channel] && s < upper_level[channel])
+                for(size_t column = 0; column < columns; column++)
                 {
-                    const int bin = (s - lower_level[channel]) / scale;
-                    histogram_expected[channel][bin]++;
+                    const sample_type sample = input[row * row_stride + column * channels + channel];
+                    const level_type s = static_cast<level_type>(sample);
+                    if(s >= lower_level[channel] && s < upper_level[channel])
+                    {
+                        const int bin = (s - lower_level[channel]) / scale;
+                        histogram_expected[channel][bin]++;
+                    }
                 }
             }
         }
@@ -559,30 +675,60 @@ TYPED_TEST(RocprimDeviceHistogramMultiEven, MultiEven)
         );
 
         size_t temporary_storage_bytes = 0;
-        HIP_CHECK((
-            rp::multi_histogram_even<channels, active_channels>(
-                nullptr, temporary_storage_bytes,
-                d_input2, size,
-                d_histogram,
-                num_levels, lower_level, upper_level,
-                stream, debug_synchronous
-            )
-        ));
+        if(rows == 1)
+        {
+            HIP_CHECK((
+                rp::multi_histogram_even<channels, active_channels>(
+                    nullptr, temporary_storage_bytes,
+                    d_input2, columns,
+                    d_histogram,
+                    num_levels, lower_level, upper_level,
+                    stream, debug_synchronous
+                )
+            ));
+        }
+        else
+        {
+            HIP_CHECK((
+                rp::multi_histogram_even<channels, active_channels>(
+                    nullptr, temporary_storage_bytes,
+                    d_input2, columns, rows, row_stride_bytes,
+                    d_histogram,
+                    num_levels, lower_level, upper_level,
+                    stream, debug_synchronous
+                )
+            ));
+        }
 
         ASSERT_GT(temporary_storage_bytes, 0U);
 
         void * d_temporary_storage;
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
-        HIP_CHECK((
-            rp::multi_histogram_even<channels, active_channels>(
-                d_temporary_storage, temporary_storage_bytes,
-                d_input2, size,
-                d_histogram,
-                num_levels, lower_level, upper_level,
-                stream, debug_synchronous
-            )
-        ));
+        if(rows == 1)
+        {
+            HIP_CHECK((
+                rp::multi_histogram_even<channels, active_channels>(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_input2, columns,
+                    d_histogram,
+                    num_levels, lower_level, upper_level,
+                    stream, debug_synchronous
+                )
+            ));
+        }
+        else
+        {
+            HIP_CHECK((
+                rp::multi_histogram_even<channels, active_channels>(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_input2, columns, rows, row_stride_bytes,
+                    d_histogram,
+                    num_levels, lower_level, upper_level,
+                    stream, debug_synchronous
+                )
+            ));
+        }
 
         std::vector<counter_type> histogram[active_channels];
         for(unsigned int channel = 0; channel < active_channels; channel++)
@@ -685,10 +831,19 @@ TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
         );
     }
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(size_t size : sizes)
+    for(auto dim : get_dims())
     {
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
+        SCOPED_TRACE(
+            testing::Message() << "with dim = {" <<
+            std::get<0>(dim) << ", " << std::get<1>(dim) << ", " << std::get<2>(dim) << "}"
+        );
+
+        const size_t rows = std::get<0>(dim);
+        const size_t columns = std::get<1>(dim);
+        const size_t row_stride = columns * channels + std::get<2>(dim);
+
+        const size_t row_stride_bytes = row_stride * sizeof(sample_type);
+        const size_t size = rows * row_stride;
 
         // Generate data
         std::vector<level_type> levels[active_channels];
@@ -703,33 +858,41 @@ TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
             levels[channel].push_back(level);
         }
 
-        std::vector<sample_type> inputs[channels];
+        std::vector<sample_type> input(size);
         for(unsigned int channel = 0; channel < channels; channel++)
         {
+            const size_t gen_columns = (row_stride + channels - 1) / channels;
+            const size_t gen_size = rows * gen_columns;
+
+            std::vector<sample_type> channel_input;
             if(channel < active_channels)
             {
-                inputs[channel] = get_random_samples<sample_type>(size, levels[channel][0], levels[channel][bins[channel]]);
+                channel_input = get_random_samples<sample_type>(
+                    gen_size, levels[channel][0], levels[channel][bins[channel]]
+                );
             }
             else
             {
-                inputs[channel] = get_random_samples<sample_type>(size, levels[0][0], levels[0][bins[0]]);
+                channel_input = get_random_samples<sample_type>(gen_size, levels[0][0], levels[0][bins[0]]);
             }
-        }
-
-        std::vector<sample_type> input(size * channels);
-        for(unsigned int channel = 0; channel < channels; channel++)
-        {
             // Interleave values
-            for(size_t i = 0; i < size; i++)
+            for(size_t row = 0; row < rows; row++)
             {
-                input[i * channels + channel] = inputs[channel][i];
+                for(size_t column = 0; column < gen_columns; column++)
+                {
+                    const size_t index = column * channels + channel;
+                    if(index < row_stride)
+                    {
+                        input[row * row_stride + index] = channel_input[row * gen_columns + column];
+                    }
+                }
             }
         }
 
         sample_type * d_input;
         level_type * d_levels[active_channels];
         counter_type * d_histogram[active_channels];
-        HIP_CHECK(hipMalloc(&d_input, size * channels * sizeof(sample_type)));
+        HIP_CHECK(hipMalloc(&d_input, size * sizeof(sample_type)));
         for(unsigned int channel = 0; channel < active_channels; channel++)
         {
             HIP_CHECK(hipMalloc(&d_levels[channel], num_levels[channel] * sizeof(level_type)));
@@ -738,7 +901,7 @@ TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
         HIP_CHECK(
             hipMemcpy(
                 d_input, input.data(),
-                size * channels * sizeof(sample_type),
+                size * sizeof(sample_type),
                 hipMemcpyHostToDevice
             )
         );
@@ -759,43 +922,77 @@ TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
         {
             histogram_expected[channel] = std::vector<counter_type>(bins[channel], 0);
 
-            for(sample_type sample : inputs[channel])
+            for(size_t row = 0; row < rows; row++)
             {
-                const level_type s = static_cast<level_type>(sample);
-                if(s >= levels[channel][0] && s < levels[channel][bins[channel]])
+                for(size_t column = 0; column < columns; column++)
                 {
-                    const auto bin_iter = std::upper_bound(levels[channel].begin(), levels[channel].end(), s);
-                    const int bin = bin_iter - levels[channel].begin() - 1;
-                    histogram_expected[channel][bin]++;
+                    const sample_type sample = input[row * row_stride + column * channels + channel];
+                    const level_type s = static_cast<level_type>(sample);
+                    if(s >= levels[channel][0] && s < levels[channel][bins[channel]])
+                    {
+                        const auto bin_iter = std::upper_bound(levels[channel].begin(), levels[channel].end(), s);
+                        const int bin = bin_iter - levels[channel].begin() - 1;
+                        histogram_expected[channel][bin]++;
+                    }
                 }
             }
         }
 
         size_t temporary_storage_bytes = 0;
-        HIP_CHECK((
-            rp::multi_histogram_range<channels, active_channels>(
-                nullptr, temporary_storage_bytes,
-                d_input, size,
-                d_histogram,
-                num_levels, d_levels,
-                stream, debug_synchronous
-            )
-        ));
+        if(rows == 1)
+        {
+            HIP_CHECK((
+                rp::multi_histogram_range<channels, active_channels>(
+                    nullptr, temporary_storage_bytes,
+                    d_input, columns,
+                    d_histogram,
+                    num_levels, d_levels,
+                    stream, debug_synchronous
+                )
+            ));
+        }
+        else
+        {
+            HIP_CHECK((
+                rp::multi_histogram_range<channels, active_channels>(
+                    nullptr, temporary_storage_bytes,
+                    d_input, columns, rows, row_stride_bytes,
+                    d_histogram,
+                    num_levels, d_levels,
+                    stream, debug_synchronous
+                )
+            ));
+        }
 
         ASSERT_GT(temporary_storage_bytes, 0U);
 
         void * d_temporary_storage;
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
-        HIP_CHECK((
-            rp::multi_histogram_range<channels, active_channels>(
-                d_temporary_storage, temporary_storage_bytes,
-                d_input, size,
-                d_histogram,
-                num_levels, d_levels,
-                stream, debug_synchronous
-            )
-        ));
+        if(rows == 1)
+        {
+            HIP_CHECK((
+                rp::multi_histogram_range<channels, active_channels>(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_input, columns,
+                    d_histogram,
+                    num_levels, d_levels,
+                    stream, debug_synchronous
+                )
+            ));
+        }
+        else
+        {
+            HIP_CHECK((
+                rp::multi_histogram_range<channels, active_channels>(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_input, columns, rows, row_stride_bytes,
+                    d_histogram,
+                    num_levels, d_levels,
+                    stream, debug_synchronous
+                )
+            ));
+        }
 
         std::vector<counter_type> histogram[active_channels];
         for(unsigned int channel = 0; channel < active_channels; channel++)
