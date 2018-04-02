@@ -87,9 +87,11 @@ add_rocprim_test_hc("rocprim.hc.device_transform" test_hc_device_transform.cpp)
 add_rocprim_test_hc("rocprim.hc.discard_iterator" test_hc_discard_iterator.cpp)
 add_rocprim_test_hc("rocprim.hc.intrinsics" test_hc_intrinsics.cpp)
 add_rocprim_test_hc("rocprim.hc.transform_iterator" test_hc_transform_iterator.cpp)
+add_rocprim_test_hc("rocprim.hc.tuple" test_hc_tuple.cpp)
 add_rocprim_test_hc("rocprim.hc.warp_reduce" test_hc_warp_reduce.cpp)
 add_rocprim_test_hc("rocprim.hc.warp_scan" test_hc_warp_scan.cpp)
 add_rocprim_test_hc("rocprim.hc.warp_sort" test_hc_warp_sort.cpp)
+add_rocprim_test_hc("rocprim.hc.zip_iterator" test_hc_zip_iterator.cpp)
 
 #
 # rocPRIM HIP API tests
@@ -122,3 +124,4 @@ add_rocprim_test_hip("rocprim.hip.transform_iterator" test_hip_transform_iterato
 add_rocprim_test_hip("rocprim.hip.intrinsics" test_hip_intrinsics.cpp)
 add_rocprim_test_hip("rocprim.hip.warp_reduce" test_hip_warp_reduce.cpp)
 add_rocprim_test_hip("rocprim.hip.warp_scan" test_hip_warp_scan.cpp)
+add_rocprim_test_hip("rocprim.hip.zip_iterator" test_hip_zip_iterator.cpp)

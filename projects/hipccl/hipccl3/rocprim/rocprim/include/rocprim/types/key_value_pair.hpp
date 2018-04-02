@@ -23,6 +23,9 @@
 
 #include "../config.hpp"
 
+/// \addtogroup utilsmodule
+/// @{
+
 BEGIN_ROCPRIM_NAMESPACE
 
 template<
@@ -35,7 +38,7 @@ struct key_value_pair
     using Key = Key_;
     using Value = Value_;
     #endif
-    
+
     using key_type = Key_;
     using value_type = Value_;
 
@@ -71,5 +74,8 @@ struct key_value_pair
 };
 
 END_ROCPRIM_NAMESPACE
+
+/// @}
+// end of group utilsmodule
 
 #endif // ROCPRIM_TYPES_KEY_VALUE_PAIR_HPP_

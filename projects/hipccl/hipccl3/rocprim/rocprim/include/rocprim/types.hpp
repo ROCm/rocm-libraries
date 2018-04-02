@@ -27,7 +27,9 @@
 #include "config.hpp"
 
 #include "types/double_buffer.hpp"
+#include "types/integer_sequence.hpp"
 #include "types/key_value_pair.hpp"
+#include "types/tuple.hpp"
 
 /// \addtogroup utilsmodule
 /// @{

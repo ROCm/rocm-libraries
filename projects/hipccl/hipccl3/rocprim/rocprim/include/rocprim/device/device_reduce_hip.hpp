@@ -147,7 +147,7 @@ hipError_t reduce_impl(void * temporary_storage,
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(detail::block_reduce_kernel<
                 block_size, items_per_thread, false, result_type,
-                InputIterator, OutputIterator, InitValueType, BinaryFunction
+                InputIterator, result_type *, InitValueType, BinaryFunction
             >),
             dim3(grid_size), dim3(block_size), 0, stream,
             input, size, block_prefixes, initial_value, reduce_op
