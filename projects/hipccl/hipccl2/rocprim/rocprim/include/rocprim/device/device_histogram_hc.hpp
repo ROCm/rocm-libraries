@@ -287,6 +287,74 @@ void histogram_range_impl(void * temporary_storage,
 
 } // end of detail namespace
 
+/// \brief Computes a histogram from a sequence of samples using equal-width bins.
+///
+/// \par
+/// * The number of histogram bins is (\p levels - 1).
+/// * Bins are evenly-segmented and include the same width of sample values:
+/// (\p upper_level - \p lower_level) / (\p levels - 1).
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage in a null pointer.
+///
+/// \tparam SampleIterator - random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam Counter - integer type for histogram bin counters.
+/// \tparam Level - type of histogram boundaries (levels)
+///
+/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the reduction operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] samples - iterator to the first element in the range of input samples.
+/// \param [in] size - number of elements in the samples range.
+/// \param [out] histogram - pointer to the first element in the histogram range.
+/// \param [in] levels - number of boundaries (levels) for histogram bins.
+/// \param [in] lower_level - lower sample value bound (inclusive) for the first histogram bin.
+/// \param [in] upper_level - upper sample value bound (exclusive) for the last histogram bin.
+/// \param [in] acc_view - [optional] \p hc::accelerator_view object. The default value
+/// is \p hc::accelerator().get_default_view() (default view of the default accelerator).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level histogram of 5 bins is computed on an array of float samples.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// hc::accelerator_view acc_view = ...;
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// unsigned int size;        // e.g., 8
+/// hc::array<float> samples; // e.g., [-10.0, 0.3, 9.5, 8.1, 1.5, 1.9, 100.0, 5.1]
+/// hc::array<int> histogram; // empty array of at least 5 elements
+/// unsigned int levels;      // e.g., 6 (for 5 bins)
+/// float lower_level;        // e.g., 0.0
+/// float upper_level;        // e.g., 10.0
+///
+/// size_t temporary_storage_size_bytes;
+/// // Get required size of the temporary storage
+/// rocprim::histogram_even(
+///     nullptr, temporary_storage_size_bytes,
+///     samples.accelerator_pointer(), size,
+///     histogram.accelerator_pointer(), levels, lower_level, upper_level,
+///     acc_view
+/// );
+///
+/// // allocate temporary storage
+/// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
+///
+/// // compute histogram
+/// rocprim::histogram_even(
+///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
+///     samples.accelerator_pointer(), size,
+///     histogram.accelerator_pointer(), levels, lower_level, upper_level,
+///     acc_view
+/// );
+/// // histogram: [3, 0, 1, 0, 2]
+/// \endcode
+/// \endparblock
 template<
     class SampleIterator,
     class Counter,
@@ -318,6 +386,82 @@ void histogram_even(void * temporary_storage,
     );
 }
 
+/// \brief Computes a histogram from a two-dimensional region of samples using equal-width bins.
+///
+/// \par
+/// * The two-dimensional region of interest within \p samples can be specified using the \p columns,
+/// \p rows and \p row_stride_bytes parameters.
+/// * The row stride must be a whole multiple of the sample data type size,
+/// i.e., <tt>(row_stride_bytes % sizeof(std::iterator_traits<SampleIterator>::value_type)) == 0</tt>.
+/// * The number of histogram bins is (\p levels - 1).
+/// * Bins are evenly-segmented and include the same width of sample values:
+/// (\p upper_level - \p lower_level) / (\p levels - 1).
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage in a null pointer.
+///
+/// \tparam SampleIterator - random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam Counter - integer type for histogram bin counters.
+/// \tparam Level - type of histogram boundaries (levels)
+///
+/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the reduction operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] samples - iterator to the first element in the range of input samples.
+/// \param [in] columns - number of elements in each row of the region.
+/// \param [in] rows - number of rows of the region.
+/// \param [in] row_stride_bytes - number of bytes between starts of consecutive rows of the region.
+/// \param [out] histogram - pointer to the first element in the histogram range.
+/// \param [in] levels - number of boundaries (levels) for histogram bins.
+/// \param [in] lower_level - lower sample value bound (inclusive) for the first histogram bin.
+/// \param [in] upper_level - upper sample value bound (exclusive) for the last histogram bin.
+/// \param [in] acc_view - [optional] \p hc::accelerator_view object. The default value
+/// is \p hc::accelerator().get_default_view() (default view of the default accelerator).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level histogram of 5 bins is computed on an array of float samples.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// hc::accelerator_view acc_view = ...;
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// unsigned int columns;     // e.g., 4
+/// unsigned int rows;        // e.g., 2
+/// size_t row_stride_bytes;  // e.g., 6 * sizeof(float)
+/// hc::array<float> samples; // e.g., [-10.0, 0.3, 9.5, 8.1, -, -, 1.5, 1.9, 100.0, 5.1, -, -]
+/// hc::array<int> histogram; // empty array of at least 5 elements
+/// unsigned int levels;      // e.g., 6 (for 5 bins)
+/// float lower_level;        // e.g., 0.0
+/// float upper_level;        // e.g., 10.0
+///
+/// size_t temporary_storage_size_bytes;
+/// // Get required size of the temporary storage
+/// rocprim::histogram_even(
+///     nullptr, temporary_storage_size_bytes,
+///     samples.accelerator_pointer(), columns, rows, row_stride_bytes,
+///     histogram.accelerator_pointer(), levels, lower_level, upper_level,
+///     acc_view
+/// );
+///
+/// // allocate temporary storage
+/// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
+///
+/// // compute histogram
+/// rocprim::histogram_even(
+///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
+///     samples.accelerator_pointer(), columns, rows, row_stride_bytes,
+///     histogram.accelerator_pointer(), levels, lower_level, upper_level,
+///     acc_view
+/// );
+/// // histogram: [3, 0, 1, 0, 2]
+/// \endcode
+/// \endparblock
 template<
     class SampleIterator,
     class Counter,
@@ -351,6 +495,85 @@ void histogram_even(void * temporary_storage,
     );
 }
 
+/// \brief Computes histograms from a sequence of multi-channel samples using equal-width bins.
+///
+/// \par
+/// * The input is a sequence of <em>pixel</em> structures, where each pixel comprises
+/// a record of \p Channels consecutive data samples (e.g., \p Channels = 4 for <em>RGBA</em> samples).
+/// * The first \p ActiveChannels channels of total \p Channels channels will be used for computing histograms
+/// (e.g., \p ActiveChannels = 3 for computing histograms of only <em>RGB</em> from <em>RGBA</em> samples).
+/// * For channel<sub><em>i</em></sub> the number of histogram bins is (\p levels[i] - 1).
+/// * For channel<sub><em>i</em></sub> bins are evenly-segmented and include the same width of sample values:
+/// (\p upper_level[i] - \p lower_level[i]) / (\p levels[i] - 1).
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage in a null pointer.
+///
+/// \tparam Channels - number of channels interleaved in the input samples.
+/// \tparam ActiveChannels - number of channels being used for computing histograms.
+/// \tparam SampleIterator - random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam Counter - integer type for histogram bin counters.
+/// \tparam Level - type of histogram boundaries (levels)
+///
+/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the reduction operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] samples - iterator to the first element in the range of input samples.
+/// \param [in] size - number of pixels in the samples range.
+/// \param [out] histogram - pointers to the first element in the histogram range, one for each active channel.
+/// \param [in] levels - number of boundaries (levels) for histogram bins in each active channel.
+/// \param [in] lower_level - lower sample value bound (inclusive) for the first histogram bin in each active channel.
+/// \param [in] upper_level - upper sample value bound (exclusive) for the last histogram bin in each active channel.
+/// \param [in] acc_view - [optional] \p hc::accelerator_view object. The default value
+/// is \p hc::accelerator().get_default_view() (default view of the default accelerator).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \par Example
+/// \parblock
+/// In this example histograms for 3 channels (RGB) are computed on an array of 8-bit RGBA samples.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// hc::accelerator_view acc_view = ...;
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// unsigned int size;                 // e.g., 8
+/// hc::array<unsigned char> samples;  // e.g., [(3, 1, 5, 255), (3, 1, 5, 255), (4, 2, 6, 127), (3, 2, 6, 127),
+///                                    //        (0, 0, 0, 100), (0, 1, 0, 100), (0, 0, 1, 255), (0, 1, 1, 255)]
+/// hc::array<int> histogram[3];       // 3 empty arrays of at least 256 elements each
+/// unsigned int levels[3];            // e.g., [257, 257, 257] (for 256 bins)
+/// int lower_level[3];                // e.g., [0, 0, 0]
+/// int upper_level[3];                // e.g., [256, 256, 256]
+///
+/// int * histogram_ptr[3] = { histogram[0].accelerator_pointer(), histogram[1]... };
+///
+/// size_t temporary_storage_size_bytes;
+/// // Get required size of the temporary storage
+/// rocprim::multi_histogram_even<4, 3>(
+///     nullptr, temporary_storage_size_bytes,
+///     samples.accelerator_pointer(), size,
+///     histogram_ptr, levels, lower_level, upper_level,
+///     acc_view
+/// );
+///
+/// // allocate temporary storage
+/// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
+///
+/// // compute histograms
+/// rocprim::multi_histogram_even<4, 3>(
+///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
+///     samples.accelerator_pointer(), size,
+///     histogram_ptr, levels, lower_level, upper_level,
+///     acc_view
+/// );
+/// // histogram: [[4, 0, 0, 3, 1, 0, 0, ..., 0],
+/// //             [2, 4, 2, 0, 0, 0, 0, ..., 0],
+/// //             [2, 2, 0, 0, 0, 2, 2, ..., 0]]
+/// \endcode
+/// \endparblock
 template<
     unsigned int Channels,
     unsigned int ActiveChannels,
@@ -379,6 +602,93 @@ void multi_histogram_even(void * temporary_storage,
     );
 }
 
+/// \brief Computes histograms from a two-dimensional region of multi-channel samples using equal-width bins.
+///
+/// \par
+/// * The two-dimensional region of interest within \p samples can be specified using the \p columns,
+/// \p rows and \p row_stride_bytes parameters.
+/// * The row stride must be a whole multiple of the sample data type size,
+/// i.e., <tt>(row_stride_bytes % sizeof(std::iterator_traits<SampleIterator>::value_type)) == 0</tt>.
+/// * The input is a sequence of <em>pixel</em> structures, where each pixel comprises
+/// a record of \p Channels consecutive data samples (e.g., \p Channels = 4 for <em>RGBA</em> samples).
+/// * The first \p ActiveChannels channels of total \p Channels channels will be used for computing histograms
+/// (e.g., \p ActiveChannels = 3 for computing histograms of only <em>RGB</em> from <em>RGBA</em> samples).
+/// * For channel<sub><em>i</em></sub> the number of histogram bins is (\p levels[i] - 1).
+/// * For channel<sub><em>i</em></sub> bins are evenly-segmented and include the same width of sample values:
+/// (\p upper_level[i] - \p lower_level[i]) / (\p levels[i] - 1).
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage in a null pointer.
+///
+/// \tparam Channels - number of channels interleaved in the input samples.
+/// \tparam ActiveChannels - number of channels being used for computing histograms.
+/// \tparam SampleIterator - random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam Counter - integer type for histogram bin counters.
+/// \tparam Level - type of histogram boundaries (levels)
+///
+/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the reduction operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] samples - iterator to the first element in the range of input samples.
+/// \param [in] columns - number of elements in each row of the region.
+/// \param [in] rows - number of rows of the region.
+/// \param [in] row_stride_bytes - number of bytes between starts of consecutive rows of the region.
+/// \param [out] histogram - pointers to the first element in the histogram range, one for each active channel.
+/// \param [in] levels - number of boundaries (levels) for histogram bins in each active channel.
+/// \param [in] lower_level - lower sample value bound (inclusive) for the first histogram bin in each active channel.
+/// \param [in] upper_level - upper sample value bound (exclusive) for the last histogram bin in each active channel.
+/// \param [in] acc_view - [optional] \p hc::accelerator_view object. The default value
+/// is \p hc::accelerator().get_default_view() (default view of the default accelerator).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \par Example
+/// \parblock
+/// In this example histograms for 3 channels (RGB) are computed on an array of 8-bit RGBA samples.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// hc::accelerator_view acc_view = ...;
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// unsigned int columns;             // e.g., 4
+/// unsigned int rows;                // e.g., 2
+/// size_t row_stride_bytes;          // e.g., 5 * sizeof(unsigned char)
+/// hc::array<unsigned char> samples; // e.g., [(3, 1, 5, 0), (3, 1, 5, 0), (4, 2, 6, 0), (3, 2, 6, 0), (-, -, -, -),
+///                                   //        (0, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 1, 1, 0), (-, -, -, -)]
+/// hc::array<int> histogram[3];      // 3 empty arrays of at least 256 elements each
+/// unsigned int levels[3];           // e.g., [257, 257, 257] (for 256 bins)
+/// int lower_level[3];               // e.g., [0, 0, 0]
+/// int upper_level[3];               // e.g., [256, 256, 256]
+///
+/// int * histogram_ptr[3] = { histogram[0].accelerator_pointer(), histogram[1]... };
+///
+/// size_t temporary_storage_size_bytes;
+/// // Get required size of the temporary storage
+/// rocprim::multi_histogram_even<4, 3>(
+///     nullptr, temporary_storage_size_bytes,
+///     samples.accelerator_pointer(), columns, rows, row_stride_bytes,
+///     histogram_ptr, levels, lower_level, upper_level,
+///     acc_view
+/// );
+///
+/// // allocate temporary storage
+/// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
+///
+/// // compute histograms
+/// rocprim::multi_histogram_even<4, 3>(
+///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
+///     samples.accelerator_pointer(), columns, rows, row_stride_bytes,
+///     histogram_ptr, levels, lower_level, upper_level,
+///     acc_view
+/// );
+/// // histogram: [[4, 0, 0, 3, 1, 0, 0, ..., 0],
+/// //             [2, 4, 2, 0, 0, 0, 0, ..., 0],
+/// //             [2, 2, 0, 0, 0, 2, 2, ..., 0]]
+/// \endcode
+/// \endparblock
 template<
     unsigned int Channels,
     unsigned int ActiveChannels,
@@ -409,6 +719,71 @@ void multi_histogram_even(void * temporary_storage,
     );
 }
 
+/// \brief Computes a histogram from a sequence of samples using the specified bin boundary levels.
+///
+/// \par
+/// * The number of histogram bins is (\p levels - 1).
+/// * The range for bin<sub><em>j</em></sub> is [<tt>level_values[j]</tt>, <tt>level_values[j+1]</tt>).
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage in a null pointer.
+///
+/// \tparam SampleIterator - random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam Counter - integer type for histogram bin counters.
+/// \tparam Level - type of histogram boundaries (levels)
+///
+/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the reduction operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] samples - iterator to the first element in the range of input samples.
+/// \param [in] size - number of elements in the samples range.
+/// \param [out] histogram - pointer to the first element in the histogram range.
+/// \param [in] levels - number of boundaries (levels) for histogram bins.
+/// \param [in] level_values - pointer to the array of bin boundaries.
+/// \param [in] acc_view - [optional] \p hc::accelerator_view object. The default value
+/// is \p hc::accelerator().get_default_view() (default view of the default accelerator).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level histogram of 5 bins is computed on an array of float samples.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// hc::accelerator_view acc_view = ...;
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// unsigned int size;             // e.g., 8
+/// hc::array<float> samples;      // e.g., [-10.0, 0.3, 9.5, 8.1, 1.5, 1.9, 100.0, 5.1]
+/// hc::array<int> histogram;      // empty array of at least 5 elements
+/// unsigned int levels;           // e.g., 6 (for 5 bins)
+/// hc::array<float> level_values; // e.g., [0.0, 1.0, 5.0, 10.0, 20.0, 50.0]
+///
+/// size_t temporary_storage_size_bytes;
+/// // Get required size of the temporary storage
+/// rocprim::histogram_range(
+///     nullptr, temporary_storage_size_bytes,
+///     samples.accelerator_pointer(), size,
+///     histogram.accelerator_pointer(), levels, level_values.accelerator_pointer(),
+///     acc_view
+/// );
+///
+/// // allocate temporary storage
+/// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
+///
+/// // compute histogram
+/// rocprim::histogram_range(
+///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
+///     samples.accelerator_pointer(), size,
+///     histogram.accelerator_pointer(), levels, level_values.accelerator_pointer(),
+///     acc_view
+/// );
+/// // histogram: [1, 2, 3, 0, 0]
+/// \endcode
+/// \endparblock
 template<
     class SampleIterator,
     class Counter,
@@ -438,6 +813,79 @@ void histogram_range(void * temporary_storage,
     );
 }
 
+/// \brief Computes a histogram from a two-dimensional region of samples using the specified bin boundary levels.
+///
+/// \par
+/// * The two-dimensional region of interest within \p samples can be specified using the \p columns,
+/// \p rows and \p row_stride_bytes parameters.
+/// * The row stride must be a whole multiple of the sample data type size,
+/// i.e., <tt>(row_stride_bytes % sizeof(std::iterator_traits<SampleIterator>::value_type)) == 0</tt>.
+/// * The number of histogram bins is (\p levels - 1).
+/// * The range for bin<sub><em>j</em></sub> is [<tt>level_values[j]</tt>, <tt>level_values[j+1]</tt>).
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage in a null pointer.
+///
+/// \tparam SampleIterator - random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam Counter - integer type for histogram bin counters.
+/// \tparam Level - type of histogram boundaries (levels)
+///
+/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the reduction operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] samples - iterator to the first element in the range of input samples.
+/// \param [in] columns - number of elements in each row of the region.
+/// \param [in] rows - number of rows of the region.
+/// \param [in] row_stride_bytes - number of bytes between starts of consecutive rows of the region.
+/// \param [out] histogram - pointer to the first element in the histogram range.
+/// \param [in] levels - number of boundaries (levels) for histogram bins.
+/// \param [in] level_values - pointer to the array of bin boundaries.
+/// \param [in] acc_view - [optional] \p hc::accelerator_view object. The default value
+/// is \p hc::accelerator().get_default_view() (default view of the default accelerator).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level histogram of 5 bins is computed on an array of float samples.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// hc::accelerator_view acc_view = ...;
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// unsigned int columns;          // e.g., 4
+/// unsigned int rows;             // e.g., 2
+/// size_t row_stride_bytes;       // e.g., 6 * sizeof(float)
+/// hc::array<float> samples;      // e.g., [-10.0, 0.3, 9.5, 8.1, 1.5, 1.9, 100.0, 5.1]
+/// hc::array<int> histogram;      // empty array of at least 5 elements
+/// unsigned int levels;           // e.g., 6 (for 5 bins)
+/// hc::array<float> level_values; // e.g., [0.0, 1.0, 5.0, 10.0, 20.0, 50.0]
+///
+/// size_t temporary_storage_size_bytes;
+/// // Get required size of the temporary storage
+/// rocprim::histogram_range(
+///     nullptr, temporary_storage_size_bytes,
+///     samples.accelerator_pointer(), columns, rows, row_stride_bytes,
+///     histogram.accelerator_pointer(), levels, level_values.accelerator_pointer(),
+///     acc_view
+/// );
+///
+/// // allocate temporary storage
+/// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
+///
+/// // compute histogram
+/// rocprim::histogram_range(
+///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
+///     samples.accelerator_pointer(), columns, rows, row_stride_bytes,
+///     histogram.accelerator_pointer(), levels, level_values.accelerator_pointer(),
+///     acc_view
+/// );
+/// // histogram: [1, 2, 3, 0, 0]
+/// \endcode
+/// \endparblock
 template<
     class SampleIterator,
     class Counter,
@@ -469,6 +917,82 @@ void histogram_range(void * temporary_storage,
     );
 }
 
+/// \brief Computes histograms from a sequence of multi-channel samples using the specified bin boundary levels.
+///
+/// \par
+/// * The input is a sequence of <em>pixel</em> structures, where each pixel comprises
+/// a record of \p Channels consecutive data samples (e.g., \p Channels = 4 for <em>RGBA</em> samples).
+/// * The first \p ActiveChannels channels of total \p Channels channels will be used for computing histograms
+/// (e.g., \p ActiveChannels = 3 for computing histograms of only <em>RGB</em> from <em>RGBA</em> samples).
+/// * For channel<sub><em>i</em></sub> the number of histogram bins is (\p levels[i] - 1).
+/// * For channel<sub><em>i</em></sub> the range for bin<sub><em>j</em></sub> is
+/// [<tt>level_values[i][j]</tt>, <tt>level_values[i][j+1]</tt>).
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage in a null pointer.
+///
+/// \tparam Channels - number of channels interleaved in the input samples.
+/// \tparam ActiveChannels - number of channels being used for computing histograms.
+/// \tparam SampleIterator - random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam Counter - integer type for histogram bin counters.
+/// \tparam Level - type of histogram boundaries (levels)
+///
+/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the reduction operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] samples - iterator to the first element in the range of input samples.
+/// \param [in] size - number of pixels in the samples range.
+/// \param [out] histogram - pointers to the first element in the histogram range, one for each active channel.
+/// \param [in] levels - number of boundaries (levels) for histogram bins in each active channel.
+/// \param [in] level_values - pointer to the array of bin boundaries for each active channel.
+/// \param [in] acc_view - [optional] \p hc::accelerator_view object. The default value
+/// is \p hc::accelerator().get_default_view() (default view of the default accelerator).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \par Example
+/// \parblock
+/// In this example histograms for 3 channels (RGB) are computed on an array of 8-bit RGBA samples.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// hc::accelerator_view acc_view = ...;
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// unsigned int size;                // e.g., 8
+/// hc::array<unsigned char> samples; // e.g., [(0, 0, 80, 255), (120, 0, 80, 255), (123, 0, 82, 127), (10, 1, 83, 0),
+///                                   //        (51, 1, 8, 100), (52, 1, 8, 100), (53, 0, 81, 255), (54, 50, 81, 255)]
+/// hc::array<int> histogram[3];      // 3 empty arrays of at least 256 elements each
+/// unsigned int levels[3];           // e.g., [4, 4, 3]
+/// hc::array<int> level_values[3];   // e.g., [[0, 50, 100, 200], [0, 20, 40, 60], [0, 10, 100]]
+///
+/// int * histogram_ptr[3] = { histogram[0].accelerator_pointer(), histogram[1]... };
+/// int * level_values_ptr[3] = { level_values[0].accelerator_pointer(), level_values[1]... };
+///
+/// size_t temporary_storage_size_bytes;
+/// // Get required size of the temporary storage
+/// rocprim::multi_histogram_range<4, 3>(
+///     nullptr, temporary_storage_size_bytes,
+///     samples.accelerator_pointer(), size,
+///     histogram_ptr, levels, level_values_ptr,
+///     acc_view
+/// );
+///
+/// // allocate temporary storage
+/// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
+///
+/// // compute histograms
+/// rocprim::multi_histogram_range<4, 3>(
+///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
+///     samples.accelerator_pointer(), size,
+///     histogram_ptr, levels, level_values_ptr,
+///     acc_view
+/// );
+/// // histogram: [[2, 4, 2], [7, 0, 1], [2, 6]]
+/// \endcode
+/// \endparblock
 template<
     unsigned int Channels,
     unsigned int ActiveChannels,
@@ -496,6 +1020,92 @@ void multi_histogram_range(void * temporary_storage,
     );
 }
 
+/// \brief Computes histograms from a two-dimensional region of multi-channel samples using the specified bin
+/// boundary levels.
+///
+/// \par
+/// * The two-dimensional region of interest within \p samples can be specified using the \p columns,
+/// \p rows and \p row_stride_bytes parameters.
+/// * The row stride must be a whole multiple of the sample data type size,
+/// i.e., <tt>(row_stride_bytes % sizeof(std::iterator_traits<SampleIterator>::value_type)) == 0</tt>.
+/// * The input is a sequence of <em>pixel</em> structures, where each pixel comprises
+/// a record of \p Channels consecutive data samples (e.g., \p Channels = 4 for <em>RGBA</em> samples).
+/// * The first \p ActiveChannels channels of total \p Channels channels will be used for computing histograms
+/// (e.g., \p ActiveChannels = 3 for computing histograms of only <em>RGB</em> from <em>RGBA</em> samples).
+/// * For channel<sub><em>i</em></sub> the number of histogram bins is (\p levels[i] - 1).
+/// * For channel<sub><em>i</em></sub> the range for bin<sub><em>j</em></sub> is
+/// [<tt>level_values[i][j]</tt>, <tt>level_values[i][j+1]</tt>).
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage in a null pointer.
+///
+/// \tparam Channels - number of channels interleaved in the input samples.
+/// \tparam ActiveChannels - number of channels being used for computing histograms.
+/// \tparam SampleIterator - random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam Counter - integer type for histogram bin counters.
+/// \tparam Level - type of histogram boundaries (levels)
+///
+/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the reduction operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] samples - iterator to the first element in the range of input samples.
+/// \param [in] columns - number of elements in each row of the region.
+/// \param [in] rows - number of rows of the region.
+/// \param [in] row_stride_bytes - number of bytes between starts of consecutive rows of the region.
+/// \param [out] histogram - pointers to the first element in the histogram range, one for each active channel.
+/// \param [in] levels - number of boundaries (levels) for histogram bins in each active channel.
+/// \param [in] level_values - pointer to the array of bin boundaries for each active channel.
+/// \param [in] acc_view - [optional] \p hc::accelerator_view object. The default value
+/// is \p hc::accelerator().get_default_view() (default view of the default accelerator).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \par Example
+/// \parblock
+/// In this example histograms for 3 channels (RGB) are computed on an array of 8-bit RGBA samples.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// hc::accelerator_view acc_view = ...;
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// unsigned int columns;           // e.g., 4
+/// unsigned int rows;              // e.g., 2
+/// size_t row_stride_bytes;        // e.g., 5 * sizeof(unsigned char)
+/// hc::array<unsigned char> samples;
+///                         // e.g., [(0, 0, 80, 0), (120, 0, 80, 0), (123, 0, 82, 0), (10, 1, 83, 0), (-, -, -, -),
+///                         //        (51, 1, 8, 0), (52, 1, 8, 0), (53, 0, 81, 0), (54, 50, 81, 0), (-, -, -, -)]
+/// hc::array<int> histogram[3];    // 3 empty arrays
+/// unsigned int levels[3];         // e.g., [4, 4, 3]
+/// hc::array<int> level_values[3]; // e.g., [[0, 50, 100, 200], [0, 20, 40, 60], [0, 10, 100]]
+///
+/// int * histogram_ptr[3] = { histogram[0].accelerator_pointer(), histogram[1]... };
+/// int * level_values_ptr[3] = { level_values[0].accelerator_pointer(), level_values[1]... };
+///
+/// size_t temporary_storage_size_bytes;
+/// // Get required size of the temporary storage
+/// rocprim::multi_histogram_range<4, 3>(
+///     nullptr, temporary_storage_size_bytes,
+///     samples.accelerator_pointer(), columns, rows, row_stride_bytes,
+///     histogram_ptr, levels, level_values_ptr,
+///     acc_view
+/// );
+///
+/// // allocate temporary storage
+/// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
+///
+/// // compute histograms
+/// rocprim::multi_histogram_range<4, 3>(
+///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
+///     samples.accelerator_pointer(), columns, rows, row_stride_bytes,
+///     histogram_ptr, levels, level_values_ptr,
+///     acc_view
+/// );
+/// // histogram: [[2, 4, 2], [7, 0, 1], [2, 6]]
+/// \endcode
+/// \endparblock
 template<
     unsigned int Channels,
     unsigned int ActiveChannels,
