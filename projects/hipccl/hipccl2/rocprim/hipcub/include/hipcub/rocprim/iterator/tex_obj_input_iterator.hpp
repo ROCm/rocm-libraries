@@ -18,20 +18,19 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_ITERATOR_HPP_
-#define ROCPRIM_ITERATOR_HPP_
+#ifndef HIPCUB_ROCPRIM_ITERATOR_TEX_OBJ_INPUT_ITERATOR_HPP_
+#define HIPCUB_ROCPRIM_ITERATOR_TEX_OBJ_INPUT_ITERATOR_HPP_
 
-// Meta configuration for rocPRIM
-#include "config.hpp"
+#include "../../config.hpp"
 
-#include "iterator/arg_index_iterator.hpp"
-#include "iterator/constant_iterator.hpp"
-#include "iterator/counting_iterator.hpp"
-#include "iterator/discard_iterator.hpp"
-#ifdef ROCPRIM_HIP_API
-#include "iterator/texture_cache_iterator.hpp"
-#endif
-#include "iterator/transform_iterator.hpp"
-#include "iterator/zip_iterator.hpp"
+BEGIN_HIPCUB_NAMESPACE
 
-#endif // ROCPRIM_ITERATOR_HPP_
+template<
+    typename T,
+    typename OffsetT = std::ptrdiff_t
+>
+using TexObjInputIterator = ::rocprim::texture_cache_iterator<T, OffsetT>;
+
+END_HIPCUB_NAMESPACE
+
+#endif // HIPCUB_ROCPRIM_ITERATOR_TEX_OBJ_INPUT_ITERATOR_HPP_
