@@ -30,6 +30,7 @@
 // Iterator
 #include "iterator/arg_index_input_iterator.hpp"
 #include "iterator/counting_input_iterator.hpp"
+#include "iterator/tex_obj_input_iterator.hpp"
 #include "iterator/transform_input_iterator.hpp"
 
 // Warp
