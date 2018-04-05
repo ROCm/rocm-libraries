@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef HIPCUB_ROCPRIM_HPP_
-#define HIPCUB_ROCPRIM_HPP_
+#ifndef HIPCUB_ROCPRIM_HIPCUB_HPP_
+#define HIPCUB_ROCPRIM_HIPCUB_HPP_
 
 #include "../config.hpp"
 
@@ -56,4 +56,4 @@
 #include "device/device_segmented_reduce.hpp"
 #include "device/device_select.hpp"
 
-#endif // HIPCUB_ROCPRIM_HPP_
+#endif // HIPCUB_ROCPRIM_HIPCUB_HPP_
