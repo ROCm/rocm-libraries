@@ -101,7 +101,7 @@ namespace detail
 ///
 /// // perform transform
 /// rocprim::transform(
-///     input.accelerator_pointer(), output.accelerator_pointer(), input.size(),
+///     input.accelerator_pointer(), output.accelerator_pointer(), size,
 ///     transform_op, acc_view, false
 /// );
 /// // output: [6, 7, 8, 9, 10, 11, 12, 13]
