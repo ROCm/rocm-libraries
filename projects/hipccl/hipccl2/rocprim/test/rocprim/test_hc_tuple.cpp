@@ -206,6 +206,23 @@ TEST(RocprimTupleTests, TupleAssignOperator)
 
     t6 = decltype(t7)();
     t7 = t6;
+
+    rocprim::tuple<int, int> t10(1, 2);
+    const rocprim::tuple<int, int>& t10_ref = t10;
+    rocprim::tuple<int, int> t11(10, 20);
+    t11 = t10_ref;
+    ASSERT_EQ(rocprim::get<0>(t11), 1);
+    ASSERT_EQ(rocprim::get<1>(t11), 2);
+
+    rocprim::tuple<int, int> t12(11, 12);
+    t12 = std::move(t10);
+    ASSERT_EQ(rocprim::get<0>(t12), 1);
+    ASSERT_EQ(rocprim::get<1>(t12), 2);
+
+    rocprim::tuple<float, double> t13(11, 12);
+    t13 = std::move(t10);
+    ASSERT_EQ(rocprim::get<0>(t13), float(1));
+    ASSERT_EQ(rocprim::get<1>(t13), double(2));
 }
 
 TEST(RocprimTupleTests, TupleComparisonOperators)
