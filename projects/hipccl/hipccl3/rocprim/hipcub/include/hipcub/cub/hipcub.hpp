@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef CUB_HIPCUB_HPP_
-#define CUB_HIPCUB_HPP_
+#ifndef HIPCUB_CUB_HIPCUB_HPP_
+#define HIPCUB_CUB_HIPCUB_HPP_
 
 #include "../config.hpp"
 
@@ -42,4 +42,4 @@ END_HIPCUB_NAMESPACE
 #include "device/device_scan.hpp"
 #include "device/device_select.hpp"
 
-#endif // CUB_HIPCUB_HPP_
+#endif // HIPCUB_CUB_HIPCUB_HPP_
