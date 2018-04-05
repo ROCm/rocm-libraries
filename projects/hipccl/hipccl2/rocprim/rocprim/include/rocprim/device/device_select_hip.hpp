@@ -119,6 +119,83 @@ void flag_unique_kernel(InputIterator input,
 
 } // end detail namespace
 
+/// \brief HIP parallel select primitive for device level using range of flags.
+///
+/// Performs a device-wide selection based on input \p flags. If a value from \p input
+/// should be selected and copied into \p output range the corresponding item from
+/// \p flags range should be set to such value that can be implicitly converted to
+/// \p true (\p bool type).
+///
+/// \par Overview
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage in a null pointer.
+/// * Ranges specified by \p input and \p flags must have at least \p size elements.
+/// * Range specified by \p output must have at least so many elements, that all positively
+/// flagged values can be copied into it.
+/// * Range specified by \p selected_count_output must have at least 1 element.
+/// * Values of \p flag range should be implicitly convertible to `bool` type.
+///
+/// \tparam InputIterator - random-access iterator type of the input range. It can be
+/// a simple pointer type.
+/// \tparam FlagIterator - random-access iterator type of the flag range. It can be
+/// a simple pointer type.
+/// \tparam OutputIterator - random-access iterator type of the output range. It can be
+/// a simple pointer type.
+/// \tparam SelectedCountOutputIterator - random-access iterator type of the selected_count_output
+/// value. It can be a simple pointer type.
+///
+/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the select operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input - iterator to the first element in the range to select values from.
+/// \param [in] flags - iterator to the selection flag corresponding to the first element from \p input range.
+/// \param [out] output - iterator to the first element in the output range.
+/// \param [out] selected_count_output - iterator to the total number of selected values (length of \p output).
+/// \param [in] size - number of element in the input range.
+/// \param [in] stream - [optional] HIP stream object. The default is \p 0 (default stream).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. The default value is \p false.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level select operation is performed on an array of
+/// integer values with array of <tt>char</tt>s used as flags.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t input_size;     // e.g., 8
+/// int * input;           // e.g., [1, 2, 3, 4, 5, 6, 7, 8]
+/// char * flags;          // e.g., [0, 1, 1, 0, 0, 1, 0, 1]
+/// int * output;          // empty array of 8 elements
+/// size_t * output_count; // empty array of 1 element
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::select(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, flags,
+///     output, output_count,
+///     input_size
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform selection
+/// rocprim::select(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, flags,
+///     output, output_count,
+///     input_size
+/// );
+/// // output: [2, 3, 6, 8]
+/// // output_count: 4
+/// \endcode
+/// \endparblock
 template<
     class InputIterator,
     class FlagIterator,
@@ -207,6 +284,86 @@ hipError_t select(void * temporary_storage,
     return hipSuccess;
 }
 
+/// \brief HIP parallel select primitive for device level using selection operator.
+///
+/// Performs a device-wide selection using selection operator. If a value \p x from \p input
+/// should be selected and copied into \p output range, then <tt>select_op(x)</tt> has to
+/// return \p true.
+///
+/// \par Overview
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage in a null pointer.
+/// * Range specified by \p input must have at least \p size elements.
+/// * Range specified by \p output must have at least so many elements, that all selected
+/// values can be copied into it.
+/// * Range specified by \p selected_count_output must have at least 1 element.
+///
+/// \tparam InputIterator - random-access iterator type of the input range. It can be
+/// a simple pointer type.
+/// \tparam OutputIterator - random-access iterator type of the output range. It can be
+/// a simple pointer type.
+/// \tparam SelectedCountOutputIterator - random-access iterator type of the selected_count_output
+/// value. It can be a simple pointer type.
+/// \tparam SelectOp - type of an unary selection operator.
+///
+/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the select operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input - iterator to the first element in the range to select values from.
+/// \param [out] output - iterator to the first element in the output range.
+/// \param [out] selected_count_output - iterator to the total number of selected values (length of \p output).
+/// \param [in] size - number of element in the input range.
+/// \param [in] select_op - unary function object that will be used for selecting values.
+/// The signature of the function should be equivalent to the following:
+/// <tt>bool f(const T &a);</tt>. The signature does not need to have
+/// <tt>const &</tt>, but function object must not modify the object passed to it.
+/// \param [in] stream - [optional] HIP stream object. The default is \p 0 (default stream).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. The default value is \p false.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level select operation is performed on an array of
+/// integer values, only even values are selected.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// auto select_op =
+///     [] __device__ (int a) -> bool
+///     {
+///         return (a%2) == 0;
+///     };
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t input_size;     // e.g., 8
+/// int * input;           // e.g., [1, 2, 3, 4, 5, 6, 7, 8]
+/// int * output;          // empty array of 8 elements
+/// size_t * output_count; // empty array of 1 element
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::select(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, output, output_count,
+///     select_op, input_size
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform selection
+/// rocprim::select(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, output, output_count,
+///     select_op, input_size
+/// );
+/// // output: [2, 4, 6, 8]
+/// // output_count: 4
+/// \endcode
+/// \endparblock
 template<
     class InputIterator,
     class OutputIterator,
@@ -298,6 +455,80 @@ hipError_t select(void * temporary_storage,
     return hipSuccess;
 }
 
+/// \brief HIP device-level parallel unique primitive.
+///
+/// From given \p input range unique primitive eliminates all but the first element from every
+/// consecutive group of equivalent elements and copies them into \p output.
+///
+/// \par Overview
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage in a null pointer.
+/// * Range specified by \p input must have at least \p size elements.
+/// * Range specified by \p output must have at least so many elements, that all selected
+/// values can be copied into it.
+/// * Range specified by \p unique_count_output must have at least 1 element.
+/// * By default <tt>InputIterator::value_type</tt>'s equality operator is used to check
+/// if elements are equivalent.
+///
+/// \tparam InputIterator - random-access iterator type of the input range. It can be
+/// a simple pointer type.
+/// \tparam OutputIterator - random-access iterator type of the output range. It can be
+/// a simple pointer type.
+/// \tparam UniqueCountOutputIterator - random-access iterator type of the unique_count_output
+/// value used to return number of unique values. It can be a simple pointer type.
+/// \tparam EqualityOp - type of an binary operator used to compare values for equality.
+///
+/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the unique operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input - iterator to the first element in the range to select values from.
+/// \param [out] output - iterator to the first element in the output range.
+/// \param [out] unique_count_output - iterator to the total number of selected values (length of \p output).
+/// \param [in] size - number of element in the input range.
+/// \param [in] equality_op - [optional] binary function object used to compare input values for equality.
+/// The signature of the function should be equivalent to the following:
+/// <tt>bool equal_to(const T &a, const T &b);</tt>. The signature does not need to have
+/// <tt>const &</tt>, but function object must not modify the object passed to it.
+/// \param [in] stream - [optional] HIP stream object. The default is \p 0 (default stream).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. The default value is \p false.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level unique operation is performed on an array of integer values.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t input_size;     // e.g., 8
+/// int * input;           // e.g., [1, 4, 2, 4, 4, 7, 7, 7]
+/// int * output;          // empty array of 8 elements
+/// size_t * output_count; // empty array of 1 element
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::unique(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, output, output_count,
+///     input_size
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform unique operation
+/// rocprim::unique(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, output, output_count,
+///     input_size
+/// );
+/// // output: [1, 4, 2, 4, 7]
+/// // output_count: 5
+/// \endcode
+/// \endparblock
 template<
     class InputIterator,
     class OutputIterator,
