@@ -681,6 +681,12 @@ public:
         base = std::forward<T>(v);
         return *this;
     }
+
+    tuple& operator=(const tuple& other) noexcept
+    {
+        base = other.base;
+        return *this;
+    }
     #else // For documentation
     /// \brief Copy assignment operator.
     /// \param other tuple to replace the contents of this tuple
