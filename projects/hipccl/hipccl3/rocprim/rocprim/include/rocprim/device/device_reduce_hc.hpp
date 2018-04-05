@@ -230,7 +230,7 @@ void reduce_impl(void * temporary_storage,
 /// rocprim::reduce(
 ///     nullptr, temporary_storage_size_bytes,
 ///     input.accelerator_pointer(), output.accelerator_pointer(), start_value,
-///     input.size(), min_op, acc_view, false
+///     size, min_op, acc_view, false
 /// );
 ///
 /// // allocate temporary storage
@@ -240,7 +240,7 @@ void reduce_impl(void * temporary_storage,
 /// rocprim::reduce(
 ///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
 ///     input.accelerator_pointer(), output.accelerator_pointer(), start_value,
-///     input.size(), min_op, acc_view, false
+///     size, min_op, acc_view, false
 /// );
 /// // output: [1]
 /// \endcode
@@ -329,7 +329,7 @@ void reduce(void * temporary_storage,
 /// // Get required size of the temporary storage
 /// rocprim::reduce(
 ///     nullptr, temporary_storage_size_bytes,
-///     input.accelerator_pointer(), output.accelerator_pointer(), input.size(),
+///     input.accelerator_pointer(), output.accelerator_pointer(), size,
 ///     rocprim::plus<int>(), acc_view, false
 /// );
 ///
@@ -339,7 +339,7 @@ void reduce(void * temporary_storage,
 /// // perform reduce
 /// rocprim::reduce(
 ///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
-///     input.accelerator_pointer(), output.accelerator_pointer(), input.size(),
+///     input.accelerator_pointer(), output.accelerator_pointer(), size,
 ///     rocprim::plus<int>(), acc_view, false
 /// );
 /// // output: [36]
