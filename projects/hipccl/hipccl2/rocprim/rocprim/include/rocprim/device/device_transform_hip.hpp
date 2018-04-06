@@ -26,6 +26,8 @@
 
 #include "../config.hpp"
 #include "../detail/various.hpp"
+#include "../types/tuple.hpp"
+#include "../iterator/zip_iterator.hpp"
 
 #include "detail/device_transform.hpp"
 
@@ -176,6 +178,86 @@ hipError_t transform(InputIterator input,
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("transform_kernel", size, start);
 
     return hipSuccess;
+}
+
+/// \brief HIP parallel device-level transform primitive for two inputs.
+///
+/// transform function performs a device-wide transformation operation
+/// on two input ranges using binary \p transform_op operator.
+///
+/// \par Overview
+/// * Ranges specified by \p input1, \p input2, and \p output must have at least \p size elements.
+///
+/// \tparam InputIterator1 - random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam InputIterator2 - random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam BinaryFunction - type of binary function used for transform.
+///
+/// \param [in] input1 - iterator to the first element in the 1st range to transform.
+/// \param [in] input2 - iterator to the first element in the 2nd range to transform.
+/// \param [out] output - iterator to the first element in the output range.
+/// \param [in] size - number of element in the input range.
+/// \param [in] transform_op - binary operation function object that will be used for transform.
+/// The signature of the function should be equivalent to the following:
+/// <tt>U f(const T1& a, const T2& b);</tt>. The signature does not need to have
+/// <tt>const &</tt>, but function object must not modify the object passed to it.
+/// \param [in] stream - [optional] HIP stream object. The default is \p 0 (default stream).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced. Default value is \p false.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level transform operation is performed on two arrays of
+/// integer values (element-wise sum is performed).
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// // custom transform function
+/// auto transform_op =
+///     [] __device__ (int a, int b) -> int
+///     {
+///         return a + b;
+///     };
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t size;   // e.g., 8
+/// int* input1;   // e.g., [1, 2, 3, 4, 5, 6, 7, 8]
+/// int* input2;   // e.g., [1, 2, 3, 4, 5, 6, 7, 8]
+/// int* output;   // empty array of 8 elements
+///
+/// // perform transform
+/// rocprim::transform(
+///     input1, input2, output, input1.size(), transform_op
+/// );
+/// // output: [2, 4, 6, 8, 10, 12, 14, 16]
+/// \endcode
+/// \endparblock
+template<
+    class InputIterator1,
+    class InputIterator2,
+    class OutputIterator,
+    class BinaryFunction
+>
+inline
+hipError_t transform(InputIterator1 input1,
+                     InputIterator2 input2,
+                     OutputIterator output,
+                     const size_t size,
+                     BinaryFunction transform_op,
+                     const hipStream_t stream = 0,
+                     bool debug_synchronous = false)
+{
+    using value_type1 = typename std::iterator_traits<InputIterator1>::value_type;
+    using value_type2 = typename std::iterator_traits<InputIterator2>::value_type;
+    return transform(
+        ::rocprim::make_zip_iterator(::rocprim::make_tuple(input1, input2)), output,
+        size, detail::unpack_binary_op<value_type1, value_type2, BinaryFunction>(transform_op),
+        stream, debug_synchronous
+    );
 }
 
 #undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
