@@ -114,6 +114,7 @@ add_rocprim_test_hip("rocprim.hip.device_histogram" test_hip_device_histogram.cp
 add_rocprim_test_hip("rocprim.hip.device_radix_sort" test_hip_device_radix_sort.cpp)
 add_rocprim_test_hip("rocprim.hip.device_reduce_by_key" test_hip_device_reduce_by_key.cpp)
 add_rocprim_test_hip("rocprim.hip.device_reduce" test_hip_device_reduce.cpp)
+add_rocprim_test_hip("rocprim.hip.device_run_length_encode" test_hip_device_run_length_encode.cpp)
 add_rocprim_test_hip("rocprim.hip.device_scan" test_hip_device_scan.cpp)
 add_rocprim_test_hip("rocprim.hip.device_segmented_radix_sort" test_hip_device_segmented_radix_sort.cpp)
 add_rocprim_test_hip("rocprim.hip.device_segmented_reduce" test_hip_device_segmented_reduce.cpp)
