@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_DEVICE_DEVICE_RUN_LENGTH_ENCODE_HIP_HPP_
-#define ROCPRIM_DEVICE_DEVICE_RUN_LENGTH_ENCODE_HIP_HPP_
+#ifndef ROCPRIM_DEVICE_DEVICE_RUN_LENGTH_ENCODE_HC_HPP_
+#define ROCPRIM_DEVICE_DEVICE_RUN_LENGTH_ENCODE_HC_HPP_
 
 #include <type_traits>
 #include <iterator>
@@ -32,25 +32,23 @@
 #include "../iterator/discard_iterator.hpp"
 #include "../iterator/zip_iterator.hpp"
 
-#include "device_reduce_by_key_hip.hpp"
-#include "device_select_hip.hpp"
+#include "device_reduce_by_key_hc.hpp"
+#include "device_select_hc.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// \addtogroup devicemodule_hip
+/// \addtogroup devicemodule_hc
 /// @{
 
 namespace detail
 {
 
-#define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start) \
+#define ROCPRIM_DETAIL_HC_SYNC(name, size, start) \
     { \
-        if(error != hipSuccess) return error; \
         if(debug_synchronous) \
         { \
             std::cout << name << "(" << size << ")"; \
-            auto error = hipStreamSynchronize(stream); \
-            if(error != hipSuccess) return error; \
+            acc_view.wait(); \
             auto end = std::chrono::high_resolution_clock::now(); \
             auto d = std::chrono::duration_cast<std::chrono::duration<double>>(end - start); \
             std::cout << " " << d.count() * 1000 << " ms" << '\n'; \
@@ -66,25 +64,25 @@ template<
     class RunsCountOutputIterator
 >
 inline
-hipError_t run_length_encode(void * temporary_storage,
-                             size_t& storage_size,
-                             InputIterator input,
-                             unsigned int size,
-                             UniqueOutputIterator unique_output,
-                             CountsOutputIterator counts_output,
-                             RunsCountOutputIterator runs_count_output,
-                             hipStream_t stream = 0,
-                             bool debug_synchronous = false)
+void run_length_encode(void * temporary_storage,
+                       size_t& storage_size,
+                       InputIterator input,
+                       unsigned int size,
+                       UniqueOutputIterator unique_output,
+                       CountsOutputIterator counts_output,
+                       RunsCountOutputIterator runs_count_output,
+                       hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
+                       bool debug_synchronous = false)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     using count_type = unsigned int;
 
-    return ::rocprim::reduce_by_key(
+    ::rocprim::reduce_by_key(
         temporary_storage, storage_size,
         input, make_constant_iterator<count_type>(1), size,
         unique_output, counts_output, runs_count_output,
         ::rocprim::plus<count_type>(), ::rocprim::equal_to<input_type>(),
-        stream, debug_synchronous
+        acc_view, debug_synchronous
     );
 }
 
@@ -95,31 +93,29 @@ template<
     class RunsCountOutputIterator
 >
 inline
-hipError_t run_length_encode_non_trivial_runs(void * temporary_storage,
-                                              size_t& storage_size,
-                                              InputIterator input,
-                                              unsigned int size,
-                                              OffsetsOutputIterator offsets_output,
-                                              CountsOutputIterator counts_output,
-                                              RunsCountOutputIterator runs_count_output,
-                                              hipStream_t stream = 0,
-                                              bool debug_synchronous = false)
+void run_length_encode_non_trivial_runs(void * temporary_storage,
+                                        size_t& storage_size,
+                                        InputIterator input,
+                                        unsigned int size,
+                                        OffsetsOutputIterator offsets_output,
+                                        CountsOutputIterator counts_output,
+                                        RunsCountOutputIterator runs_count_output,
+                                        hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
+                                        bool debug_synchronous = false)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     using offset_type = unsigned int;
     using count_type = unsigned int;
     using offset_count_pair = typename ::rocprim::tuple<offset_type, count_type>;
 
-    hipError_t error;
-
-    auto reduce_op = [] __device__ (const offset_count_pair& a, const offset_count_pair& b)
+    auto reduce_op = [](const offset_count_pair& a, const offset_count_pair& b) [[hc]]
     {
         return offset_count_pair(
             ::rocprim::get<0>(a), // Always use offset of the first item of the run
             ::rocprim::get<1>(a) + ::rocprim::get<1>(b) // Number of items in the run
         );
     };
-    auto non_trivial_runs_select_op = [] __device__ (const offset_count_pair& a)
+    auto non_trivial_runs_select_op = [](const offset_count_pair& a) [[hc]]
     {
         return ::rocprim::get<1>(a) > 1;
     };
@@ -130,7 +126,7 @@ hipError_t run_length_encode_non_trivial_runs(void * temporary_storage,
 
     // Calculate size of temporary storage for reduce_by_key operation
     size_t reduce_by_key_bytes;
-    error = ::rocprim::reduce_by_key(
+    ::rocprim::reduce_by_key(
         nullptr, reduce_by_key_bytes,
         input,
         ::rocprim::make_zip_iterator(
@@ -144,23 +140,21 @@ hipError_t run_length_encode_non_trivial_runs(void * temporary_storage,
         ::rocprim::make_zip_iterator(::rocprim::make_tuple(offsets_tmp, counts_tmp)),
         all_runs_count_tmp,
         reduce_op, ::rocprim::equal_to<input_type>(),
-        stream, debug_synchronous
+        acc_view, debug_synchronous
     );
-    if(error != hipSuccess) return error;
     reduce_by_key_bytes = ::rocprim::detail::align_size(reduce_by_key_bytes);
 
     // Calculate size of temporary storage for select operation
     size_t select_bytes;
-    error = ::rocprim::select(
+    ::rocprim::select(
         nullptr, select_bytes,
         ::rocprim::make_zip_iterator(::rocprim::make_tuple(offsets_tmp, counts_tmp)),
         ::rocprim::make_zip_iterator(::rocprim::make_tuple(offsets_output, counts_output)),
         runs_count_output,
         size,
         non_trivial_runs_select_op,
-        stream, debug_synchronous
+        acc_view, debug_synchronous
     );
-    if(error != hipSuccess) return error;
     select_bytes = ::rocprim::detail::align_size(select_bytes);
 
     const size_t offsets_tmp_bytes = ::rocprim::detail::align_size(size * sizeof(offset_type));
@@ -170,7 +164,7 @@ hipError_t run_length_encode_non_trivial_runs(void * temporary_storage,
     {
         storage_size = ::rocprim::max(reduce_by_key_bytes, select_bytes) +
             offsets_tmp_bytes + counts_tmp_bytes + all_runs_count_tmp_bytes;
-        return hipSuccess;
+        return;
     }
 
     char * ptr = reinterpret_cast<char *>(temporary_storage);
@@ -184,7 +178,7 @@ hipError_t run_length_encode_non_trivial_runs(void * temporary_storage,
     std::chrono::high_resolution_clock::time_point start;
 
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    error = ::rocprim::reduce_by_key(
+    ::rocprim::reduce_by_key(
         temporary_storage, reduce_by_key_bytes,
         input,
         ::rocprim::make_transform_iterator( // Workaround: without transform zip_iterator returns zeros
@@ -201,38 +195,33 @@ hipError_t run_length_encode_non_trivial_runs(void * temporary_storage,
         ::rocprim::make_zip_iterator(rocprim::make_tuple(offsets_tmp, counts_tmp)),
         all_runs_count_tmp,
         reduce_op, ::rocprim::equal_to<input_type>(),
-        stream, debug_synchronous
+        acc_view, debug_synchronous
     );
-    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("rocprim::reduce_by_key", size, start)
+    ROCPRIM_DETAIL_HC_SYNC("rocprim::reduce_by_key", size, start)
 
     // Read count of all runs (including trivial runs)
     count_type all_runs_count;
-    error = hipMemcpyAsync(&all_runs_count, all_runs_count_tmp, sizeof(count_type), hipMemcpyDeviceToHost, stream);
-    if(error != hipSuccess) return error;
-    error = hipStreamSynchronize(stream);
-    if(error != hipSuccess) return error;
+    hc::copy(hc::array<count_type>(hc::extent<1>(1), acc_view, all_runs_count_tmp), &all_runs_count);
 
     // Select non-trivial runs
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    error = ::rocprim::select(
+    ::rocprim::select(
         temporary_storage, select_bytes,
         ::rocprim::make_zip_iterator(::rocprim::make_tuple(offsets_tmp, counts_tmp)),
         ::rocprim::make_zip_iterator(::rocprim::make_tuple(offsets_output, counts_output)),
         runs_count_output,
         all_runs_count,
         non_trivial_runs_select_op,
-        stream, debug_synchronous
+        acc_view, debug_synchronous
     );
-    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("rocprim::select", all_runs_count, start)
-
-    return hipSuccess;
+    ROCPRIM_DETAIL_HC_SYNC("rocprim::select", all_runs_count, start)
 }
 
-#undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
+#undef ROCPRIM_DETAIL_HC_SYNC
 
 /// @}
-// end of group devicemodule_hip
+// end of group devicemodule_hc
 
 END_ROCPRIM_NAMESPACE
 
-#endif // ROCPRIM_DEVICE_DEVICE_RUN_LENGTH_ENCODE_HIP_HPP_
+#endif // ROCPRIM_DEVICE_DEVICE_RUN_LENGTH_ENCODE_HC_HPP_
