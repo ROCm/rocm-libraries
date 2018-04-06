@@ -52,6 +52,7 @@
     #include "device/device_radix_sort_hc.hpp"
     #include "device/device_reduce_by_key_hc.hpp"
     #include "device/device_reduce_hc.hpp"
+    #include "device/device_run_length_encode_hc.hpp"
     #include "device/device_scan_hc.hpp"
     #include "device/device_segmented_radix_sort_hc.hpp"
     #include "device/device_segmented_reduce_hc.hpp"
