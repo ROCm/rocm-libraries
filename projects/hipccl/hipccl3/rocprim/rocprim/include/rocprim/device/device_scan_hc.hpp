@@ -136,7 +136,7 @@ void scan_impl(void * temporary_storage,
             nested_temp_storage_size,
             block_prefixes, // input
             block_prefixes, // output
-            char(0), // dummy initial value
+            result_type(), // dummy initial value
             number_of_blocks, // size
             scan_op,
             acc_view,
@@ -268,13 +268,20 @@ void inclusive_scan(void * temporary_storage,
                     hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
                     const bool debug_synchronous = false)
 {
+    using input_type = typename std::iterator_traits<InputIterator>::value_type;
+    #ifdef __cpp_lib_is_invocable
+    using result_type = typename std::invoke_result<BinaryFunction, input_type, input_type>::type;
+    #else
+    using result_type = typename std::result_of<BinaryFunction(input_type, input_type)>::type;
+    #endif
+
     // TODO: Those values should depend on type size
     constexpr unsigned int block_size = 256;
     constexpr unsigned int items_per_thread = 4;
     return detail::scan_impl<block_size, items_per_thread, false>(
         temporary_storage, storage_size,
-        // char(0) is a dummy initial value
-        input, output, char(0), size,
+        // result_type() is a dummy initial value (not used)
+        input, output, result_type(), size,
         scan_op, acc_view, debug_synchronous
     );
 }

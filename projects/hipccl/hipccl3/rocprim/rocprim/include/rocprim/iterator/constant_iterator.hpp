@@ -82,7 +82,7 @@ public:
     ~constant_iterator() = default;
 
     ROCPRIM_HOST_DEVICE inline
-    reference operator*() const
+    value_type operator*() const
     {
         return value_;
     }
