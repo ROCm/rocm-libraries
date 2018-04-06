@@ -247,6 +247,7 @@ hipError_t select(void * temporary_storage,
     auto indices = reinterpret_cast<unsigned int*>(
         static_cast<unsigned char*>(temporary_storage) + scan_storage_size
     );
+    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
     error = ::rocprim::exclusive_scan(
         temporary_storage, scan_storage_size,
         flags, indices, 0U, size, ::rocprim::plus<unsigned int>(),
@@ -416,6 +417,7 @@ hipError_t select(void * temporary_storage,
     auto indices = reinterpret_cast<unsigned int*>(
         static_cast<unsigned char*>(temporary_storage) + scan_storage_size
     );
+    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
     error = ::rocprim::exclusive_scan(
         temporary_storage, scan_storage_size,
         ::rocprim::make_transform_iterator(input, select_op),
@@ -597,6 +599,7 @@ hipError_t unique(void * temporary_storage,
         {
             return !equality_op(a, b);
         };
+    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
     hipLaunchKernelGGL(
         HIP_KERNEL_NAME(detail::flag_unique_kernel<
             block_size, items_per_thread,

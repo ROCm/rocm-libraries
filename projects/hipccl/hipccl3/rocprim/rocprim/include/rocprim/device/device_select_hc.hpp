@@ -183,6 +183,7 @@ void select(void * temporary_storage,
     auto indices = reinterpret_cast<unsigned int*>(
         static_cast<unsigned char*>(temporary_storage) + scan_storage_size
     );
+    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
     ::rocprim::exclusive_scan(
         temporary_storage, scan_storage_size,
         flags, indices, 0U, size, ::rocprim::plus<unsigned int>(),
@@ -355,6 +356,7 @@ void select(void * temporary_storage,
     auto indices = reinterpret_cast<unsigned int*>(
         static_cast<unsigned char*>(temporary_storage) + scan_storage_size
     );
+    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
     ::rocprim::exclusive_scan(
         temporary_storage, scan_storage_size,
         ::rocprim::make_transform_iterator(input, select_op),
@@ -539,6 +541,7 @@ void unique(void * temporary_storage,
         {
             return !equality_op(a, b);
         };
+    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
     hc::parallel_for_each(
         acc_view,
         hc::tiled_extent<1>(number_of_blocks * block_size, block_size),
