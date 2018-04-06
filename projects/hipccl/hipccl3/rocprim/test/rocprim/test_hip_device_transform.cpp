@@ -63,9 +63,6 @@ public:
 };
 
 typedef ::testing::Types<
-    // -----------------------------------------------------------------------
-    //
-    // -----------------------------------------------------------------------
     DeviceTransformParams<int>,
     DeviceTransformParams<unsigned long>,
     DeviceTransformParams<short, int>,
@@ -90,7 +87,7 @@ TYPED_TEST_CASE(RocprimDeviceTransformTests, RocprimDeviceTransformTestsParams);
 template<class T>
 struct transform
 {
-    __device__ __host__
+    __device__ __host__ inline
     constexpr T operator()(const T& a) const
     {
         return a + 5;
@@ -161,6 +158,99 @@ TYPED_TEST(RocprimDeviceTransformTests, Transform)
         }
 
         hipFree(d_input);
+        hipFree(d_output);
+    }
+}
+
+template<class T1, class T2, class U>
+struct binary_transform
+{
+    __device__ __host__ inline
+    constexpr U operator()(const T1& a, const T2& b) const
+    {
+        return a + b;
+    }
+};
+
+TYPED_TEST(RocprimDeviceTransformTests, BinaryTransform)
+{
+    using T1 = typename TestFixture::input_type;
+    using T2 = typename TestFixture::input_type;
+    using U = typename TestFixture::output_type;
+    const bool debug_synchronous = TestFixture::debug_synchronous;
+
+    const std::vector<size_t> sizes = get_sizes();
+    for(auto size : sizes)
+    {
+        hipStream_t stream = 0; // default
+
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+        // Generate data
+        std::vector<T1> input1 = test_utils::get_random_data<T1>(size, 1, 100);
+        std::vector<T2> input2 = test_utils::get_random_data<T2>(size, 1, 100);
+        std::vector<U> output(input1.size(), 0);
+
+        T1 * d_input1;
+        T2 * d_input2;
+        U * d_output;
+        HIP_CHECK(hipMalloc(&d_input1, input1.size() * sizeof(T1)));
+        HIP_CHECK(hipMalloc(&d_input2, input2.size() * sizeof(T2)));
+        HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(U)));
+        HIP_CHECK(
+            hipMemcpy(
+                d_input1, input1.data(),
+                input1.size() * sizeof(T1),
+                hipMemcpyHostToDevice
+            )
+        );
+        HIP_CHECK(
+            hipMemcpy(
+                d_input2, input2.data(),
+                input2.size() * sizeof(T2),
+                hipMemcpyHostToDevice
+            )
+        );
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Calculate expected results on host
+        std::vector<U> expected(input1.size());
+        std::transform(
+            input1.begin(), input1.end(), input2.begin(),
+            expected.begin(), binary_transform<T1, T2, U>()
+        );
+
+        // Run
+        HIP_CHECK(
+            rocprim::transform(
+                d_input1, d_input2, d_output, input1.size(),
+                binary_transform<T1, T2, U>(), stream, debug_synchronous
+            )
+        );
+        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Copy output to host
+        HIP_CHECK(
+            hipMemcpy(
+                output.data(), d_output,
+                output.size() * sizeof(U),
+                hipMemcpyDeviceToHost
+            )
+        );
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Check if output values are as expected
+        for(size_t i = 0; i < output.size(); i++)
+        {
+            SCOPED_TRACE(testing::Message() << "where index = " << i);
+            auto diff = std::max<U>(std::abs(0.01f * expected[i]), U(0.01f));
+            if(std::is_integral<U>::value) diff = 0;
+            ASSERT_NEAR(output[i], expected[i], diff);
+        }
+
+        hipFree(d_input1);
+        hipFree(d_input2);
         hipFree(d_output);
     }
 }
