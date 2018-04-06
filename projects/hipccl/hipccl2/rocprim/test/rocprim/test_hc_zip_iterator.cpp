@@ -331,3 +331,127 @@ TEST(RocprimZipIteratorTests, TransformReduce)
     if(std::is_integral<U2>::value) diff2 = 0;
     ASSERT_NEAR(output2[0], expected2, diff2);
 }
+
+TEST(RocprimZipIteratorTests, ScanByKey)
+{
+    using T1 = int;
+    using T2 = unsigned int;
+    using U1 = T1;
+    using U2 = T2;
+    const bool debug_synchronous = false;
+    const size_t size = 1024 * 16;
+
+    hc::accelerator acc;
+    hc::accelerator_view acc_view = acc.create_view();
+
+    // Generate data
+    std::vector<T1> input = test_utils::get_random_data<T1>(size, 1, 100);
+    std::vector<T2> keys = test_utils::get_random_data<T2>(size, 1, 16);
+    std::sort(keys.begin(), keys.end());
+
+    hc::array<T1> d_input(hc::extent<1>(size), input.begin(), acc_view);
+    hc::array<T2> d_keys(hc::extent<1>(size), keys.begin(), acc_view);
+    hc::array<U1> d_output(hc::extent<1>(size), acc_view);
+    hc::array<U2> d_output_keys(hc::extent<1>(size), acc_view);
+    acc_view.wait();
+
+    // scan function
+    auto scan_op =
+        [](const rocprim::tuple<T1, T2>& t1,
+           const rocprim::tuple<T1, T2>& t2) [[hc]] [[cpu]]
+            -> rocprim::tuple<T1, T2>
+        {
+            if(rocprim::get<1>(t1) == rocprim::get<1>(t2))
+            {
+                return rocprim::make_tuple(
+                    rocprim::get<0>(t1) + rocprim::get<0>(t2),
+                    rocprim::get<1>(t2)
+                );
+            }
+            return t2;
+        };
+
+    // Calculate expected results on host
+    std::vector<U1> expected(input.size());
+    std::vector<U2> expected_keys(keys.size());
+    std::partial_sum(
+        rocprim::make_zip_iterator(
+            rocprim::make_tuple(input.begin(), keys.begin())
+        ),
+        rocprim::make_zip_iterator(
+            rocprim::make_tuple(input.end(), keys.end())
+        ),
+        rocprim::make_zip_iterator(
+            rocprim::make_tuple(expected.begin(), expected_keys.begin())
+        ),
+        scan_op
+    );
+
+    // temp storage
+    size_t temp_storage_size_bytes;
+    // Get size of d_temp_storage
+    rocprim::inclusive_scan(
+        nullptr,
+        temp_storage_size_bytes,
+        rocprim::make_zip_iterator(
+            rocprim::make_tuple(
+                d_input.accelerator_pointer(),
+                d_keys.accelerator_pointer()
+            )
+        ),
+        rocprim::make_zip_iterator(
+            rocprim::make_tuple(
+                d_output.accelerator_pointer(),
+                d_output_keys.accelerator_pointer()
+            )
+        ),
+        input.size(),
+        scan_op,
+        acc_view,
+        debug_synchronous
+    );
+    acc_view.wait();
+
+    // temp_storage_size_bytes must be >0
+    ASSERT_GT(temp_storage_size_bytes, 0);
+
+    // allocate temporary storage
+    hc::array<char> d_temp_storage(temp_storage_size_bytes, acc_view);
+    acc_view.wait();
+
+    // Run
+    rocprim::inclusive_scan(
+        d_temp_storage.accelerator_pointer(),
+        temp_storage_size_bytes,
+        rocprim::make_zip_iterator(
+            rocprim::make_tuple(
+                d_input.accelerator_pointer(),
+                d_keys.accelerator_pointer()
+            )
+        ),
+        rocprim::make_zip_iterator(
+            rocprim::make_tuple(
+                d_output.accelerator_pointer(),
+                d_output_keys.accelerator_pointer()
+            )
+        ),
+        input.size(),
+        scan_op,
+        acc_view,
+        debug_synchronous
+    );
+    acc_view.wait();
+
+    // Check if output values are as expected
+    std::vector<U1> output = d_output;
+    std::vector<U2> output_keys = d_output_keys;
+    for(size_t i = 0; i < output.size(); i++)
+    {
+        SCOPED_TRACE(testing::Message() << "where index = " << i);
+
+        auto diff1 = std::max<U1>(std::abs(0.01f * expected[i]), U1(0.01f));
+        if(std::is_integral<U1>::value) diff1 = 0;
+        ASSERT_NEAR(output[i], expected[i], diff1);
+        ASSERT_EQ(output_keys[i], expected_keys[i]);
+    }
+}
