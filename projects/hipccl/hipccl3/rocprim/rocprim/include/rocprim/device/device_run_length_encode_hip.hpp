@@ -59,6 +59,84 @@ namespace detail
 
 } // end detail namespace
 
+/// \brief HIP parallel run-length encoding for device level.
+///
+/// run_length_encode function performs a device-wide run-length encoding of runs (groups)
+/// of consecutive values. The first value of each run is copied to \p unique_output and
+/// the length of the run is written to \p counts_output.
+/// The total number of runs is written to \p runs_count_output.
+///
+/// \par Overview
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage in a null pointer.
+/// * Range specified by \p input must have at least \p size elements.
+/// * Range specified by \p runs_count_output must have at least 1 element.
+/// * Ranges specified by \p unique_output and \p counts_output must have at least
+/// <tt>*runs_count_output</tt> (i.e. the number of runs) elements.
+///
+/// \tparam InputIterator - random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam UniqueOutputIterator - random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam CountsOutputIterator - random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam RunsCountOutputIterator - random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+///
+/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input - iterator to the first element in the range of values.
+/// \param [in] size - number of element in the input range.
+/// \param [out] unique_output - iterator to the first element in the output range of unique values.
+/// \param [out] counts_output - iterator to the first element in the output range of lenghts.
+/// \param [out] runs_count_output - iterator to total number of runs.
+/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \returns \p hipSuccess (\p 0) after successful operation; otherwise a HIP runtime error of
+/// type \p hipError_t.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level run-length encoding operation is performed on an array of
+/// integer values.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t input_size;          // e.g., 8
+/// int * input;                // e.g., [1, 1, 1, 2, 10, 10, 10, 88]
+/// int * unique_output;        // empty array of at least 4 elements
+/// int * counts_output;        // empty array of at least 4 elements
+/// int * runs_count_output;    // empty array of 1 element
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::run_length_encode(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, input_size,
+///     unique_output, counts_output, runs_count_output
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform encoding
+/// rocprim::run_length_encode(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, input_size,
+///     unique_output, counts_output, runs_count_output
+/// );
+/// // unique_output:     [1, 2, 10, 88]
+/// // counts_output:     [3, 1,  3,  1]
+/// // runs_count_output: [4]
+/// \endcode
+/// \endparblock
 template<
     class InputIterator,
     class UniqueOutputIterator,
@@ -88,6 +166,85 @@ hipError_t run_length_encode(void * temporary_storage,
     );
 }
 
+/// \brief HIP parallel run-length encoding of non-trivial runs for device level.
+///
+/// run_length_encode_non_trivial_runs function performs a device-wide run-length encoding of
+/// non-trivial runs (groups) of consecutive values (groups of more than one element).
+/// The offset of the first value of each non-trivial run is copied to \p offsets_output and
+/// the length of the run (the count of elements) is written to \p counts_output.
+/// The total number of non-trivial runs is written to \p runs_count_output.
+///
+/// \par Overview
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage in a null pointer.
+/// * Range specified by \p input must have at least \p size elements.
+/// * Range specified by \p runs_count_output must have at least 1 element.
+/// * Ranges specified by \p offsets_output and \p counts_output must have at least
+/// <tt>*runs_count_output</tt> (i.e. the number of non-trivial runs) elements.
+///
+/// \tparam InputIterator - random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam OffsetsOutputIterator - random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam CountsOutputIterator - random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam RunsCountOutputIterator - random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+///
+/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input - iterator to the first element in the range of values.
+/// \param [in] size - number of element in the input range.
+/// \param [out] offsets_output - iterator to the first element in the output range of offsets.
+/// \param [out] counts_output - iterator to the first element in the output range of lenghts.
+/// \param [out] runs_count_output - iterator to total number of runs.
+/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \returns \p hipSuccess (\p 0) after successful operation; otherwise a HIP runtime error of
+/// type \p hipError_t.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level run-length encoding of non-trivial runs is performed on an array of
+/// integer values.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t input_size;          // e.g., 8
+/// int * input;                // e.g., [1, 1, 1, 2, 10, 10, 10, 88]
+/// int * offsets_output;       // empty array of at least 2 elements
+/// int * counts_output;        // empty array of at least 2 elements
+/// int * runs_count_output;    // empty array of 1 element
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::run_length_encode_non_trivial_runs(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, input_size,
+///     offsets_output, counts_output, runs_count_output
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform encoding
+/// rocprim::run_length_encode_non_trivial_runs(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, input_size,
+///     offsets_output, counts_output, runs_count_output
+/// );
+/// // offsets_output:    [0, 4]
+/// // counts_output:     [3, 3]
+/// // runs_count_output: [2]
+/// \endcode
+/// \endparblock
 template<
     class InputIterator,
     class OffsetsOutputIterator,
