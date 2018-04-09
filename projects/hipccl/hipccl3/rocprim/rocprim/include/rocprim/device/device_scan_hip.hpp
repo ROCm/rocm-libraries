@@ -44,12 +44,12 @@ template<
     class InputIterator,
     class OutputIterator,
     class BinaryFunction,
-    class InitValueType
+    class ResultType
 >
 __global__
 void single_scan_kernel(InputIterator input,
                         const size_t size,
-                        InitValueType initial_value,
+                        ResultType initial_value,
                         OutputIterator output,
                         BinaryFunction scan_op)
 {
@@ -65,13 +65,13 @@ template<
     unsigned int ItemsPerThread,
     class InputIterator,
     class BinaryFunction,
-    class ScanOpResultType
+    class ResultType
 >
 __global__
 void block_reduce_kernel(InputIterator input,
                          const size_t size,
                          BinaryFunction scan_op,
-                         ScanOpResultType * block_prefixes)
+                         ResultType * block_prefixes)
 {
     block_reduce_kernel_impl<BlockSize, ItemsPerThread>(
         input, size, scan_op, block_prefixes
@@ -85,16 +85,15 @@ template<
     class InputIterator,
     class OutputIterator,
     class BinaryFunction,
-    class InitValueType,
-    class ScanOpResultType
+    class ResultType
 >
 __global__
 void final_scan_kernel(InputIterator input,
                        const size_t size,
                        OutputIterator output,
-                       const InitValueType initial_value,
+                       const ResultType initial_value,
                        BinaryFunction scan_op,
-                       ScanOpResultType * block_prefixes)
+                       ResultType * block_prefixes)
 {
     final_scan_kernel_impl<BlockSize, ItemsPerThread, Exclusive>(
         input, size, output, initial_value, scan_op, block_prefixes
@@ -226,13 +225,13 @@ hipError_t scan_impl(void * temporary_storage,
                 block_size, items_per_thread,
                 Exclusive, // flag for exclusive scan operation
                 InputIterator, OutputIterator,
-                BinaryFunction, InitValueType, result_type
+                BinaryFunction, result_type
             >),
             dim3(grid_size), dim3(block_size), 0, stream,
             input,
             size,
             output,
-            initial_value,
+            static_cast<result_type>(initial_value),
             scan_op,
             block_prefixes
         );
@@ -251,7 +250,7 @@ hipError_t scan_impl(void * temporary_storage,
                 InputIterator, OutputIterator, BinaryFunction
             >),
             dim3(1), dim3(single_scan_block_size), 0, stream,
-            input, size, initial_value, output, scan_op
+            input, size, static_cast<result_type>(initial_value), output, scan_op
         );
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("single_scan_kernel", size, start);
     }
