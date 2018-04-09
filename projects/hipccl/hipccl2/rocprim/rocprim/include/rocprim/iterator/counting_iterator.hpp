@@ -53,8 +53,9 @@ public:
     /// The type of the value that can be obtained by dereferencing the iterator.
     using value_type = typename std::remove_const<Incrementable>::type;
     /// \brief A reference type of the type iterated over (\p value_type).
-    /// It's `const` since counting_iterator is a read-only iterator.
-    using reference = const value_type&; // counting_iterator is not writable
+    /// It's same as `value_type` since constant_iterator is a read-only
+    /// iterator and does not have underlying buffer.
+    using reference = value_type; // counting_iterator is not writable
     /// \brief A pointer type of the type iterated over (\p value_type).
     /// It's `const` since counting_iterator is a read-only iterator.
     using pointer = const value_type*; // counting_iterator is not writable
