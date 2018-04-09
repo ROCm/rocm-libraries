@@ -54,8 +54,9 @@ public:
     /// The type of the value that can be obtained by dereferencing the iterator.
     using value_type = typename std::remove_const<ValueType>::type;
     /// \brief A reference type of the type iterated over (\p value_type).
-    /// It's `const` since constant_iterator is a read-only iterator.
-    using reference = const value_type&; // constant_iterator is not writable
+    /// It's same as `value_type` since constant_iterator is a read-only
+    /// iterator and does not have underlying buffer.
+    using reference = value_type; // constant_iterator is not writable
     /// \brief A pointer type of the type iterated over (\p value_type).
     /// It's `const` since constant_iterator is a read-only iterator.
     using pointer = const value_type*; // constant_iterator is not writable
@@ -126,26 +127,26 @@ public:
     ROCPRIM_HOST_DEVICE inline
     constant_iterator operator+(difference_type distance) const
     {
-        return constant_iterator(value_, index_ + static_cast<value_type>(distance));
+        return constant_iterator(value_, index_ + distance);
     }
 
     ROCPRIM_HOST_DEVICE inline
     constant_iterator& operator+=(difference_type distance)
     {
-        index_ += static_cast<value_type>(distance);
+        index_ += distance;
         return *this;
     }
 
     ROCPRIM_HOST_DEVICE inline
     constant_iterator operator-(difference_type distance) const
     {
-        return constant_iterator(value_, index_ - static_cast<value_type>(distance));
+        return constant_iterator(value_, index_ - distance);
     }
 
     ROCPRIM_HOST_DEVICE inline
     constant_iterator& operator-=(difference_type distance)
     {
-        index_ -= static_cast<value_type>(distance);
+        index_ -= distance;
         return *this;
     }
 
