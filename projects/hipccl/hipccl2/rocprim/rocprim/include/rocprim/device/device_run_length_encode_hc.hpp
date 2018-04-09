@@ -344,14 +344,11 @@ void run_length_encode_non_trivial_runs(void * temporary_storage,
     ::rocprim::reduce_by_key(
         temporary_storage, reduce_by_key_bytes,
         input,
-        ::rocprim::make_transform_iterator( // Workaround: without transform zip_iterator returns zeros
-            ::rocprim::make_zip_iterator(
-                ::rocprim::make_tuple(
-                    ::rocprim::make_counting_iterator<offset_type>(0),
-                    ::rocprim::make_constant_iterator<count_type>(1)
-                )
-            ),
-            [](offset_count_pair a) { return a; }
+        ::rocprim::make_zip_iterator(
+            ::rocprim::make_tuple(
+                ::rocprim::make_counting_iterator<offset_type>(0),
+                ::rocprim::make_constant_iterator<count_type>(1)
+            )
         ),
         size,
         ::rocprim::make_discard_iterator(), // Ignore unique output
