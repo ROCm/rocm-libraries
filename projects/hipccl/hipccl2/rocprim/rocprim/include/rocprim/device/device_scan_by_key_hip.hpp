@@ -87,6 +87,9 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
+/// \returns \p hipSuccess (\p 0) after successful scan; otherwise a HIP runtime error of
+/// type \p hipError_t.
+///
 /// \par Example
 /// \parblock
 /// In this example a device-level inclusive sum-by-key operation is performed on an array of
