@@ -124,10 +124,14 @@ public:
     /// using keywords <tt>__shared__</tt> in HIP or \p tile_static in HC. It can be aliased to
     /// an externally allocated memory, or be a part of a union type with other storage types
     /// to increase shared memory reusability.
+    #ifndef DOXYGEN_SHOULD_SKIP_THIS // hides storage_type implementation for Doxygen
     struct storage_type
     {
         T buffer[BlockSize * ItemsPerThread + bank_conflicts_padding];
     };
+    #else
+    using storage_type = storage_type_; // only for Doxygen
+    #endif
 
     /// \brief Transposes a blocked arrangement of items to a striped arrangement
     /// across the thread block.
@@ -177,6 +181,7 @@ public:
     ///         ...
     ///     }
     /// );
+    /// \endcode
     template<class U>
     ROCPRIM_DEVICE inline
     void blocked_to_striped(const T (&input)[ItemsPerThread],
@@ -245,6 +250,7 @@ public:
     ///         ...
     ///     }
     /// );
+    /// \endcode
     template<class U>
     ROCPRIM_DEVICE inline
     void striped_to_blocked(const T (&input)[ItemsPerThread],
@@ -313,6 +319,7 @@ public:
     ///         ...
     ///     }
     /// );
+    /// \endcode
     template<class U>
     ROCPRIM_DEVICE inline
     void blocked_to_warp_striped(const T (&input)[ItemsPerThread],
@@ -384,6 +391,7 @@ public:
     ///         ...
     ///     }
     /// );
+    /// \endcode
     template<class U>
     ROCPRIM_DEVICE inline
     void warp_striped_to_blocked(const T (&input)[ItemsPerThread],
@@ -435,6 +443,7 @@ public:
     /// \param [in] input - array that data is loaded from.
     /// \param [out] output - array that data is loaded to.
     /// \param [out] ranks - array that has rank of data.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
@@ -460,6 +469,7 @@ public:
     ///         ...
     ///     }
     /// );
+    /// \endcode
     template<class U, class Offset>
     ROCPRIM_DEVICE inline
     void scatter_to_blocked(const T (&input)[ItemsPerThread],
@@ -510,6 +520,7 @@ public:
     /// \param [in] input - array that data is loaded from.
     /// \param [out] output - array that data is loaded to.
     /// \param [out] ranks - array that has rank of data.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
@@ -535,6 +546,7 @@ public:
     ///         ...
     ///     }
     /// );
+    /// \endcode
     template<class U, class Offset>
     ROCPRIM_DEVICE inline
     void scatter_to_striped(const T (&input)[ItemsPerThread],
@@ -591,6 +603,7 @@ public:
     /// \param [in] input - array that data is loaded from.
     /// \param [out] output - array that data is loaded to.
     /// \param [in] ranks - array that has rank of data.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
@@ -616,6 +629,7 @@ public:
     ///         ...
     ///     }
     /// );
+    /// \endcode
     template<class U, class Offset>
     ROCPRIM_DEVICE inline
     void scatter_to_striped_guarded(const T (&input)[ItemsPerThread],
@@ -675,6 +689,7 @@ public:
     /// \param [out] output - array that data is loaded to.
     /// \param [in] ranks - array that has rank of data.
     /// \param [in] is_valid - array that has flags to denote validity.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
@@ -701,6 +716,7 @@ public:
     ///         ...
     ///     }
     /// );
+    /// \endcode
     template<class U, class Offset, class ValidFlag>
     ROCPRIM_DEVICE inline
     void scatter_to_striped_flagged(const T (&input)[ItemsPerThread],
