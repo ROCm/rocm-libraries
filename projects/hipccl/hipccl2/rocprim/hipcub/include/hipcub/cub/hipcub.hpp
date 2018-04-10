@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef CUB_HIPCUB_HPP_
-#define CUB_HIPCUB_HPP_
+#ifndef HIPCUB_CUB_HIPCUB_HPP_
+#define HIPCUB_CUB_HIPCUB_HPP_
 
 #include "../config.hpp"
 
@@ -37,9 +37,10 @@ END_HIPCUB_NAMESPACE
 #include "device/device_histogram.hpp"
 #include "device/device_radix_sort.hpp"
 #include "device/device_reduce.hpp"
+#include "device/device_run_length_encode.hpp"
 #include "device/device_segmented_radix_sort.hpp"
 #include "device/device_segmented_reduce.hpp"
 #include "device/device_scan.hpp"
 #include "device/device_select.hpp"
 
-#endif // CUB_HIPCUB_HPP_
+#endif // HIPCUB_CUB_HIPCUB_HPP_
