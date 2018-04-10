@@ -87,9 +87,16 @@ template<class InputIt, class OutputIt, class BinaryOperation>
 OutputIt host_inclusive_scan(InputIt first, InputIt last,
                              OutputIt d_first, BinaryOperation op)
 {
+    using input_type = typename std::iterator_traits<InputIt>::value_type;
+    #ifdef __cpp_lib_is_invocable
+    using result_type = typename std::invoke_result<BinaryOperation, input_type, input_type>::type;
+    #else
+    using result_type = typename std::result_of<BinaryOperation(input_type, input_type)>::type;
+    #endif
+
     if (first == last) return d_first;
 
-    typename std::iterator_traits<OutputIt>::value_type sum = *first;
+    result_type sum = *first;
     *d_first = sum;
 
     while (++first != last) {
@@ -104,9 +111,16 @@ OutputIt host_exclusive_scan(InputIt first, InputIt last,
                              T initial_value, OutputIt d_first,
                              BinaryOperation op)
 {
+    using input_type = typename std::iterator_traits<InputIt>::value_type;
+    #ifdef __cpp_lib_is_invocable
+    using result_type = typename std::invoke_result<BinaryOperation, input_type, input_type>::type;
+    #else
+    using result_type = typename std::result_of<BinaryOperation(input_type, input_type)>::type;
+    #endif
+
     if (first == last) return d_first;
 
-    typename std::iterator_traits<OutputIt>::value_type sum = initial_value;
+    result_type sum = initial_value;
     *d_first = initial_value;
 
     while ((first+1) != last)

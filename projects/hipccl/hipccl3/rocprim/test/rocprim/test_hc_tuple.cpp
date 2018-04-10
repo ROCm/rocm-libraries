@@ -111,6 +111,9 @@ TEST(RocprimTupleTests, TupleConstructors)
     rocprim::tuple<double, float> t8(i, 2); (void) t8;
     rocprim::tuple<double, float> t9(i, i); (void) t9;
     rocprim::tuple<int, int> t10(i, i); (void) t10;
+
+    const rocprim::tuple<float, unsigned int> ct1(1.0f, 2U);
+    rocprim::tuple<double, unsigned int> ct2(ct1);
 }
 
 struct empty1
