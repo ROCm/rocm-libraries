@@ -37,10 +37,25 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \addtogroup blockmodule
 /// @{
 
+/// \brief Available algorithms for block_histogram primitive.
 enum class block_histogram_algorithm
 {
+    /// Atomic addition is used to update bin count directly.
+    /// \par Performance Notes:
+    /// * Performance is dependent on hardware implementation of atomic addition.
+    /// * Performance may decrease for non-uniform random input distributions
+    /// where many concurrent updates may be made to the same bin counter.
     using_atomic,
+
+    /// A two-phase operation is used:-
+    /// * Data is sorted using radix-sort.
+    /// * "Runs" of same-valued keys are detected using discontinuity; run-lengths
+    /// are bin counts.
+    /// \par Performance Notes:
+    /// * Performance is consistent regardless of sample bin distribution.
     using_sort,
+
+    /// \brief Default block_histogram algorithm.
     default_algorithm = using_atomic,
 };
 
@@ -68,6 +83,73 @@ struct select_block_histogram_impl<block_histogram_algorithm::using_sort>
 
 } // end namespace detail
 
+/// \brief The block_histogram class is a block level parallel primitive which provides methods
+/// for constructing block-wide histograms from items partitioned across threads in a block.
+///
+/// \tparam T - the input/output type.
+/// \tparam BlockSize - the number of threads in a block.
+/// \tparam ItemsPerThread - the number of items to be processed by each thread.
+/// \tparam Bins - the number of bins within the histogram.
+/// \tparam Algorithm - selected histogram algorithm, block_histogram_algorithm::default_algorithm by default.
+///
+/// \par Overview
+/// * block_histogram has two alternative implementations: \p block_histogram_algorithm::using_atomic
+///   and block_histogram_algorithm::using_sort.
+///
+/// \par Examples
+/// \parblock
+/// In the examples histogram operation is performed on block of 192 threads, each provides
+/// one \p int value, result is returned using the same variable as for input.
+///
+/// \b HIP: \n
+/// \code{.cpp}
+/// __global__ void example_kernel(...)
+/// {
+///     // specialize block_histogram for int, logical block of 192 threads,
+///     // 2 items per thread and a bin size of 192.
+///     using block_histogram_int = rocprim::block_histogram<int, 192, 2, 192>;
+///     // allocate storage in shared memory
+///     __shared__ block_histogram_int::storage_type storage;
+///     __shared__ int hist[192];
+///
+///     int value[2];
+///     ...
+///     // execute histogram
+///     block_histogram_int().histogram(
+///         value, // input
+///         hist, // output
+///         storage
+///     );
+///     ...
+/// }
+/// \endcode
+///
+/// \b HC: \n
+/// \code{.cpp}
+/// hc::parallel_for_each(
+///     hc::extent<1>(...).tile(64),
+///     [=](hc::tiled_index<1> i) [[hc]]
+///     {
+///         // specialize block_histogram for int, logical block of 192 threads,
+///         // 2 items per thread and a bin size of 192.
+///         using block_histogram_int = rocprim::block_histogram<int, 192, 2, 192>;
+///         // allocate storage in shared memory
+///         tile_static block_histogram_int::storage_type storage;
+///         tile_static int hist[192];
+///
+///         int value[2];
+///         ...
+///         // execute histogram
+///         block_histogram_int().histogram(
+///             value, // input
+///             hist, // output
+///             storage
+///         );
+///         ...
+///     }
+/// );
+/// \endcode
+/// \endparblock
 template<
     class T,
     unsigned int BlockSize,
@@ -82,8 +164,21 @@ class block_histogram
 {
     using base_type = typename detail::select_block_histogram_impl<Algorithm>::template type<T, BlockSize, ItemsPerThread, Bins>;
 public:
+    /// \brief Struct used to allocate a temporary memory that is required for thread
+    /// communication during operations provided by related parallel primitive.
+    ///
+    /// Depending on the implemention the operations exposed by parallel primitive may
+    /// require a temporary storage for thread communication. The storage should be allocated
+    /// using keywords <tt>__shared__</tt> in HIP or \p tile_static in HC. It can be aliased to
+    /// an externally allocated memory, or be a part of a union type with other storage types
+    /// to increase shared memory reusability.
     using storage_type = typename base_type::storage_type;
 
+    /// \brief Initialize histogram counters to zero.
+    ///
+    /// \tparam Counter - [inferred] counter type of histogram.
+    ///
+    /// \param [out] hist - histogram bin count.
     template<class Counter>
     ROCPRIM_DEVICE inline
     void init_histogram(Counter hist[Bins])
@@ -101,24 +196,88 @@ public:
         }
     }
 
-    template<class Counter>
-    ROCPRIM_DEVICE inline
-    void composite(T (&input)[ItemsPerThread],
-                   Counter hist[Bins])
-    {
-        base_type::composite(input, hist);
-    }
-
-    template<class Counter>
-    ROCPRIM_DEVICE inline
-    void histogram(T (&input)[ItemsPerThread],
-                   Counter hist[Bins])
-    {
-        init_histogram(hist);
-        ::rocprim::syncthreads();
-        composite(input, hist);
-    }
-
+    /// \brief Update an existing block-wide histogram. Each thread composites an array of
+    /// input elements.
+    ///
+    /// \tparam Counter - [inferred] counter type of histogram.
+    ///
+    /// \param [in] input - reference to an array containing thread input values.
+    /// \param [out] hist - histogram bin count.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
+    /// universal rocprim::syncthreads().
+    ///
+    /// \par Examples
+    /// \parblock
+    /// In the examples histogram operation is performed on block of 192 threads, each provides
+    /// one \p int value, result is returned using the same variable as for input.
+    ///
+    /// \b HIP: \n
+    /// \code{.cpp}
+    /// __global__ void example_kernel(...)
+    /// {
+    ///     // specialize block_histogram for int, logical block of 192 threads,
+    ///     // 2 items per thread and a bin size of 192.
+    ///     using block_histogram_int = rocprim::block_histogram<int, 192, 2, 192>;
+    ///     // allocate storage in shared memory
+    ///     __shared__ block_histogram_int::storage_type storage;
+    ///     __shared__ int hist[192];
+    ///
+    ///     int value[2];
+    ///     ...
+    ///     // initialize histogram
+    ///     block_histogram_int().init_histogram(
+    ///         hist // output
+    ///     );
+    ///
+    ///     rocprim::syncthreads();
+    ///
+    ///     // update histogram
+    ///     block_histogram_int().composite(
+    ///         value, // input
+    ///         hist, // output
+    ///         storage
+    ///     );
+    ///     ...
+    /// }
+    /// \endcode
+    ///
+    /// \b HC: \n
+    /// \code{.cpp}
+    /// hc::parallel_for_each(
+    ///     hc::extent<1>(...).tile(64),
+    ///     [=](hc::tiled_index<1> i) [[hc]]
+    ///     {
+    ///         // specialize block_histogram for int, logical block of 192 threads,
+    ///         // 2 items per thread and a bin size of 192.
+    ///         using block_histogram_int = rocprim::block_histogram<int, 192, 2, 192>;
+    ///         // allocate storage in shared memory
+    ///         tile_static block_histogram_int::storage_type storage;
+    ///         tile_static int hist[192];
+    ///
+    ///         int value[2];
+    ///         ...
+    ///         // initialize histogram
+    ///         block_histogram_int().init_histogram(
+    ///             hist // output
+    ///         );
+    ///
+    ///         rocprim::syncthreads();
+    ///
+    ///         // update histogram
+    ///         block_histogram_int().composite(
+    ///             value, // input
+    ///             hist, // output
+    ///             storage
+    ///         );
+    ///         ...
+    ///     }
+    /// );
+    /// \endcode
+    /// \endparblock
     template<class Counter>
     ROCPRIM_DEVICE inline
     void composite(T (&input)[ItemsPerThread],
@@ -128,6 +287,93 @@ public:
         base_type::composite(input, hist, storage);
     }
 
+    /// \overload
+    /// \brief Update an existing block-wide histogram. Each thread composites an array of
+    /// input elements.
+    ///
+    /// * This overload does not accept storage argument. Required shared memory is
+    /// allocated by the method itself.
+    ///
+    /// \tparam Counter - [inferred] counter type of histogram.
+    ///
+    /// \param [in] input - reference to an array containing thread input values.
+    /// \param [out] hist - histogram bin count.
+    template<class Counter>
+    ROCPRIM_DEVICE inline
+    void composite(T (&input)[ItemsPerThread],
+                   Counter hist[Bins])
+    {
+        base_type::composite(input, hist);
+    }
+
+    /// \brief Construct a new block-wide histogram. Each thread contributes an array of
+    /// input elements.
+    ///
+    /// \tparam Counter - [inferred] counter type of histogram.
+    ///
+    /// \param [in] input - reference to an array containing thread input values.
+    /// \param [out] hist - histogram bin count.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
+    /// universal rocprim::syncthreads().
+    ///
+    /// \par Examples
+    /// \parblock
+    /// In the examples histogram operation is performed on block of 192 threads, each provides
+    /// one \p int value, result is returned using the same variable as for input.
+    ///
+    /// \b HIP: \n
+    /// \code{.cpp}
+    /// __global__ void example_kernel(...)
+    /// {
+    ///     // specialize block_histogram for int, logical block of 192 threads,
+    ///     // 2 items per thread and a bin size of 192.
+    ///     using block_histogram_int = rocprim::block_histogram<int, 192, 2, 192>;
+    ///     // allocate storage in shared memory
+    ///     __shared__ block_histogram_int::storage_type storage;
+    ///     __shared__ int hist[192];
+    ///
+    ///     int value[2];
+    ///     ...
+    ///     // execute histogram
+    ///     block_histogram_int().histogram(
+    ///         value, // input
+    ///         hist, // output
+    ///         storage
+    ///     );
+    ///     ...
+    /// }
+    /// \endcode
+    ///
+    /// \b HC: \n
+    /// \code{.cpp}
+    /// hc::parallel_for_each(
+    ///     hc::extent<1>(...).tile(64),
+    ///     [=](hc::tiled_index<1> i) [[hc]]
+    ///     {
+    ///         // specialize block_histogram for int, logical block of 192 threads,
+    ///         // 2 items per thread and a bin size of 192.
+    ///         using block_histogram_int = rocprim::block_histogram<int, 192, 2, 192>;
+    ///         // allocate storage in shared memory
+    ///         tile_static block_histogram_int::storage_type storage;
+    ///         tile_static int hist[192];
+    ///
+    ///         int value[2];
+    ///         ...
+    ///         // execute histogram
+    ///         block_histogram_int().histogram(
+    ///             value, // input
+    ///             hist, // output
+    ///             storage
+    ///         );
+    ///         ...
+    ///     }
+    /// );
+    /// \endcode
+    /// \endparblock
     template<class Counter>
     ROCPRIM_DEVICE inline
     void histogram(T (&input)[ItemsPerThread],
@@ -137,6 +383,27 @@ public:
         init_histogram(hist);
         ::rocprim::syncthreads();
         composite(input, hist, storage);
+    }
+
+    /// \overload
+    /// \brief Construct a new block-wide histogram. Each thread contributes an array of
+    /// input elements.
+    ///
+    /// * This overload does not accept storage argument. Required shared memory is
+    /// allocated by the method itself.
+    ///
+    /// \tparam Counter - [inferred] counter type of histogram.
+    ///
+    /// \param [in] input - reference to an array containing thread input values.
+    /// \param [out] hist - histogram bin count.
+    template<class Counter>
+    ROCPRIM_DEVICE inline
+    void histogram(T (&input)[ItemsPerThread],
+                   Counter hist[Bins])
+    {
+        init_histogram(hist);
+        ::rocprim::syncthreads();
+        composite(input, hist);
     }
 };
 
