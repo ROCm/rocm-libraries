@@ -43,17 +43,6 @@ BEGIN_ROCPRIM_NAMESPACE
 class discard_iterator
 {
 public:
-    /// The type of the value that can be obtained by dereferencing the iterator.
-    using value_type = void;
-    /// \brief A reference type of the type iterated over (\p value_type).
-    using reference = void;
-    /// \brief A pointer type of the type iterated over (\p value_type).
-    using pointer = void;
-    /// A type used for identify distance between iterators.
-    using difference_type = std::ptrdiff_t;
-    /// The category of the iterator.
-    using iterator_category = std::random_access_iterator_tag;
-
     struct discard_value
     {
         ROCPRIM_HOST_DEVICE inline
@@ -73,6 +62,17 @@ public:
             return *this;
         }
     };
+
+    /// The type of the value that can be obtained by dereferencing the iterator.
+    using value_type = discard_value;
+    /// \brief A reference type of the type iterated over (\p value_type).
+    using reference = discard_value;
+    /// \brief A pointer type of the type iterated over (\p value_type).
+    using pointer = discard_value*;
+    /// A type used for identify distance between iterators.
+    using difference_type = std::ptrdiff_t;
+    /// The category of the iterator.
+    using iterator_category = std::random_access_iterator_tag;
 
     /// \brief Creates a new discard_iterator.
     ///
@@ -117,13 +117,13 @@ public:
     }
 
     ROCPRIM_HOST_DEVICE inline
-    discard_value operator*()
+    discard_value operator*() const
     {
-        return 0;
+        return discard_value();
     }
 
     ROCPRIM_HOST_DEVICE inline
-    discard_value operator[](difference_type distance)
+    discard_value operator[](difference_type distance) const
     {
         discard_iterator i = (*this) + distance;
         return *i;

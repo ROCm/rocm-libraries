@@ -48,14 +48,13 @@ template<
     bool Exclusive,
     class BlockScan,
     class T,
-    class InitValueType,
     unsigned int ItemsPerThread,
     class BinaryFunction
 >
 ROCPRIM_DEVICE inline
 auto single_scan_block_scan(T (&input)[ItemsPerThread],
                             T (&output)[ItemsPerThread],
-                            InitValueType initial_value,
+                            T initial_value,
                             typename BlockScan::storage_type& storage,
                             BinaryFunction scan_op)
     -> typename std::enable_if<Exclusive>::type
@@ -74,14 +73,13 @@ template<
     bool Exclusive,
     class BlockScan,
     class T,
-    class InitValueType,
     unsigned int ItemsPerThread,
     class BinaryFunction
 >
 ROCPRIM_DEVICE inline
 auto single_scan_block_scan(T (&input)[ItemsPerThread],
                             T (&output)[ItemsPerThread],
-                            InitValueType initial_value,
+                            T initial_value,
                             typename BlockScan::storage_type& storage,
                             BinaryFunction scan_op)
     -> typename std::enable_if<!Exclusive>::type
@@ -103,27 +101,27 @@ template<
     class InputIterator,
     class OutputIterator,
     class BinaryFunction,
-    class InitValueType
+    class ResultType
 >
 ROCPRIM_DEVICE inline
 void single_scan_kernel_impl(InputIterator input,
                              const size_t input_size,
-                             InitValueType initial_value,
+                             ResultType initial_value,
                              OutputIterator output,
                              BinaryFunction scan_op)
 {
-    using output_type = typename std::iterator_traits<OutputIterator>::value_type;
+    using result_type = ResultType;
 
     using block_load_type = ::rocprim::block_load<
-        output_type, BlockSize, ItemsPerThread,
+        result_type, BlockSize, ItemsPerThread,
         ::rocprim::block_load_method::block_load_transpose
     >;
     using block_store_type = ::rocprim::block_store<
-        output_type, BlockSize, ItemsPerThread,
+        result_type, BlockSize, ItemsPerThread,
         ::rocprim::block_store_method::block_store_transpose
     >;
     using block_scan_type = ::rocprim::block_scan<
-        output_type, BlockSize,
+        result_type, BlockSize,
         ::rocprim::block_scan_algorithm::reduce_then_scan
     >;
 
@@ -134,7 +132,7 @@ void single_scan_kernel_impl(InputIterator input,
         typename block_scan_type::storage_type scan;
     } storage;
 
-    output_type values[ItemsPerThread];
+    result_type values[ItemsPerThread];
     // load input values into values
     block_load_type()
         .load(
@@ -171,15 +169,15 @@ template<
     unsigned int ItemsPerThread,
     class InputIterator,
     class BinaryFunction,
-    class ScanOpResultType
+    class ResultType
 >
 ROCPRIM_DEVICE inline
 void block_reduce_kernel_impl(InputIterator input,
                               const size_t input_size,
                               BinaryFunction scan_op,
-                              ScanOpResultType * block_prefixes)
+                              ResultType * block_prefixes)
 {
-    using result_type = ScanOpResultType;
+    using result_type = ResultType;
 
     using block_reduce_type = ::rocprim::block_reduce<
         result_type, BlockSize,
@@ -243,7 +241,7 @@ template<
     class BlockScan,
     class T,
     unsigned int ItemsPerThread,
-    class ScanOpResultType,
+    class ResultType,
     class BinaryFunction
 >
 ROCPRIM_DEVICE inline
@@ -251,7 +249,7 @@ auto final_scan_block_scan(const unsigned int flat_block_id,
                            T (&input)[ItemsPerThread],
                            T (&output)[ItemsPerThread],
                            T initial_value,
-                           ScanOpResultType * block_prefixes,
+                           ResultType * block_prefixes,
                            typename BlockScan::storage_type& storage,
                            BinaryFunction scan_op)
     -> typename std::enable_if<Exclusive>::type
@@ -278,7 +276,7 @@ template<
     class BlockScan,
     class T,
     unsigned int ItemsPerThread,
-    class ScanOpResultType,
+    class ResultType,
     class BinaryFunction
 >
 ROCPRIM_DEVICE inline
@@ -286,7 +284,7 @@ auto final_scan_block_scan(const unsigned int flat_block_id,
                            T (&input)[ItemsPerThread],
                            T (&output)[ItemsPerThread],
                            T initial_value,
-                           ScanOpResultType * block_prefixes,
+                           ResultType * block_prefixes,
                            typename BlockScan::storage_type& storage,
                            BinaryFunction scan_op)
     -> typename std::enable_if<!Exclusive>::type
@@ -327,29 +325,28 @@ template<
     class InputIterator,
     class OutputIterator,
     class BinaryFunction,
-    class InitValueType,
-    class ScanOpResultType
+    class ResultType
 >
 ROCPRIM_DEVICE inline
 void final_scan_kernel_impl(InputIterator input,
                             const size_t input_size,
                             OutputIterator output,
-                            const InitValueType initial_value,
+                            const ResultType initial_value,
                             BinaryFunction scan_op,
-                            ScanOpResultType * block_prefixes)
+                            ResultType * block_prefixes)
 {
-    using output_type = typename std::iterator_traits<OutputIterator>::value_type;
+    using result_type = ResultType;
 
     using block_load_type = ::rocprim::block_load<
-        output_type, BlockSize, ItemsPerThread,
+        result_type, BlockSize, ItemsPerThread,
         ::rocprim::block_load_method::block_load_transpose
     >;
     using block_store_type = ::rocprim::block_store<
-        output_type, BlockSize, ItemsPerThread,
+        result_type, BlockSize, ItemsPerThread,
         ::rocprim::block_store_method::block_store_transpose
     >;
     using block_scan_type = ::rocprim::block_scan<
-        output_type, BlockSize,
+        result_type, BlockSize,
         ::rocprim::block_scan_algorithm::using_warp_scan
     >;
 
@@ -369,7 +366,7 @@ void final_scan_kernel_impl(InputIterator input,
     const unsigned int number_of_blocks = (input_size + items_per_block - 1)/items_per_block;
 
     // For input values
-    output_type values[ItemsPerThread];
+    result_type values[ItemsPerThread];
 
     // TODO: valid_in_last_block can be calculated on host
     auto valid_in_last_block = input_size - items_per_block * (number_of_blocks - 1);
@@ -399,7 +396,7 @@ void final_scan_kernel_impl(InputIterator input,
         flat_block_id,
         values, // input
         values, // output
-        static_cast<output_type>(initial_value),
+        initial_value,
         block_prefixes,
         storage.scan,
         scan_op

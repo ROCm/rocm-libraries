@@ -177,7 +177,7 @@ public:
                T (&items)[ItemsPerThread])
     {
         using value_type = typename std::iterator_traits<OutputIterator>::value_type;
-        static_assert(std::is_convertible<value_type, T>::value,
+        static_assert(std::is_convertible<T, value_type>::value,
                       "The type T must be such that an object of type OutputIterator "
                       "can be dereferenced and assigned a value of type T.");
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
@@ -204,7 +204,7 @@ public:
                unsigned int valid)
     {
         using value_type = typename std::iterator_traits<OutputIterator>::value_type;
-        static_assert(std::is_convertible<value_type, T>::value,
+        static_assert(std::is_convertible<T, value_type>::value,
                       "The type T must be such that an object of type OutputIterator "
                       "can be dereferenced and assigned a value of type T.");
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
@@ -252,7 +252,7 @@ public:
                storage_type& storage)
     {
         using value_type = typename std::iterator_traits<OutputIterator>::value_type;
-        static_assert(std::is_convertible<value_type, T>::value,
+        static_assert(std::is_convertible<T, value_type>::value,
                       "The type T must be such that an object of type OutputIterator "
                       "can be dereferenced and assigned a value of type T.");
         (void) storage;
@@ -303,7 +303,7 @@ public:
                storage_type& storage)
     {
         using value_type = typename std::iterator_traits<OutputIterator>::value_type;
-        static_assert(std::is_convertible<value_type, T>::value,
+        static_assert(std::is_convertible<T, value_type>::value,
                       "The type T must be such that an object of type OutputIterator "
                       "can be dereferenced and assigned a value of type T.");
         (void) storage;
@@ -347,7 +347,7 @@ public:
                U (&items)[ItemsPerThread])
     {
         using value_type = typename std::iterator_traits<OutputIterator>::value_type;
-        static_assert(std::is_convertible<value_type, T>::value,
+        static_assert(std::is_convertible<T, value_type>::value,
                       "The type T must be such that an object of type OutputIterator "
                       "can be dereferenced and assigned a value of type T.");
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
@@ -361,7 +361,7 @@ public:
                unsigned int valid)
     {
         using value_type = typename std::iterator_traits<OutputIterator>::value_type;
-        static_assert(std::is_convertible<value_type, T>::value,
+        static_assert(std::is_convertible<T, value_type>::value,
                       "The type T must be such that an object of type OutputIterator "
                       "can be dereferenced and assigned a value of type T.");
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
@@ -384,7 +384,7 @@ public:
                storage_type& storage)
     {
         using value_type = typename std::iterator_traits<OutputIterator>::value_type;
-        static_assert(std::is_convertible<value_type, T>::value,
+        static_assert(std::is_convertible<T, value_type>::value,
                       "The type T must be such that an object of type OutputIterator "
                       "can be dereferenced and assigned a value of type T.");
         (void) storage;
@@ -399,7 +399,7 @@ public:
                storage_type& storage)
     {
         using value_type = typename std::iterator_traits<OutputIterator>::value_type;
-        static_assert(std::is_convertible<value_type, T>::value,
+        static_assert(std::is_convertible<T, value_type>::value,
                       "The type T must be such that an object of type OutputIterator "
                       "can be dereferenced and assigned a value of type T.");
         (void) storage;
@@ -426,7 +426,7 @@ public:
                T (&items)[ItemsPerThread])
     {
         using value_type = typename std::iterator_traits<OutputIterator>::value_type;
-        static_assert(std::is_convertible<value_type, T>::value,
+        static_assert(std::is_convertible<T, value_type>::value,
                       "The type T must be such that an object of type OutputIterator "
                       "can be dereferenced and assigned a value of type T.");
         ROCPRIM_SHARED_MEMORY storage_type storage;
@@ -442,7 +442,7 @@ public:
                unsigned int valid)
     {
         using value_type = typename std::iterator_traits<OutputIterator>::value_type;
-        static_assert(std::is_convertible<value_type, T>::value,
+        static_assert(std::is_convertible<T, value_type>::value,
                       "The type T must be such that an object of type OutputIterator "
                       "can be dereferenced and assigned a value of type T.");
         ROCPRIM_SHARED_MEMORY storage_type storage;
@@ -458,7 +458,7 @@ public:
                storage_type& storage)
     {
         using value_type = typename std::iterator_traits<OutputIterator>::value_type;
-        static_assert(std::is_convertible<value_type, T>::value,
+        static_assert(std::is_convertible<T, value_type>::value,
                       "The type T must be such that an object of type OutputIterator "
                       "can be dereferenced and assigned a value of type T.");
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
@@ -474,7 +474,7 @@ public:
                storage_type& storage)
     {
         using value_type = typename std::iterator_traits<OutputIterator>::value_type;
-        static_assert(std::is_convertible<value_type, T>::value,
+        static_assert(std::is_convertible<T, value_type>::value,
                       "The type T must be such that an object of type OutputIterator "
                       "can be dereferenced and assigned a value of type T.");
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
@@ -505,7 +505,7 @@ public:
                T (&items)[ItemsPerThread])
     {
         using value_type = typename std::iterator_traits<OutputIterator>::value_type;
-        static_assert(std::is_convertible<value_type, T>::value,
+        static_assert(std::is_convertible<T, value_type>::value,
                       "The type T must be such that an object of type OutputIterator "
                       "can be dereferenced and assigned a value of type T.");
         ROCPRIM_SHARED_MEMORY storage_type storage;
@@ -521,7 +521,7 @@ public:
                unsigned int valid)
     {
         using value_type = typename std::iterator_traits<OutputIterator>::value_type;
-        static_assert(std::is_convertible<value_type, T>::value,
+        static_assert(std::is_convertible<T, value_type>::value,
                       "The type T must be such that an object of type OutputIterator "
                       "can be dereferenced and assigned a value of type T.");
         ROCPRIM_SHARED_MEMORY storage_type storage;
@@ -537,7 +537,7 @@ public:
                storage_type& storage)
     {
         using value_type = typename std::iterator_traits<OutputIterator>::value_type;
-        static_assert(std::is_convertible<value_type, T>::value,
+        static_assert(std::is_convertible<T, value_type>::value,
                       "The type T must be such that an object of type OutputIterator "
                       "can be dereferenced and assigned a value of type T.");
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
@@ -553,7 +553,7 @@ public:
                storage_type& storage)
     {
         using value_type = typename std::iterator_traits<OutputIterator>::value_type;
-        static_assert(std::is_convertible<value_type, T>::value,
+        static_assert(std::is_convertible<T, value_type>::value,
                       "The type T must be such that an object of type OutputIterator "
                       "can be dereferenced and assigned a value of type T.");
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();

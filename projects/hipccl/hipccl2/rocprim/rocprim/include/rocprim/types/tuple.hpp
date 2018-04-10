@@ -272,6 +272,18 @@ struct tuple_value
         v.value = std::move(this->value);
         this->value = std::move(tmp);
     }
+
+    ROCPRIM_HOST_DEVICE inline
+    T& get() noexcept
+    {
+        return value;
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    const T& get() const noexcept
+    {
+        return value;
+    }
 };
 
 // Specialization for empty base optimization
@@ -349,6 +361,18 @@ struct tuple_value<I, T, true> : private T
         v = std::move(*this);
         *this = std::move(tmp);
     }
+
+    ROCPRIM_HOST_DEVICE inline
+    T& get() noexcept
+    {
+        return static_cast<T&>(*this);
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    const T& get() const noexcept
+    {
+        return static_cast<const T&>(*this);
+    }
 };
 
 template<class Sequences, class... Types>
@@ -411,6 +435,21 @@ struct tuple_impl<::rocprim::index_sequence<Indices...>, Types...>
     {
     }
 
+    template<
+        class... UTypes,
+        typename = typename std::enable_if<
+            sizeof...(UTypes) == sizeof...(Types)
+        >::type,
+        typename = typename std::enable_if<
+            sizeof...(Types) >= 1
+        >::type
+    >
+    ROCPRIM_HOST_DEVICE inline
+    tuple_impl(const ::rocprim::tuple<UTypes...>& other)
+        : tuple_value<Indices, Types>(::rocprim::get<Indices>(other))...
+    {
+    }
+
     ROCPRIM_HOST_DEVICE inline
     ~tuple_impl() = default;
 
@@ -419,7 +458,7 @@ struct tuple_impl<::rocprim::index_sequence<Indices...>, Types...>
     {
         [](...){}(
             (tuple_value<Indices, Types>::operator=(
-                static_cast<const tuple_value<Indices, Types>&>(other).value
+                static_cast<const tuple_value<Indices, Types>&>(other).get()
             ))...
         );
         return *this;
@@ -430,7 +469,7 @@ struct tuple_impl<::rocprim::index_sequence<Indices...>, Types...>
     {
         [](...){}(
             (tuple_value<Indices, Types>::operator=(
-                static_cast<tuple_value<Indices, Types>&>(other).value
+                static_cast<tuple_value<Indices, Types>&>(other).get()
             ))...
         );
         return *this;
@@ -934,7 +973,7 @@ ROCPRIM_HOST_DEVICE inline
 const tuple_element_t<I, tuple<Types...>>& get(const tuple<Types...>& t) noexcept
 {
     using type = detail::tuple_value<I, tuple_element_t<I, tuple<Types...>>>;
-    return static_cast<const type&>(t.base).value;
+    return static_cast<const type&>(t.base).get();
 }
 
 /// \brief Extracts the <tt>I</tt>-th element from the tuple, where \p I is
@@ -946,7 +985,7 @@ ROCPRIM_HOST_DEVICE inline
 tuple_element_t<I, tuple<Types...>>& get(tuple<Types...>& t) noexcept
 {
     using type = detail::tuple_value<I, tuple_element_t<I, tuple<Types...>>>;
-    return static_cast<type&>(t.base).value;
+    return static_cast<type&>(t.base).get();
 }
 
 /// \brief Extracts the <tt>I</tt>-th element from the tuple, where \p I is
@@ -959,7 +998,7 @@ tuple_element_t<I, tuple<Types...>>&& get(tuple<Types...>&& t) noexcept
 {
     using value_type = tuple_element_t<I, tuple<Types...>>;
     using type = detail::tuple_value<I, tuple_element_t<I, tuple<Types...>>>;
-    return static_cast<value_type&&>(static_cast<type&>(t.base).value);
+    return static_cast<value_type&&>(static_cast<type&>(t.base).get());
 }
 
 // ////////////////////////

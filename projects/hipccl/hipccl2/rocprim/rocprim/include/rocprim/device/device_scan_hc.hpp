@@ -151,7 +151,7 @@ void scan_impl(void * temporary_storage,
             [=](hc::tiled_index<1>) [[hc]]
             {
                 final_scan_kernel_impl<block_size, items_per_thread, Exclusive>(
-                    input, size, output, initial_value, scan_op, block_prefixes
+                    input, size, output, static_cast<result_type>(initial_value), scan_op, block_prefixes
                 );
             }
         );
@@ -169,7 +169,7 @@ void scan_impl(void * temporary_storage,
             [=](hc::tiled_index<1>) [[hc]]
             {
                 single_scan_kernel_impl<single_scan_block_size, single_scan_items_per_thread, Exclusive>(
-                    input, size, initial_value, output, scan_op
+                    input, size, static_cast<result_type>(initial_value), output, scan_op
                 );
             }
         );
