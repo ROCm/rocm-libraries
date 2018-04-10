@@ -1,0 +1,360 @@
+// MIT License
+//
+// Copyright (c) 2017 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+#include <algorithm>
+#include <functional>
+#include <iostream>
+#include <random>
+#include <type_traits>
+#include <vector>
+#include <utility>
+
+// Google Test
+#include <gtest/gtest.h>
+// HIP API
+#include <hip/hip_runtime.h>
+// rocPRIM API
+#include <rocprim/rocprim.hpp>
+
+#include "test_utils.hpp"
+
+#define HIP_CHECK(error) ASSERT_EQ(static_cast<hipError_t>(error),hipSuccess)
+
+namespace rp = rocprim;
+
+template<
+    class Input,
+    class Output,
+    class ScanOp = ::rocprim::plus<Input>,
+    int Init = 0, // as only integral types supported, int is used here even for floating point inputs
+    unsigned int MinSegmentLength = 0,
+    unsigned int MaxSegmentLength = 1000
+>
+struct params
+{
+    using input_type = Input;
+    using output_type = Output;
+    using scan_op_type = ScanOp;
+    static constexpr input_type init = Init;
+    static constexpr unsigned int min_segment_length = MinSegmentLength;
+    static constexpr unsigned int max_segment_length = MaxSegmentLength;
+};
+
+template<class Params>
+class RocprimDeviceSegmentedScan : public ::testing::Test {
+public:
+    using params = Params;
+};
+
+typedef ::testing::Types<
+    params<unsigned char, unsigned int, rocprim::plus<unsigned int>>,
+    params<int, int, rocprim::plus<int>, -100, 0, 10000>,
+    params<double, double, rocprim::minimum<double>, 1000, 0, 10000>,
+    params<int, short, rocprim::maximum<int>, 10, 1000, 10000>,
+    params<float, double, rocprim::maximum<double>, 50, 2, 10>,
+    params<float, float, rocprim::plus<float>, 123, 100, 200>
+> Params;
+
+TYPED_TEST_CASE(RocprimDeviceSegmentedScan, Params);
+
+std::vector<size_t> get_sizes()
+{
+    std::vector<size_t> sizes = {
+        1024, 2048, 4096, 1792,
+        1, 10, 53, 211, 500,
+        2345, 11001, 34567,
+        (1 << 16) - 1220
+    };
+    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(2, 1, 1000000);
+    sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
+    return sizes;
+}
+
+TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScan)
+{
+    using input_type = typename TestFixture::params::input_type;
+    using output_type = typename TestFixture::params::output_type;
+    using scan_op_type = typename TestFixture::params::scan_op_type;
+
+    #ifdef __cpp_lib_is_invocable
+    using result_type = typename std::invoke_result<scan_op_type, input_type, input_type>::type;
+    #else
+    using result_type = typename std::result_of<scan_op_type(input_type, input_type)>::type;
+    #endif
+
+    using offset_type = unsigned int;
+    const bool debug_synchronous = false;
+    scan_op_type scan_op;
+
+    std::random_device rd;
+    std::default_random_engine gen(rd());
+
+    std::uniform_int_distribution<size_t> segment_length_dis(
+        TestFixture::params::min_segment_length,
+        TestFixture::params::max_segment_length
+    );
+
+    hipStream_t stream = 0; // default stream
+
+    const std::vector<size_t> sizes = get_sizes();
+    for(size_t size : sizes)
+    {
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+        // Generate data and calculate expected results
+        std::vector<output_type> values_expected(size);
+        std::vector<input_type> values_input = test_utils::get_random_data<input_type>(size, 0, 100);
+
+        std::vector<offset_type> offsets;
+        unsigned int segments_count = 0;
+        size_t offset = 0;
+        while(offset < size)
+        {
+            const size_t segment_length = segment_length_dis(gen);
+            offsets.push_back(offset);
+
+            const size_t end = std::min(size, offset + segment_length);
+            result_type aggregate = values_input[offset];
+            values_expected[offset] = aggregate;
+            for(size_t i = offset + 1; i < end; i++)
+            {
+                aggregate = scan_op(aggregate, values_input[i]);
+                values_expected[i] = aggregate;
+            }
+
+            segments_count++;
+            offset += segment_length;
+        }
+        offsets.push_back(size);
+
+        input_type  * d_values_input;
+        offset_type * d_offsets;
+        output_type * d_values_output;
+        HIP_CHECK(hipMalloc(&d_values_input, size * sizeof(input_type)));
+        HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
+        HIP_CHECK(hipMalloc(&d_values_output, size * sizeof(output_type)));
+        HIP_CHECK(
+            hipMemcpy(
+                d_values_input, values_input.data(),
+                size * sizeof(input_type),
+                hipMemcpyHostToDevice
+            )
+        );
+        HIP_CHECK(
+            hipMemcpy(
+                d_offsets, offsets.data(),
+                (segments_count + 1) * sizeof(offset_type),
+                hipMemcpyHostToDevice
+            )
+        );
+        HIP_CHECK(hipDeviceSynchronize());
+
+        size_t temporary_storage_bytes;
+        rocprim::segmented_inclusive_scan(
+            nullptr, temporary_storage_bytes,
+            d_values_input, d_values_output,
+            segments_count,
+            d_offsets, d_offsets + 1,
+            scan_op,
+            stream, debug_synchronous
+        );
+
+        ASSERT_GT(temporary_storage_bytes, 0);
+        void * d_temporary_storage;
+        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+
+        rocprim::segmented_inclusive_scan(
+            d_temporary_storage, temporary_storage_bytes,
+            d_values_input, d_values_output,
+            segments_count,
+            d_offsets, d_offsets + 1,
+            scan_op,
+            stream, debug_synchronous
+        );
+        HIP_CHECK(hipDeviceSynchronize());
+
+        std::vector<output_type> values_output(size);
+        HIP_CHECK(
+            hipMemcpy(
+                values_output.data(), d_values_output,
+                values_output.size() * sizeof(output_type),
+                hipMemcpyDeviceToHost
+            )
+        );
+        HIP_CHECK(hipDeviceSynchronize());
+
+        for(size_t i = 0; i < values_output.size(); i++)
+        {
+            SCOPED_TRACE(testing::Message() << "with index = " << i);
+            if(std::is_integral<output_type>::value)
+            {
+                ASSERT_EQ(values_output[i], values_expected[i]);
+            }
+            else
+            {
+                auto diff = std::max<output_type>(std::abs(0.01 * values_expected[i]), 0.01);
+                ASSERT_NEAR(values_output[i], values_expected[i], diff);
+            }
+        }
+
+        HIP_CHECK(hipFree(d_temporary_storage));
+        HIP_CHECK(hipFree(d_values_input));
+        HIP_CHECK(hipFree(d_offsets));
+        HIP_CHECK(hipFree(d_values_output));
+    }
+}
+
+TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScan)
+{
+    using input_type = typename TestFixture::params::input_type;
+    using output_type = typename TestFixture::params::output_type;
+    using scan_op_type = typename TestFixture::params::scan_op_type;
+    constexpr input_type init = TestFixture::params::init;
+
+    #ifdef __cpp_lib_is_invocable
+    using result_type = typename std::invoke_result<scan_op_type, input_type, input_type>::type;
+    #else
+    using result_type = typename std::result_of<scan_op_type(input_type, input_type)>::type;
+    #endif
+
+    using offset_type = unsigned int;
+    const bool debug_synchronous = false;
+    scan_op_type scan_op;
+
+    std::random_device rd;
+    std::default_random_engine gen(rd());
+
+    std::uniform_int_distribution<size_t> segment_length_dis(
+        TestFixture::params::min_segment_length,
+        TestFixture::params::max_segment_length
+    );
+
+    hipStream_t stream = 0; // default stream
+
+    const std::vector<size_t> sizes = get_sizes();
+    for(size_t size : sizes)
+    {
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+        // Generate data and calculate expected results
+        std::vector<output_type> values_expected(size);
+        std::vector<input_type> values_input = test_utils::get_random_data<input_type>(size, 0, 100);
+
+        std::vector<offset_type> offsets;
+        unsigned int segments_count = 0;
+        size_t offset = 0;
+        while(offset < size)
+        {
+            const size_t segment_length = segment_length_dis(gen);
+            offsets.push_back(offset);
+
+            const size_t end = std::min(size, offset + segment_length);
+            result_type aggregate = init;
+            values_expected[offset] = aggregate;
+            for(size_t i = offset + 1; i < end; i++)
+            {
+                aggregate = scan_op(aggregate, values_input[i-1]);
+                values_expected[i] = aggregate;
+            }
+
+            segments_count++;
+            offset += segment_length;
+        }
+        offsets.push_back(size);
+
+        input_type  * d_values_input;
+        offset_type * d_offsets;
+        output_type * d_values_output;
+        HIP_CHECK(hipMalloc(&d_values_input, size * sizeof(input_type)));
+        HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
+        HIP_CHECK(hipMalloc(&d_values_output, size * sizeof(output_type)));
+        HIP_CHECK(
+            hipMemcpy(
+                d_values_input, values_input.data(),
+                size * sizeof(input_type),
+                hipMemcpyHostToDevice
+            )
+        );
+        HIP_CHECK(
+            hipMemcpy(
+                d_offsets, offsets.data(),
+                (segments_count + 1) * sizeof(offset_type),
+                hipMemcpyHostToDevice
+            )
+        );
+        HIP_CHECK(hipDeviceSynchronize());
+
+        size_t temporary_storage_bytes;
+        rocprim::segmented_exclusive_scan(
+            nullptr, temporary_storage_bytes,
+            d_values_input, d_values_output,
+            segments_count,
+            d_offsets, d_offsets + 1,
+            init, scan_op,
+            stream, debug_synchronous
+        );
+        HIP_CHECK(hipDeviceSynchronize());
+
+        ASSERT_GT(temporary_storage_bytes, 0);
+        void * d_temporary_storage;
+        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+
+        rocprim::segmented_exclusive_scan(
+            d_temporary_storage, temporary_storage_bytes,
+            d_values_input, d_values_output,
+            segments_count,
+            d_offsets, d_offsets + 1,
+            init, scan_op,
+            stream, debug_synchronous
+        );
+        HIP_CHECK(hipDeviceSynchronize());
+
+        std::vector<output_type> values_output(size);
+        HIP_CHECK(
+            hipMemcpy(
+                values_output.data(), d_values_output,
+                values_output.size() * sizeof(output_type),
+                hipMemcpyDeviceToHost
+            )
+        );
+        HIP_CHECK(hipDeviceSynchronize());
+
+        for(size_t i = 0; i < values_output.size(); i++)
+        {
+            SCOPED_TRACE(testing::Message() << "with index = " << i);
+            if(std::is_integral<output_type>::value)
+            {
+                ASSERT_EQ(values_output[i], values_expected[i]);
+            }
+            else
+            {
+                auto diff = std::max<output_type>(std::abs(0.01 * values_expected[i]), 0.01);
+                ASSERT_NEAR(values_output[i], values_expected[i], diff);
+            }
+        }
+
+        HIP_CHECK(hipFree(d_temporary_storage));
+        HIP_CHECK(hipFree(d_values_input));
+        HIP_CHECK(hipFree(d_offsets));
+        HIP_CHECK(hipFree(d_values_output));
+    }
+}
