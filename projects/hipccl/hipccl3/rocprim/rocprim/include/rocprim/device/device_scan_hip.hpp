@@ -411,7 +411,7 @@ hipError_t inclusive_scan(void * temporary_storage,
 ///
 /// \par Example
 /// \parblock
-/// In this example a device-level inclusive min-scan operation is performed on an array of
+/// In this example a device-level exclusive min-scan operation is performed on an array of
 /// integer values (<tt>short</tt>s are scanned into <tt>int</tt>s) using custom operator.
 ///
 /// \code{.cpp}
@@ -433,7 +433,7 @@ hipError_t inclusive_scan(void * temporary_storage,
 /// size_t temporary_storage_size_bytes;
 /// void * temporary_storage_ptr = nullptr;
 /// // Get required size of the temporary storage
-/// rocprim::inclusive_scan(
+/// rocprim::exclusive_scan(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     input, output, start_value, input_size, min_op
 /// );
@@ -442,7 +442,7 @@ hipError_t inclusive_scan(void * temporary_storage,
 /// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
 ///
 /// // perform scan
-/// rocprim::inclusive_scan(
+/// rocprim::exclusive_scan(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     input, output, start_value, input_size, min_op
 /// );
