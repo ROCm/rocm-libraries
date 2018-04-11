@@ -178,12 +178,20 @@ void block_reduce_kernel_impl(InputIterator input,
                               ResultType * block_prefixes)
 {
     using result_type = ResultType;
-
     using block_reduce_type = ::rocprim::block_reduce<
         result_type, BlockSize,
         ::rocprim::block_reduce_algorithm::using_warp_reduce
     >;
-    ROCPRIM_SHARED_MEMORY typename block_reduce_type::storage_type reduce_storage;
+    using block_load_type = ::rocprim::block_load<
+        result_type, BlockSize, ItemsPerThread,
+        ::rocprim::block_load_method::block_load_transpose
+    >;
+
+    ROCPRIM_SHARED_MEMORY union
+    {
+        typename block_load_type::storage_type load;
+        typename block_reduce_type::storage_type reduce;
+    } storage;
 
     // It's assumed kernel is executed in 1D
     const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
@@ -203,27 +211,30 @@ void block_reduce_kernel_impl(InputIterator input,
     // load input values into values
     if(flat_block_id == (number_of_blocks - 1)) // last block
     {
-        block_load_direct_striped<BlockSize>(
-            flat_id,
-            input + block_offset,
-            values,
-            valid_in_last_block
-        );
+        block_load_type()
+            .load(
+                input + block_offset,
+                values,
+                valid_in_last_block,
+                storage.load
+            );
     }
     else
     {
-        block_load_direct_striped<BlockSize>(
-            flat_id,
-            input + block_offset,
-            values
-        );
+        block_load_type()
+            .load(
+                input + block_offset,
+                values,
+                storage.load
+            );
     }
+    ::rocprim::syncthreads(); // sync threads to reuse shared memory
 
     block_reduce_type()
         .reduce(
             values, // input
             block_prefix, // output
-            reduce_storage,
+            storage.reduce,
             scan_op
         );
 
