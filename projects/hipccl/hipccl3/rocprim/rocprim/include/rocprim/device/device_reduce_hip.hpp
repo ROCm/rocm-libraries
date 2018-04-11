@@ -203,7 +203,7 @@ hipError_t reduce_impl(void * temporary_storage,
 /// using binary \p reduce_op operator.
 ///
 /// \par Overview
-/// * Supports non-commutative reduction operators. However, a reduction operator should be
+/// * Does not support non-commutative reduction operators. Reduction operator should also be
 /// associative. When used with non-associative functions the results may be non-deterministic
 /// and/or vary in precision.
 /// * Returns the required size of \p temporary_storage in \p storage_size
@@ -313,7 +313,7 @@ hipError_t reduce(void * temporary_storage,
 /// using binary \p reduce_op operator.
 ///
 /// \par Overview
-/// * Supports non-commutative reduction operators. However, a reduction operator should be
+/// * Does not support non-commutative reduction operators. Reduction operator should also be
 /// associative. When used with non-associative functions the results may be non-deterministic
 /// and/or vary in precision.
 /// * Returns the required size of \p temporary_storage in \p storage_size
