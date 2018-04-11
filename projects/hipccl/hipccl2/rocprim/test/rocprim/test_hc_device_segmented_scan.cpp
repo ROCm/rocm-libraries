@@ -393,7 +393,6 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScanUsingHeadFlags)
         std::vector<output_type> output = d_output;
         for(size_t i = 0; i < output.size(); i++)
         {
-            // std::cout << i << ": " << output[i] << " " << expected[i] << " " << int(input[i]) << " " << flags[i] << std::endl;
             SCOPED_TRACE(testing::Message() << "where index = " << i);
             auto diff = std::max<output_type>(std::abs(0.1f * expected[i]), output_type(0.01f));
             if(std::is_integral<output_type>::value) diff = 0;

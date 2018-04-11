@@ -376,6 +376,100 @@ hipError_t segmented_exclusive_scan(void * temporary_storage,
     );
 }
 
+template<
+    class InputIterator,
+    class OutputIterator,
+    class HeadFlagIterator,
+    class BinaryFunction = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>
+>
+inline
+hipError_t segmented_inclusive_scan(void * temporary_storage,
+                                    size_t& storage_size,
+                                    InputIterator input,
+                                    OutputIterator output,
+                                    HeadFlagIterator head_flags,
+                                    size_t size,
+                                    BinaryFunction scan_op = BinaryFunction(),
+                                    hipStream_t stream = 0,
+                                    bool debug_synchronous = false)
+{
+    using input_type = typename std::iterator_traits<InputIterator>::value_type;
+    using flag_type = typename std::iterator_traits<HeadFlagIterator>::value_type;
+    using segmented_scan_flag_wrapper_op_type =
+        detail::segmented_scan_flag_wrapper_op<
+            input_type, flag_type, BinaryFunction
+        >;
+
+    return inclusive_scan(
+        temporary_storage, storage_size,
+        make_zip_iterator(make_tuple(input, head_flags)),
+        make_zip_iterator(make_tuple(output, make_discard_iterator())),
+        size, segmented_scan_flag_wrapper_op_type(scan_op),
+        stream, debug_synchronous
+    );
+}
+
+template<
+    class InputIterator,
+    class OutputIterator,
+    class HeadFlagIterator,
+    class InitValueType,
+    class BinaryFunction = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>
+>
+inline
+hipError_t segmented_exclusive_scan(void * temporary_storage,
+                                    size_t& storage_size,
+                                    InputIterator input,
+                                    OutputIterator output,
+                                    HeadFlagIterator head_flags,
+                                    const InitValueType initial_value,
+                                    size_t size,
+                                    BinaryFunction scan_op = BinaryFunction(),
+                                    hipStream_t stream = 0,
+                                    bool debug_synchronous = false)
+{
+    using input_type = typename std::iterator_traits<InputIterator>::value_type;
+    using flag_type = typename std::iterator_traits<HeadFlagIterator>::value_type;
+    using segmented_scan_flag_wrapper_op_type =
+        detail::segmented_scan_flag_wrapper_op<
+            input_type, flag_type, BinaryFunction
+        >;
+
+    return inclusive_scan(
+        temporary_storage, storage_size,
+        // input:                         [1, 2, 3, 4, 5, 6, 7, 8]
+        // replace_first_iterator(input): [9, 1, 2, 3, 4, 5, 6, 7]
+        // head_flags:                    [1, 0, 0, 1, 0, 1, 0, 0]
+        // initial_value:                  9
+        // transform_iterator:            [9, 1, 2, 9, 4, 9, 6, 7]
+        //
+        // inclusive_scan result:         [9, 10, 12, 9, 13, 9, 15, 22]
+        make_transform_iterator(
+            make_zip_iterator(
+                make_tuple(
+                    detail::replace_first_iterator<InputIterator>(input - 1, initial_value),
+                    head_flags
+                )
+            ),
+            [initial_value](const ::rocprim::tuple<input_type, flag_type>& t)
+                -> ::rocprim::tuple<input_type, flag_type>
+            {
+                if(::rocprim::get<1>(t))
+                {
+                    return ::rocprim::make_tuple(
+                        static_cast<input_type>(initial_value),
+                        ::rocprim::get<1>(t)
+                    );
+                }
+                return t;
+            }
+        ),
+        make_zip_iterator(make_tuple(output, make_discard_iterator())),
+        size, segmented_scan_flag_wrapper_op_type(scan_op),
+        stream, debug_synchronous
+    );
+}
+
 /// @}
 // end of group devicemodule_hip
 
