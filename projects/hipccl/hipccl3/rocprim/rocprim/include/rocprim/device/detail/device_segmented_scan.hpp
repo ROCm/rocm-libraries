@@ -39,6 +39,128 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
+// Replaces first value of given range with given value
+// Important: it does not dereference the first item in given range, so
+// it does not matter if it's an invalid pointer.
+template<class InputIterator>
+class replace_first_iterator
+{
+private:
+    using input_category = typename std::iterator_traits<InputIterator>::iterator_category;
+    static_assert(
+        std::is_same<input_category, std::random_access_iterator_tag>::value,
+        "InputIterator must be a random-access iterator"
+    );
+
+public:
+    using value_type = typename std::iterator_traits<InputIterator>::value_type;
+    using reference = value_type;
+    using pointer = const value_type*;
+    using difference_type = typename std::iterator_traits<InputIterator>::difference_type;
+    using iterator_category = std::random_access_iterator_tag;
+
+    ROCPRIM_HOST_DEVICE inline
+    ~replace_first_iterator() = default;
+
+    ROCPRIM_HOST_DEVICE inline
+    replace_first_iterator(InputIterator iterator, value_type value, size_t index = 0)
+        : iterator_(iterator), value_(value), index_(index)
+    {
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    replace_first_iterator& operator++()
+    {
+        iterator_++;
+        index_++;
+        return *this;
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    replace_first_iterator operator++(int)
+    {
+        replace_first_iterator old = *this;
+        iterator_++;
+        index_++;
+        return old;
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    value_type operator*() const
+    {
+        if(index_ == 0)
+        {
+            return value_;
+        }
+        return *iterator_;
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    value_type operator[](difference_type distance) const
+    {
+        replace_first_iterator i = (*this) + distance;
+        return *i;
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    replace_first_iterator operator+(difference_type distance) const
+    {
+        return replace_first_iterator(iterator_ + distance, value_, index_ + distance);
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    replace_first_iterator& operator+=(difference_type distance)
+    {
+        iterator_ += distance;
+        index_ += distance;
+        return *this;
+    }
+
+private:
+    InputIterator iterator_;
+    value_type value_;
+    size_t index_;
+};
+
+template<class V, class F, class BinaryFunction>
+struct segmented_scan_flag_wrapper_op
+{
+    #ifdef __cpp_lib_is_invocable
+    using result_type = typename std::invoke_result<BinaryFunction, V, V>::type;
+    #else
+    using result_type = typename std::result_of<BinaryFunction(V, V)>::type;
+    #endif
+
+    ROCPRIM_HOST_DEVICE inline
+    segmented_scan_flag_wrapper_op() = default;
+
+    ROCPRIM_HOST_DEVICE inline
+    segmented_scan_flag_wrapper_op(BinaryFunction scan_op)
+        : scan_op_(scan_op)
+    {
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    ~segmented_scan_flag_wrapper_op() = default;
+
+    ROCPRIM_HOST_DEVICE inline
+    rocprim::tuple<result_type, F> operator()(const rocprim::tuple<result_type, F>& t1,
+                                              const rocprim::tuple<result_type, F>& t2) const
+    {
+        if(!rocprim::get<1>(t2))
+        {
+            return rocprim::make_tuple(
+                scan_op_(rocprim::get<0>(t1), rocprim::get<0>(t2)),
+                static_cast<F>(rocprim::get<1>(t1) || rocprim::get<1>(t2))
+            );
+        }
+        return t2;
+    }
+
+private:
+    BinaryFunction scan_op_;
+};
+
 template<
     bool Exclusive,
     bool UsePrefix,
