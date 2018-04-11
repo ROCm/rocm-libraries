@@ -125,8 +125,7 @@ void segmented_scan_impl(void * temporary_storage,
 /// \par Overview
 /// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
-/// * Ranges specified by \p input must have at least \p size elements, \p output must have
-/// \p segments elements.
+/// * Ranges specified by \p input and \p output must have at least \p size elements.
 /// * Ranges specified by \p begin_offsets and \p end_offsets must have
 /// at least \p segments elements. They may use the same sequence <tt>offsets</tt> of at least
 /// <tt>segments + 1</tt> elements: <tt>offsets</tt> for \p begin_offsets and
@@ -196,7 +195,7 @@ void segmented_scan_impl(void * temporary_storage,
 /// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
 ///
 /// // perform scan
-/// rocprim::inclusive_scan(
+/// rocprim::segmented_inclusive_scan(
 ///     temporary_storage_ptr.accelerator_pointer(), temporary_storage_size_bytes,
 ///     input.accelerator_pointer(), output.accelerator_pointer(), segments,
 ///     offsets.accelerator_pointer(), offsets.accelerator_pointer() + 1,
@@ -248,8 +247,7 @@ void segmented_inclusive_scan(void * temporary_storage,
 /// \par Overview
 /// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
-/// * Ranges specified by \p input must have at least \p size elements, \p output must have
-/// \p segments elements.
+/// * Ranges specified by \p input and \p output must have at least \p size elements.
 /// * Ranges specified by \p begin_offsets and \p end_offsets must have
 /// at least \p segments elements. They may use the same sequence <tt>offsets</tt> of at least
 /// <tt>segments + 1</tt> elements: <tt>offsets</tt> for \p begin_offsets and
@@ -322,7 +320,7 @@ void segmented_inclusive_scan(void * temporary_storage,
 /// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
 ///
 /// // perform scan
-/// rocprim::exclusive_scan(
+/// rocprim::segmented_exclusive_scan(
 ///     temporary_storage_ptr.accelerator_pointer(), temporary_storage_size_bytes,
 ///     input.accelerator_pointer(), output.accelerator_pointer(), segments,
 ///     offsets.accelerator_pointer(), offsets.accelerator_pointer() + 1,
@@ -361,6 +359,83 @@ void segmented_exclusive_scan(void * temporary_storage,
     );
 }
 
+/// \brief HC parallel segmented inclusive scan primitive for device level.
+///
+/// segmented_inclusive_scan function performs a device-wide inclusive scan operation
+/// across multiple sequences from \p input using binary \p scan_op operator. Beginnings
+/// of the segments should be marked by value convertible to \p true at corresponding
+/// position in \p flags range.
+///
+/// \par Overview
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage in a null pointer.
+/// * Ranges specified by \p input, \p output, and \p flags must have at least \p size elements.
+/// * \p value_type of \p HeadFlagIterator iterator should be convertible to \p bool type.
+///
+/// \tparam InputIterator - random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam HeadFlagIterator - random-access iterator type of flags. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam BinaryFunction - type of binary function used for scan operation. Default type
+/// is \p rocprim::plus<T>, where \p T is a \p value_type of \p InputIterator.
+///
+/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the scan operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input - iterator to the first element in the range to scan.
+/// \param [out] output - iterator to the first element in the output range.
+/// \param [in] head_flags - iterator to the first element in the range of head flags marking
+/// beginnings of each segment in the input range.
+/// \param [in] size - number of element in the input range.
+/// \param [in] scan_op - binary operation function object that will be used for scan.
+/// The signature of the function should be equivalent to the following:
+/// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
+/// <tt>const &</tt>, but function object must not modify the objects passed to it.
+/// The default value is \p BinaryFunction().
+/// \param [in] acc_view - [optional] \p hc::accelerator_view object. The default value
+/// is \p hc::accelerator().get_default_view() (default view of the default accelerator).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced. The default value is \p false.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level segmented inclusive sum operation is performed on
+/// an array of integer values (<tt>short</tt>s are added into <tt>int</tt>s).
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// hc::accelerator_view acc_view = ...;
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t size;      // e.g., 8
+/// hc::array<short> input(hc::extent<1>(size), ...);  // e.g., [1, 2, 3, 4, 5, 6, 7, 8]
+/// hc::array<int>   flags(hc::extent<1>(size), ...);  // e.g., [1, 0, 0, 1, 0, 1, 0, 0]
+/// hc::array<int>   output(hc::extent<1>(size), ...); // empty array of 8 elements
+///
+/// size_t temporary_storage_size_bytes;
+/// // Get required size of the temporary storage
+/// rocprim::segmented_inclusive_scan(
+///     nullptr, temporary_storage_size_bytes,
+///     input.accelerator_pointer(), output.accelerator_pointer(), flags.accelerator_pointer(),
+///     size, ::rocprim::plus<int>(), acc_view
+/// );
+///
+/// // allocate temporary storage
+/// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
+///
+/// // perform scan
+/// rocprim::segmented_inclusive_scan(
+///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
+///     input.accelerator_pointer(), output.accelerator_pointer(), flags.accelerator_pointer(),
+///     size, ::rocprim::plus<int>(), acc_view
+/// );
+/// // output: [1, 3, 6, 4, 9, 6, 13, 21]
+/// \endcode
+/// \endparblock
 template<
     class InputIterator,
     class OutputIterator,
@@ -394,6 +469,86 @@ void segmented_inclusive_scan(void * temporary_storage,
     );
 }
 
+/// \brief HC parallel segmented exclusive scan primitive for device level.
+///
+/// segmented_exclusive_scan function performs a device-wide exclusive scan operation
+/// across multiple sequences from \p input using binary \p scan_op operator. Beginnings
+/// of the segments should be marked by value convertible to \p true at corresponding
+/// position in \p flags range.
+///
+/// \par Overview
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage in a null pointer.
+/// * Ranges specified by \p input, \p output, and \p flags must have at least \p size elements.
+/// * \p value_type of \p HeadFlagIterator iterator should be convertible to \p bool type.
+///
+/// \tparam InputIterator - random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam HeadFlagIterator - random-access iterator type of flags. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam BinaryFunction - type of binary function used for scan operation. Default type
+/// is \p rocprim::plus<T>, where \p T is a \p value_type of \p InputIterator.
+/// \tparam InitValueType - type of the initial value.
+///
+/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the scan operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input - iterator to the first element in the range to scan.
+/// \param [out] output - iterator to the first element in the output range.
+/// \param [in] head_flags - iterator to the first element in the range of head flags marking
+/// beginnings of each segment in the input range.
+/// \param [in] initial_value - initial value to start the scan.
+/// \param [in] size - number of element in the input range.
+/// \param [in] scan_op - binary operation function object that will be used for scan.
+/// The signature of the function should be equivalent to the following:
+/// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
+/// <tt>const &</tt>, but function object must not modify the objects passed to it.
+/// The default value is \p BinaryFunction().
+/// \param [in] acc_view - [optional] \p hc::accelerator_view object. The default value
+/// is \p hc::accelerator().get_default_view() (default view of the default accelerator).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced. The default value is \p false.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level segmented inclusive sum operation is performed on
+/// an array of integer values (<tt>short</tt>s are added into <tt>int</tt>s).
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// hc::accelerator_view acc_view = ...;
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t size;      // e.g., 8
+/// int start_value;                                   // e.g., 9
+/// hc::array<short> input(hc::extent<1>(size), ...);  // e.g., [1, 2, 3, 4, 5, 6, 7, 8]
+/// hc::array<int>   flags(hc::extent<1>(size), ...);  // e.g., [1, 0, 0, 1, 0, 1, 0, 0]
+/// hc::array<int>   output(hc::extent<1>(size), ...); // empty array of 8 elements
+///
+/// size_t temporary_storage_size_bytes;
+/// // Get required size of the temporary storage
+/// rocprim::segmented_exclusive_scan(
+///     nullptr, temporary_storage_size_bytes,
+///     input.accelerator_pointer(), output.accelerator_pointer(), flags.accelerator_pointer(),
+///     start_value, size, ::rocprim::plus<int>(), acc_view
+/// );
+///
+/// // allocate temporary storage
+/// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
+///
+/// // perform scan
+/// rocprim::segmented_exclusive_scan(
+///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
+///     input.accelerator_pointer(), output.accelerator_pointer(), flags.accelerator_pointer(),
+///     start_value, size, ::rocprim::plus<int>(), acc_view
+/// );
+/// // output: [9, 10, 12, 9, 13, 9, 15, 22]
+/// \endcode
+/// \endparblock
 template<
     class InputIterator,
     class OutputIterator,
@@ -422,6 +577,11 @@ void segmented_exclusive_scan(void * temporary_storage,
 
     return inclusive_scan(
         temporary_storage, storage_size,
+        // Using replace_first_iterator shifts input one item to left and replaces
+        // first value with initial_value. Then transform_iterator replaces last
+        // elements of other segments to initial_value. That modified input data
+        // can be inclusively scanned and produce expected exclusive results.
+        //
         // input:                         [1, 2, 3, 4, 5, 6, 7, 8]
         // replace_first_iterator(input): [9, 1, 2, 3, 4, 5, 6, 7]
         // head_flags:                    [1, 0, 0, 1, 0, 1, 0, 0]
