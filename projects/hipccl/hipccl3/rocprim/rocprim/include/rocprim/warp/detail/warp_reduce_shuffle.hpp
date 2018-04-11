@@ -54,7 +54,7 @@ public:
 
         T value;
         #pragma unroll
-        for (unsigned int offset = WarpSize >> 1; offset > 0; offset >>= 1)
+        for(unsigned int offset = 1; offset < WarpSize; offset *= 2)
         {
             value = warp_shuffle_down(output, offset, WarpSize);
             output = reduce_op(output, value);
@@ -78,7 +78,7 @@ public:
 
         T value;
         #pragma unroll
-        for (unsigned int offset = WarpSize >> 1; offset > 0; offset >>= 1)
+        for(unsigned int offset = 1; offset < WarpSize; offset *= 2)
         {
             value = warp_shuffle_down(output, offset, WarpSize);
             unsigned int id = detail::logical_lane_id<WarpSize>();
