@@ -69,12 +69,11 @@ template<
 >
 __global__
 void block_reduce_kernel(InputIterator input,
-                         const size_t size,
                          BinaryFunction scan_op,
                          ResultType * block_prefixes)
 {
     block_reduce_kernel_impl<BlockSize, ItemsPerThread>(
-        input, size, scan_op, block_prefixes
+        input, scan_op, block_prefixes
     );
 }
 
@@ -180,12 +179,12 @@ hipError_t scan_impl(void * temporary_storage,
 
     if(number_of_blocks > 1)
     {
-        // Grid size for block_reduce_kernel and final_scan_kernel
-        auto grid_size = number_of_blocks;
-
         // Pointer to array with block_prefixes
         result_type * block_prefixes = static_cast<result_type*>(temporary_storage);
 
+        // Grid size for block_reduce_kernel, we don't need to calculate reduction
+        // of the last block as it will never be used as prefix for other blocks
+        auto grid_size = number_of_blocks - 1;
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(detail::block_reduce_kernel<
@@ -193,7 +192,7 @@ hipError_t scan_impl(void * temporary_storage,
                 InputIterator, BinaryFunction, result_type
             >),
             dim3(grid_size), dim3(block_size), 0, stream,
-            input, size, scan_op, block_prefixes
+            input, scan_op, block_prefixes
         );
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("block_reduce_kernel", size, start)
 
@@ -219,6 +218,8 @@ hipError_t scan_impl(void * temporary_storage,
         if(error != hipSuccess) return error;
         ROCPRIM_DETAIL_HIP_SYNC("nested_device_scan", number_of_blocks, start);
 
+        // Grid size for final_scan_kernel
+        grid_size = number_of_blocks;
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(detail::final_scan_kernel<
@@ -239,17 +240,17 @@ hipError_t scan_impl(void * temporary_storage,
     }
     else
     {
-        constexpr unsigned int single_scan_block_size = BlockSize;
-        constexpr unsigned int single_scan_items_per_thread = ItemsPerThread;
+        constexpr unsigned int single_scan_bs = BlockSize;
+        constexpr unsigned int single_scan_itp = ItemsPerThread;
 
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(detail::single_scan_kernel<
-                single_scan_block_size, single_scan_items_per_thread,
+                single_scan_bs, single_scan_itp,
                 Exclusive, // flag for exclusive scan operation
                 InputIterator, OutputIterator, BinaryFunction
             >),
-            dim3(1), dim3(single_scan_block_size), 0, stream,
+            dim3(1), dim3(single_scan_bs), 0, stream,
             input, size, static_cast<result_type>(initial_value), output, scan_op
         );
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("single_scan_kernel", size, start);
@@ -411,7 +412,7 @@ hipError_t inclusive_scan(void * temporary_storage,
 ///
 /// \par Example
 /// \parblock
-/// In this example a device-level inclusive min-scan operation is performed on an array of
+/// In this example a device-level exclusive min-scan operation is performed on an array of
 /// integer values (<tt>short</tt>s are scanned into <tt>int</tt>s) using custom operator.
 ///
 /// \code{.cpp}
@@ -433,7 +434,7 @@ hipError_t inclusive_scan(void * temporary_storage,
 /// size_t temporary_storage_size_bytes;
 /// void * temporary_storage_ptr = nullptr;
 /// // Get required size of the temporary storage
-/// rocprim::inclusive_scan(
+/// rocprim::exclusive_scan(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     input, output, start_value, input_size, min_op
 /// );
@@ -442,7 +443,7 @@ hipError_t inclusive_scan(void * temporary_storage,
 /// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
 ///
 /// // perform scan
-/// rocprim::inclusive_scan(
+/// rocprim::exclusive_scan(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     input, output, start_value, input_size, min_op
 /// );

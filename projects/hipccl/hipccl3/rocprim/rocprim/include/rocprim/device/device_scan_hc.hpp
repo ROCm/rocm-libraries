@@ -104,12 +104,12 @@ void scan_impl(void * temporary_storage,
 
     if(number_of_blocks > 1)
     {
-        // Grid size for block_reduce_kernel and final_scan_kernel
-        auto grid_size = number_of_blocks * block_size;
-
         // Pointer to array with block_prefixes
         result_type * block_prefixes = static_cast<result_type*>(temporary_storage);
 
+        // Grid size for block_reduce_kernel, we don't need to calculate reduction
+        // of the last block as it will never be used as prefix for other blocks
+        auto grid_size = (number_of_blocks - 1) * block_size;
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         hc::parallel_for_each(
             acc_view,
@@ -117,7 +117,7 @@ void scan_impl(void * temporary_storage,
             [=](hc::tiled_index<1>) [[hc]]
             {
                 block_reduce_kernel_impl<block_size, items_per_thread>(
-                    input, size, scan_op, block_prefixes
+                    input, scan_op, block_prefixes
                 );
             }
         );
@@ -144,6 +144,8 @@ void scan_impl(void * temporary_storage,
         );
         ROCPRIM_DETAIL_HC_SYNC("nested_device_scan", number_of_blocks, start)
 
+        // Grid size for final_scan_kernel
+        grid_size = number_of_blocks * block_size;
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         hc::parallel_for_each(
             acc_view,
@@ -151,7 +153,8 @@ void scan_impl(void * temporary_storage,
             [=](hc::tiled_index<1>) [[hc]]
             {
                 final_scan_kernel_impl<block_size, items_per_thread, Exclusive>(
-                    input, size, output, static_cast<result_type>(initial_value), scan_op, block_prefixes
+                    input, size, output, static_cast<result_type>(initial_value),
+                    scan_op, block_prefixes
                 );
             }
         );
@@ -159,16 +162,16 @@ void scan_impl(void * temporary_storage,
     }
     else
     {
-        constexpr unsigned int single_scan_block_size = BlockSize;
-        constexpr unsigned int single_scan_items_per_thread = ItemsPerThread;
+        constexpr unsigned int single_scan_bs = BlockSize;
+        constexpr unsigned int single_scan_ipt = ItemsPerThread;
 
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         hc::parallel_for_each(
             acc_view,
-            hc::tiled_extent<1>(block_size, block_size),
+            hc::tiled_extent<1>(single_scan_bs, single_scan_bs),
             [=](hc::tiled_index<1>) [[hc]]
             {
-                single_scan_kernel_impl<single_scan_block_size, single_scan_items_per_thread, Exclusive>(
+                single_scan_kernel_impl<single_scan_bs, single_scan_ipt, Exclusive>(
                     input, size, static_cast<result_type>(initial_value), output, scan_op
                 );
             }
