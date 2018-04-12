@@ -27,6 +27,12 @@
 #include "../config.hpp"
 #include "../detail/various.hpp"
 
+#include "../iterator/zip_iterator.hpp"
+#include "../iterator/discard_iterator.hpp"
+#include "../iterator/transform_iterator.hpp"
+#include "../iterator/detail/replace_first_iterator.hpp"
+#include "../types/tuple.hpp"
+
 #include "detail/device_segmented_scan.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -151,11 +157,11 @@ hipError_t segmented_scan_impl(void * temporary_storage,
 /// <tt>offsets + 1</tt> for \p end_offsets.
 ///
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
-/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// requirements of a C++ RandomAccessIterator concept. It can be a simple pointer type.
 /// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
-/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// requirements of a C++ RandomAccessIterator concept. It can be a simple pointer type.
 /// \tparam OffsetIterator - random-access iterator type of segment offsets. Must meet the
-/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// requirements of a C++ RandomAccessIterator concept. It can be a simple pointer type.
 /// \tparam BinaryFunction - type of binary function used for scan operation. Default type
 /// is \p rocprim::plus<T>, where \p T is a \p value_type of \p InputIterator.
 ///
@@ -270,14 +276,14 @@ hipError_t segmented_inclusive_scan(void * temporary_storage,
 /// <tt>offsets + 1</tt> for \p end_offsets.
 ///
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
-/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// requirements of a C++ RandomAccessIterator concept. It can be a simple pointer type.
 /// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
-/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// requirements of a C++ RandomAccessIterator concept. It can be a simple pointer type.
 /// \tparam OffsetIterator - random-access iterator type of segment offsets. Must meet the
-/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// requirements of a C++ RandomAccessIterator concept. It can be a simple pointer type.
+/// \tparam InitValueType - type of the initial value.
 /// \tparam BinaryFunction - type of binary function used for scan operation. Default type
 /// is \p rocprim::plus<T>, where \p T is a \p value_type of \p InputIterator.
-/// \tparam InitValueType - type of the initial value.
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -388,11 +394,11 @@ hipError_t segmented_exclusive_scan(void * temporary_storage,
 /// * \p value_type of \p HeadFlagIterator iterator should be convertible to \p bool type.
 ///
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
-/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// requirements of a C++ RandomAccessIterator concept. It can be a simple pointer type.
 /// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
-/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// requirements of a C++ RandomAccessIterator concept. It can be a simple pointer type.
 /// \tparam HeadFlagIterator - random-access iterator type of flags. Must meet the
-/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// requirements of a C++ RandomAccessIterator concept. It can be a simple pointer type.
 /// \tparam BinaryFunction - type of binary function used for scan operation. Default type
 /// is \p rocprim::plus<T>, where \p T is a \p value_type of \p InputIterator.
 ///
@@ -497,14 +503,14 @@ hipError_t segmented_inclusive_scan(void * temporary_storage,
 /// * \p value_type of \p HeadFlagIterator iterator should be convertible to \p bool type.
 ///
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
-/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// requirements of a C++ RandomAccessIterator concept. It can be a simple pointer type.
 /// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
-/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// requirements of a C++ RandomAccessIterator concept. It can be a simple pointer type.
 /// \tparam HeadFlagIterator - random-access iterator type of flags. Must meet the
-/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// requirements of a C++ RandomAccessIterator concept. It can be a simple pointer type.
+/// \tparam InitValueType - type of the initial value.
 /// \tparam BinaryFunction - type of binary function used for scan operation. Default type
 /// is \p rocprim::plus<T>, where \p T is a \p value_type of \p InputIterator.
-/// \tparam InitValueType - type of the initial value.
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to

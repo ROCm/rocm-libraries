@@ -132,6 +132,39 @@ OutputIt host_exclusive_scan(InputIt first, InputIt last,
     return ++d_first;
 }
 
+template<class InputIt, class KeyIt, class T, class OutputIt, class BinaryOperation, class KeyCompare>
+OutputIt host_exclusive_scan_by_key(InputIt first, InputIt last, KeyIt k_first,
+                                    T initial_value, OutputIt d_first,
+                                    BinaryOperation op, KeyCompare key_compare_op)
+{
+    using input_type = typename std::iterator_traits<InputIt>::value_type;
+    #ifdef __cpp_lib_is_invocable
+    using result_type = typename std::invoke_result<BinaryOperation, input_type, input_type>::type;
+    #else
+    using result_type = typename std::result_of<BinaryOperation(input_type, input_type)>::type;
+    #endif
+
+    if (first == last) return d_first;
+
+    result_type sum = initial_value;
+    *d_first = initial_value;
+
+    while ((first+1) != last)
+    {
+        if(key_compare_op(*k_first, *++k_first))
+        {
+            sum = op(sum, *first);
+        }
+        else
+        {
+            sum = initial_value;
+        }
+        *++d_first = sum;
+        first++;
+    }
+    return ++d_first;
+}
+
 } // end test_utils namespace
 
 #endif // TEST_TEST_UTILS_HOST_HPP_
