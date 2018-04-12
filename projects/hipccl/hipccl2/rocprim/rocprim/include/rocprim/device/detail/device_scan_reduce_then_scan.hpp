@@ -173,7 +173,6 @@ template<
 >
 ROCPRIM_DEVICE inline
 void block_reduce_kernel_impl(InputIterator input,
-                              const size_t input_size,
                               BinaryFunction scan_op,
                               ResultType * block_prefixes)
 {
@@ -196,38 +195,18 @@ void block_reduce_kernel_impl(InputIterator input,
     // It's assumed kernel is executed in 1D
     const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
     const unsigned int flat_block_id = ::rocprim::detail::block_id<0>();
-
     const unsigned int block_offset = flat_block_id * ItemsPerThread * BlockSize;
-    constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
-    // TODO: number_of_blocks can be calculated on host
-    const unsigned int number_of_blocks = (input_size + items_per_block - 1)/items_per_block;
 
     // For input values
     result_type values[ItemsPerThread];
-
     result_type block_prefix;
-    // TODO: valid_in_last_block can be calculated on host
-    auto valid_in_last_block = input_size - items_per_block * (number_of_blocks - 1);
-    // load input values into values
-    if(flat_block_id == (number_of_blocks - 1)) // last block
-    {
-        block_load_type()
-            .load(
-                input + block_offset,
-                values,
-                valid_in_last_block,
-                storage.load
-            );
-    }
-    else
-    {
-        block_load_type()
-            .load(
-                input + block_offset,
-                values,
-                storage.load
-            );
-    }
+
+    block_load_type()
+        .load(
+            input + block_offset,
+            values,
+            storage.load
+        );
     ::rocprim::syncthreads(); // sync threads to reuse shared memory
 
     block_reduce_type()
