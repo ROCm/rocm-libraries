@@ -35,7 +35,7 @@ list(APPEND CMAKE_MODULE_PATH
 include(cmake/SetToolchain.cmake)
 
 # rocPRIM project
-project(rocprim VERSION 0.2.1.0 LANGUAGES CXX)
+project(rocprim VERSION 0.3.0.0 LANGUAGES CXX)
 
 # Set a default build type if none was specified
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
