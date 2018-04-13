@@ -64,4 +64,10 @@
     #error "HIP and HC APIs are not available"
 #endif
 
+#ifdef ROCPRIM_DISABLE_DPP
+    #define ROCPRIM_DETAIL_USE_DPP false
+#else
+    #define ROCPRIM_DETAIL_USE_DPP true
+#endif
+
 #endif // ROCPRIM_CONFIG_HPP_

@@ -30,7 +30,7 @@
 #include "../functional.hpp"
 #include "../types.hpp"
 
-#include "detail/warp_reduce_shuffle.hpp"
+#include "detail/warp_reduce_crosslane.hpp"
 #include "detail/warp_reduce_shared_mem.hpp"
 
 /// \addtogroup warpmodule
@@ -46,9 +46,9 @@ template<class T, unsigned int WarpSize, bool UseAllReduce>
 struct select_warp_reduce_impl
 {
     typedef typename std::conditional<
-        // can we use shuffle-based implementation?
+        // can we use crosslane (DPP or shuffle-based) implementation?
         detail::is_warpsize_shuffleable<WarpSize>::value,
-        detail::warp_reduce_shuffle<T, WarpSize, UseAllReduce>, // yes
+        detail::warp_reduce_crosslane<T, WarpSize, UseAllReduce>, // yes
         detail::warp_reduce_shared_mem<T, WarpSize, UseAllReduce> // no
     >::type type;
 };
