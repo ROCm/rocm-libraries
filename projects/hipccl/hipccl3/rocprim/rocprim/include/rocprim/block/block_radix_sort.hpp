@@ -26,7 +26,7 @@
 #include "../config.hpp"
 #include "../detail/various.hpp"
 #include "../detail/radix_sort.hpp"
-#include "../warp/detail/warp_scan_shuffle.hpp"
+#include "../warp/detail/warp_scan_crosslane.hpp"
 
 #include "../intrinsics.hpp"
 #include "../functional.hpp"
@@ -135,9 +135,9 @@ class block_bit_plus_scan
 
     // typedef of warp_scan primitive that will be used to get prefix values for
     // each warp (scanned carry-outs from warps before it)
-    // warp_scan_shuffle is an implementation of warp_scan that does not need storage,
+    // warp_scan_crosslane is an implementation of warp_scan that does not need storage,
     // but requires logical warp size to be a power of two.
-    using warp_scan_prefix_type = ::rocprim::detail::warp_scan_shuffle<T, detail::next_power_of_two(warps_no)>;
+    using warp_scan_prefix_type = ::rocprim::detail::warp_scan_crosslane<T, detail::next_power_of_two(warps_no)>;
 
 public:
 
@@ -145,7 +145,7 @@ public:
     {
         T warp_prefixes[warps_no];
         // ---------- Shared memory optimisation ----------
-        // Since we use warp_scan_shuffle for warp scan, we don't need to allocate
+        // Since we use warp_scan_crosslane for warp scan, we don't need to allocate
         // any temporary memory for it.
     };
 

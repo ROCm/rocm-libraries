@@ -50,19 +50,19 @@ class block_scan_warp_scan
 
     // typedef of warp_scan primitive that will be used to perform warp-level
     // inclusive/exclusive scan operations on input values.
-    // warp_scan_shuffle is an implementation of warp_scan that does not need storage,
+    // warp_scan_crosslane is an implementation of warp_scan that does not need storage,
     // but requires logical warp size to be a power of two.
-    using warp_scan_input_type = ::rocprim::detail::warp_scan_shuffle<T, warp_size_>;
+    using warp_scan_input_type = ::rocprim::detail::warp_scan_crosslane<T, warp_size_>;
     // typedef of warp_scan primitive that will be used to get prefix values for
     // each warp (scanned carry-outs from warps before it).
-    using warp_scan_prefix_type = ::rocprim::detail::warp_scan_shuffle<T, detail::next_power_of_two(warps_no_)>;
+    using warp_scan_prefix_type = ::rocprim::detail::warp_scan_crosslane<T, detail::next_power_of_two(warps_no_)>;
 
 public:
     struct storage_type
     {
         T warp_prefixes[warps_no_];
         // ---------- Shared memory optimisation ----------
-        // Since warp_scan_input and warp_scan_prefix are typedef of warp_scan_shuffle,
+        // Since warp_scan_input and warp_scan_prefix are typedef of warp_scan_crosslane,
         // we don't need to allocate any temporary memory for them.
         // If we just use warp_scan, we would need to add following union to this struct:
         // union
@@ -507,7 +507,7 @@ private:
             output = scan_op(warp_prefix, output);
         }
     }
-    
+
     // When BlockSize is less than warp_size we dont need the extra prefix calculations.
     template<class BinaryFunction, unsigned int BlockSize_ = BlockSize>
     ROCPRIM_DEVICE inline
