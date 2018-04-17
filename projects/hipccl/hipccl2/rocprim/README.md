@@ -1,3 +1,7 @@
+# Warning (pre-production state)
+
+rocPRIM is in its pre-production state and should be used for development purposes only.
+
 # rocPRIM
 
 The rocPRIM is a header-only library providing HIP and HC parallel primitives for developing
@@ -7,7 +11,7 @@ performant GPU-accelerated code on AMD ROCm platform.
 
 * Git
 * CMake (3.10.0 or later)
-* AMD [ROCm](https://rocm.github.io/install.html) platform (1.6.4 or later)
+* AMD [ROCm](https://rocm.github.io/install.html) platform (1.7.1 or later)
 
 Optional:
 
