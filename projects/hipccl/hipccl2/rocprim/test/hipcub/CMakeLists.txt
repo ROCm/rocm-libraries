@@ -25,7 +25,7 @@ function(add_hipcub_test TEST_NAME TEST_SOURCES)
   get_filename_component(TEST_TARGET ${TEST_MAIN_SOURCE} NAME_WE)
   if(HIP_PLATFORM STREQUAL "hcc")
     add_executable(${TEST_TARGET} ${TEST_SOURCES})
-    target_include_directories(${TEST_TARGET} SYSTEM
+    target_include_directories(${TEST_TARGET} SYSTEM BEFORE
       PUBLIC
         ${GTEST_INCLUDE_DIRS}
     )
@@ -50,7 +50,7 @@ function(add_hipcub_test TEST_NAME TEST_SOURCES)
       OPTIONS
         --expt-extended-lambda
     )
-    target_include_directories(${TEST_TARGET} SYSTEM
+    target_include_directories(${TEST_TARGET} SYSTEM BEFORE
       PUBLIC
         ${GTEST_INCLUDE_DIRS}
     )

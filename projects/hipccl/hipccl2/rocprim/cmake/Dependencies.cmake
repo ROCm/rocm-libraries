@@ -91,6 +91,9 @@ if(BUILD_TEST)
              ${UPDATE_DISCONNECTED_IF_AVAILABLE}
     )
   endif()
+  # Fix for FindGTest: unset cache variables since GTEST_FOUND is false
+  unset(GTEST_INCLUDE_DIR CACHE)
+  unset(GTEST_INCLUDE_DIRS CACHE)
   find_package(GTest REQUIRED)
 endif()
 
