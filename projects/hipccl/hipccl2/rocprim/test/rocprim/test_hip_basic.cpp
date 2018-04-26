@@ -40,7 +40,7 @@ TEST(RocprimBasicTests, GetVersion)
 // get_rocprim_version_on_device is compiled in a separate source,
 // that way we can be sure that all rocPRIM functions are inline
 // and there won't be any multiple definitions error
-TEST(RocprimBasicTests, BlockScan)
+TEST(RocprimBasicTests, GetVersionOnDevice)
 {
     auto version = get_rocprim_version_on_device();
     ASSERT_EQ(version, ROCPRIM_VERSION);

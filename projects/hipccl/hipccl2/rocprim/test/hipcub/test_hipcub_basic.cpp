@@ -20,26 +20,22 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#ifndef ROCPRIM_TEST_DETAIL_GET_ROCPRIM_VERSION_HPP_
-#define ROCPRIM_TEST_DETAIL_GET_ROCPRIM_VERSION_HPP_
-
 #include <iostream>
-#include <cstdio>
+#include <vector>
 
-// rocPRIM API
-#include <rocprim/rocprim.hpp>
+// Google Test
+#include <gtest/gtest.h>
 
-#ifdef ROCPRIM_HIP_API
-    #define HIP_CHECK(condition)         \
-    {                                  \
-        hipError_t error = condition;    \
-        if(error != hipSuccess){         \
-            std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
-            exit(error); \
-        } \
-    }
-#endif
+// hipCUB API
+#include <hipcub/hipcub.hpp>
 
-unsigned int get_rocprim_version_on_device();
+#include "detail/get_hipcub_version.hpp"
 
-#endif // ROCPRIM_TEST_DETAIL_GET_ROCPRIM_VERSION_HPP_
+// get_hipcub_version_on_device is compiled in a separate source,
+// that way we can be sure that all hipCUB functions are inline
+// and there won't be any multiple definitions error
+TEST(HipcubBasicTests, GetVersionOnDevice)
+{
+    int version = get_hipcub_version_on_device();
+    ASSERT_EQ(version, HIPCUB_VERSION);
+}
