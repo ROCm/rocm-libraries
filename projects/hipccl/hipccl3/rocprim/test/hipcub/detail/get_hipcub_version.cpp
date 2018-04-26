@@ -20,26 +20,39 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#ifndef ROCPRIM_TEST_DETAIL_GET_ROCPRIM_VERSION_HPP_
-#define ROCPRIM_TEST_DETAIL_GET_ROCPRIM_VERSION_HPP_
+#include "get_hipcub_version.hpp"
 
-#include <iostream>
-#include <cstdio>
+__global__
+void get_version_kernel(unsigned int * version)
+{
+    *version = HIPCUB_VERSION;
+}
 
-// rocPRIM API
-#include <rocprim/rocprim.hpp>
+unsigned int get_hipcub_version_on_device()
+{
+    unsigned int version = 0;
 
-#ifdef ROCPRIM_HIP_API
-    #define HIP_CHECK(condition)         \
-    {                                  \
-        hipError_t error = condition;    \
-        if(error != hipSuccess){         \
-            std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
-            exit(error); \
-        } \
-    }
-#endif
+    unsigned int * d_version;
+    HIP_CHECK(hipMalloc(&d_version, sizeof(unsigned int)));
+    HIP_CHECK(hipDeviceSynchronize());
 
-unsigned int get_rocprim_version_on_device();
+    hipLaunchKernelGGL(
+        get_version_kernel,
+        dim3(1), dim3(1), 0, 0,
+        d_version
+    );
+    HIP_CHECK(hipPeekAtLastError());
+    HIP_CHECK(hipDeviceSynchronize());
 
-#endif // ROCPRIM_TEST_DETAIL_GET_ROCPRIM_VERSION_HPP_
+    HIP_CHECK(
+        hipMemcpy(
+            &version, d_version,
+            sizeof(unsigned int),
+            hipMemcpyDeviceToHost
+        )
+    );
+    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipFree(d_version));
+
+    return version;
+}
