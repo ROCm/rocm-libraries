@@ -65,6 +65,7 @@ void histogram_shared_kernel(SampleIterator samples,
                              unsigned int columns,
                              unsigned int rows,
                              unsigned int row_stride,
+                             unsigned int rows_per_block,
                              fixed_array<Counter *, ActiveChannels> histogram,
                              fixed_array<SampleToBinOp, ActiveChannels> sample_to_bin_op,
                              fixed_array<unsigned int, ActiveChannels> bins)
@@ -72,7 +73,7 @@ void histogram_shared_kernel(SampleIterator samples,
     HIP_DYNAMIC_SHARED(unsigned int, block_histogram);
 
     histogram_shared<BlockSize, ItemsPerThread, Channels, ActiveChannels>(
-        samples, columns, rows, row_stride,
+        samples, columns, rows, row_stride, rows_per_block,
         histogram,
         sample_to_bin_op, bins,
         block_histogram
@@ -211,11 +212,12 @@ hipError_t histogram_impl(void * temporary_storage,
         grid_size.x = std::min(max_grid_size, blocks_x);
         grid_size.y = std::min(rows, max_grid_size / grid_size.x);
         const size_t block_histogram_bytes = total_bins * sizeof(unsigned int);
+        const unsigned int rows_per_block = ::rocprim::detail::ceiling_div(rows, grid_size.y);
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(histogram_shared_kernel<block_size, items_per_thread, Channels, ActiveChannels>),
             grid_size, dim3(block_size, 1), block_histogram_bytes, stream,
-            samples, columns, rows, row_stride,
+            samples, columns, rows, row_stride, rows_per_block,
             fixed_array<Counter *, ActiveChannels>(histogram),
             fixed_array<SampleToBinOp, ActiveChannels>(sample_to_bin_op),
             fixed_array<unsigned int, ActiveChannels>(bins)

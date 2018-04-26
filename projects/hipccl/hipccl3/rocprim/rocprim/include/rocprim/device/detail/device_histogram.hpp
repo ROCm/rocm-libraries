@@ -198,10 +198,73 @@ struct sample_vector
     T values[Size];
 };
 
-// TODO: add overloads for cases when SampleIterator is a pointer
-// reinterpret_cast<const sample_vector_type *>(samples)
+// Checks if it is possible to load 2 or 4 sample_vector<Sample, Channels> as one 32-bit value
+template<
+    unsigned int ItemsPerThread,
+    unsigned int Channels,
+    class Sample
+>
+struct is_sample_vectorizable
+    : std::integral_constant<
+        bool,
+        ((sizeof(Sample) * Channels == 1) || (sizeof(Sample) * Channels == 2)) &&
+        (ItemsPerThread % (sizeof(Sample) * Channels) == 0)
+    > { };
 
 template<
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    unsigned int Channels,
+    class Sample
+>
+ROCPRIM_DEVICE inline
+typename std::enable_if<is_sample_vectorizable<ItemsPerThread, Channels, Sample>::value>::type
+load_samples(unsigned int flat_id,
+             Sample * samples,
+             sample_vector<Sample, Channels> (&values)[ItemsPerThread])
+{
+    using packed_samples_type = int[sizeof(Sample) * Channels * ItemsPerThread / sizeof(int)];
+
+    if(reinterpret_cast<uintptr_t>(samples) % sizeof(int) == 0)
+    {
+        // the pointer is aligned by 4 bytes
+        block_load_direct_striped<BlockSize>(
+            flat_id,
+            reinterpret_cast<const int *>(samples),
+            reinterpret_cast<packed_samples_type&>(values)
+        );
+    }
+    else
+    {
+        block_load_direct_striped<BlockSize>(
+            flat_id,
+            reinterpret_cast<const sample_vector<Sample, Channels> *>(samples),
+            values
+        );
+    }
+}
+
+template<
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    unsigned int Channels,
+    class Sample
+>
+ROCPRIM_DEVICE inline
+typename std::enable_if<!is_sample_vectorizable<ItemsPerThread, Channels, Sample>::value>::type
+load_samples(unsigned int flat_id,
+             Sample * samples,
+             sample_vector<Sample, Channels> (&values)[ItemsPerThread])
+{
+    block_load_direct_striped<BlockSize>(
+        flat_id,
+        reinterpret_cast<const sample_vector<Sample, Channels> *>(samples),
+        values
+    );
+}
+
+template<
+    unsigned int BlockSize,
     unsigned int ItemsPerThread,
     unsigned int Channels,
     class Sample,
@@ -228,6 +291,7 @@ void load_samples(unsigned int flat_id,
 }
 
 template<
+    unsigned int BlockSize,
     unsigned int ItemsPerThread,
     unsigned int Channels,
     class Sample,
@@ -291,6 +355,7 @@ void histogram_shared(SampleIterator samples,
                       unsigned int columns,
                       unsigned int rows,
                       unsigned int row_stride,
+                      unsigned int rows_per_block,
                       fixed_array<Counter *, ActiveChannels> histogram,
                       fixed_array<SampleToBinOp, ActiveChannels> sample_to_bin_op,
                       fixed_array<unsigned int, ActiveChannels> bins,
@@ -305,8 +370,6 @@ void histogram_shared(SampleIterator samples,
     const unsigned int block_id0 = ::rocprim::detail::block_id<0>();
     const unsigned int block_id1 = ::rocprim::detail::block_id<1>();
     const unsigned int grid_size0 = ::rocprim::detail::grid_size<0>();
-    const unsigned int grid_size1 = ::rocprim::detail::grid_size<1>();
-    const unsigned int rows_per_block = ::rocprim::detail::ceiling_div(rows, grid_size1);
 
     unsigned int * block_histogram[ActiveChannels];
     for(unsigned int channel = 0; channel < ActiveChannels; channel++)
@@ -331,21 +394,11 @@ void histogram_shared(SampleIterator samples,
         {
             sample_vector_type values[ItemsPerThread];
 
-            unsigned int valid_count;
             if(block_offset + items_per_block <= columns)
             {
-                valid_count = items_per_block;
-                load_samples(flat_id, row_samples + Channels * block_offset, values);
-            }
-            else
-            {
-                valid_count = columns - block_offset;
-                load_samples(flat_id, row_samples + Channels * block_offset, values, valid_count);
-            }
+                load_samples<BlockSize>(flat_id, row_samples + Channels * block_offset, values);
 
-            for(unsigned int i = 0; i < ItemsPerThread; i++)
-            {
-                if(flat_id * ItemsPerThread + i < valid_count)
+                for(unsigned int i = 0; i < ItemsPerThread; i++)
                 {
                     for(unsigned int channel = 0; channel < ActiveChannels; channel++)
                     {
@@ -353,6 +406,26 @@ void histogram_shared(SampleIterator samples,
                         if(bin != -1)
                         {
                             ::rocprim::detail::atomic_add(&block_histogram[channel][bin], 1);
+                        }
+                    }
+                }
+            }
+            else
+            {
+                const unsigned int valid_count = columns - block_offset;
+                load_samples<BlockSize>(flat_id, row_samples + Channels * block_offset, values, valid_count);
+
+                for(unsigned int i = 0; i < ItemsPerThread; i++)
+                {
+                    if(flat_id * ItemsPerThread + i < valid_count)
+                    {
+                        for(unsigned int channel = 0; channel < ActiveChannels; channel++)
+                        {
+                            const int bin = sample_to_bin_op[channel](values[i].values[channel]);
+                            if(bin != -1)
+                            {
+                                ::rocprim::detail::atomic_add(&block_histogram[channel][bin], 1);
+                            }
                         }
                     }
                 }
@@ -409,12 +482,12 @@ void histogram_global(SampleIterator samples,
     if(block_offset + items_per_block <= columns)
     {
         valid_count = items_per_block;
-        load_samples(flat_id, samples, values);
+        load_samples<BlockSize>(flat_id, samples, values);
     }
     else
     {
         valid_count = columns - block_offset;
-        load_samples(flat_id, samples, values, valid_count);
+        load_samples<BlockSize>(flat_id, samples, values, valid_count);
     }
 
     for(unsigned int i = 0; i < ItemsPerThread; i++)
