@@ -20,26 +20,24 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#ifndef ROCPRIM_TEST_DETAIL_GET_ROCPRIM_VERSION_HPP_
-#define ROCPRIM_TEST_DETAIL_GET_ROCPRIM_VERSION_HPP_
+#ifndef HIPCUB_TEST_DETAIL_GET_HIPCUB_VERSION_HPP_
+#define HIPCUB_TEST_DETAIL_GET_HIPCUB_VERSION_HPP_
 
 #include <iostream>
 #include <cstdio>
 
-// rocPRIM API
-#include <rocprim/rocprim.hpp>
+// hipCUB API
+#include <hipcub/hipcub.hpp>
 
-#ifdef ROCPRIM_HIP_API
-    #define HIP_CHECK(condition)         \
-    {                                  \
-        hipError_t error = condition;    \
-        if(error != hipSuccess){         \
-            std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
-            exit(error); \
-        } \
-    }
-#endif
+#define HIP_CHECK(condition)         \
+{                                  \
+    hipError_t error = condition;    \
+    if(error != hipSuccess){         \
+        std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
+        exit(error); \
+    } \
+}
 
-unsigned int get_rocprim_version_on_device();
+unsigned int get_hipcub_version_on_device();
 
-#endif // ROCPRIM_TEST_DETAIL_GET_ROCPRIM_VERSION_HPP_
+#endif // HIPCUB_TEST_DETAIL_GET_HIPCUB_VERSION_HPP_

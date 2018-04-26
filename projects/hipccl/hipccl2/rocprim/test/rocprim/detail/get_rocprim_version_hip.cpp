@@ -23,7 +23,7 @@
 #include "get_rocprim_version.hpp"
 
 __global__
-void block_scan_kernel(unsigned int * version)
+void get_version_kernel(unsigned int * version)
 {
     *version = rocprim::version();
 }
@@ -37,7 +37,7 @@ unsigned int get_rocprim_version_on_device()
     HIP_CHECK(hipDeviceSynchronize());
 
     hipLaunchKernelGGL(
-        block_scan_kernel,
+        get_version_kernel,
         dim3(1), dim3(1), 0, 0,
         d_version
     );
