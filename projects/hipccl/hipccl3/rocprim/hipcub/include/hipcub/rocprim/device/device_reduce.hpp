@@ -35,12 +35,14 @@ namespace detail
 {
 
 template<class T>
+inline
 T get_lowest_value()
 {
     return std::numeric_limits<T>::lowest();
 }
 
 template<>
+inline
 __half get_lowest_value<__half>()
 {
     unsigned short lowest_half = 0xfbff;
@@ -49,12 +51,14 @@ __half get_lowest_value<__half>()
 }
 
 template<class T>
+inline
 T get_max_value()
 {
     return std::numeric_limits<T>::max();
 }
 
 template<>
+inline
 __half get_max_value<__half>()
 {
     unsigned short max_half = 0x7bff;

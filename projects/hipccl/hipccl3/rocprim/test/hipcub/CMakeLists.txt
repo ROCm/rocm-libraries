@@ -70,6 +70,9 @@ endfunction()
 # Tests
 # ****************************************************************************
 
+# HIP basic test, which also checks if there are no linkage problems when there are multiple sources
+add_hipcub_test("hipcub.BasicTest" "test_hipcub_basic.cpp;detail/get_hipcub_version.cpp")
+
 add_hipcub_test("hipcub.BlockDiscontinuity" test_hipcub_block_discontinuity.cpp)
 add_hipcub_test("hipcub.BlockExchange" test_hipcub_block_exchange.cpp)
 add_hipcub_test("hipcub.BlockHistogram" test_hipcub_block_histogram.cpp)
