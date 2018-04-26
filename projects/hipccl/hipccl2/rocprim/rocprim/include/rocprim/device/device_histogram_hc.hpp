@@ -157,6 +157,7 @@ void histogram_impl(void * temporary_storage,
         const unsigned int grid_size_x = std::min(max_grid_size, blocks_x);
         const unsigned int grid_size_y = std::min(rows, max_grid_size / grid_size_x);
         const size_t block_histogram_bytes = total_bins * sizeof(unsigned int);
+        const unsigned int rows_per_block = ::rocprim::detail::ceiling_div(rows, grid_size_y);
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         hc::parallel_for_each(
             acc_view,
@@ -172,7 +173,7 @@ void histogram_impl(void * temporary_storage,
                 );
 
                 histogram_shared<block_size, items_per_thread, Channels, ActiveChannels>(
-                    samples, columns, rows, row_stride,
+                    samples, columns, rows, row_stride, rows_per_block,
                     histogram_fixed,
                     sample_to_bin_op_fixed,
                     bins_fixed,
