@@ -267,7 +267,8 @@ struct is_sample_vectorizable
     : std::integral_constant<
         bool,
         ((sizeof(Sample) * Channels == 1) || (sizeof(Sample) * Channels == 2)) &&
-        (ItemsPerThread % (sizeof(Sample) * Channels) == 0)
+        (ItemsPerThread % (sizeof(Sample) * Channels) == 0) &&
+        (sizeof(Sample) * Channels * ItemsPerThread / sizeof(int) > 0)
     > { };
 
 template<
