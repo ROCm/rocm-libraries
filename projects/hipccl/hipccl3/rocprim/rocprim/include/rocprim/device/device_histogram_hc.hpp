@@ -80,15 +80,6 @@ void histogram_impl(void * temporary_storage,
 
     constexpr unsigned int items_per_block = block_size * items_per_thread;
 
-    for(unsigned int channel = 0; channel < ActiveChannels; channel++)
-    {
-        if(levels[channel] < 2)
-        {
-            // Histogram must have at least 1 bin
-            throw hc::runtime_exception("`levels` must be at least 2", 0);
-        }
-    }
-
     if(row_stride_bytes % sizeof(sample_type) != 0)
     {
         // Row stride must be a whole multiple of the sample data type size
@@ -228,6 +219,15 @@ void histogram_even_impl(void * temporary_storage,
                          hc::accelerator_view& acc_view,
                          bool debug_synchronous)
 {
+    for(unsigned int channel = 0; channel < ActiveChannels; channel++)
+    {
+        if(levels[channel] < 2)
+        {
+            // Histogram must have at least 1 bin
+            throw hc::runtime_exception("`levels` must be at least 2", 0);
+        }
+    }
+
     sample_to_bin_even<Level> sample_to_bin_op[ActiveChannels];
     for(unsigned int channel = 0; channel < ActiveChannels; channel++)
     {
@@ -266,6 +266,15 @@ void histogram_range_impl(void * temporary_storage,
                           hc::accelerator_view& acc_view,
                           bool debug_synchronous)
 {
+    for(unsigned int channel = 0; channel < ActiveChannels; channel++)
+    {
+        if(levels[channel] < 2)
+        {
+            // Histogram must have at least 1 bin
+            throw hc::runtime_exception("`levels` must be at least 2", 0);
+        }
+    }
+
     sample_to_bin_range<Level> sample_to_bin_op[ActiveChannels];
     for(unsigned int channel = 0; channel < ActiveChannels; channel++)
     {
