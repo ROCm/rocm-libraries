@@ -148,15 +148,6 @@ hipError_t histogram_impl(void * temporary_storage,
 
     constexpr unsigned int items_per_block = block_size * items_per_thread;
 
-    for(unsigned int channel = 0; channel < ActiveChannels; channel++)
-    {
-        if(levels[channel] < 2)
-        {
-            // Histogram must have at least 1 bin
-            return hipErrorInvalidValue;
-        }
-    }
-
     if(row_stride_bytes % sizeof(sample_type) != 0)
     {
         // Row stride must be a whole multiple of the sample data type size
@@ -262,6 +253,15 @@ hipError_t histogram_even_impl(void * temporary_storage,
                                hipStream_t stream,
                                bool debug_synchronous)
 {
+    for(unsigned int channel = 0; channel < ActiveChannels; channel++)
+    {
+        if(levels[channel] < 2)
+        {
+            // Histogram must have at least 1 bin
+            return hipErrorInvalidValue;
+        }
+    }
+
     sample_to_bin_even<Level> sample_to_bin_op[ActiveChannels];
     for(unsigned int channel = 0; channel < ActiveChannels; channel++)
     {
@@ -300,6 +300,15 @@ hipError_t histogram_range_impl(void * temporary_storage,
                                 hipStream_t stream,
                                 bool debug_synchronous)
 {
+    for(unsigned int channel = 0; channel < ActiveChannels; channel++)
+    {
+        if(levels[channel] < 2)
+        {
+            // Histogram must have at least 1 bin
+            return hipErrorInvalidValue;
+        }
+    }
+
     sample_to_bin_range<Level> sample_to_bin_op[ActiveChannels];
     for(unsigned int channel = 0; channel < ActiveChannels; channel++)
     {

@@ -31,6 +31,8 @@
 #include "../../intrinsics.hpp"
 #include "../../functional.hpp"
 
+#include "uint_fast_div.hpp"
+
 BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
@@ -103,7 +105,7 @@ public:
     }
 };
 
-template<class Level>
+template<class Level, class Enable = void>
 struct sample_to_bin_even
 {
     unsigned int bins;
@@ -130,6 +132,76 @@ struct sample_to_bin_even
         if(s >= lower_level && s < upper_level)
         {
             return (s - lower_level) / scale;
+        }
+        else
+        {
+            return -1;
+        }
+    }
+};
+
+template<class Level>
+struct sample_to_bin_even<Level, typename std::enable_if<std::is_integral<Level>::value && (sizeof(Level) <= 4)>::type>
+{
+    unsigned int bins;
+    Level lower_level;
+    Level upper_level;
+    uint_fast_div scale;
+
+    ROCPRIM_HOST_DEVICE inline
+    sample_to_bin_even() = default;
+
+    ROCPRIM_HOST_DEVICE inline
+    sample_to_bin_even(unsigned int bins, Level lower_level, Level upper_level)
+        : bins(bins),
+          lower_level(lower_level),
+          upper_level(upper_level),
+          scale((upper_level - lower_level) / bins)
+    {}
+
+    template<class Sample>
+    ROCPRIM_HOST_DEVICE inline
+    int operator()(Sample sample) const
+    {
+        const Level s = static_cast<Level>(sample);
+        if(s >= lower_level && s < upper_level)
+        {
+            return static_cast<unsigned int>(s - lower_level) / scale;
+        }
+        else
+        {
+            return -1;
+        }
+    }
+};
+
+template<class Level>
+struct sample_to_bin_even<Level, typename std::enable_if<std::is_floating_point<Level>::value>::type>
+{
+    unsigned int bins;
+    Level lower_level;
+    Level upper_level;
+    Level inv_scale;
+
+    ROCPRIM_HOST_DEVICE inline
+    sample_to_bin_even() = default;
+
+    ROCPRIM_HOST_DEVICE inline
+    sample_to_bin_even(unsigned int bins, Level lower_level, Level upper_level)
+        : bins(bins),
+          lower_level(lower_level),
+          upper_level(upper_level),
+          inv_scale(bins / (upper_level - lower_level))
+    {}
+
+    template<class Sample>
+    ROCPRIM_HOST_DEVICE inline
+    int operator()(Sample sample) const
+    {
+        const Level s = static_cast<Level>(sample);
+        if(s >= lower_level && s < upper_level)
+        {
+            return (s - lower_level) * inv_scale;
         }
         else
         {
