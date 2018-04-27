@@ -74,7 +74,8 @@ void histogram_impl(void * temporary_storage,
     using sample_type = typename std::iterator_traits<SampleIterator>::value_type;
 
     constexpr unsigned int block_size = 256;
-    constexpr unsigned int items_per_thread = 8;
+    constexpr unsigned int registers_per_sample = ::rocprim::detail::ceiling_div(sizeof(sample_type), sizeof(int));
+    constexpr unsigned int items_per_thread = ::rocprim::max(8u / ActiveChannels / registers_per_sample, 1u);
     constexpr unsigned int max_grid_size = 1024;
     constexpr unsigned int shared_impl_max_bins = 1024;
 
