@@ -126,17 +126,15 @@ struct sample_to_bin_even
 
     template<class Sample>
     ROCPRIM_HOST_DEVICE inline
-    int operator()(Sample sample) const
+    bool operator()(Sample sample, unsigned int& bin) const
     {
         const Level s = static_cast<Level>(sample);
         if(s >= lower_level && s < upper_level)
         {
-            return (s - lower_level) / scale;
+            bin = static_cast<unsigned int>((s - lower_level) / scale);
+            return true;
         }
-        else
-        {
-            return -1;
-        }
+        return false;
     }
 };
 
@@ -161,17 +159,15 @@ struct sample_to_bin_even<Level, typename std::enable_if<std::is_integral<Level>
 
     template<class Sample>
     ROCPRIM_HOST_DEVICE inline
-    int operator()(Sample sample) const
+    bool operator()(Sample sample, unsigned int& bin) const
     {
         const Level s = static_cast<Level>(sample);
         if(s >= lower_level && s < upper_level)
         {
-            return static_cast<unsigned int>(s - lower_level) / scale;
+            bin = static_cast<unsigned int>(s - lower_level) / scale;
+            return true;
         }
-        else
-        {
-            return -1;
-        }
+        return false;
     }
 };
 
@@ -196,17 +192,15 @@ struct sample_to_bin_even<Level, typename std::enable_if<std::is_floating_point<
 
     template<class Sample>
     ROCPRIM_HOST_DEVICE inline
-    int operator()(Sample sample) const
+    bool operator()(Sample sample, unsigned int& bin) const
     {
         const Level s = static_cast<Level>(sample);
         if(s >= lower_level && s < upper_level)
         {
-            return (s - lower_level) * inv_scale;
+            bin = static_cast<unsigned int>((s - lower_level) * inv_scale);
+            return true;
         }
-        else
-        {
-            return -1;
-        }
+        return false;
     }
 };
 
@@ -249,18 +243,11 @@ struct sample_to_bin_range
 
     template<class Sample>
     ROCPRIM_HOST_DEVICE inline
-    int operator()(Sample sample) const
+    bool operator()(Sample sample, unsigned int& bin) const
     {
         const Level s = static_cast<Level>(sample);
-        const unsigned int bin = upper_bound(level_values, bins + 1, s) - 1;
-        if(bin < bins)
-        {
-            return bin;
-        }
-        else
-        {
-            return -1;
-        }
+        bin = upper_bound(level_values, bins + 1, s) - 1;
+        return bin < bins;
     }
 };
 
@@ -474,8 +461,8 @@ void histogram_shared(SampleIterator samples,
                 {
                     for(unsigned int channel = 0; channel < ActiveChannels; channel++)
                     {
-                        const int bin = sample_to_bin_op[channel](values[i].values[channel]);
-                        if(bin != -1)
+                        unsigned int bin;
+                        if(sample_to_bin_op[channel](values[i].values[channel], bin))
                         {
                             ::rocprim::detail::atomic_add(&block_histogram[channel][bin], 1);
                         }
@@ -493,8 +480,8 @@ void histogram_shared(SampleIterator samples,
                     {
                         for(unsigned int channel = 0; channel < ActiveChannels; channel++)
                         {
-                            const int bin = sample_to_bin_op[channel](values[i].values[channel]);
-                            if(bin != -1)
+                            unsigned int bin;
+                            if(sample_to_bin_op[channel](values[i].values[channel], bin))
                             {
                                 ::rocprim::detail::atomic_add(&block_histogram[channel][bin], 1);
                             }
@@ -566,8 +553,8 @@ void histogram_global(SampleIterator samples,
     {
         for(unsigned int channel = 0; channel < ActiveChannels; channel++)
         {
-            const int bin = sample_to_bin_op[channel](values[i].values[channel]);
-            if(bin != -1)
+            unsigned int bin;
+            if(sample_to_bin_op[channel](values[i].values[channel], bin))
             {
                 const unsigned int pos = flat_id * ItemsPerThread + i;
                 unsigned long long same_bin_lanes_mask = ::rocprim::ballot(pos < valid_count);
