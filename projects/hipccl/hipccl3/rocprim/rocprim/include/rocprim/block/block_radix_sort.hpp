@@ -88,18 +88,18 @@ struct buckets
 
 template<class T>
 ROCPRIM_DEVICE inline
-void warp_bit_plus_exclusive_scan(const T input, T& output)
+void warp_bit_plus_exclusive_scan(const T input, T& output, const T add)
 {
-    output = ::rocprim::masked_bit_count(::rocprim::ballot(input));
+    output = ::rocprim::masked_bit_count(::rocprim::ballot(input), add);
 }
 
 template<class T, unsigned int Size>
 ROCPRIM_DEVICE inline
-void warp_bit_plus_exclusive_scan(const buckets<T, Size>& input, buckets<T, Size>& output)
+void warp_bit_plus_exclusive_scan(const buckets<T, Size>& input, buckets<T, Size>& output, const buckets<T, Size>& add)
 {
     for(unsigned int r = 0; r < Size; r++)
     {
-        warp_bit_plus_exclusive_scan(input[r], output[r]);
+        warp_bit_plus_exclusive_scan(input[r], output[r], add[r]);
     }
 }
 
@@ -190,12 +190,9 @@ public:
 
         // Perform exclusive warp scan of bit values
         T lane_prefix;
-        warp_bit_plus_exclusive_scan(input[0], lane_prefix);
-        for(unsigned int i = 1; i < ItemsPerThread; i++)
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            T s;
-            warp_bit_plus_exclusive_scan(input[i], s);
-            lane_prefix = lane_prefix + s;
+            warp_bit_plus_exclusive_scan(input[i], lane_prefix, lane_prefix);
         }
 
         // Scan the lane's items and calculate final scan results
