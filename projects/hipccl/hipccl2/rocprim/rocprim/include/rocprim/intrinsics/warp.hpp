@@ -48,17 +48,17 @@ unsigned long long ballot(bool predicate)
 /// For each thread, this function returns the number of active threads which
 /// have <tt>i</tt>-th bit of \p x set and come before the current thread.
 ROCPRIM_DEVICE inline
-unsigned int masked_bit_count(unsigned long long x)
+unsigned int masked_bit_count(unsigned long long x, unsigned int add = 0)
 {
     #ifdef ROCPRIM_HC_API
         int c;
-        c = hc::__amdgcn_mbcnt_lo(static_cast<int>(x), 0);
+        c = hc::__amdgcn_mbcnt_lo(static_cast<int>(x), add);
         c = hc::__amdgcn_mbcnt_hi(static_cast<int>(x >> 32), c);
         return c;
     #else // HIP
         // TODO: Use HIP function(s)
         int c;
-        c = hc::__amdgcn_mbcnt_lo(static_cast<int>(x), 0);
+        c = hc::__amdgcn_mbcnt_lo(static_cast<int>(x), add);
         c = hc::__amdgcn_mbcnt_hi(static_cast<int>(x >> 32), c);
         return c;
     #endif
