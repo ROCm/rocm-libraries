@@ -34,7 +34,7 @@ template<
     int BLOCK_DIM_X,
     int ITEMS_PER_THREAD,
     typename ValueT = NullType,
-    int RADIX_BITS = 1,
+    int RADIX_BITS = 4, /* ignored */
     bool MEMOIZE_OUTER_SCAN = true, /* ignored */
     BlockScanAlgorithm INNER_SCAN_ALGORITHM = BLOCK_SCAN_WARP_SCANS, /* ignored */
     hipSharedMemConfig SMEM_CONFIG = hipSharedMemBankSizeFourByte, /* ignored */
@@ -47,8 +47,7 @@ class BlockRadixSort
         KeyT,
         BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z,
         ITEMS_PER_THREAD,
-        ValueT,
-        RADIX_BITS
+        ValueT
       >
 {
     static_assert(
@@ -61,8 +60,7 @@ class BlockRadixSort
             KeyT,
             BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z,
             ITEMS_PER_THREAD,
-            ValueT,
-            RADIX_BITS
+            ValueT
         >;
 
     // Reference to temporary storage (usually shared memory)
