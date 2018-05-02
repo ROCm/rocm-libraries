@@ -34,7 +34,7 @@ BEGIN_ROCPRIM_NAMESPACE
 ///
 /// \param predicate - input to be evaluated for all active lanes
 ROCPRIM_DEVICE inline
-unsigned long long ballot(bool predicate)
+unsigned long long ballot(int predicate)
 {
     #ifdef ROCPRIM_HC_API
         return hc::__ballot(predicate);
