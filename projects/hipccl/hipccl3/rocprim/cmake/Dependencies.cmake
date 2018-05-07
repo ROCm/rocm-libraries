@@ -20,7 +20,12 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# Use or download and build required depenedencies
+# ###########################
+# rocPRIM dependencies
+# ###########################
+
+# HIP dependency is handled earlier in the project cmake file
+# when VerifyCompiler.cmake is included.
 
 # For downloading, building, and installing required dependencies
 include(cmake/DownloadProject.cmake)
@@ -38,16 +43,16 @@ endif()
 
 # CUB (only for CUDA platform)
 if(HIP_PLATFORM STREQUAL "nvcc")
-  if((NOT DEFINED CUB_INCLUDE_DIR) OR DEPENDENCIES_FORCE_DOWNLOAD)
+  if(NOT DEFINED CUB_INCLUDE_DIR)
     download_project(PROJ   cub
-             GIT_REPOSITORY https://github.com/NVlabs/cub.git
-             GIT_TAG        v1.8.0
-             LOG_DOWNLOAD   TRUE
-             LOG_CONFIGURE  TRUE
-             LOG_BUILD      TRUE
-             LOG_INSTALL    TRUE
-             BUILD_PROJECT  FALSE
-             ${UPDATE_DISCONNECTED_IF_AVAILABLE}
+      GIT_REPOSITORY https://github.com/NVlabs/cub.git
+      GIT_TAG        v1.8.0
+      LOG_DOWNLOAD   TRUE
+      LOG_CONFIGURE  TRUE
+      LOG_BUILD      TRUE
+      LOG_INSTALL    TRUE
+      BUILD_PROJECT  FALSE
+      ${UPDATE_DISCONNECTED_IF_AVAILABLE}
     )
     set(CUB_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/cub-src/ CACHE PATH "")
   endif()
@@ -55,57 +60,44 @@ endif()
 
 # Test dependencies
 if(BUILD_TEST)
-  # GTest
-  if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
-    find_package(GTest QUIET)
-  endif()
-
-  if(NOT GTEST_FOUND)
-    message(STATUS "GTest not found. Downloading and building GTest.")
-    # Download, build and install googletest library
-    set(GTEST_ROOT ${CMAKE_CURRENT_BINARY_DIR}/gtest CACHE PATH "")
-    download_project(PROJ   googletest
-             GIT_REPOSITORY https://github.com/google/googletest.git
-             GIT_TAG        master
-             INSTALL_DIR    ${GTEST_ROOT}
-             CMAKE_ARGS     -DBUILD_GTEST=ON -DINSTALL_GTEST=ON -Dgtest_force_shared_crt=ON -DBUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
-             LOG_DOWNLOAD   TRUE
-             LOG_CONFIGURE  TRUE
-             LOG_BUILD      TRUE
-             LOG_INSTALL    TRUE
-             BUILD_PROJECT  TRUE
-             ${UPDATE_DISCONNECTED_IF_AVAILABLE}
-    )
-  endif()
-  # Fix for FindGTest: unset cache variables since GTEST_FOUND is false
-  unset(GTEST_INCLUDE_DIR CACHE)
-  unset(GTEST_INCLUDE_DIRS CACHE)
+  # Google Test (https://github.com/google/googletest)
+  message(STATUS "Downloading and building GTest.")
+  set(GTEST_ROOT ${CMAKE_CURRENT_BINARY_DIR}/gtest CACHE PATH "")
+  download_project(
+    PROJ           googletest
+    GIT_REPOSITORY https://github.com/google/googletest.git
+    GIT_TAG        master
+    INSTALL_DIR    ${GTEST_ROOT}
+    CMAKE_ARGS     -DBUILD_GTEST=ON -DINSTALL_GTEST=ON -Dgtest_force_shared_crt=ON -DBUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
+    LOG_DOWNLOAD   TRUE
+    LOG_CONFIGURE  TRUE
+    LOG_BUILD      TRUE
+    LOG_INSTALL    TRUE
+    BUILD_PROJECT  TRUE
+    ${UPDATE_DISCONNECTED_IF_AVAILABLE}
+  )
   find_package(GTest REQUIRED)
 endif()
 
 # Benchmark dependencies
 if(BUILD_BENCHMARK)
-  if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
-    find_package(benchmark QUIET)
-  endif()
-
-  if(NOT benchmark_FOUND)
-    message(STATUS "Google Benchmark not found. Downloading and building Google Benchmark.")
-    # Download, build and install googlebenchmark library
-    set(GOOGLEBENCHMARK_ROOT ${CMAKE_CURRENT_BINARY_DIR}/googlebenchmark CACHE PATH "")
-    download_project(PROJ   googlebenchmark
-             GIT_REPOSITORY https://github.com/google/benchmark.git
-             GIT_TAG        master
-             INSTALL_DIR    ${GOOGLEBENCHMARK_ROOT}
-             CMAKE_ARGS     -DCMAKE_BUILD_TYPE=RELEASE -DBENCHMARK_ENABLE_TESTING=OFF -DBUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
-             LOG_DOWNLOAD   TRUE
-             LOG_CONFIGURE  TRUE
-             LOG_BUILD      TRUE
-             LOG_INSTALL    TRUE
-             BUILD_PROJECT  TRUE
-             ${UPDATE_DISCONNECTED_IF_AVAILABLE}
-    )
-  endif()
+  # Google Benchmark (https://github.com/google/benchmark.git)
+  message(STATUS "Downloading and building Google Benchmark.")
+  # Download, build and install googlebenchmark library
+  set(GOOGLEBENCHMARK_ROOT ${CMAKE_CURRENT_BINARY_DIR}/googlebenchmark CACHE PATH "")
+  download_project(
+    PROJ           googlebenchmark
+    GIT_REPOSITORY https://github.com/google/benchmark.git
+    GIT_TAG        master
+    INSTALL_DIR    ${GOOGLEBENCHMARK_ROOT}
+    CMAKE_ARGS     -DCMAKE_BUILD_TYPE=RELEASE -DBENCHMARK_ENABLE_TESTING=OFF -DBUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
+    LOG_DOWNLOAD   TRUE
+    LOG_CONFIGURE  TRUE
+    LOG_BUILD      TRUE
+    LOG_INSTALL    TRUE
+    BUILD_PROJECT  TRUE
+    ${UPDATE_DISCONNECTED_IF_AVAILABLE}
+  )
   find_package(benchmark REQUIRED CONFIG PATHS ${GOOGLEBENCHMARK_ROOT})
 endif()
 
