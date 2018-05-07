@@ -29,6 +29,8 @@
 #include "../../intrinsics.hpp"
 #include "../../functional.hpp"
 
+#include "../../warp/warp_sort.hpp"
+
 BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
@@ -39,7 +41,7 @@ template<
     unsigned int BlockSize,
     class Value
 >
-class block_sort_shared
+class block_sort_bitonic
 {
 public:
     struct storage_type
@@ -164,21 +166,38 @@ private:
         class... KeyValue
     >
     ROCPRIM_DEVICE inline
-    typename std::enable_if<detail::is_power_of_two(Size)>::type
-    sort_impl(const unsigned int flat_tid,
-              storage_type& storage,
-              BinaryFunction compare_function,
-              KeyValue&... kv)
+    typename std::enable_if<(Size <= ::rocprim::warp_size())>::type
+    sort_power_two(const unsigned int flat_tid,
+                   storage_type& storage,
+                   BinaryFunction compare_function,
+                   KeyValue&... kv)
     {
-        static constexpr unsigned int PairSize =  sizeof...(KeyValue);
-        static_assert(
-            PairSize < 3,
-            "KeyValue parameter pack can 1 or 2 elements (key, or key and value)"
-        );
+        (void) flat_tid;
+        (void) storage;
 
+        ::rocprim::warp_sort<Key, Size, Value> wsort;
+        wsort.sort(kv..., compare_function);
+    }
+
+    template<
+        unsigned int Size,
+        class BinaryFunction,
+        class... KeyValue
+    >
+    ROCPRIM_DEVICE inline
+    typename std::enable_if<(Size > ::rocprim::warp_size())>::type
+    sort_power_two(const unsigned int flat_tid,
+                   storage_type& storage,
+                   BinaryFunction compare_function,
+                   KeyValue&... kv)
+    {
+        ::rocprim::warp_sort<Key, ::rocprim::warp_size(), Value> wsort;
+        wsort.sort(kv..., compare_function);
+        
         load(kv..., flat_tid, storage);
 
-        for(unsigned int length = 1; length < Size; length <<= 1)
+        #pragma unroll
+        for(unsigned int length = ::rocprim::warp_size() >> 1; length < Size; length <<= 1)
         {
             bool dir = (flat_tid & (length << 1)) != 0;
             for(unsigned int k = length; k > 0; k >>= 1)
@@ -191,7 +210,28 @@ private:
 
         store(kv..., flat_tid, storage);
     }
-    
+
+    template<
+        unsigned int Size,
+        class BinaryFunction,
+        class... KeyValue
+    >
+    ROCPRIM_DEVICE inline
+    typename std::enable_if<detail::is_power_of_two(Size)>::type
+    sort_impl(const unsigned int flat_tid,
+              storage_type& storage,
+              BinaryFunction compare_function,
+              KeyValue&... kv)
+    {
+        static constexpr unsigned int PairSize =  sizeof...(KeyValue);
+        static_assert(
+            PairSize < 3,
+            "KeyValue parameter pack can 1 or 2 elements (key, or key and value)"
+        );
+
+        sort_power_two<Size, BinaryFunction>(flat_tid, storage, compare_function, kv...);
+    }
+
     template<
         unsigned int Size,
         class BinaryFunction,
@@ -209,16 +249,17 @@ private:
             PairSize < 3,
             "KeyValue parameter pack can 1 or 2 elements (key, or key and value)"
         );
-        
+
         load(kv..., flat_tid, storage);
 
         bool is_even = (flat_tid % 2 == 0);
         unsigned int odd_id = (is_even) ? std::max(flat_tid, (unsigned int) 1) - 1 : std::min(flat_tid + 1, Size - 1);
         unsigned int even_id = (is_even) ? std::min(flat_tid + 1, Size - 1) : std::max(flat_tid, (unsigned int) 1) - 1;
-        
-        for(unsigned int i = 0; i < Size; i++)
+
+        #pragma unroll
+        for(unsigned int length = 0; length < Size; length++)
         {
-            unsigned int next_id = (i % 2 == 0) ? even_id : odd_id;
+            unsigned int next_id = (length % 2 == 0) ? even_id : odd_id;
             swap(kv..., flat_tid, next_id, 0, storage, compare_function);
             ::rocprim::syncthreads();
             load(kv..., flat_tid, storage);

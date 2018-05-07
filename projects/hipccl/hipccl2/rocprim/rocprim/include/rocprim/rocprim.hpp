@@ -45,6 +45,7 @@
 #include "block/block_load.hpp"
 #include "block/block_radix_sort.hpp"
 #include "block/block_scan.hpp"
+#include "block/block_sort.hpp"
 #include "block/block_store.hpp"
 
 #ifdef ROCPRIM_HC_API
