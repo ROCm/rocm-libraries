@@ -20,7 +20,15 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# Dependencies
+# Use or download and build required depenedencies
+
+# For downloading, building, and installing required dependencies
+include(cmake/DownloadProject.cmake)
+if(CMAKE_VERSION VERSION_LESS 3.2)
+  set(UPDATE_DISCONNECTED_IF_AVAILABLE "")
+else()
+  set(UPDATE_DISCONNECTED_IF_AVAILABLE "UPDATE_DISCONNECTED TRUE")
+endif()
 
 # GIT
 find_package(Git REQUIRED)
@@ -28,30 +36,7 @@ if (NOT Git_FOUND)
   message(FATAL_ERROR "Please ensure Git is installed on the system")
 endif()
 
-# HIP and nvcc configuration
-find_package(HIP REQUIRED)
-if(HIP_PLATFORM STREQUAL "nvcc")
-  include(cmake/NVCC.cmake)
-elseif(HIP_PLATFORM STREQUAL "hcc")
-  # Workaround until hcc & hip cmake modules fixes symlink logic in their config files.
-  # (Thanks to rocBLAS devs for finding workaround for this problem!)
-  list(APPEND CMAKE_PREFIX_PATH /opt/rocm/hcc /opt/rocm/hip)
-  # Ignore hcc warning: argument unused during compilation: '-isystem /opt/rocm/hip/include'
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-command-line-argument")
-  find_package(hcc REQUIRED CONFIG PATHS /opt/rocm)
-  find_package(hip REQUIRED CONFIG PATHS /opt/rocm)
-endif()
-
-# For downloading, building, and installing required dependencies
-include(cmake/DownloadProject.cmake)
-
-if(CMAKE_VERSION VERSION_LESS 3.2)
-  set(UPDATE_DISCONNECTED_IF_AVAILABLE "")
-else()
-  set(UPDATE_DISCONNECTED_IF_AVAILABLE "UPDATE_DISCONNECTED TRUE")
-endif()
-
-# CUB
+# CUB (only for CUDA platform)
 if(HIP_PLATFORM STREQUAL "nvcc")
   if((NOT DEFINED CUB_INCLUDE_DIR) OR DEPENDENCIES_FORCE_DOWNLOAD)
     download_project(PROJ   cub
@@ -70,6 +55,7 @@ endif()
 
 # Test dependencies
 if(BUILD_TEST)
+  # GTest
   if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
     find_package(GTest QUIET)
   endif()
@@ -123,7 +109,7 @@ if(BUILD_BENCHMARK)
   find_package(benchmark REQUIRED CONFIG PATHS ${GOOGLEBENCHMARK_ROOT})
 endif()
 
-# Find or download/install rocm-cmake project
+# Find or download/install rocm-cmake project (https://github.com/RadeonOpenCompute/rocm-cmake)
 find_package(ROCM QUIET CONFIG PATHS /opt/rocm)
 if(NOT ROCM_FOUND)
   set(rocm_cmake_tag "master" CACHE STRING "rocm-cmake tag to download")

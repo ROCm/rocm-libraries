@@ -12,6 +12,7 @@ performant GPU-accelerated code on AMD ROCm platform.
 * Git
 * CMake (3.10.0 or later)
 * AMD [ROCm](https://rocm.github.io/install.html) platform (1.7.1 or later)
+  * Including [HCC](https://github.com/RadeonOpenCompute/hcc) compiler, which must be set as C++ compiler on ROCm platform.
 
 Optional:
 
@@ -39,7 +40,12 @@ cd rocPRIM; mkdir build; cd build
 # Build options:
 #   BUILD_TEST - on by default,
 #   BUILD_BENCHMARK - off by default.
-cmake -DBUILD_BENCHMARK=ON ../. # or cmake-gui ../.
+#
+# ! IMPORTANT !
+# On ROCm platform set C++ compiler to HCC. You can do it by adding 'CXX=<path-to-hcc>'
+# before 'cmake' or setting cmake option 'CMAKE_CXX_COMPILER' to path to HCC compiler.
+#
+[CXX=hcc] cmake -DBUILD_BENCHMARK=ON ../. # or cmake-gui ../.
 
 # Build
 make -j4
