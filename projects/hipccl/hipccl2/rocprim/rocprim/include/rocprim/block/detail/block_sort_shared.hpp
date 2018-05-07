@@ -42,8 +42,6 @@ template<
 class block_sort_shared
 {
 public:
-    static_assert(detail::is_power_of_two(BlockSize), "BlockSize must be power of 2");
-
     struct storage_type
     {
         Key key[BlockSize];
@@ -56,7 +54,7 @@ public:
               storage_type& storage,
               BinaryFunction compare_function)
     {
-        this->sort_impl(
+        this->sort_impl<BlockSize>(
             ::rocprim::flat_block_thread_id(),
             storage, compare_function,
             thread_key
@@ -79,7 +77,7 @@ public:
               storage_type& storage,
               BinaryFunction compare_function)
     {
-        this->sort_impl(
+        this->sort_impl<BlockSize>(
             ::rocprim::flat_block_thread_id(),
             storage, compare_function,
             thread_key, thread_value
@@ -134,11 +132,11 @@ private:
               storage_type& storage,
               BinaryFunction compare_function)
     {
-        unsigned int sibling_idx = flat_tid ^ k;
-        Key sibling_key = storage.key[sibling_idx];
-        bool compare = compare_function(sibling_key, key);
-        bool swap = compare ^ (sibling_idx < flat_tid) ^ dir;
-        key = swap ? sibling_key : key;
+        unsigned int next_id = k;
+        Key next_key = storage.key[next_id];
+        bool compare = compare_function(next_key, key);
+        bool swap = compare ^ (next_id < flat_tid) ^ dir;
+        key = swap ? next_key : key;
     }
 
     template<class BinaryFunction>
@@ -151,21 +149,26 @@ private:
               storage_type& storage,
               BinaryFunction compare_function)
     {
-        unsigned int sibling_idx = flat_tid ^ k;
-        Key sibling_key = storage.key[sibling_idx];
-        Value sibling_value = storage.value[sibling_idx];
-        bool compare = compare_function(sibling_key, key);
-        bool swap = compare ^ (sibling_idx < flat_tid) ^ dir;
-        key = swap ? sibling_key : key;
-        value = swap ? sibling_value : value;
+        unsigned int next_id = k;
+        Key next_key = storage.key[next_id];
+        Value next_value = storage.value[next_id];
+        bool compare = compare_function(next_key, key);
+        bool swap = compare ^ (next_id < flat_tid) ^ dir;
+        key = swap ? next_key : key;
+        value = swap ? next_value : value;
     }
 
-    template<class BinaryFunction, class... KeyValue>
+    template<
+        unsigned int Size,
+        class BinaryFunction,
+        class... KeyValue
+    >
     ROCPRIM_DEVICE inline
-    void sort_impl(const unsigned int flat_tid,
-                   storage_type& storage,
-                   BinaryFunction compare_function,
-                   KeyValue&... kv)
+    typename std::enable_if<detail::is_power_of_two(Size)>::type
+    sort_impl(const unsigned int flat_tid,
+              storage_type& storage,
+              BinaryFunction compare_function,
+              KeyValue&... kv)
     {
         static constexpr unsigned int PairSize =  sizeof...(KeyValue);
         static_assert(
@@ -175,15 +178,50 @@ private:
 
         load(kv..., flat_tid, storage);
 
-        for(unsigned int length = 1; length < BlockSize; length <<= 1)
+        for(unsigned int length = 1; length < Size; length <<= 1)
         {
             bool dir = (flat_tid & (length << 1)) != 0;
             for(unsigned int k = length; k > 0; k >>= 1)
             {
-                swap(kv..., flat_tid, k, dir, storage, compare_function);
+                swap(kv..., flat_tid, flat_tid ^ k, dir, storage, compare_function);
                 ::rocprim::syncthreads();
                 load(kv..., flat_tid, storage);
             }
+        }
+
+        store(kv..., flat_tid, storage);
+    }
+    
+    template<
+        unsigned int Size,
+        class BinaryFunction,
+        class... KeyValue
+    >
+    ROCPRIM_DEVICE inline
+    typename std::enable_if<!detail::is_power_of_two(Size)>::type
+    sort_impl(const unsigned int flat_tid,
+              storage_type& storage,
+              BinaryFunction compare_function,
+              KeyValue&... kv)
+    {
+        static constexpr unsigned int PairSize =  sizeof...(KeyValue);
+        static_assert(
+            PairSize < 3,
+            "KeyValue parameter pack can 1 or 2 elements (key, or key and value)"
+        );
+        
+        load(kv..., flat_tid, storage);
+
+        bool is_even = (flat_tid % 2 == 0);
+        unsigned int odd_id = (is_even) ? std::max(flat_tid, (unsigned int) 1) - 1 : std::min(flat_tid + 1, Size - 1);
+        unsigned int even_id = (is_even) ? std::min(flat_tid + 1, Size - 1) : std::max(flat_tid, (unsigned int) 1) - 1;
+        
+        for(unsigned int i = 0; i < Size; i++)
+        {
+            unsigned int next_id = (i % 2 == 0) ? even_id : odd_id;
+            swap(kv..., flat_tid, next_id, 0, storage, compare_function);
+            ::rocprim::syncthreads();
+            load(kv..., flat_tid, storage);
         }
 
         store(kv..., flat_tid, storage);

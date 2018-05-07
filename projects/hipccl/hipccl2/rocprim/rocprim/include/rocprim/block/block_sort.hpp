@@ -89,9 +89,7 @@ public:
               storage_type& storage,
               BinaryFunction compare_function = BinaryFunction())
     {
-        base_type::sort(
-            thread_key, storage, compare_function
-        );
+        base_type::sort(thread_key, storage, compare_function);
     }
 
     template<class BinaryFunction = ::rocprim::less<Key>>
@@ -110,9 +108,7 @@ public:
               storage_type& storage,
               BinaryFunction compare_function = BinaryFunction())
     {
-        base_type::sort(
-            thread_key, thread_value, storage, compare_function
-        );
+        base_type::sort(thread_key, thread_value, storage, compare_function);
     }
 };
 

@@ -36,51 +36,70 @@
 
 namespace rp = rocprim;
 
-template<unsigned int BlockSize>
+template<
+    class Key,
+    class Value,
+    unsigned int BlockSize
+>
 struct params
 {
+    using key_type = Key;
+    using value_type = Value;
     static constexpr unsigned int block_size = BlockSize;
 };
 
 template<typename Params>
 class RocprimBlockSortTests : public ::testing::Test {
 public:
+    using key_type = typename Params::key_type;
+    using value_type = typename Params::value_type;
     static constexpr unsigned int block_size = Params::block_size;
 };
 
 typedef ::testing::Types<
-    params<64U>,
-    params<128U>,
-    params<256U>,
-    params<512U>,
-    params<1024U>
+    // Power of 2 BlockSize
+    params<unsigned int, int, 64U>,
+    params<int, int, 128U>,
+    params<unsigned int, int, 256U>,
+    params<unsigned int, char, 1024U>,
+
+    // Non-power of 2 BlockSize
+    params<double, unsigned int, 65U>,
+    params<float, int, 37U>,
+    params<long long, char, 510U>,
+    params<unsigned int, long long, 162U>,
+    params<unsigned int, float, 255U>
 > BlockSizes;
 
 TYPED_TEST_CASE(RocprimBlockSortTests, BlockSizes);
 
-TYPED_TEST(RocprimBlockSortTests, SortInt)
+TYPED_TEST(RocprimBlockSortTests, SortKey)
 {
+    using key_type = typename TestFixture::key_type;
     const size_t block_size = TestFixture::block_size;
     const size_t size = block_size * 1134;
 
     // Generate data
-    std::vector<int> output = test_utils::get_random_data<int>(size, -100, 100);
+    std::vector<key_type> output = test_utils::get_random_data<key_type>(size, -100, 100);
 
     // Calculate expected results on host
-    std::vector<int> expected(output);
+    std::vector<key_type> expected(output);
 
     for(size_t i = 0; i < output.size() / block_size; i++)
     {
-        std::sort(expected.begin() + (i * block_size), expected.begin() + ((i + 1) * block_size));
+        std::sort(
+            expected.begin() + (i * block_size),
+            expected.begin() + ((i + 1) * block_size)
+        );
     }
 
-    hc::array_view<int, 1> d_output(output.size(), output.data());
+    hc::array_view<key_type, 1> d_output(output.size(), output.data());
     hc::parallel_for_each(
         hc::extent<1>(output.size()).tile(block_size),
         [=](hc::tiled_index<1> i) [[hc]]
         {
-            int value = d_output[i];
-            rp::block_sort<int, block_size> bsort;
+            key_type value = d_output[i];
+            rp::block_sort<key_type, block_size> bsort;
             bsort.sort(value);
             d_output[i] = value;
         }
@@ -93,12 +112,6 @@ TYPED_TEST(RocprimBlockSortTests, SortInt)
     }
 }
 
-template<class T>
-bool test(const T& a, const T& b) [[hc]]
-{
-    return a < b;
-}
-
 template<class Key, class Value>
 struct key_value_comparator
 {
@@ -108,39 +121,43 @@ struct key_value_comparator
     }
 };
 
-TYPED_TEST(RocprimBlockSortTests, SortKeyInt)
+TYPED_TEST(RocprimBlockSortTests, SortKeyValue)
 {
+    using key_type = typename TestFixture::key_type;
+    using value_type = typename TestFixture::value_type;
     const size_t block_size = TestFixture::block_size;
     const size_t size = block_size * 1134;
 
     // Generate data
-    std::vector<int> output_key(size);
+    std::vector<key_type> output_key(size);
     std::iota(output_key.begin(), output_key.end(), 0);
     std::shuffle(output_key.begin(), output_key.end(), std::mt19937{std::random_device{}()});
-    std::vector<int> output_value = test_utils::get_random_data<int>(size, -100, 100);
+    std::vector<value_type> output_value = test_utils::get_random_data<value_type>(size, -100, 100);
 
     // Combine vectors to form pairs with key and value
-    std::vector<std::pair<int, int>> target(size);
+    std::vector<std::pair<key_type, value_type>> target(size);
     for (unsigned i = 0; i < target.size(); i++)
         target[i] = std::make_pair(output_key[i], output_value[i]);
 
     // Calculate expected results on host
-    std::vector<std::pair<int, int>> expected(target);
+    std::vector<std::pair<key_type, value_type>> expected(target);
 
     for(size_t i = 0; i < expected.size() / block_size; i++)
     {
-        std::sort(expected.begin() + (i * block_size),
-                  expected.begin() + ((i + 1) * block_size),
-                  key_value_comparator<int, int>());
+        std::sort(
+            expected.begin() + (i * block_size),
+            expected.begin() + ((i + 1) * block_size),
+            key_value_comparator<key_type, value_type>()
+        );
     }
 
-    hc::array_view<int, 1> d_output_key(output_key.size(), output_key.data());
-    hc::array_view<int, 1> d_output_value(output_value.size(), output_value.data());
+    hc::array_view<key_type, 1> d_output_key(output_key.size(), output_key.data());
+    hc::array_view<value_type, 1> d_output_value(output_value.size(), output_value.data());
     hc::parallel_for_each(
         hc::extent<1>(output_key.size()).tile(block_size),
         [=](hc::tiled_index<1> i) [[hc]]
         {
-            rp::block_sort<int, block_size, int> bsort;
+            rp::block_sort<key_type, block_size, value_type> bsort;
             bsort.sort(d_output_key[i], d_output_value[i]);
         }
     );
