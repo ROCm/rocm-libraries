@@ -34,6 +34,8 @@
 
 #include "test_utils.hpp"
 
+#define HIP_CHECK(error) ASSERT_EQ(static_cast<hipError_t>(error), hipSuccess)
+
 namespace rp = rocprim;
 
 template<
@@ -73,11 +75,26 @@ typedef ::testing::Types<
 
 TYPED_TEST_CASE(RocprimBlockSortTests, BlockSizes);
 
+template<
+    unsigned int BlockSize,
+    class key_type
+>
+__global__
+void sort_key_kernel(key_type * device_key_output)
+{
+    const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
+    key_type key = device_key_output[index];
+    rp::block_sort<key_type, BlockSize> bsort;
+    bsort.sort(key);
+    device_key_output[index] = key;
+}
+
 TYPED_TEST(RocprimBlockSortTests, SortKey)
 {
     using key_type = typename TestFixture::key_type;
     const size_t block_size = TestFixture::block_size;
     const size_t size = block_size * 1134;
+    const size_t grid_size = size / block_size;
 
     // Generate data
     std::vector<key_type> output = test_utils::get_random_data<key_type>(size, -100, 100);
@@ -93,23 +110,40 @@ TYPED_TEST(RocprimBlockSortTests, SortKey)
         );
     }
 
-    hc::array_view<key_type, 1> d_output(output.size(), output.data());
-    hc::parallel_for_each(
-        hc::extent<1>(output.size()).tile(block_size),
-        [=](hc::tiled_index<1> i) [[hc]]
-        {
-            key_type value = d_output[i];
-            rp::block_sort<key_type, block_size> bsort;
-            bsort.sort(value);
-            d_output[i] = value;
-        }
+    // Preparing device
+    key_type * device_key_output;
+    HIP_CHECK(hipMalloc(&device_key_output, output.size() * sizeof(key_type)));
+
+    HIP_CHECK(
+        hipMemcpy(
+            device_key_output, output.data(),
+            output.size() * sizeof(key_type),
+            hipMemcpyHostToDevice
+        )
     );
 
-    d_output.synchronize();
+    // Running kernel
+    hipLaunchKernelGGL(
+        HIP_KERNEL_NAME(sort_key_kernel<block_size, key_type>),
+        dim3(grid_size), dim3(block_size), 0, 0,
+        device_key_output
+    );
+
+    // Reading results back
+    HIP_CHECK(
+        hipMemcpy(
+            output.data(), device_key_output,
+            output.size() * sizeof(key_type),
+            hipMemcpyDeviceToHost
+        )
+    );
+
     for(size_t i = 0; i < output.size(); i++)
     {
         ASSERT_EQ(output[i], expected[i]);
     }
+
+    HIP_CHECK(hipFree(device_key_output));
 }
 
 template<class Key, class Value>
@@ -121,12 +155,30 @@ struct key_value_comparator
     }
 };
 
+template<
+    unsigned int BlockSize,
+    class key_type,
+    class value_type
+>
+__global__
+void sort_key_value_kernel(key_type * device_key_output, value_type * device_value_output)
+{
+    const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
+    key_type key = device_key_output[index];
+    value_type value = device_value_output[index];
+    rp::block_sort<key_type, BlockSize, value_type> bsort;
+    bsort.sort(key, value);
+    device_key_output[index] = key;
+    device_value_output[index] = value;
+}
+
 TYPED_TEST(RocprimBlockSortTests, SortKeyValue)
 {
     using key_type = typename TestFixture::key_type;
     using value_type = typename TestFixture::value_type;
     const size_t block_size = TestFixture::block_size;
     const size_t size = block_size * 1134;
+    const size_t grid_size = size / block_size;
 
     // Generate data
     std::vector<key_type> output_key(size);
@@ -163,19 +215,52 @@ TYPED_TEST(RocprimBlockSortTests, SortKeyValue)
         );
     }
 
-    hc::array_view<key_type, 1> d_output_key(output_key.size(), output_key.data());
-    hc::array_view<value_type, 1> d_output_value(output_value.size(), output_value.data());
-    hc::parallel_for_each(
-        hc::extent<1>(output_key.size()).tile(block_size),
-        [=](hc::tiled_index<1> i) [[hc]]
-        {
-            rp::block_sort<key_type, block_size, value_type> bsort;
-            bsort.sort(d_output_key[i], d_output_value[i]);
-        }
+    // Preparing device
+    key_type * device_key_output;
+    HIP_CHECK(hipMalloc(&device_key_output, output_key.size() * sizeof(key_type)));
+    value_type * device_value_output;
+    HIP_CHECK(hipMalloc(&device_value_output, output_value.size() * sizeof(value_type)));
+
+    HIP_CHECK(
+        hipMemcpy(
+            device_key_output, output_key.data(),
+            output_key.size() * sizeof(key_type),
+            hipMemcpyHostToDevice
+        )
     );
 
-    d_output_key.synchronize();
-    d_output_value.synchronize();
+    HIP_CHECK(
+        hipMemcpy(
+            device_value_output, output_value.data(),
+            output_value.size() * sizeof(value_type),
+            hipMemcpyHostToDevice
+        )
+    );
+
+    // Running kernel
+    hipLaunchKernelGGL(
+        HIP_KERNEL_NAME(sort_key_value_kernel<block_size, key_type, value_type>),
+        dim3(grid_size), dim3(block_size), 0, 0,
+        device_key_output, device_value_output
+    );
+
+    // Reading results back
+    HIP_CHECK(
+        hipMemcpy(
+            output_key.data(), device_key_output,
+            output_key.size() * sizeof(key_type),
+            hipMemcpyDeviceToHost
+        )
+    );
+
+    HIP_CHECK(
+        hipMemcpy(
+            output_value.data(), device_value_output,
+            output_value.size() * sizeof(value_type),
+            hipMemcpyDeviceToHost
+        )
+    );
+
     for(size_t i = 0; i < expected.size(); i++)
     {
         ASSERT_EQ(output_key[i], expected[i].first);

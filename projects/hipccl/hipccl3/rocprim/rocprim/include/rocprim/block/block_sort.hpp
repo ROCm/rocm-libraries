@@ -29,7 +29,7 @@
 #include "../intrinsics.hpp"
 #include "../functional.hpp"
 
-#include "detail/block_sort_shared.hpp"
+#include "detail/block_sort_bitonic.hpp"
 
 /// \addtogroup blockmodule
 /// @{
@@ -39,8 +39,8 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \brief Available algorithms for block_sort primitive.
 enum class block_sort_algorithm
 {
-    using_shared,
-    default_algorithm = using_shared,
+    bitonic_sort,
+    default_algorithm = bitonic_sort,
 };
 
 namespace detail
@@ -52,10 +52,10 @@ template<block_sort_algorithm Algorithm>
 struct select_block_sort_impl;
 
 template<>
-struct select_block_sort_impl<block_sort_algorithm::using_shared>
+struct select_block_sort_impl<block_sort_algorithm::bitonic_sort>
 {
     template<class Key, unsigned int BlockSize, class Value>
-    using type = block_sort_shared<Key, BlockSize, Value>;
+    using type = block_sort_bitonic<Key, BlockSize, Value>;
 };
 
 } // end namespace detail
