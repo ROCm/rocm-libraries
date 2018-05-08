@@ -32,26 +32,13 @@ list(APPEND CMAKE_MODULE_PATH
   ${HIP_PATH}/cmake /opt/rocm/hip/cmake # FindHIP.cmake
 )
 
-# Select hcc as a C++ compiler
-include(SetToolchain)
-
-# HIP and nvcc configuration
-if(HIP_PLATFORM STREQUAL "nvcc")
-  include(NVCC)
-elseif(HIP_PLATFORM STREQUAL "hcc")
-  # Workaround until hcc & hip cmake modules fixes symlink logic in their config files.
-  # (Thanks to rocBLAS devs for finding workaround for this problem!)
-  list(APPEND CMAKE_PREFIX_PATH /opt/rocm/hcc /opt/rocm/hip)
-  # Ignore hcc warning: argument unused during compilation: '-isystem /opt/rocm/hip/include'
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-command-line-argument")
-  find_package(hcc REQUIRED CONFIG PATHS /opt/rocm)
-  find_package(hip REQUIRED CONFIG PATHS /opt/rocm)
-endif()
+# Verify that hcc compiler is used on ROCM platform
+include(VerifyCompiler)
 
 # Download CUB
 include(DownloadProject)
 if(HIP_PLATFORM STREQUAL "nvcc")
-  if((NOT DEFINED CUB_INCLUDE_DIR) OR DEPENDENCIES_FORCE_DOWNLOAD)
+  if(NOT DEFINED CUB_INCLUDE_DIR)
     download_project(PROJ   cub
              GIT_REPOSITORY https://github.com/NVlabs/cub.git
              GIT_TAG        v1.8.0

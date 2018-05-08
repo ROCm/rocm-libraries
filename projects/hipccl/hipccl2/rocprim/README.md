@@ -12,20 +12,16 @@ performant GPU-accelerated code on AMD ROCm platform.
 * Git
 * CMake (3.10.0 or later)
 * AMD [ROCm](https://rocm.github.io/install.html) platform (1.7.1 or later)
+  * Including [HCC](https://github.com/RadeonOpenCompute/hcc) compiler, which must be set as C++ compiler on ROCm platform.
 
 Optional:
 
 * [GTest](https://github.com/google/googletest)
   * Required only for tests. Building tests is enabled by default.
-  * Use `GTEST_ROOT` to specify GTest location (also see [FindGTest](https://cmake.org/cmake/help/latest/module/FindGTest.html)).
-  * If GTest is not already installed, it will be automatically downloaded and built.
+  * It will be automatically downloaded and built by cmake script.
 * [Google Benchmark](https://github.com/google/benchmark)
   * Required only for benchmarks. Building benchmarks is off by default.
-  * If Google Benchmark is not already installed, it will be automatically downloaded and built.
-
-If some dependencies are missing, CMake script automatically downloads, builds and
-installs them. Setting `DEPENDENCIES_FORCE_DOWNLOAD` option `ON` forces script to
-not to use system-installed libraries, and to download all dependencies.
+  * It will be automatically downloaded and built by cmake script.
 
 ## Build and Install
 
@@ -39,7 +35,12 @@ cd rocPRIM; mkdir build; cd build
 # Build options:
 #   BUILD_TEST - on by default,
 #   BUILD_BENCHMARK - off by default.
-cmake -DBUILD_BENCHMARK=ON ../. # or cmake-gui ../.
+#
+# ! IMPORTANT !
+# On ROCm platform set C++ compiler to HCC. You can do it by adding 'CXX=<path-to-hcc>'
+# before 'cmake' or setting cmake option 'CMAKE_CXX_COMPILER' to path to the HCC compiler.
+#
+[CXX=hcc] cmake -DBUILD_BENCHMARK=ON ../. # or cmake-gui ../.
 
 # Build
 make -j4
