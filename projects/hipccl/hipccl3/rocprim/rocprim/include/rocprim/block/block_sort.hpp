@@ -110,6 +110,27 @@ public:
     {
         base_type::sort(thread_key, thread_value, storage, compare_function);
     }
+
+    template<class BinaryFunction = ::rocprim::less<Key>>
+    ROCPRIM_DEVICE inline
+    void sort(Key& thread_key,
+              storage_type& storage,
+              const unsigned int size,
+              BinaryFunction compare_function = BinaryFunction())
+    {
+        base_type::sort(thread_key, storage, compare_function, size);
+    }
+
+    template<class BinaryFunction = ::rocprim::less<Key>>
+    ROCPRIM_DEVICE inline
+    void sort(Key& thread_key,
+              Value& thread_value,
+              storage_type& storage,
+              const unsigned int size,
+              BinaryFunction compare_function = BinaryFunction())
+    {
+        base_type::sort(thread_key, thread_value, storage, compare_function, size);
+    }
 };
 
 END_ROCPRIM_NAMESPACE
