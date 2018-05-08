@@ -146,15 +146,6 @@ TYPED_TEST(RocprimBlockSortTests, SortKey)
     HIP_CHECK(hipFree(device_key_output));
 }
 
-template<class Key, class Value>
-struct key_value_comparator
-{
-    bool operator()(const std::pair<Key, Value>& lhs, const std::pair<Key, Value>& rhs)
-    {
-        return lhs.first < rhs.first;
-    }
-};
-
 template<
     unsigned int BlockSize,
     class key_type,
@@ -173,6 +164,127 @@ void sort_key_value_kernel(key_type * device_key_output, value_type * device_val
 }
 
 TYPED_TEST(RocprimBlockSortTests, SortKeyValue)
+{
+    using key_type = typename TestFixture::key_type;
+    using value_type = typename TestFixture::value_type;
+    const size_t block_size = TestFixture::block_size;
+    const size_t size = block_size * 1134;
+    const size_t grid_size = size / block_size;
+
+    // Generate data
+    std::vector<key_type> output_key(size);
+    for(size_t i = 0; i < output_key.size() / block_size; i++)
+    {
+        std::iota(
+            output_key.begin() + (i * block_size),
+            output_key.begin() + ((i + 1) * block_size),
+            0
+        );
+        
+        std::shuffle(
+            output_key.begin() + (i * block_size),
+            output_key.begin() + ((i + 1) * block_size),
+            std::mt19937{std::random_device{}()}
+        );
+    }
+    std::vector<value_type> output_value = test_utils::get_random_data<value_type>(size, -100, 100);
+
+    // Combine vectors to form pairs with key and value
+    std::vector<std::pair<key_type, value_type>> target(size);
+    for (unsigned i = 0; i < target.size(); i++)
+        target[i] = std::make_pair(output_key[i], output_value[i]);
+
+    // Calculate expected results on host
+    std::vector<std::pair<key_type, value_type>> expected(target);
+
+    for(size_t i = 0; i < expected.size() / block_size; i++)
+    {
+        std::sort(
+            expected.begin() + (i * block_size),
+            expected.begin() + ((i + 1) * block_size)
+        );
+    }
+
+    // Preparing device
+    key_type * device_key_output;
+    HIP_CHECK(hipMalloc(&device_key_output, output_key.size() * sizeof(key_type)));
+    value_type * device_value_output;
+    HIP_CHECK(hipMalloc(&device_value_output, output_value.size() * sizeof(value_type)));
+
+    HIP_CHECK(
+        hipMemcpy(
+            device_key_output, output_key.data(),
+            output_key.size() * sizeof(key_type),
+            hipMemcpyHostToDevice
+        )
+    );
+
+    HIP_CHECK(
+        hipMemcpy(
+            device_value_output, output_value.data(),
+            output_value.size() * sizeof(value_type),
+            hipMemcpyHostToDevice
+        )
+    );
+
+    // Running kernel
+    hipLaunchKernelGGL(
+        HIP_KERNEL_NAME(sort_key_value_kernel<block_size, key_type, value_type>),
+        dim3(grid_size), dim3(block_size), 0, 0,
+        device_key_output, device_value_output
+    );
+
+    // Reading results back
+    HIP_CHECK(
+        hipMemcpy(
+            output_key.data(), device_key_output,
+            output_key.size() * sizeof(key_type),
+            hipMemcpyDeviceToHost
+        )
+    );
+
+    HIP_CHECK(
+        hipMemcpy(
+            output_value.data(), device_value_output,
+            output_value.size() * sizeof(value_type),
+            hipMemcpyDeviceToHost
+        )
+    );
+
+    for(size_t i = 0; i < expected.size(); i++)
+    {
+        ASSERT_EQ(output_key[i], expected[i].first);
+        ASSERT_EQ(output_value[i], expected[i].second);
+    }
+}
+
+template<class Key, class Value>
+struct key_value_comparator
+{
+    bool operator()(const std::pair<Key, Value>& lhs, const std::pair<Key, Value>& rhs)
+    {
+        return lhs.first > rhs.first;
+    }
+};
+
+template<
+    unsigned int BlockSize,
+    class key_type,
+    class value_type
+>
+__global__
+void custom_sort_key_value_kernel(key_type * device_key_output, value_type * device_value_output)
+{
+    const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
+    key_type key = device_key_output[index];
+    value_type value = device_value_output[index];
+    rp::block_sort<key_type, BlockSize, value_type> bsort;
+    bsort.sort(key, value, rocprim::greater<key_type>());
+    device_key_output[index] = key;
+    device_value_output[index] = value;
+}
+
+TYPED_TEST(RocprimBlockSortTests, CustomSortKeyValue)
 {
     using key_type = typename TestFixture::key_type;
     using value_type = typename TestFixture::value_type;
@@ -239,7 +351,7 @@ TYPED_TEST(RocprimBlockSortTests, SortKeyValue)
 
     // Running kernel
     hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(sort_key_value_kernel<block_size, key_type, value_type>),
+        HIP_KERNEL_NAME(custom_sort_key_value_kernel<block_size, key_type, value_type>),
         dim3(grid_size), dim3(block_size), 0, 0,
         device_key_output, device_value_output
     );

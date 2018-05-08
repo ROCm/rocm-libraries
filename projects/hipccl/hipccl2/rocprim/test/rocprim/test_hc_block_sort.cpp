@@ -112,16 +112,77 @@ TYPED_TEST(RocprimBlockSortTests, SortKey)
     }
 }
 
+TYPED_TEST(RocprimBlockSortTests, SortKeyValue)
+{
+    using key_type = typename TestFixture::key_type;
+    using value_type = typename TestFixture::value_type;
+    const size_t block_size = TestFixture::block_size;
+    const size_t size = block_size * 1134;
+
+    // Generate data
+    std::vector<key_type> output_key(size);
+    for(size_t i = 0; i < output_key.size() / block_size; i++)
+    {
+        std::iota(
+            output_key.begin() + (i * block_size),
+            output_key.begin() + ((i + 1) * block_size),
+            0
+        );
+        
+        std::shuffle(
+            output_key.begin() + (i * block_size),
+            output_key.begin() + ((i + 1) * block_size),
+            std::mt19937{std::random_device{}()}
+        );
+    }
+    std::vector<value_type> output_value = test_utils::get_random_data<value_type>(size, -100, 100);
+
+    // Combine vectors to form pairs with key and value
+    std::vector<std::pair<key_type, value_type>> target(size);
+    for (unsigned i = 0; i < target.size(); i++)
+        target[i] = std::make_pair(output_key[i], output_value[i]);
+
+    // Calculate expected results on host
+    std::vector<std::pair<key_type, value_type>> expected(target);
+
+    for(size_t i = 0; i < expected.size() / block_size; i++)
+    {
+        std::sort(
+            expected.begin() + (i * block_size),
+            expected.begin() + ((i + 1) * block_size)
+        );
+    }
+
+    hc::array_view<key_type, 1> d_output_key(output_key.size(), output_key.data());
+    hc::array_view<value_type, 1> d_output_value(output_value.size(), output_value.data());
+    hc::parallel_for_each(
+        hc::extent<1>(output_key.size()).tile(block_size),
+        [=](hc::tiled_index<1> i) [[hc]]
+        {
+            rp::block_sort<key_type, block_size, value_type> bsort;
+            bsort.sort(d_output_key[i], d_output_value[i]);
+        }
+    );
+
+    d_output_key.synchronize();
+    d_output_value.synchronize();
+    for(size_t i = 0; i < expected.size(); i++)
+    {
+        ASSERT_EQ(output_key[i], expected[i].first);
+        ASSERT_EQ(output_value[i], expected[i].second);
+    }
+}
+
 template<class Key, class Value>
 struct key_value_comparator
 {
     bool operator()(const std::pair<Key, Value>& lhs, const std::pair<Key, Value>& rhs)
     {
-        return lhs.first < rhs.first;
+        return lhs.first > rhs.first;
     }
 };
 
-TYPED_TEST(RocprimBlockSortTests, SortKeyValue)
+TYPED_TEST(RocprimBlockSortTests, CustomSortKeyValue)
 {
     using key_type = typename TestFixture::key_type;
     using value_type = typename TestFixture::value_type;
@@ -170,7 +231,7 @@ TYPED_TEST(RocprimBlockSortTests, SortKeyValue)
         [=](hc::tiled_index<1> i) [[hc]]
         {
             rp::block_sort<key_type, block_size, value_type> bsort;
-            bsort.sort(d_output_key[i], d_output_value[i]);
+            bsort.sort(d_output_key[i], d_output_value[i], rocprim::greater<key_type>());
         }
     );
 
@@ -182,3 +243,4 @@ TYPED_TEST(RocprimBlockSortTests, SortKeyValue)
         ASSERT_EQ(output_value[i], expected[i].second);
     }
 }
+
