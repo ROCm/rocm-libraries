@@ -25,17 +25,14 @@ cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
 # Install prefix
 set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended onto install directories")
 
+# rocPRIM project
+project(rocprim VERSION 0.3.0.1 LANGUAGES CXX)
+
 # CMake modules
 list(APPEND CMAKE_MODULE_PATH
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake
   ${HIP_PATH}/cmake /opt/rocm/hip/cmake # FindHIP.cmake
 )
-
-# Select hcc as a C++ compiler
-include(cmake/SetToolchain.cmake)
-
-# rocPRIM project
-project(rocprim VERSION 0.3.0.0 LANGUAGES CXX)
 
 # Set a default build type if none was specified
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -46,7 +43,10 @@ endif()
 
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOLEAN "Add paths to linker search and installed rpath")
 
-# Build CXX flags
+# Verify that hcc compiler is used on ROCM platform
+include(cmake/VerifyCompiler.cmake)
+
+# Set CXX flags
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -62,6 +62,7 @@ option(ONLY_INSTALL "Only install" OFF)
 # Get dependencies
 include(cmake/Dependencies.cmake)
 
+# Print configuration summary
 include(cmake/Summary.cmake)
 print_configuration_summary()
 

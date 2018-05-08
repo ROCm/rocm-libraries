@@ -1,4 +1,30 @@
-################################################################################################
+# MIT License
+#
+# Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+# Find HIP package and verify that correct C++ compiler was selected for available
+# platfrom. On ROCm platform host and device code is compiled by the same compiler:
+# hcc. On CUDA host can be compiled by any C++ compiler while device code is compiled
+# by nvcc compiler (CMake's CUDA package handles this).
+
 # A function for automatic detection of the lowest CC of the installed NV GPUs
 function(hip_cuda_detect_lowest_cc out_variable)
     set(__cufile ${PROJECT_BINARY_DIR}/detect_nvgpus_cc.cu)
@@ -43,9 +69,10 @@ function(hip_cuda_detect_lowest_cc out_variable)
 endfunction()
 
 ################################################################################################
-###  Non macro/function section
+# Non macro/function section
 ################################################################################################
 
+# Get CUDA
 find_package(CUDA REQUIRED)
 
 # Finds lowest supported CUDA CC
