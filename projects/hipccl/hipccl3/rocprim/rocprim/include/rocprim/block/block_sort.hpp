@@ -39,7 +39,9 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \brief Available algorithms for block_sort primitive.
 enum class block_sort_algorithm
 {
+    /// \brief A bitonic sort based algorithm.
     bitonic_sort,
+    /// \brief Default block_sort algorithm.
     default_algorithm = bitonic_sort,
 };
 
@@ -60,6 +62,71 @@ struct select_block_sort_impl<block_sort_algorithm::bitonic_sort>
 
 } // end namespace detail
 
+/// \brief The block_sort class is a block level parallel primitive which provides
+/// methods sorting items (keys or key-value pairs) partitioned across threads in a block
+/// using comparison-based sort algorithm.
+///
+/// \tparam Key - the key type.
+/// \tparam BlockSize - the number of threads in a block.
+/// \tparam Value - the value type. Default type empty_type indicates
+/// a keys-only sort.
+/// \tparam Algorithm - selected sort algorithm, block_sort_algorithm::default_algorithm by default.
+///
+/// \par Overview
+/// * Accepts custom compare_functions for sorting across a block.
+/// * Performance depends on \p BlockSize.
+///   * It is better if \p BlockSize is a power of two.
+///   * If \p BlockSize is not a power of two, or when function with \p size overload is used
+///     odd-even sort is used instead of bitonic sort, leading to decreased performance.
+///
+/// \par Examples
+/// \parblock
+/// In the examples sort is performed on a block of 256 threads, each thread provides
+/// one \p int value, results are returned using the same variable as for input.
+///
+/// \b HIP: \n
+/// \code{.cpp}
+/// __global__ void example_kernel(...)
+/// {
+///     // specialize block_sort for int, block of 256 threads,
+///     // key-only sort
+///     using block_sort_int = rocprim::block_sort<int, 256>;
+///     // allocate storage in shared memory
+///     __shared__ block_sort_int::storage_type storage;
+///
+///     int input = ...;
+///     // execute block sort (ascending)
+///     block_sort_int().sort(
+///         input,
+///         storage
+///     );
+///     ...
+/// }
+/// \endcode
+///
+/// \b HC: \n
+/// \code{.cpp}
+/// hc::parallel_for_each(
+///     hc::extent<1>(...).tile(256),
+///     [=](hc::tiled_index<1> i) [[hc]]
+///     {
+///         // specialize block_sort for int, block of 256 threads,
+///         // key-only sort
+///         using block_sort_int = rocprim::block_sort<int, 256>;
+///
+///         // allocate storage in shared memory
+///         tile_static block_sort_int::storage_type storage;
+///
+///         int input = ...;
+///         // execute block sort (ascending)
+///         block_sort_int().sort(
+///             input,
+///             storage
+///         );
+///     }
+/// );
+/// \endcode
+/// \endparblock
 template<
     class Key,
     unsigned int BlockSize,
@@ -73,8 +140,27 @@ class block_sort
 {
     using base_type = typename detail::select_block_sort_impl<Algorithm>::template type<Key, BlockSize, Value>;
 public:
+    /// \brief Struct used to allocate a temporary memory that is required for thread
+    /// communication during operations provided by related parallel primitive.
+    ///
+    /// Depending on the implemention the operations exposed by parallel primitive may
+    /// require a temporary storage for thread communication. The storage should be allocated
+    /// using keywords <tt>__shared__</tt> in HIP or \p tile_static in HC. It can be aliased to
+    /// an externally allocated memory, or be a part of a union type with other storage types
+    /// to increase shared memory reusability.
     using storage_type = typename base_type::storage_type;
 
+    /// \brief Block sort for any data type.
+    ///
+    /// \tparam BinaryFunction - type of binary function used for sort. Default type
+    /// is rocprim::less<T>.
+    ///
+    /// \param [in, out] thread_key - reference to a key provided by a thread.
+    /// \param [in] compare_function - comparison function object which returns true if the 
+    /// first argument is is ordered before the second.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
+    /// <tt>const &</tt>, but function object must not modify the objects passed to it.
     template<class BinaryFunction = ::rocprim::less<Key>>
     ROCPRIM_DEVICE inline
     void sort(Key& thread_key,
@@ -83,6 +169,72 @@ public:
         base_type::sort(thread_key, compare_function);
     }
 
+    /// \brief Block sort for any data type.
+    ///
+    /// \tparam BinaryFunction - type of binary function used for sort. Default type
+    /// is rocprim::less<T>.
+    ///
+    /// \param [in, out] thread_key - reference to a key provided by a thread.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] compare_function - comparison function object which returns true if the 
+    /// first argument is is ordered before the second.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
+    /// <tt>const &</tt>, but function object must not modify the objects passed to it.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
+    /// universal rocprim::syncthreads().
+    ///
+    /// \par Examples
+    /// \parblock
+    /// In the examples sort is performed on a block of 256 threads, each thread provides
+    /// one \p int value, results are returned using the same variable as for input.
+    ///
+    /// \b HIP: \n
+    /// \code{.cpp}
+    /// __global__ void example_kernel(...)
+    /// {
+    ///     // specialize block_sort for int, block of 256 threads,
+    ///     // key-only sort
+    ///     using block_sort_int = rocprim::block_sort<int, 256>;
+    ///     // allocate storage in shared memory
+    ///     __shared__ block_sort_int::storage_type storage;
+    ///
+    ///     int input = ...;
+    ///     // execute block sort (ascending)
+    ///     block_sort_int().sort(
+    ///         input,
+    ///         storage
+    ///     );
+    ///     ...
+    /// }
+    /// \endcode
+    ///
+    /// \b HC: \n
+    /// \code{.cpp}
+    /// hc::parallel_for_each(
+    ///     hc::extent<1>(...).tile(256),
+    ///     [=](hc::tiled_index<1> i) [[hc]]
+    ///     {
+    ///         // specialize block_sort for int, block of 256 threads,
+    ///         // key-only sort
+    ///         using block_sort_int = rocprim::block_sort<int, 256>;
+    ///
+    ///         // allocate storage in shared memory
+    ///         tile_static block_sort_int::storage_type storage;
+    ///
+    ///         int input = ...;
+    ///         // execute block sort (ascending)
+    ///         block_sort_int().sort(
+    ///             input,
+    ///             storage
+    ///         );
+    ///     }
+    /// );
+    /// \endcode
+    /// \endparblock
     template<class BinaryFunction = ::rocprim::less<Key>>
     ROCPRIM_DEVICE inline
     void sort(Key& thread_key,
@@ -92,6 +244,18 @@ public:
         base_type::sort(thread_key, storage, compare_function);
     }
 
+    /// \brief Block sort by key for any data type.
+    ///
+    /// \tparam BinaryFunction - type of binary function used for sort. Default type
+    /// is rocprim::less<T>.
+    ///
+    /// \param [in, out] thread_key - reference to a key provided by a thread.
+    /// \param [in, out] thread_value - reference to a value provided by a thread.
+    /// \param [in] compare_function - comparison function object which returns true if the 
+    /// first argument is is ordered before the second.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
+    /// <tt>const &</tt>, but function object must not modify the objects passed to it.
     template<class BinaryFunction = ::rocprim::less<Key>>
     ROCPRIM_DEVICE inline
     void sort(Key& thread_key,
@@ -101,6 +265,74 @@ public:
         base_type::sort(thread_key, thread_value, compare_function);
     }
 
+    /// \brief Block sort by key for any data type.
+    ///
+    /// \tparam BinaryFunction - type of binary function used for sort. Default type
+    /// is rocprim::less<T>.
+    ///
+    /// \param [in, out] thread_key - reference to a key provided by a thread.
+    /// \param [in, out] thread_value - reference to a value provided by a thread.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] compare_function - comparison function object which returns true if the 
+    /// first argument is is ordered before the second.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
+    /// <tt>const &</tt>, but function object must not modify the objects passed to it.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
+    /// universal rocprim::syncthreads().
+    ///
+    /// \parblock
+    /// In the examples sort is performed on a block of 256 threads, each thread provides
+    /// one \p int key and one \p int value, results are returned using the same variable as for input.
+    ///
+    /// \b HIP: \n
+    /// \code{.cpp}
+    /// __global__ void example_kernel(...)
+    /// {
+    ///     // specialize block_sort for int, block of 256 threads,
+    ///     using block_sort_int = rocprim::block_sort<int, 256, int>;
+    ///     // allocate storage in shared memory
+    ///     __shared__ block_sort_int::storage_type storage;
+    ///
+    ///     int key = ...;
+    ///     int value = ...;
+    ///     // execute block sort (ascending)
+    ///     block_sort_int().sort(
+    ///         key,
+    ///         value,
+    ///         storage
+    ///     );
+    ///     ...
+    /// }
+    /// \endcode
+    ///
+    /// \b HC: \n
+    /// \code{.cpp}
+    /// hc::parallel_for_each(
+    ///     hc::extent<1>(...).tile(256),
+    ///     [=](hc::tiled_index<1> i) [[hc]]
+    ///     {
+    ///         // specialize block_sort for int, block of 256 threads,
+    ///         using block_sort_int = rocprim::block_sort<int, 256, int>;
+    ///
+    ///         // allocate storage in shared memory
+    ///         tile_static block_sort_int::storage_type storage;
+    ///
+    ///         int key = ...;
+    ///         int value = ...;
+    ///         // execute block sort (ascending)
+    ///         block_sort_int().sort(
+    ///             key,
+    ///             value,
+    ///             storage
+    ///         );
+    ///     }
+    /// );
+    /// \endcode
+    /// \endparblock
     template<class BinaryFunction = ::rocprim::less<Key>>
     ROCPRIM_DEVICE inline
     void sort(Key& thread_key,
@@ -111,6 +343,20 @@ public:
         base_type::sort(thread_key, thread_value, storage, compare_function);
     }
 
+    /// \brief Block sort by key for any data type. If \p size is
+    /// greater than \p BlockSize, this function does nothing.
+    ///
+    /// \tparam BinaryFunction - type of binary function used for sort. Default type
+    /// is rocprim::less<T>.
+    ///
+    /// \param [in, out] thread_key - reference to a key provided by a thread.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] size - custom size of block to be sorted.
+    /// \param [in] compare_function - comparison function object which returns true if the 
+    /// first argument is is ordered before the second.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
+    /// <tt>const &</tt>, but function object must not modify the objects passed to it.
     template<class BinaryFunction = ::rocprim::less<Key>>
     ROCPRIM_DEVICE inline
     void sort(Key& thread_key,
@@ -121,6 +367,21 @@ public:
         base_type::sort(thread_key, storage, compare_function, size);
     }
 
+    /// \brief Block sort by key for any data type. If \p size is
+    /// greater than \p BlockSize, this function does nothing.
+    ///
+    /// \tparam BinaryFunction - type of binary function used for sort. Default type
+    /// is rocprim::less<T>.
+    ///
+    /// \param [in, out] thread_key - reference to a key provided by a thread.
+    /// \param [in, out] thread_value - reference to a value provided by a thread.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] size - custom size of block to be sorted.
+    /// \param [in] compare_function - comparison function object which returns true if the 
+    /// first argument is is ordered before the second.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
+    /// <tt>const &</tt>, but function object must not modify the objects passed to it.
     template<class BinaryFunction = ::rocprim::less<Key>>
     ROCPRIM_DEVICE inline
     void sort(Key& thread_key,

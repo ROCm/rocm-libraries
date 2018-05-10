@@ -313,6 +313,11 @@ private:
             "KeyValue parameter pack can 1 or 2 elements (key, or key and value)"
         );
 
+        if(size > BlockSize)
+        {
+            return;
+        }
+        
         copy_to_shared(kv..., flat_tid, storage);
 
         bool is_even = (flat_tid % 2 == 0);
