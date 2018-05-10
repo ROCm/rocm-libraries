@@ -76,7 +76,8 @@ struct select_block_sort_impl<block_sort_algorithm::bitonic_sort>
 /// * Accepts custom compare_functions for sorting across a block.
 /// * Performance depends on \p BlockSize.
 ///   * It is better if \p BlockSize is a power of two.
-///   * If \p BlockSize is not a power of two, performance decreases significantly.
+///   * If \p BlockSize is not a power of two, or when function with \p size overload is used
+///     odd-even sort is used instead of bitonic sort, leading to decreased performance.
 ///
 /// \par Examples
 /// \parblock
@@ -154,8 +155,9 @@ public:
     /// \tparam BinaryFunction - type of binary function used for sort. Default type
     /// is rocprim::less<T>.
     ///
-    /// \param thread_key - input/output to pass to other threads
-    /// \param compare_function - binary operation function object that will be used for sort.
+    /// \param [in, out] thread_key - reference to a key provided by a thread.
+    /// \param [in] compare_function - comparison function object which returns true if the 
+    /// first argument is is ordered before the second.
     /// The signature of the function should be equivalent to the following:
     /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
@@ -167,14 +169,15 @@ public:
         base_type::sort(thread_key, compare_function);
     }
 
-    /// \brief Block sort for any data type using temporary storage.
+    /// \brief Block sort for any data type.
     ///
     /// \tparam BinaryFunction - type of binary function used for sort. Default type
     /// is rocprim::less<T>.
     ///
-    /// \param thread_key - input/output to pass to other threads
-    /// \param storage - temporary storage for inputs
-    /// \param compare_function - binary operation function object that will be used for sort.
+    /// \param [in, out] thread_key - reference to a key provided by a thread.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] compare_function - comparison function object which returns true if the 
+    /// first argument is is ordered before the second.
     /// The signature of the function should be equivalent to the following:
     /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
@@ -246,9 +249,10 @@ public:
     /// \tparam BinaryFunction - type of binary function used for sort. Default type
     /// is rocprim::less<T>.
     ///
-    /// \param thread_key - input/output key to pass to other threads
-    /// \param thread_value - input/output value to pass to other threads
-    /// \param compare_function - binary operation function object that will be used for sort.
+    /// \param [in, out] thread_key - reference to a key provided by a thread.
+    /// \param [in, out] thread_value - reference to a value provided by a thread.
+    /// \param [in] compare_function - comparison function object which returns true if the 
+    /// first argument is is ordered before the second.
     /// The signature of the function should be equivalent to the following:
     /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
@@ -261,15 +265,16 @@ public:
         base_type::sort(thread_key, thread_value, compare_function);
     }
 
-    /// \brief Block sort by key for any data type using temporary storage.
+    /// \brief Block sort by key for any data type.
     ///
     /// \tparam BinaryFunction - type of binary function used for sort. Default type
     /// is rocprim::less<T>.
     ///
-    /// \param thread_key - input/output key to pass to other threads
-    /// \param thread_value - input/output value to pass to other threads
-    /// \param storage - temporary storage for inputs
-    /// \param compare_function - binary operation function object that will be used for sort.
+    /// \param [in, out] thread_key - reference to a key provided by a thread.
+    /// \param [in, out] thread_value - reference to a value provided by a thread.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] compare_function - comparison function object which returns true if the 
+    /// first argument is is ordered before the second.
     /// The signature of the function should be equivalent to the following:
     /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
@@ -338,15 +343,17 @@ public:
         base_type::sort(thread_key, thread_value, storage, compare_function);
     }
 
-    /// \brief Block sort by key for any data type using temporary storage.
+    /// \brief Block sort by key for any data type. If \p size is
+    /// greater than \p BlockSize, this function does nothing.
     ///
     /// \tparam BinaryFunction - type of binary function used for sort. Default type
     /// is rocprim::less<T>.
     ///
-    /// \param thread_key - input/output key to pass to other threads
-    /// \param storage - temporary storage for inputs
-    /// \param size - custom size of block to be sorted
-    /// \param compare_function - binary operation function object that will be used for sort.
+    /// \param [in, out] thread_key - reference to a key provided by a thread.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] size - custom size of block to be sorted.
+    /// \param [in] compare_function - comparison function object which returns true if the 
+    /// first argument is is ordered before the second.
     /// The signature of the function should be equivalent to the following:
     /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
@@ -360,16 +367,18 @@ public:
         base_type::sort(thread_key, storage, compare_function, size);
     }
 
-    /// \brief Block sort by key for any data type using temporary storage.
+    /// \brief Block sort by key for any data type. If \p size is
+    /// greater than \p BlockSize, this function does nothing.
     ///
     /// \tparam BinaryFunction - type of binary function used for sort. Default type
     /// is rocprim::less<T>.
     ///
-    /// \param thread_key - input/output key to pass to other threads
-    /// \param thread_value - input/output value to pass to other threads
-    /// \param storage - temporary storage for inputs
-    /// \param size - custom size of block to be sorted
-    /// \param compare_function - binary operation function object that will be used for sort.
+    /// \param [in, out] thread_key - reference to a key provided by a thread.
+    /// \param [in, out] thread_value - reference to a value provided by a thread.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] size - custom size of block to be sorted.
+    /// \param [in] compare_function - comparison function object which returns true if the 
+    /// first argument is is ordered before the second.
     /// The signature of the function should be equivalent to the following:
     /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
