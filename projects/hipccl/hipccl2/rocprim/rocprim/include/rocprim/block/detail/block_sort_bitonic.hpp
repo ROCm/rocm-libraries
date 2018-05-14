@@ -112,7 +112,7 @@ public:
               const unsigned int size,
               BinaryFunction compare_function)
     {
-        this->sort_impl<BlockSize>(
+        this->sort_impl(
             ::rocprim::flat_block_thread_id(), size,
             storage, compare_function,
             thread_key
@@ -127,7 +127,7 @@ public:
               const unsigned int size,
               BinaryFunction compare_function)
     {
-        this->sort_impl<BlockSize>(
+        this->sort_impl(
             ::rocprim::flat_block_thread_id(), size,
             storage, compare_function,
             thread_key, thread_value
@@ -317,7 +317,7 @@ private:
         {
             return;
         }
-        
+
         copy_to_shared(kv..., flat_tid, storage);
 
         bool is_even = (flat_tid % 2 == 0);
