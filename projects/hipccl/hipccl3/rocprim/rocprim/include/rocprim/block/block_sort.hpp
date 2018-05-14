@@ -156,7 +156,7 @@ public:
     /// is rocprim::less<T>.
     ///
     /// \param [in, out] thread_key - reference to a key provided by a thread.
-    /// \param [in] compare_function - comparison function object which returns true if the 
+    /// \param [in] compare_function - comparison function object which returns true if the
     /// first argument is is ordered before the second.
     /// The signature of the function should be equivalent to the following:
     /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
@@ -176,7 +176,7 @@ public:
     ///
     /// \param [in, out] thread_key - reference to a key provided by a thread.
     /// \param [in] storage - reference to a temporary storage object of type storage_type.
-    /// \param [in] compare_function - comparison function object which returns true if the 
+    /// \param [in] compare_function - comparison function object which returns true if the
     /// first argument is is ordered before the second.
     /// The signature of the function should be equivalent to the following:
     /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
@@ -251,7 +251,7 @@ public:
     ///
     /// \param [in, out] thread_key - reference to a key provided by a thread.
     /// \param [in, out] thread_value - reference to a value provided by a thread.
-    /// \param [in] compare_function - comparison function object which returns true if the 
+    /// \param [in] compare_function - comparison function object which returns true if the
     /// first argument is is ordered before the second.
     /// The signature of the function should be equivalent to the following:
     /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
@@ -273,7 +273,7 @@ public:
     /// \param [in, out] thread_key - reference to a key provided by a thread.
     /// \param [in, out] thread_value - reference to a value provided by a thread.
     /// \param [in] storage - reference to a temporary storage object of type storage_type.
-    /// \param [in] compare_function - comparison function object which returns true if the 
+    /// \param [in] compare_function - comparison function object which returns true if the
     /// first argument is is ordered before the second.
     /// The signature of the function should be equivalent to the following:
     /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
@@ -352,7 +352,7 @@ public:
     /// \param [in, out] thread_key - reference to a key provided by a thread.
     /// \param [in] storage - reference to a temporary storage object of type storage_type.
     /// \param [in] size - custom size of block to be sorted.
-    /// \param [in] compare_function - comparison function object which returns true if the 
+    /// \param [in] compare_function - comparison function object which returns true if the
     /// first argument is is ordered before the second.
     /// The signature of the function should be equivalent to the following:
     /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
@@ -364,7 +364,7 @@ public:
               const unsigned int size,
               BinaryFunction compare_function = BinaryFunction())
     {
-        base_type::sort(thread_key, storage, compare_function, size);
+        base_type::sort(thread_key, storage, size, compare_function);
     }
 
     /// \brief Block sort by key for any data type. If \p size is
@@ -377,7 +377,7 @@ public:
     /// \param [in, out] thread_value - reference to a value provided by a thread.
     /// \param [in] storage - reference to a temporary storage object of type storage_type.
     /// \param [in] size - custom size of block to be sorted.
-    /// \param [in] compare_function - comparison function object which returns true if the 
+    /// \param [in] compare_function - comparison function object which returns true if the
     /// first argument is is ordered before the second.
     /// The signature of the function should be equivalent to the following:
     /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
@@ -390,7 +390,7 @@ public:
               const unsigned int size,
               BinaryFunction compare_function = BinaryFunction())
     {
-        base_type::sort(thread_key, thread_value, storage, compare_function, size);
+        base_type::sort(thread_key, thread_value, storage, size, compare_function);
     }
 };
 
