@@ -128,7 +128,7 @@ TYPED_TEST(RocprimBlockSortTests, SortKeyValue)
             output_key.begin() + ((i + 1) * block_size),
             0
         );
-        
+
         std::shuffle(
             output_key.begin() + (i * block_size),
             output_key.begin() + ((i + 1) * block_size),
@@ -159,8 +159,12 @@ TYPED_TEST(RocprimBlockSortTests, SortKeyValue)
         hc::extent<1>(output_key.size()).tile(block_size),
         [=](hc::tiled_index<1> i) [[hc]]
         {
+            key_type key = d_output_key[i];
+            value_type value = d_output_value[i];
             rp::block_sort<key_type, block_size, value_type> bsort;
-            bsort.sort(d_output_key[i], d_output_value[i]);
+            bsort.sort(key, value);
+            d_output_key[i] = key;
+            d_output_value[i] = value;
         }
     );
 
@@ -198,7 +202,7 @@ TYPED_TEST(RocprimBlockSortTests, CustomSortKeyValue)
             output_key.begin() + ((i + 1) * block_size),
             0
         );
-        
+
         std::shuffle(
             output_key.begin() + (i * block_size),
             output_key.begin() + ((i + 1) * block_size),
@@ -230,8 +234,12 @@ TYPED_TEST(RocprimBlockSortTests, CustomSortKeyValue)
         hc::extent<1>(output_key.size()).tile(block_size),
         [=](hc::tiled_index<1> i) [[hc]]
         {
+            key_type key = d_output_key[i];
+            value_type value = d_output_value[i];
             rp::block_sort<key_type, block_size, value_type> bsort;
-            bsort.sort(d_output_key[i], d_output_value[i], rocprim::greater<key_type>());
+            bsort.sort(key, value, rocprim::greater<key_type>());
+            d_output_key[i] = key;
+            d_output_value[i] = value;
         }
     );
 

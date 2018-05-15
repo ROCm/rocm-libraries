@@ -104,7 +104,7 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortInt)
     d_output.synchronize();
     for(size_t i = 0; i < output.size(); i++)
     {
-        EXPECT_EQ(output[i], expected[i]);
+        ASSERT_EQ(output[i], expected[i]);
     }
 }
 
@@ -146,8 +146,12 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
         hc::extent<1>(output_key.size()).tile(block_size),
         [=](hc::tiled_index<1> i) [[hc]]
         {
+            int key = d_output_key[i];
+            int value = d_output_value[i];
             rp::warp_sort<int, logical_warp_size, int> wsort;
-            wsort.sort(d_output_key[i], d_output_value[i]);
+            wsort.sort(key, value);
+            d_output_key[i] = key;
+            d_output_value[i] = value;
         }
     );
 
@@ -155,7 +159,7 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
     d_output_value.synchronize();
     for(size_t i = 0; i < expected.size(); i++)
     {
-        EXPECT_EQ(d_output_key[i], expected[i].first);
-        EXPECT_EQ(d_output_value[i], expected[i].second);
+        ASSERT_EQ(d_output_key[i], expected[i].first);
+        ASSERT_EQ(d_output_value[i], expected[i].second);
     }
 }

@@ -95,6 +95,6 @@ TEST(HIPTests, Saxpy)
 
     for(size_t i = 0; i < N; i++)
     {
-        EXPECT_NEAR(y[i], 201.0f, 0.1f);
+        ASSERT_NEAR(y[i], 201.0f, 0.1f);
     }
 }

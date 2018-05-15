@@ -176,12 +176,12 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSum)
     {
         if (std::is_integral<T>::value)
         {
-            EXPECT_EQ(output[i], expected[i]);
+            ASSERT_EQ(output[i], expected[i]);
         }
         else if(std::is_floating_point<T>::value)
         {
             auto tolerance = std::max<T>(std::abs(0.1f * expected[i]), T(0.01f));
-            EXPECT_NEAR(output[i], expected[i], tolerance);
+            ASSERT_NEAR(output[i], expected[i], tolerance);
         }
     }
 
@@ -284,12 +284,12 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSum)
     {
         if (std::is_integral<T>::value)
         {
-            EXPECT_EQ(output[i], expected[i]);
+            ASSERT_EQ(output[i], expected[i]);
         }
         else if(std::is_floating_point<T>::value)
         {
             auto tolerance = std::max<T>(std::abs(0.1f * expected[i]), T(0.01f));
-            EXPECT_NEAR(output[i], expected[i], tolerance);
+            ASSERT_NEAR(output[i], expected[i], tolerance);
         }
     }
 
@@ -392,12 +392,12 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumValid)
     {
         if (std::is_integral<T>::value)
         {
-            EXPECT_EQ(output[i], expected[i]);
+            ASSERT_EQ(output[i], expected[i]);
         }
         else if(std::is_floating_point<T>::value)
         {
             auto tolerance = std::max<T>(std::abs(0.1f * expected[i]), T(0.01f));
-            EXPECT_NEAR(output[i], expected[i], tolerance);
+            ASSERT_NEAR(output[i], expected[i], tolerance);
         }
     }
 
@@ -502,12 +502,12 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSumValid)
     {
         if (std::is_integral<T>::value)
         {
-            EXPECT_EQ(output[i], expected[i]);
+            ASSERT_EQ(output[i], expected[i]);
         }
         else if(std::is_floating_point<T>::value)
         {
             auto tolerance = std::max<T>(std::abs(0.1f * expected[i]), T(0.01f));
-            EXPECT_NEAR(output[i], expected[i], tolerance);
+            ASSERT_NEAR(output[i], expected[i], tolerance);
         }
     }
 
