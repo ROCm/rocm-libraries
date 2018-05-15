@@ -20,6 +20,18 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+# Use CUDA_INCLUDE_DIRECTORIES to include required dirs
+# for nvcc if cmake version is less than 3.10
+if((HIP_PLATFORM STREQUAL "nvcc") AND (CMAKE_VERSION VERSION_LESS "3.10"))
+    CUDA_INCLUDE_DIRECTORIES(
+        "${PROJECT_BINARY_DIR}/hipcub/include/hipcub"
+        "${PROJECT_BINARY_DIR}/hipcub/include"
+        "${PROJECT_SOURCE_DIR}/hipcub/include"
+        ${GTEST_INCLUDE_DIRS}
+        ${CUB_INCLUDE_DIR}
+    )
+endif()
+
 function(add_hipcub_test TEST_NAME TEST_SOURCES)
   list(GET TEST_SOURCES 0 TEST_MAIN_SOURCE)
   get_filename_component(TEST_TARGET ${TEST_MAIN_SOURCE} NAME_WE)
