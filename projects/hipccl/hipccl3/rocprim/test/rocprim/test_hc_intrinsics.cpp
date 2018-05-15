@@ -139,7 +139,7 @@ TEST(RocprimIntrinsicsTests, WarpShuffleUpInt)
     d_output.synchronize();
     for(size_t i = 0; i < output.size(); i++)
     {
-        EXPECT_EQ(output[i], expected[i]);
+        ASSERT_EQ(output[i], expected[i]);
     }
 }
 
@@ -172,7 +172,7 @@ TEST(RocprimIntrinsicsTests, WarpShuffleUpChar)
     d_output.synchronize();
     for(size_t i = 0; i < output.size(); i++)
     {
-        EXPECT_EQ(output[i], expected[i]);
+        ASSERT_EQ(output[i], expected[i]);
     }
 }
 
@@ -205,7 +205,7 @@ TEST(RocprimIntrinsicsTests, WarpShuffleUpFloat)
     d_output.synchronize();
     for(size_t i = 0; i < output.size(); i++)
     {
-        EXPECT_NEAR(output[i], expected[i], std::abs(0.01f * expected[i]));
+        ASSERT_NEAR(output[i], expected[i], std::abs(0.01f * expected[i]));
     }
 }
 
@@ -238,7 +238,7 @@ TEST(RocprimIntrinsicsTests, WarpShuffleUpDouble)
     d_output.synchronize();
     for(size_t i = 0; i < output.size(); i++)
     {
-        EXPECT_NEAR(output[i], expected[i], std::abs(0.01 * expected[i]));
+        ASSERT_NEAR(output[i], expected[i], std::abs(0.01 * expected[i]));
     }
 }
 
@@ -279,7 +279,7 @@ TEST(RocprimIntrinsicsTests, WarpShuffleUpCustomStruct)
     d_output.synchronize();
     for(size_t i = 0; i < output.size(); i++)
     {
-        EXPECT_EQ(output[i], expected[i]);
+        ASSERT_EQ(output[i], expected[i]);
     }
 }
 
@@ -319,7 +319,7 @@ TEST(RocprimIntrinsicsTests, WarpShuffleUpCustomAlignedStruct)
     d_output.synchronize();
     for(size_t i = 0; i < output.size(); i++)
     {
-        EXPECT_EQ(output[i], expected[i]);
+        ASSERT_EQ(output[i], expected[i]);
     }
 }
 
@@ -352,7 +352,7 @@ TEST(RocprimIntrinsicsTests, WarpShuffleDown)
     d_output.synchronize();
     for(size_t i = 0; i < output.size(); i++)
     {
-        EXPECT_EQ(output[i], expected[i]);
+        ASSERT_EQ(output[i], expected[i]);
     }
 }
 
@@ -386,7 +386,7 @@ TEST(RocprimIntrinsicsTests, WarpShuffle)
     d_output.synchronize();
     for(size_t i = 0; i < output.size(); i++)
     {
-        EXPECT_EQ(output[i], expected[i]);
+        ASSERT_EQ(output[i], expected[i]);
     }
 }
 
@@ -420,7 +420,7 @@ TEST(RocprimIntrinsicsTests, WarpShuffleXor)
     d_output.synchronize();
     for(size_t i = 0; i < output.size(); i++)
     {
-        EXPECT_EQ(output[i], expected[i]);
+        ASSERT_EQ(output[i], expected[i]);
     }
 }
 
@@ -451,6 +451,6 @@ TEST(RocprimIntrinsicsTests, WarpId)
     d_output.synchronize();
     for(size_t i = 0; i < output.size(); i++)
     {
-        EXPECT_EQ(output[i], expected[i]);
+        ASSERT_EQ(output[i], expected[i]);
     }
 }
