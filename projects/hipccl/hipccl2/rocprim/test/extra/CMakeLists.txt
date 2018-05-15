@@ -39,17 +39,29 @@ include(VerifyCompiler)
 include(DownloadProject)
 if(HIP_PLATFORM STREQUAL "nvcc")
   if(NOT DEFINED CUB_INCLUDE_DIR)
-    download_project(PROJ   cub
-             GIT_REPOSITORY https://github.com/NVlabs/cub.git
-             GIT_TAG        v1.8.0
-             LOG_DOWNLOAD   TRUE
-             LOG_CONFIGURE  TRUE
-             LOG_BUILD      TRUE
-             LOG_INSTALL    TRUE
-             BUILD_PROJECT  FALSE
-             ${UPDATE_DISCONNECTED_IF_AVAILABLE}
+    file(
+      DOWNLOAD https://github.com/NVlabs/cub/archive/1.8.0.zip
+      ${CMAKE_CURRENT_BINARY_DIR}/cub-1.8.0.zip
+      STATUS cub_download_status LOG cub_download_log
     )
-    set(CUB_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/cub-src/ CACHE PATH "")
+    list(GET cub_download_status 0 cub_download_error_code)
+    if(cub_download_error_code)
+      message(FATAL_ERROR "Error: downloading "
+        "https://github.com/NVlabs/cub/archive/1.8.0.zip failed "
+        "error_code: ${cub_download_error_code} "
+        "log: ${cub_download_log} "
+      )
+    endif()
+
+    execute_process(
+      COMMAND ${CMAKE_COMMAND} -E tar xzf ${CMAKE_CURRENT_BINARY_DIR}/cub-1.8.0.zip
+      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+      RESULT_VARIABLE cub_unpack_error_code
+    )
+    if(cub_unpack_error_code)
+      message(FATAL_ERROR "Error: unpacking ${CMAKE_CURRENT_BINARY_DIR}/cub-1.8.0.zip failed")
+    endif()
+    set(CUB_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/cub-1.8.0/ CACHE PATH "")
   endif()
 endif()
 
@@ -89,6 +101,16 @@ function(add_rocprim_test TEST_NAME TEST_SOURCES)
   endforeach()
   add_test(${TEST_NAME} ${TEST_TARGET})
 endfunction()
+
+# Use CUDA_INCLUDE_DIRECTORIES to include required dirs
+# for nvcc if cmake version is less than 3.10
+if((HIP_PLATFORM STREQUAL "nvcc") AND (CMAKE_VERSION VERSION_LESS "3.10"))
+    CUDA_INCLUDE_DIRECTORIES(
+        ${hipcub_INCLUDE_DIR}
+        ${GTEST_INCLUDE_DIRS}
+        ${CUB_INCLUDE_DIR}
+    )
+endif()
 
 function(add_hipcub_test TEST_NAME TEST_SOURCES)
   list(GET TEST_SOURCES 0 TEST_MAIN_SOURCE)
