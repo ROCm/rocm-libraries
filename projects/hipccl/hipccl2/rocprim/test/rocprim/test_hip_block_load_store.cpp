@@ -35,7 +35,7 @@
 #include "test_utils.hpp"
 
 #define HIP_CHECK(error)         \
-    EXPECT_EQ(static_cast<hipError_t>(error),hipSuccess)
+    ASSERT_EQ(static_cast<hipError_t>(error),hipSuccess)
 
 namespace rp = rocprim;
 
@@ -559,7 +559,7 @@ TYPED_TEST(RocprimVectorizationTests, MatchVectorType)
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
     typedef typename rp::detail::match_vector_type<T, items_per_thread>::type Vector;
     bool input = std::is_same<Vector, U>::value;
-    EXPECT_TRUE(input);
+    ASSERT_TRUE(input);
 }
 
 
