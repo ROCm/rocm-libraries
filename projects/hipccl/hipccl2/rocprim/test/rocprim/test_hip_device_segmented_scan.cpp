@@ -204,15 +204,14 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScan)
 
         for(size_t i = 0; i < values_output.size(); i++)
         {
-            SCOPED_TRACE(testing::Message() << "with index = " << i);
             if(std::is_integral<output_type>::value)
             {
-                ASSERT_EQ(values_output[i], values_expected[i]);
+                ASSERT_EQ(values_output[i], values_expected[i]) << "with index: " << i;
             }
             else
             {
                 auto diff = std::max<output_type>(std::abs(0.01 * values_expected[i]), 0.01);
-                ASSERT_NEAR(values_output[i], values_expected[i], diff);
+                ASSERT_NEAR(values_output[i], values_expected[i], diff) << "with index: " << i;
             }
         }
 
@@ -340,15 +339,14 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScan)
 
         for(size_t i = 0; i < values_output.size(); i++)
         {
-            SCOPED_TRACE(testing::Message() << "with index = " << i);
             if(std::is_integral<output_type>::value)
             {
-                ASSERT_EQ(values_output[i], values_expected[i]);
+                ASSERT_EQ(values_output[i], values_expected[i]) << "with index: " << i;
             }
             else
             {
                 auto diff = std::max<output_type>(std::abs(0.01 * values_expected[i]), 0.01);
-                ASSERT_NEAR(values_output[i], values_expected[i], diff);
+                ASSERT_NEAR(values_output[i], values_expected[i], diff) << "with index: " << i;
             }
         }
 
@@ -479,10 +477,9 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScanUsingHeadFlags)
         HIP_CHECK(hipDeviceSynchronize());
         for(size_t i = 0; i < output.size(); i++)
         {
-            SCOPED_TRACE(testing::Message() << "where index = " << i);
             auto diff = std::max<output_type>(std::abs(0.1f * expected[i]), output_type(0.01f));
             if(std::is_integral<output_type>::value) diff = 0;
-            ASSERT_NEAR(output[i], expected[i], diff);
+            ASSERT_NEAR(output[i], expected[i], diff) << "with index: " << i;
         }
     }
 }
@@ -633,10 +630,9 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScanUsingHeadFlags)
         HIP_CHECK(hipDeviceSynchronize());
         for(size_t i = 0; i < output.size(); i++)
         {
-            SCOPED_TRACE(testing::Message() << "where index = " << i);
             auto diff = std::max<output_type>(std::abs(0.1f * expected[i]), output_type(0.01f));
             if(std::is_integral<output_type>::value) diff = 0;
-            ASSERT_NEAR(output[i], expected[i], diff);
+            ASSERT_NEAR(output[i], expected[i], diff) << "with index: " << i;
         }
     }
 }
