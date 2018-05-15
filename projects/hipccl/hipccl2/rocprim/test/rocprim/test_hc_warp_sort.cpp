@@ -104,7 +104,7 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortInt)
     d_output.synchronize();
     for(size_t i = 0; i < output.size(); i++)
     {
-        EXPECT_EQ(output[i], expected[i]);
+        ASSERT_EQ(output[i], expected[i]);
     }
 }
 
@@ -159,7 +159,7 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
     d_output_value.synchronize();
     for(size_t i = 0; i < expected.size(); i++)
     {
-        EXPECT_EQ(d_output_key[i], expected[i].first);
-        EXPECT_EQ(d_output_value[i], expected[i].second);
+        ASSERT_EQ(d_output_key[i], expected[i].first);
+        ASSERT_EQ(d_output_value[i], expected[i].second);
     }
 }

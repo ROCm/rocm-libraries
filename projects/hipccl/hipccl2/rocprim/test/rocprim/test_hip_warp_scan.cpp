@@ -184,7 +184,7 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScan)
     {
         for(size_t i = 0; i < output.size(); i++)
         {
-            EXPECT_EQ(output[i], expected[i]);
+            ASSERT_EQ(output[i], expected[i]);
         }
     }
     else if (std::is_floating_point<T>::value)
@@ -192,7 +192,7 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScan)
         for(size_t i = 0; i < output.size(); i++)
         {
             auto tolerance = std::max<T>(std::abs(0.1f * expected[i]), T(0.01f));
-            EXPECT_NEAR(output[i], expected[i], tolerance);
+            ASSERT_NEAR(output[i], expected[i], tolerance);
         }
     }
 
@@ -318,12 +318,12 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScanReduce)
     {
         for(size_t i = 0; i < output.size(); i++)
         {
-            EXPECT_EQ(output[i], expected[i]);
+            ASSERT_EQ(output[i], expected[i]);
         }
 
         for(size_t i = 0; i < output_reductions.size(); i++)
         {
-            EXPECT_EQ(output_reductions[i], expected_reductions[i]);
+            ASSERT_EQ(output_reductions[i], expected_reductions[i]);
         }
     }
     else if (std::is_floating_point<T>::value)
@@ -331,13 +331,13 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScanReduce)
         for(size_t i = 0; i < output.size(); i++)
         {
             auto tolerance = std::max<T>(std::abs(0.1f * expected[i]), T(0.01f));
-            EXPECT_NEAR(output[i], expected[i], tolerance);
+            ASSERT_NEAR(output[i], expected[i], tolerance);
         }
 
         for(size_t i = 0; i < output_reductions.size(); i++)
         {
             auto tolerance = std::max<T>(std::abs(0.1f * expected_reductions[i]), T(0.01f));
-            EXPECT_NEAR(output_reductions[i], expected_reductions[i], tolerance);
+            ASSERT_NEAR(output_reductions[i], expected_reductions[i], tolerance);
         }
     }
 
@@ -440,7 +440,7 @@ TYPED_TEST(RocprimWarpScanTests, ExclusiveScan)
     {
         for(size_t i = 0; i < output.size(); i++)
         {
-            EXPECT_EQ(output[i], expected[i]);
+            ASSERT_EQ(output[i], expected[i]);
         }
     }
     else if (std::is_floating_point<T>::value)
@@ -448,7 +448,7 @@ TYPED_TEST(RocprimWarpScanTests, ExclusiveScan)
         for(size_t i = 0; i < output.size(); i++)
         {
             auto tolerance = std::max<T>(std::abs(0.1f * expected[i]), T(0.01f));
-            EXPECT_NEAR(output[i], expected[i], tolerance);
+            ASSERT_NEAR(output[i], expected[i], tolerance);
         }
     }
 
@@ -583,12 +583,12 @@ TYPED_TEST(RocprimWarpScanTests, ExclusiveReduceScan)
     {
         for(size_t i = 0; i < output.size(); i++)
         {
-            EXPECT_EQ(output[i], expected[i]);
+            ASSERT_EQ(output[i], expected[i]);
         }
 
         for(size_t i = 0; i < output_reductions.size(); i++)
         {
-            EXPECT_EQ(output_reductions[i], expected_reductions[i]);
+            ASSERT_EQ(output_reductions[i], expected_reductions[i]);
         }
     }
     else if (std::is_floating_point<T>::value)
@@ -596,13 +596,13 @@ TYPED_TEST(RocprimWarpScanTests, ExclusiveReduceScan)
         for(size_t i = 0; i < output.size(); i++)
         {
             auto tolerance = std::max<T>(std::abs(0.1f * expected[i]), T(0.01f));
-            EXPECT_NEAR(output[i], expected[i], tolerance);
+            ASSERT_NEAR(output[i], expected[i], tolerance);
         }
 
         for(size_t i = 0; i < output_reductions.size(); i++)
         {
             auto tolerance = std::max<T>(std::abs(0.1f * expected_reductions[i]), T(0.01f));
-            EXPECT_NEAR(output_reductions[i], expected_reductions[i], tolerance);
+            ASSERT_NEAR(output_reductions[i], expected_reductions[i], tolerance);
         }
     }
 
@@ -737,8 +737,8 @@ TYPED_TEST(RocprimWarpScanTests, Scan)
     {
         for(size_t i = 0; i < output_inclusive.size(); i++)
         {
-            EXPECT_EQ(output_inclusive[i], expected_inclusive[i]);
-            EXPECT_EQ(output_exclusive[i], expected_exclusive[i]);
+            ASSERT_EQ(output_inclusive[i], expected_inclusive[i]);
+            ASSERT_EQ(output_exclusive[i], expected_exclusive[i]);
         }
     }
     else if (std::is_floating_point<T>::value)
@@ -746,10 +746,10 @@ TYPED_TEST(RocprimWarpScanTests, Scan)
         for(size_t i = 0; i < output_inclusive.size(); i++)
         {
             auto tolerance = std::max<T>(std::abs(0.1f * expected_inclusive[i]), T(0.01f));
-            EXPECT_NEAR(output_inclusive[i], expected_inclusive[i], tolerance);
+            ASSERT_NEAR(output_inclusive[i], expected_inclusive[i], tolerance);
 
             tolerance = std::max<T>(std::abs(0.1f * expected_exclusive[i]), T(0.01f));
-            EXPECT_NEAR(output_exclusive[i], expected_exclusive[i], tolerance);
+            ASSERT_NEAR(output_exclusive[i], expected_exclusive[i], tolerance);
         }
     }
 
@@ -908,13 +908,13 @@ TYPED_TEST(RocprimWarpScanTests, ScanReduce)
     {
         for(size_t i = 0; i < output_inclusive.size(); i++)
         {
-            EXPECT_EQ(output_inclusive[i], expected_inclusive[i]);
-            EXPECT_EQ(output_exclusive[i], expected_exclusive[i]);
+            ASSERT_EQ(output_inclusive[i], expected_inclusive[i]);
+            ASSERT_EQ(output_exclusive[i], expected_exclusive[i]);
         }
 
         for(size_t i = 0; i < output_reductions.size(); i++)
         {
-            EXPECT_EQ(output_reductions[i], expected_reductions[i]);
+            ASSERT_EQ(output_reductions[i], expected_reductions[i]);
         }
     }
     else if (std::is_floating_point<T>::value)
@@ -922,16 +922,16 @@ TYPED_TEST(RocprimWarpScanTests, ScanReduce)
         for(size_t i = 0; i < output_inclusive.size(); i++)
         {
             auto tolerance = std::max<T>(std::abs(0.1f * expected_inclusive[i]), T(0.01f));
-            EXPECT_NEAR(output_inclusive[i], expected_inclusive[i], tolerance);
+            ASSERT_NEAR(output_inclusive[i], expected_inclusive[i], tolerance);
 
             tolerance = std::max<T>(std::abs(0.1f * expected_exclusive[i]), T(0.01f));
-            EXPECT_NEAR(output_exclusive[i], expected_exclusive[i], tolerance);
+            ASSERT_NEAR(output_exclusive[i], expected_exclusive[i], tolerance);
         }
 
         for(size_t i = 0; i < output_reductions.size(); i++)
         {
             auto tolerance = std::max<T>(std::abs(0.1f * expected_reductions[i]), T(0.01f));
-            EXPECT_NEAR(output_reductions[i], expected_reductions[i], tolerance);
+            ASSERT_NEAR(output_reductions[i], expected_reductions[i], tolerance);
         }
     }
 
@@ -1023,7 +1023,7 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScanCustomType)
     {
         for(size_t i = 0; i < output.size(); i++)
         {
-            EXPECT_EQ(output[i], expected[i]);
+            ASSERT_EQ(output[i], expected[i]);
         }
     }
     else if (std::is_floating_point<base_type>::value)
@@ -1032,8 +1032,8 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScanCustomType)
         {
             auto tolerance_x = std::max<base_type>(std::abs(0.1f * expected[i].x), base_type(0.01f));
             auto tolerance_y = std::max<base_type>(std::abs(0.1f * expected[i].y), base_type(0.01f));
-            EXPECT_NEAR(output[i].x, expected[i].x, tolerance_x);
-            EXPECT_NEAR(output[i].y, expected[i].y, tolerance_y);
+            ASSERT_NEAR(output[i].x, expected[i].x, tolerance_x);
+            ASSERT_NEAR(output[i].y, expected[i].y, tolerance_y);
         }
     }
 
