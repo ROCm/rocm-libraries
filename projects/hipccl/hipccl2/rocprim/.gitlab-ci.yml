@@ -25,7 +25,7 @@ image: rocm/rocm-terminal:1.7.1
 variables:
   SUDO_CMD: "" # Must be "sudo" on images which don't use root user
   DEPS_DIR: "$CI_PROJECT_DIR/__dependencies"
-  CMAKE_URL: "https://cmake.org/files/v3.10/cmake-3.10.0-Linux-x86_64.tar.gz"
+  CMAKE_URL: "https://cmake.org/files/v3.5/cmake-3.5.1-Linux-x86_64.tar.gz"
   # General build flags
   CXXFLAGS: ""
   CMAKE_OPTIONS: ""
