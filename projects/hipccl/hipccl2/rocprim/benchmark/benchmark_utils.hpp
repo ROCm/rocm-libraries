@@ -29,11 +29,9 @@
 #include <rocprim/rocprim.hpp>
 
 // get_random_data() generates only part of sequence and replicates it,
-// because benchmarks do not need "true" random sequence.
-const size_t max_random_size = 1024 * 1024;
-
+// because benchmarks usually do not need "true" random sequence.
 template<class T>
-inline auto get_random_data(size_t size, T min, T max)
+inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 1024 * 1024)
     -> typename std::enable_if<std::is_integral<T>::value, std::vector<T>>::type
 {
     std::random_device rd;
@@ -52,7 +50,7 @@ inline auto get_random_data(size_t size, T min, T max)
 }
 
 template<class T>
-inline auto get_random_data(size_t size, T min, T max)
+inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 1024 * 1024)
     -> typename std::enable_if<std::is_floating_point<T>::value, std::vector<T>>::type
 {
     std::random_device rd;
@@ -71,7 +69,7 @@ inline auto get_random_data(size_t size, T min, T max)
 }
 
 template<class T>
-inline std::vector<T> get_random_data01(size_t size, float p)
+inline std::vector<T> get_random_data01(size_t size, float p, size_t max_random_size = 1024 * 1024)
 {
     std::random_device rd;
     std::default_random_engine gen(rd());
@@ -137,14 +135,14 @@ template<class T, class U>
 struct is_custom_type<custom_type<T,U>> : std::true_type {};
 
 template<class T>
-inline auto get_random_data(size_t size, T min, T max)
+inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 1024 * 1024)
     -> typename std::enable_if<is_custom_type<T>::value, std::vector<T>>::type
 {
     using first_type = typename T::first_type;
     using second_type = typename T::second_type;
     std::vector<T> data(size);
-    auto fdata = get_random_data<first_type>(size, min.x, max.x);
-    auto sdata = get_random_data<second_type>(size, min.y, max.y);
+    auto fdata = get_random_data<first_type>(size, min.x, max.x, max_random_size);
+    auto sdata = get_random_data<second_type>(size, min.y, max.y, max_random_size);
     for(size_t i = 0; i < size; i++)
     {
         data[i] = T(fdata[i], sdata[i]);
