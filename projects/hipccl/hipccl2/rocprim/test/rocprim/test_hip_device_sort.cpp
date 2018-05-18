@@ -47,8 +47,8 @@ template<
 >
 struct DeviceSortParams
 {
-    using input_type = InputType;
-    using output_type = OutputType;
+    using key_type = InputType;
+    using value_type = OutputType;
 };
 
 // ---------------------------------------------------------
@@ -59,8 +59,8 @@ template<class Params>
 class RocprimDeviceSortTests : public ::testing::Test
 {
 public:
-    using input_type = typename Params::input_type;
-    using output_type = typename Params::output_type;
+    using key_type = typename Params::key_type;
+    using value_type = typename Params::value_type;
     const bool debug_synchronous = false;
 };
 
@@ -70,7 +70,7 @@ typedef ::testing::Types<
     // -----------------------------------------------------------------------
     DeviceSortParams<int>,
     DeviceSortParams<unsigned long>,
-    DeviceSortParams<short, int>,
+    DeviceSortParams<float, int>,
     DeviceSortParams<int, float>
 > RocprimDeviceSortTestsParams;
 
@@ -91,8 +91,7 @@ TYPED_TEST_CASE(RocprimDeviceSortTests, RocprimDeviceSortTestsParams);
 
 TYPED_TEST(RocprimDeviceSortTests, SortKey)
 {
-    using T = typename TestFixture::input_type;
-    using U = typename TestFixture::output_type;
+    using key_type = typename TestFixture::key_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
     const std::vector<size_t> sizes = get_sizes();
@@ -103,31 +102,31 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, 0, size);
-        std::vector<U> output(size, 0);
+        std::vector<key_type> input = test_utils::get_random_data<key_type>(size, 0, size);
+        std::vector<key_type> output(size, 0);
 
-        T * d_input;
-        U * d_output;
-        HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
-        HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(U)));
+        key_type * d_input;
+        key_type * d_output;
+        HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(key_type)));
+        HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(key_type)));
         HIP_CHECK(
             hipMemcpy(
                 d_input, input.data(),
-                input.size() * sizeof(T),
+                input.size() * sizeof(key_type),
                 hipMemcpyHostToDevice
             )
         );
         HIP_CHECK(hipDeviceSynchronize());
 
         // Calculate expected results on host
-        std::vector<T> expected(input);
+        std::vector<key_type> expected(input);
         std::sort(
             expected.begin(),
             expected.end()
         );
 
         // compare function
-        ::rocprim::less<U> lesser_op;
+        ::rocprim::less<key_type> lesser_op;
         // temp storage
         size_t temp_storage_size_bytes;
         void * d_temp_storage = nullptr;
@@ -162,7 +161,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
         HIP_CHECK(
             hipMemcpy(
                 output.data(), d_output,
-                output.size() * sizeof(U),
+                output.size() * sizeof(key_type),
                 hipMemcpyDeviceToHost
             )
         );
@@ -171,13 +170,142 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
         // Check if output values are as expected
         for(size_t i = 0; i < output.size(); i++)
         {
-            auto diff = std::max<U>(std::abs(0.01f * expected[i]), U(0.01f));
-            if(std::is_integral<U>::value) diff = 0;
+            auto diff = std::max<key_type>(std::abs(0.01f * expected[i]), key_type(0.01f));
+            if(std::is_integral<key_type>::value) diff = 0;
             ASSERT_NEAR(output[i], expected[i], diff);
         }
 
         hipFree(d_input);
         hipFree(d_output);
+        hipFree(d_temp_storage);
+    }
+}
+
+TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
+{
+    using key_type = typename TestFixture::key_type;
+    using value_type = typename TestFixture::value_type;
+    const bool debug_synchronous = TestFixture::debug_synchronous;
+
+    const std::vector<size_t> sizes = get_sizes();
+    for(auto size : sizes)
+    {
+        hipStream_t stream = 0; // default
+
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+        // Generate data
+        std::vector<key_type> keys_input(size);
+        std::iota(keys_input.begin(), keys_input.end(), 0);
+        std::shuffle(
+            keys_input.begin(),
+            keys_input.end(),
+            std::mt19937{std::random_device{}()}
+        );
+        std::vector<value_type> values_input = test_utils::get_random_data<value_type>(size, -1000, 1000);
+        std::vector<key_type> keys_output(size, 0);
+        std::vector<value_type> values_output(size, 0);
+
+        key_type * d_keys_input;
+        key_type * d_keys_output;
+        HIP_CHECK(hipMalloc(&d_keys_input, keys_input.size() * sizeof(key_type)));
+        HIP_CHECK(hipMalloc(&d_keys_output, keys_output.size() * sizeof(key_type)));
+        HIP_CHECK(
+            hipMemcpy(
+                d_keys_input, keys_input.data(),
+                keys_input.size() * sizeof(key_type),
+                hipMemcpyHostToDevice
+            )
+        );
+        HIP_CHECK(hipDeviceSynchronize());
+
+        value_type * d_values_input;
+        value_type * d_values_output;
+        HIP_CHECK(hipMalloc(&d_values_input, values_input.size() * sizeof(value_type)));
+        HIP_CHECK(hipMalloc(&d_values_output, values_output.size() * sizeof(value_type)));
+        HIP_CHECK(
+            hipMemcpy(
+                d_values_input, values_input.data(),
+                values_input.size() * sizeof(value_type),
+                hipMemcpyHostToDevice
+            )
+        );
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Calculate expected results on host
+        using key_value = std::pair<key_type, value_type>;
+        std::vector<key_value> expected(size);
+        for(size_t i = 0; i < size; i++)
+        {
+            expected[i] = key_value(keys_input[i], values_input[i]);
+        }
+        std::sort(
+            expected.begin(),
+            expected.end()
+        );
+
+        // compare function
+        ::rocprim::less<key_type> lesser_op;
+        // temp storage
+        size_t temp_storage_size_bytes;
+        void * d_temp_storage = nullptr;
+        // Get size of d_temp_storage
+        HIP_CHECK(
+            rocprim::sort(
+                d_temp_storage, temp_storage_size_bytes,
+                d_keys_input, d_keys_output,
+                d_values_input, d_values_output, keys_input.size(),
+                lesser_op, stream, debug_synchronous
+            )
+        );
+
+        // temp_storage_size_bytes must be >0
+        ASSERT_GT(temp_storage_size_bytes, 0);
+
+        // allocate temporary storage
+        HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Run
+        HIP_CHECK(
+            rocprim::sort(
+                d_temp_storage, temp_storage_size_bytes,
+                d_keys_input, d_keys_output,
+                d_values_input, d_values_output, keys_input.size(),
+                lesser_op, stream, debug_synchronous
+            )
+        );
+        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Copy output to host
+        HIP_CHECK(
+            hipMemcpy(
+                keys_output.data(), d_keys_output,
+                keys_output.size() * sizeof(key_type),
+                hipMemcpyDeviceToHost
+            )
+        );
+        HIP_CHECK(
+            hipMemcpy(
+                values_output.data(), d_values_output,
+                values_output.size() * sizeof(value_type),
+                hipMemcpyDeviceToHost
+            )
+        );
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Check if output values are as expected
+        for(size_t i = 0; i < keys_output.size(); i++)
+        {
+            ASSERT_EQ(keys_output[i], expected[i].first);
+            ASSERT_EQ(values_output[i], expected[i].second);
+        }
+
+        hipFree(d_keys_input);
+        hipFree(d_keys_output);
+        hipFree(d_values_input);
+        hipFree(d_values_output);
         hipFree(d_temp_storage);
     }
 }
