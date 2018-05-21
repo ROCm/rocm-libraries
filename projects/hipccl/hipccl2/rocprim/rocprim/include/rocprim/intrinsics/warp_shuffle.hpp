@@ -52,7 +52,6 @@ T warp_shuffle_op(T input, ShuffleOp&& op)
     return *shfl_output;
 }
 
-extern "C"
 ROCPRIM_DEVICE
 int __amdgcn_update_dpp(int old, int src, int dpp_ctrl, int row_mask, int bank_mask, bool bound_ctrl)
     __asm("llvm.amdgcn.update.dpp.i32");

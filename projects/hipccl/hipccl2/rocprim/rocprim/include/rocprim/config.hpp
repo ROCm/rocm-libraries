@@ -64,6 +64,11 @@
     #error "HIP and HC APIs are not available"
 #endif
 
+// TODO remove when the issue https://github.com/RadeonOpenCompute/hcc/issues/715 is fixed
+#ifndef ROCPRIM_DISABLE_DPP
+    #define ROCPRIM_DISABLE_DPP
+#endif
+
 #ifdef ROCPRIM_DISABLE_DPP
     #define ROCPRIM_DETAIL_USE_DPP false
 #else
