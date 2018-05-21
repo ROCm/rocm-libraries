@@ -170,7 +170,7 @@ hipError_t sort_impl(void * temporary_storage,
     // Start point for time measurements
     std::chrono::high_resolution_clock::time_point start;
 
-    auto number_of_blocks = (size + BlockSize - 1)/BlockSize;
+    auto number_of_blocks = (size + block_size - 1)/block_size;
     if(debug_synchronous)
     {
         std::cout << "block_size " << block_size << '\n';
