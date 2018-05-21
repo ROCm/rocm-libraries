@@ -322,57 +322,6 @@ template<
     class KeysInputIterator,
     class KeysOutputIterator,
     class ValuesInputIterator,
-    class ValuesOutputIterator
->
-ROCPRIM_DEVICE inline
-void block_copy_kernel_impl(KeysInputIterator keys_input,
-                            KeysOutputIterator keys_output,
-                            ValuesInputIterator values_input,
-                            ValuesOutputIterator values_output,
-                            const size_t input_size)
-{
-    using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
-    using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
-    constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
-
-    const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
-    const unsigned int flat_block_id = ::rocprim::detail::block_id<0>();
-    const unsigned int block_offset = flat_block_id * BlockSize;
-    const unsigned int number_of_blocks = (input_size + BlockSize - 1)/BlockSize;
-    auto valid_in_last_block = input_size - BlockSize * (number_of_blocks - 1);
-    const bool last_block = flat_block_id == (number_of_blocks - 1);
-
-    key_type key[1];
-    value_type value[1];
-
-    block_load_impl<with_values, BlockSize>(
-        flat_id,
-        block_offset,
-        valid_in_last_block,
-        last_block,
-        keys_input,
-        values_input,
-        key,
-        value
-    );
-
-    block_store_impl<with_values, BlockSize>(
-        flat_id,
-        block_offset,
-        valid_in_last_block,
-        last_block,
-        keys_output,
-        values_output,
-        key,
-        value
-    );
-}
-
-template<
-    unsigned int BlockSize,
-    class KeysInputIterator,
-    class KeysOutputIterator,
-    class ValuesInputIterator,
     class ValuesOutputIterator,
     class BinaryFunction
 >
@@ -473,7 +422,6 @@ void block_merge_kernel_impl(KeysInputIterator keys_input,
     const unsigned int next_block_id = block_id_is_odd ? block_id - 1 :
                                                          block_id + 1;
     const unsigned int block_start = min(block_id * block_size, (unsigned int) input_size);
-    //const unsigned int block_end = min((flat_block_id + 1) * BlockSize, (unsigned int) input_size);
     const unsigned int next_block_start = min(next_block_id * block_size, (unsigned int) input_size);
     const unsigned int next_block_end = min((next_block_id + 1) * block_size, (unsigned int) input_size);
 
