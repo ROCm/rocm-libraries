@@ -30,7 +30,7 @@
 #include "../functional.hpp"
 #include "../types.hpp"
 
-#include "detail/warp_scan_shuffle.hpp"
+#include "detail/warp_scan_crosslane.hpp"
 #include "detail/warp_scan_shared_mem.hpp"
 
 /// \addtogroup warpmodule
@@ -46,9 +46,9 @@ template<class T, unsigned int WarpSize>
 struct select_warp_scan_impl
 {
     typedef typename std::conditional<
-        // can we use shuffle-based implementation?
+        // can we use crosslane (DPP or shuffle-based) implementation?
         detail::is_warpsize_shuffleable<WarpSize>::value,
-        detail::warp_scan_shuffle<T, WarpSize>, // yes
+        detail::warp_scan_crosslane<T, WarpSize>, // yes
         detail::warp_scan_shared_mem<T, WarpSize> // no
     >::type type;
 };

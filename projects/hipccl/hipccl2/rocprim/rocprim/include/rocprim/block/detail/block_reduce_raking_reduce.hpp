@@ -46,13 +46,13 @@ class block_reduce_raking_reduce
     static constexpr unsigned int thread_reduction_size_ =
         (BlockSize + ::rocprim::warp_size() - 1)/ ::rocprim::warp_size();
 
-    // Warp reduce, warp_reduce_shuffle does not require shared memory (storage), but
+    // Warp reduce, warp_reduce_crosslane does not require shared memory (storage), but
     // logical warp size must be a power of two.
     static constexpr unsigned int warp_size_ =
         detail::get_min_warp_size(BlockSize, ::rocprim::warp_size());
     // BlockSize is multiple of hardware warp
     static constexpr bool block_size_smaller_than_warp_size_ = (BlockSize < warp_size_);
-    using warp_reduce_prefix_type = ::rocprim::detail::warp_reduce_shuffle<T, warp_size_, false>;
+    using warp_reduce_prefix_type = ::rocprim::detail::warp_reduce_crosslane<T, warp_size_, false>;
 
 public:
 
