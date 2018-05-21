@@ -28,6 +28,7 @@
 #include "../detail/various.hpp"
 
 #include "detail/device_merge_sort.hpp"
+#include "device_transform_hip.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -36,25 +37,6 @@ BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
 {
-
-template<
-    unsigned int BlockSize,
-    class KeysInputIterator,
-    class KeysOutputIterator,
-    class ValuesInputIterator,
-    class ValuesOutputIterator
->
-__global__
-void block_copy_kernel(KeysInputIterator keys_input,
-                       KeysOutputIterator keys_output,
-                       ValuesInputIterator values_input,
-                       ValuesOutputIterator values_output,
-                       const size_t size)
-{
-    block_copy_kernel_impl<BlockSize>(
-        keys_input, keys_output, values_input, values_output, size
-    );
-}
 
 template<
     unsigned int BlockSize,
@@ -128,6 +110,7 @@ void block_merge_kernel(KeysInputIterator keys_input,
 
 template<
     unsigned int BlockSize,
+    unsigned int ItemsPerThread,
     class KeysInputIterator,
     class KeysOutputIterator,
     class ValuesInputIterator,
@@ -226,13 +209,19 @@ hipError_t merge_sort_impl(void * temporary_storage,
     if(temporary_store)
     {
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(detail::block_copy_kernel<block_size>),
-            dim3(grid_size), dim3(block_size), 0, stream,
-            keys_buffer, keys_output, values_buffer, values_output,
-            size
+        ::rocprim::transform(
+            keys_buffer, keys_output, size,
+            ::rocprim::identity<key_type>(), stream, debug_synchronous
         );
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("block_copy_kernel", size, start);
+
+        if(with_values)
+        {
+            ::rocprim::transform(
+                values_buffer, values_output, size,
+                ::rocprim::identity<value_type>(), stream, debug_synchronous
+            );
+        }
+        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("transform", size, start);
     }
 
     return hipSuccess;
@@ -321,8 +310,9 @@ hipError_t merge_sort(void * temporary_storage,
                       bool debug_synchronous = false)
 {
     constexpr unsigned int block_size = 256;
+    constexpr unsigned int items_per_thread = 8;
     empty_type * values = nullptr;
-    return detail::merge_sort_impl<block_size>(
+    return detail::merge_sort_impl<block_size, items_per_thread>(
         temporary_storage, storage_size,
         keys_input, keys_output, values, values, size,
         compare_function, stream, debug_synchronous
@@ -422,7 +412,8 @@ hipError_t merge_sort(void * temporary_storage,
                       bool debug_synchronous = false)
 {
     constexpr unsigned int block_size = 256;
-    return detail::merge_sort_impl<block_size>(
+    constexpr unsigned int items_per_thread = 8;
+    return detail::merge_sort_impl<block_size, items_per_thread>(
         temporary_storage, storage_size,
         keys_input, keys_output, values_input, values_output, size,
         compare_function, stream, debug_synchronous
