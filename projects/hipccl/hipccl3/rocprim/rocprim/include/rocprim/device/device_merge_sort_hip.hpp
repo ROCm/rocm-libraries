@@ -243,6 +243,68 @@ hipError_t merge_sort_impl(void * temporary_storage,
 
 } // end of detail namespace
 
+/// \brief HIP parallel merge sort primitive for device level.
+///
+/// \p merge_sort function performs a device-wide merge sort
+/// of keys. Function sorts input keys based on comparison function.
+///
+/// \par Overview
+/// * The contents of the inputs are not altered by the sorting function.
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage in a null pointer.
+/// * Accepts custom compare_functions for sorting across the device.
+///
+/// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+///
+/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] keys_input - pointer to the first element in the range to sort.
+/// \param [out] keys_output - pointer to the first element in the output range.
+/// \param [in] size - number of element in the input range.
+/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
+/// type \p hipError_t.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level ascending merge sort is performed on an array of
+/// \p float values.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t input_size;      // e.g., 8
+/// float * input;          // e.g., [0.6, 0.3, 0.65, 0.4, 0.2, 0.08, 1, 0.7]
+/// float * output;         // empty array of 8 elements
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::merge_sort(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, output, input_size
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform sort
+/// rocprim::merge_sort(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, output, input_size
+/// );
+/// // keys_output: [0.08, 0.2, 0.3, 0.4, 0.6, 0.65, 0.7, 1]
+/// \endcode
+/// \endparblock
 template<
     class KeysInputIterator,
     class KeysOutputIterator,
@@ -267,6 +329,79 @@ hipError_t merge_sort(void * temporary_storage,
     );
 }
 
+/// \brief HIP parallel ascending merge sort-by-key primitive for device level.
+///
+/// \p merge_sort function performs a device-wide merge sort
+/// of (key, value) pairs. Function sorts input pairs based on comparison function.
+///
+/// \par Overview
+/// * The contents of the inputs are not altered by the sorting function.
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage in a null pointer.
+/// * Accepts custom compare_functions for sorting across the device.
+///
+/// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam ValuesInputIterator - random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam ValuesOutputIterator - random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+///
+/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] keys_input - pointer to the first element in the range to sort.
+/// \param [out] keys_output - pointer to the first element in the output range.
+/// \param [in] values_input - pointer to the first element in the range to sort.
+/// \param [out] values_output - pointer to the first element in the output range.
+/// \param [in] size - number of element in the input range.
+/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
+/// type \p hipError_t.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level ascending merge sort is performed where input keys are
+/// represented by an array of unsigned integers and input values by an array of <tt>double</tt>s.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t input_size;          // e.g., 8
+/// unsigned int * keys_input;  // e.g., [ 6, 3,  5, 4,  1,  8,  2, 7]
+/// double * values_input;      // e.g., [-5, 2, -4, 3, -1, -8, -2, 7]
+/// unsigned int * keys_output; // empty array of 8 elements
+/// double * values_output;     // empty array of 8 elements
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::merge_sort(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     keys_input, keys_output, values_input, values_output,
+///     input_size
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform sort
+/// rocprim::merge_sort(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     keys_input, keys_output, values_input, values_output,
+///     input_size
+/// );
+/// // keys_output:   [ 1,  2, 3, 4,  5,  6, 7,  8]
+/// // values_output: [-1, -2, 2, 3, -4, -5, 7, -8]
+/// \endcode
+/// \endparblock
 template<
     class KeysInputIterator,
     class KeysOutputIterator,
