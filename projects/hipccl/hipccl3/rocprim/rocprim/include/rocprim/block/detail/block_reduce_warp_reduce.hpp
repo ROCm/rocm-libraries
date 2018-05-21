@@ -54,12 +54,12 @@ class block_reduce_warp_reduce
 
     // typedef of warp_reduce primitive that will be used to perform warp-level
     // reduce operation on input values.
-    // warp_reduce_shuffle is an implementation of warp_reduce that does not need storage,
+    // warp_reduce_crosslane is an implementation of warp_reduce that does not need storage,
     // but requires logical warp size to be a power of two.
-    using warp_reduce_input_type = ::rocprim::detail::warp_reduce_shuffle<T, warp_size_, false>;
+    using warp_reduce_input_type = ::rocprim::detail::warp_reduce_crosslane<T, warp_size_, false>;
     // typedef of warp_reduce primitive that will be used to perform reduction
     // of results of warp-level reduction.
-    using warp_reduce_output_type = ::rocprim::detail::warp_reduce_shuffle<
+    using warp_reduce_output_type = ::rocprim::detail::warp_reduce_crosslane<
         T, detail::next_power_of_two(warps_no_), false
     >;
 

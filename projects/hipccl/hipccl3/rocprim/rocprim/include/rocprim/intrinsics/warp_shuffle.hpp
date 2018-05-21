@@ -42,14 +42,40 @@ T warp_shuffle_op(T input, ShuffleOp&& op)
 
     int * shfl_input = reinterpret_cast<int *>(&input);
     int shfl_output_words[words_no];
-    T * shlf_output = reinterpret_cast<T*>(shfl_output_words);
+    T * shfl_output = reinterpret_cast<T*>(shfl_output_words);
 
     #pragma unroll
     for(int i = 0; i < words_no; i++)
     {
         shfl_output_words[i] = op(shfl_input[i]);
     }
-    return *shlf_output;
+    return *shfl_output;
+}
+
+ROCPRIM_DEVICE
+int __amdgcn_update_dpp(int old, int src, int dpp_ctrl, int row_mask, int bank_mask, bool bound_ctrl)
+    __asm("llvm.amdgcn.update.dpp.i32");
+
+template<class T>
+ROCPRIM_DEVICE inline
+T warp_move_dpp(T input, int dpp_ctrl,
+                int row_mask = 0xf, int bank_mask = 0xf, bool bound_ctrl = false)
+{
+    constexpr int words_no = (sizeof(T) + sizeof(int) - 1) / sizeof(int);
+
+    int * int_input = reinterpret_cast<int *>(&input);
+    int int_output_words[words_no];
+    T * int_output = reinterpret_cast<T*>(int_output_words);
+
+    #pragma unroll
+    for(int i = 0; i < words_no; i++)
+    {
+        int_output_words[i] = __amdgcn_update_dpp(
+            0, int_input[i],
+            dpp_ctrl, row_mask, bank_mask, bound_ctrl
+        );
+    }
+    return *int_output;
 }
 
 } // end namespace detail
