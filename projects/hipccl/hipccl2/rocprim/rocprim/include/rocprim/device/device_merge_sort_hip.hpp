@@ -27,7 +27,7 @@
 #include "../config.hpp"
 #include "../detail/various.hpp"
 
-#include "detail/device_sort.hpp"
+#include "detail/device_merge_sort.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -135,16 +135,16 @@ template<
     class BinaryFunction
 >
 inline
-hipError_t sort_impl(void * temporary_storage,
-                     size_t& storage_size,
-                     KeysInputIterator keys_input,
-                     KeysOutputIterator keys_output,
-                     ValuesInputIterator values_input,
-                     ValuesOutputIterator values_output,
-                     const size_t size,
-                     BinaryFunction compare_function,
-                     const hipStream_t stream,
-                     bool debug_synchronous)
+hipError_t merge_sort_impl(void * temporary_storage,
+                           size_t& storage_size,
+                           KeysInputIterator keys_input,
+                           KeysOutputIterator keys_output,
+                           ValuesInputIterator values_input,
+                           ValuesOutputIterator values_output,
+                           const size_t size,
+                           BinaryFunction compare_function,
+                           const hipStream_t stream,
+                           bool debug_synchronous)
 
 {
     using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
@@ -249,18 +249,18 @@ template<
     class BinaryFunction = ::rocprim::less<typename std::iterator_traits<KeysInputIterator>::value_type>
 >
 inline
-hipError_t sort(void * temporary_storage,
-                size_t& storage_size,
-                KeysInputIterator keys_input,
-                KeysOutputIterator keys_output,
-                const size_t size,
-                BinaryFunction compare_function = BinaryFunction(),
-                const hipStream_t stream = 0,
-                bool debug_synchronous = false)
+hipError_t merge_sort(void * temporary_storage,
+                      size_t& storage_size,
+                      KeysInputIterator keys_input,
+                      KeysOutputIterator keys_output,
+                      const size_t size,
+                      BinaryFunction compare_function = BinaryFunction(),
+                      const hipStream_t stream = 0,
+                      bool debug_synchronous = false)
 {
     constexpr unsigned int block_size = 256;
     empty_type * values = nullptr;
-    return detail::sort_impl<block_size>(
+    return detail::merge_sort_impl<block_size>(
         temporary_storage, storage_size,
         keys_input, keys_output, values, values, size,
         compare_function, stream, debug_synchronous
@@ -275,19 +275,19 @@ template<
     class BinaryFunction = ::rocprim::less<typename std::iterator_traits<KeysInputIterator>::value_type>
 >
 inline
-hipError_t sort(void * temporary_storage,
-                size_t& storage_size,
-                KeysInputIterator keys_input,
-                KeysOutputIterator keys_output,
-                ValuesInputIterator values_input,
-                ValuesOutputIterator values_output,
-                const size_t size,
-                BinaryFunction compare_function = BinaryFunction(),
-                const hipStream_t stream = 0,
-                bool debug_synchronous = false)
+hipError_t merge_sort(void * temporary_storage,
+                      size_t& storage_size,
+                      KeysInputIterator keys_input,
+                      KeysOutputIterator keys_output,
+                      ValuesInputIterator values_input,
+                      ValuesOutputIterator values_output,
+                      const size_t size,
+                      BinaryFunction compare_function = BinaryFunction(),
+                      const hipStream_t stream = 0,
+                      bool debug_synchronous = false)
 {
     constexpr unsigned int block_size = 256;
-    return detail::sort_impl<block_size>(
+    return detail::merge_sort_impl<block_size>(
         temporary_storage, storage_size,
         keys_input, keys_output, values_input, values_output, size,
         compare_function, stream, debug_synchronous

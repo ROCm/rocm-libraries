@@ -31,7 +31,7 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_hcc.h>
 // rocPRIM API
-#include <rocprim/device/device_sort_hip.hpp>
+#include <rocprim/rocprim.hpp>
 
 #include "test_utils.hpp"
 
@@ -132,7 +132,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
         void * d_temp_storage = nullptr;
         // Get size of d_temp_storage
         HIP_CHECK(
-            rocprim::sort(
+            rocprim::merge_sort(
                 d_temp_storage, temp_storage_size_bytes,
                 d_input, d_output, input.size(),
                 lesser_op, stream, debug_synchronous
@@ -148,7 +148,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
 
         // Run
         HIP_CHECK(
-            rocprim::sort(
+            rocprim::merge_sort(
                 d_temp_storage, temp_storage_size_bytes,
                 d_input, d_output, input.size(),
                 lesser_op, stream, debug_synchronous
@@ -251,7 +251,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
         void * d_temp_storage = nullptr;
         // Get size of d_temp_storage
         HIP_CHECK(
-            rocprim::sort(
+            rocprim::merge_sort(
                 d_temp_storage, temp_storage_size_bytes,
                 d_keys_input, d_keys_output,
                 d_values_input, d_values_output, keys_input.size(),
@@ -268,7 +268,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
 
         // Run
         HIP_CHECK(
-            rocprim::sort(
+            rocprim::merge_sort(
                 d_temp_storage, temp_storage_size_bytes,
                 d_keys_input, d_keys_output,
                 d_values_input, d_values_output, keys_input.size(),

@@ -30,7 +30,7 @@
 // HC API
 #include <hcc/hc.hpp>
 // rocPRIM API
-#include <rocprim/device/device_sort_hc.hpp>
+#include <rocprim/rocprim.hpp>
 
 #include "test_utils.hpp"
 
@@ -117,7 +117,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
         size_t temp_storage_size_bytes;
 
         // Get size of d_temp_storage
-        rocprim::sort(
+        rocprim::merge_sort(
             nullptr, temp_storage_size_bytes,
             d_input.accelerator_pointer(), d_output.accelerator_pointer(), input.size(),
             lesser_op, acc_view, debug_synchronous
@@ -130,7 +130,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
         hc::array<char> d_temp_storage(temp_storage_size_bytes, acc_view);
 
         // Run
-        rocprim::sort(
+        rocprim::merge_sort(
             d_temp_storage.accelerator_pointer(), temp_storage_size_bytes,
             d_input.accelerator_pointer(), d_output.accelerator_pointer(), input.size(),
             lesser_op, acc_view, debug_synchronous
@@ -196,7 +196,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
         size_t temp_storage_size_bytes;
 
         // Get size of d_temp_storage
-        rocprim::sort(
+        rocprim::merge_sort(
             nullptr, temp_storage_size_bytes,
             d_keys_input.accelerator_pointer(), d_keys_output.accelerator_pointer(),
             d_values_input.accelerator_pointer(), d_values_output.accelerator_pointer(), keys_input.size(),
@@ -210,7 +210,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
         hc::array<char> d_temp_storage(temp_storage_size_bytes, acc_view);
 
         // Run
-        rocprim::sort(
+        rocprim::merge_sort(
             d_temp_storage.accelerator_pointer(), temp_storage_size_bytes,
             d_keys_input.accelerator_pointer(), d_keys_output.accelerator_pointer(),
             d_values_input.accelerator_pointer(), d_values_output.accelerator_pointer(), keys_input.size(),
