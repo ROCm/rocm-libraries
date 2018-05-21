@@ -331,8 +331,8 @@ void block_copy_kernel_impl(KeysInputIterator keys_input,
                             ValuesOutputIterator values_output,
                             const size_t input_size)
 {
-    using key_type = typename std::iterator_traits<KeysOutputIterator>::value_type;
-    using value_type = typename std::iterator_traits<ValuesOutputIterator>::value_type;
+    using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
+    using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
     constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
 
     const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
@@ -384,8 +384,8 @@ void block_sort_kernel_impl(KeysInputIterator keys_input,
                             const size_t input_size,
                             BinaryFunction compare_function)
 {
-    using key_type = typename std::iterator_traits<KeysOutputIterator>::value_type;
-    using value_type = typename std::iterator_traits<ValuesOutputIterator>::value_type;
+    using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
+    using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
     constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
 
     const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
@@ -445,8 +445,8 @@ void block_merge_kernel_impl(KeysInputIterator keys_input,
                              const unsigned int block_size,
                              BinaryFunction compare_function)
 {
-    using key_type = typename std::iterator_traits<KeysOutputIterator>::value_type;
-    using value_type = typename std::iterator_traits<ValuesOutputIterator>::value_type;
+    using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
+    using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
     constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
 
     const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();

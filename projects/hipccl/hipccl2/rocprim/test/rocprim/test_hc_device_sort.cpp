@@ -27,16 +27,12 @@
 // Google Test
 #include <gtest/gtest.h>
 
-// HIP API
-#include <hip/hip_runtime.h>
-#include <hip/hip_hcc.h>
+// HC API
+#include <hcc/hc.hpp>
 // rocPRIM API
-#include <rocprim/device/device_sort_hip.hpp>
+#include <rocprim/device/device_sort_hc.hpp>
 
 #include "test_utils.hpp"
-
-#define HIP_CHECK(error)         \
-    ASSERT_EQ(static_cast<hipError_t>(error),hipSuccess)
 
 namespace rp = rocprim;
 
@@ -94,29 +90,19 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
     using key_type = typename TestFixture::key_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
+    hc::accelerator acc;
+    hc::accelerator_view acc_view = acc.create_view();
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        hipStream_t stream = 0; // default
-
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
         // Generate data
         std::vector<key_type> input = test_utils::get_random_data<key_type>(size, 0, size);
-        std::vector<key_type> output(size, 0);
 
-        key_type * d_input;
-        key_type * d_output;
-        HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(key_type)));
-        HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(key_type)));
-        HIP_CHECK(
-            hipMemcpy(
-                d_input, input.data(),
-                input.size() * sizeof(key_type),
-                hipMemcpyHostToDevice
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
+        hc::array<key_type> d_input(hc::extent<1>(size), input.begin(), acc_view);
+        hc::array<key_type> d_output(size, acc_view);
 
         // Calculate expected results on host
         std::vector<key_type> expected(input);
@@ -129,55 +115,36 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
         ::rocprim::less<key_type> lesser_op;
         // temp storage
         size_t temp_storage_size_bytes;
-        void * d_temp_storage = nullptr;
+
         // Get size of d_temp_storage
-        HIP_CHECK(
-            rocprim::sort(
-                d_temp_storage, temp_storage_size_bytes,
-                d_input, d_output, input.size(),
-                lesser_op, stream, debug_synchronous
-            )
+        rocprim::sort(
+            nullptr, temp_storage_size_bytes,
+            d_input.accelerator_pointer(), d_output.accelerator_pointer(), input.size(),
+            lesser_op, acc_view, debug_synchronous
         );
 
         // temp_storage_size_bytes must be >0
         ASSERT_GT(temp_storage_size_bytes, 0);
 
         // allocate temporary storage
-        HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
-        HIP_CHECK(hipDeviceSynchronize());
+        hc::array<char> d_temp_storage(temp_storage_size_bytes, acc_view);
 
         // Run
-        HIP_CHECK(
-            rocprim::sort(
-                d_temp_storage, temp_storage_size_bytes,
-                d_input, d_output, input.size(),
-                lesser_op, stream, debug_synchronous
-            )
+        rocprim::sort(
+            d_temp_storage.accelerator_pointer(), temp_storage_size_bytes,
+            d_input.accelerator_pointer(), d_output.accelerator_pointer(), input.size(),
+            lesser_op, acc_view, debug_synchronous
         );
-        HIP_CHECK(hipPeekAtLastError());
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // Copy output to host
-        HIP_CHECK(
-            hipMemcpy(
-                output.data(), d_output,
-                output.size() * sizeof(key_type),
-                hipMemcpyDeviceToHost
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
+        acc_view.wait();
 
         // Check if output values are as expected
+        std::vector<key_type> output = d_output;
         for(size_t i = 0; i < output.size(); i++)
         {
             auto diff = std::max<key_type>(std::abs(0.01f * expected[i]), key_type(0.01f));
             if(std::is_integral<key_type>::value) diff = 0;
             ASSERT_NEAR(output[i], expected[i], diff);
         }
-
-        hipFree(d_input);
-        hipFree(d_output);
-        hipFree(d_temp_storage);
     }
 }
 
@@ -187,11 +154,12 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
     using value_type = typename TestFixture::value_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
+    hc::accelerator acc;
+    hc::accelerator_view acc_view = acc.create_view();
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        hipStream_t stream = 0; // default
-
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
         // Generate data
@@ -203,34 +171,12 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
             std::mt19937{std::random_device{}()}
         );
         std::vector<value_type> values_input = test_utils::get_random_data<value_type>(size, -1000, 1000);
-        std::vector<key_type> keys_output(size, 0);
-        std::vector<value_type> values_output(size, 0);
 
-        key_type * d_keys_input;
-        key_type * d_keys_output;
-        HIP_CHECK(hipMalloc(&d_keys_input, keys_input.size() * sizeof(key_type)));
-        HIP_CHECK(hipMalloc(&d_keys_output, keys_output.size() * sizeof(key_type)));
-        HIP_CHECK(
-            hipMemcpy(
-                d_keys_input, keys_input.data(),
-                keys_input.size() * sizeof(key_type),
-                hipMemcpyHostToDevice
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
+        hc::array<key_type> d_keys_input(hc::extent<1>(size), keys_input.begin(), acc_view);
+        hc::array<key_type> d_keys_output(size, acc_view);
 
-        value_type * d_values_input;
-        value_type * d_values_output;
-        HIP_CHECK(hipMalloc(&d_values_input, values_input.size() * sizeof(value_type)));
-        HIP_CHECK(hipMalloc(&d_values_output, values_output.size() * sizeof(value_type)));
-        HIP_CHECK(
-            hipMemcpy(
-                d_values_input, values_input.data(),
-                values_input.size() * sizeof(value_type),
-                hipMemcpyHostToDevice
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
+        hc::array<value_type> d_values_input(hc::extent<1>(size), values_input.begin(), acc_view);
+        hc::array<value_type> d_values_output(size, acc_view);
 
         // Calculate expected results on host
         using key_value = std::pair<key_type, value_type>;
@@ -248,64 +194,37 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
         ::rocprim::less<key_type> lesser_op;
         // temp storage
         size_t temp_storage_size_bytes;
-        void * d_temp_storage = nullptr;
+
         // Get size of d_temp_storage
-        HIP_CHECK(
-            rocprim::sort(
-                d_temp_storage, temp_storage_size_bytes,
-                d_keys_input, d_keys_output,
-                d_values_input, d_values_output, keys_input.size(),
-                lesser_op, stream, debug_synchronous
-            )
+        rocprim::sort(
+            nullptr, temp_storage_size_bytes,
+            d_keys_input.accelerator_pointer(), d_keys_output.accelerator_pointer(),
+            d_values_input.accelerator_pointer(), d_values_output.accelerator_pointer(), keys_input.size(),
+            lesser_op, acc_view, debug_synchronous
         );
 
         // temp_storage_size_bytes must be >0
         ASSERT_GT(temp_storage_size_bytes, 0);
 
         // allocate temporary storage
-        HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
-        HIP_CHECK(hipDeviceSynchronize());
+        hc::array<char> d_temp_storage(temp_storage_size_bytes, acc_view);
 
         // Run
-        HIP_CHECK(
-            rocprim::sort(
-                d_temp_storage, temp_storage_size_bytes,
-                d_keys_input, d_keys_output,
-                d_values_input, d_values_output, keys_input.size(),
-                lesser_op, stream, debug_synchronous
-            )
+        rocprim::sort(
+            d_temp_storage.accelerator_pointer(), temp_storage_size_bytes,
+            d_keys_input.accelerator_pointer(), d_keys_output.accelerator_pointer(),
+            d_values_input.accelerator_pointer(), d_values_output.accelerator_pointer(), keys_input.size(),
+            lesser_op, acc_view, debug_synchronous
         );
-        HIP_CHECK(hipPeekAtLastError());
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // Copy output to host
-        HIP_CHECK(
-            hipMemcpy(
-                keys_output.data(), d_keys_output,
-                keys_output.size() * sizeof(key_type),
-                hipMemcpyDeviceToHost
-            )
-        );
-        HIP_CHECK(
-            hipMemcpy(
-                values_output.data(), d_values_output,
-                values_output.size() * sizeof(value_type),
-                hipMemcpyDeviceToHost
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
+        acc_view.wait();
 
         // Check if output values are as expected
+        std::vector<key_type> keys_output = d_keys_output;
+        std::vector<value_type> values_output = d_values_output;
         for(size_t i = 0; i < keys_output.size(); i++)
         {
             ASSERT_EQ(keys_output[i], expected[i].first);
             ASSERT_EQ(values_output[i], expected[i].second);
         }
-
-        hipFree(d_keys_input);
-        hipFree(d_keys_output);
-        hipFree(d_values_input);
-        hipFree(d_values_output);
-        hipFree(d_temp_storage);
     }
 }
