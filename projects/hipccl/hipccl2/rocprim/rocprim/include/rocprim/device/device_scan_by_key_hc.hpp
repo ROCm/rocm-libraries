@@ -25,15 +25,13 @@
 #include <iterator>
 
 #include "../config.hpp"
-#include "../detail/various.hpp"
-
 #include "../iterator/zip_iterator.hpp"
 #include "../iterator/discard_iterator.hpp"
 #include "../iterator/detail/replace_first_iterator.hpp"
 #include "../types/tuple.hpp"
 
-#include "device_scan_hc.hpp"
-#include "detail/device_scan_by_key.hpp"
+#include "../detail/various.hpp"
+#include "../detail/binary_op_wrappers.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -148,7 +146,7 @@ void inclusive_scan_by_key(void * temporary_storage,
 {
     using input_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
     using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
-    using scan_by_key_operator = detail::scan_by_key_wrapper_op<
+    using scan_by_key_operator = detail::scan_by_key_op_wrapper<
         input_type, key_type, BinaryFunction, KeyCompareFunction
     >;
 
@@ -280,7 +278,7 @@ void exclusive_scan_by_key(void * temporary_storage,
 {
     using input_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
     using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
-    using scan_by_key_operator = detail::scan_by_key_wrapper_op<
+    using scan_by_key_operator = detail::scan_by_key_op_wrapper<
         input_type, key_type, BinaryFunction, KeyCompareFunction
     >;
 
