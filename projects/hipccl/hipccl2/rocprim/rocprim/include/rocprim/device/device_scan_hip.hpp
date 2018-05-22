@@ -285,12 +285,12 @@ hipError_t scan_impl(void * temporary_storage,
     else
     {
         constexpr unsigned int single_scan_bs = BlockSize;
-        constexpr unsigned int single_scan_itp = ItemsPerThread;
+        constexpr unsigned int single_scan_ipt = ItemsPerThread;
 
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(detail::single_scan_kernel<
-                single_scan_bs, single_scan_itp,
+                single_scan_bs, single_scan_ipt,
                 Exclusive, // flag for exclusive scan operation
                 InputIterator, OutputIterator, BinaryFunction
             >),
@@ -375,7 +375,7 @@ hipError_t lookback_scan_impl(void * temporary_storage,
             dim3(grid_size), dim3(block_size), 0, stream,
             scan_state, number_of_blocks, ordered_bid
         );
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_single_pass_scan_kernel", size, start)
+        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_lookback_scan_state_kernel", size, start)
 
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         grid_size = number_of_blocks;
@@ -389,17 +389,17 @@ hipError_t lookback_scan_impl(void * temporary_storage,
             input, output, size, static_cast<result_type>(initial_value),
             scan_op, scan_state, number_of_blocks, ordered_bid
         );
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("single_pass_scan_kernel", size, start)
+        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("lookback_scan_kernel", size, start)
     }
     else
     {
         constexpr unsigned int single_scan_block_size = BlockSize;
-        constexpr unsigned int single_scan_itp = ItemsPerThread;
+        constexpr unsigned int single_scan_ipt = ItemsPerThread;
 
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(single_scan_kernel<
-                single_scan_block_size, single_scan_itp,
+                single_scan_block_size, single_scan_ipt,
                 Exclusive, // flag for exclusive scan operation
                 InputIterator, OutputIterator, BinaryFunction
             >),
@@ -510,14 +510,13 @@ hipError_t inclusive_scan(void * temporary_storage,
     using result_type = typename std::result_of<BinaryFunction(input_type, input_type)>::type;
     #endif
 
-    // Lookback scan has problems with types that are not arithemic,
-    // so it's disabled in those cases.
+    // Lookback scan has problems with types that are not arithmetic
     if(std::is_arithmetic<result_type>::value)
     {
         constexpr unsigned int block_size = 256;
         constexpr unsigned int items_per_thread =
             ::rocprim::max<unsigned int>(
-                (16 * sizeof(unsigned int))/sizeof(input_type), 1
+                (16 * sizeof(unsigned int))/sizeof(result_type), 1
             );
         return detail::lookback_scan_impl<block_size, items_per_thread, false>(
             temporary_storage, storage_size,
@@ -645,14 +644,13 @@ hipError_t exclusive_scan(void * temporary_storage,
     using result_type = typename std::result_of<BinaryFunction(input_type, input_type)>::type;
     #endif
 
-    // Lookback scan has problems with types that are not arithemic,
-    // so it's disabled in those cases.
+    // Lookback scan has problems with types that are not arithmetic
     if(std::is_arithmetic<result_type>::value)
     {
         constexpr unsigned int block_size = 256;
         constexpr unsigned int items_per_thread =
             ::rocprim::max<unsigned int>(
-                (16 * sizeof(unsigned int))/sizeof(input_type), 1
+                (16 * sizeof(unsigned int))/sizeof(result_type), 1
             );
         return detail::lookback_scan_impl<block_size, items_per_thread, true>(
             temporary_storage, storage_size,
