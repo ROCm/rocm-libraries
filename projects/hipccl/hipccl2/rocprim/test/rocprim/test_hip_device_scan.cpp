@@ -65,7 +65,7 @@ public:
 
 typedef ::testing::Types<
     DeviceScanParams<int>,
-    DeviceScanParams<unsigned long>,
+    DeviceScanParams<long>,
     DeviceScanParams<short, int>,
     DeviceScanParams<float, double>,
     DeviceScanParams<test_utils::custom_test_type<double>>
@@ -100,7 +100,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, 1, 100);
+        std::vector<T> input = test_utils::get_random_data<T>(size, 1, 10);
         std::vector<U> output(input.size(), 0);
 
         T * d_input;
@@ -210,7 +210,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanSum)
 
         // Calculate expected results on host
         std::vector<U> expected(input.size());
-        T initial_value = test_utils::get_random_value<T>(1, 100);
+        T initial_value = test_utils::get_random_value<T>(1, 10);
         test_utils::host_exclusive_scan(
             input.begin(), input.end(),
             initial_value, expected.begin(),
@@ -281,7 +281,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanByKey)
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, 1, 100);
+        std::vector<T> input = test_utils::get_random_data<T>(size, 1, 10);
         std::vector<K> keys = test_utils::get_random_data<K>(size, 1, 16);
         std::sort(keys.begin(), keys.end());
         std::vector<U> output(input.size(), 0);
@@ -406,7 +406,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
 
         // Generate data
         T initial_value = test_utils::get_random_value<T>(1, 1);
-        std::vector<T> input = test_utils::get_random_data<T>(size, 1, 100);
+        std::vector<T> input = test_utils::get_random_data<T>(size, 1, 10);
         std::vector<K> keys = test_utils::get_random_data<K>(size, 1, 16);
         std::sort(keys.begin(), keys.end());
         std::vector<U> output(input.size(), 0);

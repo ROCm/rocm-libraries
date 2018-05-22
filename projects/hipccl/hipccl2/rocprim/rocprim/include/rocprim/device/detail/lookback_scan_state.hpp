@@ -23,9 +23,14 @@
 
 #include <type_traits>
 
-#include "../../detail/various.hpp"
 #include "../../intrinsics.hpp"
 #include "../../types.hpp"
+
+#include "../../warp/detail/warp_reduce_crosslane.hpp"
+#include "../../warp/detail/warp_scan_crosslane.hpp"
+
+#include "../../detail/various.hpp"
+#include "../../detail/binary_op_wrappers.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -84,7 +89,7 @@ private:
     // Type which is used in store/load operations of block prefix (flag and value).
     // It is essential that this type is load/store using single instruction.
     using prefix_underlying_type = typename make_vector_type<flag_type_, 2>::type;
-    static constexpr unsigned int padding = 0;//::rocprim::warp_size();
+    static constexpr unsigned int padding = ::rocprim::warp_size();
 
     // Helper struct
     struct prefix_type
@@ -153,7 +158,7 @@ public:
             ::rocprim::detail::memory_fence_system();
             auto p = prefixes[padding + block_id];
             prefix = *reinterpret_cast<prefix_type*>(&p);
-        } while(prefix.flag == PREFIX_EMPTY);
+        } while(::rocprim::detail::warp_any(prefix.flag == PREFIX_EMPTY));
 
         // return
         flag = prefix.flag;
@@ -172,15 +177,15 @@ private:
     prefix_underlying_type * prefixes;
 };
 
-
 #define ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_USE_VOLATILE 1
+
 // This does not work for unknown reasons. Lookback-based scan should
 // be only enabled for arithmetic types for now.
 template<class T>
 struct lookback_scan_state<T, false>
 {
 private:
-    static constexpr unsigned int padding = 0;//::rocprim::warp_size();
+    static constexpr unsigned int padding = ::rocprim::warp_size();
 
 public:
     using flag_type = char;
@@ -296,6 +301,102 @@ private:
     // not stored in single instruction).
     T * prefixes_partial_values;
     T * prefixes_complete_values;
+};
+
+template<class T, class BinaryFunction, class LookbackScanState>
+class lookback_scan_prefix_op
+{
+    using flag_type = typename LookbackScanState::flag_type;
+    static_assert(
+        std::is_same<T, typename LookbackScanState::value_type>::value,
+        "T must be LookbackScanState::value_type"
+    );
+
+public:
+    ROCPRIM_DEVICE inline
+    lookback_scan_prefix_op(unsigned int block_id,
+                            BinaryFunction scan_op,
+                            LookbackScanState &scan_state)
+        : block_id_(block_id),
+          scan_op_(scan_op),
+          scan_state_(scan_state)
+    {
+    }
+
+    ROCPRIM_DEVICE inline
+    ~lookback_scan_prefix_op() = default;
+
+    ROCPRIM_DEVICE inline
+    void reduce_partial_prefixes(unsigned int block_id,
+                                 flag_type& flag,
+                                 T& partial_prefix)
+    {
+        // Order of reduction must be reversed, because 0th thread has
+        // prefix from the (block_id_ - 1) block, 1st thread has prefix
+        // from (block_id_ - 2) block etc.
+        using headflag_scan_op_type = reverse_binary_op_wrapper<
+            headflag_scan_op_wrapper<T, bool, BinaryFunction>
+        >;
+        using value_headflag_type = typename headflag_scan_op_type::result_type;
+        using warp_reduce_prefix_type = warp_reduce_crosslane<
+            value_headflag_type, ::rocprim::warp_size(), false
+        >;
+
+        T block_prefix;
+        scan_state_.get(block_id, flag, block_prefix);
+
+        auto headflag_scan_op = headflag_scan_op_type(scan_op_);
+        auto value_flag = ::rocprim::make_tuple(block_prefix, flag == PREFIX_COMPLETE);
+        warp_reduce_prefix_type().reduce(value_flag, value_flag, headflag_scan_op);
+        partial_prefix = ::rocprim::get<0>(value_flag);
+    }
+
+    ROCPRIM_DEVICE inline
+    T get_prefix()
+    {
+        flag_type flag;
+        T partial_prefix;
+        unsigned int previous_block_id = block_id_ - ::rocprim::lane_id() - 1;
+
+        // reduce last warp_size() number of prefixes to
+        // get the complete prefix for this block.
+        reduce_partial_prefixes(previous_block_id, flag, partial_prefix);
+        T prefix = partial_prefix;
+
+        // while we don't load a complete prefix, reduce partial prefixes
+        while(::rocprim::detail::warp_all(flag != PREFIX_COMPLETE))
+        {
+            previous_block_id -= ::rocprim::warp_size();
+            reduce_partial_prefixes(previous_block_id, flag, partial_prefix);
+            prefix = scan_op_(partial_prefix, prefix);
+        }
+        return prefix;
+    }
+
+    ROCPRIM_DEVICE inline
+    T operator()(T reduction)
+    {
+        // Set partial prefix for next block
+        if(::rocprim::lane_id() == 0)
+        {
+            scan_state_.set_partial(block_id_, reduction);
+        }
+
+        // Get prefix
+        auto prefix = get_prefix();
+
+        // Set complete prefix for next block
+        if(::rocprim::lane_id() == 0)
+        {
+            scan_state_.set_complete(block_id_, scan_op_(prefix, reduction));
+        }
+        return prefix;
+    }
+
+private:
+    unsigned int       block_id_;
+    BinaryFunction     scan_op_;
+    LookbackScanState& scan_state_;
 };
 
 } // end of detail namespace

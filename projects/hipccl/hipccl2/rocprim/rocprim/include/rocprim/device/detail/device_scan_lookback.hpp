@@ -89,14 +89,12 @@ void lookback_scan_kernel_impl(InputIterator input,
     (void) initial_value;
     (void) Exclusive;
 
-    using flag_type = typename LookbackScanState::flag_type;
     using result_type = ResultType;
     static_assert(
         std::is_same<result_type, typename LookbackScanState::value_type>::value,
         "value_type of LookbackScanState must be result_type"
     );
 
-    using order_bid_type  = ordered_block_id<unsigned int>;
     using block_load_type = ::rocprim::block_load<
         result_type, BlockSize, ItemsPerThread,
         ::rocprim::block_load_method::block_load_transpose
@@ -110,9 +108,13 @@ void lookback_scan_kernel_impl(InputIterator input,
         ::rocprim::block_scan_algorithm::using_warp_scan
     >;
 
+    using order_bid_type = ordered_block_id<unsigned int>;
+    using lookback_scan_prefix_op_type = lookback_scan_prefix_op<
+        result_type, BinaryFunction, LookbackScanState
+    >;
+
     ROCPRIM_SHARED_MEMORY union
     {
-        result_type prefix;
         typename order_bid_type::storage_type ordered_bid;
         typename block_load_type::storage_type load;
         typename block_store_type::storage_type store;
@@ -151,59 +153,38 @@ void lookback_scan_kernel_impl(InputIterator input,
     }
     ::rocprim::syncthreads(); // sync threads to reuse shared memory
 
-    // Scan of block values
-    block_scan_type()
-        .inclusive_scan(
-            values, // input
-            values, // output
-            storage.scan,
-            scan_op
-        );
-
-    // First block in grid can store its last value as its complete prefix
     if(flat_block_id == 0)
     {
-        if(flat_block_thread_id == BlockSize - 1)
+        result_type reduction;
+        block_scan_type()
+            .inclusive_scan(
+                values, // input
+                values, // output
+                reduction,
+                storage.scan,
+                scan_op
+            );
+        if(flat_block_thread_id == 0)
         {
-            scan_state.set_complete(flat_block_id, values[ItemsPerThread - 1]);
+            scan_state.set_complete(flat_block_id, reduction);
         }
     }
-    // Other blocks set partial, calculate/get their prefixes, set complete
     else
     {
-        if(flat_block_thread_id == BlockSize - 1)
-        {
-            // Set partial
-            scan_state.set_partial(flat_block_id, values[ItemsPerThread - 1]);
-
-            // Get prefix
-            result_type partial_prefix;
-            flag_type flag;
-            scan_state.get(flat_block_id - 1, flag, partial_prefix);
-            for(unsigned int i = flat_block_id - 2; flag != PREFIX_COMPLETE; i--)
-            {
-                result_type value;
-                scan_state.get(i, flag, value);
-                partial_prefix = scan_op(value, partial_prefix);
-            }
-            storage.prefix = partial_prefix;
-        }
-        __syncthreads();
-
-        // adding prefix sum of previous blocks
-        result_type prefix = storage.prefix;
-        #pragma unroll
-        for(unsigned int i = 0; i < ItemsPerThread; i++)
-        {
-            values[i] = scan_op(prefix, values[i]);
-        }
-
-        // Set complete
-        if(flat_block_thread_id == BlockSize - 1)
-        {
-            scan_state.set_complete(flat_block_id, values[ItemsPerThread - 1]);
-        }
+        // Scan of block values
+        auto prefix_op = lookback_scan_prefix_op_type(
+            flat_block_id, scan_op, scan_state
+        );
+        block_scan_type()
+            .inclusive_scan(
+                values, // input
+                values, // output
+                storage.scan,
+                prefix_op,
+                scan_op
+            );
     }
+    ::rocprim::syncthreads(); // sync threads to reuse shared memory
 
     // Save values into output array
     if(flat_block_id == (number_of_blocks - 1)) // last block
