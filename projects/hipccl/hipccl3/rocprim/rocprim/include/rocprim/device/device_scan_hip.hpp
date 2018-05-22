@@ -638,14 +638,39 @@ hipError_t exclusive_scan(void * temporary_storage,
                           const hipStream_t stream = 0,
                           bool debug_synchronous = false)
 {
-    // TODO: Those values should depend on type size
-    constexpr unsigned int block_size = 256;
-    constexpr unsigned int items_per_thread = 4;
-    return detail::scan_impl<block_size, items_per_thread, true>(
-        temporary_storage, storage_size,
-        input, output, initial_value, size,
-        scan_op, stream, debug_synchronous
-    );
+    using input_type = typename std::iterator_traits<InputIterator>::value_type;
+    #ifdef __cpp_lib_is_invocable
+    using result_type = typename std::invoke_result<BinaryFunction, input_type, input_type>::type;
+    #else
+    using result_type = typename std::result_of<BinaryFunction(input_type, input_type)>::type;
+    #endif
+
+    // Lookback scan has problems with types that are not arithemic,
+    // so it's disabled in those cases.
+    if(std::is_arithmetic<result_type>::value)
+    {
+        constexpr unsigned int block_size = 256;
+        constexpr unsigned int items_per_thread =
+            ::rocprim::max<unsigned int>(
+                (16 * sizeof(unsigned int))/sizeof(input_type), 1
+            );
+        return detail::lookback_scan_impl<block_size, items_per_thread, true>(
+            temporary_storage, storage_size,
+            input, output, initial_value, size,
+            scan_op, stream, debug_synchronous
+        );
+    }
+    else
+    {
+        // TODO: Those values should depend on type size
+        constexpr unsigned int block_size = 256;
+        constexpr unsigned int items_per_thread = 4;
+        return detail::scan_impl<block_size, items_per_thread, true>(
+            temporary_storage, storage_size,
+            input, output, initial_value, size,
+            scan_op, stream, debug_synchronous
+        );
+    }
 }
 
 /// @}

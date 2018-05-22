@@ -66,6 +66,108 @@ void init_lookback_scan_state_kernel_impl(LookBackScanState lookback_scan_state,
 }
 
 template<
+    bool Exclusive,
+    class BlockScan,
+    class T,
+    unsigned int ItemsPerThread,
+    class BinaryFunction
+>
+ROCPRIM_DEVICE inline
+auto lookback_block_scan(T (&values)[ItemsPerThread],
+                         T /* initial_value */,
+                         T& reduction,
+                         typename BlockScan::storage_type& storage,
+                         BinaryFunction scan_op)
+    -> typename std::enable_if<!Exclusive>::type
+{
+    BlockScan()
+        .inclusive_scan(
+            values, // input
+            values, // output
+            reduction,
+            storage,
+            scan_op
+        );
+}
+
+template<
+    bool Exclusive,
+    class BlockScan,
+    class T,
+    unsigned int ItemsPerThread,
+    class BinaryFunction
+>
+ROCPRIM_DEVICE inline
+auto lookback_block_scan(T (&values)[ItemsPerThread],
+                         T initial_value,
+                         T& reduction,
+                         typename BlockScan::storage_type& storage,
+                         BinaryFunction scan_op)
+    -> typename std::enable_if<Exclusive>::type
+{
+    BlockScan()
+        .exclusive_scan(
+            values, // input
+            values, // output
+            initial_value,
+            reduction,
+            storage,
+            scan_op
+        );
+    reduction = scan_op(initial_value, reduction);
+}
+
+template<
+    bool Exclusive,
+    class BlockScan,
+    class T,
+    unsigned int ItemsPerThread,
+    class PrefixCallback,
+    class BinaryFunction
+>
+ROCPRIM_DEVICE inline
+auto lookback_block_scan(T (&values)[ItemsPerThread],
+                         typename BlockScan::storage_type& storage,
+                         PrefixCallback& prefix_callback_op,
+                         BinaryFunction scan_op)
+    -> typename std::enable_if<!Exclusive>::type
+{
+    BlockScan()
+        .inclusive_scan(
+            values, // input
+            values, // output
+            storage,
+            prefix_callback_op,
+            scan_op
+        );
+}
+
+template<
+    bool Exclusive,
+    class BlockScan,
+    class T,
+    unsigned int ItemsPerThread,
+    class PrefixCallback,
+    class BinaryFunction
+>
+ROCPRIM_DEVICE inline
+auto lookback_block_scan(T (&values)[ItemsPerThread],
+                         typename BlockScan::storage_type& storage,
+                         PrefixCallback& prefix_callback_op,
+                         BinaryFunction scan_op)
+    -> typename std::enable_if<Exclusive>::type
+{
+    BlockScan()
+        .exclusive_scan(
+            values, // input
+            values, // output
+            storage,
+            prefix_callback_op,
+            scan_op
+        );
+}
+
+template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
     bool Exclusive,
@@ -85,10 +187,6 @@ void lookback_scan_kernel_impl(InputIterator input,
                                const unsigned int number_of_blocks,
                                ordered_block_id<unsigned int> ordered_bid)
 {
-    // TODO: Enable Exclusive
-    (void) initial_value;
-    (void) Exclusive;
-
     using result_type = ResultType;
     static_assert(
         std::is_same<result_type, typename LookbackScanState::value_type>::value,
@@ -156,14 +254,13 @@ void lookback_scan_kernel_impl(InputIterator input,
     if(flat_block_id == 0)
     {
         result_type reduction;
-        block_scan_type()
-            .inclusive_scan(
-                values, // input
-                values, // output
-                reduction,
-                storage.scan,
-                scan_op
-            );
+        lookback_block_scan<Exclusive, block_scan_type>(
+            values, // input/output
+            initial_value,
+            reduction,
+            storage.scan,
+            scan_op
+        );
         if(flat_block_thread_id == 0)
         {
             scan_state.set_complete(flat_block_id, reduction);
@@ -175,14 +272,12 @@ void lookback_scan_kernel_impl(InputIterator input,
         auto prefix_op = lookback_scan_prefix_op_type(
             flat_block_id, scan_op, scan_state
         );
-        block_scan_type()
-            .inclusive_scan(
-                values, // input
-                values, // output
-                storage.scan,
-                prefix_op,
-                scan_op
-            );
+        lookback_block_scan<Exclusive, block_scan_type>(
+            values, // input/output
+            storage.scan,
+            prefix_op,
+            scan_op
+        );
     }
     ::rocprim::syncthreads(); // sync threads to reuse shared memory
 
