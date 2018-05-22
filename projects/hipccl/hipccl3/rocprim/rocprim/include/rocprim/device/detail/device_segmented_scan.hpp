@@ -25,10 +25,11 @@
 #include <iterator>
 
 #include "../../config.hpp"
-#include "../../detail/various.hpp"
-
 #include "../../intrinsics.hpp"
 #include "../../types.hpp"
+
+#include "../../detail/various.hpp"
+#include "../../detail/binary_op_wrappers.hpp"
 
 #include "../../block/block_load.hpp"
 #include "../../block/block_store.hpp"
@@ -38,45 +39,6 @@ BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
 {
-
-template<class V, class F, class BinaryFunction>
-struct segmented_scan_flag_wrapper_op
-{
-    #ifdef __cpp_lib_is_invocable
-    using result_type = typename std::invoke_result<BinaryFunction, V, V>::type;
-    #else
-    using result_type = typename std::result_of<BinaryFunction(V, V)>::type;
-    #endif
-
-    ROCPRIM_HOST_DEVICE inline
-    segmented_scan_flag_wrapper_op() = default;
-
-    ROCPRIM_HOST_DEVICE inline
-    segmented_scan_flag_wrapper_op(BinaryFunction scan_op)
-        : scan_op_(scan_op)
-    {
-    }
-
-    ROCPRIM_HOST_DEVICE inline
-    ~segmented_scan_flag_wrapper_op() = default;
-
-    ROCPRIM_HOST_DEVICE inline
-    rocprim::tuple<result_type, F> operator()(const rocprim::tuple<result_type, F>& t1,
-                                              const rocprim::tuple<result_type, F>& t2) const
-    {
-        if(!rocprim::get<1>(t2))
-        {
-            return rocprim::make_tuple(
-                scan_op_(rocprim::get<0>(t1), rocprim::get<0>(t2)),
-                static_cast<F>(rocprim::get<1>(t1) || rocprim::get<1>(t2))
-            );
-        }
-        return t2;
-    }
-
-private:
-    BinaryFunction scan_op_;
-};
 
 template<
     bool Exclusive,
