@@ -23,6 +23,7 @@
 #include <iostream>
 #include <vector>
 #include <algorithm>
+#include <cmath>
 
 // Google Test
 #include <gtest/gtest.h>
@@ -66,7 +67,8 @@ typedef ::testing::Types<
     DeviceScanParams<int>,
     DeviceScanParams<unsigned long>,
     DeviceScanParams<short, int>,
-    DeviceScanParams<float, double>
+    DeviceScanParams<float, double>,
+    DeviceScanParams<test_utils::custom_test_type<double>>
 > RocprimDeviceScanTestsParams;
 
 std::vector<size_t> get_sizes()
@@ -74,7 +76,7 @@ std::vector<size_t> get_sizes()
     std::vector<size_t> sizes = {
         1, 10, 53, 211,
         1024, 2048, 5096,
-        34567, (1 << 18) - 1220
+        34567, (1 << 18)
     };
     const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(2, 1, 16384);
     sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
@@ -98,7 +100,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, 1, 1);
+        std::vector<T> input = test_utils::get_random_data<T>(size, 1, 100);
         std::vector<U> output(input.size(), 0);
 
         T * d_input;
@@ -165,13 +167,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
         HIP_CHECK(hipDeviceSynchronize());
 
         // Check if output values are as expected
-        for(size_t i = 0; i < output.size(); i++)
-        {
-            SCOPED_TRACE(testing::Message() << "where index = " << i);
-            auto diff = std::max<U>(std::abs(0.01f * expected[i]), U(0.01f));
-            if(std::is_integral<U>::value) diff = 0;
-            ASSERT_NEAR(output[i], expected[i], diff);
-        }
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, 0.01f));
 
         hipFree(d_input);
         hipFree(d_output);
@@ -262,13 +258,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanSum)
         HIP_CHECK(hipDeviceSynchronize());
 
         // Check if output values are as expected
-        for(size_t i = 0; i < output.size(); i++)
-        {
-            SCOPED_TRACE(testing::Message() << "where index = " << i);
-            auto diff = std::max<U>(std::abs(0.01f * expected[i]), U(0.01f));
-            if(std::is_integral<U>::value) diff = 0;
-            ASSERT_NEAR(output[i], expected[i], diff);
-        }
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, 0.01f));
 
         hipFree(d_input);
         hipFree(d_output);
@@ -391,13 +381,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanByKey)
         HIP_CHECK(hipDeviceSynchronize());
 
         // Check if output values are as expected
-        for(size_t i = 0; i < output.size(); i++)
-        {
-            SCOPED_TRACE(testing::Message() << "where index = " << i);
-            auto diff = std::max<U>(std::abs(0.01f * expected[i]), U(0.01f));
-            if(std::is_integral<U>::value) diff = 0;
-            ASSERT_NEAR(output[i], expected[i], diff);
-        }
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, 0.01f));
 
         hipFree(d_keys);
         hipFree(d_input);
@@ -421,7 +405,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
         // Generate data
-        T initial_value = test_utils::get_random_value<T>(1, 100);
+        T initial_value = test_utils::get_random_value<T>(1, 1);
         std::vector<T> input = test_utils::get_random_data<T>(size, 1, 100);
         std::vector<K> keys = test_utils::get_random_data<K>(size, 1, 16);
         std::sort(keys.begin(), keys.end());
@@ -503,13 +487,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
         HIP_CHECK(hipDeviceSynchronize());
 
         // Check if output values are as expected
-        for(size_t i = 0; i < output.size(); i++)
-        {
-            SCOPED_TRACE(testing::Message() << "where index = " << i);
-            auto diff = std::max<U>(std::abs(0.01f * expected[i]), U(0.01f));
-            if(std::is_integral<U>::value) diff = 0;
-            ASSERT_NEAR(output[i], expected[i], diff);
-        }
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, 0.01f));
 
         hipFree(d_keys);
         hipFree(d_input);
