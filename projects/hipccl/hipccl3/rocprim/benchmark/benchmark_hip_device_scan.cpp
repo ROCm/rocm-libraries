@@ -226,7 +226,7 @@ int main(int argc, char *argv[])
     std::cout << "[HIP] Device name: " << devProp.name << std::endl;
 
     using custom_double2 = custom_type<double, double>;
-    using custom_int_double = custom_type<int, double>;
+    using custom_int2 = custom_type<int, int>;
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks =
@@ -240,10 +240,13 @@ int main(int argc, char *argv[])
         CREATE_INCLUSIVE_BENCHMARK(double, rocprim::plus<double>),
         CREATE_EXCLUSIVE_BENCHMARK(double, rocprim::plus<double>),
 
+        CREATE_INCLUSIVE_BENCHMARK(long long, rocprim::plus<long long>),
+        CREATE_EXCLUSIVE_BENCHMARK(long long, rocprim::plus<long long>),
+
         CREATE_INCLUSIVE_BENCHMARK(custom_double2, rocprim::plus<custom_double2>),
         CREATE_EXCLUSIVE_BENCHMARK(custom_double2, rocprim::plus<custom_double2>),
-        CREATE_INCLUSIVE_BENCHMARK(custom_int_double, rocprim::plus<custom_int_double>),
-        CREATE_EXCLUSIVE_BENCHMARK(custom_int_double, rocprim::plus<custom_int_double>)
+        CREATE_INCLUSIVE_BENCHMARK(custom_int2, rocprim::plus<custom_int2>),
+        CREATE_EXCLUSIVE_BENCHMARK(custom_int2, rocprim::plus<custom_int2>)
     };
 
     // Use manual timing
