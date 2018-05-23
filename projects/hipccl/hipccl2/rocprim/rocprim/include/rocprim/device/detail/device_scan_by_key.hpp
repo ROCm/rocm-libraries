@@ -36,9 +36,9 @@ template<class V, class K, class BinaryFunction, class KCompare>
 struct scan_by_key_wrapper_op
 {
     #ifdef __cpp_lib_is_invocable
-    using result_type = typename std::invoke_result<BinaryFunction, V, V>::type;
+    using value_type = typename std::invoke_result<BinaryFunction, V, V>::type;
     #else
-    using result_type = typename std::result_of<BinaryFunction(V, V)>::type;
+    using value_type = typename std::result_of<BinaryFunction(V, V)>::type;
     #endif
 
     ROCPRIM_HOST_DEVICE inline
@@ -54,8 +54,8 @@ struct scan_by_key_wrapper_op
     ~scan_by_key_wrapper_op() = default;
 
     ROCPRIM_HOST_DEVICE inline
-    rocprim::tuple<result_type, K> operator()(const rocprim::tuple<result_type, K>& t1,
-                                              const rocprim::tuple<result_type, K>& t2) const
+    rocprim::tuple<value_type, K> operator()(const rocprim::tuple<value_type, K>& t1,
+                                             const rocprim::tuple<value_type, K>& t2) const
     {
         if(compare_keys_op_(rocprim::get<1>(t1), rocprim::get<1>(t2)))
         {
