@@ -21,6 +21,8 @@
 #ifndef ROCPRIM_INTRINSICS_THREAD_HPP_
 #define ROCPRIM_INTRINSICS_THREAD_HPP_
 
+#include <atomic>
+
 #include "../config.hpp"
 #include "../detail/various.hpp"
 
@@ -255,6 +257,39 @@ namespace detail
     {
         return warp_id();
     }
+
+    #if ROCPRIM_HIP_API
+    ROCPRIM_DEVICE inline
+    void memory_fence_system(void)
+    {
+        ::__threadfence_system();
+    }
+
+    ROCPRIM_DEVICE inline
+    void memory_fence_block(void)
+    {
+        ::__threadfence_block();
+    }
+
+    ROCPRIM_DEVICE inline
+    void memory_fence_device(void)
+    {
+        ::__threadfence();
+    }
+    #else
+    // __threadfence_system()
+    ROCPRIM_DEVICE inline
+    void memory_fence_system(void)
+    {
+        std::atomic_thread_fence(std::memory_order_seq_cst);
+    }
+
+    // Works like __threadfence_block()
+    extern __attribute__((const)) ROCPRIM_DEVICE void memory_fence_block() __asm("__llvm_fence_sc_wg");
+
+    // Works like __threadfence()
+    extern __attribute__((const)) ROCPRIM_DEVICE void memory_fence_device() __asm("__llvm_fence_sc_dev");
+    #endif
 }
 
 /// @}
