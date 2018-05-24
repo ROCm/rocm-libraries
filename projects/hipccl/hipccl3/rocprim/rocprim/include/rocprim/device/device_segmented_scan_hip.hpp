@@ -475,8 +475,8 @@ hipError_t segmented_inclusive_scan(void * temporary_storage,
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     using flag_type = typename std::iterator_traits<HeadFlagIterator>::value_type;
-    using segmented_scan_flag_wrapper_op_type =
-        detail::segmented_scan_flag_wrapper_op<
+    using headflag_scan_op_wrapper_type =
+        detail::headflag_scan_op_wrapper<
             input_type, flag_type, BinaryFunction
         >;
 
@@ -484,7 +484,7 @@ hipError_t segmented_inclusive_scan(void * temporary_storage,
         temporary_storage, storage_size,
         make_zip_iterator(make_tuple(input, head_flags)),
         make_zip_iterator(make_tuple(output, make_discard_iterator())),
-        size, segmented_scan_flag_wrapper_op_type(scan_op),
+        size, headflag_scan_op_wrapper_type(scan_op),
         stream, debug_synchronous
     );
 }
@@ -589,8 +589,8 @@ hipError_t segmented_exclusive_scan(void * temporary_storage,
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     using flag_type = typename std::iterator_traits<HeadFlagIterator>::value_type;
-    using segmented_scan_flag_wrapper_op_type =
-        detail::segmented_scan_flag_wrapper_op<
+    using headflag_scan_op_wrapper_type =
+        detail::headflag_scan_op_wrapper<
             input_type, flag_type, BinaryFunction
         >;
 
@@ -624,7 +624,7 @@ hipError_t segmented_exclusive_scan(void * temporary_storage,
             }
         ),
         make_zip_iterator(make_tuple(output, make_discard_iterator())),
-        size, segmented_scan_flag_wrapper_op_type(scan_op),
+        size, headflag_scan_op_wrapper_type(scan_op),
         stream, debug_synchronous
     );
 }

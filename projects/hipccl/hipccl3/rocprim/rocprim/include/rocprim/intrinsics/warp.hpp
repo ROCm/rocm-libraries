@@ -64,6 +64,31 @@ unsigned int masked_bit_count(unsigned long long x)
     #endif
 }
 
+namespace detail
+{
+
+ROCPRIM_DEVICE inline
+int warp_any(int predicate)
+{
+    #ifdef ROCPRIM_HC_API
+        return hc::__any(predicate);
+    #else // ROCPRIM_HIP_API
+        return ::__any(predicate);
+    #endif
+}
+
+ROCPRIM_DEVICE inline
+int warp_all(int predicate)
+{
+    #ifdef ROCPRIM_HC_API
+        return hc::__all(predicate);
+    #else // ROCPRIM_HIP_API
+        return ::__all(predicate);
+    #endif
+}
+
+} // end detail namespace
+
 /// @}
 // end of group intrinsicsmodule
 
