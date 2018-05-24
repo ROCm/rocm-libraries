@@ -25,9 +25,11 @@
 #include <iterator>
 
 #include "../config.hpp"
+#include "../functional.hpp"
 #include "../detail/various.hpp"
 
 #include "detail/device_scan_reduce_then_scan.hpp"
+#include "detail/device_scan_lookback.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -162,16 +164,131 @@ void scan_impl(void * temporary_storage,
     }
     else
     {
-        constexpr unsigned int single_scan_bs = BlockSize;
+        constexpr unsigned int single_scan_block_size = BlockSize;
         constexpr unsigned int single_scan_ipt = ItemsPerThread;
 
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         hc::parallel_for_each(
             acc_view,
-            hc::tiled_extent<1>(single_scan_bs, single_scan_bs),
+            hc::tiled_extent<1>(single_scan_block_size, single_scan_block_size),
             [=](hc::tiled_index<1>) [[hc]]
             {
-                single_scan_kernel_impl<single_scan_bs, single_scan_ipt, Exclusive>(
+                single_scan_kernel_impl<single_scan_block_size, single_scan_ipt, Exclusive>(
+                    input, size, static_cast<result_type>(initial_value), output, scan_op
+                );
+            }
+        );
+        ROCPRIM_DETAIL_HC_SYNC("single_scan_kernel", size, start);
+    }
+}
+
+template<
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    bool Exclusive,
+    class InputIterator,
+    class OutputIterator,
+    class InitValueType,
+    class BinaryFunction
+>
+inline
+void lookback_scan_impl(void * temporary_storage,
+                        size_t& storage_size,
+                        InputIterator input,
+                        OutputIterator output,
+                        const InitValueType initial_value,
+                        const size_t size,
+                        BinaryFunction scan_op,
+                        hc::accelerator_view acc_view,
+                        const bool debug_synchronous)
+{
+    using input_type = typename std::iterator_traits<InputIterator>::value_type;
+    #ifdef __cpp_lib_is_invocable
+    using result_type = typename std::invoke_result<BinaryFunction, input_type, input_type>::type;
+    #else
+    using result_type = typename std::result_of<BinaryFunction(input_type, input_type)>::type;
+    #endif
+    using scan_state_type = detail::lookback_scan_state<result_type>;
+    using ordered_block_id_type = detail::ordered_block_id<unsigned int>;
+
+    constexpr unsigned int block_size = BlockSize;
+    constexpr unsigned int items_per_thread = ItemsPerThread;
+    constexpr auto items_per_block = block_size * items_per_thread;
+    const unsigned int number_of_blocks = (size + items_per_block - 1)/items_per_block;
+
+    // Calculate required temporary storage
+    size_t scan_state_bytes = ::rocprim::detail::align_size(
+        scan_state_type::get_storage_size(number_of_blocks)
+    );
+    size_t ordered_block_id_bytes = ordered_block_id_type::get_storage_size();
+    if(temporary_storage == nullptr)
+    {
+        // storage_size is never zero
+        storage_size = scan_state_bytes + ordered_block_id_bytes;
+        return;
+    }
+
+    // Start point for time measurements
+    std::chrono::high_resolution_clock::time_point start;
+    if(debug_synchronous)
+    {
+        std::cout << "size " << size << '\n';
+        std::cout << "block_size " << block_size << '\n';
+        std::cout << "number of blocks " << number_of_blocks << '\n';
+        std::cout << "items_per_block " << items_per_block << '\n';
+    }
+
+    if(number_of_blocks > 1)
+    {
+        // Create and initialize lookback_scan_state obj
+        auto scan_state = scan_state_type::create(temporary_storage, number_of_blocks);
+        // Create ad initialize ordered_block_id obj
+        auto ptr = reinterpret_cast<char*>(temporary_storage);
+        auto ordered_bid = ordered_block_id_type::create(
+            reinterpret_cast<ordered_block_id_type::id_type*>(ptr + scan_state_bytes)
+        );
+
+        if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
+        auto grid_size = block_size * ((number_of_blocks + block_size - 1) / block_size);
+        hc::parallel_for_each(
+            acc_view,
+            hc::tiled_extent<1>(grid_size, block_size),
+            [=](hc::tiled_index<1>) [[hc]]
+            {
+                init_lookback_scan_state_kernel_impl(
+                    scan_state, number_of_blocks, ordered_bid
+                );
+            }
+        );
+        ROCPRIM_DETAIL_HC_SYNC("init_lookback_scan_state_kernel", size, start)
+
+        if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
+        grid_size = block_size * number_of_blocks;
+        hc::parallel_for_each(
+            acc_view,
+            hc::tiled_extent<1>(grid_size, block_size),
+            [=](hc::tiled_index<1>) [[hc]]
+            {
+                lookback_scan_kernel_impl<BlockSize, ItemsPerThread, Exclusive>(
+                    input, output, size, static_cast<result_type>(initial_value),
+                    scan_op, scan_state, number_of_blocks, ordered_bid
+                );
+            }
+        );
+        ROCPRIM_DETAIL_HC_SYNC("lookback_scan_kernel", size, start)
+    }
+    else
+    {
+        constexpr unsigned int single_scan_block_size = BlockSize;
+        constexpr unsigned int single_scan_ipt = ItemsPerThread;
+
+        if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
+        hc::parallel_for_each(
+            acc_view,
+            hc::tiled_extent<1>(single_scan_block_size, single_scan_block_size),
+            [=](hc::tiled_index<1>) [[hc]]
+            {
+                single_scan_kernel_impl<single_scan_block_size, single_scan_ipt, Exclusive>(
                     input, size, static_cast<result_type>(initial_value), output, scan_op
                 );
             }
@@ -278,15 +395,33 @@ void inclusive_scan(void * temporary_storage,
     using result_type = typename std::result_of<BinaryFunction(input_type, input_type)>::type;
     #endif
 
-    // TODO: Those values should depend on type size
-    constexpr unsigned int block_size = 256;
-    constexpr unsigned int items_per_thread = 4;
-    return detail::scan_impl<block_size, items_per_thread, false>(
-        temporary_storage, storage_size,
-        // result_type() is a dummy initial value (not used)
-        input, output, result_type(), size,
-        scan_op, acc_view, debug_synchronous
-    );
+    // Lookback scan has problems with types that are not arithmetic
+    if(std::is_arithmetic<result_type>::value)
+    {
+        constexpr unsigned int block_size = 256;
+        constexpr unsigned int items_per_thread =
+            ::rocprim::max<unsigned int>(
+                (16 * sizeof(unsigned int))/sizeof(result_type), 1
+            );
+        return detail::lookback_scan_impl<block_size, items_per_thread, false>(
+            temporary_storage, storage_size,
+            // result_type() is a dummy initial value (not used)
+            input, output, result_type(), size,
+            scan_op, acc_view, debug_synchronous
+        );
+    }
+    else
+    {
+        // TODO: Those values should depend on type size
+        constexpr unsigned int block_size = 256;
+        constexpr unsigned int items_per_thread = 4;
+        return detail::scan_impl<block_size, items_per_thread, false>(
+            temporary_storage, storage_size,
+            // result_type() is a dummy initial value (not used)
+            input, output, result_type(), size,
+            scan_op, acc_view, debug_synchronous
+        );
+    }
 }
 
 /// \brief HC parallel exclusive scan primitive for device level.
@@ -388,14 +523,38 @@ void exclusive_scan(void * temporary_storage,
                     hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
                     const bool debug_synchronous = false)
 {
-    // TODO: Those values should depend on type size
-    constexpr unsigned int block_size = 256;
-    constexpr unsigned int items_per_thread = 4;
-    return detail::scan_impl<block_size, items_per_thread, true>(
-        temporary_storage, storage_size,
-        input, output, initial_value, size,
-        scan_op, acc_view, debug_synchronous
-    );
+    using input_type = typename std::iterator_traits<InputIterator>::value_type;
+    #ifdef __cpp_lib_is_invocable
+    using result_type = typename std::invoke_result<BinaryFunction, input_type, input_type>::type;
+    #else
+    using result_type = typename std::result_of<BinaryFunction(input_type, input_type)>::type;
+    #endif
+
+    // Lookback scan has problems with types that are not arithmetic
+    if(std::is_arithmetic<result_type>::value)
+    {
+        constexpr unsigned int block_size = 256;
+        constexpr unsigned int items_per_thread =
+            ::rocprim::max<unsigned int>(
+                (16 * sizeof(unsigned int))/sizeof(result_type), 1
+            );
+        return detail::lookback_scan_impl<block_size, items_per_thread, true>(
+            temporary_storage, storage_size,
+            input, output, initial_value, size,
+            scan_op, acc_view, debug_synchronous
+        );
+    }
+    else
+    {
+        // TODO: Those values should depend on type size
+        constexpr unsigned int block_size = 256;
+        constexpr unsigned int items_per_thread = 4;
+        return detail::scan_impl<block_size, items_per_thread, true>(
+            temporary_storage, storage_size,
+            input, output, initial_value, size,
+            scan_op, acc_view, debug_synchronous
+        );
+    }
 }
 
 /// @}

@@ -27,6 +27,9 @@
 #include <type_traits>
 #include <cstdlib>
 
+// Google Test
+#include <gtest/gtest.h>
+
 #include <rocprim/rocprim.hpp>
 
 #include "../test_utils_host.hpp"
@@ -60,21 +63,34 @@ size_t get_max_block_size()
 }
 #endif
 
+template<class T>
+struct is_custom_test_type : std::false_type
+{
+};
+
 #if defined(ROCPRIM_HC_API) || defined(ROCPRIM_HIP_API)
 // Custom type used in tests
 template<class T>
 struct custom_test_type
 {
+    using value_type = T;
+
     T x;
     T y;
 
-    ROCPRIM_HOST_DEVICE
-    custom_test_type(T xx = 0, T yy = 0) : x(xx), y(yy) {}
+    ROCPRIM_HOST_DEVICE inline
+    custom_test_type() = default;
 
-    ROCPRIM_HOST_DEVICE
-    ~custom_test_type() {}
+    ROCPRIM_HOST_DEVICE inline
+    custom_test_type(T x, T y) : x(x), y(y) {}
 
-    ROCPRIM_HOST_DEVICE
+    ROCPRIM_HOST_DEVICE inline
+    custom_test_type(T xy) : x(xy), y(xy) {}
+
+    ROCPRIM_HOST_DEVICE inline
+    ~custom_test_type() = default;
+
+    ROCPRIM_HOST_DEVICE inline
     custom_test_type& operator=(const custom_test_type& other)
     {
         x = other.x;
@@ -82,19 +98,125 @@ struct custom_test_type
         return *this;
     }
 
-    ROCPRIM_HOST_DEVICE
+    ROCPRIM_HOST_DEVICE inline
     custom_test_type operator+(const custom_test_type& other) const
     {
         return custom_test_type(x + other.x, y + other.y);
     }
 
-    ROCPRIM_HOST_DEVICE
+    ROCPRIM_HOST_DEVICE inline
+    custom_test_type operator-(const custom_test_type& other) const
+    {
+        return custom_test_type(x - other.x, y - other.y);
+    }
+
+    ROCPRIM_HOST_DEVICE inline
     bool operator==(const custom_test_type& other) const
     {
         return (x == other.x && y == other.y);
     }
+
+    ROCPRIM_HOST_DEVICE inline
+    bool operator!=(const custom_test_type& other) const
+    {
+        return !(*this == other);
+    }
 };
+
+template<class T> inline
+std::ostream& operator<<(std::ostream& stream,
+                         const custom_test_type<T>& value)
+{
+    stream << "[" << value.x << "; " << value.y << "]";
+    return stream;
+}
+
+template<class T>
+struct is_custom_test_type<custom_test_type<T>> : std::true_type
+{
+};
+
+template<class T>
+inline auto get_random_data(size_t size, typename T::value_type min, typename T::value_type max)
+    -> typename std::enable_if<
+           is_custom_test_type<T>::value && std::is_integral<typename T::value_type>::value,
+           std::vector<T>
+       >::type
+{
+    std::random_device rd;
+    std::default_random_engine gen(rd());
+    std::uniform_int_distribution<typename T::value_type> distribution(min, max);
+    std::vector<T> data(size);
+    std::generate(data.begin(), data.end(), [&]() { return distribution(gen); });
+    return data;
+}
+
+template<class T>
+inline auto get_random_data(size_t size, typename T::value_type min, typename T::value_type max)
+    -> typename std::enable_if<
+           is_custom_test_type<T>::value && std::is_floating_point<typename T::value_type>::value,
+           std::vector<T>
+       >::type
+{
+    std::random_device rd;
+    std::default_random_engine gen(rd());
+    std::uniform_real_distribution<typename T::value_type> distribution(min, max);
+    std::vector<T> data(size);
+    std::generate(data.begin(), data.end(), [&]() { return T(distribution(gen)); });
+    return data;
+}
+
+template<class T>
+inline auto get_random_value(typename T::value_type min, typename T::value_type max)
+    -> typename std::enable_if<is_custom_test_type<T>::value, T>::type
+{
+    return get_random_data(1, min, max)[0];
+}
 #endif
+
+template<class T>
+auto assert_near(const std::vector<T>& result, const std::vector<T>& expected, const float percent)
+    -> typename std::enable_if<!is_custom_test_type<T>::value && std::is_arithmetic<T>::value>::type
+{
+    ASSERT_EQ(result.size(), expected.size());
+    for(size_t i = 0; i < result.size(); i++)
+    {
+        auto diff = std::max<T>(std::abs(percent * expected[i]), T(percent));
+        if(std::is_integral<T>::value) diff = 0;
+        ASSERT_NEAR(result[i], expected[i], diff) << "where index = " << i;
+    }
+}
+
+template<class T>
+auto assert_near(const std::vector<T>& result, const std::vector<T>& expected, const float percent)
+    -> typename std::enable_if<is_custom_test_type<T>::value>::type
+{
+    using value_type = typename T::value_type;
+    ASSERT_EQ(result.size(), expected.size());
+    for(size_t i = 0; i < result.size(); i++)
+    {
+        auto diff1 = std::max<value_type>(std::abs(percent * expected[i].x), value_type(percent));
+        auto diff2 = std::max<value_type>(std::abs(percent * expected[i].y), value_type(percent));
+        if(std::is_integral<value_type>::value)
+        {
+            diff1 = 0;
+            diff2 = 0;
+        }
+        ASSERT_NEAR(result[i].x, expected[i].x, diff1) << "where index = " << i;
+        ASSERT_NEAR(result[i].y, expected[i].y, diff2) << "where index = " << i;
+    }
+}
+
+template<class T>
+auto assert_near(const std::vector<T>& result, const std::vector<T>& expected, const float)
+    -> typename std::enable_if<!is_custom_test_type<T>::value && !std::is_arithmetic<T>::value>::type
+{
+    ASSERT_EQ(result.size(), expected.size());
+    for(size_t i = 0; i < result.size(); i++)
+    {
+        ASSERT_EQ(result[i], expected[i]) << "where index = " << i;
+    }
+}
 
 } // end test_utils namespace
 

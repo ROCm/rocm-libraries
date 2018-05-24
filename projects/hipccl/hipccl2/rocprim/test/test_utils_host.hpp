@@ -74,7 +74,8 @@ inline std::vector<T> get_random_data01(size_t size, float p)
 }
 
 template<class T>
-inline T get_random_value(T min, T max)
+inline auto get_random_value(T min, T max)
+    -> typename std::enable_if<std::is_arithmetic<T>::value, T>::type
 {
     return get_random_data(1, min, max)[0];
 }
