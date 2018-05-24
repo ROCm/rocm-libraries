@@ -131,7 +131,7 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSum)
             tile_static typename wreduce_t::storage_type storage[warps_no];
             wreduce_t().reduce(value, value, storage[warp_id]);
 
-            if (i.local[0] % logical_warp_size == 0)
+            if(i.local[0] % logical_warp_size == 0)
             {
                 d_output[i.global[0] / logical_warp_size] = value;
             }
@@ -263,7 +263,7 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumValid)
             tile_static typename wreduce_t::storage_type storage[warps_no];
             wreduce_t().reduce(value, value, valid, storage[warp_id]);
 
-            if (i.local[0] % logical_warp_size == 0)
+            if(i.local[0] % logical_warp_size == 0)
             {
                 d_output[i.global[0] / logical_warp_size] = value;
             }
@@ -406,7 +406,7 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumCustomStruct)
             tile_static typename wreduce_t::storage_type storage[warps_no];
             wreduce_t().reduce(value, value, storage[warp_id]);
 
-            if (i.local[0] % logical_warp_size == 0)
+            if(i.local[0] % logical_warp_size == 0)
             {
                 d_output[i.global[0] / logical_warp_size] = value;
             }
@@ -423,5 +423,172 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumCustomStruct)
         auto diffy = std::max<base_type>(std::abs(0.1f * expected[i].y), base_type(0.01f));
         if(std::is_integral<base_type>::value) diffy = 0;
         ASSERT_NEAR(output[i].y, expected[i].y, diffy);
+    }
+}
+
+TYPED_TEST(RocprimWarpReduceTests, HeadSegmentedReduceSum)
+{
+    // logical warp side for warp primitive, execution warp size is always rp::warp_size()
+    using type = typename TestFixture::params::type;
+    using flag_type = unsigned char;
+    constexpr size_t logical_warp_size = TestFixture::params::warp_size;
+    constexpr size_t block_size =
+        rp::detail::is_power_of_two(logical_warp_size)
+            ? rp::max<size_t>(rp::warp_size(), logical_warp_size * 4)
+            : (rp::warp_size()/logical_warp_size) * logical_warp_size;
+    const size_t size = block_size * 4;
+
+    // Given warp size not supported
+    if(logical_warp_size > rp::warp_size())
+    {
+        return;
+    }
+
+    // Generate data
+    std::vector<type> input = test_utils::get_random_data<type>(size, 1, 10); // used for input
+    std::vector<flag_type> flags = test_utils::get_random_data01<flag_type>(size, 0.25f);
+    for(size_t i = 0; i < flags.size(); i+= logical_warp_size)
+    {
+        flags[i] = 1;
+    }
+    std::vector<type> output(input.size());
+
+    // Calculate expected results on host
+    std::vector<type> expected(output.size());
+    size_t segment_head_index = 0;
+    type reduction;
+    for(size_t i = 0; i < output.size(); i++)
+    {
+        if(i%logical_warp_size == 0 || flags[i])
+        {
+            expected[segment_head_index] = reduction;
+            segment_head_index = i;
+            reduction = input[i];
+        }
+        else
+        {
+            reduction = reduction + input[i];
+        }
+    }
+    expected[segment_head_index] = reduction;
+
+    hc::array_view<type, 1> d_input(input.size(), input.data());
+    hc::array_view<flag_type, 1> d_flag(flags.size(), flags.data());
+    hc::array_view<type, 1> d_output(output.size(), output.data());
+    hc::parallel_for_each(
+        hc::extent<1>(input.size()).tile(block_size),
+        [=](hc::tiled_index<1> i) [[hc]]
+        {
+            constexpr unsigned int warps_no = block_size/logical_warp_size;
+            const unsigned int warp_id = rp::detail::logical_warp_id<logical_warp_size>();
+
+            type value = d_input[i];
+            flag_type flag = d_flag[i];
+
+            using wreduce_t = rp::warp_reduce<type, logical_warp_size>;
+            tile_static typename wreduce_t::storage_type storage[warps_no];
+            wreduce_t().head_segmented_reduce(value, value, flag, storage[warp_id]);
+
+            d_output[i] = value;
+        }
+    );
+    d_output.synchronize();
+
+    for(size_t i = 0; i < output.size(); i++)
+    {
+        if(flags[i])
+        {
+            auto diff = std::max<type>(std::abs(0.1f * expected[i]), type(0.01f));
+            if(std::is_integral<type>::value) diff = 0;
+            ASSERT_NEAR(output[i], expected[i], diff) << " with index: " << index;
+        }
+    }
+}
+
+TYPED_TEST(RocprimWarpReduceTests, TailSegmentedReduceSum)
+{
+    // logical warp side for warp primitive, execution warp size is always rp::warp_size()
+    using type = typename TestFixture::params::type;
+    using flag_type = unsigned char;
+    constexpr size_t logical_warp_size = TestFixture::params::warp_size;
+    constexpr size_t block_size =
+        rp::detail::is_power_of_two(logical_warp_size)
+            ? rp::max<size_t>(rp::warp_size(), logical_warp_size * 4)
+            : (rp::warp_size()/logical_warp_size) * logical_warp_size;
+    const size_t size = block_size * 4;
+
+    // Given warp size not supported
+    if(logical_warp_size > rp::warp_size())
+    {
+        return;
+    }
+
+    // Generate data
+    std::vector<type> input = test_utils::get_random_data<type>(size, 1, 10); // used for input
+    std::vector<flag_type> flags = test_utils::get_random_data01<flag_type>(size, 0.25f);
+    for(size_t i = logical_warp_size - 1; i < flags.size(); i+= logical_warp_size)
+    {
+        flags[i] = 1;
+    }
+    std::vector<type> output(input.size());
+
+    // Calculate expected results on host
+    std::vector<type> expected(output.size());
+    std::vector<size_t> segment_indexes;
+    size_t segment_index = 0;
+    type reduction;
+    for(size_t i = 0; i < output.size(); i++)
+    {
+        // single value segments
+        if(flags[i])
+        {
+            expected[i] = input[i];
+            segment_indexes.push_back(i);
+        }
+        else
+        {
+            segment_index = i;
+            reduction = input[i];
+            auto next = i + 1;
+            while(next < output.size() && !flags[next])
+            {
+                reduction = reduction + input[next];
+                i++;
+                next++;
+            }
+            i++;
+            expected[segment_index] = reduction + input[i];
+            segment_indexes.push_back(segment_index);
+        }
+    }
+
+    hc::array_view<type, 1> d_input(input.size(), input.data());
+    hc::array_view<flag_type, 1> d_flag(flags.size(), flags.data());
+    hc::array_view<type, 1> d_output(output.size(), output.data());
+    hc::parallel_for_each(
+        hc::extent<1>(input.size()).tile(block_size),
+        [=](hc::tiled_index<1> i) [[hc]]
+        {
+            constexpr unsigned int warps_no = block_size/logical_warp_size;
+            const unsigned int warp_id = rp::detail::logical_warp_id<logical_warp_size>();
+
+            type value = d_input[i];
+            flag_type flag = d_flag[i];
+
+            using wreduce_t = rp::warp_reduce<type, logical_warp_size>;
+            tile_static typename wreduce_t::storage_type storage[warps_no];
+            wreduce_t().tail_segmented_reduce(value, value, flag, storage[warp_id]);
+
+            d_output[i] = value;
+        }
+    );
+    d_output.synchronize();
+
+    for(size_t i = 0; i < segment_indexes.size(); i++)
+    {
+        auto index = segment_indexes[i];
+        auto diff = std::max<type>(std::abs(0.1f * expected[i]), type(0.01f));
+        if(std::is_integral<type>::value) diff = 0;
+        ASSERT_NEAR(output[index], expected[index], diff) << " with index: " << index;
     }
 }
