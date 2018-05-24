@@ -24,10 +24,11 @@
 #include <type_traits>
 
 #include "../../config.hpp"
-#include "../../detail/various.hpp"
-
 #include "../../intrinsics.hpp"
 #include "../../types.hpp"
+#include "../../detail/various.hpp"
+
+#include "warp_segment_bounds.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -70,7 +71,7 @@ public:
         this->reduce(input, output, reduce_op);
     }
 
-    template<class BinaryFunction>
+    template<bool UseAllReduceDummy = UseAllReduce, class BinaryFunction>
     ROCPRIM_DEVICE inline
     void reduce(T input, T& output, unsigned int valid_items, BinaryFunction reduce_op)
     {
@@ -84,7 +85,7 @@ public:
             unsigned int id = detail::logical_lane_id<WarpSize>();
             if (id + offset < valid_items) output = reduce_op(output, value);
         }
-        set_output<UseAllReduce>(output);
+        set_output<UseAllReduceDummy>(output);
     }
 
     template<class BinaryFunction>
@@ -96,7 +97,49 @@ public:
         this->reduce(input, output, valid_items, reduce_op);
     }
 
+    template<class Flag, class BinaryFunction>
+    ROCPRIM_DEVICE inline
+    void head_segmented_reduce(T input, T& output, Flag flag, BinaryFunction reduce_op)
+    {
+        this->segmented_reduce<true>(input, output, flag, reduce_op);
+    }
+
+    template<class Flag, class BinaryFunction>
+    ROCPRIM_DEVICE inline
+    void tail_segmented_reduce(T input, T& output, Flag flag, BinaryFunction reduce_op)
+    {
+        this->segmented_reduce<false>(input, output, flag, reduce_op);
+    }
+
+    template<class Flag, class BinaryFunction>
+    ROCPRIM_DEVICE inline
+    void head_segmented_reduce(T input, T& output, Flag flag,
+                               storage_type& storage, BinaryFunction reduce_op)
+    {
+        (void) storage;
+        this->segmented_reduce<true>(input, output, flag, reduce_op);
+    }
+
+    template<class Flag, class BinaryFunction>
+    ROCPRIM_DEVICE inline
+    void tail_segmented_reduce(T input, T& output, Flag flag,
+                               storage_type& storage, BinaryFunction reduce_op)
+    {
+        (void) storage;
+        this->segmented_reduce<false>(input, output, flag, reduce_op);
+    }
+
 private:
+    template<bool HeadSegmented, class Flag, class BinaryFunction>
+    ROCPRIM_DEVICE inline
+    void segmented_reduce(T input, T& output, Flag flag, BinaryFunction reduce_op)
+    {
+        // Get logical lane id of the last valid value in the segment,
+        // and convert it to number of valid values in segment.
+        auto valid_items_in_segment = last_in_warp_segment<HeadSegmented, WarpSize>(flag) + 1U;
+        this->reduce<false>(input, output, valid_items_in_segment, reduce_op);
+    }
+
     template<bool Switch>
     ROCPRIM_DEVICE inline
     typename std::enable_if<(Switch == false)>::type

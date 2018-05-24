@@ -322,6 +322,28 @@ public:
     {
         base_type::reduce(input, output, valid_items, storage, reduce_op);
     }
+
+    template<class Flag, class BinaryFunction = ::rocprim::plus<T>>
+    ROCPRIM_DEVICE inline
+    void head_segmented_reduce(T input,
+                               T& output,
+                               Flag flag,
+                               storage_type& storage,
+                               BinaryFunction reduce_op = BinaryFunction())
+    {
+        base_type::head_segmented_reduce(input, output, flag, storage, reduce_op);
+    }
+
+    template<class Flag, class BinaryFunction = ::rocprim::plus<T>>
+    ROCPRIM_DEVICE inline
+    void tail_segmented_reduce(T input,
+                               T& output,
+                               Flag flag,
+                               storage_type& storage,
+                               BinaryFunction reduce_op = BinaryFunction())
+    {
+        base_type::tail_segmented_reduce(input, output, flag, storage, reduce_op);
+    }
 };
 
 END_ROCPRIM_NAMESPACE
