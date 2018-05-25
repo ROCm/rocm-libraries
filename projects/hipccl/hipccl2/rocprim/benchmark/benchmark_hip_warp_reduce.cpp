@@ -51,65 +51,105 @@
   }
 
 #ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 128;
+const size_t DEFAULT_N = 1024 * 1024 * 32;
 #endif
 
-namespace rp = rocprim;
-
-struct reduce
+template<
+    bool AllReduce,
+    class T,
+    unsigned int WarpSize,
+    unsigned int Trials
+>
+__global__
+void warp_reduce_kernel(const T * d_input, T * d_output)
 {
-    template<
-        class T,
-        unsigned int WarpSize,
-        unsigned int Trials
-    >
-    __global__
-    static void kernel(const T * d_input, T * d_output)
+    const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+
+    auto value = d_input[i];
+
+    using wreduce_t = rocprim::warp_reduce<T, WarpSize, AllReduce>;
+    __shared__ typename wreduce_t::storage_type storage;
+    #pragma nounroll
+    for(unsigned int trial = 0; trial < Trials; trial++)
     {
-        const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
-
-        auto value = d_input[i];
-
-        using wreduce_t = rp::warp_reduce<T, WarpSize>;
-        __shared__ typename wreduce_t::storage_type storage;
-        #pragma nounroll
-        for(unsigned int trial = 0; trial < Trials; trial++)
-        {
-            wreduce_t().reduce(value, value, storage);
-        }
-
-        d_output[i] = value;
+        wreduce_t().reduce(value, value, storage);
     }
-};
 
-struct all_reduce
-{
-    template<
-        class T,
-        unsigned int WarpSize,
-        unsigned int Trials
-    >
-    __global__
-    static void kernel(const T * d_input, T * d_output)
-    {
-        const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
-
-        auto value = d_input[i];
-
-        using wreduce_t = rp::warp_reduce<T, WarpSize, true>;
-        __shared__ typename wreduce_t::storage_type storage;
-        #pragma nounroll
-        for(unsigned int trial = 0; trial < Trials; trial++)
-        {
-            wreduce_t().reduce(value, value, storage);
-        }
-
-        d_output[i] = value;
-    }
-};
+    d_output[i] = value;
+}
 
 template<
-    class Benchmark,
+    class T,
+    class Flag,
+    unsigned int WarpSize,
+    unsigned int Trials
+>
+__global__
+void segmented_warp_reduce_kernel(const T* d_input, Flag* d_flags, T* d_output)
+{
+    const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+
+    auto value = d_input[i];
+    auto flag = d_flags[i];
+
+    using wreduce_t = rocprim::warp_reduce<T, WarpSize>;
+    __shared__ typename wreduce_t::storage_type storage;
+    #pragma nounroll
+    for(unsigned int trial = 0; trial < Trials; trial++)
+    {
+        wreduce_t().head_segmented_reduce(value, value, flag, storage);
+    }
+
+    d_output[i] = value;
+}
+
+template<
+    bool AllReduce,
+    bool Segmented,
+    unsigned int WarpSize,
+    unsigned int BlockSize,
+    unsigned int Trials,
+    class T,
+    class Flag
+>
+inline
+auto execute_warp_reduce_kernel(T* input, T* output, Flag* /* flags */,
+                                size_t size, hipStream_t stream)
+    -> typename std::enable_if<!Segmented>::type
+{
+    hipLaunchKernelGGL(
+        HIP_KERNEL_NAME(warp_reduce_kernel<AllReduce, T, WarpSize, Trials>),
+        dim3(size/BlockSize), dim3(BlockSize), 0, stream,
+        input, output
+    );
+    HIP_CHECK(hipPeekAtLastError());
+}
+
+template<
+    bool AllReduce,
+    bool Segmented,
+    unsigned int WarpSize,
+    unsigned int BlockSize,
+    unsigned int Trials,
+    class T,
+    class Flag
+>
+inline
+auto execute_warp_reduce_kernel(T* input, T* output, Flag* flags,
+                                size_t size, hipStream_t stream)
+    -> typename std::enable_if<Segmented>::type
+{
+    hipLaunchKernelGGL(
+        HIP_KERNEL_NAME(segmented_warp_reduce_kernel<T, Flag, WarpSize, Trials>),
+        dim3(size/BlockSize), dim3(BlockSize), 0, stream,
+        input, flags, output
+    );
+    HIP_CHECK(hipPeekAtLastError());
+}
+
+template<
+    bool AllReduce,
+    bool Segmented,
     class T,
     unsigned int WarpSize,
     unsigned int BlockSize,
@@ -117,12 +157,17 @@ template<
 >
 void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
 {
+    using flag_type = unsigned char;
+
     const auto size = BlockSize * ((N + BlockSize - 1)/BlockSize);
 
     std::vector<T> input = get_random_data<T>(size, T(0), T(10));
+    std::vector<flag_type> flags = get_random_data<flag_type>(size, 0, 1);
     T * d_input;
+    flag_type * d_flags;
     T * d_output;
     HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
+    HIP_CHECK(hipMalloc(&d_flags, size * sizeof(flag_type)));
     HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
     HIP_CHECK(
         hipMemcpy(
@@ -131,18 +176,21 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
             hipMemcpyHostToDevice
         )
     );
+    HIP_CHECK(
+        hipMemcpy(
+            d_flags, flags.data(),
+            size * sizeof(flag_type),
+            hipMemcpyHostToDevice
+        )
+    );
     HIP_CHECK(hipDeviceSynchronize());
 
     for(auto _ : state)
     {
         auto start = std::chrono::high_resolution_clock::now();
-
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(Benchmark::template kernel<T, WarpSize, Trials>),
-            dim3(size/BlockSize), dim3(BlockSize), 0, stream,
-            d_input, d_output
+        execute_warp_reduce_kernel<AllReduce, Segmented, WarpSize, BlockSize, Trials>(
+            d_input, d_output, d_flags, size, stream
         );
-        HIP_CHECK(hipPeekAtLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         auto end = std::chrono::high_resolution_clock::now();
@@ -155,16 +203,17 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
 
     HIP_CHECK(hipFree(d_input));
     HIP_CHECK(hipFree(d_output));
+    HIP_CHECK(hipFree(d_flags));
 }
 
 #define CREATE_BENCHMARK(T, WS, BS) \
 benchmark::RegisterBenchmark( \
     (std::string("warp_reduce<" #T ", " #WS ", " #BS ">.") + name).c_str(), \
-    run_benchmark<Benchmark, T, WS, BS>, \
+    run_benchmark<AllReduce, Segmented, T, WS, BS>, \
     stream, size \
 )
 
-template<class Benchmark>
+template<bool AllReduce, bool Segmented>
 void add_benchmarks(const std::string& name,
                     std::vector<benchmark::internal::Benchmark*>& benchmarks,
                     hipStream_t stream,
@@ -176,6 +225,8 @@ void add_benchmarks(const std::string& name,
         CREATE_BENCHMARK(int, 64, 64),
         CREATE_BENCHMARK(int, 37, 64),
         CREATE_BENCHMARK(int, 61, 64),
+        CREATE_BENCHMARK(double, 64, 64),
+        CREATE_BENCHMARK(double, 61, 64)
     };
 
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
@@ -203,8 +254,9 @@ int main(int argc, char *argv[])
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_benchmarks<reduce>("reduce", benchmarks, stream, size);
-    add_benchmarks<all_reduce>("all_reduce", benchmarks, stream, size);
+    add_benchmarks<false, false>("reduce", benchmarks, stream, size);
+    add_benchmarks<true, false>("all_reduce", benchmarks, stream, size);
+    add_benchmarks<false, true>("segmented_reduce", benchmarks, stream, size);
 
     // Use manual timing
     for(auto& b : benchmarks)

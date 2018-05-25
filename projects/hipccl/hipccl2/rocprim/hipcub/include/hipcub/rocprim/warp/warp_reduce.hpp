@@ -61,6 +61,22 @@ public:
         return input;
     }
 
+    template<typename FlagT>
+    HIPCUB_DEVICE inline
+    T HeadSegmentedSum(T input, FlagT head_flag)
+    {
+        base_type::head_segmented_reduce(input, input, head_flag, temp_storage_);
+        return input;
+    }
+
+    template<typename FlagT>
+    HIPCUB_DEVICE inline
+    T TailSegmentedSum(T input, FlagT tail_flag)
+    {
+        base_type::tail_segmented_reduce(input, input, tail_flag, temp_storage_);
+        return input;
+    }
+
     template<typename ReduceOp>
     HIPCUB_DEVICE inline
     T Reduce(T input, ReduceOp reduce_op)
@@ -74,6 +90,26 @@ public:
     T Reduce(T input, ReduceOp reduce_op, int valid_items)
     {
         base_type::reduce(input, input, valid_items, temp_storage_, reduce_op);
+        return input;
+    }
+
+    template<typename ReduceOp, typename FlagT>
+    HIPCUB_DEVICE inline
+    T HeadSegmentedReduce(T input, FlagT head_flag, ReduceOp reduce_op)
+    {
+        base_type::head_segmented_reduce(
+            input, input, head_flag, temp_storage_, reduce_op
+        );
+        return input;
+    }
+
+    template<typename ReduceOp, typename FlagT>
+    HIPCUB_DEVICE inline
+    T TailSegmentedReduce(T input, FlagT tail_flag, ReduceOp reduce_op)
+    {
+        base_type::tail_segmented_reduce(
+            input, input, tail_flag, temp_storage_, reduce_op
+        );
         return input;
     }
 };
