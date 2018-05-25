@@ -148,6 +148,12 @@ public:
         // After confirmation from CUB's developers we will most probably change rocPRIM too.
         inclusive_output = scan_op(initial_value, inclusive_output);
     }
+
+    HIPCUB_DEVICE inline
+    T Broadcast(T input, unsigned int src_lane)
+    {
+        return base_type::broadcast(input, src_lane, temp_storage_);
+    }
 };
 
 END_HIPCUB_NAMESPACE
