@@ -28,7 +28,8 @@
 // Google Test
 #include <gtest/gtest.h>
 // HC API
-#include <hcc/hc.hpp>
+#include <hip/hip_runtime.h>
+#include <hip/hip_hcc.h>
 // rocPRIM API
 #include <rocprim/rocprim.hpp>
 
@@ -180,7 +181,7 @@ TYPED_TEST(RocprimBlockSortTests, SortKeyValue)
             output_key.begin() + ((i + 1) * block_size),
             0
         );
-        
+
         std::shuffle(
             output_key.begin() + (i * block_size),
             output_key.begin() + ((i + 1) * block_size),
@@ -301,7 +302,7 @@ TYPED_TEST(RocprimBlockSortTests, CustomSortKeyValue)
             output_key.begin() + ((i + 1) * block_size),
             0
         );
-        
+
         std::shuffle(
             output_key.begin() + (i * block_size),
             output_key.begin() + ((i + 1) * block_size),

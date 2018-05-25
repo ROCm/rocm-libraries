@@ -164,6 +164,16 @@ struct minimum
     }
 };
 
+template<class T>
+struct identity
+{
+    ROCPRIM_HOST_DEVICE inline
+    constexpr T operator()(const T& a) const
+    {
+        return a;
+    }
+};
+
 /// @}
 // end of group utilsmodule_functional
 
