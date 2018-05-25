@@ -30,6 +30,7 @@
 #include "../intrinsics.hpp"
 #include "../functional.hpp"
 #include "../types.hpp"
+#include "../type_traits.hpp"
 
 /// \addtogroup blockmodule
 /// @{
@@ -951,7 +952,7 @@ private:
                    FlagOp flag_op,
                    storage_type& storage)
     {
-        static_assert(std::is_integral<Flag>::value, "Flag must be integral type");
+        static_assert(::rocprim::is_integral<Flag>::value, "Flag must be integral type");
 
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
 
