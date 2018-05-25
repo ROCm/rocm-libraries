@@ -24,10 +24,9 @@
 #include <type_traits>
 
 #include "../../config.hpp"
-#include "../../detail/various.hpp"
-
 #include "../../intrinsics.hpp"
 #include "../../types.hpp"
+#include "../../detail/various.hpp"
 
 #include "warp_reduce_shuffle.hpp"
 
@@ -113,6 +112,44 @@ public:
     {
         (void) storage; // disables unused parameter warning
         this->reduce(input, output, valid_items, reduce_op);
+    }
+
+    template<class Flag, class BinaryFunction>
+    ROCPRIM_DEVICE inline
+    void head_segmented_reduce(T input, T& output, Flag flag, BinaryFunction reduce_op)
+    {
+        // Fallback to shuffle-based implementation
+        warp_reduce_shuffle<T, WarpSize, UseAllReduce>()
+            .head_segmented_reduce(input, output, flag, reduce_op);
+    }
+
+    template<class Flag, class BinaryFunction>
+    ROCPRIM_DEVICE inline
+    void tail_segmented_reduce(T input, T& output, Flag flag, BinaryFunction reduce_op)
+    {
+        // Fallback to shuffle-based implementation
+        warp_reduce_shuffle<T, WarpSize, UseAllReduce>()
+            .tail_segmented_reduce(input, output, flag, reduce_op);
+    }
+
+    template<class Flag, class BinaryFunction>
+    ROCPRIM_DEVICE inline
+    void head_segmented_reduce(T input, T& output, Flag flag,
+                               storage_type& storage, BinaryFunction reduce_op)
+    {
+        // Fallback to shuffle-based implementation
+        warp_reduce_shuffle<T, WarpSize, UseAllReduce>()
+            .head_segmented_reduce(input, output, flag, storage, reduce_op);
+    }
+
+    template<class Flag, class BinaryFunction>
+    ROCPRIM_DEVICE inline
+    void tail_segmented_reduce(T input, T& output, Flag flag,
+                               storage_type& storage, BinaryFunction reduce_op)
+    {
+        // Fallback to shuffle-based implementation
+        warp_reduce_shuffle<T, WarpSize, UseAllReduce>()
+            .tail_segmented_reduce(input, output, flag, storage, reduce_op);
     }
 };
 
