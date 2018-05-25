@@ -24,6 +24,7 @@
 #include <type_traits>
 
 #include "../config.hpp"
+#include "../type_traits.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 namespace detail
@@ -37,7 +38,7 @@ template<class Key, class BitKey, class Enable = void>
 struct radix_key_codec_integral { };
 
 template<class Key, class BitKey>
-struct radix_key_codec_integral<Key, BitKey, typename std::enable_if<std::is_unsigned<Key>::value>::type>
+struct radix_key_codec_integral<Key, BitKey, typename std::enable_if<::rocprim::is_unsigned<Key>::value>::type>
 {
     using bit_key_type = BitKey;
 
@@ -55,7 +56,7 @@ struct radix_key_codec_integral<Key, BitKey, typename std::enable_if<std::is_uns
 };
 
 template<class Key, class BitKey>
-struct radix_key_codec_integral<Key, BitKey, typename std::enable_if<std::is_signed<Key>::value>::type>
+struct radix_key_codec_integral<Key, BitKey, typename std::enable_if<::rocprim::is_signed<Key>::value>::type>
 {
     using bit_key_type = BitKey;
 
@@ -108,7 +109,7 @@ struct radix_key_codec_base
 template<class Key>
 struct radix_key_codec_base<
     Key,
-    typename std::enable_if<std::is_integral<Key>::value && !std::is_same<bool, Key>::value>::type
+    typename std::enable_if<::rocprim::is_integral<Key>::value && !std::is_same<bool, Key>::value>::type
 > : radix_key_codec_integral<Key, typename std::make_unsigned<Key>::type> { };
 
 template<>
