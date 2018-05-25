@@ -49,6 +49,7 @@
     #endif
 #elif defined(ROCPRIM_HIP_API)
     #include <hip/hip_runtime.h>
+    #include <hip/hip_fp16.h>
 
     #ifndef ROCPRIM_DEVICE
         #define ROCPRIM_DEVICE __device__
