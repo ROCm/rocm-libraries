@@ -102,7 +102,7 @@ if(BUILD_BENCHMARK)
   download_project(
     PROJ           googlebenchmark
     GIT_REPOSITORY https://github.com/google/benchmark.git
-    GIT_TAG        master
+    GIT_TAG        v1.4.0
     INSTALL_DIR    ${GOOGLEBENCHMARK_ROOT}
     CMAKE_ARGS     -DCMAKE_BUILD_TYPE=RELEASE -DBENCHMARK_ENABLE_TESTING=OFF -DBUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
     LOG_DOWNLOAD   TRUE
