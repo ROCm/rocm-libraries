@@ -32,6 +32,54 @@
 
 #include "test_utils.hpp"
 
+template<class T>
+struct non_trivial
+{
+    non_trivial() { x = 1; }
+    non_trivial(T x) : x(x) {}
+    ~non_trivial() {}
+
+    non_trivial& operator=(const non_trivial& other)
+    {
+        x = other.x;
+        return *this;
+    }
+
+    non_trivial operator+(const non_trivial& other) const
+    {
+        return non_trivial(x + other.x);
+    }
+
+    non_trivial operator-(const non_trivial& other) const
+    {
+        return non_trivial(x - other.x);
+    }
+
+    bool operator==(const non_trivial& other) const
+    {
+        return (x == other.x);
+    }
+
+    bool operator!=(const non_trivial& other) const
+    {
+        return !(*this == other);
+    }
+
+    bool operator==(const T& value) const
+    {
+        return (x == value);
+    }
+
+    bool operator!=(const T& value) const
+    {
+        return !(*this == value);
+    }
+
+    T x;
+};
+
+using non_trivial_int = non_trivial<int>;
+
 TEST(RocprimTupleTests, IntegerSequence)
 {
     ASSERT_TRUE((
@@ -114,6 +162,9 @@ TEST(RocprimTupleTests, TupleConstructors)
 
     const rocprim::tuple<float, unsigned int> ct1(1.0f, 2U);
     rocprim::tuple<double, unsigned int> ct2(ct1);
+
+    rocprim::tuple<non_trivial_int> nt_ct1; (void) nt_ct1;
+    rocprim::tuple<non_trivial_int> nt_ct2(non_trivial_int(1)); (void) nt_ct2;
 }
 
 struct empty1
@@ -159,6 +210,13 @@ TEST(RocprimTupleTests, TupleGetIndex)
     using type = rocprim::tuple<int, double>;
     ASSERT_EQ(rocprim::get<0>(type()), 0);
     ASSERT_EQ(rocprim::get<1>(type(1, 2)), 2);
+
+    // non-trivial
+    rocprim::tuple<non_trivial_int, non_trivial_int> nt1(
+        non_trivial_int(1), non_trivial_int(2)
+    );
+    ASSERT_EQ(rocprim::get<0>(nt1), 1);
+    ASSERT_EQ(rocprim::get<1>(nt1), 2);
 }
 
 TEST(RocprimTupleTests, TupleAssignOperator)
@@ -226,6 +284,15 @@ TEST(RocprimTupleTests, TupleAssignOperator)
     t13 = std::move(t10);
     ASSERT_EQ(rocprim::get<0>(t13), float(1));
     ASSERT_EQ(rocprim::get<1>(t13), double(2));
+
+    // non-trivial
+    rocprim::tuple<non_trivial_int, non_trivial_int> nt1(
+        non_trivial_int(1), non_trivial_int(2)
+    );
+    rocprim::tuple<non_trivial_int, non_trivial_int> nt2;
+    nt2 = nt1;
+    ASSERT_EQ(rocprim::get<0>(nt2), 1);
+    ASSERT_EQ(rocprim::get<1>(nt2), 2);
 }
 
 TEST(RocprimTupleTests, TupleComparisonOperators)

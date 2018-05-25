@@ -375,6 +375,10 @@ struct tuple_value<I, T, true> : private T
     }
 };
 
+template <class... Types>
+ROCPRIM_HOST_DEVICE inline
+void swallow(Types&&...) noexcept {}
+
 template<class Sequences, class... Types>
 struct tuple_impl;
 
@@ -456,10 +460,10 @@ struct tuple_impl<::rocprim::index_sequence<Indices...>, Types...>
     ROCPRIM_HOST_DEVICE inline
     tuple_impl& operator=(const tuple_impl& other) noexcept
     {
-        [](...){}(
-            (tuple_value<Indices, Types>::operator=(
+        swallow(
+            tuple_value<Indices, Types>::operator=(
                 static_cast<const tuple_value<Indices, Types>&>(other).get()
-            ))...
+            )...
         );
         return *this;
     }
@@ -467,10 +471,10 @@ struct tuple_impl<::rocprim::index_sequence<Indices...>, Types...>
     ROCPRIM_HOST_DEVICE inline
     tuple_impl& operator=(tuple_impl&& other) noexcept
     {
-        [](...){}(
-            (tuple_value<Indices, Types>::operator=(
+        swallow(
+            tuple_value<Indices, Types>::operator=(
                 static_cast<tuple_value<Indices, Types>&>(other).get()
-            ))...
+            )...
         );
         return *this;
     }
@@ -479,11 +483,7 @@ struct tuple_impl<::rocprim::index_sequence<Indices...>, Types...>
     ROCPRIM_HOST_DEVICE inline
     tuple_impl& operator=(const ::rocprim::tuple<UTypes...>& other) noexcept
     {
-        [](...){}(
-            (tuple_value<Indices, Types>::operator=(
-                ::rocprim::get<Indices>(other)
-            ))...
-        );
+        swallow(tuple_value<Indices, Types>::operator=(::rocprim::get<Indices>(other))...);
         return *this;
     }
 
@@ -491,10 +491,10 @@ struct tuple_impl<::rocprim::index_sequence<Indices...>, Types...>
     ROCPRIM_HOST_DEVICE inline
     tuple_impl& operator=(::rocprim::tuple<UTypes...>&& other) noexcept
     {
-        [](...){}(
-            (tuple_value<Indices, Types>::operator=(
+        swallow(
+            tuple_value<Indices, Types>::operator=(
                 ::rocprim::get<Indices>(std::move(other))
-            ))...
+            )...
         );
         return *this;
     }
@@ -502,7 +502,7 @@ struct tuple_impl<::rocprim::index_sequence<Indices...>, Types...>
     ROCPRIM_HOST_DEVICE inline
     tuple_impl& swap(tuple_impl& other) noexcept
     {
-        [](...){}(
+        swallow(
             (static_cast<tuple_value<Indices, Types>&>(*this).swap(
                 static_cast<tuple_value<Indices, Types>&>(other)
             ), 0)...
