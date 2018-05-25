@@ -18,3 +18,12 @@
  * \defgroup utilsmodule_tuple Tuple
  * \ingroup utilsmodule
  */
+
+ /**
+ * \defgroup utilsmodule_typetraits Type Traits
+ * \ingroup utilsmodule
+ * @{
+ *      Selected type traits known from standard C++ library which
+ *      include half-precision floating point type (rocprim::half).
+ * @}
+ */
