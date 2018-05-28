@@ -115,6 +115,13 @@ struct empty_type
 
 };
 
+/// \brief Half-precision floating point type
+#ifdef ROCPRIM_HC_API
+    using half = ::hc::half;
+#else // HIP
+    using half = ::__half;
+#endif
+
 END_ROCPRIM_NAMESPACE
 
 /// @}

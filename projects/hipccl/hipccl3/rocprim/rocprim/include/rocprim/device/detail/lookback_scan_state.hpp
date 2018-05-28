@@ -25,6 +25,7 @@
 
 #include "../../intrinsics.hpp"
 #include "../../types.hpp"
+#include "../../type_traits.hpp"
 
 #include "../../warp/detail/warp_reduce_crosslane.hpp"
 #include "../../warp/detail/warp_scan_crosslane.hpp"
@@ -61,7 +62,7 @@ enum prefix_flag
 // is_arithmetic - arithmetic types up to 8 bytes have separate faster
 // and simpler implementation. See below.
 // TODO: consider other types that can be loaded in single op.
-template<class T, bool is_arithmetic = std::is_arithmetic<T>::value>
+template<class T, bool is_arithmetic = ::rocprim::is_arithmetic<T>::value>
 struct lookback_scan_state;
 
 // Flag and prefix value are load/store in one operation. Volatile

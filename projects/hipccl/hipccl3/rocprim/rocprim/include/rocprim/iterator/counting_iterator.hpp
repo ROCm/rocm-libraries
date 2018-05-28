@@ -27,6 +27,7 @@
 #include <type_traits>
 
 #include "../config.hpp"
+#include "../type_traits.hpp"
 
 /// \addtogroup iteratormodule
 /// @{
@@ -213,7 +214,7 @@ private:
     template<class T>
     inline
     auto equal_value(const T& x, const T& y) const
-        -> typename std::enable_if<std::is_floating_point<T>::value, bool>::type
+        -> typename std::enable_if<::rocprim::is_floating_point<T>::value, bool>::type
     {
         return difference_type(y) - difference_type(x) == 0;
     }
@@ -221,7 +222,7 @@ private:
     template<class T>
     inline
     auto equal_value(const T& x, const T& y) const
-        -> typename std::enable_if<!std::is_floating_point<T>::value, bool>::type
+        -> typename std::enable_if<!::rocprim::is_floating_point<T>::value, bool>::type
     {
         return (x == y);
     }

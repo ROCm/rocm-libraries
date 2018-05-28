@@ -26,6 +26,7 @@
 
 #include "../config.hpp"
 #include "../functional.hpp"
+#include "../type_traits.hpp"
 #include "../detail/various.hpp"
 
 #include "detail/device_scan_reduce_then_scan.hpp"
@@ -396,7 +397,7 @@ void inclusive_scan(void * temporary_storage,
     #endif
 
     // Lookback scan has problems with types that are not arithmetic
-    if(std::is_arithmetic<result_type>::value)
+    if(::rocprim::is_arithmetic<result_type>::value)
     {
         constexpr unsigned int block_size = 256;
         constexpr unsigned int items_per_thread =
@@ -531,7 +532,7 @@ void exclusive_scan(void * temporary_storage,
     #endif
 
     // Lookback scan has problems with types that are not arithmetic
-    if(std::is_arithmetic<result_type>::value)
+    if(::rocprim::is_arithmetic<result_type>::value)
     {
         constexpr unsigned int block_size = 256;
         constexpr unsigned int items_per_thread =

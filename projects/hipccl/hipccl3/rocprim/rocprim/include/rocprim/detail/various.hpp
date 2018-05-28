@@ -25,6 +25,7 @@
 
 #include "../config.hpp"
 #include "../types.hpp"
+#include "../type_traits.hpp"
 
 // TODO: Refactor when it gets crowded
 
@@ -41,7 +42,7 @@ template<class T>
 ROCPRIM_HOST_DEVICE inline
 constexpr bool is_power_of_two(const T x)
 {
-    static_assert(std::is_integral<T>::value, "T must be integer type");
+    static_assert(::rocprim::is_integral<T>::value, "T must be integer type");
     return (x > 0) && ((x & (x - 1)) == 0);
 }
 
@@ -49,14 +50,14 @@ template<class T>
 ROCPRIM_HOST_DEVICE inline
 constexpr T next_power_of_two(const T x, const T acc = 1)
 {
-    static_assert(std::is_unsigned<T>::value, "T must be unsigned type");
+    static_assert(::rocprim::is_unsigned<T>::value, "T must be unsigned type");
     return acc >= x ? acc : next_power_of_two(x, 2 * acc);
 }
 
 template<class T>
 ROCPRIM_HOST_DEVICE inline
 constexpr auto ceiling_div(T a, T b)
-    -> typename std::enable_if<std::is_integral<T>::value, T>::type
+    -> typename std::enable_if<::rocprim::is_integral<T>::value, T>::type
 {
     return (a + b - 1) / b;
 }
@@ -73,7 +74,7 @@ template<class T>
 ROCPRIM_HOST_DEVICE inline
 constexpr T get_min_warp_size(const T block_size, const T max_warp_size)
 {
-    static_assert(std::is_unsigned<T>::value, "T must be unsigned type");
+    static_assert(::rocprim::is_unsigned<T>::value, "T must be unsigned type");
     return block_size >= max_warp_size ? max_warp_size : next_power_of_two(block_size);
 }
 
@@ -156,7 +157,7 @@ struct match_fundamental_type
 template<class T>
 ROCPRIM_DEVICE inline
 auto store_volatile(T * output, T value)
-    -> typename std::enable_if<std::is_fundamental<T>::value>::type
+    -> typename std::enable_if<::rocprim::is_fundamental<T>::value>::type
 {
     *const_cast<volatile T*>(output) = value;
 }
@@ -164,7 +165,7 @@ auto store_volatile(T * output, T value)
 template<class T>
 ROCPRIM_DEVICE inline
 auto store_volatile(T * output, T value)
-    -> typename std::enable_if<!std::is_fundamental<T>::value>::type
+    -> typename std::enable_if<!::rocprim::is_fundamental<T>::value>::type
 {
     using fundamental_type = typename match_fundamental_type<T>::type;
     constexpr unsigned int n = sizeof(T) / sizeof(fundamental_type);
@@ -182,7 +183,7 @@ auto store_volatile(T * output, T value)
 template<class T>
 ROCPRIM_DEVICE inline
 auto load_volatile(T * input)
-    -> typename std::enable_if<std::is_fundamental<T>::value, T>::type
+    -> typename std::enable_if<::rocprim::is_fundamental<T>::value, T>::type
 {
     T retval = *const_cast<volatile T*>(input);
     return retval;
@@ -191,7 +192,7 @@ auto load_volatile(T * input)
 template<class T>
 ROCPRIM_DEVICE inline
 auto load_volatile(T * input)
-    -> typename std::enable_if<!std::is_fundamental<T>::value, T>::type
+    -> typename std::enable_if<!::rocprim::is_fundamental<T>::value, T>::type
 {
     using fundamental_type = typename match_fundamental_type<T>::type;
     constexpr unsigned int n = sizeof(T) / sizeof(fundamental_type);
