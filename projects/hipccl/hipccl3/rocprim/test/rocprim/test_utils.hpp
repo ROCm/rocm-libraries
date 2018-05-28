@@ -79,7 +79,7 @@ struct custom_test_type
     T y;
 
     ROCPRIM_HOST_DEVICE inline
-    custom_test_type() = default;
+    custom_test_type() {}
 
     ROCPRIM_HOST_DEVICE inline
     custom_test_type(T x, T y) : x(x), y(y) {}
@@ -88,7 +88,7 @@ struct custom_test_type
     custom_test_type(T xy) : x(xy), y(xy) {}
 
     ROCPRIM_HOST_DEVICE inline
-    ~custom_test_type() = default;
+    ~custom_test_type() {}
 
     ROCPRIM_HOST_DEVICE inline
     custom_test_type& operator=(const custom_test_type& other)
