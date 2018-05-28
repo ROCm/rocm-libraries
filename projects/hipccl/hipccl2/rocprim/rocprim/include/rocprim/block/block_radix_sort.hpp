@@ -141,13 +141,15 @@ class block_bit_plus_scan
 
 public:
 
-    struct storage_type
+    struct storage_type_
     {
         T warp_prefixes[warps_no];
         // ---------- Shared memory optimisation ----------
         // Since we use warp_scan_crosslane for warp scan, we don't need to allocate
         // any temporary memory for it.
     };
+
+    using storage_type = detail::raw_storage<storage_type_>;
 
     template<unsigned int ItemsPerThread>
     ROCPRIM_DEVICE inline
@@ -158,6 +160,7 @@ public:
     {
         const unsigned int lane_id = ::rocprim::lane_id();
         const unsigned int warp_id = ::rocprim::warp_id();
+        storage_type_& storage_ = storage.get();
 
         T warp_reduction;
         warp_bit_plus_reduce(input[0], warp_reduction);
@@ -169,7 +172,7 @@ public:
         }
         if(lane_id == 0)
         {
-            storage.warp_prefixes[warp_id] = warp_reduction;
+            storage_.warp_prefixes[warp_id] = warp_reduction;
         }
         ::rocprim::syncthreads();
 
@@ -178,9 +181,9 @@ public:
         {
             if(lane_id < warps_no)
             {
-                T prefix = storage.warp_prefixes[lane_id];
+                T prefix = storage_.warp_prefixes[lane_id];
                 warp_scan_prefix_type().inclusive_scan(prefix, prefix, ::rocprim::plus<T>());
-                storage.warp_prefixes[lane_id] = prefix;
+                storage_.warp_prefixes[lane_id] = prefix;
             }
         }
         ::rocprim::syncthreads();
@@ -198,14 +201,14 @@ public:
         // Scan the lane's items and calculate final scan results
         output[0] = warp_id == 0
             ? lane_prefix
-            : lane_prefix + storage.warp_prefixes[warp_id - 1];
+            : lane_prefix + storage_.warp_prefixes[warp_id - 1];
         for(unsigned int i = 1; i < ItemsPerThread; i++)
         {
             output[i] = output[i - 1] + input[i - 1];
         }
 
         // Get the final inclusive reduction result
-        reduction = storage.warp_prefixes[warps_no - 1];
+        reduction = storage_.warp_prefixes[warps_no - 1];
     }
 };
 
@@ -304,6 +307,17 @@ class block_radix_sort
     using bit_keys_exchange_type = ::rocprim::block_exchange<bit_key_type, BlockSize, ItemsPerThread>;
     using values_exchange_type = ::rocprim::block_exchange<Value, BlockSize, ItemsPerThread>;
 
+    // Struct used for creating a raw_storage object for this primitive's temporary storage.
+    struct storage_type_
+    {
+        union
+        {
+            typename bit_keys_exchange_type::storage_type bit_keys_exchange;
+            typename values_exchange_type::storage_type values_exchange;
+        };
+        typename bit_block_scan::storage_type bit_block_scan;
+    };
+
 public:
 
     /// \brief Struct used to allocate a temporary memory that is required for thread
@@ -315,15 +329,7 @@ public:
     /// an externally allocated memory, or be a part of a union type with other storage types
     /// to increase shared memory reusability.
     #ifndef DOXYGEN_SHOULD_SKIP_THIS // hides storage_type implementation for Doxygen
-    struct storage_type
-    {
-        union
-        {
-            typename bit_keys_exchange_type::storage_type bit_keys_exchange;
-            typename values_exchange_type::storage_type values_exchange;
-        };
-        typename bit_block_scan::storage_type bit_block_scan;
-    };
+    using storage_type = detail::raw_storage<storage_type_>;
     #else
     using storage_type = storage_type_; // only for Doxygen
     #endif
@@ -1175,6 +1181,7 @@ private:
                    unsigned int end_bit)
     {
         using key_codec = ::rocprim::detail::radix_key_codec<Key, Descending>;
+        storage_type_& storage_ = storage.get();
 
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
 
@@ -1202,7 +1209,7 @@ private:
                     banks[i][r] = radix == r;
                 }
             }
-            bit_block_scan().exclusive_scan(banks, positions, counts, storage.bit_block_scan);
+            bit_block_scan().exclusive_scan(banks, positions, counts, storage_.bit_block_scan);
 
             // Prefix sum of counts to compute starting positions of keys of each radix value
             buckets starts;
@@ -1254,8 +1261,9 @@ private:
                        bit_key_type (&bit_keys)[ItemsPerThread],
                        const unsigned int (&ranks)[ItemsPerThread])
     {
+        storage_type_& storage_ = storage.get();
         // Synchronization is omitted here because bit_block_scan already calls it
-        bit_keys_exchange_type().scatter_to_blocked(bit_keys, bit_keys, ranks, storage.bit_keys_exchange);
+        bit_keys_exchange_type().scatter_to_blocked(bit_keys, bit_keys, ranks, storage_.bit_keys_exchange);
     }
 
     template<class SortedValue>
@@ -1264,9 +1272,10 @@ private:
                          SortedValue * values,
                          const unsigned int (&ranks)[ItemsPerThread])
     {
+        storage_type_& storage_ = storage.get();
         ::rocprim::syncthreads(); // Storage will be reused (union), synchronization is needed
         SortedValue (&vs)[ItemsPerThread] = *reinterpret_cast<SortedValue (*)[ItemsPerThread]>(values);
-        values_exchange_type().scatter_to_blocked(vs, vs, ranks, storage.values_exchange);
+        values_exchange_type().scatter_to_blocked(vs, vs, ranks, storage_.values_exchange);
     }
 
     ROCPRIM_DEVICE inline
@@ -1283,8 +1292,9 @@ private:
     void to_striped_keys(storage_type& storage,
                          bit_key_type (&bit_keys)[ItemsPerThread])
     {
+        storage_type_& storage_ = storage.get();
         ::rocprim::syncthreads();
-        bit_keys_exchange_type().blocked_to_striped(bit_keys, bit_keys, storage.bit_keys_exchange);
+        bit_keys_exchange_type().blocked_to_striped(bit_keys, bit_keys, storage_.bit_keys_exchange);
     }
 
     template<class SortedValue>
@@ -1292,9 +1302,10 @@ private:
     void to_striped_values(storage_type& storage,
                            SortedValue * values)
     {
+        storage_type_& storage_ = storage.get();
         ::rocprim::syncthreads(); // Storage will be reused (union), synchronization is needed
         SortedValue (&vs)[ItemsPerThread] = *reinterpret_cast<SortedValue (*)[ItemsPerThread]>(values);
-        values_exchange_type().blocked_to_striped(vs, vs, storage.values_exchange);
+        values_exchange_type().blocked_to_striped(vs, vs, storage_.values_exchange);
     }
 
     ROCPRIM_DEVICE inline

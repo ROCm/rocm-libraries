@@ -40,11 +40,12 @@ template<
 >
 class warp_scan_shared_mem
 {
-public:
-    struct storage_type
+    struct storage_type_
     {
         T threads[WarpSize];
     };
+public:
+    using storage_type = detail::raw_storage<storage_type_>;
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE inline
@@ -52,16 +53,17 @@ public:
                         storage_type& storage, BinaryFunction scan_op)
     {
         const unsigned int lid = detail::logical_lane_id<WarpSize>();
+        storage_type_& storage_ = storage.get();
 
         T me = input;
-        store_volatile(&storage.threads[lid], me);
+        store_volatile(&storage_.threads[lid], me);
         for(unsigned int i = 1; i < WarpSize; i *= 2)
         {
             if(lid >= i)
             {
-                T other = load_volatile(&storage.threads[lid - i]);
+                T other = load_volatile(&storage_.threads[lid - i]);
                 me = scan_op(other, me);
-                store_volatile(&storage.threads[lid], me);
+                store_volatile(&storage_.threads[lid], me);
             }
         }
         output = me;
@@ -72,8 +74,9 @@ public:
     void inclusive_scan(T input, T& output, T& reduction,
                         storage_type& storage, BinaryFunction scan_op)
     {
+        storage_type_& storage_ = storage.get();
         inclusive_scan(input, output, storage, scan_op);
-        reduction = load_volatile(&storage.threads[WarpSize - 1]);
+        reduction = load_volatile(&storage_.threads[WarpSize - 1]);
     }
 
     template<class BinaryFunction>
@@ -99,8 +102,9 @@ public:
     void exclusive_scan(T input, T& output, T init, T& reduction,
                         storage_type& storage, BinaryFunction scan_op)
     {
+        storage_type_& storage_ = storage.get();
         inclusive_scan(input, output, storage, scan_op);
-        reduction = load_volatile(&storage.threads[WarpSize - 1]);
+        reduction = load_volatile(&storage_.threads[WarpSize - 1]);
         to_exclusive(output, init, storage, scan_op);
     }
 
@@ -127,19 +131,21 @@ public:
     void scan(T input, T& inclusive_output, T& exclusive_output, T init, T& reduction,
               storage_type& storage, BinaryFunction scan_op)
     {
+        storage_type_& storage_ = storage.get();
         inclusive_scan(input, inclusive_output, storage, scan_op);
-        reduction = load_volatile(&storage.threads[WarpSize - 1]);
+        reduction = load_volatile(&storage_.threads[WarpSize - 1]);
         to_exclusive(exclusive_output, init, storage, scan_op);
     }
 
     ROCPRIM_DEVICE inline
     T broadcast(T input, const unsigned int src_lane, storage_type& storage)
     {
+        storage_type_& storage_ = storage.get();
         if(src_lane == detail::logical_lane_id<WarpSize>())
         {
-            store_volatile(&storage.threads[src_lane], input);
+            store_volatile(&storage_.threads[src_lane], input);
         }
-        return load_volatile(&storage.threads[src_lane]);
+        return load_volatile(&storage_.threads[src_lane]);
     }
 
 protected:
@@ -158,10 +164,11 @@ private:
                       storage_type& storage, BinaryFunction scan_op)
     {
         const unsigned int lid = detail::logical_lane_id<WarpSize>();
+        storage_type_& storage_ = storage.get();
         exclusive_output = init;
         if(lid != 0)
         {
-            exclusive_output = scan_op(init, load_volatile(&storage.threads[lid-1]));
+            exclusive_output = scan_op(init, load_volatile(&storage_.threads[lid-1]));
         }
     }
 
@@ -169,9 +176,10 @@ private:
     void to_exclusive(T& exclusive_output, storage_type& storage)
     {
         const unsigned int lid = detail::logical_lane_id<WarpSize>();
+        storage_type_& storage_ = storage.get();
         if(lid != 0)
         {
-            exclusive_output = load_volatile(&storage.threads[lid-1]);
+            exclusive_output = load_volatile(&storage_.threads[lid-1]);
         }
     }
 };

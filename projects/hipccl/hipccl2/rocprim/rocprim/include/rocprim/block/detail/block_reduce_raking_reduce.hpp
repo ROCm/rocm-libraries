@@ -53,13 +53,14 @@ class block_reduce_raking_reduce
     // BlockSize is multiple of hardware warp
     static constexpr bool block_size_smaller_than_warp_size_ = (BlockSize < warp_size_);
     using warp_reduce_prefix_type = ::rocprim::detail::warp_reduce_crosslane<T, warp_size_, false>;
-
-public:
-
-    struct storage_type
+    
+    struct storage_type_
     {
         T threads[BlockSize];
     };
+
+public:
+    using storage_type = detail::raw_storage<storage_type_>;
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE inline
@@ -153,17 +154,18 @@ private:
                      storage_type& storage,
                      BinaryFunction reduce_op)
     {
-        storage.threads[flat_tid] = input;
+        storage_type_& storage_ = storage.get();
+        storage_.threads[flat_tid] = input;
         ::rocprim::syncthreads();
 
         if (flat_tid < warp_size_)
         {
-            T thread_reduction = storage.threads[flat_tid];
+            T thread_reduction = storage_.threads[flat_tid];
             #pragma unroll
             for(unsigned int i = warp_size_ + flat_tid; i < BlockSize; i += warp_size_)
             {
                 thread_reduction = reduce_op(
-                    thread_reduction, storage.threads[i]
+                    thread_reduction, storage_.threads[i]
                 );
             }
             warp_reduce<block_size_smaller_than_warp_size_, warp_reduce_prefix_type>(
@@ -208,17 +210,18 @@ private:
                      storage_type& storage,
                      BinaryFunction reduce_op)
     {
-        storage.threads[flat_tid] = input;
+        storage_type_& storage_ = storage.get();
+        storage_.threads[flat_tid] = input;
         ::rocprim::syncthreads();
 
         if (flat_tid < warp_size_)
         {
-            T thread_reduction = storage.threads[flat_tid];
+            T thread_reduction = storage_.threads[flat_tid];
             #pragma unroll
             for(unsigned int i = warp_size_ + flat_tid; i < BlockSize; i += warp_size_)
             {
                 thread_reduction = (i < valid_items) ? reduce_op(
-                    thread_reduction, storage.threads[i]
+                    thread_reduction, storage_.threads[i]
                 ) : thread_reduction;
             }
             warp_reduce_prefix_type().reduce(thread_reduction, output, valid_items, reduce_op);

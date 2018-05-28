@@ -43,21 +43,21 @@ template<
 >
 class block_sort_bitonic
 {
-public:
     template<class KeyType, class ValueType>
-    struct storage
+    struct storage_type_
     {
         KeyType key[BlockSize];
         ValueType value[BlockSize];
     };
 
     template<class KeyType>
-    struct storage<KeyType, empty_type>
+    struct storage_type_<KeyType, empty_type>
     {
         KeyType key[BlockSize];
     };
 
-    using storage_type = storage<Key, Value>;
+public:
+    using storage_type = detail::raw_storage<storage_type_<Key, Value>>;
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE inline
@@ -138,15 +138,17 @@ private:
     ROCPRIM_DEVICE inline
     void copy_to_shared(Key& k, const unsigned int flat_tid, storage_type& storage)
     {
-        storage.key[flat_tid] = k;
+        storage_type_<Key, Value>& storage_ = storage.get();
+        storage_.key[flat_tid] = k;
         ::rocprim::syncthreads();
     }
 
     ROCPRIM_DEVICE inline
     void copy_to_shared(Key& k, Value& v, const unsigned int flat_tid, storage_type& storage)
     {
-        storage.key[flat_tid] = k;
-        storage.value[flat_tid] = v;
+        storage_type_<Key, Value>& storage_ = storage.get();
+        storage_.key[flat_tid] = k;
+        storage_.value[flat_tid] = v;
         ::rocprim::syncthreads();
     }
 
@@ -159,7 +161,8 @@ private:
               storage_type& storage,
               BinaryFunction compare_function)
     {
-        Key next_key = storage.key[next_id];
+        storage_type_<Key, Value>& storage_ = storage.get();
+        Key next_key = storage_.key[next_id];
         bool compare = compare_function(next_key, key);
         bool swap = compare ^ (next_id < flat_tid) ^ dir;
         key = swap ? next_key : key;
@@ -175,8 +178,9 @@ private:
               storage_type& storage,
               BinaryFunction compare_function)
     {
-        Key next_key = storage.key[next_id];
-        Value next_value = storage.value[next_id];
+        storage_type_<Key, Value>& storage_ = storage.get();
+        Key next_key = storage_.key[next_id];
+        Value next_value = storage_.value[next_id];
         bool compare = compare_function(next_key, key);
         bool swap = compare ^ (next_id < flat_tid) ^ dir;
         key = swap ? next_key : key;
