@@ -209,6 +209,23 @@ auto load_volatile(T * input)
     return retval;
 }
 
+// A storage-backing wrapper that allows types with non-trivial constructors to be aliased in unions
+template <typename T>
+struct raw_storage
+{
+    // Biggest memory-access word that T is a whole multiple of and is not larger than the alignment of T
+    typedef typename detail::match_fundamental_type<T>::type device_word;
+
+    // Backing storage
+    device_word storage[sizeof(T) / sizeof(device_word)];
+
+    // Alias
+    ROCPRIM_HOST_DEVICE T& get()
+    {
+        return reinterpret_cast<T&>(*this);
+    }
+};
+
 } // end namespace detail
 END_ROCPRIM_NAMESPACE
 

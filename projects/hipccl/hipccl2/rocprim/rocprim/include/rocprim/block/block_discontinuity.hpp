@@ -146,6 +146,7 @@ template<
 >
 class block_discontinuity
 {
+    // Struct used for creating a raw_storage object for this primitive's temporary storage.
     struct storage_type_
     {
         T first_items[BlockSize];
@@ -162,7 +163,11 @@ public:
     /// using keywords <tt>__shared__</tt> in HIP or \p tile_static in HC. It can be aliased to
     /// an externally allocated memory, or be a part of a union type with other storage types
     /// to increase shared memory reusability.
-    using storage_type = storage_type_;
+    #ifndef DOXYGEN_SHOULD_SKIP_THIS // hides storage_type implementation for Doxygen
+    using storage_type = detail::raw_storage<storage_type_>;
+    #else
+    using storage_type = storage_type_; 
+    #endif
 
     /// \brief Tags \p head_flags that indicate discontinuities between items partitioned
     /// across the thread block, where the first item has no reference and is always
@@ -955,7 +960,7 @@ private:
         static_assert(::rocprim::is_integral<Flag>::value, "Flag must be integral type");
 
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
-
+        storage_type_& storage_ = storage.get();
         // Copy input items for rare cases when input and head_flags/tail_flags are the same arrays
         // (in other cases it does not affect performance)
         T items[ItemsPerThread];
@@ -966,11 +971,11 @@ private:
 
         if(WithHeads)
         {
-            storage.last_items[flat_id] = items[ItemsPerThread - 1];
+            storage_.last_items[flat_id] = items[ItemsPerThread - 1];
         }
         if(WithTails)
         {
-            storage.first_items[flat_id] = items[0];
+            storage_.first_items[flat_id] = items[0];
         }
         ::rocprim::syncthreads();
 
@@ -980,14 +985,14 @@ private:
             {
                 const T predecessor_item = (flat_id == 0)
                     ? tile_predecessor_item
-                    : storage.last_items[flat_id - 1];
+                    : storage_.last_items[flat_id - 1];
                 head_flags[0] = detail::apply(flag_op, predecessor_item, items[0], flat_id * ItemsPerThread);
             }
             else
             {
                 head_flags[0] = (flat_id == 0)
                     ? Flag(true) // The first item in the block is always flagged
-                    : detail::apply(flag_op, storage.last_items[flat_id - 1], items[0], flat_id * ItemsPerThread);
+                    : detail::apply(flag_op, storage_.last_items[flat_id - 1], items[0], flat_id * ItemsPerThread);
             }
 
             for(unsigned int i = 1; i < ItemsPerThread; i++)
@@ -1006,7 +1011,7 @@ private:
             {
                 const T successor_item = (flat_id == BlockSize - 1)
                     ? tile_successor_item
-                    : storage.first_items[flat_id + 1];
+                    : storage_.first_items[flat_id + 1];
                 tail_flags[ItemsPerThread - 1] = detail::apply(
                     flag_op, items[ItemsPerThread - 1], successor_item,
                     flat_id * ItemsPerThread + ItemsPerThread
@@ -1017,7 +1022,7 @@ private:
                 tail_flags[ItemsPerThread - 1] = (flat_id == BlockSize - 1)
                     ? Flag(true) // The last item in the block is always flagged
                     : detail::apply(
-                        flag_op, items[ItemsPerThread - 1], storage.first_items[flat_id + 1],
+                        flag_op, items[ItemsPerThread - 1], storage_.first_items[flat_id + 1],
                         flat_id * ItemsPerThread + ItemsPerThread
                     );
             }

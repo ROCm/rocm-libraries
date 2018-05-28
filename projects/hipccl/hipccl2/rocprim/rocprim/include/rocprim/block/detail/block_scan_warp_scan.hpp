@@ -57,8 +57,7 @@ class block_scan_warp_scan
     // each warp (scanned carry-outs from warps before it).
     using warp_scan_prefix_type = ::rocprim::detail::warp_scan_crosslane<T, detail::next_power_of_two(warps_no_)>;
 
-public:
-    struct storage_type
+    struct storage_type_
     {
         T warp_prefixes[warps_no_];
         // ---------- Shared memory optimisation ----------
@@ -70,9 +69,12 @@ public:
         //     typename warp_scan_input::storage_type wscan[warps_no_];
         //     typename warp_scan_prefix::storage_type wprefix_scan;
         // };
-        // and use storage.wscan[warp_id] and storage.wprefix_scan when calling
+        // and use storage_.wscan[warp_id] and storage.wprefix_scan when calling
         // warp_scan_input().inclusive_scan(..) and warp_scan_prefix().inclusive_scan(..).
     };
+
+public:
+    using storage_type = detail::raw_storage<storage_type_>;
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE inline
@@ -105,9 +107,10 @@ public:
                         storage_type& storage,
                         BinaryFunction scan_op)
     {
+        storage_type_& storage_ = storage.get();
         this->inclusive_scan(input, output, storage, scan_op);
         // Save reduction result
-        reduction = storage.warp_prefixes[warps_no_ - 1];
+        reduction = storage_.warp_prefixes[warps_no_ - 1];
     }
 
     template<class BinaryFunction>
@@ -131,11 +134,12 @@ public:
     {
         const auto flat_tid = ::rocprim::flat_block_thread_id();
         const auto warp_id = ::rocprim::warp_id();
+        storage_type_& storage_ = storage.get();
         this->inclusive_scan_impl(flat_tid, input, output, storage, scan_op);
-        // Include block prefix (this operation overwrites storage.warp_prefixes[warps_no_ - 1])
+        // Include block prefix (this operation overwrites storage_.warp_prefixes[warps_no_ - 1])
         T block_prefix = this->get_block_prefix(
             flat_tid, warp_id,
-            storage.warp_prefixes[warps_no_ - 1], // block reduction
+            storage_.warp_prefixes[warps_no_ - 1], // block reduction
             prefix_callback_op, storage
         );
         output = scan_op(block_prefix, output);
@@ -197,9 +201,10 @@ public:
                         storage_type& storage,
                         BinaryFunction scan_op)
     {
+        storage_type_& storage_ = storage.get();
         this->inclusive_scan(input, output, storage, scan_op);
         // Save reduction result
-        reduction = storage.warp_prefixes[warps_no_ - 1];
+        reduction = storage_.warp_prefixes[warps_no_ - 1];
     }
 
     template<unsigned int ItemsPerThread, class BinaryFunction>
@@ -225,6 +230,7 @@ public:
                         PrefixCallback& prefix_callback_op,
                         BinaryFunction scan_op)
     {
+        storage_type_& storage_ = storage.get();
         // Reduce thread items
         T thread_input = input[0];
         #pragma unroll
@@ -242,10 +248,10 @@ public:
             scan_op
         );
 
-        // this operation overwrites storage.warp_prefixes[warps_no_ - 1]
+        // this operation overwrites storage_.warp_prefixes[warps_no_ - 1]
         T block_prefix = this->get_block_prefix(
             flat_tid, ::rocprim::warp_id(),
-            storage.warp_prefixes[warps_no_ - 1], // block reduction
+            storage_.warp_prefixes[warps_no_ - 1], // block reduction
             prefix_callback_op, storage
         );
 
@@ -301,11 +307,12 @@ public:
                         storage_type& storage,
                         BinaryFunction scan_op)
     {
+        storage_type_& storage_ = storage.get();
         this->exclusive_scan(
             input, output, init, storage, scan_op
         );
         // Save reduction result
-        reduction = storage.warp_prefixes[warps_no_ - 1];
+        reduction = storage_.warp_prefixes[warps_no_ - 1];
     }
 
     template<class BinaryFunction>
@@ -332,13 +339,14 @@ public:
     {
         const auto flat_tid = ::rocprim::flat_block_thread_id();
         const auto warp_id = ::rocprim::warp_id();
+        storage_type_& storage_ = storage.get();
         this->exclusive_scan_impl(
             flat_tid, input, output, storage, scan_op
         );
-        // Include block prefix (this operation overwrites storage.warp_prefixes[warps_no_ - 1])
+        // Include block prefix (this operation overwrites storage_.warp_prefixes[warps_no_ - 1])
         T block_prefix = this->get_block_prefix(
             flat_tid, warp_id,
-            storage.warp_prefixes[warps_no_ - 1], // block reduction
+            storage_.warp_prefixes[warps_no_ - 1], // block reduction
             prefix_callback_op, storage
         );
         output = scan_op(block_prefix, output);
@@ -409,9 +417,10 @@ public:
                         storage_type& storage,
                         BinaryFunction scan_op)
     {
+        storage_type_& storage_ = storage.get();
         this->exclusive_scan(input, output, init, storage, scan_op);
         // Save reduction result
-        reduction = storage.warp_prefixes[warps_no_ - 1];
+        reduction = storage_.warp_prefixes[warps_no_ - 1];
     }
 
     template<unsigned int ItemsPerThread, class BinaryFunction>
@@ -438,6 +447,7 @@ public:
                         PrefixCallback& prefix_callback_op,
                         BinaryFunction scan_op)
     {
+        storage_type_& storage_ = storage.get();
         // Reduce thread items
         T thread_input = input[0];
         #pragma unroll
@@ -455,10 +465,10 @@ public:
             scan_op
         );
 
-        // this operation overwrites storage.warp_prefixes[warps_no_ - 1]
+        // this operation overwrites storage_.warp_prefixes[warps_no_ - 1]
         T block_prefix = this->get_block_prefix(
             flat_tid, ::rocprim::warp_id(),
-            storage.warp_prefixes[warps_no_ - 1], // block reduction
+            storage_.warp_prefixes[warps_no_ - 1], // block reduction
             prefix_callback_op, storage
         );
 
@@ -490,20 +500,21 @@ private:
                              BinaryFunction scan_op)
         -> typename std::enable_if<(BlockSize_ > ::rocprim::warp_size())>::type
     {
+        storage_type_& storage_ = storage.get();
         // Perform warp scan
         warp_scan_input_type().inclusive_scan(
             // not using shared mem, see note in storage_type
             input, output, scan_op
         );
 
-        // i-th warp will have its prefix stored in storage.warp_prefixes[i-1]
+        // i-th warp will have its prefix stored in storage_.warp_prefixes[i-1]
         const auto warp_id = ::rocprim::warp_id();
         this->calculate_warp_prefixes(flat_tid, warp_id, output, storage, scan_op);
 
         // Use warp prefix to calculate the final scan results for every thread
         if(warp_id != 0)
         {
-            auto warp_prefix = storage.warp_prefixes[warp_id - 1];
+            auto warp_prefix = storage_.warp_prefixes[warp_id - 1];
             output = scan_op(warp_prefix, output);
         }
     }
@@ -520,6 +531,7 @@ private:
     {
         (void) storage;
         (void) flat_tid;
+        storage_type_& storage_ = storage.get();
         // Perform warp scan
         warp_scan_input_type().inclusive_scan(
             // not using shared mem, see note in storage_type
@@ -528,7 +540,7 @@ private:
 
         if(flat_tid == BlockSize_ - 1)
         {
-            storage.warp_prefixes[0] = output;
+            storage_.warp_prefixes[0] = output;
         }
         ::rocprim::syncthreads();
     }
@@ -544,13 +556,14 @@ private:
                              BinaryFunction scan_op)
         -> typename std::enable_if<(BlockSize_ > ::rocprim::warp_size())>::type
     {
+        storage_type_& storage_ = storage.get();
         // Perform warp scan on input values
         warp_scan_input_type().inclusive_scan(
             // not using shared mem, see note in storage_type
             input, output, scan_op
         );
 
-        // i-th warp will have its prefix stored in storage.warp_prefixes[i-1]
+        // i-th warp will have its prefix stored in storage_.warp_prefixes[i-1]
         const auto warp_id = ::rocprim::warp_id();
         this->calculate_warp_prefixes(flat_tid, warp_id, output, storage, scan_op);
 
@@ -559,7 +572,7 @@ private:
         auto warp_prefix = init;
         if(warp_id != 0)
         {
-            warp_prefix = scan_op(init, storage.warp_prefixes[warp_id-1]);
+            warp_prefix = scan_op(init, storage_.warp_prefixes[warp_id-1]);
         }
 
         // Use warp prefix to calculate the final scan results for every thread
@@ -586,6 +599,7 @@ private:
         (void) flat_tid;
         (void) storage;
         (void) init;
+        storage_type_& storage_ = storage.get();
         // Perform warp scan on input values
         warp_scan_input_type().inclusive_scan(
             // not using shared mem, see note in storage_type
@@ -594,7 +608,7 @@ private:
 
         if(flat_tid == BlockSize_ - 1)
         {
-            storage.warp_prefixes[0] = output;
+            storage_.warp_prefixes[0] = output;
         }
         ::rocprim::syncthreads();
 
@@ -617,13 +631,14 @@ private:
                              BinaryFunction scan_op)
         -> typename std::enable_if<(BlockSize_ > ::rocprim::warp_size())>::type
     {
+        storage_type_& storage_ = storage.get();
         // Perform warp scan on input values
         warp_scan_input_type().inclusive_scan(
             // not using shared mem, see note in storage_type
             input, output, scan_op
         );
 
-        // i-th warp will have its prefix stored in storage.warp_prefixes[i-1]
+        // i-th warp will have its prefix stored in storage_.warp_prefixes[i-1]
         const auto warp_id = ::rocprim::warp_id();
         this->calculate_warp_prefixes(flat_tid, warp_id, output, storage, scan_op);
 
@@ -631,7 +646,7 @@ private:
         T warp_prefix;
         if(warp_id != 0)
         {
-            warp_prefix = storage.warp_prefixes[warp_id - 1];
+            warp_prefix = storage_.warp_prefixes[warp_id - 1];
             output = scan_op(warp_prefix, output);
         }
         output = warp_shuffle_up(output, 1, warp_size_); // shift to get exclusive results
@@ -654,6 +669,7 @@ private:
     {
         (void) flat_tid;
         (void) storage;
+        storage_type_& storage_ = storage.get();
         // Perform warp scan on input values
         warp_scan_input_type().inclusive_scan(
             // not using shared mem, see note in storage_type
@@ -662,13 +678,13 @@ private:
 
         if(flat_tid == BlockSize_ - 1)
         {
-            storage.warp_prefixes[0] = output;
+            storage_.warp_prefixes[0] = output;
         }
         ::rocprim::syncthreads();
         output = warp_shuffle_up(output, 1, warp_size_); // shift to get exclusive results
     }
 
-    // i-th warp will have its prefix stored in storage.warp_prefixes[i-1]
+    // i-th warp will have its prefix stored in storage_.warp_prefixes[i-1]
     template<class BinaryFunction>
     ROCPRIM_DEVICE inline
     void calculate_warp_prefixes(const unsigned int flat_tid,
@@ -677,28 +693,29 @@ private:
                                  storage_type& storage,
                                  BinaryFunction scan_op)
     {
+        storage_type_& storage_ = storage.get();
         // Save the warp reduction result, that is the scan result
         // for last element in each warp
         if(flat_tid == ::rocprim::min((warp_id+1) * warp_size_, BlockSize) - 1)
         {
-            storage.warp_prefixes[warp_id] = inclusive_input;
+            storage_.warp_prefixes[warp_id] = inclusive_input;
         }
         ::rocprim::syncthreads();
 
-        // Scan the warp reduction results and store in storage.warp_prefixes
+        // Scan the warp reduction results and store in storage_.warp_prefixes
         if(flat_tid < warps_no_)
         {
-            auto warp_prefix = storage.warp_prefixes[flat_tid];
+            auto warp_prefix = storage_.warp_prefixes[flat_tid];
             warp_scan_prefix_type().inclusive_scan(
                 // not using shared mem, see note in storage_type
                 warp_prefix, warp_prefix, scan_op
             );
-            storage.warp_prefixes[flat_tid] = warp_prefix;
+            storage_.warp_prefixes[flat_tid] = warp_prefix;
         }
         ::rocprim::syncthreads();
     }
 
-    // THIS OVERWRITES storage.warp_prefixes[warps_no_ - 1]
+    // THIS OVERWRITES storage_.warp_prefixes[warps_no_ - 1]
     template<class PrefixCallback>
     ROCPRIM_DEVICE inline
     T get_block_prefix(const unsigned int flat_tid,
@@ -707,17 +724,18 @@ private:
                        PrefixCallback& prefix_callback_op,
                        storage_type& storage)
     {
+        storage_type_& storage_ = storage.get();
         if(warp_id == 0)
         {
             T block_prefix = prefix_callback_op(reduction);
             if(flat_tid == 0)
             {
-                // Reuse storage.warp_prefixes[warps_no_ - 1] to store block prefix
-                storage.warp_prefixes[warps_no_ - 1] = block_prefix;
+                // Reuse storage_.warp_prefixes[warps_no_ - 1] to store block prefix
+                storage_.warp_prefixes[warps_no_ - 1] = block_prefix;
             }
         }
         ::rocprim::syncthreads();
-        return storage.warp_prefixes[warps_no_ - 1];
+        return storage_.warp_prefixes[warps_no_ - 1];
     }
 };
 
