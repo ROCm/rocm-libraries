@@ -650,7 +650,7 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScanCustomStruct)
     }
 
     // Calculate expected results on host
-    std::vector<T> expected(output.size());
+    std::vector<T> expected(output.size(), 0);
     for(size_t i = 0; i < output.size() / logical_warp_size; i++)
     {
         for(size_t j = 0; j < logical_warp_size; j++)
