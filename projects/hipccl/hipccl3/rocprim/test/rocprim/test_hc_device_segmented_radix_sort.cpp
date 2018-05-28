@@ -72,7 +72,7 @@ typedef ::testing::Types<
     params<short, int, true, 0, 16, 0, 10000>,
     params<long long, char, false, 0, 64, 4000, 8000>,
     params<double, unsigned int, false, 0, 64, 2, 10>,
-    params<double, int, true, 0, 64, 2000, 10000>,
+    params<rp::half, int, true, 0, 16, 2000, 10000>,
     params<float, int, false, 0, 32, 0, 1000>,
 
     // start_bit and end_bit
@@ -116,8 +116,8 @@ private:
 
 public:
     static_assert(
-        key_comparator::all_bits<StartBit, EndBit>() || std::is_unsigned<Key>::value,
-        "Test supports start and bits only for unsigned integers"
+        key_comparator::all_bits<StartBit, EndBit>() || rp::is_unsigned<Key>::value,
+        "Test supports start and end bits only for unsigned integers"
     );
 
     bool operator()(const Key& lhs, const Key& rhs)
@@ -178,7 +178,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeys)
 
         // Generate data
         std::vector<key_type> keys_input;
-        if(std::is_floating_point<key_type>::value)
+        if(rp::is_floating_point<key_type>::value)
         {
             keys_input = test_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
         }
@@ -292,7 +292,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairs)
 
         // Generate data
         std::vector<key_type> keys_input;
-        if(std::is_floating_point<key_type>::value)
+        if(rp::is_floating_point<key_type>::value)
         {
             keys_input = test_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
         }
@@ -425,7 +425,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
 
         // Generate data
         std::vector<key_type> keys_input;
-        if(std::is_floating_point<key_type>::value)
+        if(rp::is_floating_point<key_type>::value)
         {
             keys_input = test_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
         }
@@ -542,7 +542,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
 
         // Generate data
         std::vector<key_type> keys_input;
-        if(std::is_floating_point<key_type>::value)
+        if(rp::is_floating_point<key_type>::value)
         {
             keys_input = test_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
         }

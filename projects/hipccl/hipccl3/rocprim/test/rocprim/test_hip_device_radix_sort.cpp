@@ -74,11 +74,12 @@ typedef ::testing::Types<
     params<double, unsigned int>,
     params<double, int, true>,
     params<float, int>,
+    params<rp::half, long long>,
 
     // start_bit and end_bit
     params<unsigned char, int, true, 0, 7>,
     params<unsigned short, int, true, 4, 10>,
-    params<unsigned int, short, false, 3, 22>,
+    params<unsigned int, rp::half, false, 3, 22>,
     params<unsigned int, double, true, 4, 21>,
     params<unsigned int, short, true, 0, 15>,
     params<unsigned long long, char, false, 8, 20>,
@@ -93,7 +94,7 @@ TYPED_TEST_CASE(RocprimDeviceRadixSort, Params);
 template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
 struct key_comparator
 {
-    static_assert(std::is_unsigned<Key>::value, "Test supports start and bits only for unsigned integers");
+    static_assert(rp::is_unsigned<Key>::value, "Test supports start and end bits only for unsigned integers");
 
     bool operator()(const Key& lhs, const Key& rhs)
     {
@@ -151,7 +152,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
 
         // Generate data
         std::vector<key_type> keys_input;
-        if(std::is_floating_point<key_type>::value)
+        if(rp::is_floating_point<key_type>::value)
         {
             keys_input = test_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
         }
@@ -260,7 +261,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairs)
 
         // Generate data
         std::vector<key_type> keys_input;
-        if(std::is_floating_point<key_type>::value)
+        if(rp::is_floating_point<key_type>::value)
         {
             keys_input = test_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
         }
@@ -404,7 +405,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeysDoubleBuffer)
 
         // Generate data
         std::vector<key_type> keys_input;
-        if(std::is_floating_point<key_type>::value)
+        if(rp::is_floating_point<key_type>::value)
         {
             keys_input = test_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
         }
@@ -515,7 +516,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairsDoubleBuffer)
 
         // Generate data
         std::vector<key_type> keys_input;
-        if(std::is_floating_point<key_type>::value)
+        if(rp::is_floating_point<key_type>::value)
         {
             keys_input = test_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
         }

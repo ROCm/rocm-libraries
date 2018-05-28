@@ -113,6 +113,9 @@ struct radix_key_codec_base<
 > : radix_key_codec_integral<Key, typename std::make_unsigned<Key>::type> { };
 
 template<>
+struct radix_key_codec_base<::rocprim::half> : radix_key_codec_floating<::rocprim::half, unsigned short> { };
+
+template<>
 struct radix_key_codec_base<float> : radix_key_codec_floating<float, unsigned int> { };
 
 template<>
