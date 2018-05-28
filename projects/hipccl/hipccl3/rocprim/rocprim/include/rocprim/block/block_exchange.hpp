@@ -114,6 +114,12 @@ class block_exchange
     static constexpr unsigned int bank_conflicts_padding =
         has_bank_conflicts ? (BlockSize * ItemsPerThread / banks_no) : 0;
 
+    // Struct used for creating a raw_storage object for this primitive's temporary storage.
+    struct storage_type_
+    {
+        T buffer[BlockSize * ItemsPerThread + bank_conflicts_padding];
+    };
+
 public:
 
     /// \brief Struct used to allocate a temporary memory that is required for thread
@@ -125,10 +131,7 @@ public:
     /// an externally allocated memory, or be a part of a union type with other storage types
     /// to increase shared memory reusability.
     #ifndef DOXYGEN_SHOULD_SKIP_THIS // hides storage_type implementation for Doxygen
-    struct storage_type
-    {
-        T buffer[BlockSize * ItemsPerThread + bank_conflicts_padding];
-    };
+    using storage_type = detail::raw_storage<storage_type_>;
     #else
     using storage_type = storage_type_; // only for Doxygen
     #endif
@@ -189,16 +192,17 @@ public:
                             storage_type& storage)
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        storage_type_& storage_ = storage.get();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            storage.buffer[index(flat_id * ItemsPerThread + i)] = input[i];
+            storage_.buffer[index(flat_id * ItemsPerThread + i)] = input[i];
         }
         ::rocprim::syncthreads();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            output[i] = storage.buffer[index(i * BlockSize + flat_id)];
+            output[i] = storage_.buffer[index(i * BlockSize + flat_id)];
         }
     }
 
@@ -258,16 +262,17 @@ public:
                             storage_type& storage)
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        storage_type_& storage_ = storage.get();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            storage.buffer[index(i * BlockSize + flat_id)] = input[i];
+            storage_.buffer[index(i * BlockSize + flat_id)] = input[i];
         }
         ::rocprim::syncthreads();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            output[i] = storage.buffer[index(flat_id * ItemsPerThread + i)];
+            output[i] = storage_.buffer[index(flat_id * ItemsPerThread + i)];
         }
     }
 
@@ -331,15 +336,16 @@ public:
         const unsigned int warp_id = ::rocprim::warp_id();
         const unsigned int current_warp_size = get_current_warp_size();
         const unsigned int offset = warp_id * items_per_warp;
+        storage_type_& storage_ = storage.get();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            storage.buffer[index(offset + lane_id * ItemsPerThread + i)] = input[i];
+            storage_.buffer[index(offset + lane_id * ItemsPerThread + i)] = input[i];
         }
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            output[i] = storage.buffer[index(offset + i * current_warp_size + lane_id)];
+            output[i] = storage_.buffer[index(offset + i * current_warp_size + lane_id)];
         }
     }
 
@@ -403,15 +409,16 @@ public:
         const unsigned int warp_id = ::rocprim::warp_id();
         const unsigned int current_warp_size = get_current_warp_size();
         const unsigned int offset = warp_id * items_per_warp;
+        storage_type_& storage_ = storage.get();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            storage.buffer[index(offset + i * current_warp_size + lane_id)] = input[i];
+            storage_.buffer[index(offset + i * current_warp_size + lane_id)] = input[i];
         }
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            output[i] = storage.buffer[index(offset + lane_id * ItemsPerThread + i)];
+            output[i] = storage_.buffer[index(offset + lane_id * ItemsPerThread + i)];
         }
     }
 
@@ -478,17 +485,18 @@ public:
                             storage_type& storage)
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        storage_type_& storage_ = storage.get();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             const Offset rank = ranks[i];
-            storage.buffer[index(rank)] = input[i];
+            storage_.buffer[index(rank)] = input[i];
         }
         ::rocprim::syncthreads();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            output[i] = storage.buffer[index(flat_id * ItemsPerThread + i)];
+            output[i] = storage_.buffer[index(flat_id * ItemsPerThread + i)];
         }
     }
 
@@ -555,17 +563,18 @@ public:
                             storage_type& storage)
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        storage_type_& storage_ = storage.get();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             const Offset rank = ranks[i];
-            storage.buffer[rank] = input[i];
+            storage_.buffer[rank] = input[i];
         }
         ::rocprim::syncthreads();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            output[i] = storage.buffer[i * BlockSize + flat_id];
+            output[i] = storage_.buffer[i * BlockSize + flat_id];
         }
     }
 
@@ -638,20 +647,21 @@ public:
                                     storage_type& storage)
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        storage_type_& storage_ = storage.get();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             const Offset rank = ranks[i];
             if(rank >= 0)
             {
-                storage.buffer[rank] = input[i];
+                storage_.buffer[rank] = input[i];
             }
         }
         ::rocprim::syncthreads();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            output[i] = storage.buffer[i * BlockSize + flat_id];
+            output[i] = storage_.buffer[i * BlockSize + flat_id];
         }
     }
 
@@ -726,20 +736,21 @@ public:
                                     storage_type& storage)
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        storage_type_& storage_ = storage.get();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             const Offset rank = ranks[i];
             if(is_valid[i])
             {
-                storage.buffer[rank] = input[i];
+                storage_.buffer[rank] = input[i];
             }
         }
         ::rocprim::syncthreads();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            output[i] = storage.buffer[i * BlockSize + flat_id];
+            output[i] = storage_.buffer[i * BlockSize + flat_id];
         }
     }
 

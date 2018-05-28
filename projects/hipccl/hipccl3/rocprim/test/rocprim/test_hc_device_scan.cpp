@@ -61,7 +61,9 @@ public:
 };
 
 typedef ::testing::Types<
-    DeviceScanParams<int, long>//,
+    DeviceScanParams<int, long>,
+    DeviceScanParams<long, long>,
+    DeviceScanParams<test_utils::custom_test_type<int>, test_utils::custom_test_type<int>>
     // DeviceScanParams<unsigned char, float>
 > RocprimDeviceScanTestsParams;
 
@@ -147,13 +149,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
 
         // Check if output values are as expected
         std::vector<U> output = d_output;
-        for(size_t i = 0; i < output.size(); i++)
-        {
-            SCOPED_TRACE(testing::Message() << "where index = " << i);
-            auto diff = std::max<U>(std::abs(0.1f * expected[i]), U(0.01f));
-            if(std::is_integral<U>::value) diff = 0;
-            ASSERT_NEAR(output[i], expected[i], diff);
-        }
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, 0.01f));
     }
 }
 
@@ -227,13 +223,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanSum)
 
         // Check if output values are as expected
         std::vector<U> output = d_output;
-        for(size_t i = 0; i < output.size(); i++)
-        {
-            SCOPED_TRACE(testing::Message() << "where index = " << i);
-            auto diff = std::max<U>(std::abs(0.01f * expected[i]), U(0.01f));
-            if(std::is_integral<U>::value) diff = 0;
-            ASSERT_NEAR(output[i], expected[i], diff);
-        }
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, 0.01f));
     }
 }
 
@@ -335,13 +325,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanByKey)
 
         // Check if output values are as expected
         std::vector<U> output = d_output;
-        for(size_t i = 0; i < output.size(); i++)
-        {
-            SCOPED_TRACE(testing::Message() << "where index = " << i);
-            auto diff = std::max<U>(std::abs(0.1f * expected[i]), U(0.01f));
-            if(std::is_integral<U>::value) diff = 0;
-            ASSERT_NEAR(output[i], expected[i], diff);
-        }
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, 0.01f));
     }
 }
 
@@ -427,12 +411,6 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
 
         // Check if output values are as expected
         std::vector<U> output = d_output;
-        for(size_t i = 0; i < output.size(); i++)
-        {
-            SCOPED_TRACE(testing::Message() << "where index = " << i);
-            auto diff = std::max<U>(std::abs(0.1f * expected[i]), U(0.01f));
-            if(std::is_integral<U>::value) diff = 0;
-            ASSERT_NEAR(output[i], expected[i], diff);
-        }
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, 0.01f));
     }
 }

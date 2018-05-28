@@ -42,11 +42,13 @@ template<
 >
 class warp_reduce_shared_mem
 {
-public:
-    struct storage_type
+    struct storage_type_
     {
         T values[WarpSize];
     };
+
+public:
+    using storage_type = detail::raw_storage<storage_type_>;
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE inline
@@ -54,18 +56,19 @@ public:
     {
         constexpr unsigned int ceiling = next_power_of_two(WarpSize);
         const unsigned int lid = detail::logical_lane_id<WarpSize>();
+        storage_type_& storage_ = storage.get();
 
         output = input;
-        store_volatile(&storage.values[lid], output);
+        store_volatile(&storage_.values[lid], output);
         #pragma unroll
         for(unsigned int i = ceiling >> 1; i > 0; i >>= 1)
         {
             if (lid + i < WarpSize && lid < i)
             {
-                output = load_volatile(&storage.values[lid]);
-                T other = load_volatile(&storage.values[lid + i]);
+                output = load_volatile(&storage_.values[lid]);
+                T other = load_volatile(&storage_.values[lid + i]);
                 output = reduce_op(output, other);
-                store_volatile(&storage.values[lid], output);
+                store_volatile(&storage_.values[lid], output);
             }
         }
         set_output<UseAllReduce>(output, storage);
@@ -78,18 +81,19 @@ public:
     {
         constexpr unsigned int ceiling = next_power_of_two(WarpSize);
         const unsigned int lid = detail::logical_lane_id<WarpSize>();
+        storage_type_& storage_ = storage.get();
 
         output = input;
-        store_volatile(&storage.values[lid], output);
+        store_volatile(&storage_.values[lid], output);
         #pragma unroll
         for(unsigned int i = ceiling >> 1; i > 0; i >>= 1)
         {
             if((lid + i) < WarpSize && lid < i && (lid + i) < valid_items)
             {
-                output = load_volatile(&storage.values[lid]);
-                T other = load_volatile(&storage.values[lid + i]);
+                output = load_volatile(&storage_.values[lid]);
+                T other = load_volatile(&storage_.values[lid + i]);
                 output = reduce_op(output, other);
-                store_volatile(&storage.values[lid], output);
+                store_volatile(&storage_.values[lid], output);
             }
         }
         set_output<UseAllReduce>(output, storage);
@@ -119,6 +123,7 @@ private:
     {
         const unsigned int lid = detail::logical_lane_id<WarpSize>();
         constexpr unsigned int ceiling = next_power_of_two(WarpSize);
+        storage_type_& storage_ = storage.get();
         // Get logical lane id of the last valid value in the segment
         auto last = last_in_warp_segment<HeadSegmented, WarpSize>(flag);
 
@@ -126,10 +131,10 @@ private:
         #pragma unroll
         for(unsigned int i = 1; i < ceiling; i *= 2)
         {
-            store_volatile(&storage.values[lid], output);
+            store_volatile(&storage_.values[lid], output);
             if((lid + i) <= last)
             {
-                T other = load_volatile(&storage.values[lid + i]);
+                T other = load_volatile(&storage_.values[lid + i]);
                 output = reduce_op(output, other);
             }
         }
@@ -150,7 +155,8 @@ private:
     typename std::enable_if<(Switch == true)>::type
     set_output(T& output, storage_type& storage)
     {
-        output = load_volatile(&storage.values[0]);
+        storage_type_& storage_ = storage.get();
+        output = load_volatile(&storage_.values[0]);
     }
 };
 
