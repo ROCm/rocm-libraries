@@ -397,7 +397,7 @@ public:
         return prefix;
     }
 
-private:
+protected:
     unsigned int       block_id_;
     BinaryFunction     scan_op_;
     LookbackScanState& scan_state_;
