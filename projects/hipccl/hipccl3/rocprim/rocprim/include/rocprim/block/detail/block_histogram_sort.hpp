@@ -55,7 +55,7 @@ private:
     using discontinuity = block_discontinuity<T, BlockSize>;
 
 public:
-    union storage_type
+    union storage_type_
     {
         typename radix_sort::storage_type sort;
         struct
@@ -65,6 +65,8 @@ public:
             unsigned int end[Bins];
         };
     };
+
+    using storage_type = detail::raw_storage<storage_type_>;
 
     template<class Counter>
     ROCPRIM_DEVICE inline
@@ -89,8 +91,9 @@ public:
         const auto flat_tid = ::rocprim::flat_block_thread_id();
         unsigned int head_flags[ItemsPerThread];
         discontinuity_op flags_op(storage);
+        storage_type_& storage_ = storage.get();
 
-        radix_sort().sort(input, storage.sort);
+        radix_sort().sort(input, storage_.sort);
 
         #pragma unroll
         for(unsigned int offset = 0; offset < Bins; offset += BlockSize)
@@ -98,19 +101,19 @@ public:
             const unsigned int offset_tid = offset + flat_tid;
             if(offset_tid < Bins)
             {
-                storage.start[offset_tid] = tile_size;
-                storage.end[offset_tid] = tile_size;
+                storage_.start[offset_tid] = tile_size;
+                storage_.end[offset_tid] = tile_size;
             }
         }
         ::rocprim::syncthreads();
 
-        discontinuity().flag_heads(head_flags, input, flags_op, storage.flag);
+        discontinuity().flag_heads(head_flags, input, flags_op, storage_.flag);
         
         // ::rocprim::syncthreads() isn't required here as input is sorted by this point
         // and it's impossible that flags_op will be called where b = input[0] and a != b
         if(flat_tid == 0)
         {
-            storage.start[static_cast<unsigned int>(input[0])] = 0;
+            storage_.start[static_cast<unsigned int>(input[0])] = 0;
         }
         ::rocprim::syncthreads();
 
@@ -120,7 +123,7 @@ public:
             const unsigned int offset_tid = offset + flat_tid;
             if(offset_tid < Bins)
             {
-                Counter count = static_cast<Counter>(storage.end[offset_tid] - storage.start[offset_tid]);
+                Counter count = static_cast<Counter>(storage_.end[offset_tid] - storage_.start[offset_tid]);
                 hist[offset_tid] += count;
             }
         }
@@ -139,10 +142,11 @@ private:
         ROCPRIM_DEVICE inline
         bool operator()(const T& a, const T& b, unsigned int b_index) const
         {
+            storage_type_& storage_ = storage.get();
             if(a != b)
             {
-                storage.start[static_cast<unsigned int>(b)] = b_index;
-                storage.end[static_cast<unsigned int>(a)] = b_index;
+                storage_.start[static_cast<unsigned int>(b)] = b_index;
+                storage_.end[static_cast<unsigned int>(a)] = b_index;
                 return true;
             }
             else

@@ -63,11 +63,13 @@ class block_reduce_warp_reduce
         T, detail::next_power_of_two(warps_no_), false
     >;
 
-public:
-    struct storage_type
+    struct storage_type_
     {
         T warp_partials[warps_no_];
     };
+
+public:
+    using storage_type = detail::raw_storage<storage_type_>;
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE inline
@@ -166,23 +168,24 @@ private:
         const unsigned int warp_offset = warp_id * warp_size_;
         const unsigned int num_valid =
             (warp_offset < BlockSize) ? BlockSize - warp_offset : 0;
+        storage_type_& storage_ = storage.get();
 
         // Perform warp reduce
         warp_reduce<!block_size_is_warp_multiple_, warp_reduce_input_type>(
             input, output, num_valid, reduce_op
         );
 
-        // i-th warp will have its partial stored in storage.warp_partials[i-1]
+        // i-th warp will have its partial stored in storage_.warp_partials[i-1]
         if(lane_id == 0)
         {
-            storage.warp_partials[warp_id] = output;
+            storage_.warp_partials[warp_id] = output;
         }
         ::rocprim::syncthreads();
 
         if(flat_tid < warps_no_)
         {
             // Use warp partial to calculate the final reduce results for every thread
-            auto warp_partial = storage.warp_partials[lane_id];
+            auto warp_partial = storage_.warp_partials[lane_id];
 
             warp_reduce<!warps_no_is_pow_of_two_, warp_reduce_output_type>(
                 warp_partial, output, warps_no_, reduce_op
@@ -231,23 +234,24 @@ private:
         const unsigned int warp_offset = warp_id * warp_size_;
         const unsigned int num_valid =
             (warp_offset < valid_items) ? valid_items - warp_offset : 0;
+        storage_type_& storage_ = storage.get();
 
         // Perform warp reduce
         warp_reduce_input_type().reduce(
             input, output, num_valid, reduce_op
         );
 
-        // i-th warp will have its partial stored in storage.warp_partials[i-1]
+        // i-th warp will have its partial stored in storage_.warp_partials[i-1]
         if(lane_id == 0)
         {
-            storage.warp_partials[warp_id] = output;
+            storage_.warp_partials[warp_id] = output;
         }
         ::rocprim::syncthreads();
 
         if(flat_tid < warps_no_)
         {
             // Use warp partial to calculate the final reduce results for every thread
-            auto warp_partial = storage.warp_partials[lane_id];
+            auto warp_partial = storage_.warp_partials[lane_id];
 
             unsigned int valid_warps_no = (valid_items + warp_size_ - 1) / warp_size_;
             warp_reduce_output_type().reduce(
