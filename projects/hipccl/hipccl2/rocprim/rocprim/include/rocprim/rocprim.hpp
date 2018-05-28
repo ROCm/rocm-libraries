@@ -68,6 +68,7 @@
     #include "device/device_histogram_hip.hpp"
     #include "device/device_merge_hip.hpp"
     #include "device/device_merge_sort_hip.hpp"
+    #include "device/device_partition_hip.hpp"
     #include "device/device_radix_sort_hip.hpp"
     #include "device/device_reduce_by_key_hip.hpp"
     #include "device/device_reduce_hip.hpp"

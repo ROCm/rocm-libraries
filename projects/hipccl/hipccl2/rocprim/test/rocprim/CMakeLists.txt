@@ -118,6 +118,7 @@ add_rocprim_test_hip("rocprim.hip.constant_iterator" test_hip_constant_iterator.
 add_rocprim_test_hip("rocprim.hip.counting_iterator" test_hip_counting_iterator.cpp)
 add_rocprim_test_hip("rocprim.hip.device_histogram" test_hip_device_histogram.cpp)
 add_rocprim_test_hip("rocprim.hip.device_merge" test_hip_device_merge.cpp)
+add_rocprim_test_hip("rocprim.hip.device_partition" test_hip_device_partition.cpp)
 add_rocprim_test_hip("rocprim.hip.device_merge_sort" test_hip_device_merge_sort.cpp)
 add_rocprim_test_hip("rocprim.hip.device_radix_sort" test_hip_device_radix_sort.cpp)
 add_rocprim_test_hip("rocprim.hip.device_reduce_by_key" test_hip_device_reduce_by_key.cpp)

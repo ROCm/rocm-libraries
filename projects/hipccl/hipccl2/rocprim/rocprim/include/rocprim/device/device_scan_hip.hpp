@@ -126,11 +126,11 @@ void lookback_scan_kernel(InputIterator input,
                           BinaryFunction scan_op,
                           LookBackScanState lookback_scan_state,
                           const unsigned int number_of_blocks,
-                          ordered_block_id<unsigned int> ordered_block_id)
+                          ordered_block_id<unsigned int> ordered_bid)
 {
     lookback_scan_kernel_impl<BlockSize, ItemsPerThread, Exclusive>(
         input, output, size, initial_value, scan_op,
-        lookback_scan_state, number_of_blocks, ordered_block_id
+        lookback_scan_state, number_of_blocks, ordered_bid
     );
 }
 
@@ -138,10 +138,10 @@ template<class LookBackScanState>
 __global__
 void init_lookback_scan_state_kernel(LookBackScanState lookback_scan_state,
                                      const unsigned int number_of_blocks,
-                                     ordered_block_id<unsigned int> ordered_block_id)
+                                     ordered_block_id<unsigned int> ordered_bid)
 {
     init_lookback_scan_state_kernel_impl(
-        lookback_scan_state, number_of_blocks, ordered_block_id
+        lookback_scan_state, number_of_blocks, ordered_bid
     );
 }
 
