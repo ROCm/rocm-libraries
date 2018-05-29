@@ -33,6 +33,7 @@
 #include "intrinsics.hpp"
 #include "functional.hpp"
 #include "types.hpp"
+#include "type_traits.hpp"
 #include "iterator.hpp"
 
 #include "warp/warp_reduce.hpp"
