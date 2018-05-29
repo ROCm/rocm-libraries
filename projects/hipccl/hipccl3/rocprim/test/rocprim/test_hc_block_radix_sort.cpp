@@ -72,6 +72,7 @@ typedef ::testing::Types<
     params<int, int, 128U, 1>,
     params<unsigned int, int, 256U, 1>,
     params<unsigned short, char, 1024U, 1, true>,
+    params<rp::half, int, 128U, 1>,
 
     // Non-power of 2 BlockSize
     params<double, unsigned int, 65U, 1>,
@@ -79,17 +80,18 @@ typedef ::testing::Types<
     params<long long, char, 510U, 1, true>,
     params<unsigned int, long long, 162U, 1, false, true>,
     params<unsigned char, float, 255U, 1>,
+    params<rp::half, float, 113U, 1>,
 
     // Power of 2 BlockSize and ItemsPerThread > 1
     params<float, char, 64U, 2, true>,
-    params<int, short, 128U, 4>,
+    params<int, rp::half, 128U, 4>,
     params<unsigned short, char, 256U, 7>,
 
     // Non-power of 2 BlockSize and ItemsPerThread > 1
     params<double, int, 33U, 5>,
     params<char, double, 464U, 2, true, true>,
     params<unsigned short, int, 100U, 3>,
-    params<short, int, 234U, 9>,
+    params<rp::half, int, 234U, 9>,
 
     // StartBit and EndBit
     params<unsigned long long, char, 64U, 1, false, false, 8, 20>,
@@ -107,7 +109,7 @@ TYPED_TEST_CASE(RocprimBlockRadixSort, Params);
 template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
 struct key_comparator
 {
-    static_assert(std::is_unsigned<Key>::value, "Test supports start and bits only for unsigned integers");
+    static_assert(rp::is_unsigned<Key>::value, "Test supports start and end bits only for unsigned integers");
 
     bool operator()(const Key& lhs, const Key& rhs)
     {
@@ -157,7 +159,7 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeys)
     const size_t size = items_per_block * 1134;
     // Generate data
     std::vector<key_type> keys_output;
-    if(std::is_floating_point<key_type>::value)
+    if(rp::is_floating_point<key_type>::value)
     {
         keys_output = test_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
     }
@@ -245,7 +247,7 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeysValues)
     const size_t size = items_per_block * 1134;
     // Generate data
     std::vector<key_type> keys_output;
-    if(std::is_floating_point<key_type>::value)
+    if(rp::is_floating_point<key_type>::value)
     {
         keys_output = test_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
     }
@@ -259,7 +261,7 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeysValues)
     }
 
     std::vector<value_type> values_output;
-    if(std::is_floating_point<value_type>::value)
+    if(rp::is_floating_point<value_type>::value)
     {
         values_output = test_utils::get_random_data<value_type>(size, (value_type)-1000, (value_type)+1000);
     }

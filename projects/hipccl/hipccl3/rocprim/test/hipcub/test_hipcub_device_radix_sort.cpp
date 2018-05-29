@@ -114,7 +114,7 @@ private:
 public:
     static_assert(
         key_comparator::all_bits<StartBit, EndBit>() || std::is_unsigned<Key>::value,
-        "Test supports start and bits only for unsigned integers"
+        "Test supports start and end bits only for unsigned integers"
     );
 
     bool operator()(const Key& lhs, const Key& rhs)
