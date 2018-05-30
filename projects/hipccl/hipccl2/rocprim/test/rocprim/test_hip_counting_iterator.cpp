@@ -57,9 +57,6 @@ public:
 };
 
 typedef ::testing::Types<
-    // -----------------------------------------------------------------------
-    //
-    // -----------------------------------------------------------------------
     RocprimCountingIteratorParams<int>,
     RocprimCountingIteratorParams<unsigned int>,
     RocprimCountingIteratorParams<unsigned long>,
