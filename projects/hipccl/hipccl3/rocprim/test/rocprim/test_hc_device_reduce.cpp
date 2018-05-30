@@ -62,9 +62,6 @@ public:
 };
 
 typedef ::testing::Types<
-    // -----------------------------------------------------------------------
-    //
-    // -----------------------------------------------------------------------
     DeviceReduceParams<int, long>,
     DeviceReduceParams<unsigned char, float>
 > RocprimDeviceReduceTestsParams;

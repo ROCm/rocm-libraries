@@ -28,6 +28,7 @@
 #include "../functional.hpp"
 #include "../type_traits.hpp"
 #include "../detail/various.hpp"
+#include "../detail/match_result_type.hpp"
 
 #include "detail/device_scan_reduce_then_scan.hpp"
 #include "detail/device_scan_lookback.hpp"
@@ -191,11 +192,10 @@ hipError_t scan_impl(void * temporary_storage,
                      bool debug_synchronous)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    #ifdef __cpp_lib_is_invocable
-    using result_type = typename std::invoke_result<BinaryFunction, input_type, input_type>::type;
-    #else
-    using result_type = typename std::result_of<BinaryFunction(input_type, input_type)>::type;
-    #endif
+    using output_type = typename std::iterator_traits<OutputIterator>::value_type;
+    using result_type = typename ::rocprim::detail::match_result_type<
+        input_type, output_type, BinaryFunction
+    >::type;
 
     constexpr unsigned int block_size = BlockSize;
     constexpr unsigned int items_per_thread = ItemsPerThread;
@@ -324,11 +324,11 @@ hipError_t lookback_scan_impl(void * temporary_storage,
                               bool debug_synchronous)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    #ifdef __cpp_lib_is_invocable
-    using result_type = typename std::invoke_result<BinaryFunction, input_type, input_type>::type;
-    #else
-    using result_type = typename std::result_of<BinaryFunction(input_type, input_type)>::type;
-    #endif
+    using output_type = typename std::iterator_traits<OutputIterator>::value_type;
+    using result_type = typename ::rocprim::detail::match_result_type<
+        input_type, output_type, BinaryFunction
+    >::type;
+
     using scan_state_type = detail::lookback_scan_state<result_type>;
     using ordered_block_id_type = detail::ordered_block_id<unsigned int>;
 
@@ -505,11 +505,10 @@ hipError_t inclusive_scan(void * temporary_storage,
                           bool debug_synchronous = false)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    #ifdef __cpp_lib_is_invocable
-    using result_type = typename std::invoke_result<BinaryFunction, input_type, input_type>::type;
-    #else
-    using result_type = typename std::result_of<BinaryFunction(input_type, input_type)>::type;
-    #endif
+    using output_type = typename std::iterator_traits<OutputIterator>::value_type;
+    using result_type = typename ::rocprim::detail::match_result_type<
+        input_type, output_type, BinaryFunction
+    >::type;
 
     // Lookback scan has problems with types that are not arithmetic
     if(::rocprim::is_arithmetic<result_type>::value)
@@ -639,11 +638,10 @@ hipError_t exclusive_scan(void * temporary_storage,
                           bool debug_synchronous = false)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    #ifdef __cpp_lib_is_invocable
-    using result_type = typename std::invoke_result<BinaryFunction, input_type, input_type>::type;
-    #else
-    using result_type = typename std::result_of<BinaryFunction(input_type, input_type)>::type;
-    #endif
+    using output_type = typename std::iterator_traits<OutputIterator>::value_type;
+    using result_type = typename ::rocprim::detail::match_result_type<
+        input_type, output_type, BinaryFunction
+    >::type;
 
     // Lookback scan has problems with types that are not arithmetic
     if(::rocprim::is_arithmetic<result_type>::value)
