@@ -132,9 +132,11 @@ void partition_kernel_impl(IndexIterator indices,
                            const unsigned int spacing,
                            BinaryFunction compare_function)
 {
+    const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
     const unsigned int flat_block_id = ::rocprim::detail::block_id<0>();
+    const unsigned int flat_block_size = ::rocprim::detail::block_size<0>();
 
-    unsigned int id = flat_block_id;
+    unsigned int id = flat_block_id * flat_block_size + flat_id;
 
     unsigned int partition_id = id * spacing;
     unsigned int diag = min(partition_id, (unsigned int)(input1_size + input2_size));
@@ -161,7 +163,8 @@ void load(unsigned int flat_id,
           KeysInputIterator1 keys_input1,
           KeysInputIterator2 keys_input2,
           KeyType * keys_shared,
-          const size_t input1_size)
+          const size_t input1_size,
+          const size_t input2_size)
 {
     constexpr unsigned int block_size = BlockSize;
     constexpr unsigned int items_per_thread = ItemsPerThread;
@@ -169,11 +172,16 @@ void load(unsigned int flat_id,
     KeyType keys[items_per_thread];
     keys_input2 -= input1_size;
 
+    unsigned int count = input1_size + input2_size;
+
     #pragma unroll
     for(unsigned int i = 0; i < items_per_thread; ++i)
     {
         unsigned int index = block_size * i + flat_id;
-        keys[i] = (index < input1_size) ? keys_input1[index] : keys_input2[index];
+        if(index < count)
+        {
+            keys[i] = (index < input1_size) ? keys_input1[index] : keys_input2[index];
+        }
     }
 
     #pragma unroll
@@ -252,7 +260,7 @@ void merge_keys(unsigned int flat_id,
 
     load<block_size, items_per_thread>(
         flat_id, keys_input1 + range.begin1, keys_input2 + range.begin2,
-        keys_shared, range.count1()
+        keys_shared, range.count1(), range.count2()
     );
 
     range_t range_local = range_t {

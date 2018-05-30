@@ -146,8 +146,8 @@ hipError_t merge_impl(void * temporary_storage,
     constexpr unsigned int items_per_thread = ItemsPerThread;
     constexpr auto items_per_block = block_size * items_per_thread;
 
-    const unsigned int partitions = div_up((unsigned int)(input1_size + input2_size), items_per_block) + 1;
-    const size_t partition_bytes = partitions * sizeof(unsigned int);
+    const unsigned int partitions = div_up((unsigned int)(input1_size + input2_size), items_per_block);
+    const size_t partition_bytes = (partitions + 1) * sizeof(unsigned int);
 
     if(temporary_storage == nullptr)
     {
@@ -170,10 +170,12 @@ hipError_t merge_impl(void * temporary_storage,
 
     unsigned int * index = reinterpret_cast<unsigned int *>(temporary_storage);
 
+    const unsigned partition_blocks = div_up(partitions + 1, 128);
+
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
     hipLaunchKernelGGL(
         HIP_KERNEL_NAME(detail::partition_kernel),
-        dim3(number_of_blocks), dim3(1), 0, stream,
+        dim3(partition_blocks), dim3(128), 0, stream,
         index, keys_input1, keys_input2, input1_size, input2_size,
         items_per_block, compare_function
     );
@@ -217,7 +219,7 @@ hipError_t merge(void * temporary_storage,
 {
     // TODO: Those values should depend on type size
     constexpr unsigned int block_size = 256;
-    constexpr unsigned int items_per_thread = 8;
+    constexpr unsigned int items_per_thread = 4;
     empty_type * values = nullptr;
     return detail::merge_impl<block_size, items_per_thread>(
         temporary_storage, storage_size,
