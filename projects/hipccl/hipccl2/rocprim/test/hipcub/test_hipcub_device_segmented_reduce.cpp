@@ -92,21 +92,13 @@ TYPED_TEST(HipcubDeviceSegmentedReduceOp, Reduce)
     using input_type = typename TestFixture::params::input_type;
     using output_type = typename TestFixture::params::output_type;
     using reduce_op_type = typename TestFixture::params::reduce_op_type;
-    constexpr input_type init = TestFixture::params::init;
 
-    #ifdef __cpp_lib_is_invocable
-    using result_type = typename std::invoke_result<reduce_op_type, input_type, input_type>::type;
-    #else
-    using result_type = typename std::result_of<reduce_op_type(input_type, input_type)>::type;
-    #endif
-
+    using result_type = output_type;
     using offset_type = unsigned int;
 
+    constexpr input_type init = TestFixture::params::init;
     const bool debug_synchronous = false;
-
     reduce_op_type reduce_op;
-
-    const std::vector<size_t> sizes = get_sizes();
 
     std::random_device rd;
     std::default_random_engine gen(rd());
@@ -116,6 +108,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduceOp, Reduce)
         TestFixture::params::max_segment_length
     );
 
+    const std::vector<size_t> sizes = get_sizes();
     for(size_t size : sizes)
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
@@ -139,7 +132,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduceOp, Reduce)
             result_type aggregate = init;
             for(size_t i = offset; i < end; i++)
             {
-                aggregate = reduce_op(aggregate, values_input[i]);
+                aggregate = reduce_op(aggregate, static_cast<result_type>(values_input[i]));
             }
             aggregates_expected.push_back(aggregate);
 
@@ -267,23 +260,14 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Sum)
 {
     using input_type = typename TestFixture::params::input_type;
     using output_type = typename TestFixture::params::output_type;
-
     using reduce_op_type = typename hipcub::Sum;
-    constexpr input_type init = input_type(0);
-
-    #ifdef __cpp_lib_is_invocable
-    using result_type = typename std::invoke_result<reduce_op_type, input_type, input_type>::type;
-    #else
-    using result_type = typename std::result_of<reduce_op_type(input_type, input_type)>::type;
-    #endif
-
+    using result_type = output_type;
     using offset_type = unsigned int;
 
+    constexpr input_type init = input_type(0);
     const bool debug_synchronous = false;
-
     reduce_op_type reduce_op;
 
-    const std::vector<size_t> sizes = get_sizes();
 
     std::random_device rd;
     std::default_random_engine gen(rd());
@@ -293,6 +277,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Sum)
         TestFixture::params::max_segment_length
     );
 
+    const std::vector<size_t> sizes = get_sizes();
     for(size_t size : sizes)
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
@@ -316,7 +301,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Sum)
             result_type aggregate = init;
             for(size_t i = offset; i < end; i++)
             {
-                aggregate = reduce_op(aggregate, values_input[i]);
+                aggregate = reduce_op(aggregate, static_cast<result_type>(values_input[i]));
             }
             aggregates_expected.push_back(aggregate);
 
@@ -411,23 +396,13 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Min)
 {
     using input_type = typename TestFixture::params::input_type;
     using output_type = typename TestFixture::params::output_type;
-
     using reduce_op_type = typename hipcub::Min;
-    constexpr input_type init = std::numeric_limits<input_type>::max();
-
-    #ifdef __cpp_lib_is_invocable
-    using result_type = typename std::invoke_result<reduce_op_type, input_type, input_type>::type;
-    #else
-    using result_type = typename std::result_of<reduce_op_type(input_type, input_type)>::type;
-    #endif
-
+    using result_type = output_type;
     using offset_type = unsigned int;
 
+    constexpr input_type init = std::numeric_limits<input_type>::max();
     const bool debug_synchronous = false;
-
     reduce_op_type reduce_op;
-
-    const std::vector<size_t> sizes = get_sizes();
 
     std::random_device rd;
     std::default_random_engine gen(rd());
@@ -437,6 +412,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Min)
         TestFixture::params::max_segment_length
     );
 
+    const std::vector<size_t> sizes = get_sizes();
     for(size_t size : sizes)
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
@@ -460,7 +436,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Min)
             result_type aggregate = init;
             for(size_t i = offset; i < end; i++)
             {
-                aggregate = reduce_op(aggregate, values_input[i]);
+                aggregate = reduce_op(aggregate, static_cast<result_type>(values_input[i]));
             }
             aggregates_expected.push_back(aggregate);
 

@@ -96,30 +96,22 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
     using input_type = typename TestFixture::params::input_type;
     using output_type = typename TestFixture::params::output_type;
     using reduce_op_type = typename TestFixture::params::reduce_op_type;
-    constexpr input_type init = TestFixture::params::init;
 
-    #ifdef __cpp_lib_is_invocable
-    using result_type = typename std::invoke_result<reduce_op_type, input_type, input_type>::type;
-    #else
-    using result_type = typename std::result_of<reduce_op_type(input_type, input_type)>::type;
-    #endif
-
+    using result_type = output_type;
     using offset_type = unsigned int;
 
+    constexpr input_type init = TestFixture::params::init;
     const bool debug_synchronous = false;
-
     reduce_op_type reduce_op;
-
-    const std::vector<size_t> sizes = get_sizes();
 
     std::random_device rd;
     std::default_random_engine gen(rd());
-
     std::uniform_int_distribution<size_t> segment_length_dis(
         TestFixture::params::min_segment_length,
         TestFixture::params::max_segment_length
     );
 
+    const std::vector<size_t> sizes = get_sizes();
     for(size_t size : sizes)
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
