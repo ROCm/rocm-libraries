@@ -73,13 +73,12 @@ void segmented_sort(KeysInputIterator keys_input,
         key_type, value_type
     >;
 
-    ROCPRIM_SHARED_MEMORY struct
+    ROCPRIM_SHARED_MEMORY union
     {
         typename count_helper_type::storage_type count_helper;
         typename sort_and_scatter_helper::storage_type sort_and_scatter;
     } storage;
 
-    const unsigned int flat_id = ::rocprim::flat_block_thread_id();
     const unsigned int segment_id = ::rocprim::detail::block_id<0>();
 
     const unsigned int begin_offset = begin_offsets[segment_id];
@@ -102,10 +101,9 @@ void segmented_sort(KeysInputIterator keys_input,
 
     unsigned int digit_start;
     scan_type().exclusive_scan(digit_count, digit_start, 0);
-    if(flat_id < radix_size)
-    {
-        digit_start += begin_offset;
-    }
+    digit_start += begin_offset;
+
+    ::rocprim::syncthreads();
 
     sort_and_scatter_helper().sort_and_scatter(
         keys_input, keys_output, values_input, values_output,

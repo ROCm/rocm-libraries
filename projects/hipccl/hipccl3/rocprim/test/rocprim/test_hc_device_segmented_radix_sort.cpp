@@ -345,8 +345,11 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairs)
             );
         }
 
+        // Use custom config
+        using config = rp::segmented_radix_sort_config<6, 4, rp::kernel_config<128, 9>>;
+
         size_t temporary_storage_bytes = 0;
-        rp::segmented_radix_sort_pairs(
+        rp::segmented_radix_sort_pairs<config>(
             nullptr, temporary_storage_bytes,
             d_keys_input.accelerator_pointer(), d_keys_output.accelerator_pointer(),
             d_values_input.accelerator_pointer(), d_values_output.accelerator_pointer(),
@@ -361,7 +364,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairs)
 
         if(descending)
         {
-            rp::segmented_radix_sort_pairs_desc(
+            rp::segmented_radix_sort_pairs_desc<config>(
                 d_temporary_storage.accelerator_pointer(), temporary_storage_bytes,
                 d_keys_input.accelerator_pointer(), d_keys_output.accelerator_pointer(),
                 d_values_input.accelerator_pointer(), d_values_output.accelerator_pointer(),
@@ -373,7 +376,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairs)
         }
         else
         {
-            rp::segmented_radix_sort_pairs(
+            rp::segmented_radix_sort_pairs<config>(
                 d_temporary_storage.accelerator_pointer(), temporary_storage_bytes,
                 d_keys_input.accelerator_pointer(), d_keys_output.accelerator_pointer(),
                 d_values_input.accelerator_pointer(), d_values_output.accelerator_pointer(),

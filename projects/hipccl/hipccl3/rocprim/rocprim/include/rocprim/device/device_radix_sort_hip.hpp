@@ -34,6 +34,7 @@
 #include "../functional.hpp"
 #include "../types.hpp"
 
+#include "device_radix_sort_config.hpp"
 #include "detail/device_radix_sort.hpp"
 
 /// \addtogroup devicemodule_hip
@@ -104,8 +105,8 @@ void sort_and_scatter_kernel(KeysInputIterator keys_input,
                              ValuesInputIterator values_input,
                              ValuesOutputIterator values_output,
                              unsigned int size,
-                             const unsigned int * batch_digit_counts,
-                             const unsigned int * digit_counts,
+                             const unsigned int * batch_digit_starts,
+                             const unsigned int * digit_starts,
                              unsigned int bit,
                              unsigned int current_radix_bits,
                              unsigned int blocks_per_full_batch,
@@ -113,7 +114,7 @@ void sort_and_scatter_kernel(KeysInputIterator keys_input,
 {
     sort_and_scatter<BlockSize, ItemsPerThread, RadixBits, Descending>(
         keys_input, keys_output, values_input, values_output, size,
-        batch_digit_counts, digit_counts,
+        batch_digit_starts, digit_starts,
         bit, current_radix_bits,
         blocks_per_full_batch, full_batches
     );
@@ -135,6 +136,8 @@ void sort_and_scatter_kernel(KeysInputIterator keys_input,
     }
 
 template<
+    class Config,
+    unsigned int RadixBits,
     bool Descending,
     class KeysInputIterator,
     class KeysOutputIterator,
@@ -142,37 +145,209 @@ template<
     class ValuesOutputIterator
 >
 inline
-hipError_t radix_sort(void * temporary_storage,
-                      size_t& storage_size,
-                      KeysInputIterator keys_input,
-                      typename std::iterator_traits<KeysInputIterator>::value_type * keys_tmp,
-                      KeysOutputIterator keys_output,
-                      ValuesInputIterator values_input,
-                      typename std::iterator_traits<ValuesInputIterator>::value_type * values_tmp,
-                      ValuesOutputIterator values_output,
-                      unsigned int size,
-                      bool& is_result_in_output,
-                      unsigned int begin_bit,
-                      unsigned int end_bit,
-                      hipStream_t stream,
-                      bool debug_synchronous)
+hipError_t radix_sort_iteration(KeysInputIterator keys_input,
+                                typename std::iterator_traits<KeysInputIterator>::value_type * keys_tmp,
+                                KeysOutputIterator keys_output,
+                                ValuesInputIterator values_input,
+                                typename std::iterator_traits<ValuesInputIterator>::value_type * values_tmp,
+                                ValuesOutputIterator values_output,
+                                unsigned int size,
+                                unsigned int * batch_digit_counts,
+                                unsigned int * digit_counts,
+                                bool to_output,
+                                unsigned int bit,
+                                unsigned int begin_bit,
+                                unsigned int end_bit,
+                                unsigned int blocks_per_full_batch,
+                                unsigned int full_batches,
+                                unsigned int batches,
+                                hipStream_t stream,
+                                bool debug_synchronous)
 {
-    constexpr unsigned int radix_bits = 8;
-    constexpr unsigned int radix_size = 1 << radix_bits;
+    constexpr unsigned int radix_size = 1 << RadixBits;
 
+    // Handle cases when (end_bit - bit) is not divisible by RadixBits, i.e. the last
+    // iteration has a shorter mask.
+    const unsigned int current_radix_bits = ::rocprim::min(RadixBits, end_bit - bit);
+
+    const bool is_first_iteration = (bit == begin_bit);
+
+    std::chrono::high_resolution_clock::time_point start;
+
+    if(debug_synchronous)
+    {
+        std::cout << "RadixBits " << RadixBits << '\n';
+        std::cout << "bit " << bit << '\n';
+        std::cout << "current_radix_bits " << current_radix_bits << '\n';
+    }
+
+    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
+    if(is_first_iteration)
+    {
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(fill_digit_counts_kernel<
+                Config::sort::block_size, Config::sort::items_per_thread, RadixBits, Descending
+            >),
+            dim3(batches), dim3(Config::sort::block_size), 0, stream,
+            keys_input, size,
+            batch_digit_counts,
+            bit, current_radix_bits,
+            blocks_per_full_batch, full_batches
+        );
+    }
+    else
+    {
+        if(to_output)
+        {
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(fill_digit_counts_kernel<
+                    Config::sort::block_size, Config::sort::items_per_thread, RadixBits, Descending
+                >),
+                dim3(batches), dim3(Config::sort::block_size), 0, stream,
+                keys_tmp, size,
+                batch_digit_counts,
+                bit, current_radix_bits,
+                blocks_per_full_batch, full_batches
+            );
+        }
+        else
+        {
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(fill_digit_counts_kernel<
+                    Config::sort::block_size, Config::sort::items_per_thread, RadixBits, Descending
+                >),
+                dim3(batches), dim3(Config::sort::block_size), 0, stream,
+                keys_output, size,
+                batch_digit_counts,
+                bit, current_radix_bits,
+                blocks_per_full_batch, full_batches
+            );
+        }
+    }
+    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("fill_digit_counts", size, start)
+
+    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
+    hipLaunchKernelGGL(
+        HIP_KERNEL_NAME(scan_batches_kernel<Config::scan::block_size, Config::scan::items_per_thread, RadixBits>),
+        dim3(radix_size), dim3(Config::scan::block_size), 0, stream,
+        batch_digit_counts, digit_counts, batches
+    );
+    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("scan_batches", radix_size * Config::scan::block_size, start)
+
+    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
+    hipLaunchKernelGGL(
+        HIP_KERNEL_NAME(scan_digits_kernel<RadixBits>),
+        dim3(1), dim3(radix_size), 0, stream,
+        digit_counts
+    );
+    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("scan_digits", radix_size, start)
+
+    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
+    if(is_first_iteration)
+    {
+        if(to_output)
+        {
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(sort_and_scatter_kernel<
+                    Config::sort::block_size, Config::sort::items_per_thread, RadixBits, Descending
+                >),
+                dim3(batches), dim3(Config::sort::block_size), 0, stream,
+                keys_input, keys_output, values_input, values_output, size,
+                const_cast<const unsigned int *>(batch_digit_counts),
+                const_cast<const unsigned int *>(digit_counts),
+                bit, current_radix_bits,
+                blocks_per_full_batch, full_batches
+            );
+        }
+        else
+        {
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(sort_and_scatter_kernel<
+                    Config::sort::block_size, Config::sort::items_per_thread, RadixBits, Descending
+                >),
+                dim3(batches), dim3(Config::sort::block_size), 0, stream,
+                keys_input, keys_tmp, values_input, values_tmp, size,
+                const_cast<const unsigned int *>(batch_digit_counts),
+                const_cast<const unsigned int *>(digit_counts),
+                bit, current_radix_bits,
+                blocks_per_full_batch, full_batches
+            );
+        }
+    }
+    else
+    {
+        if(to_output)
+        {
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(sort_and_scatter_kernel<
+                    Config::sort::block_size, Config::sort::items_per_thread, RadixBits, Descending
+                >),
+                dim3(batches), dim3(Config::sort::block_size), 0, stream,
+                keys_tmp, keys_output, values_tmp, values_output, size,
+                const_cast<const unsigned int *>(batch_digit_counts),
+                const_cast<const unsigned int *>(digit_counts),
+                bit, current_radix_bits,
+                blocks_per_full_batch, full_batches
+            );
+        }
+        else
+        {
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(sort_and_scatter_kernel<
+                    Config::sort::block_size, Config::sort::items_per_thread, RadixBits, Descending
+                >),
+                dim3(batches), dim3(Config::sort::block_size), 0, stream,
+                keys_output, keys_tmp, values_output, values_tmp, size,
+                const_cast<const unsigned int *>(batch_digit_counts),
+                const_cast<const unsigned int *>(digit_counts),
+                bit, current_radix_bits,
+                blocks_per_full_batch, full_batches
+            );
+        }
+    }
+    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("sort_and_scatter", size, start)
+
+    return hipSuccess;
+}
+
+template<
+    class Config,
+    bool Descending,
+    class KeysInputIterator,
+    class KeysOutputIterator,
+    class ValuesInputIterator,
+    class ValuesOutputIterator
+>
+inline
+hipError_t radix_sort_impl(void * temporary_storage,
+                           size_t& storage_size,
+                           KeysInputIterator keys_input,
+                           typename std::iterator_traits<KeysInputIterator>::value_type * keys_tmp,
+                           KeysOutputIterator keys_output,
+                           ValuesInputIterator values_input,
+                           typename std::iterator_traits<ValuesInputIterator>::value_type * values_tmp,
+                           ValuesOutputIterator values_output,
+                           unsigned int size,
+                           bool& is_result_in_output,
+                           unsigned int begin_bit,
+                           unsigned int end_bit,
+                           hipStream_t stream,
+                           bool debug_synchronous)
+{
     using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
     using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
 
+    using config = default_or_custom_config<
+        Config,
+        default_radix_sort_config<ROCPRIM_TARGET_ARCH, key_type, value_type>
+    >;
+
     constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
 
-    constexpr unsigned int scan_block_size = 256;
-    constexpr unsigned int scan_items_per_thread = 4;
+    constexpr unsigned int max_radix_size = 1 << config::long_radix_bits;
 
-    constexpr unsigned int sort_block_size = 256;
-    constexpr unsigned int sort_items_per_thread = 11;
-
-    constexpr unsigned int scan_size = scan_block_size * scan_items_per_thread;
-    constexpr unsigned int sort_size = sort_block_size * sort_items_per_thread;
+    constexpr unsigned int scan_size = config::scan::block_size * config::scan::items_per_thread;
+    constexpr unsigned int sort_size = config::sort::block_size * config::sort::items_per_thread;
 
     const unsigned int blocks = ::rocprim::detail::ceiling_div(static_cast<unsigned int>(size), sort_size);
     const unsigned int blocks_per_full_batch = ::rocprim::detail::ceiling_div(blocks, scan_size);
@@ -180,11 +355,19 @@ hipError_t radix_sort(void * temporary_storage,
         ? blocks % scan_size
         : scan_size;
     const unsigned int batches = (blocks_per_full_batch == 1 ? full_batches : scan_size);
-    const unsigned int iterations = ::rocprim::detail::ceiling_div(end_bit - begin_bit, radix_bits);
     const bool with_double_buffer = keys_tmp != nullptr;
 
-    const size_t batch_digit_counts_bytes = ::rocprim::detail::align_size(batches * radix_size * sizeof(unsigned int));
-    const size_t digit_counts_bytes = ::rocprim::detail::align_size(radix_size * sizeof(unsigned int));
+    const unsigned int bits = end_bit - begin_bit;
+    const unsigned int iterations = ::rocprim::detail::ceiling_div(bits, config::long_radix_bits);
+    const unsigned int radix_bits_diff = config::long_radix_bits - config::short_radix_bits;
+    const unsigned int short_iterations = radix_bits_diff != 0
+        ? ::rocprim::min(iterations, (config::long_radix_bits * iterations - bits) / radix_bits_diff)
+        : 0;
+    const unsigned int long_iterations = iterations - short_iterations;
+
+    const size_t batch_digit_counts_bytes =
+        ::rocprim::detail::align_size(batches * max_radix_size * sizeof(unsigned int));
+    const size_t digit_counts_bytes = ::rocprim::detail::align_size(max_radix_size * sizeof(unsigned int));
     const size_t keys_bytes = ::rocprim::detail::align_size(size * sizeof(key_type));
     const size_t values_bytes = with_values ? ::rocprim::detail::align_size(size * sizeof(value_type)) : 0;
     if(temporary_storage == nullptr)
@@ -204,6 +387,8 @@ hipError_t radix_sort(void * temporary_storage,
         std::cout << "full_batches " << full_batches << '\n';
         std::cout << "batches " << batches << '\n';
         std::cout << "iterations " << iterations << '\n';
+        std::cout << "long_iterations " << long_iterations << '\n';
+        std::cout << "short_iterations " << short_iterations << '\n';
         hipError_t error = hipStreamSynchronize(stream);
         if(error != hipSuccess) return error;
     }
@@ -221,144 +406,38 @@ hipError_t radix_sort(void * temporary_storage,
     }
 
     bool to_output = with_double_buffer || (iterations - 1) % 2 == 0;
-    for(unsigned int bit = begin_bit; bit < end_bit; bit += radix_bits)
+    unsigned int bit = begin_bit;
+    for(unsigned int i = 0; i < long_iterations; i++)
     {
-        // Handle cases when (end_bit - bit) is not divisible by radix_bits, i.e. the last
-        // iteration has a shorter mask.
-        const unsigned int current_radix_bits = ::rocprim::min(radix_bits, end_bit - bit);
-
-        const bool is_first_iteration = (bit == begin_bit);
-
-        std::chrono::high_resolution_clock::time_point start;
-
-        if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-        if(is_first_iteration)
-        {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(fill_digit_counts_kernel<
-                    sort_block_size, sort_items_per_thread, radix_bits, Descending
-                >),
-                dim3(batches), dim3(sort_block_size), 0, stream,
-                keys_input, size,
-                batch_digit_counts,
-                bit, current_radix_bits,
-                blocks_per_full_batch, full_batches
-            );
-        }
-        else
-        {
-            if(to_output)
-            {
-                hipLaunchKernelGGL(
-                    HIP_KERNEL_NAME(fill_digit_counts_kernel<
-                        sort_block_size, sort_items_per_thread, radix_bits, Descending
-                    >),
-                    dim3(batches), dim3(sort_block_size), 0, stream,
-                    keys_tmp, size,
-                    batch_digit_counts,
-                    bit, current_radix_bits,
-                    blocks_per_full_batch, full_batches
-                );
-            }
-            else
-            {
-                hipLaunchKernelGGL(
-                    HIP_KERNEL_NAME(fill_digit_counts_kernel<
-                        sort_block_size, sort_items_per_thread, radix_bits, Descending
-                    >),
-                    dim3(batches), dim3(sort_block_size), 0, stream,
-                    keys_output, size,
-                    batch_digit_counts,
-                    bit, current_radix_bits,
-                    blocks_per_full_batch, full_batches
-                );
-            }
-        }
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("fill_digit_counts", size, start)
-
-        if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(scan_batches_kernel<scan_block_size, scan_items_per_thread, radix_bits>),
-            dim3(radix_size), dim3(scan_block_size), 0, stream,
-            batch_digit_counts, digit_counts, batches
+        hipError_t error = radix_sort_iteration<config, config::long_radix_bits, Descending>(
+            keys_input, keys_tmp, keys_output, values_input, values_tmp, values_output, size,
+            batch_digit_counts, digit_counts,
+            to_output,
+            bit, begin_bit, end_bit,
+            blocks_per_full_batch, full_batches, batches,
+            stream, debug_synchronous
         );
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("scan_batches", radix_size * scan_block_size, start)
-
-        if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(scan_digits_kernel<radix_bits>),
-            dim3(1), dim3(radix_size), 0, stream,
-            digit_counts
-        );
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("scan_digits", radix_size, start)
-
-        if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-        if(is_first_iteration)
-        {
-            if(to_output)
-            {
-                hipLaunchKernelGGL(
-                    HIP_KERNEL_NAME(sort_and_scatter_kernel<
-                        sort_block_size, sort_items_per_thread, radix_bits, Descending
-                    >),
-                    dim3(batches), dim3(sort_block_size), 0, stream,
-                    keys_input, keys_output, values_input, values_output, size,
-                    const_cast<const unsigned int *>(batch_digit_counts),
-                    const_cast<const unsigned int *>(digit_counts),
-                    bit, current_radix_bits,
-                    blocks_per_full_batch, full_batches
-                );
-            }
-            else
-            {
-                hipLaunchKernelGGL(
-                    HIP_KERNEL_NAME(sort_and_scatter_kernel<
-                        sort_block_size, sort_items_per_thread, radix_bits, Descending
-                    >),
-                    dim3(batches), dim3(sort_block_size), 0, stream,
-                    keys_input, keys_tmp, values_input, values_tmp, size,
-                    const_cast<const unsigned int *>(batch_digit_counts),
-                    const_cast<const unsigned int *>(digit_counts),
-                    bit, current_radix_bits,
-                    blocks_per_full_batch, full_batches
-                );
-            }
-        }
-        else
-        {
-            if(to_output)
-            {
-                hipLaunchKernelGGL(
-                    HIP_KERNEL_NAME(sort_and_scatter_kernel<
-                        sort_block_size, sort_items_per_thread, radix_bits, Descending
-                    >),
-                    dim3(batches), dim3(sort_block_size), 0, stream,
-                    keys_tmp, keys_output, values_tmp, values_output, size,
-                    const_cast<const unsigned int *>(batch_digit_counts),
-                    const_cast<const unsigned int *>(digit_counts),
-                    bit, current_radix_bits,
-                    blocks_per_full_batch, full_batches
-                );
-            }
-            else
-            {
-                hipLaunchKernelGGL(
-                    HIP_KERNEL_NAME(sort_and_scatter_kernel<
-                        sort_block_size, sort_items_per_thread, radix_bits, Descending
-                    >),
-                    dim3(batches), dim3(sort_block_size), 0, stream,
-                    keys_output, keys_tmp, values_output, values_tmp, size,
-                    const_cast<const unsigned int *>(batch_digit_counts),
-                    const_cast<const unsigned int *>(digit_counts),
-                    bit, current_radix_bits,
-                    blocks_per_full_batch, full_batches
-                );
-            }
-        }
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("sort_and_scatter", size, start)
+        if(error != hipSuccess) return error;
 
         is_result_in_output = to_output;
         to_output = !to_output;
+        bit += config::long_radix_bits;
+    }
+    for(unsigned int i = 0; i < short_iterations; i++)
+    {
+        hipError_t error = radix_sort_iteration<config, config::short_radix_bits, Descending>(
+            keys_input, keys_tmp, keys_output, values_input, values_tmp, values_output, size,
+            batch_digit_counts, digit_counts,
+            to_output,
+            bit, begin_bit, end_bit,
+            blocks_per_full_batch, full_batches, batches,
+            stream, debug_synchronous
+        );
+        if(error != hipSuccess) return error;
+
+        is_result_in_output = to_output;
+        to_output = !to_output;
+        bit += config::short_radix_bits;
     }
 
     return hipSuccess;
@@ -384,6 +463,8 @@ hipError_t radix_sort(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p radix_sort_config or
+/// a custom class with the same members.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
@@ -441,6 +522,7 @@ hipError_t radix_sort(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class KeysInputIterator,
     class KeysOutputIterator,
     class Key = typename std::iterator_traits<KeysInputIterator>::value_type
@@ -458,7 +540,7 @@ hipError_t radix_sort_keys(void * temporary_storage,
 {
     empty_type * values = nullptr;
     bool ignored;
-    return detail::radix_sort<false>(
+    return detail::radix_sort_impl<Config, false>(
         temporary_storage, storage_size,
         keys_input, nullptr, keys_output,
         values, nullptr, values,
@@ -484,6 +566,8 @@ hipError_t radix_sort_keys(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p radix_sort_config or
+/// a custom class with the same members.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
@@ -541,6 +625,7 @@ hipError_t radix_sort_keys(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class KeysInputIterator,
     class KeysOutputIterator,
     class Key = typename std::iterator_traits<KeysInputIterator>::value_type
@@ -558,7 +643,7 @@ hipError_t radix_sort_keys_desc(void * temporary_storage,
 {
     empty_type * values = nullptr;
     bool ignored;
-    return detail::radix_sort<true>(
+    return detail::radix_sort_impl<Config, true>(
         temporary_storage, storage_size,
         keys_input, nullptr, keys_output,
         values, nullptr, values,
@@ -585,6 +670,8 @@ hipError_t radix_sort_keys_desc(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p radix_sort_config or
+/// a custom class with the same members.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
@@ -657,6 +744,7 @@ hipError_t radix_sort_keys_desc(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class KeysInputIterator,
     class KeysOutputIterator,
     class ValuesInputIterator,
@@ -677,7 +765,7 @@ hipError_t radix_sort_pairs(void * temporary_storage,
                             bool debug_synchronous = false)
 {
     bool ignored;
-    return detail::radix_sort<false>(
+    return detail::radix_sort_impl<Config, false>(
         temporary_storage, storage_size,
         keys_input, nullptr, keys_output,
         values_input, nullptr, values_output,
@@ -704,6 +792,8 @@ hipError_t radix_sort_pairs(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p radix_sort_config or
+/// a custom class with the same members.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
@@ -772,6 +862,7 @@ hipError_t radix_sort_pairs(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class KeysInputIterator,
     class KeysOutputIterator,
     class ValuesInputIterator,
@@ -792,7 +883,7 @@ hipError_t radix_sort_pairs_desc(void * temporary_storage,
                                  bool debug_synchronous = false)
 {
     bool ignored;
-    return detail::radix_sort<true>(
+    return detail::radix_sort_impl<Config, true>(
         temporary_storage, storage_size,
         keys_input, nullptr, keys_output,
         values_input, nullptr, values_output,
@@ -823,6 +914,8 @@ hipError_t radix_sort_pairs_desc(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p radix_sort_config or
+/// a custom class with the same members.
 /// \tparam Key - key type. Must be an integral type or a floating-point type.
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
@@ -878,7 +971,10 @@ hipError_t radix_sort_pairs_desc(void * temporary_storage,
 /// // keys.current(): [0.08, 0.2, 0.3, 0.4, 0.6, 0.65, 0.7, 1]
 /// \endcode
 /// \endparblock
-template<class Key>
+template<
+    class Config = default_config,
+    class Key
+>
 inline
 hipError_t radix_sort_keys(void * temporary_storage,
                            size_t& storage_size,
@@ -891,7 +987,7 @@ hipError_t radix_sort_keys(void * temporary_storage,
 {
     empty_type * values = nullptr;
     bool is_result_in_output;
-    hipError_t error = detail::radix_sort<false>(
+    hipError_t error = detail::radix_sort_impl<Config, false>(
         temporary_storage, storage_size,
         keys.current(), keys.current(), keys.alternate(),
         values, values, values,
@@ -927,6 +1023,8 @@ hipError_t radix_sort_keys(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p radix_sort_config or
+/// a custom class with the same members.
 /// \tparam Key - key type. Must be an integral type or a floating-point type.
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
@@ -982,7 +1080,10 @@ hipError_t radix_sort_keys(void * temporary_storage,
 /// // keys.current(): [8, 7, 6, 5, 4, 3, 2, 1]
 /// \endcode
 /// \endparblock
-template<class Key>
+template<
+    class Config = default_config,
+    class Key
+>
 inline
 hipError_t radix_sort_keys_desc(void * temporary_storage,
                                 size_t& storage_size,
@@ -995,7 +1096,7 @@ hipError_t radix_sort_keys_desc(void * temporary_storage,
 {
     empty_type * values = nullptr;
     bool is_result_in_output;
-    hipError_t error = detail::radix_sort<true>(
+    hipError_t error = detail::radix_sort_impl<Config, true>(
         temporary_storage, storage_size,
         keys.current(), keys.current(), keys.alternate(),
         values, values, values,
@@ -1031,6 +1132,8 @@ hipError_t radix_sort_keys_desc(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p radix_sort_config or
+/// a custom class with the same members.
 /// \tparam Key - key type. Must be an integral type or a floating-point type.
 /// \tparam Value - value type.
 ///
@@ -1099,7 +1202,11 @@ hipError_t radix_sort_keys_desc(void * temporary_storage,
 /// // values.current(): [-1, -2, 2, 3, -4, -5, 7, -8]
 /// \endcode
 /// \endparblock
-template<class Key, class Value>
+template<
+    class Config = default_config,
+    class Key,
+    class Value
+>
 inline
 hipError_t radix_sort_pairs(void * temporary_storage,
                             size_t& storage_size,
@@ -1112,7 +1219,7 @@ hipError_t radix_sort_pairs(void * temporary_storage,
                             bool debug_synchronous = false)
 {
     bool is_result_in_output;
-    hipError_t error = detail::radix_sort<false>(
+    hipError_t error = detail::radix_sort_impl<Config, false>(
         temporary_storage, storage_size,
         keys.current(), keys.current(), keys.alternate(),
         values.current(), values.current(), values.alternate(),
@@ -1149,6 +1256,8 @@ hipError_t radix_sort_pairs(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p radix_sort_config or
+/// a custom class with the same members.
 /// \tparam Key - key type. Must be an integral type or a floating-point type.
 /// \tparam Value - value type.
 ///
@@ -1211,7 +1320,11 @@ hipError_t radix_sort_pairs(void * temporary_storage,
 /// // values.current(): [-8, 7, -5, -4, 3, 2, -1, -2]
 /// \endcode
 /// \endparblock
-template<class Key, class Value>
+template<
+    class Config = default_config,
+    class Key,
+    class Value
+>
 inline
 hipError_t radix_sort_pairs_desc(void * temporary_storage,
                                  size_t& storage_size,
@@ -1224,7 +1337,7 @@ hipError_t radix_sort_pairs_desc(void * temporary_storage,
                                  bool debug_synchronous = false)
 {
     bool is_result_in_output;
-    hipError_t error = detail::radix_sort<true>(
+    hipError_t error = detail::radix_sort_impl<Config, true>(
         temporary_storage, storage_size,
         keys.current(), keys.current(), keys.alternate(),
         values.current(), values.current(), values.alternate(),
