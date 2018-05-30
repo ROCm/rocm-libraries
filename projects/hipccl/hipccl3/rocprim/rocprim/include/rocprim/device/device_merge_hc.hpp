@@ -80,8 +80,8 @@ void merge_impl(void * temporary_storage,
     constexpr unsigned int items_per_thread = ItemsPerThread;
     constexpr auto items_per_block = block_size * items_per_thread;
 
-    const unsigned int partitions = div_up((unsigned int)(input1_size + input2_size), items_per_block) + 1;
-    const size_t partition_bytes = partitions * sizeof(unsigned int);
+    const unsigned int partitions = div_up((unsigned int)(input1_size + input2_size), items_per_block);
+    const size_t partition_bytes = (partitions + 1) * sizeof(unsigned int);
 
     if(temporary_storage == nullptr)
     {
@@ -103,12 +103,14 @@ void merge_impl(void * temporary_storage,
     }
 
     unsigned int * index = reinterpret_cast<unsigned int *>(temporary_storage);
+
+    const unsigned partition_blocks = div_up(partitions + 1, 128) * 128;
     const unsigned int grid_size = number_of_blocks * block_size;
 
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
     hc::parallel_for_each(
         acc_view,
-        hc::tiled_extent<1>(grid_size, block_size),
+        hc::tiled_extent<1>(partition_blocks, 128),
         [=](hc::tiled_index<1>) [[hc]]
         {
             partition_kernel_impl(
