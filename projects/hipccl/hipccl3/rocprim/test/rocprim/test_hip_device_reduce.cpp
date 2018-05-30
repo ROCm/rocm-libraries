@@ -65,10 +65,7 @@ public:
 };
 
 typedef ::testing::Types<
-    // -----------------------------------------------------------------------
-    //
-    // -----------------------------------------------------------------------
-    DeviceReduceParams<int>,
+    DeviceReduceParams<int, long>,
     DeviceReduceParams<unsigned long>,
     DeviceReduceParams<short, int>,
     DeviceReduceParams<int, float>

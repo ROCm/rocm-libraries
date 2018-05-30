@@ -61,10 +61,7 @@ public:
 };
 
 typedef ::testing::Types<
-    // -----------------------------------------------------------------------
-    //
-    // -----------------------------------------------------------------------
-    DeviceReduceParams<int>,
+    DeviceReduceParams<int, long>,
     DeviceReduceParams<unsigned long>,
     DeviceReduceParams<short>,
     DeviceReduceParams<int>
@@ -203,7 +200,7 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceMinimum)
         // Calculate expected results on host
         U expected = std::accumulate(
             input.begin(), input.end(),
-            std::numeric_limits<U>::max(), min_op
+            std::numeric_limits<T>::max(), min_op
         );
 
         // temp storage

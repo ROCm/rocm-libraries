@@ -44,12 +44,11 @@ namespace detail
 template<
     bool WithInitialValue,
     class T,
-    class InitValueType,
     class BinaryFunction
 >
 ROCPRIM_DEVICE inline
-auto reduce_with_initial(T& output,
-                         InitValueType initial_value,
+auto reduce_with_initial(T output,
+                         T initial_value,
                          BinaryFunction reduce_op)
     -> typename std::enable_if<WithInitialValue, T>::type
 {
@@ -59,12 +58,11 @@ auto reduce_with_initial(T& output,
 template<
     bool WithInitialValue,
     class T,
-    class InitValueType,
     class BinaryFunction
 >
 ROCPRIM_DEVICE inline
-auto reduce_with_initial(T& output,
-                         InitValueType initial_value,
+auto reduce_with_initial(T output,
+                         T initial_value,
                          BinaryFunction reduce_op)
     -> typename std::enable_if<!WithInitialValue, T>::type
 {
@@ -162,7 +160,7 @@ void block_reduce_kernel_impl(InputIterator input,
         output[flat_block_id] =
             reduce_with_initial<WithInitialValue>(
                 output_value,
-                initial_value,
+                static_cast<output_type>(initial_value),
                 reduce_op
             );
     }
