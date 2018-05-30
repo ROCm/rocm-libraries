@@ -217,7 +217,7 @@ hipError_t merge(void * temporary_storage,
 {
     // TODO: Those values should depend on type size
     constexpr unsigned int block_size = 256;
-    constexpr unsigned int items_per_thread = 4;
+    constexpr unsigned int items_per_thread = 8;
     empty_type * values = nullptr;
     return detail::merge_impl<block_size, items_per_thread>(
         temporary_storage, storage_size,

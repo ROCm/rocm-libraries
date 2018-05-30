@@ -27,16 +27,12 @@
 // Google Test
 #include <gtest/gtest.h>
 
-// HIP API
-#include <hip/hip_runtime.h>
-#include <hip/hip_hcc.h>
+// HC API
+#include <hcc/hc.hpp>
 // rocPRIM API
 #include <rocprim/rocprim.hpp>
 
 #include "test_utils.hpp"
-
-#define HIP_CHECK(error)         \
-    ASSERT_EQ(static_cast<hipError_t>(error),hipSuccess)
 
 namespace rp = rocprim;
 
@@ -90,7 +86,8 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        hipStream_t stream = 0; // default
+        hc::accelerator acc;
+        hc::accelerator_view acc_view = acc.create_view();
 
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
@@ -99,32 +96,13 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
         std::vector<key_type> keys_input2 = test_utils::get_random_data<key_type>(size, 0, size);
         std::sort(keys_input1.begin(), keys_input1.end());
         std::sort(keys_input2.begin(), keys_input2.end());
-        std::vector<key_type> keys_output(size + size, 0);
 
-        key_type * d_keys_input1;
-        key_type * d_keys_input2;
-        key_type * d_keys_output;
-        HIP_CHECK(hipMalloc(&d_keys_input1, keys_input1.size() * sizeof(key_type)));
-        HIP_CHECK(hipMalloc(&d_keys_input2, keys_input2.size() * sizeof(key_type)));
-        HIP_CHECK(hipMalloc(&d_keys_output, keys_output.size() * sizeof(key_type)));
-        HIP_CHECK(
-            hipMemcpy(
-                d_keys_input1, keys_input1.data(),
-                keys_input1.size() * sizeof(key_type),
-                hipMemcpyHostToDevice
-            )
-        );
-        HIP_CHECK(
-            hipMemcpy(
-                d_keys_input2, keys_input2.data(),
-                keys_input2.size() * sizeof(key_type),
-                hipMemcpyHostToDevice
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
+        hc::array<key_type> d_keys_input1(hc::extent<1>(size), keys_input1.begin(), acc_view);
+        hc::array<key_type> d_keys_input2(hc::extent<1>(size), keys_input2.begin(), acc_view);
+        hc::array<key_type> d_keys_output(size + size, acc_view);
 
         // Calculate expected results on host
-        std::vector<key_type> expected(keys_output.size());
+        std::vector<key_type> expected(size + size);
         std::merge(
             keys_input1.begin(),
             keys_input1.end(),
@@ -137,57 +115,41 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
         ::rocprim::less<key_type> lesser_op;
         // temp storage
         size_t temp_storage_size_bytes;
-        void * d_temp_storage = nullptr;
+
         // Get size of d_temp_storage
-        HIP_CHECK(
-            rocprim::merge(
-                d_temp_storage, temp_storage_size_bytes,
-                d_keys_input1, d_keys_input2, d_keys_output, keys_input1.size(),
-                keys_input2.size(),
-                lesser_op, stream, debug_synchronous
-            )
+        rocprim::merge(
+            nullptr, temp_storage_size_bytes,
+            d_keys_input1.accelerator_pointer(),
+            d_keys_input2.accelerator_pointer(),
+            d_keys_output.accelerator_pointer(),
+            keys_input1.size(), keys_input2.size(),
+            lesser_op, acc_view, debug_synchronous
         );
 
         // temp_storage_size_bytes must be >0
         ASSERT_GT(temp_storage_size_bytes, 0);
 
         // allocate temporary storage
-        HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
-        HIP_CHECK(hipDeviceSynchronize());
+        hc::array<char> d_temp_storage(temp_storage_size_bytes, acc_view);
 
         // Run
-        HIP_CHECK(
-            rocprim::merge(
-                d_temp_storage, temp_storage_size_bytes,
-                d_keys_input1, d_keys_input2, d_keys_output, keys_input1.size(),
-                keys_input2.size(),
-                lesser_op, stream, debug_synchronous
-            )
+        rocprim::merge(
+            d_temp_storage.accelerator_pointer(), temp_storage_size_bytes,
+            d_keys_input1.accelerator_pointer(),
+            d_keys_input2.accelerator_pointer(),
+            d_keys_output.accelerator_pointer(),
+            keys_input1.size(), keys_input2.size(),
+            lesser_op, acc_view, debug_synchronous
         );
-        HIP_CHECK(hipPeekAtLastError());
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // Copy keys_output to host
-        HIP_CHECK(
-            hipMemcpy(
-                keys_output.data(), d_keys_output,
-                keys_output.size() * sizeof(key_type),
-                hipMemcpyDeviceToHost
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
+        acc_view.wait();
 
         // Check if keys_output values are as expected
+        std::vector<key_type> keys_output = d_keys_output;
         for(size_t i = 0; i < keys_output.size(); i++)
         {
             auto diff = std::max<key_type>(std::abs(0.01f * expected[i]), key_type(0.01f));
             if(std::is_integral<key_type>::value) diff = 0;
             ASSERT_NEAR(keys_output[i], expected[i], diff);
         }
-
-        hipFree(d_keys_input1);
-        hipFree(d_keys_input2);
-        hipFree(d_keys_output);
-        hipFree(d_temp_storage);
     }
 }
