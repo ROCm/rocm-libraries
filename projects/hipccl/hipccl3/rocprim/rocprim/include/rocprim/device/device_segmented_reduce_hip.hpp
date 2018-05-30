@@ -41,11 +41,10 @@ namespace detail
 template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
-    class ResultType,
     class InputIterator,
     class OutputIterator,
     class OffsetIterator,
-    class InitValueType,
+    class ResultType,
     class BinaryFunction
 >
 __global__
@@ -54,9 +53,9 @@ void segmented_reduce_kernel(InputIterator input,
                              OffsetIterator begin_offsets,
                              OffsetIterator end_offsets,
                              BinaryFunction reduce_op,
-                             InitValueType initial_value)
+                             ResultType initial_value)
 {
-    segmented_reduce<BlockSize, ItemsPerThread, ResultType>(
+    segmented_reduce<BlockSize, ItemsPerThread>(
         input, output,
         begin_offsets, end_offsets,
         reduce_op, initial_value
@@ -99,11 +98,10 @@ hipError_t segmented_reduce_impl(void * temporary_storage,
                                  bool debug_synchronous)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    #ifdef __cpp_lib_is_invocable
-    using result_type = typename std::invoke_result<BinaryFunction, input_type, input_type>::type;
-    #else
-    using result_type = typename std::result_of<BinaryFunction(input_type, input_type)>::type;
-    #endif
+    using output_type = typename std::iterator_traits<OutputIterator>::value_type;
+    using result_type = typename ::rocprim::detail::match_result_type<
+        input_type, output_type, BinaryFunction
+    >::type;
 
     constexpr unsigned int block_size = 256;
     constexpr unsigned int items_per_thread = 8;
@@ -120,11 +118,11 @@ hipError_t segmented_reduce_impl(void * temporary_storage,
 
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
     hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(segmented_reduce_kernel<block_size, items_per_thread, result_type>),
+        HIP_KERNEL_NAME(segmented_reduce_kernel<block_size, items_per_thread>),
         dim3(segments), dim3(block_size), 0, stream,
         input, output,
         begin_offsets, end_offsets,
-        reduce_op, initial_value
+        reduce_op, static_cast<result_type>(initial_value)
     );
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_reduce", segments, start);
 
