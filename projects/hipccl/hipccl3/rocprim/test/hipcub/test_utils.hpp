@@ -91,11 +91,11 @@ OutputIt host_inclusive_scan(InputIt first, InputIt last,
                              OutputIt d_first, BinaryOperation op)
 {
     using input_type = typename std::iterator_traits<InputIt>::value_type;
-    #ifdef __cpp_lib_is_invocable
-    using result_type = typename std::invoke_result<BinaryOperation, input_type, input_type>::type;
-    #else
-    using result_type = typename std::result_of<BinaryOperation(input_type, input_type)>::type;
-    #endif
+    using output_type = typename std::iterator_traits<OutputIt>::value_type;
+    using result_type =
+        typename std::conditional<
+            std::is_void<output_type>::value, input_type, output_type
+        >::type;
 
     if (first == last) return d_first;
 
@@ -103,7 +103,7 @@ OutputIt host_inclusive_scan(InputIt first, InputIt last,
     *d_first = sum;
 
     while (++first != last) {
-       sum = op(sum, *first);
+       sum = op(sum, static_cast<result_type>(*first));
        *++d_first = sum;
     }
     return ++d_first;
@@ -115,11 +115,11 @@ OutputIt host_exclusive_scan(InputIt first, InputIt last,
                              BinaryOperation op)
 {
     using input_type = typename std::iterator_traits<InputIt>::value_type;
-    #ifdef __cpp_lib_is_invocable
-    using result_type = typename std::invoke_result<BinaryOperation, input_type, input_type>::type;
-    #else
-    using result_type = typename std::result_of<BinaryOperation(input_type, input_type)>::type;
-    #endif
+    using output_type = typename std::iterator_traits<OutputIt>::value_type;
+    using result_type =
+        typename std::conditional<
+            std::is_void<output_type>::value, input_type, output_type
+        >::type;
 
     if (first == last) return d_first;
 
@@ -128,7 +128,7 @@ OutputIt host_exclusive_scan(InputIt first, InputIt last,
 
     while ((first+1) != last)
     {
-       sum = op(sum, *first);
+       sum = op(sum, static_cast<result_type>(*first));
        *++d_first = sum;
        first++;
     }
@@ -141,11 +141,11 @@ OutputIt host_exclusive_scan_by_key(InputIt first, InputIt last, KeyIt k_first,
                                     BinaryOperation op, KeyCompare key_compare_op)
 {
     using input_type = typename std::iterator_traits<InputIt>::value_type;
-    #ifdef __cpp_lib_is_invocable
-    using result_type = typename std::invoke_result<BinaryOperation, input_type, input_type>::type;
-    #else
-    using result_type = typename std::result_of<BinaryOperation(input_type, input_type)>::type;
-    #endif
+    using output_type = typename std::iterator_traits<OutputIt>::value_type;
+    using result_type =
+        typename std::conditional<
+            std::is_void<output_type>::value, input_type, output_type
+        >::type;
 
     if (first == last) return d_first;
 
@@ -156,7 +156,7 @@ OutputIt host_exclusive_scan_by_key(InputIt first, InputIt last, KeyIt k_first,
     {
         if(key_compare_op(*k_first, *++k_first))
         {
-            sum = op(sum, *first);
+            sum = op(sum, static_cast<result_type>(*first));
         }
         else
         {

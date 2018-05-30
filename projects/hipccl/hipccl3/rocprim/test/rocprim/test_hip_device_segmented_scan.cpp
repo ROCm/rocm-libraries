@@ -94,12 +94,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScan)
     using input_type = typename TestFixture::params::input_type;
     using output_type = typename TestFixture::params::output_type;
     using scan_op_type = typename TestFixture::params::scan_op_type;
-
-    #ifdef __cpp_lib_is_invocable
-    using result_type = typename std::invoke_result<scan_op_type, input_type, input_type>::type;
-    #else
-    using result_type = typename std::result_of<scan_op_type(input_type, input_type)>::type;
-    #endif
+    using result_type = output_type;
 
     using offset_type = unsigned int;
     const bool debug_synchronous = false;
@@ -227,15 +222,10 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScan)
     using input_type = typename TestFixture::params::input_type;
     using output_type = typename TestFixture::params::output_type;
     using scan_op_type = typename TestFixture::params::scan_op_type;
-    constexpr input_type init = TestFixture::params::init;
-
-    #ifdef __cpp_lib_is_invocable
-    using result_type = typename std::invoke_result<scan_op_type, input_type, input_type>::type;
-    #else
-    using result_type = typename std::result_of<scan_op_type(input_type, input_type)>::type;
-    #endif
-
+    using result_type = output_type;
     using offset_type = unsigned int;
+
+    constexpr input_type init = TestFixture::params::init;
     const bool debug_synchronous = false;
     scan_op_type scan_op;
 
