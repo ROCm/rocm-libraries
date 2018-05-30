@@ -54,9 +54,6 @@ public:
 };
 
 typedef ::testing::Types<
-    // -----------------------------------------------------------------------
-    //
-    // -----------------------------------------------------------------------
     RocprimTextureCacheIteratorParams<int>,
     RocprimTextureCacheIteratorParams<unsigned int>,
     RocprimTextureCacheIteratorParams<unsigned char>,

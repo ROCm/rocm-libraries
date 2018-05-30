@@ -41,11 +41,10 @@ namespace detail
 template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
-    class ResultType,
     class InputIterator,
     class OutputIterator,
     class OffsetIterator,
-    class InitValueType,
+    class ResultType,
     class BinaryFunction
 >
 ROCPRIM_DEVICE inline
@@ -54,7 +53,7 @@ void segmented_reduce(InputIterator input,
                       OffsetIterator begin_offsets,
                       OffsetIterator end_offsets,
                       BinaryFunction reduce_op,
-                      InitValueType initial_value)
+                      ResultType initial_value)
 {
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
 
@@ -94,7 +93,7 @@ void segmented_reduce(InputIterator input,
             offset += BlockSize;
             while(offset < end_offset)
             {
-                result = reduce_op(result, input[offset]);
+                result = reduce_op(result, static_cast<ResultType>(input[offset]));
                 offset += BlockSize;
             }
         }
@@ -121,7 +120,7 @@ void segmented_reduce(InputIterator input,
         result = values[0];
         for(unsigned int i = 1; i < ItemsPerThread; i++)
         {
-            result = reduce_op(result, values[i]);
+            result = reduce_op(result, static_cast<ResultType>(values[i]));
         }
         block_offset += items_per_block;
 
@@ -131,7 +130,7 @@ void segmented_reduce(InputIterator input,
             block_load_direct_striped<BlockSize>(flat_id, input + block_offset, values);
             for(unsigned int i = 0; i < ItemsPerThread; i++)
             {
-                result = reduce_op(result, values[i]);
+                result = reduce_op(result, static_cast<ResultType>(values[i]));
             }
             block_offset += items_per_block;
         }
@@ -143,7 +142,7 @@ void segmented_reduce(InputIterator input,
         {
             if(i * BlockSize + flat_id < valid_count)
             {
-                result = reduce_op(result, values[i]);
+                result = reduce_op(result, static_cast<ResultType>(values[i]));
             }
         }
 

@@ -336,20 +336,23 @@ public:
         // prefix from the (block_id_ - 1) block, 1st thread has prefix
         // from (block_id_ - 2) block etc.
         using headflag_scan_op_type = reverse_binary_op_wrapper<
-            headflag_scan_op_wrapper<T, bool, BinaryFunction>
+            BinaryFunction, T, T
         >;
-        using value_headflag_type = typename headflag_scan_op_type::result_type;
         using warp_reduce_prefix_type = warp_reduce_crosslane<
-            value_headflag_type, ::rocprim::warp_size(), false
+            T, ::rocprim::warp_size(), false
         >;
 
         T block_prefix;
         scan_state_.get(block_id, flag, block_prefix);
 
         auto headflag_scan_op = headflag_scan_op_type(scan_op_);
-        auto value_flag = ::rocprim::make_tuple(block_prefix, flag == PREFIX_COMPLETE);
-        warp_reduce_prefix_type().reduce(value_flag, value_flag, headflag_scan_op);
-        partial_prefix = ::rocprim::get<0>(value_flag);
+        warp_reduce_prefix_type()
+            .tail_segmented_reduce(
+                block_prefix,
+                partial_prefix,
+                (flag == PREFIX_COMPLETE),
+                headflag_scan_op
+            );
     }
 
     ROCPRIM_DEVICE inline

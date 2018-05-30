@@ -54,9 +54,6 @@ public:
 };
 
 typedef ::testing::Types<
-    // -----------------------------------------------------------------------
-    //
-    // -----------------------------------------------------------------------
     RocprimArgIndexIteratorParams<int>,
     RocprimArgIndexIteratorParams<unsigned int>,
     RocprimArgIndexIteratorParams<unsigned long>,

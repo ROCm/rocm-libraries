@@ -80,11 +80,10 @@ void segmented_scan_impl(void * temporary_storage,
                          const bool debug_synchronous)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    #ifdef __cpp_lib_is_invocable
-    using result_type = typename std::invoke_result<BinaryFunction, input_type, input_type>::type;
-    #else
-    using result_type = typename std::result_of<BinaryFunction(input_type, input_type)>::type;
-    #endif
+    using output_type = typename std::iterator_traits<OutputIterator>::value_type;
+    using result_type = typename ::rocprim::detail::match_result_type<
+        input_type, output_type, BinaryFunction
+    >::type;
 
     constexpr unsigned int block_size = BlockSize;
     constexpr unsigned int items_per_thread = ItemsPerThread;
@@ -224,11 +223,10 @@ void segmented_inclusive_scan(void * temporary_storage,
                               const bool debug_synchronous = false)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    #ifdef __cpp_lib_is_invocable
-    using result_type = typename std::invoke_result<BinaryFunction, input_type, input_type>::type;
-    #else
-    using result_type = typename std::result_of<BinaryFunction(input_type, input_type)>::type;
-    #endif
+    using output_type = typename std::iterator_traits<OutputIterator>::value_type;
+    using result_type = typename ::rocprim::detail::match_result_type<
+        input_type, output_type, BinaryFunction
+    >::type;
 
     // TODO: Those values should depend on type size
     constexpr unsigned int block_size = 256;
