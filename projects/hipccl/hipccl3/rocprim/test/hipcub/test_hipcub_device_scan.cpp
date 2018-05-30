@@ -60,12 +60,9 @@ public:
 };
 
 typedef ::testing::Types<
-    // -----------------------------------------------------------------------
-    //
-    // -----------------------------------------------------------------------
-    DeviceScanParams<int>,
+    DeviceScanParams<int, long>,
     DeviceScanParams<unsigned long>,
-    DeviceScanParams<short>,
+    DeviceScanParams<short, float>,
     DeviceScanParams<float>
 > HipcubDeviceScanTestsParams;
 

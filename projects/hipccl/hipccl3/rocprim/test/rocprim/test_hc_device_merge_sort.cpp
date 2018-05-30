@@ -61,9 +61,6 @@ public:
 };
 
 typedef ::testing::Types<
-    // -----------------------------------------------------------------------
-    //
-    // -----------------------------------------------------------------------
     DeviceSortParams<int>,
     DeviceSortParams<unsigned long>,
     DeviceSortParams<float, int>,
