@@ -258,7 +258,7 @@ namespace detail
         return warp_id();
     }
 
-    #if ROCPRIM_HIP_API
+    #ifdef ROCPRIM_HIP_API
     ROCPRIM_DEVICE inline
     void memory_fence_system(void)
     {
