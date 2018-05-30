@@ -133,4 +133,5 @@ add_rocprim_test_hip("rocprim.hip.transform_iterator" test_hip_transform_iterato
 add_rocprim_test_hip("rocprim.hip.intrinsics" test_hip_intrinsics.cpp)
 add_rocprim_test_hip("rocprim.hip.warp_reduce" test_hip_warp_reduce.cpp)
 add_rocprim_test_hip("rocprim.hip.warp_scan" test_hip_warp_scan.cpp)
+add_rocprim_test_hip("rocprim.hip.warp_sort" test_hip_warp_sort.cpp)
 add_rocprim_test_hip("rocprim.hip.zip_iterator" test_hip_zip_iterator.cpp)
