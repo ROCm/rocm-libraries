@@ -568,9 +568,12 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
 
         rp::double_buffer<key_type> d_keys(d_keys_input, d_keys_output);
 
+        // Use custom config
+        using config = rp::segmented_radix_sort_config<7, 4, rp::kernel_config<192, 5>>;
+
         size_t temporary_storage_bytes = 0;
         HIP_CHECK(
-            rp::segmented_radix_sort_keys(
+            rp::segmented_radix_sort_keys<config>(
                 nullptr, temporary_storage_bytes,
                 d_keys, size,
                 segments_count, d_offsets, d_offsets + 1,
@@ -586,7 +589,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
         if(descending)
         {
             HIP_CHECK(
-                rp::segmented_radix_sort_keys_desc(
+                rp::segmented_radix_sort_keys_desc<config>(
                     d_temporary_storage, temporary_storage_bytes,
                     d_keys, size,
                     segments_count, d_offsets, d_offsets + 1,
@@ -598,7 +601,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
         else
         {
             HIP_CHECK(
-                rp::segmented_radix_sort_keys(
+                rp::segmented_radix_sort_keys<config>(
                     d_temporary_storage, temporary_storage_bytes,
                     d_keys, size,
                     segments_count, d_offsets, d_offsets + 1,

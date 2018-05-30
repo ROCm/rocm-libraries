@@ -181,9 +181,12 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
         std::vector<key_type> expected(keys_input);
         std::stable_sort(expected.begin(), expected.end(), key_comparator<key_type, descending, start_bit, end_bit>());
 
+        // Use custom config
+        using config = rp::radix_sort_config<8, 5, rp::kernel_config<256, 3>, rp::kernel_config<256, 8>>;
+
         size_t temporary_storage_bytes;
         HIP_CHECK(
-            rp::radix_sort_keys(
+            rp::radix_sort_keys<config>(
                 nullptr, temporary_storage_bytes,
                 d_keys_input, d_keys_output, size,
                 start_bit, end_bit
@@ -198,7 +201,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
         if(descending)
         {
             HIP_CHECK(
-                rp::radix_sort_keys_desc(
+                rp::radix_sort_keys_desc<config>(
                     d_temporary_storage, temporary_storage_bytes,
                     d_keys_input, d_keys_output, size,
                     start_bit, end_bit,
@@ -209,7 +212,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
         else
         {
             HIP_CHECK(
-                rp::radix_sort_keys(
+                rp::radix_sort_keys<config>(
                     d_temporary_storage, temporary_storage_bytes,
                     d_keys_input, d_keys_output, size,
                     start_bit, end_bit,
