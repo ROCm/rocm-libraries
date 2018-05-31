@@ -68,10 +68,28 @@ void run_merge_keys_benchmark(benchmark::State& state, hipStream_t stream, size_
     const size_t size2 = size - size1;
 
     // Generate data
-    std::vector<key_type> keys_input1(size1);
-    std::vector<key_type> keys_input2(size2);
-    std::iota(keys_input1.begin(), keys_input1.end(), 0);
-    std::iota(keys_input2.begin(), keys_input2.end(), 0);
+    std::vector<key_type> keys_input1;
+    std::vector<key_type> keys_input2;
+    if(std::is_floating_point<key_type>::value)
+    {
+        keys_input1 = get_random_data<key_type>(size1, (key_type)-1000, (key_type)+1000);
+        keys_input2 = get_random_data<key_type>(size2, (key_type)-1000, (key_type)+1000);
+    }
+    else
+    {
+        keys_input1 = get_random_data<key_type>(
+            size1,
+            std::numeric_limits<key_type>::min(),
+            std::numeric_limits<key_type>::max()
+        );
+        keys_input2 = get_random_data<key_type>(
+            size2,
+            std::numeric_limits<key_type>::min(),
+            std::numeric_limits<key_type>::max()
+        );
+    }
+    std::sort(keys_input1.begin(), keys_input1.end());
+    std::sort(keys_input2.begin(), keys_input2.end());
 
     key_type * d_keys_input1;
     key_type * d_keys_input2;
@@ -169,7 +187,7 @@ void add_merge_keys_benchmarks(std::vector<benchmark::internal::Benchmark*>& ben
         CREATE_MERGE_KEYS_BENCHMARK(long long),
 
         CREATE_MERGE_KEYS_BENCHMARK(char),
-        CREATE_MERGE_KEYS_BENCHMARK(float),
+        CREATE_MERGE_KEYS_BENCHMARK(short),
     };
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }

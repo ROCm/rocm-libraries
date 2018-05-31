@@ -38,10 +38,6 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-unsigned int div_up(unsigned int a, unsigned int b) {
-    return (a + b - 1) / b;
-}
-
 struct range_t
 {
     unsigned int begin1;
@@ -66,12 +62,12 @@ ROCPRIM_DEVICE inline
 range_t compute_range(const unsigned int id,
                       const unsigned int size1,
                       const unsigned int size2,
-                      const unsigned int blocksize,
+                      const unsigned int spacing,
                       const unsigned int p1,
                       const unsigned int p2)
 {
-    unsigned int diag1 = id * blocksize;
-    unsigned int diag2 = min(size1 + size2, diag1 + blocksize);
+    unsigned int diag1 = id * spacing;
+    unsigned int diag2 = min(size1 + size2, diag1 + spacing);
 
     return range_t{p1, p2, diag1 - p1, diag2 - p2};
 }
@@ -91,19 +87,15 @@ unsigned int merge_path(KeysInputIterator1 keys_input1,
 {
     using key_type = typename std::iterator_traits<KeysInputIterator1>::value_type;
 
-    unsigned int a, b;
-    key_type input_a;
-    key_type input_b;
-
     int begin = max((int)0, (int)diag - (int)input2_size);
     int end = min((int)diag, (int)input1_size);
 
     while(begin < end)
     {
-        a = (begin + end) / 2;
-        b = diag - 1 - a;
-        input_a = keys_input1[a];
-        input_b = keys_input2[b];
+        unsigned int a = (begin + end) / 2;
+        unsigned int b = diag - 1 - a;
+        key_type input_a = keys_input1[a];
+        key_type input_b = keys_input2[b];
         if(!compare_function(input_b, input_a))
         {
             begin = a + 1;
@@ -140,14 +132,17 @@ void partition_kernel_impl(IndexIterator indices,
 
     unsigned int partition_id = id * spacing;
     unsigned int diag = min(partition_id, (unsigned int)(input1_size + input2_size));
-    unsigned int begin = merge_path(
-                            keys_input1,
-                            keys_input2,
-                            input1_size,
-                            input2_size,
-                            diag,
-                            compare_function
-                        );
+
+    unsigned int begin =
+        merge_path(
+            keys_input1,
+            keys_input2,
+            input1_size,
+            input2_size,
+            diag,
+            compare_function
+        );
+
     indices[id] = begin;
 }
 
@@ -166,18 +161,15 @@ void load(unsigned int flat_id,
           const size_t input1_size,
           const size_t input2_size)
 {
-    constexpr unsigned int block_size = BlockSize;
-    constexpr unsigned int items_per_thread = ItemsPerThread;
-
-    KeyType keys[items_per_thread];
+    KeyType keys[ItemsPerThread];
     keys_input2 -= input1_size;
 
     unsigned int count = input1_size + input2_size;
 
     #pragma unroll
-    for(unsigned int i = 0; i < items_per_thread; ++i)
+    for(unsigned int i = 0; i < ItemsPerThread; ++i)
     {
-        unsigned int index = block_size * i + flat_id;
+        unsigned int index = BlockSize * i + flat_id;
         if(index < count)
         {
             keys[i] = (index < input1_size) ? keys_input1[index] : keys_input2[index];
@@ -185,9 +177,9 @@ void load(unsigned int flat_id,
     }
 
     #pragma unroll
-	for(unsigned int i = 0; i < items_per_thread; ++i)
+    for(unsigned int i = 0; i < ItemsPerThread; ++i)
     {
-        keys_shared[block_size * i + flat_id] = keys[i];
+        keys_shared[BlockSize * i + flat_id] = keys[i];
     }
 
     ::rocprim::syncthreads();
@@ -212,7 +204,7 @@ void serial_merge(KeyType * keys_shared,
     for(unsigned int i = 0; i < ItemsPerThread; ++i)
     {
         bool compare = (range.begin2 >= range.end2) ||
-                     ((range.begin1 < range.end1) && !compare_function(b, a));
+                       ((range.begin1 < range.end1) && !compare_function(b, a));
         unsigned int x = compare ? range.begin1 : range.begin2;
 
         inputs[i] = compare ? a : b;
@@ -252,38 +244,39 @@ void merge_keys(unsigned int flat_id,
 {
     using key_type = typename std::iterator_traits<KeysInputIterator1>::value_type;
 
-    constexpr unsigned int block_size = BlockSize;
-    constexpr unsigned int items_per_thread = ItemsPerThread;
-    constexpr unsigned int input_block_size = block_size * items_per_thread + 1;
+    constexpr unsigned int input_block_size = BlockSize * ItemsPerThread + 1;
 
     ROCPRIM_SHARED_MEMORY key_type keys_shared[input_block_size];
 
-    load<block_size, items_per_thread>(
+    load<BlockSize, ItemsPerThread>(
         flat_id, keys_input1 + range.begin1, keys_input2 + range.begin2,
         keys_shared, range.count1(), range.count2()
     );
 
-    range_t range_local = range_t {
-                              0, range.count1(), range.count1(),
-                              (range.count1() + range.count2())
-                          };
+    range_t range_local =
+        range_t {
+            0, range.count1(), range.count1(),
+            (range.count1() + range.count2())
+        };
 
     unsigned int diag = ItemsPerThread * flat_id;
-    unsigned int partition = merge_path(
-                                keys_shared + range_local.begin1,
-                                keys_shared + range_local.begin2,
-                                range_local.count1(),
-                                range_local.count2(),
-                                diag,
-                                compare_function
-                            );
+        unsigned int partition =
+        merge_path(
+            keys_shared + range_local.begin1,
+            keys_shared + range_local.begin2,
+            range_local.count1(),
+            range_local.count2(),
+            diag,
+            compare_function
+        );
 
-    range_t range_partition = range_t {
-                                  range_local.begin1 + partition,
-                                  range_local.end1,
-                                  range_local.begin2 + diag - partition,
-                                  range_local.end2
-                              };
+    range_t range_partition =
+        range_t {
+            range_local.begin1 + partition,
+            range_local.end1,
+            range_local.begin2 + diag - partition,
+            range_local.end2
+        };
 
     serial_merge(
         keys_shared, key_inputs, index, range_partition,
@@ -319,16 +312,16 @@ merge_values(unsigned int flat_id,
     if(count >= ItemsPerThread * BlockSize)
     {
         #pragma unroll
-    	for(unsigned int i = 0; i < ItemsPerThread; ++i)
+        for(unsigned int i = 0; i < ItemsPerThread; ++i)
         {
-    		values[i] = (index[i] < input1_size) ? values_input1[index[i]] :
-    			                                   values_input2[index[i]];
+            values[i] = (index[i] < input1_size) ? values_input1[index[i]] :
+                                                   values_input2[index[i]];
         }
     }
     else
     {
         #pragma unroll
-    	for(unsigned int i = 0; i < ItemsPerThread; ++i)
+        for(unsigned int i = 0; i < ItemsPerThread; ++i)
         {
             unsigned int id = ItemsPerThread * i + flat_id;
             if(id < count)
@@ -404,12 +397,10 @@ void merge_kernel_impl(IndexIterator indices,
     using value_type = typename std::iterator_traits<ValuesInputIterator1>::value_type;
     constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
 
-    constexpr unsigned int block_size = BlockSize;
-    constexpr unsigned int items_per_thread = ItemsPerThread;
-    constexpr unsigned int items_per_block = block_size * items_per_thread;
+    constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
 
-    key_type input[items_per_thread];
-    unsigned int index[items_per_thread];
+    key_type input[ItemsPerThread];
+    unsigned int index[ItemsPerThread];
 
     const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
     const unsigned int flat_block_id = ::rocprim::detail::block_id<0>();
@@ -420,12 +411,13 @@ void merge_kernel_impl(IndexIterator indices,
     const unsigned int p1 = indices[flat_block_id];
     const unsigned int p2 = indices[flat_block_id + 1];
 
-    range_t range = compute_range(
-                        flat_block_id, input1_size, input2_size, items_per_block,
-                        p1, p2
-                    );
+    range_t range =
+        compute_range(
+            flat_block_id, input1_size, input2_size, items_per_block,
+            p1, p2
+        );
 
-    merge_keys<block_size>(
+    merge_keys<BlockSize>(
         flat_id, keys_input1, keys_input2, input, index,
         range, compare_function
     );
@@ -448,7 +440,7 @@ void merge_kernel_impl(IndexIterator indices,
         );
     }
 
-    merge_values<with_values, block_size>(
+    merge_values<with_values, BlockSize>(
         flat_id, values_input1 + range.begin1, values_input2 + range.begin2,
         values_output + block_offset, index,
         range.count1(), range.count2()
