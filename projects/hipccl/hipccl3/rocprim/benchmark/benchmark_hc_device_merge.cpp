@@ -79,18 +79,32 @@ void run_benchmark(benchmark::State& state, hc::accelerator_view acc_view, size_
     const size_t size2 = size - size1;
 
     // Generate data
-    std::vector<key_type> keys_input1(size1);
-    std::vector<key_type> keys_input2(size2);
-    std::iota(keys_input1.begin(), keys_input1.end(), 0);
-    std::iota(keys_input2.begin(), keys_input2.end(), 0);
-
-    //std::vector<value_type> values_input(size);
-    //std::iota(values_input.begin(), values_input.end(), 0);
+    std::vector<key_type> keys_input1;
+    std::vector<key_type> keys_input2;
+    if(std::is_floating_point<key_type>::value)
+    {
+        keys_input1 = get_random_data<key_type>(size1, (key_type)-1000, (key_type)+1000);
+        keys_input2 = get_random_data<key_type>(size2, (key_type)-1000, (key_type)+1000);
+    }
+    else
+    {
+        keys_input1 = get_random_data<key_type>(
+            size1,
+            std::numeric_limits<key_type>::min(),
+            std::numeric_limits<key_type>::max()
+        );
+        keys_input2 = get_random_data<key_type>(
+            size2,
+            std::numeric_limits<key_type>::min(),
+            std::numeric_limits<key_type>::max()
+        );
+    }
+    std::sort(keys_input1.begin(), keys_input1.end());
+    std::sort(keys_input2.begin(), keys_input2.end());
 
     hc::array<key_type> d_keys_input1(hc::extent<1>(size1), keys_input1.begin(), acc_view);
     hc::array<key_type> d_keys_input2(hc::extent<1>(size2), keys_input2.begin(), acc_view);
     hc::array<key_type> d_keys_output(size, acc_view);
-    //hc::array<value_type> d_values_output(size, acc_view);
     acc_view.wait();
 
     size_t temp_storage_size_bytes = 0;
@@ -177,6 +191,7 @@ void add_benchmarks(const std::string& name,
         CREATE_BENCHMARK(long long),
 
         CREATE_BENCHMARK(char),
+        CREATE_BENCHMARK(short),
 
         CREATE_BENCHMARK(float),
         CREATE_BENCHMARK(double),

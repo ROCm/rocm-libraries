@@ -63,16 +63,22 @@ typedef ::testing::Types<
     DeviceMergeParams<int, float>
 > RocprimDeviceMergeTestsParams;
 
-std::vector<size_t> get_sizes()
+// size1, size2
+std::vector<std::tuple<size_t, size_t>> get_dims()
 {
-    std::vector<size_t> sizes = {
-        1, 10, 53, 211,
-        1024, 2048, 5096,
-        34567, (1 << 17) - 1220
+    std::vector<std::tuple<size_t, size_t>> sizes = {
+        std::make_tuple(2, 1),
+        std::make_tuple(10, 10),
+        std::make_tuple(111, 111),
+        std::make_tuple(128, 1289),
+        std::make_tuple(12, 1000),
+        std::make_tuple(123, 3000),
+        std::make_tuple(1024, 512),
+        std::make_tuple(2345, 49),
+        std::make_tuple(17867, 41),
+        std::make_tuple(17867, 34567),
+        std::make_tuple(34567, (1 << 17) - 1220),
     };
-    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(2, 1, 16384);
-    sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
-    std::sort(sizes.begin(), sizes.end());
     return sizes;
 }
 
@@ -83,26 +89,31 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
     using key_type = typename TestFixture::key_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
-    {
-        hc::accelerator acc;
-        hc::accelerator_view acc_view = acc.create_view();
+    hc::accelerator acc;
+    hc::accelerator_view acc_view = acc.create_view();
 
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
+    for(auto dim : get_dims())
+    {
+        SCOPED_TRACE(
+            testing::Message() << "with dim = {" <<
+            std::get<0>(dim) << ", " << std::get<1>(dim) << "}"
+        );
+
+        const size_t size1 = std::get<0>(dim);
+        const size_t size2 = std::get<1>(dim);
 
         // Generate data
-        std::vector<key_type> keys_input1 = test_utils::get_random_data<key_type>(size, 0, size);
-        std::vector<key_type> keys_input2 = test_utils::get_random_data<key_type>(size, 0, size);
+        std::vector<key_type> keys_input1 = test_utils::get_random_data<key_type>(size1, 0, size1);
+        std::vector<key_type> keys_input2 = test_utils::get_random_data<key_type>(size2, 0, size2);
         std::sort(keys_input1.begin(), keys_input1.end());
         std::sort(keys_input2.begin(), keys_input2.end());
 
-        hc::array<key_type> d_keys_input1(hc::extent<1>(size), keys_input1.begin(), acc_view);
-        hc::array<key_type> d_keys_input2(hc::extent<1>(size), keys_input2.begin(), acc_view);
-        hc::array<key_type> d_keys_output(size + size, acc_view);
+        hc::array<key_type> d_keys_input1(hc::extent<1>(size1), keys_input1.begin(), acc_view);
+        hc::array<key_type> d_keys_input2(hc::extent<1>(size2), keys_input2.begin(), acc_view);
+        hc::array<key_type> d_keys_output(size1 + size2, acc_view);
 
         // Calculate expected results on host
-        std::vector<key_type> expected(size + size);
+        std::vector<key_type> expected(size1 + size2);
         std::merge(
             keys_input1.begin(),
             keys_input1.end(),

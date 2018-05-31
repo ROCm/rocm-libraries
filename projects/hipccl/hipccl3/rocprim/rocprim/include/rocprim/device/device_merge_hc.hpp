@@ -77,10 +77,11 @@ void merge_impl(void * temporary_storage,
 
 {
     constexpr unsigned int block_size = BlockSize;
+    constexpr unsigned int half_block = block_size / 2;
     constexpr unsigned int items_per_thread = ItemsPerThread;
     constexpr auto items_per_block = block_size * items_per_thread;
 
-    const unsigned int partitions = div_up((unsigned int)(input1_size + input2_size), items_per_block);
+    const unsigned int partitions = ((input1_size + input2_size) + items_per_block - 1) / items_per_block;
     const size_t partition_bytes = (partitions + 1) * sizeof(unsigned int);
 
     if(temporary_storage == nullptr)
@@ -104,13 +105,13 @@ void merge_impl(void * temporary_storage,
 
     unsigned int * index = reinterpret_cast<unsigned int *>(temporary_storage);
 
-    const unsigned partition_blocks = div_up(partitions + 1, 128) * 128;
+    const unsigned partition_blocks = ((partitions + 1) + half_block - 1) / half_block;
     const unsigned int grid_size = number_of_blocks * block_size;
 
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
     hc::parallel_for_each(
         acc_view,
-        hc::tiled_extent<1>(partition_blocks, 128),
+        hc::tiled_extent<1>(partition_blocks * half_block, half_block),
         [=](hc::tiled_index<1>) [[hc]]
         {
             partition_kernel_impl(
@@ -141,6 +142,75 @@ void merge_impl(void * temporary_storage,
 
 } // end of detail namespace
 
+/// \brief HC parallel merge primitive for device level.
+///
+/// \p merge function performs a device-wide merge of keys.
+/// Function merges two ordered sets of input keys based on comparison function.
+///
+/// \par Overview
+/// * The contents of the inputs are not altered by the merging function.
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage in a null pointer.
+/// * Accepts custom compare_functions for merging across the device.
+///
+/// \tparam KeysInputIterator1 - random-access iterator type of the first input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam KeysInputIterator2 - random-access iterator type of the second input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+///
+/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the sort operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] keys_input1 - pointer to the first element in the first range to merge.
+/// \param [in] keys_input2 - pointer to the first element in the second range to merge.
+/// \param [out] keys_output - pointer to the first element in the output range.
+/// \param [in] size1 - number of element in the first input range.
+/// \param [in] size2 - number of element in the second input range.
+/// \param [in] acc_view - [optional] \p hc::accelerator_view object. The default value
+/// is \p hc::accelerator().get_default_view() (default view of the default accelerator).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level ascending merge is performed on an array of
+/// \p int values.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// hc::accelerator_view acc_view = ...;
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t input_size;               // e.g., 4
+/// hc::array<int> input1;           // e.g., [0, 1, 2, 3]
+/// hc::array<int> input2;           // e.g., [0, 1, 2, 3]
+/// hc::array<int> output;           // empty array of 8 elements
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::merge(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input1.accelerator_pointer(), input2.accelerator_pointer(),
+///     output.accelerator_pointer(), input_size, input_size
+/// );
+///
+/// // allocate temporary storage
+/// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
+///
+/// // perform merge
+/// rocprim::merge(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input1.accelerator_pointer(), input2.accelerator_pointer(),
+///     output.accelerator_pointer(), input_size, input_size
+/// );
+/// // keys_output: [0, 0, 1, 1, 2, 2, 3, 3]
+/// \endcode
+/// \endparblock
 template<
     class KeysInputIterator1,
     class KeysInputIterator2,
@@ -163,7 +233,7 @@ void merge(void * temporary_storage,
     constexpr unsigned int block_size = 256;
     constexpr unsigned int items_per_thread = 8;
     empty_type * values = nullptr;
-    return detail::merge_impl<block_size, items_per_thread>(
+    detail::merge_impl<block_size, items_per_thread>(
         temporary_storage, storage_size,
         keys_input1, keys_input2, keys_output,
         values, values, values,
