@@ -81,6 +81,7 @@ add_rocprim_benchmark_hip(benchmark_hip_device_memory.cpp)
 # rocPRIM HC benchmarks
 add_rocprim_benchmark_hc(benchmark_hc_block_discontinuity.cpp)
 add_rocprim_benchmark_hc(benchmark_hc_block_exchange.cpp)
+add_rocprim_benchmark_hc(benchmark_hc_block_radix_sort.cpp)
 add_rocprim_benchmark_hc(benchmark_hc_block_sort.cpp)
 add_rocprim_benchmark_hc(benchmark_hc_device_merge.cpp)
 add_rocprim_benchmark_hc(benchmark_hc_device_merge_sort.cpp)
