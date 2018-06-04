@@ -72,6 +72,7 @@ typedef ::testing::Types<
     params<double, int, true>,
     params<float, int>,
     params<rp::half, long long>,
+    params<int, test_utils::custom_test_type<float>>,
 
     // start_bit and end_bit
     params<unsigned char, int, true, 0, 7>,
