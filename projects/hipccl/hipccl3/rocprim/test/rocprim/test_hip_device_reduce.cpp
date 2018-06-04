@@ -72,7 +72,9 @@ typedef ::testing::Types<
     DeviceReduceParams<unsigned int>,
     DeviceReduceParams<long, long, true>,
     DeviceReduceParams<short, int>,
-    DeviceReduceParams<int, float>
+    DeviceReduceParams<int, float>,
+    DeviceReduceParams<test_utils::custom_test_type<float>, test_utils::custom_test_type<float>>,
+    DeviceReduceParams<test_utils::custom_test_type<int>, test_utils::custom_test_type<float>>
 > RocprimDeviceReduceTestsParams;
 
 std::vector<size_t> get_sizes()
@@ -108,6 +110,9 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
         std::vector<T> input = test_utils::get_random_data<T>(size, 1, 100);
         std::vector<U> output(1, 0);
 
+        // reduce function
+        ::rocprim::plus<U> plus_op;
+
         T * d_input;
         U * d_output;
         HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
@@ -122,10 +127,12 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
         HIP_CHECK(hipDeviceSynchronize());
 
         // Calculate expected results on host
-        U expected = std::accumulate(input.begin(), input.end(), 0);
+        U expected = U(0);
+        for(unsigned int i = 0; i < input.size(); i++)
+        {
+            expected = plus_op(expected, input[i]);
+        }
 
-        // scan function
-        ::rocprim::plus<U> plus_op;
         // temp storage
         size_t temp_storage_size_bytes;
         void * d_temp_storage = nullptr;
@@ -169,9 +176,7 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
         HIP_CHECK(hipDeviceSynchronize());
 
         // Check if output values are as expected
-        auto diff = std::max<U>(std::abs(0.01f * expected), U(0.01f));
-        if(std::is_integral<U>::value) diff = 0;
-        ASSERT_NEAR(output[0], expected, diff);
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output[0], expected, 0.01f));
 
         hipFree(d_input);
         hipFree(d_output);
@@ -210,11 +215,15 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
         );
         HIP_CHECK(hipDeviceSynchronize());
 
-        // scan function
+        // reduce function
         ::rocprim::minimum<U> min_op;
 
         // Calculate expected results on host
-        U expected = std::accumulate(input.begin(), input.end(), std::numeric_limits<U>::max(), min_op);
+        U expected = U(test_utils::numeric_limits<U>::max());
+        for(unsigned int i = 0; i < input.size(); i++)
+        {
+            expected = min_op(expected, input[i]);
+        }
 
         // temp storage
         size_t temp_storage_size_bytes;
@@ -225,7 +234,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
                 d_temp_storage, temp_storage_size_bytes,
                 d_input,
                 test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
-                std::numeric_limits<U>::max(), input.size(), min_op, stream, debug_synchronous
+                test_utils::numeric_limits<U>::max(), input.size(), min_op, stream, debug_synchronous
             )
         );
 
@@ -242,7 +251,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
                 d_temp_storage, temp_storage_size_bytes,
                 d_input,
                 test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
-                std::numeric_limits<U>::max(), input.size(), min_op, stream, debug_synchronous
+                test_utils::numeric_limits<U>::max(), input.size(), min_op, stream, debug_synchronous
             )
         );
         HIP_CHECK(hipPeekAtLastError());
@@ -259,9 +268,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
         HIP_CHECK(hipDeviceSynchronize());
 
         // Check if output values are as expected
-        auto diff = std::max<U>(std::abs(0.01f * expected), U(0.01f));
-        if(std::is_integral<U>::value) diff = 0;
-        ASSERT_NEAR(output[0], expected, diff);
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_near<U>(output[0], expected, 0.01f));
 
         hipFree(d_input);
         hipFree(d_output);
@@ -321,10 +328,14 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
         HIP_CHECK(hipDeviceSynchronize());
 
         arg_min<int, T> reduce_op;
-        const key_value max(std::numeric_limits<int>::max(), std::numeric_limits<T>::max());
+        const key_value max(std::numeric_limits<int>::max(), test_utils::numeric_limits<T>::max());
 
         // Calculate expected results on host
-        key_value expected = std::accumulate(input.begin(), input.end(), max, reduce_op);
+        key_value expected = max;
+        for(unsigned int i = 0; i < input.size(); i++)
+        {
+            expected = reduce_op(expected, input[i]);
+        }
 
         // temp storage
         size_t temp_storage_size_bytes;
@@ -369,10 +380,8 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
         HIP_CHECK(hipDeviceSynchronize());
 
         // Check if output values are as expected
-        auto diff = std::max<T>(std::abs(0.01f * expected.value), T(0.01f));
-        if(std::is_integral<T>::value) diff = 0;
         ASSERT_EQ(output[0].key, expected.key);
-        ASSERT_NEAR(output[0].value, expected.value, diff);
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output[0].value, expected.value, 0.01f));
 
         hipFree(d_input);
         hipFree(d_output);
