@@ -232,6 +232,14 @@ struct custom_test_type
     ROCPRIM_HOST_DEVICE inline
     custom_test_type(T xy) : x(xy), y(xy) {}
 
+    template<class U>
+    ROCPRIM_HOST_DEVICE inline
+    custom_test_type(const custom_test_type<U>& other)
+    {
+        x = other.x;
+        y = other.y;
+    }
+
     ROCPRIM_HOST_DEVICE inline
     ~custom_test_type() {}
 
@@ -253,6 +261,18 @@ struct custom_test_type
     custom_test_type operator-(const custom_test_type& other) const
     {
         return custom_test_type(x - other.x, y - other.y);
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    bool operator<(const custom_test_type& other) const
+    {
+        return (x < other.x && y < other.y);
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    bool operator>(const custom_test_type& other) const
+    {
+        return (x > other.x && y > other.y);
     }
 
     ROCPRIM_HOST_DEVICE inline
@@ -278,6 +298,24 @@ std::ostream& operator<<(std::ostream& stream,
 
 template<class T>
 struct is_custom_test_type<custom_test_type<T>> : std::true_type
+{
+};
+
+namespace detail
+{
+    template<class T>
+    struct numeric_limits_custom_test_type : public std::numeric_limits<typename T::value_type>
+    {
+    };
+}
+
+// Numeric limits which also supports custom_test_type<U> classes
+template<class T>
+struct numeric_limits : public std::conditional<
+        is_custom_test_type<T>::value,
+        detail::numeric_limits_custom_test_type<T>,
+        std::numeric_limits<T>
+    >::type
 {
 };
 
@@ -330,6 +368,32 @@ auto assert_near(const std::vector<T>& result, const std::vector<T>& expected, c
         if(std::is_integral<T>::value) diff = 0;
         ASSERT_NEAR(result[i], expected[i], diff) << "where index = " << i;
     }
+}
+
+template<class T>
+auto assert_near(const T& result, const T& expected, const float percent)
+    -> typename std::enable_if<!is_custom_test_type<T>::value && std::is_arithmetic<T>::value>::type
+{
+    auto diff = std::max<T>(std::abs(percent * expected), T(percent));
+    if(std::is_integral<T>::value) diff = 0;
+    ASSERT_NEAR(result, expected, diff);
+}
+
+
+template<class T>
+auto assert_near(const T& result, const T& expected, const float percent)
+    -> typename std::enable_if<is_custom_test_type<T>::value>::type
+{
+    using value_type = typename T::value_type;
+    auto diff1 = std::max<value_type>(std::abs(percent * expected.x), value_type(percent));
+    auto diff2 = std::max<value_type>(std::abs(percent * expected.y), value_type(percent));
+    if(std::is_integral<value_type>::value)
+    {
+        diff1 = 0;
+        diff2 = 0;
+    }
+    ASSERT_NEAR(result.x, expected.x, diff1);
+    ASSERT_NEAR(result.y, expected.y, diff2);
 }
 
 template<class T>

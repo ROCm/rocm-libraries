@@ -63,7 +63,9 @@ public:
 
 typedef ::testing::Types<
     DeviceReduceParams<int, long>,
-    DeviceReduceParams<unsigned char, float>
+    DeviceReduceParams<unsigned char, float>,
+    DeviceReduceParams<test_utils::custom_test_type<float>, test_utils::custom_test_type<float>>,
+    DeviceReduceParams<test_utils::custom_test_type<int>, test_utils::custom_test_type<float>>
 > RocprimDeviceReduceTestsParams;
 
 std::vector<size_t> get_sizes()
@@ -106,7 +108,12 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
         ::rocprim::plus<U> plus_op;
 
         // Calculate expected results on host
-        U expected = std::accumulate(input.begin(), input.end(), 0);
+        U expected = U(0);
+        for(unsigned int i = 0; i < input.size(); i++)
+        {
+            expected = plus_op(expected, input[i]);
+        }
+
 
         // temp storage
         size_t temp_storage_size_bytes;
@@ -145,9 +152,7 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
 
         // Check if output values are as expected
         std::vector<U> output = d_output;
-        auto diff = std::max<U>(std::abs(0.01f * expected), U(0.01f));
-        if(std::is_integral<U>::value) diff = 0;
-        ASSERT_NEAR(output[0], expected, diff);
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output[0], expected, 0.01f));
     }
 }
 
@@ -176,7 +181,11 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
         ::rocprim::minimum<U> min_op;
 
         // Calculate expected results on host
-        U expected = std::accumulate(input.begin(), input.end(), std::numeric_limits<U>::max(), min_op);
+        U expected = U(test_utils::numeric_limits<U>::max());
+        for(unsigned int i = 0; i < input.size(); i++)
+        {
+            expected = min_op(expected, input[i]);
+        }
 
         // temp storage
         size_t temp_storage_size_bytes;
@@ -186,7 +195,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
             temp_storage_size_bytes,
             d_input.accelerator_pointer(),
             d_output.accelerator_pointer(),
-            std::numeric_limits<U>::max(),
+            test_utils::numeric_limits<U>::max(),
             input.size(),
             min_op,
             acc_view,
@@ -207,7 +216,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
             temp_storage_size_bytes,
             d_input.accelerator_pointer(),
             d_output.accelerator_pointer(),
-            std::numeric_limits<U>::max(),
+            test_utils::numeric_limits<U>::max(),
             input.size(),
             min_op,
             acc_view,
@@ -217,9 +226,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
 
         // Check if output values are as expected
         std::vector<U> output = d_output;
-        auto diff = std::max<U>(std::abs(0.01f * expected), U(0.01f));
-        if(std::is_integral<U>::value) diff = 0;
-        ASSERT_NEAR(output[0], expected, diff);
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_near<U>(output[0], expected, 0.01f));
     }
 }
 
@@ -265,10 +272,14 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
         acc_view.wait();
 
         arg_min<int, T> reduce_op;
-        const key_value max(std::numeric_limits<int>::max(), std::numeric_limits<T>::max());
+        const key_value max(std::numeric_limits<int>::max(), test_utils::numeric_limits<T>::max());
 
         // Calculate expected results on host
-        key_value expected = std::accumulate(input.begin(), input.end(), max, reduce_op);
+        key_value expected = max;
+        for(unsigned int i = 0; i < input.size(); i++)
+        {
+            expected = reduce_op(expected, input[i]);
+        }
 
         // temp storage
         size_t temp_storage_size_bytes;
@@ -309,9 +320,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
 
         // Check if output values are as expected
         std::vector<key_value> output = d_output;
-        auto diff = std::max<T>(std::abs(0.01f * expected.value), T(0.01f));
-        if(std::is_integral<T>::value) diff = 0;
         ASSERT_EQ(output[0].key, expected.key);
-        ASSERT_NEAR(output[0].value, expected.value, diff);
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output[0].value, expected.value, 0.01f));
     }
 }
