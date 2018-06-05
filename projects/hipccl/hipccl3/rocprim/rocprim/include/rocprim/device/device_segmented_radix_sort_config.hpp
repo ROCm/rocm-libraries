@@ -30,6 +30,18 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
+/// \brief Configuration of device-level segmented radix sort operation.
+///
+/// Radix sort is excecuted in a few iterations (passes) depending on total number of bits to be sorted
+/// (\p begin_bit and \p end_bit), each iteration sorts either \p LongRadixBits or \p ShortRadixBits bits
+/// choosen to cover whole bit range in optimal way.
+///
+/// For example, if \p LongRadixBits is 7, \p ShortRadixBits is 6, \p begin_bit is 0 and \p end_bit is 32
+/// there will be 5 iterations: 7 + 7 + 6 + 6 + 6 = 32 bits.
+///
+/// \tparam LongRadixBits - number of bits in long iterations.
+/// \tparam ShortRadixBits - number of bits in short iterations, must be equal to or less than \p LongRadixBits.
+/// \tparam SortConfig - configuration of radix sort kernel. Must be \p kernel_config.
 template<
     unsigned int LongRadixBits,
     unsigned int ShortRadixBits,
@@ -37,9 +49,11 @@ template<
 >
 struct segmented_radix_sort_config
 {
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
     static constexpr unsigned int long_radix_bits = LongRadixBits;
     static constexpr unsigned int short_radix_bits = ShortRadixBits;
     using sort = SortConfig;
+#endif
 };
 
 namespace detail
@@ -117,8 +131,6 @@ struct segmented_radix_sort_config_900<Key, empty_type>
         select_type_case<sizeof(Key) == 8, segmented_radix_sort_config<7, 6, kernel_config<256, 15> > >
     > { };
 
-} // end namespace detail
-
 template<unsigned int TargetArch, class Key, class Value>
 struct default_segmented_radix_sort_config
     : select_arch<
@@ -127,6 +139,8 @@ struct default_segmented_radix_sort_config
         select_arch_case<900, detail::segmented_radix_sort_config_900<Key, Value> >,
         detail::segmented_radix_sort_config_900<Key, Value>
     > { };
+
+} // end namespace detail
 
 END_ROCPRIM_NAMESPACE
 
