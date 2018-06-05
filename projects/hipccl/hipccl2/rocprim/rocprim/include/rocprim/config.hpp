@@ -76,4 +76,8 @@
     #define ROCPRIM_DETAIL_USE_DPP true
 #endif
 
+#ifndef ROCPRIM_TARGET_ARCH
+    #define ROCPRIM_TARGET_ARCH 0
+#endif
+
 #endif // ROCPRIM_CONFIG_HPP_

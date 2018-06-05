@@ -461,8 +461,11 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairsDoubleBuffer)
         rp::double_buffer<key_type> d_keys(d_keys0.accelerator_pointer(), d_keys1.accelerator_pointer());
         rp::double_buffer<value_type> d_values(d_values0.accelerator_pointer(), d_values1.accelerator_pointer());
 
+        // Use custom config
+        using config = rp::radix_sort_config<6, 4, rp::kernel_config<128, 4>, rp::kernel_config<192, 5>>;
+
         size_t temporary_storage_bytes;
-        rp::radix_sort_pairs(
+        rp::radix_sort_pairs<config>(
             nullptr, temporary_storage_bytes,
             d_keys, d_values, size,
             start_bit, end_bit
@@ -474,7 +477,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairsDoubleBuffer)
 
         if(descending)
         {
-            rp::radix_sort_pairs_desc(
+            rp::radix_sort_pairs_desc<config>(
                 d_temporary_storage.accelerator_pointer(), temporary_storage_bytes,
                 d_keys, d_values, size,
                 start_bit, end_bit,
@@ -483,7 +486,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairsDoubleBuffer)
         }
         else
         {
-            rp::radix_sort_pairs(
+            rp::radix_sort_pairs<config>(
                 d_temporary_storage.accelerator_pointer(), temporary_storage_bytes,
                 d_keys, d_values, size,
                 start_bit, end_bit,

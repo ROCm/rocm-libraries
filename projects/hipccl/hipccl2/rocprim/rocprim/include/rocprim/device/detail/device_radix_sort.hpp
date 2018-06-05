@@ -64,7 +64,7 @@ struct radix_digit_count_helper
         unsigned int digit_counts[warps_no][radix_size];
     };
 
-    template<class KeysInputIterator>
+    template<bool IsFull = false, class KeysInputIterator>
     ROCPRIM_DEVICE inline
     void count_digits(KeysInputIterator keys_input,
                       unsigned int begin_offset,
@@ -101,7 +101,7 @@ struct radix_digit_count_helper
             unsigned int valid_count;
             // Use loading into a striped arrangement because an order of items is irrelevant,
             // only totals matter
-            if(block_offset + items_per_block <= end_offset)
+            if(IsFull || (block_offset + items_per_block <= end_offset))
             {
                 valid_count = items_per_block;
                 block_load_direct_striped<BlockSize>(flat_id, keys_input + block_offset, keys);
@@ -111,17 +111,13 @@ struct radix_digit_count_helper
                 valid_count = end_offset - block_offset;
                 block_load_direct_striped<BlockSize>(flat_id, keys_input + block_offset, keys, valid_count);
             }
-            bit_key_type bit_keys[ItemsPerThread];
-            for(unsigned int i = 0; i < ItemsPerThread; i++)
-            {
-                bit_keys[i] = key_codec::encode(keys[i]);
-            }
 
             for(unsigned int i = 0; i < ItemsPerThread; i++)
             {
-                const unsigned int digit = (bit_keys[i] >> bit) & radix_mask;
+                const bit_key_type bit_key = key_codec::encode(keys[i]);
+                const unsigned int digit = (bit_key >> bit) & radix_mask;
                 const unsigned int pos = i * BlockSize + flat_id;
-                unsigned long long same_digit_lanes_mask = ::rocprim::ballot(pos < valid_count);
+                unsigned long long same_digit_lanes_mask = ::rocprim::ballot(IsFull || (pos < valid_count));
                 for(unsigned int b = 0; b < RadixBits; b++)
                 {
                     const unsigned int bit_set = digit & (1u << b);
@@ -201,6 +197,7 @@ struct radix_sort_and_scatter_helper
     };
 
     template<
+        bool IsFull = false,
         class KeysInputIterator,
         class KeysOutputIterator,
         class ValuesInputIterator,
@@ -232,7 +229,7 @@ struct radix_sort_and_scatter_helper
             key_type keys[ItemsPerThread];
             value_type values[ItemsPerThread];
             unsigned int valid_count;
-            if(block_offset + items_per_block <= end_offset)
+            if(IsFull || (block_offset + items_per_block <= end_offset))
             {
                 valid_count = items_per_block;
                 keys_load_type().load(keys_input + block_offset, keys, storage.keys_load);
@@ -311,7 +308,7 @@ struct radix_sort_and_scatter_helper
             {
                 const unsigned int digit = (bit_keys[i] >> bit) & radix_mask;
                 const unsigned int pos = i * BlockSize + flat_id;
-                if(pos < valid_count)
+                if(IsFull || (pos < valid_count))
                 {
                     const unsigned int dst = pos - storage.starts[digit] + storage.digit_starts[digit];
                     keys_output[dst] = key_codec::decode(bit_keys[i]);
@@ -405,13 +402,26 @@ void fill_digit_counts(KeysInputIterator keys_input,
     block_offset *= items_per_block;
 
     unsigned int digit_count;
-    count_helper_type().count_digits(
-        keys_input,
-        block_offset, std::min(size, block_offset + blocks_per_batch * items_per_block),
-        bit, current_radix_bits,
-        storage,
-        digit_count
-    );
+    if(batch_id < ::rocprim::detail::grid_size<0>() - 1)
+    {
+        count_helper_type().template count_digits<true>(
+            keys_input,
+            block_offset, block_offset + blocks_per_batch * items_per_block,
+            bit, current_radix_bits,
+            storage,
+            digit_count
+        );
+    }
+    else
+    {
+        count_helper_type().template count_digits<false>(
+            keys_input,
+            block_offset, size,
+            bit, current_radix_bits,
+            storage,
+            digit_count
+        );
+    }
 
     if(flat_id < radix_size)
     {
@@ -535,13 +545,26 @@ void sort_and_scatter(KeysInputIterator keys_input,
         digit_start = digit_starts[flat_id] + batch_digit_starts[batch_id * radix_size + flat_id];
     }
 
-    sort_and_scatter_helper().sort_and_scatter(
-        keys_input, keys_output, values_input, values_output,
-        block_offset, std::min(size, block_offset + blocks_per_batch * items_per_block),
-        bit, current_radix_bits,
-        digit_start,
-        storage
-    );
+    if(batch_id < ::rocprim::detail::grid_size<0>() - 1)
+    {
+        sort_and_scatter_helper().template sort_and_scatter<true>(
+            keys_input, keys_output, values_input, values_output,
+            block_offset, block_offset + blocks_per_batch * items_per_block,
+            bit, current_radix_bits,
+            digit_start,
+            storage
+        );
+    }
+    else
+    {
+        sort_and_scatter_helper().template sort_and_scatter<false>(
+            keys_input, keys_output, values_input, values_output,
+            block_offset, size,
+            bit, current_radix_bits,
+            digit_start,
+            storage
+        );
+    }
 }
 
 } // end namespace detail

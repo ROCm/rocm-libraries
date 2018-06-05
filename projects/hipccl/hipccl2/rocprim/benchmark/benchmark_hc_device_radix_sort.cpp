@@ -130,14 +130,15 @@ void run_benchmark(benchmark::State& state, hc::accelerator_view acc_view, size_
     std::vector<key_type> keys_input;
     if(std::is_floating_point<key_type>::value)
     {
-        keys_input = get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
+        keys_input = get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000, size);
     }
     else
     {
         keys_input = get_random_data<key_type>(
             size,
             std::numeric_limits<key_type>::min(),
-            std::numeric_limits<key_type>::max()
+            std::numeric_limits<key_type>::max(),
+            size
         );
     }
 

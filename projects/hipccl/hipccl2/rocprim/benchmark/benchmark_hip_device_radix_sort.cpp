@@ -68,14 +68,15 @@ void run_sort_keys_benchmark(benchmark::State& state, hipStream_t stream, size_t
     std::vector<key_type> keys_input;
     if(std::is_floating_point<key_type>::value)
     {
-        keys_input = get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
+        keys_input = get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000, size);
     }
     else
     {
         keys_input = get_random_data<key_type>(
             size,
             std::numeric_limits<key_type>::min(),
-            std::numeric_limits<key_type>::max()
+            std::numeric_limits<key_type>::max(),
+            size
         );
     }
 
@@ -159,14 +160,15 @@ void run_sort_pairs_benchmark(benchmark::State& state, hipStream_t stream, size_
     std::vector<key_type> keys_input;
     if(std::is_floating_point<key_type>::value)
     {
-        keys_input = get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
+        keys_input = get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000, size);
     }
     else
     {
         keys_input = get_random_data<key_type>(
             size,
             std::numeric_limits<key_type>::min(),
-            std::numeric_limits<key_type>::max()
+            std::numeric_limits<key_type>::max(),
+            size
         );
     }
 
@@ -296,12 +298,13 @@ void add_sort_pairs_benchmarks(std::vector<benchmark::internal::Benchmark*>& ben
     std::vector<benchmark::internal::Benchmark*> bs =
     {
         CREATE_SORT_PAIRS_BENCHMARK(int, float),
-        CREATE_SORT_PAIRS_BENCHMARK(long long, double),
-
-        CREATE_SORT_PAIRS_BENCHMARK(char, char),
-        CREATE_SORT_PAIRS_BENCHMARK(short, short),
-
+        CREATE_SORT_PAIRS_BENCHMARK(int, double),
         CREATE_SORT_PAIRS_BENCHMARK(int, custom_float2),
+        CREATE_SORT_PAIRS_BENCHMARK(int, custom_double2),
+
+        CREATE_SORT_PAIRS_BENCHMARK(long long, float),
+        CREATE_SORT_PAIRS_BENCHMARK(long long, double),
+        CREATE_SORT_PAIRS_BENCHMARK(long long, custom_float2),
         CREATE_SORT_PAIRS_BENCHMARK(long long, custom_double2),
     };
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());

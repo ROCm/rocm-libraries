@@ -42,89 +42,11 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-/// Allows to reduce and scan multimple sequences simultaneously
-template<class T, unsigned int Size>
-struct buckets
-{
-    static constexpr unsigned int size = Size;
-    T xs[Size];
-
-    ROCPRIM_DEVICE inline
-    buckets()
-    {
-        for(unsigned int r = 0; r < Size; r++)
-        {
-            xs[r] = T(0);
-        }
-    }
-
-    ROCPRIM_DEVICE inline
-    buckets operator+(const buckets& b) const
-    {
-        buckets c;
-        for(unsigned int r = 0; r < Size; r++)
-        {
-            c[r] = xs[r] + b[r];
-        }
-        return c;
-    }
-
-    ROCPRIM_DEVICE inline
-    T& operator[](unsigned int idx)
-    {
-        return xs[idx];
-    }
-
-    ROCPRIM_DEVICE inline
-    T operator[](unsigned int idx) const
-    {
-        return xs[idx];
-    }
-};
-
-/// Specialized warp scan and reduce functions of bool (1 bit values)
+/// Specialized block scan of bool (1 bit values)
+/// It uses warp scan and reduce functions of bool (1 bit values) based on ballot and bit count.
 /// They have much better performance (several times faster) than generic scan and reduce classes
 /// because of using hardware ability to calculate which lanes have true predicate values.
-
-template<class T>
-ROCPRIM_DEVICE inline
-void warp_bit_plus_exclusive_scan(const T input, T& output)
-{
-    output = ::rocprim::masked_bit_count(::rocprim::ballot(input));
-}
-
-template<class T, unsigned int Size>
-ROCPRIM_DEVICE inline
-void warp_bit_plus_exclusive_scan(const buckets<T, Size>& input, buckets<T, Size>& output)
-{
-    for(unsigned int r = 0; r < Size; r++)
-    {
-        warp_bit_plus_exclusive_scan(input[r], output[r]);
-    }
-}
-
-template<class T>
-ROCPRIM_DEVICE inline
-void warp_bit_plus_reduce(const T input, T& output)
-{
-    output = ::rocprim::bit_count(::rocprim::ballot(input));
-}
-
-template<class T, unsigned int Size>
-ROCPRIM_DEVICE inline
-void warp_bit_plus_reduce(const buckets<T, Size>& input, buckets<T, Size>& output)
-{
-    for(unsigned int r = 0; r < Size; r++)
-    {
-        warp_bit_plus_reduce(input[r], output[r]);
-    }
-}
-
-/// Specialized block scan of bool (1 bit values)
-template<
-    class T,
-    unsigned int BlockSize
->
+template<unsigned int BlockSize>
 class block_bit_plus_scan
 {
     // Select warp size
@@ -137,13 +59,14 @@ class block_bit_plus_scan
     // each warp (scanned carry-outs from warps before it)
     // warp_scan_crosslane is an implementation of warp_scan that does not need storage,
     // but requires logical warp size to be a power of two.
-    using warp_scan_prefix_type = ::rocprim::detail::warp_scan_crosslane<T, detail::next_power_of_two(warps_no)>;
+    using warp_scan_prefix_type =
+        ::rocprim::detail::warp_scan_crosslane<unsigned int, detail::next_power_of_two(warps_no)>;
 
 public:
 
     struct storage_type_
     {
-        T warp_prefixes[warps_no];
+        unsigned int warp_prefixes[warps_no];
         // ---------- Shared memory optimisation ----------
         // Since we use warp_scan_crosslane for warp scan, we don't need to allocate
         // any temporary memory for it.
@@ -153,22 +76,20 @@ public:
 
     template<unsigned int ItemsPerThread>
     ROCPRIM_DEVICE inline
-    void exclusive_scan(const T (&input)[ItemsPerThread],
-                        T (&output)[ItemsPerThread],
-                        T& reduction,
+    void exclusive_scan(const unsigned int (&input)[ItemsPerThread],
+                        unsigned int (&output)[ItemsPerThread],
+                        unsigned int& reduction,
                         storage_type& storage)
     {
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
         const unsigned int lane_id = ::rocprim::lane_id();
         const unsigned int warp_id = ::rocprim::warp_id();
         storage_type_& storage_ = storage.get();
 
-        T warp_reduction;
-        warp_bit_plus_reduce(input[0], warp_reduction);
+        unsigned int warp_reduction = ::rocprim::bit_count(::rocprim::ballot(input[0]));
         for(unsigned int i = 1; i < ItemsPerThread; i++)
         {
-            T r;
-            warp_bit_plus_reduce(input[i], r);
-            warp_reduction = warp_reduction + r;
+            warp_reduction += ::rocprim::bit_count(::rocprim::ballot(input[i]));
         }
         if(lane_id == 0)
         {
@@ -177,25 +98,19 @@ public:
         ::rocprim::syncthreads();
 
         // Scan the warp reduction results to calculate warp prefixes
-        if(warp_id == 0)
+        if(flat_id < warps_no)
         {
-            if(lane_id < warps_no)
-            {
-                T prefix = storage_.warp_prefixes[lane_id];
-                warp_scan_prefix_type().inclusive_scan(prefix, prefix, ::rocprim::plus<T>());
-                storage_.warp_prefixes[lane_id] = prefix;
-            }
+            unsigned int prefix = storage_.warp_prefixes[flat_id];
+            warp_scan_prefix_type().inclusive_scan(prefix, prefix, ::rocprim::plus<unsigned int>());
+            storage_.warp_prefixes[flat_id] = prefix;
         }
         ::rocprim::syncthreads();
 
         // Perform exclusive warp scan of bit values
-        T lane_prefix;
-        warp_bit_plus_exclusive_scan(input[0], lane_prefix);
-        for(unsigned int i = 1; i < ItemsPerThread; i++)
+        unsigned int lane_prefix = 0;
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            T s;
-            warp_bit_plus_exclusive_scan(input[i], s);
-            lane_prefix = lane_prefix + s;
+            lane_prefix = ::rocprim::masked_bit_count(::rocprim::ballot(input[i]), lane_prefix);
         }
 
         // Scan the lane's items and calculate final scan results
@@ -223,12 +138,11 @@ public:
 /// \tparam ItemsPerThread - the number of items contributed by each thread.
 /// \tparam Value - the value type. Default type empty_type indicates
 /// a keys-only sort.
-/// \tparam RadixBits - The number of radix bits.
 ///
 /// \par Overview
 /// * \p Key type must be an arithmetic type (that is, an integral type or a floating-point
 /// type).
-/// * Performance depends on \p BlockSize, \p ItemsPerThread and \p RadixBits.
+/// * Performance depends on \p BlockSize and \p ItemsPerThread.
 ///   * It is usually better of \p BlockSize is a multiple of the size of the hardware warp.
 ///   * It is usually increased when \p ItemsPerThread is greater than one. However, when there
 ///   are too many items per thread, each thread may need so much registers and/or shared memory
@@ -288,21 +202,15 @@ public:
 template<
     class Key,
     unsigned int BlockSize,
-    unsigned int ItemsPerThread = 1,
-    class Value = empty_type,
-    unsigned int RadixBits = 1
+    unsigned int ItemsPerThread,
+    class Value = empty_type
 >
 class block_radix_sort
 {
     static constexpr bool with_values = !std::is_same<Value, empty_type>::value;
-    static constexpr unsigned int radix_size = 1 << RadixBits;
 
     using bit_key_type = typename ::rocprim::detail::radix_key_codec<Key>::bit_key_type;
-
-    // The last radix value does not have its own bucket and hence no scan is performed, because
-    // its value can be calculated based on all other values
-    using buckets = detail::buckets<unsigned int, radix_size - 1>;
-    using bit_block_scan = detail::block_bit_plus_scan<buckets, BlockSize>;
+    using bit_block_scan = detail::block_bit_plus_scan<BlockSize>;
 
     using bit_keys_exchange_type = ::rocprim::block_exchange<bit_key_type, BlockSize, ItemsPerThread>;
     using values_exchange_type = ::rocprim::block_exchange<Value, BlockSize, ItemsPerThread>;
@@ -405,7 +313,7 @@ public:
               unsigned int begin_bit = 0,
               unsigned int end_bit = 8 * sizeof(Key))
     {
-        empty_type * values = nullptr;
+        empty_type values[ItemsPerThread];
         sort_impl<false>(keys, values, storage, begin_bit, end_bit);
     }
 
@@ -501,7 +409,7 @@ public:
                    unsigned int begin_bit = 0,
                    unsigned int end_bit = 8 * sizeof(Key))
     {
-        empty_type * values = nullptr;
+        empty_type values[ItemsPerThread];
         sort_impl<true>(keys, values, storage, begin_bit, end_bit);
     }
 
@@ -824,7 +732,7 @@ public:
                          unsigned int begin_bit = 0,
                          unsigned int end_bit = 8 * sizeof(Key))
     {
-        empty_type * values = nullptr;
+        empty_type values[ItemsPerThread];
         sort_impl<false, true>(keys, values, storage, begin_bit, end_bit);
     }
 
@@ -922,7 +830,7 @@ public:
                               unsigned int begin_bit = 0,
                               unsigned int end_bit = 8 * sizeof(Key))
     {
-        empty_type * values = nullptr;
+        empty_type values[ItemsPerThread];
         sort_impl<true, true>(keys, values, storage, begin_bit, end_bit);
     }
 
@@ -1175,7 +1083,7 @@ private:
     template<bool Descending, bool ToStriped = false, class SortedValue>
     ROCPRIM_DEVICE inline
     void sort_impl(Key (&keys)[ItemsPerThread],
-                   SortedValue * values,
+                   SortedValue (&values)[ItemsPerThread],
                    storage_type& storage,
                    unsigned int begin_bit,
                    unsigned int end_bit)
@@ -1191,54 +1099,27 @@ private:
             bit_keys[i] = key_codec::encode(keys[i]);
         }
 
-        for(unsigned int bit = begin_bit; bit < end_bit; bit += RadixBits)
+        // Use binary digits (i.e. digits can be 0 or 1)
+        for(unsigned int bit = begin_bit; bit < end_bit; bit++)
         {
-            buckets banks[ItemsPerThread];
-            buckets positions[ItemsPerThread];
-            buckets counts;
-
-            // Handle cases when (end_bit - bit) is not divisible by RadixBits, i.e. the last
-            // iteration has a shorter mask.
-            const unsigned int radix_mask = (1u << ::rocprim::min(RadixBits, end_bit - bit)) - 1;
-
+            unsigned int bits[ItemsPerThread];
             for(unsigned int i = 0; i < ItemsPerThread; i++)
             {
-                const unsigned int radix = (bit_keys[i] >> bit) & radix_mask;
-                for(unsigned int r = 0; r < radix_size - 1; r++)
-                {
-                    banks[i][r] = radix == r;
-                }
+                bits[i] = (bit_keys[i] >> bit) & 1;
             }
-            bit_block_scan().exclusive_scan(banks, positions, counts, storage_.bit_block_scan);
 
-            // Prefix sum of counts to compute starting positions of keys of each radix value
-            buckets starts;
-            unsigned int last_start = 0;
-            for(unsigned int r = 0; r < radix_size - 1; r++)
-            {
-                const unsigned int c = counts[r];
-                starts[r] = last_start;
-                last_start += c;
-            }
-            // Scatter keys to computed positions considering starting positions of their
-            // radix values
             unsigned int ranks[ItemsPerThread];
+            unsigned int count;
+            bit_block_scan().exclusive_scan(bits, ranks, count, storage_.bit_block_scan);
+
+            // Scatter keys to computed positions considering starting positions of their digit values
+            const unsigned int start = BlockSize * ItemsPerThread - count;
             for(unsigned int i = 0; i < ItemsPerThread; i++)
             {
-                const unsigned int radix = (bit_keys[i] >> bit) & radix_mask;
-                unsigned int to_position = 0;
-                unsigned int last_position = 0;
-                for(unsigned int r = 0; r < radix_size - 1; r++)
-                {
-                    to_position = radix == r ? (starts[r] + positions[i][r]) : to_position;
-                    last_position += positions[i][r];
-                }
-                // Calculate position for the last radix value based on positions of
-                // all other previous values
-                const unsigned int from_position = flat_id * ItemsPerThread + i;
-                ranks[i] = radix == radix_size - 1
-                    ? (last_start + from_position - last_position)
-                    : to_position;
+                // Calculate position for the first digit (0) value based on positions of the second (1)
+                ranks[i] = bits[i] != 0
+                    ? (start + ranks[i])
+                    : (flat_id * ItemsPerThread + i - ranks[i]);
             }
             exchange_keys(storage, bit_keys, ranks);
             exchange_values(storage, values, ranks);
@@ -1269,18 +1150,17 @@ private:
     template<class SortedValue>
     ROCPRIM_DEVICE inline
     void exchange_values(storage_type& storage,
-                         SortedValue * values,
+                         SortedValue (&values)[ItemsPerThread],
                          const unsigned int (&ranks)[ItemsPerThread])
     {
         storage_type_& storage_ = storage.get();
         ::rocprim::syncthreads(); // Storage will be reused (union), synchronization is needed
-        SortedValue (&vs)[ItemsPerThread] = *reinterpret_cast<SortedValue (*)[ItemsPerThread]>(values);
-        values_exchange_type().scatter_to_blocked(vs, vs, ranks, storage_.values_exchange);
+        values_exchange_type().scatter_to_blocked(values, values, ranks, storage_.values_exchange);
     }
 
     ROCPRIM_DEVICE inline
     void exchange_values(storage_type& storage,
-                         empty_type * values,
+                         empty_type (&values)[ItemsPerThread],
                          const unsigned int (&ranks)[ItemsPerThread])
     {
         (void) storage;
@@ -1300,12 +1180,11 @@ private:
     template<class SortedValue>
     ROCPRIM_DEVICE inline
     void to_striped_values(storage_type& storage,
-                           SortedValue * values)
+                           SortedValue (&values)[ItemsPerThread])
     {
         storage_type_& storage_ = storage.get();
         ::rocprim::syncthreads(); // Storage will be reused (union), synchronization is needed
-        SortedValue (&vs)[ItemsPerThread] = *reinterpret_cast<SortedValue (*)[ItemsPerThread]>(values);
-        values_exchange_type().blocked_to_striped(vs, vs, storage_.values_exchange);
+        values_exchange_type().blocked_to_striped(values, values, storage_.values_exchange);
     }
 
     ROCPRIM_DEVICE inline
