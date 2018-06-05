@@ -34,6 +34,7 @@
 #include "../functional.hpp"
 #include "../types.hpp"
 
+#include "device_segmented_radix_sort_config.hpp"
 #include "detail/device_segmented_radix_sort.hpp"
 
 /// \addtogroup devicemodule_hc
@@ -57,6 +58,122 @@ namespace detail
     }
 
 template<
+    class Config,
+    unsigned int RadixBits,
+    bool Descending,
+    class KeysInputIterator,
+    class KeysOutputIterator,
+    class ValuesInputIterator,
+    class ValuesOutputIterator,
+    class OffsetIterator
+>
+inline
+void segmented_radix_sort_iteration(KeysInputIterator keys_input,
+                                    typename std::iterator_traits<KeysInputIterator>::value_type * keys_tmp,
+                                    KeysOutputIterator keys_output,
+                                    ValuesInputIterator values_input,
+                                    typename std::iterator_traits<ValuesInputIterator>::value_type * values_tmp,
+                                    ValuesOutputIterator values_output,
+                                    bool to_output,
+                                    unsigned int segments,
+                                    OffsetIterator begin_offsets,
+                                    OffsetIterator end_offsets,
+                                    unsigned int bit,
+                                    unsigned int begin_bit,
+                                    unsigned int end_bit,
+                                    hc::accelerator_view& acc_view,
+                                    bool debug_synchronous)
+{
+    constexpr unsigned int block_size = Config::sort::block_size;
+    constexpr unsigned int items_per_thread = Config::sort::items_per_thread;
+
+    // Handle cases when (end_bit - bit) is not divisible by RadixBits, i.e. the last
+    // iteration has a shorter mask.
+    const unsigned int current_radix_bits = ::rocprim::min(RadixBits, end_bit - bit);
+
+    const bool is_first_iteration = (bit == begin_bit);
+
+    std::chrono::high_resolution_clock::time_point start;
+
+    if(debug_synchronous)
+    {
+        std::cout << "RadixBits " << RadixBits << '\n';
+        std::cout << "bit " << bit << '\n';
+        std::cout << "current_radix_bits " << current_radix_bits << '\n';
+    }
+
+    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
+    if(is_first_iteration)
+    {
+        if(to_output)
+        {
+            hc::parallel_for_each(
+                acc_view,
+                hc::tiled_extent<1>(segments * block_size, block_size),
+                [=](hc::tiled_index<1>) [[hc]]
+                {
+                    segmented_sort<block_size, items_per_thread, RadixBits, Descending>(
+                        keys_input, keys_output, values_input, values_output,
+                        begin_offsets, end_offsets,
+                        bit, current_radix_bits
+                    );
+                }
+            );
+        }
+        else
+        {
+            hc::parallel_for_each(
+                acc_view,
+                hc::tiled_extent<1>(segments * block_size, block_size),
+                [=](hc::tiled_index<1>) [[hc]]
+                {
+                    segmented_sort<block_size, items_per_thread, RadixBits, Descending>(
+                        keys_input, keys_tmp, values_input, values_tmp,
+                        begin_offsets, end_offsets,
+                        bit, current_radix_bits
+                    );
+                }
+            );
+        }
+    }
+    else
+    {
+        if(to_output)
+        {
+            hc::parallel_for_each(
+                acc_view,
+                hc::tiled_extent<1>(segments * block_size, block_size),
+                [=](hc::tiled_index<1>) [[hc]]
+                {
+                    segmented_sort<block_size, items_per_thread, RadixBits, Descending>(
+                        keys_tmp, keys_output, values_tmp, values_output,
+                        begin_offsets, end_offsets,
+                        bit, current_radix_bits
+                    );
+                }
+            );
+        }
+        else
+        {
+            hc::parallel_for_each(
+                acc_view,
+                hc::tiled_extent<1>(segments * block_size, block_size),
+                [=](hc::tiled_index<1>) [[hc]]
+                {
+                    segmented_sort<block_size, items_per_thread, RadixBits, Descending>(
+                        keys_output, keys_tmp, values_output, values_tmp,
+                        begin_offsets, end_offsets,
+                        bit, current_radix_bits
+                    );
+                }
+            );
+        }
+    }
+    ROCPRIM_DETAIL_HC_SYNC("segmented_sort", segments, start);
+}
+
+template<
+    class Config,
     bool Descending,
     class KeysInputIterator,
     class KeysOutputIterator,
@@ -83,18 +200,25 @@ void segmented_radix_sort_impl(void * temporary_storage,
                                hc::accelerator_view& acc_view,
                                bool debug_synchronous)
 {
-    constexpr unsigned int radix_bits = 8;
-
     using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
     using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
 
+    using config = default_or_custom_config<
+        Config,
+        default_segmented_radix_sort_config<ROCPRIM_TARGET_ARCH, key_type, value_type>
+    >;
+
     constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
 
-    constexpr unsigned int block_size = 256;
-    constexpr unsigned int items_per_thread = 11;
-
-    const unsigned int iterations = ::rocprim::detail::ceiling_div(end_bit - begin_bit, radix_bits);
     const bool with_double_buffer = keys_tmp != nullptr;
+
+    const unsigned int bits = end_bit - begin_bit;
+    const unsigned int iterations = ::rocprim::detail::ceiling_div(bits, config::long_radix_bits);
+    const unsigned int radix_bits_diff = config::long_radix_bits - config::short_radix_bits;
+    const unsigned int short_iterations = radix_bits_diff != 0
+        ? ::rocprim::min(iterations, (config::long_radix_bits * iterations - bits) / radix_bits_diff)
+        : 0;
+    const unsigned int long_iterations = iterations - short_iterations;
 
     const size_t keys_bytes = ::rocprim::detail::align_size(size * sizeof(key_type));
     const size_t values_bytes = with_values ? ::rocprim::detail::align_size(size * sizeof(value_type)) : 0;
@@ -114,6 +238,8 @@ void segmented_radix_sort_impl(void * temporary_storage,
     if(debug_synchronous)
     {
         std::cout << "iterations " << iterations << '\n';
+        std::cout << "long_iterations " << long_iterations << '\n';
+        std::cout << "short_iterations " << short_iterations << '\n';
         acc_view.wait();
     }
 
@@ -126,87 +252,34 @@ void segmented_radix_sort_impl(void * temporary_storage,
     }
 
     bool to_output = with_double_buffer || (iterations - 1) % 2 == 0;
-    for(unsigned int bit = begin_bit; bit < end_bit; bit += radix_bits)
+    unsigned int bit = begin_bit;
+    for(unsigned int i = 0; i < long_iterations; i++)
     {
-        // Handle cases when (end_bit - bit) is not divisible by radix_bits, i.e. the last
-        // iteration has a shorter mask.
-        const unsigned int current_radix_bits = ::rocprim::min(radix_bits, end_bit - bit);
-
-        const bool is_first_iteration = (bit == begin_bit);
-
-        std::chrono::high_resolution_clock::time_point start;
-
-        if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-        if(is_first_iteration)
-        {
-            if(to_output)
-            {
-                hc::parallel_for_each(
-                    acc_view,
-                    hc::tiled_extent<1>(segments * block_size, block_size),
-                    [=](hc::tiled_index<1>) [[hc]]
-                    {
-                        segmented_sort<block_size, items_per_thread, radix_bits, Descending>(
-                            keys_input, keys_output, values_input, values_output,
-                            begin_offsets, end_offsets,
-                            bit, current_radix_bits
-                        );
-                    }
-                );
-            }
-            else
-            {
-                hc::parallel_for_each(
-                    acc_view,
-                    hc::tiled_extent<1>(segments * block_size, block_size),
-                    [=](hc::tiled_index<1>) [[hc]]
-                    {
-                        segmented_sort<block_size, items_per_thread, radix_bits, Descending>(
-                            keys_input, keys_tmp, values_input, values_tmp,
-                            begin_offsets, end_offsets,
-                            bit, current_radix_bits
-                        );
-                    }
-                );
-            }
-        }
-        else
-        {
-            if(to_output)
-            {
-                hc::parallel_for_each(
-                    acc_view,
-                    hc::tiled_extent<1>(segments * block_size, block_size),
-                    [=](hc::tiled_index<1>) [[hc]]
-                    {
-                        segmented_sort<block_size, items_per_thread, radix_bits, Descending>(
-                            keys_tmp, keys_output, values_tmp, values_output,
-                            begin_offsets, end_offsets,
-                            bit, current_radix_bits
-                        );
-                    }
-                );
-            }
-            else
-            {
-                hc::parallel_for_each(
-                    acc_view,
-                    hc::tiled_extent<1>(segments * block_size, block_size),
-                    [=](hc::tiled_index<1>) [[hc]]
-                    {
-                        segmented_sort<block_size, items_per_thread, radix_bits, Descending>(
-                            keys_output, keys_tmp, values_output, values_tmp,
-                            begin_offsets, end_offsets,
-                            bit, current_radix_bits
-                        );
-                    }
-                );
-            }
-        }
-        ROCPRIM_DETAIL_HC_SYNC("segmented_sort", segments, start);
+        segmented_radix_sort_iteration<config, config::long_radix_bits, Descending>(
+            keys_input, keys_tmp, keys_output, values_input, values_tmp, values_output,
+            to_output,
+            segments, begin_offsets, end_offsets,
+            bit, begin_bit, end_bit,
+            acc_view, debug_synchronous
+        );
 
         is_result_in_output = to_output;
         to_output = !to_output;
+        bit += config::long_radix_bits;
+    }
+    for(unsigned int i = 0; i < short_iterations; i++)
+    {
+        segmented_radix_sort_iteration<config, config::short_radix_bits, Descending>(
+            keys_input, keys_tmp, keys_output, values_input, values_tmp, values_output,
+            to_output,
+            segments, begin_offsets, end_offsets,
+            bit, begin_bit, end_bit,
+            acc_view, debug_synchronous
+        );
+
+        is_result_in_output = to_output;
+        to_output = !to_output;
+        bit += config::short_radix_bits;
     }
 }
 
@@ -234,6 +307,8 @@ void segmented_radix_sort_impl(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be
+/// \p segmented_radix_sort_config or a custom class with the same members.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
@@ -303,6 +378,7 @@ void segmented_radix_sort_impl(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class KeysInputIterator,
     class KeysOutputIterator,
     class OffsetIterator,
@@ -324,7 +400,7 @@ void segmented_radix_sort_keys(void * temporary_storage,
 {
     empty_type * values = nullptr;
     bool ignored;
-    detail::segmented_radix_sort_impl<false>(
+    detail::segmented_radix_sort_impl<Config, false>(
         temporary_storage, storage_size,
         keys_input, nullptr, keys_output,
         values, nullptr, values,
@@ -355,6 +431,8 @@ void segmented_radix_sort_keys(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be
+/// \p segmented_radix_sort_config or a custom class with the same members.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
@@ -424,6 +502,7 @@ void segmented_radix_sort_keys(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class KeysInputIterator,
     class KeysOutputIterator,
     class OffsetIterator,
@@ -445,7 +524,7 @@ void segmented_radix_sort_keys_desc(void * temporary_storage,
 {
     empty_type * values = nullptr;
     bool ignored;
-    detail::segmented_radix_sort_impl<true>(
+    detail::segmented_radix_sort_impl<Config, true>(
         temporary_storage, storage_size,
         keys_input, nullptr, keys_output,
         values, nullptr, values,
@@ -477,6 +556,8 @@ void segmented_radix_sort_keys_desc(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be
+/// \p segmented_radix_sort_config or a custom class with the same members.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
@@ -559,6 +640,7 @@ void segmented_radix_sort_keys_desc(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class KeysInputIterator,
     class KeysOutputIterator,
     class ValuesInputIterator,
@@ -583,7 +665,7 @@ void segmented_radix_sort_pairs(void * temporary_storage,
                                 bool debug_synchronous = false)
 {
     bool ignored;
-    detail::segmented_radix_sort_impl<false>(
+    detail::segmented_radix_sort_impl<Config, false>(
         temporary_storage, storage_size,
         keys_input, nullptr, keys_output,
         values_input, nullptr, values_output,
@@ -615,6 +697,8 @@ void segmented_radix_sort_pairs(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be
+/// \p segmented_radix_sort_config or a custom class with the same members.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
@@ -695,6 +779,7 @@ void segmented_radix_sort_pairs(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class KeysInputIterator,
     class KeysOutputIterator,
     class ValuesInputIterator,
@@ -719,7 +804,7 @@ void segmented_radix_sort_pairs_desc(void * temporary_storage,
                                      bool debug_synchronous = false)
 {
     bool ignored;
-    detail::segmented_radix_sort_impl<true>(
+    detail::segmented_radix_sort_impl<Config, true>(
         temporary_storage, storage_size,
         keys_input, nullptr, keys_output,
         values_input, nullptr, values_output,
@@ -755,6 +840,8 @@ void segmented_radix_sort_pairs_desc(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be
+/// \p segmented_radix_sort_config or a custom class with the same members.
 /// \tparam Key - key type. Must be an integral type or a floating-point type.
 /// \tparam OffsetIterator - random-access iterator type of segment offsets. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
@@ -820,7 +907,11 @@ void segmented_radix_sort_pairs_desc(void * temporary_storage,
 /// // keys.current(): [0.3, 0.6, 0.65, 0.08, 0.2, 0.4, 0.7, 1]
 /// \endcode
 /// \endparblock
-template<class Key, class OffsetIterator>
+template<
+    class Config = default_config,
+    class Key,
+    class OffsetIterator
+>
 inline
 void segmented_radix_sort_keys(void * temporary_storage,
                                size_t& storage_size,
@@ -836,7 +927,7 @@ void segmented_radix_sort_keys(void * temporary_storage,
 {
     empty_type * values = nullptr;
     bool is_result_in_output;
-    detail::segmented_radix_sort_impl<false>(
+    detail::segmented_radix_sort_impl<Config, false>(
         temporary_storage, storage_size,
         keys.current(), keys.current(), keys.alternate(),
         values, values, values,
@@ -876,6 +967,8 @@ void segmented_radix_sort_keys(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be
+/// \p segmented_radix_sort_config or a custom class with the same members.
 /// \tparam Key - key type. Must be an integral type or a floating-point type.
 /// \tparam OffsetIterator - random-access iterator type of segment offsets. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
@@ -941,7 +1034,11 @@ void segmented_radix_sort_keys(void * temporary_storage,
 /// // keys.current(): [6, 3, 5, 8, 7, 4, 2, 1]
 /// \endcode
 /// \endparblock
-template<class Key, class OffsetIterator>
+template<
+    class Config = default_config,
+    class Key,
+    class OffsetIterator
+>
 inline
 void segmented_radix_sort_keys_desc(void * temporary_storage,
                                     size_t& storage_size,
@@ -957,7 +1054,7 @@ void segmented_radix_sort_keys_desc(void * temporary_storage,
 {
     empty_type * values = nullptr;
     bool is_result_in_output;
-    detail::segmented_radix_sort_impl<true>(
+    detail::segmented_radix_sort_impl<Config, true>(
         temporary_storage, storage_size,
         keys.current(), keys.current(), keys.alternate(),
         values, values, values,
@@ -997,6 +1094,8 @@ void segmented_radix_sort_keys_desc(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be
+/// \p segmented_radix_sort_config or a custom class with the same members.
 /// \tparam Key - key type. Must be an integral type or a floating-point type.
 /// \tparam Value - value type.
 /// \tparam OffsetIterator - random-access iterator type of segment offsets. Must meet the
@@ -1073,7 +1172,12 @@ void segmented_radix_sort_keys_desc(void * temporary_storage,
 /// // values.current(): [2, -5, -4, -1, -2, 3, 7, -8]
 /// \endcode
 /// \endparblock
-template<class Key, class Value, class OffsetIterator>
+template<
+    class Config = default_config,
+    class Key,
+    class Value,
+    class OffsetIterator
+>
 inline
 void segmented_radix_sort_pairs(void * temporary_storage,
                                 size_t& storage_size,
@@ -1089,7 +1193,7 @@ void segmented_radix_sort_pairs(void * temporary_storage,
                                 bool debug_synchronous = false)
 {
     bool is_result_in_output;
-    detail::segmented_radix_sort_impl<false>(
+    detail::segmented_radix_sort_impl<Config, false>(
         temporary_storage, storage_size,
         keys.current(), keys.current(), keys.alternate(),
         values.current(), values.current(), values.alternate(),
@@ -1130,6 +1234,8 @@ void segmented_radix_sort_pairs(void * temporary_storage,
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be
+/// \p segmented_radix_sort_config or a custom class with the same members.
 /// \tparam Key - key type. Must be an integral type or a floating-point type.
 /// \tparam Value - value type.
 /// \tparam OffsetIterator - random-access iterator type of segment offsets. Must meet the
@@ -1202,7 +1308,12 @@ void segmented_radix_sort_pairs(void * temporary_storage,
 /// // values.current(): [-5, 2, -4, -8, 7, 3, -1, -2]
 /// \endcode
 /// \endparblock
-template<class Key, class Value, class OffsetIterator>
+template<
+    class Config = default_config,
+    class Key,
+    class Value,
+    class OffsetIterator
+>
 inline
 void segmented_radix_sort_pairs_desc(void * temporary_storage,
                                      size_t& storage_size,
@@ -1218,7 +1329,7 @@ void segmented_radix_sort_pairs_desc(void * temporary_storage,
                                      bool debug_synchronous = false)
 {
     bool is_result_in_output;
-    detail::segmented_radix_sort_impl<true>(
+    detail::segmented_radix_sort_impl<Config, true>(
         temporary_storage, storage_size,
         keys.current(), keys.current(), keys.alternate(),
         values.current(), values.current(), values.alternate(),

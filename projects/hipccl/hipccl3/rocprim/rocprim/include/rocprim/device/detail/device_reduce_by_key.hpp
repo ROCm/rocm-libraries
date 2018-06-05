@@ -184,6 +184,7 @@ void fill_unique_counts(KeysInputIterator keys_input,
 
         key_type keys[ItemsPerThread];
         unsigned int valid_count;
+        ::rocprim::syncthreads();
         if(block_offset + items_per_block <= size)
         {
             valid_count = items_per_block;
