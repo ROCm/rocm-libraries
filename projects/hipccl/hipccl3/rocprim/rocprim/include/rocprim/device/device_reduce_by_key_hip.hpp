@@ -26,6 +26,7 @@
 
 #include "../config.hpp"
 #include "../detail/various.hpp"
+#include "../detail/match_result_type.hpp"
 
 #include "../functional.hpp"
 
@@ -80,9 +81,10 @@ template<
     unsigned int ItemsPerThread,
     class KeysInputIterator,
     class ValuesInputIterator,
+    class Key,
+    class Result,
     class UniqueOutputIterator,
     class AggregatesOutputIterator,
-    class CarryOut,
     class KeyCompareFunction,
     class BinaryFunction
 >
@@ -91,7 +93,8 @@ void reduce_by_key_kernel(KeysInputIterator keys_input,
                           ValuesInputIterator values_input,
                           unsigned int size,
                           const unsigned int * unique_starts,
-                          CarryOut * carry_outs,
+                          carry_out<Key, Result> * carry_outs,
+                          Result * leading_aggregates,
                           UniqueOutputIterator unique_output,
                           AggregatesOutputIterator aggregates_output,
                           KeyCompareFunction key_compare_op,
@@ -102,7 +105,7 @@ void reduce_by_key_kernel(KeysInputIterator keys_input,
 {
     reduce_by_key<BlockSize, ItemsPerThread>(
         keys_input, values_input, size,
-        unique_starts, carry_outs,
+        unique_starts, carry_outs, leading_aggregates,
         unique_output, aggregates_output,
         key_compare_op, reduce_op,
         blocks_per_full_batch, full_batches, blocks
@@ -112,20 +115,22 @@ void reduce_by_key_kernel(KeysInputIterator keys_input,
 template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
+    class Key,
+    class Result,
     class AggregatesOutputIterator,
-    class CarryOut,
     class KeyCompareFunction,
     class BinaryFunction
 >
 __global__
-void scan_and_scatter_carry_outs_kernel(const CarryOut * carry_outs,
+void scan_and_scatter_carry_outs_kernel(const carry_out<Key, Result> * carry_outs,
+                                        const Result * leading_aggregates,
                                         AggregatesOutputIterator aggregates_output,
                                         KeyCompareFunction key_compare_op,
                                         BinaryFunction reduce_op,
                                         unsigned int batches)
 {
     scan_and_scatter_carry_outs<BlockSize, ItemsPerThread>(
-        carry_outs, aggregates_output,
+        carry_outs, leading_aggregates, aggregates_output,
         key_compare_op, reduce_op,
         batches
     );
@@ -170,8 +175,12 @@ hipError_t reduce_by_key_impl(void * temporary_storage,
                               const bool debug_synchronous)
 {
     using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
-    using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
-    using carry_out_type = carry_out<key_type, value_type>;
+    using result_type = typename ::rocprim::detail::match_result_type<
+        typename std::iterator_traits<ValuesInputIterator>::value_type,
+        typename std::iterator_traits<AggregatesOutputIterator>::value_type,
+        BinaryFunction
+    >::type;
+    using carry_out_type = carry_out<key_type, result_type>;
 
     constexpr unsigned int block_size = 256;
     constexpr unsigned int items_per_thread = 7;
@@ -191,9 +200,10 @@ hipError_t reduce_by_key_impl(void * temporary_storage,
 
     const size_t unique_counts_bytes = ::rocprim::detail::align_size(batches * sizeof(unsigned int));
     const size_t carry_outs_bytes = ::rocprim::detail::align_size(batches * sizeof(carry_out_type));
+    const size_t leading_aggregates_bytes = ::rocprim::detail::align_size(batches * sizeof(result_type));
     if(temporary_storage == nullptr)
     {
-        storage_size = unique_counts_bytes + carry_outs_bytes;
+        storage_size = unique_counts_bytes + carry_outs_bytes + leading_aggregates_bytes;
         return hipSuccess;
     }
 
@@ -214,6 +224,8 @@ hipError_t reduce_by_key_impl(void * temporary_storage,
     unsigned int * unique_counts = reinterpret_cast<unsigned int *>(ptr);
     ptr += unique_counts_bytes;
     carry_out_type * carry_outs = reinterpret_cast<carry_out_type *>(ptr);
+    ptr += carry_outs_bytes;
+    result_type * leading_aggregates = reinterpret_cast<result_type *>(ptr);
 
     // Start point for time measurements
     std::chrono::high_resolution_clock::time_point start;
@@ -241,7 +253,7 @@ hipError_t reduce_by_key_impl(void * temporary_storage,
         HIP_KERNEL_NAME(reduce_by_key_kernel<block_size, items_per_thread>),
         dim3(batches), dim3(block_size), 0, stream,
         keys_input, values_input, size,
-        const_cast<const unsigned int *>(unique_counts), carry_outs,
+        const_cast<const unsigned int *>(unique_counts), carry_outs, leading_aggregates,
         unique_output, aggregates_output,
         key_compare_op, reduce_op,
         blocks_per_full_batch, full_batches, blocks
@@ -252,7 +264,7 @@ hipError_t reduce_by_key_impl(void * temporary_storage,
     hipLaunchKernelGGL(
         HIP_KERNEL_NAME(scan_and_scatter_carry_outs_kernel<scan_block_size, scan_items_per_thread>),
         dim3(1), dim3(scan_block_size), 0, stream,
-        const_cast<const carry_out_type *>(carry_outs),
+        const_cast<const carry_out_type *>(carry_outs), const_cast<const result_type *>(leading_aggregates),
         aggregates_output,
         key_compare_op, reduce_op,
         batches
