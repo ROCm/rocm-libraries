@@ -59,6 +59,10 @@ void block_store_direct_blocked(unsigned int flat_id,
                                 OutputIterator block_output,
                                 T (&items)[ItemsPerThread])
 {
+    static_assert(std::is_assignable<decltype(block_output[0]), T>::value,
+                  "The type T must be such that an object of type OutputIterator "
+                  "can be dereferenced and assigned a value of type T.");
+
     unsigned int offset = flat_id * ItemsPerThread;
     OutputIterator thread_iter = block_output + offset;
     #pragma unroll
@@ -96,6 +100,10 @@ void block_store_direct_blocked(unsigned int flat_id,
                                 T (&items)[ItemsPerThread],
                                 unsigned int valid)
 {
+    static_assert(std::is_assignable<decltype(block_output[0]), T>::value,
+                  "The type T must be such that an object of type OutputIterator "
+                  "can be dereferenced and assigned a value of type T.");
+
     unsigned int offset = flat_id * ItemsPerThread;
     OutputIterator thread_iter = block_output + offset;
     #pragma unroll
@@ -144,6 +152,9 @@ block_store_direct_blocked_vectorized(unsigned int flat_id,
                                       T* block_output,
                                       U (&items)[ItemsPerThread])
 {
+    static_assert(std::is_convertible<U, T>::value,
+                  "The type U must be such that it can be implicitly converted to T.");
+
     typedef typename detail::match_vector_type<T, ItemsPerThread>::type vector_type;
     constexpr unsigned int vectors_per_thread = (sizeof(T) * ItemsPerThread) / sizeof(vector_type);
     vector_type *vectors_ptr = reinterpret_cast<vector_type*>(const_cast<T*>(block_output));
@@ -202,6 +213,10 @@ void block_store_direct_striped(unsigned int flat_id,
                                 OutputIterator block_output,
                                 T (&items)[ItemsPerThread])
 {
+    static_assert(std::is_assignable<decltype(block_output[0]), T>::value,
+                  "The type T must be such that an object of type OutputIterator "
+                  "can be dereferenced and assigned a value of type T.");
+
     OutputIterator thread_iter = block_output + flat_id;
     #pragma unroll
     for (unsigned int item = 0; item < ItemsPerThread; item++)
@@ -240,6 +255,10 @@ void block_store_direct_striped(unsigned int flat_id,
                                 T (&items)[ItemsPerThread],
                                 unsigned int valid)
 {
+    static_assert(std::is_assignable<decltype(block_output[0]), T>::value,
+                  "The type T must be such that an object of type OutputIterator "
+                  "can be dereferenced and assigned a value of type T.");
+
     OutputIterator thread_iter = block_output + flat_id;
     #pragma unroll
     for (unsigned int item = 0; item < ItemsPerThread; item++)
@@ -287,6 +306,10 @@ void block_store_direct_warp_striped(unsigned int flat_id,
                                      OutputIterator block_output,
                                      T (&items)[ItemsPerThread])
 {
+    static_assert(std::is_assignable<decltype(block_output[0]), T>::value,
+                  "The type T must be such that an object of type OutputIterator "
+                  "can be dereferenced and assigned a value of type T.");
+
     static_assert(detail::is_power_of_two(WarpSize) && WarpSize <= warp_size(),
                  "WarpSize must be a power of two and equal or less"
                  "than the size of hardware warp.");
@@ -339,6 +362,10 @@ void block_store_direct_warp_striped(unsigned int flat_id,
                                      T (&items)[ItemsPerThread],
                                      unsigned int valid)
 {
+    static_assert(std::is_assignable<decltype(block_output[0]), T>::value,
+                  "The type T must be such that an object of type OutputIterator "
+                  "can be dereferenced and assigned a value of type T.");
+
     static_assert(detail::is_power_of_two(WarpSize) && WarpSize <= warp_size(),
                  "WarpSize must be a power of two and equal or less"
                  "than the size of hardware warp.");

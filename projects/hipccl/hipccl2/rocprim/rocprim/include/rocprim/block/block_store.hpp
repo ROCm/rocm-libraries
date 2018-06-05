@@ -176,10 +176,6 @@ public:
     void store(OutputIterator block_output,
                T (&items)[ItemsPerThread])
     {
-        using value_type = typename std::iterator_traits<OutputIterator>::value_type;
-        static_assert(std::is_convertible<T, value_type>::value,
-                      "The type T must be such that an object of type OutputIterator "
-                      "can be dereferenced and assigned a value of type T.");
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
         block_store_direct_blocked(flat_id, block_output, items);
     }
@@ -203,10 +199,6 @@ public:
                T (&items)[ItemsPerThread],
                unsigned int valid)
     {
-        using value_type = typename std::iterator_traits<OutputIterator>::value_type;
-        static_assert(std::is_convertible<T, value_type>::value,
-                      "The type T must be such that an object of type OutputIterator "
-                      "can be dereferenced and assigned a value of type T.");
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
         block_store_direct_blocked(flat_id, block_output, items, valid);
     }
@@ -251,10 +243,6 @@ public:
                T (&items)[ItemsPerThread],
                storage_type& storage)
     {
-        using value_type = typename std::iterator_traits<OutputIterator>::value_type;
-        static_assert(std::is_convertible<T, value_type>::value,
-                      "The type T must be such that an object of type OutputIterator "
-                      "can be dereferenced and assigned a value of type T.");
         (void) storage;
         store(block_output, items);
     }
@@ -302,10 +290,6 @@ public:
                unsigned int valid,
                storage_type& storage)
     {
-        using value_type = typename std::iterator_traits<OutputIterator>::value_type;
-        static_assert(std::is_convertible<T, value_type>::value,
-                      "The type T must be such that an object of type OutputIterator "
-                      "can be dereferenced and assigned a value of type T.");
         (void) storage;
         store(block_output, items, valid);
     }
@@ -346,10 +330,6 @@ public:
     void store(OutputIterator block_output,
                U (&items)[ItemsPerThread])
     {
-        using value_type = typename std::iterator_traits<OutputIterator>::value_type;
-        static_assert(std::is_convertible<T, value_type>::value,
-                      "The type T must be such that an object of type OutputIterator "
-                      "can be dereferenced and assigned a value of type T.");
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
         block_store_direct_blocked(flat_id, block_output, items);
     }
@@ -360,10 +340,6 @@ public:
                T (&items)[ItemsPerThread],
                unsigned int valid)
     {
-        using value_type = typename std::iterator_traits<OutputIterator>::value_type;
-        static_assert(std::is_convertible<T, value_type>::value,
-                      "The type T must be such that an object of type OutputIterator "
-                      "can be dereferenced and assigned a value of type T.");
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
         block_store_direct_blocked(flat_id, block_output, items, valid);
     }
@@ -383,10 +359,6 @@ public:
                U (&items)[ItemsPerThread],
                storage_type& storage)
     {
-        using value_type = typename std::iterator_traits<OutputIterator>::value_type;
-        static_assert(std::is_convertible<T, value_type>::value,
-                      "The type T must be such that an object of type OutputIterator "
-                      "can be dereferenced and assigned a value of type T.");
         (void) storage;
         store(block_output, items);
     }
@@ -398,10 +370,6 @@ public:
                unsigned int valid,
                storage_type& storage)
     {
-        using value_type = typename std::iterator_traits<OutputIterator>::value_type;
-        static_assert(std::is_convertible<T, value_type>::value,
-                      "The type T must be such that an object of type OutputIterator "
-                      "can be dereferenced and assigned a value of type T.");
         (void) storage;
         store(block_output, items, valid);
     }
@@ -425,10 +393,6 @@ public:
     void store(OutputIterator block_output,
                T (&items)[ItemsPerThread])
     {
-        using value_type = typename std::iterator_traits<OutputIterator>::value_type;
-        static_assert(std::is_convertible<T, value_type>::value,
-                      "The type T must be such that an object of type OutputIterator "
-                      "can be dereferenced and assigned a value of type T.");
         ROCPRIM_SHARED_MEMORY storage_type storage;
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
         block_exchange_type().blocked_to_striped(items, items, storage);
@@ -441,10 +405,6 @@ public:
                T (&items)[ItemsPerThread],
                unsigned int valid)
     {
-        using value_type = typename std::iterator_traits<OutputIterator>::value_type;
-        static_assert(std::is_convertible<T, value_type>::value,
-                      "The type T must be such that an object of type OutputIterator "
-                      "can be dereferenced and assigned a value of type T.");
         ROCPRIM_SHARED_MEMORY storage_type storage;
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
         block_exchange_type().blocked_to_striped(items, items, storage);
@@ -457,10 +417,6 @@ public:
                T (&items)[ItemsPerThread],
                storage_type& storage)
     {
-        using value_type = typename std::iterator_traits<OutputIterator>::value_type;
-        static_assert(std::is_convertible<T, value_type>::value,
-                      "The type T must be such that an object of type OutputIterator "
-                      "can be dereferenced and assigned a value of type T.");
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
         block_exchange_type().blocked_to_striped(items, items, storage);
         block_store_direct_striped<BlockSize>(flat_id, block_output, items);
@@ -473,10 +429,6 @@ public:
                unsigned int valid,
                storage_type& storage)
     {
-        using value_type = typename std::iterator_traits<OutputIterator>::value_type;
-        static_assert(std::is_convertible<T, value_type>::value,
-                      "The type T must be such that an object of type OutputIterator "
-                      "can be dereferenced and assigned a value of type T.");
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
         block_exchange_type().blocked_to_striped(items, items, storage);
         block_store_direct_striped<BlockSize>(flat_id, block_output, items, valid);
@@ -504,10 +456,6 @@ public:
     void store(OutputIterator block_output,
                T (&items)[ItemsPerThread])
     {
-        using value_type = typename std::iterator_traits<OutputIterator>::value_type;
-        static_assert(std::is_convertible<T, value_type>::value,
-                      "The type T must be such that an object of type OutputIterator "
-                      "can be dereferenced and assigned a value of type T.");
         ROCPRIM_SHARED_MEMORY storage_type storage;
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
         block_exchange_type().blocked_to_warp_striped(items, items, storage);
@@ -520,10 +468,6 @@ public:
                T (&items)[ItemsPerThread],
                unsigned int valid)
     {
-        using value_type = typename std::iterator_traits<OutputIterator>::value_type;
-        static_assert(std::is_convertible<T, value_type>::value,
-                      "The type T must be such that an object of type OutputIterator "
-                      "can be dereferenced and assigned a value of type T.");
         ROCPRIM_SHARED_MEMORY storage_type storage;
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
         block_exchange_type().blocked_to_warp_striped(items, items, storage);
@@ -536,10 +480,6 @@ public:
                T (&items)[ItemsPerThread],
                storage_type& storage)
     {
-        using value_type = typename std::iterator_traits<OutputIterator>::value_type;
-        static_assert(std::is_convertible<T, value_type>::value,
-                      "The type T must be such that an object of type OutputIterator "
-                      "can be dereferenced and assigned a value of type T.");
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
         block_exchange_type().blocked_to_warp_striped(items, items, storage);
         block_store_direct_warp_striped(flat_id, block_output, items);
@@ -552,10 +492,6 @@ public:
                unsigned int valid,
                storage_type& storage)
     {
-        using value_type = typename std::iterator_traits<OutputIterator>::value_type;
-        static_assert(std::is_convertible<T, value_type>::value,
-                      "The type T must be such that an object of type OutputIterator "
-                      "can be dereferenced and assigned a value of type T.");
         const unsigned int flat_id = ::rocprim::flat_block_thread_id();
         block_exchange_type().blocked_to_warp_striped(items, items, storage);
         block_store_direct_warp_striped(flat_id, block_output, items, valid);
