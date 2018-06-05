@@ -41,12 +41,14 @@ namespace rp = rocprim;
 // Params for tests
 template<
     class InputType,
-    class OutputType = InputType
+    class OutputType = InputType,
+    bool UseIdentityIterator = false
 >
 struct DeviceTransformParams
 {
     using input_type = InputType;
     using output_type = OutputType;
+    static constexpr bool use_identity_iterator = UseIdentityIterator;
 };
 
 // ---------------------------------------------------------
@@ -59,13 +61,14 @@ class RocprimDeviceTransformTests : public ::testing::Test
 public:
     using input_type = typename Params::input_type;
     using output_type = typename Params::output_type;
-    const bool debug_synchronous = false;
+    static constexpr bool use_identity_iterator = Params::use_identity_iterator;
+    static constexpr bool debug_synchronous = false;
 };
 
 typedef ::testing::Types<
-    DeviceTransformParams<int>,
+    DeviceTransformParams<int, int, true>,
     DeviceTransformParams<unsigned long>,
-    DeviceTransformParams<short, int>,
+    DeviceTransformParams<short, int, true>,
     DeviceTransformParams<int, float>
 > RocprimDeviceTransformTestsParams;
 
@@ -98,6 +101,7 @@ TYPED_TEST(RocprimDeviceTransformTests, Transform)
 {
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
+    static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
     const std::vector<size_t> sizes = get_sizes();
@@ -131,8 +135,9 @@ TYPED_TEST(RocprimDeviceTransformTests, Transform)
         // Run
         HIP_CHECK(
             rocprim::transform(
-                d_input, d_output, input.size(),
-                transform<U>(), stream, debug_synchronous
+                d_input,
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
+                input.size(), transform<U>(), stream, debug_synchronous
             )
         );
         HIP_CHECK(hipPeekAtLastError());
@@ -177,6 +182,7 @@ TYPED_TEST(RocprimDeviceTransformTests, BinaryTransform)
     using T1 = typename TestFixture::input_type;
     using T2 = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
+    static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
     const std::vector<size_t> sizes = get_sizes();
@@ -223,8 +229,9 @@ TYPED_TEST(RocprimDeviceTransformTests, BinaryTransform)
         // Run
         HIP_CHECK(
             rocprim::transform(
-                d_input1, d_input2, d_output, input1.size(),
-                binary_transform<T1, T2, U>(), stream, debug_synchronous
+                d_input1, d_input2,
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
+                input1.size(), binary_transform<T1, T2, U>(), stream, debug_synchronous
             )
         );
         HIP_CHECK(hipPeekAtLastError());
