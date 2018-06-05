@@ -27,6 +27,7 @@
 #include <type_traits>
 #include <cstdlib>
 
+// hipCUB
 #include <hipcub/hipcub.hpp>
 
 namespace test_utils
