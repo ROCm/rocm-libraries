@@ -47,7 +47,8 @@ template<
     class ScanOp = ::rocprim::plus<Input>,
     int Init = 0, // as only integral types supported, int is used here even for floating point inputs
     unsigned int MinSegmentLength = 0,
-    unsigned int MaxSegmentLength = 1000
+    unsigned int MaxSegmentLength = 1000,
+    bool UseIdentityIterator = false
 >
 struct params
 {
@@ -57,6 +58,7 @@ struct params
     static constexpr input_type init = Init;
     static constexpr unsigned int min_segment_length = MinSegmentLength;
     static constexpr unsigned int max_segment_length = MaxSegmentLength;
+    static constexpr bool use_identity_iterator = UseIdentityIterator;
 };
 
 template<class Params>
@@ -71,7 +73,7 @@ typedef ::testing::Types<
     params<double, double, rocprim::minimum<double>, 1000, 0, 10000>,
     params<int, short, rocprim::maximum<int>, 10, 1000, 10000>,
     params<float, double, rocprim::maximum<double>, 50, 2, 10>,
-    params<float, float, rocprim::plus<float>, 123, 100, 200>
+    params<float, float, rocprim::plus<float>, 123, 100, 200, true>
 > Params;
 
 TYPED_TEST_CASE(RocprimDeviceSegmentedScan, Params);
@@ -94,6 +96,8 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScan)
     using input_type = typename TestFixture::params::input_type;
     using output_type = typename TestFixture::params::output_type;
     using scan_op_type = typename TestFixture::params::scan_op_type;
+    static constexpr bool use_identity_iterator =
+        TestFixture::params::use_identity_iterator;
     using result_type = output_type;
 
     using offset_type = unsigned int;
@@ -166,7 +170,8 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScan)
         size_t temporary_storage_bytes;
         rocprim::segmented_inclusive_scan(
             nullptr, temporary_storage_bytes,
-            d_values_input, d_values_output,
+            d_values_input,
+            test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_values_output),
             segments_count,
             d_offsets, d_offsets + 1,
             scan_op,
@@ -179,7 +184,8 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScan)
 
         rocprim::segmented_inclusive_scan(
             d_temporary_storage, temporary_storage_bytes,
-            d_values_input, d_values_output,
+            d_values_input,
+            test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_values_output),
             segments_count,
             d_offsets, d_offsets + 1,
             scan_op,
@@ -222,6 +228,8 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScan)
     using input_type = typename TestFixture::params::input_type;
     using output_type = typename TestFixture::params::output_type;
     using scan_op_type = typename TestFixture::params::scan_op_type;
+    static constexpr bool use_identity_iterator =
+        TestFixture::params::use_identity_iterator;
     using result_type = output_type;
     using offset_type = unsigned int;
 
@@ -295,7 +303,8 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScan)
         size_t temporary_storage_bytes;
         rocprim::segmented_exclusive_scan(
             nullptr, temporary_storage_bytes,
-            d_values_input, d_values_output,
+            d_values_input,
+            test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_values_output),
             segments_count,
             d_offsets, d_offsets + 1,
             init, scan_op,
@@ -309,7 +318,8 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScan)
 
         rocprim::segmented_exclusive_scan(
             d_temporary_storage, temporary_storage_bytes,
-            d_values_input, d_values_output,
+            d_values_input,
+            test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_values_output),
             segments_count,
             d_offsets, d_offsets + 1,
             init, scan_op,
@@ -349,6 +359,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScan)
 
 TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScanUsingHeadFlags)
 {
+    // Does not support output iterator with void value_type
     using input_type = typename TestFixture::params::input_type;
     using flag_type = unsigned int;
     using output_type = typename TestFixture::params::output_type;
@@ -476,6 +487,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScanUsingHeadFlags)
 
 TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScanUsingHeadFlags)
 {
+    // Does not support output iterator with void value_type
     using input_type = typename TestFixture::params::input_type;
     using flag_type = unsigned int;
     using output_type = typename TestFixture::params::output_type;
