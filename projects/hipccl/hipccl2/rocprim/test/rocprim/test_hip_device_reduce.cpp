@@ -43,12 +43,15 @@ namespace rp = rocprim;
 // Params for tests
 template<
     class InputType,
-    class OutputType = InputType
+    class OutputType = InputType,
+    bool UseIdentityIterator = false
 >
 struct DeviceReduceParams
 {
     using input_type = InputType;
     using output_type = OutputType;
+    // Tests output iterator with void value_type (OutputIterator concept)
+    static constexpr bool use_identity_iterator =  UseIdentityIterator;
 };
 
 // ---------------------------------------------------------
@@ -62,11 +65,12 @@ public:
     using input_type = typename Params::input_type;
     using output_type = typename Params::output_type;
     const bool debug_synchronous = false;
+    static constexpr bool use_identity_iterator = Params::use_identity_iterator;
 };
 
 typedef ::testing::Types<
-    DeviceReduceParams<int, long>,
-    DeviceReduceParams<unsigned long>,
+    DeviceReduceParams<unsigned int>,
+    DeviceReduceParams<long, long, true>,
     DeviceReduceParams<short, int>,
     DeviceReduceParams<int, float>
 > RocprimDeviceReduceTestsParams;
@@ -91,6 +95,7 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
+    static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -128,8 +133,9 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
         HIP_CHECK(
             rocprim::reduce(
                 d_temp_storage, temp_storage_size_bytes,
-                d_input, d_output, input.size(),
-                plus_op, stream, debug_synchronous
+                d_input,
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
+                input.size(), plus_op, stream, debug_synchronous
             )
         );
 
@@ -144,8 +150,9 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
         HIP_CHECK(
             rocprim::reduce(
                 d_temp_storage, temp_storage_size_bytes,
-                d_input, d_output, input.size(),
-                plus_op, stream, debug_synchronous
+                d_input,
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
+                input.size(), plus_op, stream, debug_synchronous
             )
         );
         HIP_CHECK(hipPeekAtLastError());
@@ -177,6 +184,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
+    static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -215,8 +223,9 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
         HIP_CHECK(
             rocprim::reduce(
                 d_temp_storage, temp_storage_size_bytes,
-                d_input, d_output, std::numeric_limits<U>::max(), input.size(),
-                min_op, stream, debug_synchronous
+                d_input,
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
+                std::numeric_limits<U>::max(), input.size(), min_op, stream, debug_synchronous
             )
         );
 
@@ -231,8 +240,9 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
         HIP_CHECK(
             rocprim::reduce(
                 d_temp_storage, temp_storage_size_bytes,
-                d_input, d_output, std::numeric_limits<U>::max(), input.size(),
-                min_op, stream, debug_synchronous
+                d_input,
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
+                std::numeric_limits<U>::max(), input.size(), min_op, stream, debug_synchronous
             )
         );
         HIP_CHECK(hipPeekAtLastError());
@@ -279,6 +289,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
     using T = typename TestFixture::input_type;
     using key_value = rocprim::key_value_pair<int, T>;
     const bool debug_synchronous = TestFixture::debug_synchronous;
+    static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -322,8 +333,9 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
         HIP_CHECK(
             rocprim::reduce(
                 d_temp_storage, temp_storage_size_bytes,
-                d_input, d_output, max, input.size(),
-                reduce_op, stream, debug_synchronous
+                d_input,
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
+                max, input.size(), reduce_op, stream, debug_synchronous
             )
         );
 
@@ -338,8 +350,9 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
         HIP_CHECK(
             rocprim::reduce(
                 d_temp_storage, temp_storage_size_bytes,
-                d_input, d_output, max, input.size(),
-                reduce_op, stream, debug_synchronous
+                d_input,
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
+                max, input.size(), reduce_op, stream, debug_synchronous
             )
         );
         HIP_CHECK(hipPeekAtLastError());

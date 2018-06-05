@@ -39,12 +39,16 @@
 // Params for tests
 template<
     class InputType,
-    class OutputType = InputType
+    class OutputType = InputType,
+    // Tests output iterator with void value_type (OutputIterator concept)
+    // scan-by-key primitives don't support output iterator with void value_type
+    bool UseIdentityIteratorIfSupported = false
 >
 struct DeviceScanParams
 {
     using input_type = InputType;
     using output_type = OutputType;
+    static constexpr bool use_identity_iterator = UseIdentityIteratorIfSupported;
 };
 
 // ---------------------------------------------------------
@@ -58,14 +62,15 @@ public:
     using input_type = typename Params::input_type;
     using output_type = typename Params::output_type;
     const bool debug_synchronous = false;
+    static constexpr bool use_identity_iterator = Params::use_identity_iterator;
 };
 
 typedef ::testing::Types<
     DeviceScanParams<int>,
-    DeviceScanParams<long>,
+    DeviceScanParams<double, double, true>,
     DeviceScanParams<short, int>,
-    DeviceScanParams<float, double>,
-    DeviceScanParams<test_utils::custom_test_type<double>>
+    DeviceScanParams<long, double>,
+    DeviceScanParams<test_utils::custom_test_type<double>, test_utils::custom_test_type<double>, true>
 > RocprimDeviceScanTestsParams;
 
 std::vector<size_t> get_sizes()
@@ -88,6 +93,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
+    static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -130,8 +136,9 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
         HIP_CHECK(
             rocprim::inclusive_scan(
                 d_temp_storage, temp_storage_size_bytes,
-                d_input, d_output, input.size(),
-                plus_op, stream, debug_synchronous
+                d_input,
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
+                input.size(), plus_op, stream, debug_synchronous
             )
         );
 
@@ -146,8 +153,9 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
         HIP_CHECK(
             rocprim::inclusive_scan(
                 d_temp_storage, temp_storage_size_bytes,
-                d_input, d_output, input.size(),
-                plus_op, stream, debug_synchronous
+                d_input,
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
+                input.size(), plus_op, stream, debug_synchronous
             )
         );
         HIP_CHECK(hipPeekAtLastError());
@@ -177,6 +185,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanSum)
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
+    static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -221,8 +230,9 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanSum)
         HIP_CHECK(
             rocprim::exclusive_scan(
                 d_temp_storage, temp_storage_size_bytes,
-                d_input, d_output, initial_value, input.size(),
-                plus_op, stream, debug_synchronous
+                d_input,
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
+                initial_value, input.size(), plus_op, stream, debug_synchronous
             )
         );
 
@@ -237,8 +247,9 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanSum)
         HIP_CHECK(
             rocprim::exclusive_scan(
                 d_temp_storage, temp_storage_size_bytes,
-                d_input, d_output, initial_value, input.size(),
-                plus_op, stream, debug_synchronous
+                d_input,
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
+                initial_value, input.size(), plus_op, stream, debug_synchronous
             )
         );
         HIP_CHECK(hipPeekAtLastError());
@@ -265,6 +276,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanSum)
 
 TYPED_TEST(RocprimDeviceScanTests, InclusiveScanByKey)
 {
+    // scan-by-key does not support output iterator with void value_type
     using T = typename TestFixture::input_type;
     using K = unsigned int; // key type
     using U = typename TestFixture::output_type;
@@ -389,6 +401,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanByKey)
 
 TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
 {
+    // scan-by-key does not support output iterator with void value_type
     using T = typename TestFixture::input_type;
     using K = unsigned int; // key type
     using U = typename TestFixture::output_type;

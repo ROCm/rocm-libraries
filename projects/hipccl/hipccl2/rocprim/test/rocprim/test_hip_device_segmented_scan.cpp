@@ -48,6 +48,9 @@ template<
     int Init = 0, // as only integral types supported, int is used here even for floating point inputs
     unsigned int MinSegmentLength = 0,
     unsigned int MaxSegmentLength = 1000,
+    // Tests output iterator with void value_type (OutputIterator concept)
+    // Segmented scan primitives which use head flags do not support this kind
+    // of output iterators.
     bool UseIdentityIterator = false
 >
 struct params
