@@ -26,6 +26,7 @@
 
 #include "../config.hpp"
 #include "../detail/various.hpp"
+#include "../detail/match_result_type.hpp"
 
 #include "../functional.hpp"
 
@@ -75,8 +76,12 @@ void reduce_by_key_impl(void * temporary_storage,
                         const bool debug_synchronous)
 {
     using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
-    using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
-    using carry_out_type = carry_out<key_type, value_type>;
+    using result_type = typename ::rocprim::detail::match_result_type<
+        typename std::iterator_traits<ValuesInputIterator>::value_type,
+        typename std::iterator_traits<AggregatesOutputIterator>::value_type,
+        BinaryFunction
+    >::type;
+    using carry_out_type = carry_out<key_type, result_type>;
 
     constexpr unsigned int block_size = 256;
     constexpr unsigned int items_per_thread = 7;
@@ -96,9 +101,10 @@ void reduce_by_key_impl(void * temporary_storage,
 
     const size_t unique_counts_bytes = ::rocprim::detail::align_size(batches * sizeof(unsigned int));
     const size_t carry_outs_bytes = ::rocprim::detail::align_size(batches * sizeof(carry_out_type));
+    const size_t leading_aggregates_bytes = ::rocprim::detail::align_size(batches * sizeof(result_type));
     if(temporary_storage == nullptr)
     {
-        storage_size = unique_counts_bytes + carry_outs_bytes;
+        storage_size = unique_counts_bytes + carry_outs_bytes + leading_aggregates_bytes;
         return;
     }
 
@@ -118,6 +124,8 @@ void reduce_by_key_impl(void * temporary_storage,
     unsigned int * unique_counts = reinterpret_cast<unsigned int *>(ptr);
     ptr += unique_counts_bytes;
     carry_out_type * carry_outs = reinterpret_cast<carry_out_type *>(ptr);
+    ptr += carry_outs_bytes;
+    result_type * leading_aggregates = reinterpret_cast<result_type *>(ptr);
 
     // Start point for time measurements
     std::chrono::high_resolution_clock::time_point start;
@@ -158,7 +166,7 @@ void reduce_by_key_impl(void * temporary_storage,
         {
             reduce_by_key<block_size, items_per_thread>(
                 keys_input, values_input, size,
-                unique_counts, carry_outs,
+                unique_counts, carry_outs, leading_aggregates,
                 unique_output, aggregates_output,
                 key_compare_op, reduce_op,
                 blocks_per_full_batch, full_batches, blocks
@@ -174,7 +182,7 @@ void reduce_by_key_impl(void * temporary_storage,
         [=](hc::tiled_index<1>) [[hc]]
         {
             scan_and_scatter_carry_outs<scan_block_size, scan_items_per_thread>(
-                carry_outs,
+                carry_outs, leading_aggregates,
                 aggregates_output,
                 key_compare_op, reduce_op,
                 batches
