@@ -58,14 +58,13 @@ void scatter_kernel_impl(InputIterator input,
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     using output_type = typename std::iterator_traits<OutputIterator>::value_type;
+    // Fix for cases when output_type is void (there's no sizeof(void))
     using value_type = typename std::conditional<
-        std::is_same<void, output_type>::value,
-        input_type,
-        typename std::conditional<
-            (sizeof(output_type) > sizeof(input_type)),
-            input_type,
-            output_type
-        >::type
+        std::is_same<void, output_type>::value, input_type, output_type
+    >::type;
+    // Use smaller type for private storage
+    using result_type = typename std::conditional<
+        (sizeof(value_type) > sizeof(input_type)), input_type, value_type
     >::type;
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
 
@@ -75,7 +74,7 @@ void scatter_kernel_impl(InputIterator input,
     const unsigned int number_of_blocks = (input_size + items_per_block - 1)/items_per_block;
     auto valid_in_last_block = input_size - items_per_block * (number_of_blocks - 1);
 
-    value_type values[ItemsPerThread];
+    result_type values[ItemsPerThread];
     unsigned int out_indices[ItemsPerThread];
     bool is_selected[ItemsPerThread];
 
@@ -237,8 +236,6 @@ void flag_unique_kernel_impl(InputIterator input,
                              InequalityOp inequality_op)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    // using flag_type = typename std::iterator_traits<OutputFlagIterator>::value_type;
-
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
 
     using block_load_type = ::rocprim::block_load<
