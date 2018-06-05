@@ -48,6 +48,7 @@ template<
     class ReduceOp,
     unsigned int MinSegmentLength,
     unsigned int MaxSegmentLength,
+    class Aggregate = Value,
     class KeyCompareFunction = ::rocprim::equal_to<Key>
 >
 struct params
@@ -57,6 +58,7 @@ struct params
     using reduce_op_type = ReduceOp;
     static constexpr unsigned int min_segment_length = MinSegmentLength;
     static constexpr unsigned int max_segment_length = MaxSegmentLength;
+    using aggregate_type = Aggregate;
     using key_compare_op = KeyCompareFunction;
 };
 
@@ -66,6 +68,15 @@ public:
     using params = Params;
 };
 
+struct custom_reduce_op1
+{
+    template<class T>
+    ROCPRIM_HOST_DEVICE
+    T operator()(T a, T b)
+    {
+        return a + b;
+    }
+};
 
 template<class T>
 struct custom_key_compare_op1
@@ -79,16 +90,16 @@ struct custom_key_compare_op1
 
 typedef ::testing::Types<
     params<int, int, rp::plus<int>, 1, 1>,
-    params<double, int, rp::plus<int>, 3, 5, custom_key_compare_op1<double>>,
+    params<double, int, custom_reduce_op1, 3, 5, long long, custom_key_compare_op1<double>>,
     params<float, int, rp::plus<int>, 1, 10>,
     params<unsigned long long, float, rp::minimum<float>, 1, 30>,
     params<int, unsigned int, rp::maximum<unsigned int>, 20, 100>,
-    params<float, unsigned long long, rp::maximum<unsigned long long>, 100, 400, custom_key_compare_op1<float>>,
+    params<float, long long, rp::maximum<unsigned long long>, 100, 400, long long, custom_key_compare_op1<float>>,
     params<unsigned int, unsigned int, rp::plus<unsigned int>, 200, 600>,
-    params<double, int, rp::plus<int>, 100, 2000, custom_key_compare_op1<double>>,
+    params<double, int, rp::plus<int>, 100, 2000, double, custom_key_compare_op1<double>>,
     params<int, unsigned int, rp::plus<unsigned int>, 1000, 5000>,
     params<unsigned int, int, rp::plus<int>, 2048, 2048>,
-    params<long long, long long, rp::plus<long long>, 1000, 10000>,
+    params<long long, short, rp::plus<long long>, 1000, 10000, long long>,
     params<unsigned int, double, rp::minimum<double>, 1000, 50000>,
     params<unsigned long long, unsigned long long, rp::plus<unsigned long long>, 100000, 100000>
 > Params;
@@ -113,6 +124,7 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
 {
     using key_type = typename TestFixture::params::key_type;
     using value_type = typename TestFixture::params::value_type;
+    using aggregate_type = typename TestFixture::params::aggregate_type;
     using reduce_op_type = typename TestFixture::params::reduce_op_type;
     using key_compare_op_type = typename TestFixture::params::key_compare_op;
     using key_distribution_type = typename std::conditional<
@@ -139,7 +151,7 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
 
         // Generate data and calculate expected results
         std::vector<key_type> unique_expected;
-        std::vector<value_type> aggregates_expected;
+        std::vector<aggregate_type> aggregates_expected;
         size_t unique_count_expected = 0;
 
         std::vector<key_type> keys_input(size);
@@ -163,10 +175,10 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
             {
                 keys_input[i] = current_key;
             }
-            value_type aggregate = values_input[offset];
+            aggregate_type aggregate = values_input[offset];
             for(size_t i = offset + 1; i < end; i++)
             {
-                aggregate = reduce_op(aggregate, values_input[i]);
+                aggregate = reduce_op(aggregate, static_cast<aggregate_type>(values_input[i]));
             }
 
             // The first key of the segment must be written into unique
@@ -206,10 +218,10 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
         );
 
         key_type * d_unique_output;
-        value_type * d_aggregates_output;
+        aggregate_type * d_aggregates_output;
         unsigned int * d_unique_count_output;
         HIP_CHECK(hipMalloc(&d_unique_output, unique_count_expected * sizeof(key_type)));
-        HIP_CHECK(hipMalloc(&d_aggregates_output, unique_count_expected * sizeof(value_type)));
+        HIP_CHECK(hipMalloc(&d_aggregates_output, unique_count_expected * sizeof(aggregate_type)));
         HIP_CHECK(hipMalloc(&d_unique_count_output, sizeof(unsigned int)));
 
         size_t temporary_storage_bytes;
@@ -244,7 +256,7 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
         HIP_CHECK(hipFree(d_temporary_storage));
 
         std::vector<key_type> unique_output(unique_count_expected);
-        std::vector<value_type> aggregates_output(unique_count_expected);
+        std::vector<aggregate_type> aggregates_output(unique_count_expected);
         std::vector<unsigned int> unique_count_output(1);
         HIP_CHECK(
             hipMemcpy(
@@ -256,7 +268,7 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
         HIP_CHECK(
             hipMemcpy(
                 aggregates_output.data(), d_aggregates_output,
-                unique_count_expected * sizeof(value_type),
+                unique_count_expected * sizeof(aggregate_type),
                 hipMemcpyDeviceToHost
             )
         );
