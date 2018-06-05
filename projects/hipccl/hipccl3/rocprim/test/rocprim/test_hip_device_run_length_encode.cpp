@@ -43,7 +43,9 @@ template<
     class Key,
     class Count,
     unsigned int MinSegmentLength,
-    unsigned int MaxSegmentLength
+    unsigned int MaxSegmentLength,
+    // Tests output iterator with void value_type (OutputIterator concept)
+    bool UseIdentityIterator = false
 >
 struct params
 {
@@ -51,6 +53,7 @@ struct params
     using count_type = Count;
     static constexpr unsigned int min_segment_length = MinSegmentLength;
     static constexpr unsigned int max_segment_length = MaxSegmentLength;
+    static constexpr bool use_identity_iterator = UseIdentityIterator;
 };
 
 template<class Params>
@@ -60,7 +63,7 @@ public:
 };
 
 typedef ::testing::Types<
-    params<int, int, 1, 1>,
+    params<int, int, 1, 1, true>,
     params<double, int, 3, 5>,
     params<float, int, 1, 10>,
     params<unsigned long long, size_t, 1, 30>,
@@ -100,13 +103,14 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, Encode)
         std::uniform_int_distribution<key_type>
     >::type;
 
+    static constexpr bool use_identity_iterator =
+        TestFixture::params::use_identity_iterator;
     const bool debug_synchronous = false;
-
-    const std::vector<size_t> sizes = get_sizes();
 
     const unsigned int seed = 123;
     std::default_random_engine gen(seed);
 
+    const std::vector<size_t> sizes = get_sizes();
     for(size_t size : sizes)
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
@@ -170,7 +174,9 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, Encode)
             rocprim::run_length_encode(
                 nullptr, temporary_storage_bytes,
                 d_input, size,
-                d_unique_output, d_counts_output, d_runs_count_output,
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_unique_output),
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_counts_output),
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_runs_count_output),
                 stream, debug_synchronous
             )
         );
@@ -184,7 +190,9 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, Encode)
             rocprim::run_length_encode(
                 d_temporary_storage, temporary_storage_bytes,
                 d_input, size,
-                d_unique_output, d_counts_output, d_runs_count_output,
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_unique_output),
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_counts_output),
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_runs_count_output),
                 stream, debug_synchronous
             )
         );
@@ -244,13 +252,14 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, NonTrivialRuns)
         std::uniform_int_distribution<key_type>
     >::type;
 
+    static constexpr bool use_identity_iterator =
+        TestFixture::params::use_identity_iterator;
     const bool debug_synchronous = false;
-
-    const std::vector<size_t> sizes = get_sizes();
 
     const unsigned int seed = 123;
     std::default_random_engine gen(seed);
 
+    const std::vector<size_t> sizes = get_sizes();
     for(size_t size : sizes)
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
@@ -327,7 +336,9 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, NonTrivialRuns)
             rocprim::run_length_encode_non_trivial_runs(
                 nullptr, temporary_storage_bytes,
                 d_input, size,
-                d_offsets_output, d_counts_output, d_runs_count_output,
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_offsets_output),
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_counts_output),
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_runs_count_output),
                 stream, debug_synchronous
             )
         );
@@ -341,7 +352,9 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, NonTrivialRuns)
             rocprim::run_length_encode_non_trivial_runs(
                 d_temporary_storage, temporary_storage_bytes,
                 d_input, size,
-                d_offsets_output, d_counts_output, d_runs_count_output,
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_offsets_output),
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_counts_output),
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_runs_count_output),
                 stream, debug_synchronous
             )
         );

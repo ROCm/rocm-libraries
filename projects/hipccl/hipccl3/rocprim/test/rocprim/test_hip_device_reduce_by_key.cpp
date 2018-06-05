@@ -49,7 +49,9 @@ template<
     unsigned int MinSegmentLength,
     unsigned int MaxSegmentLength,
     class Aggregate = Value,
-    class KeyCompareFunction = ::rocprim::equal_to<Key>
+    class KeyCompareFunction = ::rocprim::equal_to<Key>,
+    // Tests output iterator with void value_type (OutputIterator concept)
+    bool UseIdentityIterator = false
 >
 struct params
 {
@@ -60,6 +62,7 @@ struct params
     static constexpr unsigned int max_segment_length = MaxSegmentLength;
     using aggregate_type = Aggregate;
     using key_compare_op = KeyCompareFunction;
+    static constexpr bool use_identity_iterator = UseIdentityIterator;
 };
 
 template<class Params>
@@ -89,8 +92,8 @@ struct custom_key_compare_op1
 };
 
 typedef ::testing::Types<
-    params<int, int, rp::plus<int>, 1, 1>,
-    params<double, int, custom_reduce_op1, 3, 5, long long, custom_key_compare_op1<double>>,
+    params<int, int, rp::plus<int>, 1, 1, int, rp::equal_to<int>, true>,
+    params<double, int, rp::plus<int>, 3, 5, long long, custom_key_compare_op1<double>>,
     params<float, int, rp::plus<int>, 1, 10>,
     params<unsigned long long, float, rp::minimum<float>, 1, 30>,
     params<int, unsigned int, rp::maximum<unsigned int>, 20, 100>,
@@ -133,6 +136,8 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
         std::uniform_int_distribution<key_type>
     >::type;
 
+    static constexpr bool use_identity_iterator =
+        TestFixture::params::use_identity_iterator;
     const bool debug_synchronous = false;
 
     reduce_op_type reduce_op;
@@ -230,7 +235,8 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
             rp::reduce_by_key(
                 nullptr, temporary_storage_bytes,
                 d_keys_input, d_values_input, size,
-                d_unique_output, d_aggregates_output,
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_unique_output),
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_aggregates_output),
                 d_unique_count_output,
                 reduce_op, key_compare_op,
                 stream, debug_synchronous
