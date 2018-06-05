@@ -28,14 +28,26 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
+/// \brief Special type used to show that the given device-level operation
+/// will be executed with optimal configuration dependent on types of the function's parameters
+/// and the target device architecture specified by ROCPRIM_TARGET_ARCH.
+struct default_config { };
+
+/// \brief Configuration of particular kernels launched by device-level operation
+///
+/// \tparam BlockSize - number of threads in a block.
+/// \tparam ItemsPerThread - number of items in processed by each thread.
 template<unsigned int BlockSize, unsigned int ItemsPerThread>
 struct kernel_config
 {
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
     static constexpr unsigned int block_size = BlockSize;
     static constexpr unsigned int items_per_thread = ItemsPerThread;
+#endif
 };
 
-struct default_config { };
+namespace detail
+{
 
 template<class...>
 using void_t = void;
@@ -53,12 +65,12 @@ struct select_type_case
     using type = T;
 };
 
-template<class Case, class... RestCases>
+template<class Case, class... OtherCases>
 struct select_type
     : std::conditional<
         Case::value,
         typename Case::type,
-        select_type<RestCases...>
+        select_type<OtherCases...>
     >::type { };
 
 template<class T>
@@ -84,13 +96,13 @@ struct select_arch_case
     using type = T;
 };
 
-template<unsigned int TargetArch, class Case, class... RestCases>
+template<unsigned int TargetArch, class Case, class... OtherCases>
 struct select_arch
     : extract_type<
         typename std::conditional<
             Case::arch == TargetArch,
             typename Case::type,
-            select_arch<TargetArch, RestCases...>
+            select_arch<TargetArch, OtherCases...>
         >::type
     > { };
 
@@ -104,6 +116,8 @@ using default_or_custom_config =
         Default,
         Config
     >::type;
+
+} // end namespace detail
 
 END_ROCPRIM_NAMESPACE
 
