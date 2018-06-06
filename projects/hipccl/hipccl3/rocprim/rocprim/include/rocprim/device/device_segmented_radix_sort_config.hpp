@@ -28,6 +28,9 @@
 
 #include "config_types.hpp"
 
+/// \addtogroup primitivesmodule_deviceconfigs
+/// @{
+
 BEGIN_ROCPRIM_NAMESPACE
 
 /// \brief Configuration of device-level segmented radix sort operation.
@@ -143,5 +146,8 @@ struct default_segmented_radix_sort_config
 } // end namespace detail
 
 END_ROCPRIM_NAMESPACE
+
+/// @}
+// end of group primitivesmodule_deviceconfigs
 
 #endif // ROCPRIM_DEVICE_DEVICE_SEGMENTED_RADIX_SORT_CONFIG_HPP_

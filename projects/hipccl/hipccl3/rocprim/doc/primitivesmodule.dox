@@ -8,3 +8,8 @@
  * \defgroup primitivesmodule Parallel primitives
  *
  */
+
+ /**
+ * \defgroup primitivesmodule_deviceconfigs Kernel configs
+ * \ingroup primitivesmodule
+ */
