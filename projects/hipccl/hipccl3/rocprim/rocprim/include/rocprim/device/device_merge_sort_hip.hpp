@@ -255,6 +255,11 @@ hipError_t merge_sort_impl(void * temporary_storage,
 /// \param [in] keys_input - pointer to the first element in the range to sort.
 /// \param [out] keys_output - pointer to the first element in the output range.
 /// \param [in] size - number of element in the input range.
+/// \param [in] compare_function - binary operation function object that will be used for comparison.
+/// The signature of the function should be equivalent to the following:
+/// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
+/// <tt>const &</tt>, but function object must not modify the objects passed to it.
+/// The default value is \p BinaryFunction().
 /// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
 /// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
@@ -348,6 +353,11 @@ hipError_t merge_sort(void * temporary_storage,
 /// \param [in] values_input - pointer to the first element in the range to sort.
 /// \param [out] values_output - pointer to the first element in the output range.
 /// \param [in] size - number of element in the input range.
+/// \param [in] compare_function - binary operation function object that will be used for comparison.
+/// The signature of the function should be equivalent to the following:
+/// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
+/// <tt>const &</tt>, but function object must not modify the objects passed to it.
+/// The default value is \p BinaryFunction().
 /// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
 /// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
