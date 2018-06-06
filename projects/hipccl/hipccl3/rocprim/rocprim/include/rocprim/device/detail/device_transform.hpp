@@ -74,6 +74,7 @@ private:
 template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
+    class ResultType,
     class InputIterator,
     class OutputIterator,
     class UnaryFunction
@@ -86,6 +87,11 @@ void transform_kernel_impl(InputIterator input,
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     using output_type = typename std::iterator_traits<OutputIterator>::value_type;
+    using result_type =
+        typename std::conditional<
+            std::is_void<output_type>::value, ResultType, output_type
+        >::type;
+
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
 
     const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
@@ -95,7 +101,7 @@ void transform_kernel_impl(InputIterator input,
     auto valid_in_last_block = input_size - items_per_block * (number_of_blocks - 1);
 
     input_type input_values[ItemsPerThread];
-    output_type output_values[ItemsPerThread];
+    result_type output_values[ItemsPerThread];
 
     // load input values into values
     if(flat_block_id == (number_of_blocks - 1)) // last block

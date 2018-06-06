@@ -63,7 +63,7 @@ typedef ::testing::Types<
     DeviceScanParams<int, long>,
     DeviceScanParams<unsigned long>,
     DeviceScanParams<short, float>,
-    DeviceScanParams<float>
+    DeviceScanParams<int, double>
 > HipcubDeviceScanTestsParams;
 
 std::vector<size_t> get_sizes()

@@ -64,7 +64,7 @@ typedef ::testing::Types<
     DeviceReduceParams<int, long>,
     DeviceReduceParams<unsigned long>,
     DeviceReduceParams<short>,
-    DeviceReduceParams<int>
+    DeviceReduceParams<int, double>
 > HipcubDeviceReduceTestsParams;
 
 std::vector<size_t> get_sizes()

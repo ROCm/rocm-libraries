@@ -30,7 +30,11 @@
 // Google Test
 #include <gtest/gtest.h>
 
+// rocPRIM
 #include <rocprim/rocprim.hpp>
+
+// Identity iterator
+#include "identity_iterator.hpp"
 
 // For better Google Test reporting and debug output of half values
 inline

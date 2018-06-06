@@ -40,13 +40,15 @@
 template<
     class InputType,
     class OutputType = InputType,
-    class FlagType = unsigned int
+    class FlagType = unsigned int,
+    bool UseIdentityIterator = false
 >
 struct DeviceSelectParams
 {
     using input_type = InputType;
     using output_type = OutputType;
     using flag_type = FlagType;
+    static constexpr bool use_identity_iterator = UseIdentityIterator;
 };
 
 template<class Params>
@@ -57,11 +59,12 @@ public:
     using output_type = typename Params::output_type;
     using flag_type = typename Params::flag_type;
     const bool debug_synchronous = false;
+    static constexpr bool use_identity_iterator = Params::use_identity_iterator;
 };
 
 typedef ::testing::Types<
     DeviceSelectParams<int, long>,
-    DeviceSelectParams<unsigned char, float>
+    DeviceSelectParams<unsigned char, float, int, true>
 > RocprimDeviceSelectTestsParams;
 
 std::vector<size_t> get_sizes()
@@ -85,6 +88,7 @@ TYPED_TEST(RocprimDeviceSelectTests, Flagged)
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     using F = typename TestFixture::flag_type;
+    static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
     hipStream_t stream = 0; // default stream
@@ -142,7 +146,7 @@ TYPED_TEST(RocprimDeviceSelectTests, Flagged)
                 temp_storage_size_bytes,
                 d_input,
                 d_flags,
-                d_output,
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
                 d_selected_count_output,
                 input.size(),
                 stream,
@@ -166,7 +170,7 @@ TYPED_TEST(RocprimDeviceSelectTests, Flagged)
                 temp_storage_size_bytes,
                 d_input,
                 d_flags,
-                d_output,
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
                 d_selected_count_output,
                 input.size(),
                 stream,
@@ -215,6 +219,7 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
 {
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
+    static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
     hipStream_t stream = 0; // default stream
@@ -267,7 +272,7 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
                 nullptr,
                 temp_storage_size_bytes,
                 d_input,
-                d_output,
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
                 d_selected_count_output,
                 input.size(),
                 select_op,
@@ -291,7 +296,7 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
                 d_temp_storage,
                 temp_storage_size_bytes,
                 d_input,
-                d_output,
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
                 d_selected_count_output,
                 input.size(),
                 select_op,
@@ -348,6 +353,7 @@ TYPED_TEST(RocprimDeviceSelectTests, Unique)
 {
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
+    static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
     hipStream_t stream = 0; // default stream
@@ -406,7 +412,7 @@ TYPED_TEST(RocprimDeviceSelectTests, Unique)
                     nullptr,
                     temp_storage_size_bytes,
                     d_input,
-                    d_output,
+                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
                     d_selected_count_output,
                     input.size(),
                     ::rocprim::equal_to<T>(),
@@ -430,7 +436,7 @@ TYPED_TEST(RocprimDeviceSelectTests, Unique)
                     d_temp_storage,
                     temp_storage_size_bytes,
                     d_input,
-                    d_output,
+                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
                     d_selected_count_output,
                     input.size(),
                     ::rocprim::equal_to<T>(),

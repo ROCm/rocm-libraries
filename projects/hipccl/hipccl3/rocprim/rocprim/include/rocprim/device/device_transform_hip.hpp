@@ -42,6 +42,7 @@ namespace detail
 template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
+    class ResultType,
     class InputIterator,
     class OutputIterator,
     class UnaryFunction
@@ -52,7 +53,7 @@ void transform_kernel(InputIterator input,
                       OutputIterator output,
                       UnaryFunction transform_op)
 {
-    transform_kernel_impl<BlockSize, ItemsPerThread>(
+    transform_kernel_impl<BlockSize, ItemsPerThread, ResultType>(
         input, size, output, transform_op
     );
 }
@@ -150,6 +151,13 @@ hipError_t transform(InputIterator input,
                      const hipStream_t stream = 0,
                      bool debug_synchronous = false)
 {
+    using input_type = typename std::iterator_traits<InputIterator>::value_type;
+    #ifdef __cpp_lib_is_invocable
+    using result_type = typename std::invoke_result<UnaryFunction, input_type>::type;
+    #else
+    using result_type = typename std::result_of<UnaryFunction(input_type)>::type;
+    #endif
+
     // TODO: Those values should depend on type size
     constexpr unsigned int block_size = 256;
     constexpr unsigned int items_per_thread = 4;
@@ -169,7 +177,7 @@ hipError_t transform(InputIterator input,
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
     hipLaunchKernelGGL(
         HIP_KERNEL_NAME(detail::transform_kernel<
-            block_size, items_per_thread,
+            block_size, items_per_thread, result_type,
             InputIterator, OutputIterator, UnaryFunction
         >),
         dim3(number_of_blocks), dim3(block_size), 0, stream,

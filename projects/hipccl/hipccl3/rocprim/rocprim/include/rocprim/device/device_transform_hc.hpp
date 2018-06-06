@@ -122,6 +122,13 @@ void transform(InputIterator input,
                hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
                bool debug_synchronous = false)
 {
+    using input_type = typename std::iterator_traits<InputIterator>::value_type;
+    #ifdef __cpp_lib_is_invocable
+    using result_type = typename std::invoke_result<UnaryFunction, input_type>::type;
+    #else
+    using result_type = typename std::result_of<UnaryFunction(input_type)>::type;
+    #endif
+
     // TODO: Those values should depend on type size
     constexpr unsigned int block_size = 256;
     constexpr unsigned int items_per_thread = 4;
@@ -146,7 +153,7 @@ void transform(InputIterator input,
         hc::tiled_extent<1>(grid_size, block_size),
         [=](hc::tiled_index<1>) [[hc]]
         {
-            detail::transform_kernel_impl<block_size, items_per_thread>(
+            detail::transform_kernel_impl<block_size, items_per_thread, result_type>(
                 input, size, output, transform_op
             );
         }

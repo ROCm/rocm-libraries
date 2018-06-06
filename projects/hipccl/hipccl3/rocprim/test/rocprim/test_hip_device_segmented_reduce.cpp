@@ -48,7 +48,9 @@ template<
     class ReduceOp = ::rocprim::plus<Input>,
     int Init = 0, // as only integral types supported, int is used here even for floating point inputs
     unsigned int MinSegmentLength = 0,
-    unsigned int MaxSegmentLength = 1000
+    unsigned int MaxSegmentLength = 1000,
+    // Tests output iterator with void value_type (OutputIterator concept)
+    bool UseIdentityIterator = false
 >
 struct params
 {
@@ -58,6 +60,7 @@ struct params
     static constexpr input_type init = Init;
     static constexpr unsigned int min_segment_length = MinSegmentLength;
     static constexpr unsigned int max_segment_length = MaxSegmentLength;
+    static constexpr bool use_identity_iterator = UseIdentityIterator;
 };
 
 template<class Params>
@@ -72,7 +75,7 @@ typedef ::testing::Types<
     params<double, double, rp::minimum<double>, 1000, 0, 10000>,
     params<int, short, rp::maximum<int>, 10, 1000, 10000>,
     params<float, double, rp::maximum<double>, 50, 2, 10>,
-    params<float, float, rp::plus<float>, 123, 100, 200>
+    params<float, float, rp::plus<float>, 123, 100, 200, true>
 > Params;
 
 TYPED_TEST_CASE(RocprimDeviceSegmentedReduce, Params);
@@ -96,6 +99,8 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
     using input_type = typename TestFixture::params::input_type;
     using output_type = typename TestFixture::params::output_type;
     using reduce_op_type = typename TestFixture::params::reduce_op_type;
+    static constexpr bool use_identity_iterator =
+        TestFixture::params::use_identity_iterator;
 
     using result_type = output_type;
     using offset_type = unsigned int;
@@ -188,7 +193,8 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
         HIP_CHECK(
             rp::segmented_reduce(
                 d_temporary_storage, temporary_storage_bytes,
-                d_values_input, d_aggregates_output,
+                d_values_input,
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_aggregates_output),
                 segments_count,
                 d_offsets, d_offsets + 1,
                 reduce_op, init,
