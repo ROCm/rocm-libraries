@@ -26,6 +26,9 @@
 #include "../config.hpp"
 #include "../detail/various.hpp"
 
+/// \addtogroup primitivesmodule_deviceconfigs
+/// @{
+
 BEGIN_ROCPRIM_NAMESPACE
 
 /// \brief Special type used to show that the given device-level operation
@@ -120,5 +123,8 @@ using default_or_custom_config =
 } // end namespace detail
 
 END_ROCPRIM_NAMESPACE
+
+/// @}
+// end of group primitivesmodule_deviceconfigs
 
 #endif // ROCPRIM_DEVICE_CONFIG_TYPES_HPP_

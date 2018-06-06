@@ -28,6 +28,9 @@
 
 #include "config_types.hpp"
 
+/// \addtogroup primitivesmodule_deviceconfigs
+/// @{
+
 BEGIN_ROCPRIM_NAMESPACE
 
 /// \brief Configuration of device-level reduce-by-key operation.
@@ -93,5 +96,8 @@ struct default_reduce_by_key_config
 } // end namespace detail
 
 END_ROCPRIM_NAMESPACE
+
+/// @}
+// end of group primitivesmodule_deviceconfigs
 
 #endif // ROCPRIM_DEVICE_DEVICE_REDUCE_BY_KEY_CONFIG_HPP_
