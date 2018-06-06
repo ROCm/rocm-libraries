@@ -142,9 +142,9 @@ template<unsigned int TargetArch, class Key, class Value>
 struct default_radix_sort_config
     : select_arch<
         TargetArch,
-        select_arch_case<803, detail::radix_sort_config_803<Key, Value> >,
-        select_arch_case<900, detail::radix_sort_config_900<Key, Value> >,
-        detail::radix_sort_config_900<Key, Value>
+        select_arch_case<803, radix_sort_config_803<Key, Value> >,
+        select_arch_case<900, radix_sort_config_900<Key, Value> >,
+        radix_sort_config_900<Key, Value>
     > { };
 
 } // end namespace detail
