@@ -76,6 +76,9 @@
     #define ROCPRIM_DETAIL_USE_DPP true
 #endif
 
+// Defines targeted AMD architecture. Supported values:
+// * 803 (gfx803)
+// * 900 (gfx900)
 #ifndef ROCPRIM_TARGET_ARCH
     #define ROCPRIM_TARGET_ARCH 0
 #endif

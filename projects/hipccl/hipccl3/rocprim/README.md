@@ -92,6 +92,17 @@ cd rocPRIM; cd build
 ./benchmark/benchmark_hip_device_<function_name> [--size <size>] [--trials <trials>]
 ```
 
+### Performance configuration
+
+Most of device-wide primitives provided by rocPRIM can be tuned for different AMD device,
+different types or different operations using compile-time configuration structures passed
+to them as a template parameter. Main "knobs" are usually size of the block and number of
+items processed by a single thread.
+
+rocPRIM has built-in default configurations for each of its primitives. In order to use
+included configurations user should define macro `ROCPRIM_TARGET_ARCH` to `803` if algorithms
+should be optimized for gfx803 GCN version, or to `900` for gfx900.
+
 ## Documentation
 
 ```
