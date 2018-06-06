@@ -134,8 +134,7 @@ void fill_unique_counts(KeysInputIterator keys_input,
                         unsigned int * unique_counts,
                         KeyCompareFunction key_compare_op,
                         unsigned int blocks_per_full_batch,
-                        unsigned int full_batches,
-                        unsigned int blocks)
+                        unsigned int full_batches)
 {
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
     constexpr unsigned int warp_size = ::rocprim::warp_size();
@@ -163,43 +162,44 @@ void fill_unique_counts(KeysInputIterator keys_input,
     const unsigned int lane_id = ::rocprim::lane_id();
     const unsigned int warp_id = ::rocprim::warp_id();
 
-    unsigned int block_id;
+    unsigned int block_offset;
     unsigned int blocks_per_batch;
     if(batch_id < full_batches)
     {
         blocks_per_batch = blocks_per_full_batch;
-        block_id = batch_id * blocks_per_batch;
+        block_offset = batch_id * blocks_per_batch;
     }
     else
     {
         blocks_per_batch = blocks_per_full_batch - 1;
-        block_id = batch_id * blocks_per_batch + full_batches;
+        block_offset = batch_id * blocks_per_batch + full_batches;
     }
+    block_offset *= items_per_block;
 
     unsigned int warp_unique_count = 0;
 
     for(unsigned int bi = 0; bi < blocks_per_batch; bi++)
     {
-        const unsigned int block_offset = block_id * items_per_block;
+        const bool is_last_block = (block_offset + items_per_block >= size);
 
         key_type keys[ItemsPerThread];
         unsigned int valid_count;
         ::rocprim::syncthreads();
-        if(block_offset + items_per_block <= size)
-        {
-            valid_count = items_per_block;
-            keys_load_type().load(keys_input + block_offset, keys, storage.keys_load);
-        }
-        else
+        if(is_last_block)
         {
             valid_count = size - block_offset;
             keys_load_type().load(keys_input + block_offset, keys, valid_count, storage.keys_load);
+        }
+        else
+        {
+            valid_count = items_per_block;
+            keys_load_type().load(keys_input + block_offset, keys, storage.keys_load);
         }
 
         bool tail_flags[ItemsPerThread];
         key_type successor_key = keys[ItemsPerThread - 1];
         ::rocprim::syncthreads();
-        if(block_id == blocks - 1)
+        if(is_last_block)
         {
             discontinuity_type().flag_tails(
                 tail_flags, successor_key, keys,
@@ -225,7 +225,7 @@ void fill_unique_counts(KeysInputIterator keys_input,
             warp_unique_count += ::rocprim::bit_count(::rocprim::ballot(tail_flags[i]));
         }
 
-        block_id++;
+        block_offset += items_per_block;
     }
 
     if(lane_id == 0)
@@ -312,8 +312,7 @@ void reduce_by_key(KeysInputIterator keys_input,
                    KeyCompareFunction key_compare_op,
                    BinaryFunction reduce_op,
                    unsigned int blocks_per_full_batch,
-                   unsigned int full_batches,
-                   unsigned int blocks)
+                   unsigned int full_batches)
 {
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
 
@@ -346,52 +345,63 @@ void reduce_by_key(KeysInputIterator keys_input,
     const unsigned int flat_id = ::rocprim::flat_block_thread_id();
     const unsigned int batch_id = ::rocprim::detail::block_id<0>();
 
-    unsigned int block_id;
+    unsigned int block_offset;
     unsigned int blocks_per_batch;
     if(batch_id < full_batches)
     {
         blocks_per_batch = blocks_per_full_batch;
-        block_id = batch_id * blocks_per_batch;
+        block_offset = batch_id * blocks_per_batch;
     }
     else
     {
         blocks_per_batch = blocks_per_full_batch - 1;
-        block_id = batch_id * blocks_per_batch + full_batches;
+        block_offset = batch_id * blocks_per_batch + full_batches;
     }
+    block_offset *= items_per_block;
+
     const unsigned int batch_start = unique_starts[batch_id];
     unsigned int block_start = batch_start;
 
     if(flat_id == 0)
     {
-        storage.has_carry_in = (block_id > 0 && blocks_per_batch > 0) &&
-            key_compare_op(
-                keys_input[block_id * items_per_block - 1],
-                keys_input[block_id * items_per_block]
-            );
+        storage.has_carry_in =
+            (block_offset > 0) &&
+            key_compare_op(keys_input[block_offset - 1], keys_input[block_offset]);
     }
 
     for(unsigned int bi = 0; bi < blocks_per_batch; bi++)
     {
-        const unsigned int block_offset = block_id * items_per_block;
+        const bool is_last_block = (block_offset + items_per_block >= size);
 
         key_type keys[ItemsPerThread];
+        result_type values[ItemsPerThread];
         unsigned int valid_count;
-        if(block_offset + items_per_block <= size)
-        {
-            valid_count = items_per_block;
-            keys_load_type().load(keys_input + block_offset, keys, storage.keys_load);
-        }
-        else
+        if(is_last_block)
         {
             valid_count = size - block_offset;
             keys_load_type().load(keys_input + block_offset, keys, valid_count, storage.keys_load);
+            ::rocprim::syncthreads();
+            values_load_type().load(values_input + block_offset, values, valid_count, storage.values_load);
+        }
+        else
+        {
+            valid_count = items_per_block;
+            keys_load_type().load(keys_input + block_offset, keys, storage.keys_load);
+            ::rocprim::syncthreads();
+            values_load_type().load(values_input + block_offset, values, storage.values_load);
+        }
+
+        if(bi > 0 && flat_id == 0 && storage.has_carry_in)
+        {
+            // Apply carry-out of the previous block as carry-in for the first segment
+            values[0] = reduce_op(storage.carry_in, values[0]);
         }
 
         bool head_flags[ItemsPerThread];
         bool tail_flags[ItemsPerThread];
         key_type successor_key = keys[ItemsPerThread - 1];
         ::rocprim::syncthreads();
-        if(block_id == blocks - 1)
+        if(is_last_block)
         {
             discontinuity_type().flag_heads_and_tails(
                 head_flags, tail_flags, successor_key, keys,
@@ -410,23 +420,6 @@ void reduce_by_key(KeysInputIterator keys_input,
                 key_flag_op<key_type, KeyCompareFunction>(key_compare_op),
                 storage.discontinuity
             );
-        }
-
-        result_type values[ItemsPerThread];
-        ::rocprim::syncthreads();
-        if(block_offset + items_per_block <= size)
-        {
-            values_load_type().load(values_input + block_offset, values, storage.values_load);
-        }
-        else
-        {
-            values_load_type().load(values_input + block_offset, values, valid_count, storage.values_load);
-        }
-
-        if(bi > 0 && flat_id == 0 && storage.has_carry_in)
-        {
-            // Apply carry-out of the previous block as carry-in for the first segment
-            values[0] = reduce_op(storage.carry_in, values[0]);
         }
 
         // Build pairs and run non-commutative inclusive scan to calculate scan-by-key
@@ -469,9 +462,9 @@ void reduce_by_key(KeysInputIterator keys_input,
             // (otherwise it is written by one of previous blocks)
             head_flags[0] = !storage.has_carry_in;
         }
-        if(block_id == blocks - 1)
+        if(is_last_block)
         {
-            // Unflag the head after the last segment as it will be write out of bounds
+            // Unflag the head after the last segment as it will be written out of bounds
             for(unsigned int i = 0; i < ItemsPerThread; i++)
             {
                 if(ranks[i] >= unique_count)
@@ -530,7 +523,7 @@ void reduce_by_key(KeysInputIterator keys_input,
             }
         }
 
-        block_id++;
+        block_offset += items_per_block;
         block_start += unique_count;
     }
 }

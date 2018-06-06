@@ -30,6 +30,7 @@
 
 #include "../functional.hpp"
 
+#include "device_reduce_by_key_config.hpp"
 #include "detail/device_reduce_by_key.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -52,14 +53,13 @@ void fill_unique_counts_kernel(KeysInputIterator keys_input,
                                unsigned int * unique_counts,
                                KeyCompareFunction key_compare_op,
                                unsigned int blocks_per_full_batch,
-                               unsigned int full_batches,
-                               unsigned int blocks)
+                               unsigned int full_batches)
 {
     fill_unique_counts<BlockSize, ItemsPerThread>(
         keys_input, size,
         unique_counts,
         key_compare_op,
-        blocks_per_full_batch, full_batches, blocks
+        blocks_per_full_batch, full_batches
     );
 }
 
@@ -100,15 +100,14 @@ void reduce_by_key_kernel(KeysInputIterator keys_input,
                           KeyCompareFunction key_compare_op,
                           BinaryFunction reduce_op,
                           unsigned int blocks_per_full_batch,
-                          unsigned int full_batches,
-                          unsigned int blocks)
+                          unsigned int full_batches)
 {
     reduce_by_key<BlockSize, ItemsPerThread>(
         keys_input, values_input, size,
         unique_starts, carry_outs, leading_aggregates,
         unique_output, aggregates_output,
         key_compare_op, reduce_op,
-        blocks_per_full_batch, full_batches, blocks
+        blocks_per_full_batch, full_batches
     );
 }
 
@@ -152,6 +151,7 @@ void scan_and_scatter_carry_outs_kernel(const carry_out<Key, Result> * carry_out
     }
 
 template<
+    class Config,
     class KeysInputIterator,
     class ValuesInputIterator,
     class UniqueOutputIterator,
@@ -182,14 +182,13 @@ hipError_t reduce_by_key_impl(void * temporary_storage,
     >::type;
     using carry_out_type = carry_out<key_type, result_type>;
 
-    constexpr unsigned int block_size = 256;
-    constexpr unsigned int items_per_thread = 7;
+    using config = default_or_custom_config<
+        Config,
+        default_reduce_by_key_config<ROCPRIM_TARGET_ARCH, key_type, result_type>
+    >;
 
-    constexpr unsigned int scan_block_size = 256;
-    constexpr unsigned int scan_items_per_thread = 7;
-
-    constexpr unsigned int items_per_block = block_size * items_per_thread;
-    constexpr unsigned int scan_items_per_block = scan_block_size * scan_items_per_thread;
+    constexpr unsigned int items_per_block = config::reduce::block_size * config::reduce::items_per_thread;
+    constexpr unsigned int scan_items_per_block = config::scan::block_size * config::scan::items_per_thread;
 
     const unsigned int blocks = ::rocprim::detail::ceiling_div(static_cast<unsigned int>(size), items_per_block);
     const unsigned int blocks_per_full_batch = ::rocprim::detail::ceiling_div(blocks, scan_items_per_block);
@@ -209,8 +208,6 @@ hipError_t reduce_by_key_impl(void * temporary_storage,
 
     if(debug_synchronous)
     {
-        std::cout << "block_size " << block_size << '\n';
-        std::cout << "items_per_thread " << items_per_thread << '\n';
         std::cout << "blocks " << blocks << '\n';
         std::cout << "blocks_per_full_batch " << blocks_per_full_batch << '\n';
         std::cout << "full_batches " << full_batches << '\n';
@@ -232,44 +229,44 @@ hipError_t reduce_by_key_impl(void * temporary_storage,
 
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
     hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(fill_unique_counts_kernel<block_size, items_per_thread>),
-        dim3(batches), dim3(block_size), 0, stream,
+        HIP_KERNEL_NAME(fill_unique_counts_kernel<config::reduce::block_size, config::reduce::items_per_thread>),
+        dim3(batches), dim3(config::reduce::block_size), 0, stream,
         keys_input, size, unique_counts, key_compare_op,
-        blocks_per_full_batch, full_batches, blocks
+        blocks_per_full_batch, full_batches
     );
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("fill_unique_counts", size, start)
 
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
     hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(scan_unique_counts_kernel<scan_block_size, scan_items_per_thread>),
-        dim3(1), dim3(scan_block_size), 0, stream,
+        HIP_KERNEL_NAME(scan_unique_counts_kernel<config::scan::block_size, config::scan::items_per_thread>),
+        dim3(1), dim3(config::scan::block_size), 0, stream,
         unique_counts, unique_count_output,
         batches
     );
-    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("scan_unique_counts", scan_block_size, start)
+    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("scan_unique_counts", config::scan::block_size, start)
 
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
     hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(reduce_by_key_kernel<block_size, items_per_thread>),
-        dim3(batches), dim3(block_size), 0, stream,
+        HIP_KERNEL_NAME(reduce_by_key_kernel<config::reduce::block_size, config::reduce::items_per_thread>),
+        dim3(batches), dim3(config::reduce::block_size), 0, stream,
         keys_input, values_input, size,
         const_cast<const unsigned int *>(unique_counts), carry_outs, leading_aggregates,
         unique_output, aggregates_output,
         key_compare_op, reduce_op,
-        blocks_per_full_batch, full_batches, blocks
+        blocks_per_full_batch, full_batches
     );
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("reduce_by_key", size, start)
 
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
     hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(scan_and_scatter_carry_outs_kernel<scan_block_size, scan_items_per_thread>),
-        dim3(1), dim3(scan_block_size), 0, stream,
+        HIP_KERNEL_NAME(scan_and_scatter_carry_outs_kernel<config::scan::block_size, config::scan::items_per_thread>),
+        dim3(1), dim3(config::scan::block_size), 0, stream,
         const_cast<const carry_out_type *>(carry_outs), const_cast<const result_type *>(leading_aggregates),
         aggregates_output,
         key_compare_op, reduce_op,
         batches
     );
-    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("scan_and_scatter_carry_outs", scan_block_size, start)
+    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("scan_and_scatter_carry_outs", config::scan::block_size, start)
 
     return hipSuccess;
 }
@@ -296,6 +293,8 @@ hipError_t reduce_by_key_impl(void * temporary_storage,
 /// * Ranges specified by \p unique_output and \p aggregates_output must have at least
 /// <tt>*unique_count_output</tt> (i.e. the number of unique keys) elements.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p reduce_by_key_config or
+/// a custom class with the same members.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam ValuesInputIterator - random-access iterator type of the input range. Must meet the
@@ -378,6 +377,7 @@ hipError_t reduce_by_key_impl(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class KeysInputIterator,
     class ValuesInputIterator,
     class UniqueOutputIterator,
@@ -400,7 +400,7 @@ hipError_t reduce_by_key(void * temporary_storage,
                          hipStream_t stream = 0,
                          bool debug_synchronous = false)
 {
-    return detail::reduce_by_key_impl(
+    return detail::reduce_by_key_impl<Config>(
         temporary_storage, storage_size,
         keys_input, values_input, size,
         unique_output, aggregates_output, unique_count_output,

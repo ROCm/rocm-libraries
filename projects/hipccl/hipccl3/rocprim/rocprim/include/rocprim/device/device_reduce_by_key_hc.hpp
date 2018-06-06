@@ -30,6 +30,7 @@
 
 #include "../functional.hpp"
 
+#include "device_reduce_by_key_config.hpp"
 #include "detail/device_reduce_by_key.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -53,6 +54,7 @@ namespace detail
     }
 
 template<
+    class Config,
     class KeysInputIterator,
     class ValuesInputIterator,
     class UniqueOutputIterator,
@@ -83,14 +85,13 @@ void reduce_by_key_impl(void * temporary_storage,
     >::type;
     using carry_out_type = carry_out<key_type, result_type>;
 
-    constexpr unsigned int block_size = 256;
-    constexpr unsigned int items_per_thread = 7;
+    using config = default_or_custom_config<
+        Config,
+        default_reduce_by_key_config<ROCPRIM_TARGET_ARCH, key_type, result_type>
+    >;
 
-    constexpr unsigned int scan_block_size = 256;
-    constexpr unsigned int scan_items_per_thread = 7;
-
-    constexpr unsigned int items_per_block = block_size * items_per_thread;
-    constexpr unsigned int scan_items_per_block = scan_block_size * scan_items_per_thread;
+    constexpr unsigned int items_per_block = config::reduce::block_size * config::reduce::items_per_thread;
+    constexpr unsigned int scan_items_per_block = config::scan::block_size * config::scan::items_per_thread;
 
     const unsigned int blocks = ::rocprim::detail::ceiling_div(static_cast<unsigned int>(size), items_per_block);
     const unsigned int blocks_per_full_batch = ::rocprim::detail::ceiling_div(blocks, scan_items_per_block);
@@ -110,8 +111,6 @@ void reduce_by_key_impl(void * temporary_storage,
 
     if(debug_synchronous)
     {
-        std::cout << "block_size " << block_size << '\n';
-        std::cout << "items_per_thread " << items_per_thread << '\n';
         std::cout << "blocks " << blocks << '\n';
         std::cout << "blocks_per_full_batch " << blocks_per_full_batch << '\n';
         std::cout << "full_batches " << full_batches << '\n';
@@ -133,12 +132,12 @@ void reduce_by_key_impl(void * temporary_storage,
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
     hc::parallel_for_each(
         acc_view,
-        hc::tiled_extent<1>(batches * block_size, block_size),
+        hc::tiled_extent<1>(batches * config::reduce::block_size, config::reduce::block_size),
         [=](hc::tiled_index<1>) [[hc]]
         {
-            fill_unique_counts<block_size, items_per_thread>(
+            fill_unique_counts<config::reduce::block_size, config::reduce::items_per_thread>(
                 keys_input, size, unique_counts, key_compare_op,
-                blocks_per_full_batch, full_batches, blocks
+                blocks_per_full_batch, full_batches
             );
         }
     );
@@ -147,29 +146,29 @@ void reduce_by_key_impl(void * temporary_storage,
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
     hc::parallel_for_each(
         acc_view,
-        hc::tiled_extent<1>(scan_block_size, scan_block_size),
+        hc::tiled_extent<1>(config::scan::block_size, config::scan::block_size),
         [=](hc::tiled_index<1>) [[hc]]
         {
-            scan_unique_counts<scan_block_size, scan_items_per_thread>(
+            scan_unique_counts<config::scan::block_size, config::scan::items_per_thread>(
                 unique_counts, unique_count_output,
                 batches
             );
         }
     );
-    ROCPRIM_DETAIL_HC_SYNC("scan_unique_counts", scan_block_size, start)
+    ROCPRIM_DETAIL_HC_SYNC("scan_unique_counts", config::scan::block_size, start)
 
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
     hc::parallel_for_each(
         acc_view,
-        hc::tiled_extent<1>(batches * block_size, block_size),
+        hc::tiled_extent<1>(batches * config::reduce::block_size, config::reduce::block_size),
         [=](hc::tiled_index<1>) [[hc]]
         {
-            reduce_by_key<block_size, items_per_thread>(
+            reduce_by_key<config::reduce::block_size, config::reduce::items_per_thread>(
                 keys_input, values_input, size,
                 unique_counts, carry_outs, leading_aggregates,
                 unique_output, aggregates_output,
                 key_compare_op, reduce_op,
-                blocks_per_full_batch, full_batches, blocks
+                blocks_per_full_batch, full_batches
             );
         }
     );
@@ -178,10 +177,10 @@ void reduce_by_key_impl(void * temporary_storage,
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
     hc::parallel_for_each(
         acc_view,
-        hc::tiled_extent<1>(scan_block_size, scan_block_size),
+        hc::tiled_extent<1>(config::scan::block_size, config::scan::block_size),
         [=](hc::tiled_index<1>) [[hc]]
         {
-            scan_and_scatter_carry_outs<scan_block_size, scan_items_per_thread>(
+            scan_and_scatter_carry_outs<config::scan::block_size, config::scan::items_per_thread>(
                 carry_outs, leading_aggregates,
                 aggregates_output,
                 key_compare_op, reduce_op,
@@ -189,7 +188,7 @@ void reduce_by_key_impl(void * temporary_storage,
             );
         }
     );
-    ROCPRIM_DETAIL_HC_SYNC("scan_and_scatter_carry_outs", scan_block_size, start)
+    ROCPRIM_DETAIL_HC_SYNC("scan_and_scatter_carry_outs", config::scan::block_size, start)
 }
 
 #undef ROCPRIM_DETAIL_HC_SYNC
@@ -214,6 +213,8 @@ void reduce_by_key_impl(void * temporary_storage,
 /// * Ranges specified by \p unique_output and \p aggregates_output must have at least
 /// <tt>*unique_count_output</tt> (i.e. the number of unique keys) elements.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p reduce_by_key_config or
+/// a custom class with the same members.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam ValuesInputIterator - random-access iterator type of the input range. Must meet the
@@ -297,6 +298,7 @@ void reduce_by_key_impl(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class KeysInputIterator,
     class ValuesInputIterator,
     class UniqueOutputIterator,
@@ -319,7 +321,7 @@ void reduce_by_key(void * temporary_storage,
                    hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
                    bool debug_synchronous = false)
 {
-    detail::reduce_by_key_impl(
+    detail::reduce_by_key_impl<Config>(
         temporary_storage, storage_size,
         keys_input, values_input, size,
         unique_output, aggregates_output, unique_count_output,

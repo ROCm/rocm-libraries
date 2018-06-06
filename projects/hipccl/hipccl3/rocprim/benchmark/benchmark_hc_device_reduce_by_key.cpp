@@ -46,6 +46,9 @@ const size_t DEFAULT_N = 1024 * 1024 * 32;
 
 namespace rp = rocprim;
 
+const unsigned int batch_size = 10;
+const unsigned int warmup_size = 5;
+
 template<class Key, class Value>
 void run_benchmark(benchmark::State& state, size_t max_length, hc::accelerator_view acc_view, size_t size)
 {
@@ -97,8 +100,7 @@ void run_benchmark(benchmark::State& state, size_t max_length, hc::accelerator_v
         d_unique_count_output.accelerator_pointer(),
         reduce_op,
         key_compare_op,
-        acc_view,
-        false
+        acc_view
     );
     acc_view.wait();
 
@@ -107,7 +109,7 @@ void run_benchmark(benchmark::State& state, size_t max_length, hc::accelerator_v
     acc_view.wait();
 
     // Warm-up
-    for(size_t i = 0; i < 10; i++)
+    for(size_t i = 0; i < warmup_size; i++)
     {
         rp::reduce_by_key(
             d_temp_storage.accelerator_pointer(),
@@ -120,13 +122,11 @@ void run_benchmark(benchmark::State& state, size_t max_length, hc::accelerator_v
             d_unique_count_output.accelerator_pointer(),
             reduce_op,
             key_compare_op,
-            acc_view,
-            false
+            acc_view
         );
     }
     acc_view.wait();
 
-    const unsigned int batch_size = 10;
     for (auto _ : state)
     {
         auto start = std::chrono::high_resolution_clock::now();
@@ -144,8 +144,7 @@ void run_benchmark(benchmark::State& state, size_t max_length, hc::accelerator_v
                 d_unique_count_output.accelerator_pointer(),
                 reduce_op,
                 key_compare_op,
-                acc_view,
-                false
+                acc_view
             );
         }
         acc_view.wait();
@@ -173,13 +172,20 @@ void add_benchmarks(size_t max_length,
                     hc::accelerator_view acc_view,
                     size_t size)
 {
+    using custom_float2 = custom_type<float, float>;
+    using custom_double2 = custom_type<double, double>;
+
     std::vector<benchmark::internal::Benchmark*> bs =
     {
         CREATE_BENCHMARK(int, float),
         CREATE_BENCHMARK(int, double),
+        CREATE_BENCHMARK(int, custom_float2),
+        CREATE_BENCHMARK(int, custom_double2),
 
         CREATE_BENCHMARK(long long, float),
         CREATE_BENCHMARK(long long, double),
+        CREATE_BENCHMARK(long long, custom_float2),
+        CREATE_BENCHMARK(long long, custom_double2),
     };
 
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
