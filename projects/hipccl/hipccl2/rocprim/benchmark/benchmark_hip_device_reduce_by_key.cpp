@@ -55,6 +55,9 @@ const size_t DEFAULT_N = 1024 * 1024 * 32;
 
 namespace rp = rocprim;
 
+const unsigned int batch_size = 10;
+const unsigned int warmup_size = 5;
+
 template<class Key, class Value>
 void run_benchmark(benchmark::State& state, size_t max_length, hipStream_t stream, size_t size)
 {
@@ -116,46 +119,51 @@ void run_benchmark(benchmark::State& state, size_t max_length, hipStream_t strea
     rp::plus<value_type> reduce_op;
     rp::equal_to<key_type> key_compare_op;
 
-    rp::reduce_by_key(
-        nullptr, temporary_storage_bytes,
-        d_keys_input, d_values_input, size,
-        d_unique_output, d_aggregates_output,
-        d_unique_count_output,
-        reduce_op, key_compare_op,
-        stream, false
+    HIP_CHECK(
+        rp::reduce_by_key(
+            nullptr, temporary_storage_bytes,
+            d_keys_input, d_values_input, size,
+            d_unique_output, d_aggregates_output,
+            d_unique_count_output,
+            reduce_op, key_compare_op,
+            stream
+        )
     );
 
     HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
     HIP_CHECK(hipDeviceSynchronize());
 
     // Warm-up
-    for(size_t i = 0; i < 10; i++)
+    for(size_t i = 0; i < warmup_size; i++)
     {
-        rp::reduce_by_key(
-            d_temporary_storage, temporary_storage_bytes,
-            d_keys_input, d_values_input, size,
-            d_unique_output, d_aggregates_output,
-            d_unique_count_output,
-            reduce_op, key_compare_op,
-            stream, false
-        );
-    }
-    HIP_CHECK(hipDeviceSynchronize());
-
-    const unsigned int batch_size = 10;
-    for (auto _ : state)
-    {
-        auto start = std::chrono::high_resolution_clock::now();
-
-        for(size_t i = 0; i < batch_size; i++)
-        {
+        HIP_CHECK(
             rp::reduce_by_key(
                 d_temporary_storage, temporary_storage_bytes,
                 d_keys_input, d_values_input, size,
                 d_unique_output, d_aggregates_output,
                 d_unique_count_output,
                 reduce_op, key_compare_op,
-                stream, false
+                stream
+            )
+        );
+    }
+    HIP_CHECK(hipDeviceSynchronize());
+
+    for (auto _ : state)
+    {
+        auto start = std::chrono::high_resolution_clock::now();
+
+        for(size_t i = 0; i < batch_size; i++)
+        {
+            HIP_CHECK(
+                rp::reduce_by_key(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_keys_input, d_values_input, size,
+                    d_unique_output, d_aggregates_output,
+                    d_unique_count_output,
+                    reduce_op, key_compare_op,
+                    stream
+                )
             );
         }
         HIP_CHECK(hipStreamSynchronize(stream));
@@ -190,13 +198,20 @@ void add_benchmarks(size_t max_length,
                     hipStream_t stream,
                     size_t size)
 {
+    using custom_float2 = custom_type<float, float>;
+    using custom_double2 = custom_type<double, double>;
+
     std::vector<benchmark::internal::Benchmark*> bs =
     {
         CREATE_BENCHMARK(int, float),
         CREATE_BENCHMARK(int, double),
+        CREATE_BENCHMARK(int, custom_float2),
+        CREATE_BENCHMARK(int, custom_double2),
 
         CREATE_BENCHMARK(long long, float),
         CREATE_BENCHMARK(long long, double),
+        CREATE_BENCHMARK(long long, custom_float2),
+        CREATE_BENCHMARK(long long, custom_double2),
     };
 
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
