@@ -138,6 +138,7 @@ struct sample_to_bin_even
     }
 };
 
+// This specialization uses fast division (uint_fast_div) for integers smaller than 64 bit
 template<class Level>
 struct sample_to_bin_even<Level, typename std::enable_if<std::is_integral<Level>::value && (sizeof(Level) <= 4)>::type>
 {
@@ -171,6 +172,7 @@ struct sample_to_bin_even<Level, typename std::enable_if<std::is_integral<Level>
     }
 };
 
+// This specialization uses multiplication by inv divisor for floats
 template<class Level>
 struct sample_to_bin_even<Level, typename std::enable_if<std::is_floating_point<Level>::value>::type>
 {
@@ -267,7 +269,7 @@ struct is_sample_vectorizable
     : std::integral_constant<
         bool,
         ((sizeof(Sample) * Channels == 1) || (sizeof(Sample) * Channels == 2)) &&
-        (ItemsPerThread % (sizeof(Sample) * Channels) == 0) &&
+        (sizeof(Sample) * Channels * ItemsPerThread % sizeof(int) == 0) &&
         (sizeof(Sample) * Channels * ItemsPerThread / sizeof(int) > 0)
     > { };
 

@@ -72,12 +72,12 @@ template<class Case, class... OtherCases>
 struct select_type
     : std::conditional<
         Case::value,
-        typename Case::type,
+        extract_type<typename Case::type>,
         select_type<OtherCases...>
     >::type { };
 
 template<class T>
-struct select_type<select_type_case<true, T>> : T { };
+struct select_type<select_type_case<true, T>> : extract_type<T> { };
 
 template<class T>
 struct select_type<select_type_case<false, T>>
@@ -90,7 +90,7 @@ struct select_type<select_type_case<false, T>>
 };
 
 template<class Fallback>
-struct select_type<Fallback> : Fallback { };
+struct select_type<Fallback> : extract_type<Fallback> { };
 
 template<unsigned int Arch, class T>
 struct select_arch_case
@@ -101,16 +101,14 @@ struct select_arch_case
 
 template<unsigned int TargetArch, class Case, class... OtherCases>
 struct select_arch
-    : extract_type<
-        typename std::conditional<
-            Case::arch == TargetArch,
-            typename Case::type,
-            select_arch<TargetArch, OtherCases...>
-        >::type
-    > { };
+    : std::conditional<
+        Case::arch == TargetArch,
+        extract_type<typename Case::type>,
+        select_arch<TargetArch, OtherCases...>
+    >::type { };
 
 template<unsigned int TargetArch, class Universal>
-struct select_arch<TargetArch, Universal> : Universal { };
+struct select_arch<TargetArch, Universal> : extract_type<Universal> { };
 
 template<class Config, class Default>
 using default_or_custom_config =

@@ -58,8 +58,6 @@ namespace rp = rocprim;
 const unsigned int batch_size = 10;
 const unsigned int warmup_size = 5;
 
-unsigned int entropies[] = { 100, 81, 54, 33, 20, 0 };
-
 template<class T>
 std::vector<T> generate(size_t size, int entropy_reduction, int lower_level, int upper_level)
 {
@@ -94,6 +92,21 @@ std::vector<T> generate(size_t size, int entropy_reduction, int lower_level, int
     }
     return data;
 }
+
+int get_entropy_percents(int entropy_reduction)
+{
+    switch(entropy_reduction)
+    {
+        case 0: return 100;
+        case 1: return 81;
+        case 2: return 54;
+        case 3: return 33;
+        case 4: return 20;
+        default: return 0;
+    }
+}
+
+const int entropy_reductions[] = { 0, 2, 4, 6 };
 
 template<class T>
 void run_even_benchmark(benchmark::State& state,
@@ -383,7 +396,7 @@ void run_range_benchmark(benchmark::State& state, size_t bins, hipStream_t strea
 #define CREATE_EVEN_BENCHMARK(T, BINS, SCALE) \
 benchmark::RegisterBenchmark( \
     (std::string("histogram_even") + "<" #T ">" + \
-        "(" + std::to_string(entropies[entropy_reduction]) + "% entropy, " + \
+        "(" + std::to_string(get_entropy_percents(entropy_reduction)) + "% entropy, " + \
         std::to_string(BINS) + " bins)" \
     ).c_str(), \
     [=](benchmark::State& state) { \
@@ -394,7 +407,7 @@ void add_even_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmark
                          hipStream_t stream,
                          size_t size)
 {
-    for(int entropy_reduction = 0; entropy_reduction <= 5; entropy_reduction += 2)
+    for(int entropy_reduction : entropy_reductions)
     {
         std::vector<benchmark::internal::Benchmark*> bs =
         {
@@ -419,7 +432,7 @@ void add_even_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmark
 #define CREATE_MULTI_EVEN_BENCHMARK(CHANNELS, ACTIVE_CHANNELS, T, BINS, SCALE) \
 benchmark::RegisterBenchmark( \
     (std::string("multi_histogram_even") + "<" #CHANNELS ", " #ACTIVE_CHANNELS ", " #T ">" + \
-        "(" + std::to_string(entropies[entropy_reduction]) + "% entropy, " + \
+        "(" + std::to_string(get_entropy_percents(entropy_reduction)) + "% entropy, " + \
         std::to_string(BINS) + " bins)" \
     ).c_str(), \
     [=](benchmark::State& state) { \
@@ -433,7 +446,7 @@ void add_multi_even_benchmarks(std::vector<benchmark::internal::Benchmark*>& ben
                                hipStream_t stream,
                                size_t size)
 {
-    for(int entropy_reduction = 0; entropy_reduction <= 5; entropy_reduction += 2)
+    for(int entropy_reduction : entropy_reductions)
     {
         std::vector<benchmark::internal::Benchmark*> bs =
         {
