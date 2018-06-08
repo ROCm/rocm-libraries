@@ -149,6 +149,85 @@ void partition_impl(void * temporary_storage,
 
 } // end of detail namespace
 
+/// \brief HC parallel partition primitive for device level using range of flags.
+///
+/// Performs a device-wide partition based on input \p flags. Partition copies
+/// the values from \p input to \p output in such a way that all values for which the corresponding
+/// items from /p flags are \p true (or can be implicitly converted to \p true) precede
+/// the elements for which the corresponding items from /p flags are \p false.
+///
+/// \par Overview
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage in a null pointer.
+/// * Ranges specified by \p input, \p flags and \p output must have at least \p size elements.
+/// * Range specified by \p selected_count_output must have at least 1 element.
+/// * Values of \p flag range should be implicitly convertible to `bool` type.
+/// * Relative order is preserved for the elements for which the corresponding values from \p flags
+/// are \p true. Other elements are copied in reverse order.
+///
+/// \tparam InputIterator - random-access iterator type of the input range. It can be
+/// a simple pointer type.
+/// \tparam FlagIterator - random-access iterator type of the flag range. It can be
+/// a simple pointer type.
+/// \tparam OutputIterator - random-access iterator type of the output range. It can be
+/// a simple pointer type.
+/// \tparam SelectedCountOutputIterator - random-access iterator type of the selected_count_output
+/// value. It can be a simple pointer type.
+///
+/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the select operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input - iterator to the first element in the range to select values from.
+/// \param [in] flags - iterator to the selection flag corresponding to the first element from \p input range.
+/// \param [out] output - iterator to the first element in the output range.
+/// \param [out] selected_count_output - iterator to the total number of selected values (length of \p output).
+/// \param [in] size - number of element in the input range.
+/// \param [in] acc_view - [optional] \p hc::accelerator_view object. The default value
+/// is \p hc::accelerator().get_default_view() (default view of the default accelerator).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. The default value is \p false.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level partition operation is performed on an array of
+/// integer values with array of <tt>char</tt>s used as flags.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// hc::accelerator_view acc_view = ...;
+///
+/// // Prepare input and output (declare arrays, allocate device memory etc.)
+/// size_t size;                                           // e.g., 8
+/// hc::array<int> input(hc::extent<1>(size), ...);        // e.g., [1, 2, 3, 4, 5, 6, 7, 8]
+/// hc::array<char> flags(hc::extent<1>(size), ...);       // e.g., [0, 1, 1, 0, 0, 1, 0, 1]
+/// hc::array<int> output(hc::extent<1>(size), ...);       // empty array of 8 elements
+/// hc::array<size_t> output_count(hc::extent<1>(1), ...); // empty array of 1 element
+///
+/// size_t temporary_storage_size_bytes;
+/// // Get required size of the temporary storage
+/// rocprim::partition(
+///     nullptr, temporary_storage_size_bytes,
+///     input.accelerator_pointer(), flags.accelerator_pointer(),
+///     output.accelerator_pointer(), output_count.accelerator_pointer(),
+///     size, acc_view, false
+/// );
+///
+/// // allocate temporary storage
+/// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
+///
+/// // perform partition
+/// rocprim::partition(
+///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
+///     input.accelerator_pointer(), flags.accelerator_pointer(),
+///     output.accelerator_pointer(), output_count.accelerator_pointer(),
+///     size, acc_view, false
+/// );
+/// // output: [2, 3, 6, 8, 7, 5, 4, 1]
+/// // output_count: 4
+/// \endcode
+/// \endparblock
 template<
     class InputIterator,
     class FlagIterator,
@@ -185,12 +264,97 @@ void partition(void * temporary_storage,
         ::rocprim::max<unsigned int>(
             (8 * sizeof(unsigned int))/sizeof(result_type), 1
         );
-    return detail::partition_impl<false, block_size, items_per_thread, result_type>(
+    detail::partition_impl<false, block_size, items_per_thread, result_type>(
         temporary_storage, storage_size, input, flags, output, selected_count_output,
         size, unary_preficate_type(), acc_view, debug_synchronous
     );
 }
 
+/// \brief HC parallel select primitive for device level using selection predicate.
+///
+/// Performs a device-wide partition using selection predicate. Partition copies
+/// the values from \p input to \p output  in such a way that all values for which
+/// the \p predicate returns \p true precede the elements for which it returns \p false.
+///
+/// \par Overview
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage in a null pointer.
+/// * Ranges specified by \p input and \p output must have at least \p size elements.
+/// * Range specified by \p selected_count_output must have at least 1 element.
+/// * Relative order is preserved for the elements for which the \p predicate returns \p true. Other
+/// elements are copied in reverse order.
+///
+/// \tparam InputIterator - random-access iterator type of the input range. It can be
+/// a simple pointer type.
+/// \tparam OutputIterator - random-access iterator type of the output range. It can be
+/// a simple pointer type.
+/// \tparam SelectedCountOutputIterator - random-access iterator type of the selected_count_output
+/// value. It can be a simple pointer type.
+/// \tparam UnaryPredicate - type of an unary selection predicate.
+///
+/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the select operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input - iterator to the first element in the range to select values from.
+/// \param [out] output - iterator to the first element in the output range.
+/// \param [out] selected_count_output - iterator to the total number of selected values (length of \p output).
+/// \param [in] size - number of element in the input range.
+/// \param [in] predicate - unary function object which returns /p true if the element should be
+/// ordered before other elements.
+/// The signature of the function should be equivalent to the following:
+/// <tt>bool f(const T &a);</tt>. The signature does not need to have
+/// <tt>const &</tt>, but function object must not modify the object passed to it.
+/// \param [in] acc_view - [optional] \p hc::accelerator_view object. The default value
+/// is \p hc::accelerator().get_default_view() (default view of the default accelerator).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. The default value is \p false.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level partition operation is performed on an array of
+/// integer values, even values are copied before odd values.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>///
+///
+/// auto predicate =
+///     [](int a) [[hcc]] -> bool
+///     {
+///         return (a%2) == 0;
+///     };
+///
+/// hc::accelerator_view acc_view = ...;
+///
+/// // Prepare input and output (declare arrays, allocate device memory etc.)
+/// size_t size;                                           // e.g., 8
+/// hc::array<int> input(hc::extent<1>(size), ...);        // e.g., [1, 2, 3, 4, 5, 6, 7, 8]
+/// hc::array<int> output(hc::extent<1>(size), ...);       // empty array of 8 elements
+/// hc::array<size_t> output_count(hc::extent<1>(1), ...); // empty array of 1 element
+///
+/// size_t temporary_storage_size_bytes;
+/// // Get required size of the temporary storage
+/// rocprim::partition(
+///     nullptr, temporary_storage_size_bytes,
+///     input.accelerator_pointer(), output.accelerator_pointer(),
+//      output_count.accelerator_pointer(),
+///     predicate, size, acc_view, false
+/// );
+///
+/// // allocate temporary storage
+/// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
+///
+/// // perform partition
+/// rocprim::partition(
+///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
+///     input.accelerator_pointer(), output.accelerator_pointer(),
+//      output_count.accelerator_pointer(),
+///     predicate, size, acc_view, false
+/// );
+/// // output: [2, 4, 6, 8, 7, 5, 3, 1]
+/// // output_count: 4
+/// \endcode
+/// \endparblock
 template<
     class InputIterator,
     class OutputIterator,
@@ -228,7 +392,7 @@ void partition(void * temporary_storage,
         ::rocprim::max<unsigned int>(
             (8 * sizeof(unsigned int))/sizeof(result_type), 1
         );
-    return detail::partition_impl<true, block_size, items_per_thread, result_type>(
+    detail::partition_impl<true, block_size, items_per_thread, result_type>(
         temporary_storage, storage_size, input, flags, output, selected_count_output,
         size, predicate, acc_view, debug_synchronous
     );
