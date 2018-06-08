@@ -201,6 +201,83 @@ hipError_t partition_impl(void * temporary_storage,
 
 } // end of detail namespace
 
+/// \brief HIP parallel select primitive for device level using range of flags.
+///
+/// Performs a device-wide partition based on input \p flags. Partition copies
+/// the values from \p input to \p output in such a way that all values for which the corresponding
+/// items from /p flags are \p true (or can be implicitly converted to \p true) precede
+/// the elements for which the corresponding items from /p flags are \p false.
+///
+/// \par Overview
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage in a null pointer.
+/// * Ranges specified by \p input, \p flags and \p output must have at least \p size elements.
+/// * Range specified by \p selected_count_output must have at least 1 element.
+/// * Values of \p flag range should be implicitly convertible to `bool` type.
+/// * Relative order is preserved for the elements for which the corresponding values from \p flags
+/// are \p true. Other elements are copied in reverse order.
+///
+/// \tparam InputIterator - random-access iterator type of the input range. It can be
+/// a simple pointer type.
+/// \tparam FlagIterator - random-access iterator type of the flag range. It can be
+/// a simple pointer type.
+/// \tparam OutputIterator - random-access iterator type of the output range. It can be
+/// a simple pointer type.
+/// \tparam SelectedCountOutputIterator - random-access iterator type of the selected_count_output
+/// value. It can be a simple pointer type.
+///
+/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the select operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input - iterator to the first element in the range to select values from.
+/// \param [in] flags - iterator to the selection flag corresponding to the first element from \p input range.
+/// \param [out] output - iterator to the first element in the output range.
+/// \param [out] selected_count_output - iterator to the total number of selected values (length of \p output).
+/// \param [in] size - number of element in the input range.
+/// \param [in] stream - [optional] HIP stream object. The default is \p 0 (default stream).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. The default value is \p false.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level partition operation is performed on an array of
+/// integer values with array of <tt>char</tt>s used as flags.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t input_size;     // e.g., 8
+/// int * input;           // e.g., [1, 2, 3, 4, 5, 6, 7, 8]
+/// char * flags;          // e.g., [0, 1, 1, 0, 0, 1, 0, 1]
+/// int * output;          // empty array of 8 elements
+/// size_t * output_count; // empty array of 1 element
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::partition(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, flags,
+///     output, output_count,
+///     input_size
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform partition
+/// rocprim::partition(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, flags,
+///     output, output_count,
+///     input_size
+/// );
+/// // output: [2, 3, 6, 8, 7, 5, 4, 1]
+/// // output_count: 4
+/// \endcode
+/// \endparblock
 template<
     class InputIterator,
     class FlagIterator,
@@ -243,6 +320,91 @@ hipError_t partition(void * temporary_storage,
     );
 }
 
+/// \brief HIP parallel select primitive for device level using selection predicate.
+///
+/// Performs a device-wide partition using selection predicate. Partition copies
+/// the values from \p input to \p output  in such a way that all values for which
+/// the \p predicate returns \p true precede the elements for which it returns \p false.
+///
+/// \par Overview
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage in a null pointer.
+/// * Ranges specified by \p input, \p flags and \p output must have at least \p size elements.
+/// * Range specified by \p selected_count_output must have at least 1 element.
+/// * Relative order is preserved for the elements for which the \p predicate returns \p true. Other
+/// elements are copied in reverse order.
+///
+/// \tparam InputIterator - random-access iterator type of the input range. It can be
+/// a simple pointer type.
+/// \tparam OutputIterator - random-access iterator type of the output range. It can be
+/// a simple pointer type.
+/// \tparam SelectedCountOutputIterator - random-access iterator type of the selected_count_output
+/// value. It can be a simple pointer type.
+/// \tparam UnaryPredicate - type of an unary selection predicate.
+///
+/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the select operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input - iterator to the first element in the range to select values from.
+/// \param [out] output - iterator to the first element in the output range.
+/// \param [out] selected_count_output - iterator to the total number of selected values (length of \p output).
+/// \param [in] size - number of element in the input range.
+/// \param [in] predicate - unary function object which returns /p true if the element should be
+/// ordered before other elements.
+/// The signature of the function should be equivalent to the following:
+/// <tt>bool f(const T &a);</tt>. The signature does not need to have
+/// <tt>const &</tt>, but function object must not modify the object passed to it.
+/// \param [in] stream - [optional] HIP stream object. The default is \p 0 (default stream).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. The default value is \p false.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level partition operation is performed on an array of
+/// integer values, even values are copied before odd values.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>///
+///
+/// auto predicate =
+///     [] __device__ (int a) -> bool
+///     {
+///         return (a%2) == 0;
+///     };
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t input_size;     // e.g., 8
+/// int * input;           // e.g., [1, 2, 3, 4, 5, 6, 7, 8]
+/// int * output;          // empty array of 8 elements
+/// size_t * output_count; // empty array of 1 element
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::partition(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input,
+///     output, output_count,
+///     input_size,
+///     predicate
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform partition
+/// rocprim::partition(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input,
+///     output, output_count,
+///     input_size,
+///     predicate
+/// );
+/// // output: [2, 4, 6, 8, 7, 5, 3, 1]
+/// // output_count: 4
+/// \endcode
+/// \endparblock
 template<
     class InputIterator,
     class OutputIterator,
