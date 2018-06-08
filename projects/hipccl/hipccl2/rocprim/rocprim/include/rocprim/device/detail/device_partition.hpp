@@ -94,6 +94,101 @@ private:
 };
 
 template<
+    bool UsePredicate,
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    class BlockLoadFlagsType,
+    class ValueType,
+    class FlagIterator,
+    class UnaryPredicate
+>
+ROCPRIM_DEVICE inline
+auto partition_block_load_flags(ValueType (&values)[ItemsPerThread],
+                                FlagIterator block_flags,
+                                UnaryPredicate predicate,
+                                bool (&is_selected)[ItemsPerThread],
+                                typename BlockLoadFlagsType::storage_type& storage,
+                                const unsigned int block_thread_id,
+                                const bool is_last_block,
+                                const unsigned int valid)
+    -> typename std::enable_if<!UsePredicate>::type
+{
+    (void) values;
+    (void) predicate;
+    (void) block_thread_id;
+    if(is_last_block) // last block
+    {
+        BlockLoadFlagsType()
+            .load(
+                block_flags,
+                is_selected,
+                valid,
+                false,
+                storage
+            );
+    }
+    else
+    {
+        BlockLoadFlagsType()
+            .load(
+                block_flags,
+                is_selected,
+                storage
+            );
+    }
+    ::rocprim::syncthreads(); // sync threads to reuse shared memory
+}
+
+template<
+    bool UsePredicate,
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    class BlockLoadFlagsType,
+    class ValueType,
+    class FlagIterator,
+    class UnaryPredicate
+>
+ROCPRIM_DEVICE inline
+auto partition_block_load_flags(ValueType (&values)[ItemsPerThread],
+                                FlagIterator block_flags,
+                                UnaryPredicate predicate,
+                                bool (&is_selected)[ItemsPerThread],
+                                typename BlockLoadFlagsType::storage_type& storage,
+                                const unsigned int block_thread_id,
+                                const bool is_last_block,
+                                const unsigned int valid_in_last_block)
+    -> typename std::enable_if<UsePredicate>::type
+{
+    (void) block_flags;
+    (void) storage;
+    if(is_last_block) // last block
+    {
+        const auto offset = block_thread_id * ItemsPerThread;
+        #pragma unroll
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            if((offset + i) < valid_in_last_block)
+            {
+                is_selected[i] = predicate(values[i]);
+            }
+            else
+            {
+                is_selected[i] = false;
+            }
+        }
+    }
+    else
+    {
+        #pragma unroll
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            is_selected[i] = predicate(values[i]);
+        }
+    }
+}
+
+template<
+    bool UsePredicate,
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
     class ResultType,
@@ -101,17 +196,19 @@ template<
     class FlagIterator,
     class OutputIterator,
     class SelectedCountOutputIterator,
+    class UnaryPredicate,
     class OffsetLookbackScanState
 >
 ROCPRIM_DEVICE inline
-void partition_flag_kernel_impl(InputIterator input,
-                                FlagIterator flags,
-                                OutputIterator output,
-                                SelectedCountOutputIterator selected_count_output,
-                                const size_t size,
-                                OffsetLookbackScanState offset_scan_state,
-                                const unsigned int number_of_blocks,
-                                ordered_block_id<unsigned int> ordered_bid)
+void partition_kernel_impl(InputIterator input,
+                           FlagIterator flags,
+                           OutputIterator output,
+                           SelectedCountOutputIterator selected_count_output,
+                           const size_t size,
+                           UnaryPredicate predicate,
+                           OffsetLookbackScanState offset_scan_state,
+                           const unsigned int number_of_blocks,
+                           ordered_block_id<unsigned int> ordered_bid)
 {
     using offset_type = typename OffsetLookbackScanState::value_type;
     using value_type = ResultType;
@@ -121,13 +218,13 @@ void partition_flag_kernel_impl(InputIterator input,
         value_type, BlockSize, ItemsPerThread,
         ::rocprim::block_load_method::block_load_transpose
     >;
-    using block_store_value_type = ::rocprim::block_store<
-        value_type, BlockSize, ItemsPerThread,
-        ::rocprim::block_store_method::block_store_transpose
-    >;
     using block_load_flag_type = ::rocprim::block_load<
         bool, BlockSize, ItemsPerThread,
         ::rocprim::block_load_method::block_load_transpose
+    >;
+    using block_store_value_type = ::rocprim::block_store<
+        value_type, BlockSize, ItemsPerThread,
+        ::rocprim::block_store_method::block_store_transpose
     >;
     using block_scan_offset_type = ::rocprim::block_scan<
         offset_type, BlockSize,
@@ -170,8 +267,9 @@ void partition_flag_kernel_impl(InputIterator input,
     bool is_selected[ItemsPerThread];
     offset_type output_indices[ItemsPerThread];
 
-    // Load input values into values, and selection flags into is_selected
-    if(flat_block_id == (number_of_blocks - 1)) // last block
+    // Load input values into values
+    bool is_last_block = flat_block_id == (number_of_blocks - 1);
+    if(is_last_block) // last block
     {
         block_load_value_type()
             .load(
@@ -180,16 +278,6 @@ void partition_flag_kernel_impl(InputIterator input,
                 valid_in_last_block,
                 storage.load_values
             );
-        ::rocprim::syncthreads(); // sync threads to reuse shared memory
-        block_load_flag_type()
-            .load(
-                flags + block_offset,
-                is_selected,
-                valid_in_last_block,
-                false,
-                storage.load_flags
-            );
-        ::rocprim::syncthreads(); // sync threads to reuse shared memory
     }
     else
     {
@@ -199,15 +287,21 @@ void partition_flag_kernel_impl(InputIterator input,
                 values,
                 storage.load_values
             );
-        ::rocprim::syncthreads(); // sync threads to reuse shared memory
-        block_load_flag_type()
-            .load(
-                flags + block_offset,
-                is_selected,
-                storage.load_flags
-            );
-        ::rocprim::syncthreads(); // sync threads to reuse shared memory
     }
+    ::rocprim::syncthreads(); // sync threads to reuse shared memory
+
+    // Load selection flags into is_selected or generate them using
+    // input value and selection predicate
+    partition_block_load_flags<UsePredicate, BlockSize, ItemsPerThread, block_load_flag_type>(
+        values,
+        flags + block_offset,
+        predicate,
+        is_selected,
+        storage.load_flags,
+        flat_block_thread_id,
+        is_last_block,
+        valid_in_last_block
+    );
 
     // Convert true/false is_selected flags to 0s and 1s
     #pragma unroll

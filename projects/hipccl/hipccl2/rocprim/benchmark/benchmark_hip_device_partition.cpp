@@ -173,10 +173,130 @@ void run_flagged_benchmark(benchmark::State& state,
     hipFree(d_temp_storage);
 }
 
+template<class T, class FlagType>
+void run_if_benchmark(benchmark::State& state,
+                      size_t size,
+                      const hipStream_t stream,
+                      float true_probability)
+{
+    size = (size * sizeof(int)) / sizeof(T);
+
+    auto select_op = [true_probability] __device__ (const T& value) -> bool
+    {
+        if(value < T(1000 * true_probability)) return true;
+        return false;
+    };
+
+    std::vector<T> input;
+    std::vector<T> output(size);
+    std::vector<unsigned int> selected_count_output(1);
+    if(std::is_floating_point<T>::value)
+    {
+        input = get_random_data<T>(size, T(-1000), T(1000));
+    }
+    else
+    {
+        input = get_random_data<T>(
+            size,
+            std::numeric_limits<T>::min(),
+            std::numeric_limits<T>::max()
+        );
+    }
+
+    T * d_input;
+    T * d_output;
+    unsigned int * d_selected_count_output;
+    HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
+    HIP_CHECK(hipMalloc(&d_output, input.size() * sizeof(T)));
+    HIP_CHECK(hipMalloc(&d_selected_count_output, sizeof(unsigned int)));
+    HIP_CHECK(
+        hipMemcpy(
+            d_input, input.data(),
+            input.size() * sizeof(T),
+            hipMemcpyHostToDevice
+        )
+    );
+    HIP_CHECK(hipDeviceSynchronize());
+    // Allocate temporary storage memory
+    size_t temp_storage_size_bytes;
+
+    // Get size of d_temp_storage
+    rocprim::partition(
+        nullptr,
+        temp_storage_size_bytes,
+        d_input,
+        d_output,
+        d_selected_count_output,
+        input.size(),
+        select_op,
+        stream
+    );
+    HIP_CHECK(hipDeviceSynchronize());
+
+    // allocate temporary storage
+    void * d_temp_storage = nullptr;
+    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+    HIP_CHECK(hipDeviceSynchronize());
+
+    // Warm-up
+    for(size_t i = 0; i < 10; i++)
+    {
+        rocprim::partition(
+            d_temp_storage,
+            temp_storage_size_bytes,
+            d_input,
+            d_output,
+            d_selected_count_output,
+            input.size(),
+            select_op,
+            stream
+        );
+    }
+    HIP_CHECK(hipDeviceSynchronize());
+
+    const unsigned int batch_size = 10;
+    for(auto _ : state)
+    {
+        auto start = std::chrono::high_resolution_clock::now();
+        for(size_t i = 0; i < batch_size; i++)
+        {
+            rocprim::partition(
+                d_temp_storage,
+                temp_storage_size_bytes,
+                d_input,
+                d_output,
+                d_selected_count_output,
+                input.size(),
+                select_op,
+                stream
+            );
+        }
+        HIP_CHECK(hipDeviceSynchronize());
+
+        auto end = std::chrono::high_resolution_clock::now();
+        auto elapsed_seconds =
+            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+        state.SetIterationTime(elapsed_seconds.count());
+    }
+    state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
+    state.SetItemsProcessed(state.iterations() * batch_size * size);
+
+    hipFree(d_input);
+    hipFree(d_output);
+    hipFree(d_selected_count_output);
+    hipFree(d_temp_storage);
+}
+
 #define CREATE_PARTITION_FLAGGED_BENCHMARK(T, F, p) \
 benchmark::RegisterBenchmark( \
     ("partition(flags)<" #T "," #F ", "#T", unsigned int>(p = " #p")"), \
     run_flagged_benchmark<T, F>, size, stream, p \
+)
+
+#define CREATE_PARTITION_IF_BENCHMARK(T, F, p) \
+benchmark::RegisterBenchmark( \
+    ("partition(if)<" #T "," #F ", "#T", unsigned int>(p = " #p")"), \
+    run_if_benchmark<T, F>, size, stream, p \
 )
 
 int main(int argc, char *argv[])
@@ -205,11 +325,23 @@ int main(int argc, char *argv[])
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks =
     {
+        CREATE_PARTITION_FLAGGED_BENCHMARK(int, unsigned char, 0.75f),
         CREATE_PARTITION_FLAGGED_BENCHMARK(int, unsigned char, 0.5f),
+        CREATE_PARTITION_FLAGGED_BENCHMARK(int, unsigned char, 0.25f),
+        CREATE_PARTITION_FLAGGED_BENCHMARK(int, unsigned char, 0.05f),
         CREATE_PARTITION_FLAGGED_BENCHMARK(float, unsigned char, 0.5f),
         CREATE_PARTITION_FLAGGED_BENCHMARK(double, unsigned char, 0.5f),
         CREATE_PARTITION_FLAGGED_BENCHMARK(custom_double2, unsigned char, 0.5f),
         CREATE_PARTITION_FLAGGED_BENCHMARK(custom_int_double, unsigned char, 0.5f),
+
+        CREATE_PARTITION_IF_BENCHMARK(int, unsigned char, 0.75f),
+        CREATE_PARTITION_IF_BENCHMARK(int, unsigned char, 0.5f),
+        CREATE_PARTITION_IF_BENCHMARK(int, unsigned char, 0.25f),
+        CREATE_PARTITION_IF_BENCHMARK(int, unsigned char, 0.05f),
+        CREATE_PARTITION_IF_BENCHMARK(float, unsigned char, 0.5f),
+        CREATE_PARTITION_IF_BENCHMARK(double, unsigned char, 0.5f),
+        CREATE_PARTITION_IF_BENCHMARK(custom_double2, unsigned char, 0.5f),
+        CREATE_PARTITION_IF_BENCHMARK(custom_int_double, unsigned char, 0.5f),
     };
 
     // Use manual timing
