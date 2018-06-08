@@ -66,9 +66,11 @@ public:
 
 typedef ::testing::Types<
     DeviceSortParams<int>,
+    DeviceSortParams<test_utils::custom_test_type<int>>,
     DeviceSortParams<unsigned long>,
     DeviceSortParams<float, int>,
-    DeviceSortParams<int, float>
+    DeviceSortParams<int, float>,
+    DeviceSortParams<int, test_utils::custom_test_type<float>>
 > RocprimDeviceSortTestsParams;
 
 std::vector<size_t> get_sizes()
@@ -167,9 +169,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
         // Check if output values are as expected
         for(size_t i = 0; i < output.size(); i++)
         {
-            auto diff = std::max<key_type>(std::abs(0.01f * expected[i]), key_type(0.01f));
-            if(std::is_integral<key_type>::value) diff = 0;
-            ASSERT_NEAR(output[i], expected[i], diff);
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output[i], expected[i], 0.01f));
         }
 
         hipFree(d_input);
@@ -201,7 +201,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
         );
         std::vector<value_type> values_input = test_utils::get_random_data<value_type>(size, -1000, 1000);
         std::vector<key_type> keys_output(size, 0);
-        std::vector<value_type> values_output(size, 0);
+        std::vector<value_type> values_output(size, value_type(0));
 
         key_type * d_keys_input;
         key_type * d_keys_output;
