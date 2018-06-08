@@ -40,6 +40,7 @@ namespace detail
 {
 
 template<
+    bool UsePredicate,
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
     class ResultType,
@@ -47,20 +48,22 @@ template<
     class FlagIterator,
     class OutputIterator,
     class SelectedCountOutputIterator,
+    class UnaryPredicate,
     class OffsetLookbackScanState
 >
 __global__
-void partition_flag_kernel(InputIterator input,
-                           FlagIterator flags,
-                           OutputIterator output,
-                           SelectedCountOutputIterator selected_count_output,
-                           const size_t size,
-                           OffsetLookbackScanState offset_scan_state,
-                           const unsigned int number_of_blocks,
-                           ordered_block_id<unsigned int> ordered_bid)
+void partition_kernel(InputIterator input,
+                      FlagIterator flags,
+                      OutputIterator output,
+                      SelectedCountOutputIterator selected_count_output,
+                      const size_t size,
+                      UnaryPredicate predicate,
+                      OffsetLookbackScanState offset_scan_state,
+                      const unsigned int number_of_blocks,
+                      ordered_block_id<unsigned int> ordered_bid)
 {
-    partition_flag_kernel_impl<BlockSize, ItemsPerThread, ResultType>(
-        input, flags, output, selected_count_output, size,
+    partition_kernel_impl<UsePredicate, BlockSize, ItemsPerThread, ResultType>(
+        input, flags, output, selected_count_output, size, predicate,
         offset_scan_state, number_of_blocks, ordered_bid
     );
 }
@@ -103,24 +106,27 @@ void init_offset_scan_state_kernel(OffsetLookBackScanState offset_scan_state,
     }
 
 template<
+    bool UsePredicate,
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
     class ResultType,
     class InputIterator,
     class FlagIterator,
     class OutputIterator,
+    class UnaryPredicate,
     class SelectedCountOutputIterator
 >
 inline
-hipError_t partition_flag_impl(void * temporary_storage,
-                               size_t& storage_size,
-                               InputIterator input,
-                               FlagIterator flags,
-                               OutputIterator output,
-                               SelectedCountOutputIterator selected_count_output,
-                               const size_t size,
-                               const hipStream_t stream,
-                               bool debug_synchronous)
+hipError_t partition_impl(void * temporary_storage,
+                         size_t& storage_size,
+                         InputIterator input,
+                         FlagIterator flags,
+                         OutputIterator output,
+                         SelectedCountOutputIterator selected_count_output,
+                         const size_t size,
+                         UnaryPredicate predicate,
+                         const hipStream_t stream,
+                         bool debug_synchronous)
 {
     using offset_type = unsigned int;
     using offset_scan_state_type = detail::lookback_scan_state<offset_type>;
@@ -175,15 +181,15 @@ hipError_t partition_flag_impl(void * temporary_storage,
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
     grid_size = number_of_blocks;
     hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(partition_flag_kernel<
-            BlockSize, ItemsPerThread,
+        HIP_KERNEL_NAME(partition_kernel<
+            UsePredicate, BlockSize, ItemsPerThread,
             ResultType, InputIterator, FlagIterator,
             OutputIterator, SelectedCountOutputIterator,
-            offset_scan_state_type
+            UnaryPredicate, offset_scan_state_type
         >),
         dim3(grid_size), dim3(block_size), 0, stream,
         input, flags, output, selected_count_output, size,
-        offset_scan_state, number_of_blocks, ordered_bid
+        predicate, offset_scan_state, number_of_blocks, ordered_bid
     );
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("lookback_scan_kernel", size, start)
 
@@ -223,14 +229,60 @@ hipError_t partition(void * temporary_storage,
         (sizeof(value_type) > sizeof(input_type)), input_type, value_type
     >::type;
 
+    // Dummy unary preficate
+    using unary_preficate_type = ::rocprim::empty_type;
+
     constexpr unsigned int block_size = 256;
     constexpr unsigned int items_per_thread =
         ::rocprim::max<unsigned int>(
             (8 * sizeof(unsigned int))/sizeof(result_type), 1
         );
-    return detail::partition_flag_impl<block_size, items_per_thread, result_type>(
-        temporary_storage, storage_size, input, flags,
-        output, selected_count_output, size, stream, debug_synchronous
+    return detail::partition_impl<false, block_size, items_per_thread, result_type>(
+        temporary_storage, storage_size, input, flags, output, selected_count_output,
+        size, unary_preficate_type(), stream, debug_synchronous
+    );
+}
+
+template<
+    class InputIterator,
+    class OutputIterator,
+    class SelectedCountOutputIterator,
+    class UnaryPredicate
+>
+inline
+hipError_t partition(void * temporary_storage,
+                     size_t& storage_size,
+                     InputIterator input,
+                     OutputIterator output,
+                     SelectedCountOutputIterator selected_count_output,
+                     const size_t size,
+                     UnaryPredicate predicate,
+                     const hipStream_t stream = 0,
+                     const bool debug_synchronous = false)
+{
+    using input_type = typename std::iterator_traits<InputIterator>::value_type;
+    using output_type = typename std::iterator_traits<OutputIterator>::value_type;
+    // Fix for cases when output_type is void (there's no sizeof(void))
+    using value_type = typename std::conditional<
+        std::is_same<void, output_type>::value, input_type, output_type
+    >::type;
+    // Use smaller type for private storage
+    using result_type = typename std::conditional<
+        (sizeof(value_type) > sizeof(input_type)), input_type, value_type
+    >::type;
+
+    // Dummy flag type
+    using flag_type = ::rocprim::empty_type;
+    flag_type * flags = nullptr;
+
+    constexpr unsigned int block_size = 256;
+    constexpr unsigned int items_per_thread =
+        ::rocprim::max<unsigned int>(
+            (8 * sizeof(unsigned int))/sizeof(result_type), 1
+        );
+    return detail::partition_impl<true, block_size, items_per_thread, result_type>(
+        temporary_storage, storage_size, input, flags, output, selected_count_output,
+        size, predicate, stream, debug_synchronous
     );
 }
 
