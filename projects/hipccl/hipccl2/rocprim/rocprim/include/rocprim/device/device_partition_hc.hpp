@@ -29,6 +29,7 @@
 #include "../type_traits.hpp"
 #include "../detail/various.hpp"
 
+#include "device_partition_config.hpp"
 #include "detail/device_partition.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -53,9 +54,7 @@ namespace detail
 
 template<
     bool UsePredicate,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    class ResultType,
+    class Config,
     class InputIterator,
     class FlagIterator,
     class OutputIterator,
@@ -75,11 +74,28 @@ void partition_impl(void * temporary_storage,
                     bool debug_synchronous)
 {
     using offset_type = unsigned int;
+    using input_type = typename std::iterator_traits<InputIterator>::value_type;
+    using output_type = typename std::iterator_traits<OutputIterator>::value_type;
+    // Fix for cases when output_type is void (there's no sizeof(void))
+    using value_type = typename std::conditional<
+        std::is_same<void, output_type>::value, input_type, output_type
+    >::type;
+    // Use smaller type for private storage
+    using result_type = typename std::conditional<
+        (sizeof(value_type) > sizeof(input_type)), input_type, value_type
+    >::type;
+
+    // Get default config if Config is default_config
+    using config = default_or_custom_config<
+        Config,
+        default_partition_config<ROCPRIM_TARGET_ARCH, result_type>
+    >;
+
     using offset_scan_state_type = detail::lookback_scan_state<offset_type>;
     using ordered_block_id_type = detail::ordered_block_id<unsigned int>;
 
-    constexpr unsigned int block_size = BlockSize;
-    constexpr unsigned int items_per_thread = ItemsPerThread;
+    constexpr unsigned int block_size = config::block_size;
+    constexpr unsigned int items_per_thread = config::items_per_thread;
     constexpr auto items_per_block = block_size * items_per_thread;
     const unsigned int number_of_blocks = (size + items_per_block - 1)/items_per_block;
 
@@ -136,7 +152,7 @@ void partition_impl(void * temporary_storage,
         hc::tiled_extent<1>(grid_size, block_size),
         [=](hc::tiled_index<1>) [[hc]]
         {
-            partition_kernel_impl<UsePredicate, BlockSize, ItemsPerThread, ResultType>(
+            partition_kernel_impl<UsePredicate, config, result_type>(
                 input, flags, output, selected_count_output, size, predicate,
                 offset_scan_state, number_of_blocks, ordered_bid
             );
@@ -165,6 +181,8 @@ void partition_impl(void * temporary_storage,
 /// * Relative order is preserved for the elements for which the corresponding values from \p flags
 /// are \p true. Other elements are copied in reverse order.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p partition_config or
+/// a custom class with the same members.
 /// \tparam InputIterator - random-access iterator type of the input range. It can be
 /// a simple pointer type.
 /// \tparam FlagIterator - random-access iterator type of the flag range. It can be
@@ -229,6 +247,7 @@ void partition_impl(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class InputIterator,
     class FlagIterator,
     class OutputIterator,
@@ -245,26 +264,10 @@ void partition(void * temporary_storage,
                hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
                const bool debug_synchronous = false)
 {
-    using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    using output_type = typename std::iterator_traits<OutputIterator>::value_type;
-    // Fix for cases when output_type is void (there's no sizeof(void))
-    using value_type = typename std::conditional<
-        std::is_same<void, output_type>::value, input_type, output_type
-    >::type;
-    // Use smaller type for private storage
-    using result_type = typename std::conditional<
-        (sizeof(value_type) > sizeof(input_type)), input_type, value_type
-    >::type;
-
     // Dummy unary preficate
     using unary_preficate_type = ::rocprim::empty_type;
 
-    constexpr unsigned int block_size = 256;
-    constexpr unsigned int items_per_thread =
-        ::rocprim::max<unsigned int>(
-            (8 * sizeof(unsigned int))/sizeof(result_type), 1
-        );
-    detail::partition_impl<false, block_size, items_per_thread, result_type>(
+    detail::partition_impl<false, Config>(
         temporary_storage, storage_size, input, flags, output, selected_count_output,
         size, unary_preficate_type(), acc_view, debug_synchronous
     );
@@ -284,6 +287,8 @@ void partition(void * temporary_storage,
 /// * Relative order is preserved for the elements for which the \p predicate returns \p true. Other
 /// elements are copied in reverse order.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p partition_config or
+/// a custom class with the same members.
 /// \tparam InputIterator - random-access iterator type of the input range. It can be
 /// a simple pointer type.
 /// \tparam OutputIterator - random-access iterator type of the output range. It can be
@@ -356,6 +361,7 @@ void partition(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class InputIterator,
     class OutputIterator,
     class SelectedCountOutputIterator,
@@ -372,27 +378,11 @@ void partition(void * temporary_storage,
                hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
                const bool debug_synchronous = false)
 {
-    using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    using output_type = typename std::iterator_traits<OutputIterator>::value_type;
-    // Fix for cases when output_type is void (there's no sizeof(void))
-    using value_type = typename std::conditional<
-        std::is_same<void, output_type>::value, input_type, output_type
-    >::type;
-    // Use smaller type for private storage
-    using result_type = typename std::conditional<
-        (sizeof(value_type) > sizeof(input_type)), input_type, value_type
-    >::type;
-
     // Dummy flag type
     using flag_type = ::rocprim::empty_type;
     flag_type * flags = nullptr;
 
-    constexpr unsigned int block_size = 256;
-    constexpr unsigned int items_per_thread =
-        ::rocprim::max<unsigned int>(
-            (8 * sizeof(unsigned int))/sizeof(result_type), 1
-        );
-    detail::partition_impl<true, block_size, items_per_thread, result_type>(
+    detail::partition_impl<true, Config>(
         temporary_storage, storage_size, input, flags, output, selected_count_output,
         size, predicate, acc_view, debug_synchronous
     );
