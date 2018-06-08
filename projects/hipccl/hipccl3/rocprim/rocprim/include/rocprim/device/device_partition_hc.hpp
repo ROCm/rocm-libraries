@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_DEVICE_DEVICE_PARTITION_HIP_HPP_
-#define ROCPRIM_DEVICE_DEVICE_PARTITION_HIP_HPP_
+#ifndef ROCPRIM_DEVICE_DEVICE_PARTITION_HC_HPP_
+#define ROCPRIM_DEVICE_DEVICE_PARTITION_HC_HPP_
 
 #include <type_traits>
 #include <iterator>
@@ -33,72 +33,18 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// \addtogroup devicemodule_hip
+/// \addtogroup devicemodule_hc
 /// @{
 
 namespace detail
 {
 
-template<
-    bool UsePredicate,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    class ResultType,
-    class InputIterator,
-    class FlagIterator,
-    class OutputIterator,
-    class SelectedCountOutputIterator,
-    class UnaryPredicate,
-    class OffsetLookbackScanState
->
-__global__
-void partition_kernel(InputIterator input,
-                      FlagIterator flags,
-                      OutputIterator output,
-                      SelectedCountOutputIterator selected_count_output,
-                      const size_t size,
-                      UnaryPredicate predicate,
-                      OffsetLookbackScanState offset_scan_state,
-                      const unsigned int number_of_blocks,
-                      ordered_block_id<unsigned int> ordered_bid)
-{
-    partition_kernel_impl<UsePredicate, BlockSize, ItemsPerThread, ResultType>(
-        input, flags, output, selected_count_output, size, predicate,
-        offset_scan_state, number_of_blocks, ordered_bid
-    );
-}
-
-template<class OffsetLookBackScanState>
-__global__
-void init_offset_scan_state_kernel(OffsetLookBackScanState offset_scan_state,
-                                   const unsigned int number_of_blocks,
-                                   ordered_block_id<unsigned int> ordered_bid)
-{
-    init_lookback_scan_state_kernel_impl(
-        offset_scan_state, number_of_blocks, ordered_bid
-    );
-}
-
-#define ROCPRIM_DETAIL_HIP_SYNC(name, size, start) \
-    if(debug_synchronous) \
+#define ROCPRIM_DETAIL_HC_SYNC(name, size, start) \
     { \
-        std::cout << name << "(" << size << ")"; \
-        auto error = hipStreamSynchronize(stream); \
-        if(error != hipSuccess) return error; \
-        auto end = std::chrono::high_resolution_clock::now(); \
-        auto d = std::chrono::duration_cast<std::chrono::duration<double>>(end - start); \
-        std::cout << " " << d.count() * 1000 << " ms" << '\n'; \
-    }
-
-#define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start) \
-    { \
-        auto error = hipPeekAtLastError(); \
-        if(error != hipSuccess) return error; \
         if(debug_synchronous) \
         { \
             std::cout << name << "(" << size << ")"; \
-            auto error = hipStreamSynchronize(stream); \
-            if(error != hipSuccess) return error; \
+            acc_view.wait(); \
             auto end = std::chrono::high_resolution_clock::now(); \
             auto d = std::chrono::duration_cast<std::chrono::duration<double>>(end - start); \
             std::cout << " " << d.count() * 1000 << " ms" << '\n'; \
@@ -117,16 +63,16 @@ template<
     class SelectedCountOutputIterator
 >
 inline
-hipError_t partition_impl(void * temporary_storage,
-                         size_t& storage_size,
-                         InputIterator input,
-                         FlagIterator flags,
-                         OutputIterator output,
-                         SelectedCountOutputIterator selected_count_output,
-                         const size_t size,
-                         UnaryPredicate predicate,
-                         const hipStream_t stream,
-                         bool debug_synchronous)
+void partition_impl(void * temporary_storage,
+                    size_t& storage_size,
+                    InputIterator input,
+                    FlagIterator flags,
+                    OutputIterator output,
+                    SelectedCountOutputIterator selected_count_output,
+                    const size_t size,
+                    UnaryPredicate predicate,
+                    hc::accelerator_view acc_view,
+                    bool debug_synchronous)
 {
     using offset_type = unsigned int;
     using offset_scan_state_type = detail::lookback_scan_state<offset_type>;
@@ -146,7 +92,7 @@ hipError_t partition_impl(void * temporary_storage,
     {
         // storage_size is never zero
         storage_size = offset_scan_state_bytes + ordered_block_id_bytes;
-        return hipSuccess;
+        return;
     }
 
     // Start point for time measurements
@@ -170,34 +116,36 @@ hipError_t partition_impl(void * temporary_storage,
     );
 
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    auto grid_size = (number_of_blocks + block_size - 1)/block_size;
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(init_offset_scan_state_kernel<offset_scan_state_type>),
-        dim3(grid_size), dim3(block_size), 0, stream,
-        offset_scan_state, number_of_blocks, ordered_bid
+    auto grid_size = ((number_of_blocks + block_size - 1)/block_size) * block_size;
+    hc::parallel_for_each(
+        acc_view,
+        hc::tiled_extent<1>(grid_size, block_size),
+        [=](hc::tiled_index<1>) [[hc]]
+        {
+            init_lookback_scan_state_kernel_impl(
+                offset_scan_state, number_of_blocks, ordered_bid
+            );
+        }
     );
-    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_offset_scan_state_kernel", size, start)
+    ROCPRIM_DETAIL_HC_SYNC("init_offset_scan_state_kernel", size, start)
 
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    grid_size = number_of_blocks;
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(partition_kernel<
-            UsePredicate, BlockSize, ItemsPerThread,
-            ResultType, InputIterator, FlagIterator,
-            OutputIterator, SelectedCountOutputIterator,
-            UnaryPredicate, offset_scan_state_type
-        >),
-        dim3(grid_size), dim3(block_size), 0, stream,
-        input, flags, output, selected_count_output, size,
-        predicate, offset_scan_state, number_of_blocks, ordered_bid
+    grid_size = number_of_blocks * block_size;
+    hc::parallel_for_each(
+        acc_view,
+        hc::tiled_extent<1>(grid_size, block_size),
+        [=](hc::tiled_index<1>) [[hc]]
+        {
+            partition_kernel_impl<UsePredicate, BlockSize, ItemsPerThread, ResultType>(
+                input, flags, output, selected_count_output, size, predicate,
+                offset_scan_state, number_of_blocks, ordered_bid
+            );
+        }
     );
-    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("partition_kernel", size, start)
-
-    return hipSuccess;
+    ROCPRIM_DETAIL_HC_SYNC("partition_kernel", size, start)
 }
 
-#undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
-#undef ROCPRIM_DETAIL_HIP_SYNC
+#undef ROCPRIM_DETAIL_HC_SYNC
 
 } // end of detail namespace
 
@@ -208,15 +156,15 @@ template<
     class SelectedCountOutputIterator
 >
 inline
-hipError_t partition(void * temporary_storage,
-                     size_t& storage_size,
-                     InputIterator input,
-                     FlagIterator flags,
-                     OutputIterator output,
-                     SelectedCountOutputIterator selected_count_output,
-                     const size_t size,
-                     const hipStream_t stream = 0,
-                     const bool debug_synchronous = false)
+void partition(void * temporary_storage,
+               size_t& storage_size,
+               InputIterator input,
+               FlagIterator flags,
+               OutputIterator output,
+               SelectedCountOutputIterator selected_count_output,
+               const size_t size,
+               hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
+               const bool debug_synchronous = false)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     using output_type = typename std::iterator_traits<OutputIterator>::value_type;
@@ -239,7 +187,7 @@ hipError_t partition(void * temporary_storage,
         );
     return detail::partition_impl<false, block_size, items_per_thread, result_type>(
         temporary_storage, storage_size, input, flags, output, selected_count_output,
-        size, unary_preficate_type(), stream, debug_synchronous
+        size, unary_preficate_type(), acc_view, debug_synchronous
     );
 }
 
@@ -250,15 +198,15 @@ template<
     class UnaryPredicate
 >
 inline
-hipError_t partition(void * temporary_storage,
-                     size_t& storage_size,
-                     InputIterator input,
-                     OutputIterator output,
-                     SelectedCountOutputIterator selected_count_output,
-                     const size_t size,
-                     UnaryPredicate predicate,
-                     const hipStream_t stream = 0,
-                     const bool debug_synchronous = false)
+void partition(void * temporary_storage,
+               size_t& storage_size,
+               InputIterator input,
+               OutputIterator output,
+               SelectedCountOutputIterator selected_count_output,
+               const size_t size,
+               UnaryPredicate predicate,
+               hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
+               const bool debug_synchronous = false)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     using output_type = typename std::iterator_traits<OutputIterator>::value_type;
@@ -282,13 +230,13 @@ hipError_t partition(void * temporary_storage,
         );
     return detail::partition_impl<true, block_size, items_per_thread, result_type>(
         temporary_storage, storage_size, input, flags, output, selected_count_output,
-        size, predicate, stream, debug_synchronous
+        size, predicate, acc_view, debug_synchronous
     );
 }
 
 /// @}
-// end of group devicemodule_hip
+// end of group devicemodule_hc
 
 END_ROCPRIM_NAMESPACE
 
-#endif // ROCPRIM_DEVICE_DEVICE_PARTITION_HIP_HPP_
+#endif // ROCPRIM_DEVICE_DEVICE_PARTITION_HC_HPP_

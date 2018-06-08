@@ -53,6 +53,7 @@
     #include "device/device_histogram_hc.hpp"
     #include "device/device_merge_hc.hpp"
     #include "device/device_merge_sort_hc.hpp"
+    #include "device/device_partition_hc.hpp"
     #include "device/device_radix_sort_hc.hpp"
     #include "device/device_reduce_by_key_hc.hpp"
     #include "device/device_reduce_hc.hpp"

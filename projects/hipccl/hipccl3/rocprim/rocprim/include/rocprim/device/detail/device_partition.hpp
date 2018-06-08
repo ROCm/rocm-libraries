@@ -33,6 +33,7 @@
 #include "../../block/block_store.hpp"
 #include "../../block/block_scan.hpp"
 
+#include "device_scan_lookback.hpp"
 #include "lookback_scan_state.hpp"
 #include "ordered_block_id.hpp"
 
