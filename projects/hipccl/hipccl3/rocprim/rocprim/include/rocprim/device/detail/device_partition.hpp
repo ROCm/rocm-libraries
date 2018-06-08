@@ -97,9 +97,9 @@ private:
 template<
     bool UsePredicate,
     unsigned int BlockSize,
-    unsigned int ItemsPerThread,
     class BlockLoadFlagsType,
     class ValueType,
+    unsigned int ItemsPerThread,
     class FlagIterator,
     class UnaryPredicate
 >
@@ -143,9 +143,9 @@ auto partition_block_load_flags(ValueType (&values)[ItemsPerThread],
 template<
     bool UsePredicate,
     unsigned int BlockSize,
-    unsigned int ItemsPerThread,
     class BlockLoadFlagsType,
     class ValueType,
+    unsigned int ItemsPerThread,
     class FlagIterator,
     class UnaryPredicate
 >
@@ -190,8 +190,7 @@ auto partition_block_load_flags(ValueType (&values)[ItemsPerThread],
 
 template<
     bool UsePredicate,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
+    class Config,
     class ResultType,
     class InputIterator,
     class FlagIterator,
@@ -211,25 +210,25 @@ void partition_kernel_impl(InputIterator input,
                            const unsigned int number_of_blocks,
                            ordered_block_id<unsigned int> ordered_bid)
 {
+    constexpr auto block_size = Config::block_size;
+    constexpr auto items_per_thread = Config::items_per_thread;
+    constexpr unsigned int items_per_block = block_size * items_per_thread;
+
     using offset_type = typename OffsetLookbackScanState::value_type;
     using value_type = ResultType;
 
     // Block primitives
     using block_load_value_type = ::rocprim::block_load<
-        value_type, BlockSize, ItemsPerThread,
-        ::rocprim::block_load_method::block_load_transpose
+        value_type, block_size, items_per_thread,
+        Config::value_block_load_method
     >;
     using block_load_flag_type = ::rocprim::block_load<
-        bool, BlockSize, ItemsPerThread,
-        ::rocprim::block_load_method::block_load_transpose
-    >;
-    using block_store_value_type = ::rocprim::block_store<
-        value_type, BlockSize, ItemsPerThread,
-        ::rocprim::block_store_method::block_store_transpose
+        bool, block_size, items_per_thread,
+        Config::value_block_load_method
     >;
     using block_scan_offset_type = ::rocprim::block_scan<
-        offset_type, BlockSize,
-        ::rocprim::block_scan_algorithm::using_warp_scan
+        offset_type, block_size,
+        Config::block_scan_method
     >;
     using order_bid_type = ordered_block_id<unsigned int>;
 
@@ -237,9 +236,6 @@ void partition_kernel_impl(InputIterator input,
     using offset_scan_prefix_op_type = offset_lookback_scan_prefix_op<
         offset_type, OffsetLookbackScanState
     >;
-
-    // Items per block
-    constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
 
     // Memory required for 2-phase scatter
     using exchange_storage_type = value_type[items_per_block];
@@ -249,7 +245,6 @@ void partition_kernel_impl(InputIterator input,
     {
         typename order_bid_type::storage_type ordered_bid;
         typename block_load_value_type::storage_type load_values;
-        typename block_store_value_type::storage_type store_values;
         typename block_load_flag_type::storage_type load_flags;
         raw_exchange_storage_type exchange_values;
         struct
@@ -264,9 +259,9 @@ void partition_kernel_impl(InputIterator input,
     const unsigned int block_offset = flat_block_id * items_per_block;
     const auto valid_in_last_block = size - items_per_block * (number_of_blocks - 1);
 
-    value_type values[ItemsPerThread];
-    bool is_selected[ItemsPerThread];
-    offset_type output_indices[ItemsPerThread];
+    value_type values[items_per_thread];
+    bool is_selected[items_per_thread];
+    offset_type output_indices[items_per_thread];
 
     // Load input values into values
     bool is_last_block = flat_block_id == (number_of_blocks - 1);
@@ -293,7 +288,7 @@ void partition_kernel_impl(InputIterator input,
 
     // Load selection flags into is_selected or generate them using
     // input value and selection predicate
-    partition_block_load_flags<UsePredicate, BlockSize, ItemsPerThread, block_load_flag_type>(
+    partition_block_load_flags<UsePredicate, block_size, block_load_flag_type>(
         values,
         flags + block_offset,
         predicate,
@@ -306,7 +301,7 @@ void partition_kernel_impl(InputIterator input,
 
     // Convert true/false is_selected flags to 0s and 1s
     #pragma unroll
-    for(unsigned int i = 0; i < ItemsPerThread; i++)
+    for(unsigned int i = 0; i < items_per_thread; i++)
     {
         output_indices[i] = is_selected[i] ? 1 : 0;
     }
@@ -361,9 +356,9 @@ void partition_kernel_impl(InputIterator input,
     // Scatter selected/rejected values to shared memory
     auto scatter_storage = (storage.exchange_values).get();
     #pragma unroll
-    for(unsigned int i = 0; i < ItemsPerThread; i++)
+    for(unsigned int i = 0; i < items_per_thread; i++)
     {
-        unsigned int item_index = (flat_block_thread_id * ItemsPerThread) + i;
+        unsigned int item_index = (flat_block_thread_id * items_per_thread) + i;
         unsigned int selected_item_index = output_indices[i] - selected_prefix;
         unsigned int rejected_item_index = (item_index - selected_item_index) + selected_in_block;
         // index of item in scatter_storage
@@ -373,9 +368,9 @@ void partition_kernel_impl(InputIterator input,
     ::rocprim::syncthreads(); // sync threads to reuse shared memory
 
     #pragma unroll
-    for(unsigned int i = 0; i < ItemsPerThread; i++)
+    for(unsigned int i = 0; i < items_per_thread; i++)
     {
-        unsigned int item_index = (i * BlockSize) + flat_block_thread_id;
+        unsigned int item_index = (i * block_size) + flat_block_thread_id;
         unsigned int selected_item_index = item_index;
         unsigned int rejected_item_index = item_index - selected_in_block;
         // number of values rejected in previous blocks
