@@ -200,7 +200,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
             std::mt19937{std::random_device{}()}
         );
         std::vector<value_type> values_input = test_utils::get_random_data<value_type>(size, -1000, 1000);
-        std::vector<key_type> keys_output(size, 0);
+        std::vector<key_type> keys_output(size, key_type(0));
         std::vector<value_type> values_output(size, value_type(0));
 
         key_type * d_keys_input;
