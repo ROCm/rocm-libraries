@@ -221,11 +221,13 @@ TYPED_TEST(RocprimDeviceHistogramEven, Even)
             }
         }
 
+        using config = rp::histogram_config<rp::kernel_config<128, 5>>;
+
         size_t temporary_storage_bytes = 0;
         if(rows == 1)
         {
             HIP_CHECK(
-                rp::histogram_even(
+                rp::histogram_even<config>(
                     nullptr, temporary_storage_bytes,
                     d_input, columns,
                     d_histogram,
@@ -237,7 +239,7 @@ TYPED_TEST(RocprimDeviceHistogramEven, Even)
         else
         {
             HIP_CHECK(
-                rp::histogram_even(
+                rp::histogram_even<config>(
                     nullptr, temporary_storage_bytes,
                     d_input, columns, rows, row_stride_bytes,
                     d_histogram,
@@ -255,7 +257,7 @@ TYPED_TEST(RocprimDeviceHistogramEven, Even)
         if(rows == 1)
         {
             HIP_CHECK(
-                rp::histogram_even(
+                rp::histogram_even<config>(
                     d_temporary_storage, temporary_storage_bytes,
                     d_input, columns,
                     d_histogram,
@@ -267,7 +269,7 @@ TYPED_TEST(RocprimDeviceHistogramEven, Even)
         else
         {
             HIP_CHECK(
-                rp::histogram_even(
+                rp::histogram_even<config>(
                     d_temporary_storage, temporary_storage_bytes,
                     d_input, columns, rows, row_stride_bytes,
                     d_histogram,
@@ -939,11 +941,13 @@ TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
             }
         }
 
+        using config = rp::histogram_config<rp::kernel_config<192, 3>>;
+
         size_t temporary_storage_bytes = 0;
         if(rows == 1)
         {
             HIP_CHECK((
-                rp::multi_histogram_range<channels, active_channels>(
+                rp::multi_histogram_range<channels, active_channels, config>(
                     nullptr, temporary_storage_bytes,
                     d_input, columns,
                     d_histogram,
@@ -955,7 +959,7 @@ TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
         else
         {
             HIP_CHECK((
-                rp::multi_histogram_range<channels, active_channels>(
+                rp::multi_histogram_range<channels, active_channels, config>(
                     nullptr, temporary_storage_bytes,
                     d_input, columns, rows, row_stride_bytes,
                     d_histogram,
@@ -973,7 +977,7 @@ TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
         if(rows == 1)
         {
             HIP_CHECK((
-                rp::multi_histogram_range<channels, active_channels>(
+                rp::multi_histogram_range<channels, active_channels, config>(
                     d_temporary_storage, temporary_storage_bytes,
                     d_input, columns,
                     d_histogram,
@@ -985,7 +989,7 @@ TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
         else
         {
             HIP_CHECK((
-                rp::multi_histogram_range<channels, active_channels>(
+                rp::multi_histogram_range<channels, active_channels, config>(
                     d_temporary_storage, temporary_storage_bytes,
                     d_input, columns, rows, row_stride_bytes,
                     d_histogram,

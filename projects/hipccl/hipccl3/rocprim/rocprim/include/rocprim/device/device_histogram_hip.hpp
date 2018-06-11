@@ -29,6 +29,7 @@
 #include "../functional.hpp"
 #include "../detail/various.hpp"
 
+#include "device_histogram_config.hpp"
 #include "detail/device_histogram.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -65,6 +66,7 @@ void histogram_shared_kernel(SampleIterator samples,
                              unsigned int columns,
                              unsigned int rows,
                              unsigned int row_stride,
+                             unsigned int rows_per_block,
                              fixed_array<Counter *, ActiveChannels> histogram,
                              fixed_array<SampleToBinOp, ActiveChannels> sample_to_bin_op,
                              fixed_array<unsigned int, ActiveChannels> bins)
@@ -72,7 +74,7 @@ void histogram_shared_kernel(SampleIterator samples,
     HIP_DYNAMIC_SHARED(unsigned int, block_histogram);
 
     histogram_shared<BlockSize, ItemsPerThread, Channels, ActiveChannels>(
-        samples, columns, rows, row_stride,
+        samples, columns, rows, row_stride, rows_per_block,
         histogram,
         sample_to_bin_op, bins,
         block_histogram
@@ -121,6 +123,7 @@ void histogram_global_kernel(SampleIterator samples,
 template<
     unsigned int Channels,
     unsigned int ActiveChannels,
+    class Config,
     class SampleIterator,
     class Counter,
     class SampleToBinOp
@@ -140,21 +143,14 @@ hipError_t histogram_impl(void * temporary_storage,
 {
     using sample_type = typename std::iterator_traits<SampleIterator>::value_type;
 
-    constexpr unsigned int block_size = 256;
-    constexpr unsigned int items_per_thread = 8;
-    constexpr unsigned int max_grid_size = 1024;
-    constexpr unsigned int shared_impl_max_bins = 1024;
+    using config = default_or_custom_config<
+        Config,
+        default_histogram_config<ROCPRIM_TARGET_ARCH, sample_type, Channels, ActiveChannels>
+    >;
 
+    constexpr unsigned int block_size = config::histogram::block_size;
+    constexpr unsigned int items_per_thread = config::histogram::items_per_thread;
     constexpr unsigned int items_per_block = block_size * items_per_thread;
-
-    for(unsigned int channel = 0; channel < ActiveChannels; channel++)
-    {
-        if(levels[channel] < 2)
-        {
-            // Histogram must have at least 1 bin
-            return hipErrorInvalidValue;
-        }
-    }
 
     if(row_stride_bytes % sizeof(sample_type) != 0)
     {
@@ -205,17 +201,20 @@ hipError_t histogram_impl(void * temporary_storage,
     );
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_histogram", max_bins, start);
 
-    if(total_bins <= shared_impl_max_bins)
+    if(total_bins <= config::shared_impl_max_bins)
     {
         dim3 grid_size;
-        grid_size.x = std::min(max_grid_size, blocks_x);
-        grid_size.y = std::min(rows, max_grid_size / grid_size.x);
+        grid_size.x = std::min(config::max_grid_size, blocks_x);
+        grid_size.y = std::min(rows, config::max_grid_size / grid_size.x);
         const size_t block_histogram_bytes = total_bins * sizeof(unsigned int);
+        const unsigned int rows_per_block = ::rocprim::detail::ceiling_div(rows, grid_size.y);
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(histogram_shared_kernel<block_size, items_per_thread, Channels, ActiveChannels>),
+            HIP_KERNEL_NAME(histogram_shared_kernel<
+                block_size, items_per_thread, Channels, ActiveChannels
+            >),
             grid_size, dim3(block_size, 1), block_histogram_bytes, stream,
-            samples, columns, rows, row_stride,
+            samples, columns, rows, row_stride, rows_per_block,
             fixed_array<Counter *, ActiveChannels>(histogram),
             fixed_array<SampleToBinOp, ActiveChannels>(sample_to_bin_op),
             fixed_array<unsigned int, ActiveChannels>(bins)
@@ -226,7 +225,9 @@ hipError_t histogram_impl(void * temporary_storage,
     {
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(histogram_global_kernel<block_size, items_per_thread, Channels, ActiveChannels>),
+            HIP_KERNEL_NAME(histogram_global_kernel<
+                block_size, items_per_thread, Channels, ActiveChannels
+            >),
             dim3(blocks_x, rows), dim3(block_size, 1), 0, stream,
             samples, columns, row_stride,
             fixed_array<Counter *, ActiveChannels>(histogram),
@@ -242,6 +243,7 @@ hipError_t histogram_impl(void * temporary_storage,
 template<
     unsigned int Channels,
     unsigned int ActiveChannels,
+    class Config,
     class SampleIterator,
     class Counter,
     class Level
@@ -260,6 +262,15 @@ hipError_t histogram_even_impl(void * temporary_storage,
                                hipStream_t stream,
                                bool debug_synchronous)
 {
+    for(unsigned int channel = 0; channel < ActiveChannels; channel++)
+    {
+        if(levels[channel] < 2)
+        {
+            // Histogram must have at least 1 bin
+            return hipErrorInvalidValue;
+        }
+    }
+
     sample_to_bin_even<Level> sample_to_bin_op[ActiveChannels];
     for(unsigned int channel = 0; channel < ActiveChannels; channel++)
     {
@@ -269,7 +280,7 @@ hipError_t histogram_even_impl(void * temporary_storage,
         );
     }
 
-    return histogram_impl<Channels, ActiveChannels>(
+    return histogram_impl<Channels, ActiveChannels, Config>(
         temporary_storage, storage_size,
         samples, columns, rows, row_stride_bytes,
         histogram,
@@ -281,6 +292,7 @@ hipError_t histogram_even_impl(void * temporary_storage,
 template<
     unsigned int Channels,
     unsigned int ActiveChannels,
+    class Config,
     class SampleIterator,
     class Counter,
     class Level
@@ -298,6 +310,15 @@ hipError_t histogram_range_impl(void * temporary_storage,
                                 hipStream_t stream,
                                 bool debug_synchronous)
 {
+    for(unsigned int channel = 0; channel < ActiveChannels; channel++)
+    {
+        if(levels[channel] < 2)
+        {
+            // Histogram must have at least 1 bin
+            return hipErrorInvalidValue;
+        }
+    }
+
     sample_to_bin_range<Level> sample_to_bin_op[ActiveChannels];
     for(unsigned int channel = 0; channel < ActiveChannels; channel++)
     {
@@ -307,7 +328,7 @@ hipError_t histogram_range_impl(void * temporary_storage,
         );
     }
 
-    return histogram_impl<Channels, ActiveChannels>(
+    return histogram_impl<Channels, ActiveChannels, Config>(
         temporary_storage, storage_size,
         samples, columns, rows, row_stride_bytes,
         histogram,
@@ -329,6 +350,8 @@ hipError_t histogram_range_impl(void * temporary_storage,
 /// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p histogram_config or
+/// a custom class with the same members.
 /// \tparam SampleIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam Counter - integer type for histogram bin counters.
@@ -388,6 +411,7 @@ hipError_t histogram_range_impl(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class SampleIterator,
     class Counter,
     class Level
@@ -409,7 +433,7 @@ hipError_t histogram_even(void * temporary_storage,
     Level lower_level_single[1] = { lower_level };
     Level upper_level_single[1] = { upper_level };
 
-    return detail::histogram_even_impl<1, 1>(
+    return detail::histogram_even_impl<1, 1, Config>(
         temporary_storage, storage_size,
         samples, size, 1, 0,
         histogram_single,
@@ -431,6 +455,8 @@ hipError_t histogram_even(void * temporary_storage,
 /// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p histogram_config or
+/// a custom class with the same members.
 /// \tparam SampleIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam Counter - integer type for histogram bin counters.
@@ -494,6 +520,7 @@ hipError_t histogram_even(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class SampleIterator,
     class Counter,
     class Level
@@ -517,7 +544,7 @@ hipError_t histogram_even(void * temporary_storage,
     Level lower_level_single[1] = { lower_level };
     Level upper_level_single[1] = { upper_level };
 
-    return detail::histogram_even_impl<1, 1>(
+    return detail::histogram_even_impl<1, 1, Config>(
         temporary_storage, storage_size,
         samples, columns, rows, row_stride_bytes,
         histogram_single,
@@ -541,6 +568,8 @@ hipError_t histogram_even(void * temporary_storage,
 ///
 /// \tparam Channels - number of channels interleaved in the input samples.
 /// \tparam ActiveChannels - number of channels being used for computing histograms.
+/// \tparam Config - [optional] configuration of the primitive. It can be \p histogram_config or
+/// a custom class with the same members.
 /// \tparam SampleIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam Counter - integer type for histogram bin counters.
@@ -605,6 +634,7 @@ hipError_t histogram_even(void * temporary_storage,
 template<
     unsigned int Channels,
     unsigned int ActiveChannels,
+    class Config = default_config,
     class SampleIterator,
     class Counter,
     class Level
@@ -621,7 +651,7 @@ hipError_t multi_histogram_even(void * temporary_storage,
                                 hipStream_t stream = 0,
                                 bool debug_synchronous = false)
 {
-    return detail::histogram_even_impl<Channels, ActiveChannels>(
+    return detail::histogram_even_impl<Channels, ActiveChannels, Config>(
         temporary_storage, storage_size,
         samples, size, 1, 0,
         histogram,
@@ -649,6 +679,8 @@ hipError_t multi_histogram_even(void * temporary_storage,
 ///
 /// \tparam Channels - number of channels interleaved in the input samples.
 /// \tparam ActiveChannels - number of channels being used for computing histograms.
+/// \tparam Config - [optional] configuration of the primitive. It can be \p histogram_config or
+/// a custom class with the same members.
 /// \tparam SampleIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam Counter - integer type for histogram bin counters.
@@ -717,6 +749,7 @@ hipError_t multi_histogram_even(void * temporary_storage,
 template<
     unsigned int Channels,
     unsigned int ActiveChannels,
+    class Config = default_config,
     class SampleIterator,
     class Counter,
     class Level
@@ -735,7 +768,7 @@ hipError_t multi_histogram_even(void * temporary_storage,
                                 hipStream_t stream = 0,
                                 bool debug_synchronous = false)
 {
-    return detail::histogram_even_impl<Channels, ActiveChannels>(
+    return detail::histogram_even_impl<Channels, ActiveChannels, Config>(
         temporary_storage, storage_size,
         samples, columns, rows, row_stride_bytes,
         histogram,
@@ -752,6 +785,8 @@ hipError_t multi_histogram_even(void * temporary_storage,
 /// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p histogram_config or
+/// a custom class with the same members.
 /// \tparam SampleIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam Counter - integer type for histogram bin counters.
@@ -809,6 +844,7 @@ hipError_t multi_histogram_even(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class SampleIterator,
     class Counter,
     class Level
@@ -828,7 +864,7 @@ hipError_t histogram_range(void * temporary_storage,
     unsigned int levels_single[1] = { levels };
     Level * level_values_single[1] = { level_values };
 
-    return detail::histogram_range_impl<1, 1>(
+    return detail::histogram_range_impl<1, 1, Config>(
         temporary_storage, storage_size,
         samples, size, 1, 0,
         histogram_single,
@@ -849,6 +885,8 @@ hipError_t histogram_range(void * temporary_storage,
 /// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p histogram_config or
+/// a custom class with the same members.
 /// \tparam SampleIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam Counter - integer type for histogram bin counters.
@@ -910,6 +948,7 @@ hipError_t histogram_range(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class SampleIterator,
     class Counter,
     class Level
@@ -931,7 +970,7 @@ hipError_t histogram_range(void * temporary_storage,
     unsigned int levels_single[1] = { levels };
     Level * level_values_single[1] = { level_values };
 
-    return detail::histogram_range_impl<1, 1>(
+    return detail::histogram_range_impl<1, 1, Config>(
         temporary_storage, storage_size,
         samples, columns, rows, row_stride_bytes,
         histogram_single,
@@ -955,6 +994,8 @@ hipError_t histogram_range(void * temporary_storage,
 ///
 /// \tparam Channels - number of channels interleaved in the input samples.
 /// \tparam ActiveChannels - number of channels being used for computing histograms.
+/// \tparam Config - [optional] configuration of the primitive. It can be \p histogram_config or
+/// a custom class with the same members.
 /// \tparam SampleIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam Counter - integer type for histogram bin counters.
@@ -1015,6 +1056,7 @@ hipError_t histogram_range(void * temporary_storage,
 template<
     unsigned int Channels,
     unsigned int ActiveChannels,
+    class Config = default_config,
     class SampleIterator,
     class Counter,
     class Level
@@ -1030,7 +1072,7 @@ hipError_t multi_histogram_range(void * temporary_storage,
                                  hipStream_t stream = 0,
                                  bool debug_synchronous = false)
 {
-    return detail::histogram_range_impl<Channels, ActiveChannels>(
+    return detail::histogram_range_impl<Channels, ActiveChannels, Config>(
         temporary_storage, storage_size,
         samples, size, 1, 0,
         histogram,
@@ -1059,6 +1101,8 @@ hipError_t multi_histogram_range(void * temporary_storage,
 ///
 /// \tparam Channels - number of channels interleaved in the input samples.
 /// \tparam ActiveChannels - number of channels being used for computing histograms.
+/// \tparam Config - [optional] configuration of the primitive. It can be \p histogram_config or
+/// a custom class with the same members.
 /// \tparam SampleIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam Counter - integer type for histogram bin counters.
@@ -1123,6 +1167,7 @@ hipError_t multi_histogram_range(void * temporary_storage,
 template<
     unsigned int Channels,
     unsigned int ActiveChannels,
+    class Config = default_config,
     class SampleIterator,
     class Counter,
     class Level
@@ -1140,7 +1185,7 @@ hipError_t multi_histogram_range(void * temporary_storage,
                                  hipStream_t stream = 0,
                                  bool debug_synchronous = false)
 {
-    return detail::histogram_range_impl<Channels, ActiveChannels>(
+    return detail::histogram_range_impl<Channels, ActiveChannels, Config>(
         temporary_storage, storage_size,
         samples, columns, rows, row_stride_bytes,
         histogram,
