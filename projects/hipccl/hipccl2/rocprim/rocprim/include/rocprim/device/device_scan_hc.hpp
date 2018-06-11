@@ -30,6 +30,8 @@
 #include "../detail/various.hpp"
 #include "../detail/match_result_type.hpp"
 
+#include "device_scan_config.hpp"
+
 #include "detail/device_scan_reduce_then_scan.hpp"
 #include "detail/device_scan_lookback.hpp"
 
@@ -54,9 +56,8 @@ namespace detail
     }
 
 template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
     bool Exclusive,
+    class Config,
     class InputIterator,
     class OutputIterator,
     class InitValueType,
@@ -79,8 +80,14 @@ void scan_impl(void * temporary_storage,
         input_type, output_type, BinaryFunction
     >::type;
 
-    constexpr unsigned int block_size = BlockSize;
-    constexpr unsigned int items_per_thread = ItemsPerThread;
+    // Get default config if Config is default_config
+    using config = default_or_custom_config<
+        Config,
+        default_scan_config<ROCPRIM_TARGET_ARCH, result_type>
+    >;
+
+    constexpr unsigned int block_size = config::block_size;
+    constexpr unsigned int items_per_thread = config::items_per_thread;
     constexpr auto items_per_block = block_size * items_per_thread;
 
     // Calculate required temporary storage
@@ -119,7 +126,7 @@ void scan_impl(void * temporary_storage,
             hc::tiled_extent<1>(grid_size, block_size),
             [=](hc::tiled_index<1>) [[hc]]
             {
-                block_reduce_kernel_impl<block_size, items_per_thread>(
+                block_reduce_kernel_impl<config>(
                     input, scan_op, block_prefixes
                 );
             }
@@ -134,7 +141,7 @@ void scan_impl(void * temporary_storage,
         auto nested_temp_storage_size = storage_size - (number_of_blocks * sizeof(result_type));
 
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-        scan_impl<BlockSize, ItemsPerThread, false>(
+        scan_impl<false, config>(
             nested_temp_storage,
             nested_temp_storage_size,
             block_prefixes, // input
@@ -155,7 +162,7 @@ void scan_impl(void * temporary_storage,
             hc::tiled_extent<1>(grid_size, block_size),
             [=](hc::tiled_index<1>) [[hc]]
             {
-                final_scan_kernel_impl<block_size, items_per_thread, Exclusive>(
+                final_scan_kernel_impl<Exclusive, config>(
                     input, size, output, static_cast<result_type>(initial_value),
                     scan_op, block_prefixes
                 );
@@ -165,16 +172,13 @@ void scan_impl(void * temporary_storage,
     }
     else
     {
-        constexpr unsigned int single_scan_block_size = BlockSize;
-        constexpr unsigned int single_scan_ipt = ItemsPerThread;
-
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         hc::parallel_for_each(
             acc_view,
-            hc::tiled_extent<1>(single_scan_block_size, single_scan_block_size),
+            hc::tiled_extent<1>(block_size, block_size),
             [=](hc::tiled_index<1>) [[hc]]
             {
-                single_scan_kernel_impl<single_scan_block_size, single_scan_ipt, Exclusive>(
+                single_scan_kernel_impl<Exclusive, config>(
                     input, size, static_cast<result_type>(initial_value), output, scan_op
                 );
             }
@@ -184,9 +188,8 @@ void scan_impl(void * temporary_storage,
 }
 
 template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
     bool Exclusive,
+    class Config,
     class InputIterator,
     class OutputIterator,
     class InitValueType,
@@ -209,11 +212,17 @@ void lookback_scan_impl(void * temporary_storage,
         input_type, output_type, BinaryFunction
     >::type;
 
+    // Get default config if Config is default_config
+    using config = default_or_custom_config<
+        Config,
+        default_scan_config<ROCPRIM_TARGET_ARCH, result_type>
+    >;
+
     using scan_state_type = detail::lookback_scan_state<result_type>;
     using ordered_block_id_type = detail::ordered_block_id<unsigned int>;
 
-    constexpr unsigned int block_size = BlockSize;
-    constexpr unsigned int items_per_thread = ItemsPerThread;
+    constexpr unsigned int block_size = config::block_size;
+    constexpr unsigned int items_per_thread = config::items_per_thread;
     constexpr auto items_per_block = block_size * items_per_thread;
     const unsigned int number_of_blocks = (size + items_per_block - 1)/items_per_block;
 
@@ -270,7 +279,7 @@ void lookback_scan_impl(void * temporary_storage,
             hc::tiled_extent<1>(grid_size, block_size),
             [=](hc::tiled_index<1>) [[hc]]
             {
-                lookback_scan_kernel_impl<BlockSize, ItemsPerThread, Exclusive>(
+                lookback_scan_kernel_impl<Exclusive, config>(
                     input, output, size, static_cast<result_type>(initial_value),
                     scan_op, scan_state, number_of_blocks, ordered_bid
                 );
@@ -280,16 +289,13 @@ void lookback_scan_impl(void * temporary_storage,
     }
     else
     {
-        constexpr unsigned int single_scan_block_size = BlockSize;
-        constexpr unsigned int single_scan_ipt = ItemsPerThread;
-
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         hc::parallel_for_each(
             acc_view,
-            hc::tiled_extent<1>(single_scan_block_size, single_scan_block_size),
+            hc::tiled_extent<1>(block_size, block_size),
             [=](hc::tiled_index<1>) [[hc]]
             {
-                single_scan_kernel_impl<single_scan_block_size, single_scan_ipt, Exclusive>(
+                single_scan_kernel_impl<Exclusive, config>(
                     input, size, static_cast<result_type>(initial_value), output, scan_op
                 );
             }
@@ -315,6 +321,8 @@ void lookback_scan_impl(void * temporary_storage,
 /// if \p temporary_storage in a null pointer.
 /// * Ranges specified by \p input and \p output must have at least \p size elements.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p scan_config or
+/// a custom class with the same members.
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
@@ -375,6 +383,7 @@ void lookback_scan_impl(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class InputIterator,
     class OutputIterator,
     class BinaryFunction = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>
@@ -398,12 +407,7 @@ void inclusive_scan(void * temporary_storage,
     // Lookback scan has problems with types that are not arithmetic
     if(::rocprim::is_arithmetic<result_type>::value)
     {
-        constexpr unsigned int block_size = 256;
-        constexpr unsigned int items_per_thread =
-            ::rocprim::max<unsigned int>(
-                (16 * sizeof(unsigned int))/sizeof(result_type), 1
-            );
-        return detail::lookback_scan_impl<block_size, items_per_thread, false>(
+        return detail::lookback_scan_impl<false, Config>(
             temporary_storage, storage_size,
             // result_type() is a dummy initial value (not used)
             input, output, result_type(), size,
@@ -412,10 +416,7 @@ void inclusive_scan(void * temporary_storage,
     }
     else
     {
-        // TODO: Those values should depend on type size
-        constexpr unsigned int block_size = 256;
-        constexpr unsigned int items_per_thread = 4;
-        return detail::scan_impl<block_size, items_per_thread, false>(
+        return detail::scan_impl<false, Config>(
             temporary_storage, storage_size,
             // result_type() is a dummy initial value (not used)
             input, output, result_type(), size,
@@ -437,6 +438,8 @@ void inclusive_scan(void * temporary_storage,
 /// if \p temporary_storage in a null pointer.
 /// * Ranges specified by \p input and \p output must have at least \p size elements.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p scan_config or
+/// a custom class with the same members.
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
@@ -507,6 +510,7 @@ void inclusive_scan(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class InputIterator,
     class OutputIterator,
     class InitValueType,
@@ -532,12 +536,7 @@ void exclusive_scan(void * temporary_storage,
     // Lookback scan has problems with types that are not arithmetic
     if(::rocprim::is_arithmetic<result_type>::value)
     {
-        constexpr unsigned int block_size = 256;
-        constexpr unsigned int items_per_thread =
-            ::rocprim::max<unsigned int>(
-                (16 * sizeof(unsigned int))/sizeof(result_type), 1
-            );
-        return detail::lookback_scan_impl<block_size, items_per_thread, true>(
+        return detail::lookback_scan_impl<true, Config>(
             temporary_storage, storage_size,
             input, output, initial_value, size,
             scan_op, acc_view, debug_synchronous
@@ -545,10 +544,7 @@ void exclusive_scan(void * temporary_storage,
     }
     else
     {
-        // TODO: Those values should depend on type size
-        constexpr unsigned int block_size = 256;
-        constexpr unsigned int items_per_thread = 4;
-        return detail::scan_impl<block_size, items_per_thread, true>(
+        return detail::scan_impl<true, Config>(
             temporary_storage, storage_size,
             input, output, initial_value, size,
             scan_op, acc_view, debug_synchronous
