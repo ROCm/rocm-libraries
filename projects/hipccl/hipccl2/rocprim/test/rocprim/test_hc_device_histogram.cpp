@@ -27,6 +27,7 @@
 #include <tuple>
 #include <vector>
 #include <utility>
+#include <stdexcept>
 
 // Google Test
 #include <gtest/gtest.h>
@@ -155,7 +156,7 @@ TEST(RocprimDeviceHistogramEven, IncorrectInput)
             d_histogram,
             1, 1, 2
         ),
-        hc::runtime_exception
+        std::invalid_argument
     );
 }
 
@@ -324,7 +325,7 @@ TEST(RocprimDeviceHistogramRange, IncorrectInput)
             d_histogram,
             1, d_levels
         ),
-        hc::runtime_exception
+        std::invalid_argument
     );
 }
 

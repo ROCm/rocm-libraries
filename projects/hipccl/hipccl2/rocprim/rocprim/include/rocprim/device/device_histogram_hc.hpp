@@ -24,6 +24,7 @@
 #include <cmath>
 #include <type_traits>
 #include <iterator>
+#include <stdexcept>
 
 #include "../config.hpp"
 #include "../functional.hpp"
@@ -87,7 +88,7 @@ void histogram_impl(void * temporary_storage,
     if(row_stride_bytes % sizeof(sample_type) != 0)
     {
         // Row stride must be a whole multiple of the sample data type size
-        throw hc::runtime_exception("Row stride must be a whole multiple of the sample data type size", 0);
+        throw std::invalid_argument("Row stride must be a whole multiple of the sample data type size");
     }
 
     const unsigned int blocks_x = ::rocprim::detail::ceiling_div(columns, items_per_block);
@@ -229,7 +230,7 @@ void histogram_even_impl(void * temporary_storage,
         if(levels[channel] < 2)
         {
             // Histogram must have at least 1 bin
-            throw hc::runtime_exception("`levels` must be at least 2", 0);
+            throw std::invalid_argument("`levels` must be at least 2");
         }
     }
 
@@ -277,7 +278,7 @@ void histogram_range_impl(void * temporary_storage,
         if(levels[channel] < 2)
         {
             // Histogram must have at least 1 bin
-            throw hc::runtime_exception("`levels` must be at least 2", 0);
+            throw std::invalid_argument("`levels` must be at least 2");
         }
     }
 
