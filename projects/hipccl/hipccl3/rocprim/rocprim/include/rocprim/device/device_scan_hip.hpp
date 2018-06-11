@@ -31,7 +31,6 @@
 #include "../detail/match_result_type.hpp"
 
 #include "device_scan_config.hpp"
-
 #include "detail/device_scan_reduce_then_scan.hpp"
 #include "detail/device_scan_lookback.hpp"
 

@@ -58,8 +58,7 @@ namespace detail
 
 template<
     bool Exclusive,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
+    class Config,
     class InputIterator,
     class OutputIterator,
     class OffsetIterator,
@@ -85,8 +84,13 @@ void segmented_scan_impl(void * temporary_storage,
         input_type, output_type, BinaryFunction
     >::type;
 
-    constexpr unsigned int block_size = BlockSize;
-    constexpr unsigned int items_per_thread = ItemsPerThread;
+    // Get default config if Config is default_config
+    using config = default_or_custom_config<
+        Config,
+        default_scan_config<ROCPRIM_TARGET_ARCH, result_type>
+    >;
+
+    constexpr unsigned int block_size = config::block_size;
 
     if(temporary_storage == nullptr)
     {
@@ -103,7 +107,7 @@ void segmented_scan_impl(void * temporary_storage,
         hc::tiled_extent<1>(segments * block_size, block_size),
         [=](hc::tiled_index<1>) [[hc]]
         {
-            segmented_scan<Exclusive, block_size, items_per_thread, result_type>(
+            segmented_scan<Exclusive, config, result_type>(
                 input, output,
                 begin_offsets, end_offsets,
                 static_cast<result_type>(initial_value), scan_op
@@ -131,6 +135,8 @@ void segmented_scan_impl(void * temporary_storage,
 /// <tt>segments + 1</tt> elements: <tt>offsets</tt> for \p begin_offsets and
 /// <tt>offsets + 1</tt> for \p end_offsets.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p scan_config or
+/// a custom class with the same members.
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ RandomAccessIterator concept. It can be a simple pointer type.
 /// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
@@ -205,6 +211,7 @@ void segmented_scan_impl(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class InputIterator,
     class OutputIterator,
     class OffsetIterator,
@@ -228,10 +235,7 @@ void segmented_inclusive_scan(void * temporary_storage,
         input_type, output_type, BinaryFunction
     >::type;
 
-    // TODO: Those values should depend on type size
-    constexpr unsigned int block_size = 256;
-    constexpr unsigned int items_per_thread = 8;
-    return detail::segmented_scan_impl<false, block_size, items_per_thread>(
+    return detail::segmented_scan_impl<false, Config>(
         temporary_storage, storage_size,
         input, output, segments, begin_offsets, end_offsets, result_type(),
         scan_op, acc_view, debug_synchronous
@@ -252,6 +256,8 @@ void segmented_inclusive_scan(void * temporary_storage,
 /// <tt>segments + 1</tt> elements: <tt>offsets</tt> for \p begin_offsets and
 /// <tt>offsets + 1</tt> for \p end_offsets.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p scan_config or
+/// a custom class with the same members.
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ RandomAccessIterator concept. It can be a simple pointer type.
 /// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
@@ -329,6 +335,7 @@ void segmented_inclusive_scan(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class InputIterator,
     class OutputIterator,
     class OffsetIterator,
@@ -348,10 +355,7 @@ void segmented_exclusive_scan(void * temporary_storage,
                               hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
                               const bool debug_synchronous = false)
 {
-    // TODO: Those values should depend on type size
-    constexpr unsigned int block_size = 256;
-    constexpr unsigned int items_per_thread = 8;
-    return detail::segmented_scan_impl<true, block_size, items_per_thread>(
+    return detail::segmented_scan_impl<true, Config>(
         temporary_storage, storage_size,
         input, output, segments, begin_offsets, end_offsets, initial_value,
         scan_op, acc_view, debug_synchronous
@@ -371,6 +375,8 @@ void segmented_exclusive_scan(void * temporary_storage,
 /// * Ranges specified by \p input, \p output, and \p flags must have at least \p size elements.
 /// * \p value_type of \p HeadFlagIterator iterator should be convertible to \p bool type.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p scan_config or
+/// a custom class with the same members.
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ RandomAccessIterator concept. It can be a simple pointer type.
 /// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
@@ -436,6 +442,7 @@ void segmented_exclusive_scan(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class InputIterator,
     class OutputIterator,
     class HeadFlagIterator,
@@ -459,7 +466,7 @@ void segmented_inclusive_scan(void * temporary_storage,
             input_type, flag_type, BinaryFunction
         >;
 
-    return inclusive_scan(
+    return inclusive_scan<Config>(
         temporary_storage, storage_size,
         make_zip_iterator(make_tuple(input, head_flags)),
         make_zip_iterator(make_tuple(output, make_discard_iterator())),
@@ -481,6 +488,8 @@ void segmented_inclusive_scan(void * temporary_storage,
 /// * Ranges specified by \p input, \p output, and \p flags must have at least \p size elements.
 /// * \p value_type of \p HeadFlagIterator iterator should be convertible to \p bool type.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p scan_config or
+/// a custom class with the same members.
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ RandomAccessIterator concept. It can be a simple pointer type.
 /// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
@@ -549,6 +558,7 @@ void segmented_inclusive_scan(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class InputIterator,
     class OutputIterator,
     class HeadFlagIterator,
@@ -574,7 +584,7 @@ void segmented_exclusive_scan(void * temporary_storage,
             input_type, flag_type, BinaryFunction
         >;
 
-    return inclusive_scan(
+    return inclusive_scan<Config>(
         temporary_storage, storage_size,
         // Using replace_first_iterator shifts input one item to left and replaces
         // first value with initial_value. Then transform_iterator replaces last
