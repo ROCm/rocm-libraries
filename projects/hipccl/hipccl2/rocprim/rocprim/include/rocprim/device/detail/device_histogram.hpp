@@ -31,6 +31,8 @@
 #include "../../intrinsics.hpp"
 #include "../../functional.hpp"
 
+#include "uint_fast_div.hpp"
+
 BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
@@ -103,7 +105,7 @@ public:
     }
 };
 
-template<class Level>
+template<class Level, class Enable = void>
 struct sample_to_bin_even
 {
     unsigned int bins;
@@ -124,17 +126,83 @@ struct sample_to_bin_even
 
     template<class Sample>
     ROCPRIM_HOST_DEVICE inline
-    int operator()(Sample sample) const
+    bool operator()(Sample sample, unsigned int& bin) const
     {
         const Level s = static_cast<Level>(sample);
         if(s >= lower_level && s < upper_level)
         {
-            return (s - lower_level) / scale;
+            bin = static_cast<unsigned int>((s - lower_level) / scale);
+            return true;
         }
-        else
+        return false;
+    }
+};
+
+// This specialization uses fast division (uint_fast_div) for integers smaller than 64 bit
+template<class Level>
+struct sample_to_bin_even<Level, typename std::enable_if<std::is_integral<Level>::value && (sizeof(Level) <= 4)>::type>
+{
+    unsigned int bins;
+    Level lower_level;
+    Level upper_level;
+    uint_fast_div scale;
+
+    ROCPRIM_HOST_DEVICE inline
+    sample_to_bin_even() = default;
+
+    ROCPRIM_HOST_DEVICE inline
+    sample_to_bin_even(unsigned int bins, Level lower_level, Level upper_level)
+        : bins(bins),
+          lower_level(lower_level),
+          upper_level(upper_level),
+          scale((upper_level - lower_level) / bins)
+    {}
+
+    template<class Sample>
+    ROCPRIM_HOST_DEVICE inline
+    bool operator()(Sample sample, unsigned int& bin) const
+    {
+        const Level s = static_cast<Level>(sample);
+        if(s >= lower_level && s < upper_level)
         {
-            return -1;
+            bin = static_cast<unsigned int>(s - lower_level) / scale;
+            return true;
         }
+        return false;
+    }
+};
+
+// This specialization uses multiplication by inv divisor for floats
+template<class Level>
+struct sample_to_bin_even<Level, typename std::enable_if<std::is_floating_point<Level>::value>::type>
+{
+    unsigned int bins;
+    Level lower_level;
+    Level upper_level;
+    Level inv_scale;
+
+    ROCPRIM_HOST_DEVICE inline
+    sample_to_bin_even() = default;
+
+    ROCPRIM_HOST_DEVICE inline
+    sample_to_bin_even(unsigned int bins, Level lower_level, Level upper_level)
+        : bins(bins),
+          lower_level(lower_level),
+          upper_level(upper_level),
+          inv_scale(bins / (upper_level - lower_level))
+    {}
+
+    template<class Sample>
+    ROCPRIM_HOST_DEVICE inline
+    bool operator()(Sample sample, unsigned int& bin) const
+    {
+        const Level s = static_cast<Level>(sample);
+        if(s >= lower_level && s < upper_level)
+        {
+            bin = static_cast<unsigned int>((s - lower_level) * inv_scale);
+            return true;
+        }
+        return false;
     }
 };
 
@@ -177,18 +245,11 @@ struct sample_to_bin_range
 
     template<class Sample>
     ROCPRIM_HOST_DEVICE inline
-    int operator()(Sample sample) const
+    bool operator()(Sample sample, unsigned int& bin) const
     {
         const Level s = static_cast<Level>(sample);
-        const unsigned int bin = upper_bound(level_values, bins + 1, s) - 1;
-        if(bin < bins)
-        {
-            return bin;
-        }
-        else
-        {
-            return -1;
-        }
+        bin = upper_bound(level_values, bins + 1, s) - 1;
+        return bin < bins;
     }
 };
 
@@ -198,10 +259,74 @@ struct sample_vector
     T values[Size];
 };
 
-// TODO: add overloads for cases when SampleIterator is a pointer
-// reinterpret_cast<const sample_vector_type *>(samples)
+// Checks if it is possible to load 2 or 4 sample_vector<Sample, Channels> as one 32-bit value
+template<
+    unsigned int ItemsPerThread,
+    unsigned int Channels,
+    class Sample
+>
+struct is_sample_vectorizable
+    : std::integral_constant<
+        bool,
+        ((sizeof(Sample) * Channels == 1) || (sizeof(Sample) * Channels == 2)) &&
+        (sizeof(Sample) * Channels * ItemsPerThread % sizeof(int) == 0) &&
+        (sizeof(Sample) * Channels * ItemsPerThread / sizeof(int) > 0)
+    > { };
 
 template<
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    unsigned int Channels,
+    class Sample
+>
+ROCPRIM_DEVICE inline
+typename std::enable_if<is_sample_vectorizable<ItemsPerThread, Channels, Sample>::value>::type
+load_samples(unsigned int flat_id,
+             Sample * samples,
+             sample_vector<Sample, Channels> (&values)[ItemsPerThread])
+{
+    using packed_samples_type = int[sizeof(Sample) * Channels * ItemsPerThread / sizeof(int)];
+
+    if(reinterpret_cast<uintptr_t>(samples) % sizeof(int) == 0)
+    {
+        // the pointer is aligned by 4 bytes
+        block_load_direct_striped<BlockSize>(
+            flat_id,
+            reinterpret_cast<const int *>(samples),
+            reinterpret_cast<packed_samples_type&>(values)
+        );
+    }
+    else
+    {
+        block_load_direct_striped<BlockSize>(
+            flat_id,
+            reinterpret_cast<const sample_vector<Sample, Channels> *>(samples),
+            values
+        );
+    }
+}
+
+template<
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    unsigned int Channels,
+    class Sample
+>
+ROCPRIM_DEVICE inline
+typename std::enable_if<!is_sample_vectorizable<ItemsPerThread, Channels, Sample>::value>::type
+load_samples(unsigned int flat_id,
+             Sample * samples,
+             sample_vector<Sample, Channels> (&values)[ItemsPerThread])
+{
+    block_load_direct_striped<BlockSize>(
+        flat_id,
+        reinterpret_cast<const sample_vector<Sample, Channels> *>(samples),
+        values
+    );
+}
+
+template<
+    unsigned int BlockSize,
     unsigned int ItemsPerThread,
     unsigned int Channels,
     class Sample,
@@ -228,6 +353,7 @@ void load_samples(unsigned int flat_id,
 }
 
 template<
+    unsigned int BlockSize,
     unsigned int ItemsPerThread,
     unsigned int Channels,
     class Sample,
@@ -291,6 +417,7 @@ void histogram_shared(SampleIterator samples,
                       unsigned int columns,
                       unsigned int rows,
                       unsigned int row_stride,
+                      unsigned int rows_per_block,
                       fixed_array<Counter *, ActiveChannels> histogram,
                       fixed_array<SampleToBinOp, ActiveChannels> sample_to_bin_op,
                       fixed_array<unsigned int, ActiveChannels> bins,
@@ -305,8 +432,6 @@ void histogram_shared(SampleIterator samples,
     const unsigned int block_id0 = ::rocprim::detail::block_id<0>();
     const unsigned int block_id1 = ::rocprim::detail::block_id<1>();
     const unsigned int grid_size0 = ::rocprim::detail::grid_size<0>();
-    const unsigned int grid_size1 = ::rocprim::detail::grid_size<1>();
-    const unsigned int rows_per_block = ::rocprim::detail::ceiling_div(rows, grid_size1);
 
     unsigned int * block_histogram[ActiveChannels];
     for(unsigned int channel = 0; channel < ActiveChannels; channel++)
@@ -331,28 +456,38 @@ void histogram_shared(SampleIterator samples,
         {
             sample_vector_type values[ItemsPerThread];
 
-            unsigned int valid_count;
             if(block_offset + items_per_block <= columns)
             {
-                valid_count = items_per_block;
-                load_samples(flat_id, row_samples + Channels * block_offset, values);
-            }
-            else
-            {
-                valid_count = columns - block_offset;
-                load_samples(flat_id, row_samples + Channels * block_offset, values, valid_count);
-            }
+                load_samples<BlockSize>(flat_id, row_samples + Channels * block_offset, values);
 
-            for(unsigned int i = 0; i < ItemsPerThread; i++)
-            {
-                if(flat_id * ItemsPerThread + i < valid_count)
+                for(unsigned int i = 0; i < ItemsPerThread; i++)
                 {
                     for(unsigned int channel = 0; channel < ActiveChannels; channel++)
                     {
-                        const int bin = sample_to_bin_op[channel](values[i].values[channel]);
-                        if(bin != -1)
+                        unsigned int bin;
+                        if(sample_to_bin_op[channel](values[i].values[channel], bin))
                         {
                             ::rocprim::detail::atomic_add(&block_histogram[channel][bin], 1);
+                        }
+                    }
+                }
+            }
+            else
+            {
+                const unsigned int valid_count = columns - block_offset;
+                load_samples<BlockSize>(flat_id, row_samples + Channels * block_offset, values, valid_count);
+
+                for(unsigned int i = 0; i < ItemsPerThread; i++)
+                {
+                    if(flat_id * ItemsPerThread + i < valid_count)
+                    {
+                        for(unsigned int channel = 0; channel < ActiveChannels; channel++)
+                        {
+                            unsigned int bin;
+                            if(sample_to_bin_op[channel](values[i].values[channel], bin))
+                            {
+                                ::rocprim::detail::atomic_add(&block_histogram[channel][bin], 1);
+                            }
                         }
                     }
                 }
@@ -409,20 +544,20 @@ void histogram_global(SampleIterator samples,
     if(block_offset + items_per_block <= columns)
     {
         valid_count = items_per_block;
-        load_samples(flat_id, samples, values);
+        load_samples<BlockSize>(flat_id, samples, values);
     }
     else
     {
         valid_count = columns - block_offset;
-        load_samples(flat_id, samples, values, valid_count);
+        load_samples<BlockSize>(flat_id, samples, values, valid_count);
     }
 
     for(unsigned int i = 0; i < ItemsPerThread; i++)
     {
         for(unsigned int channel = 0; channel < ActiveChannels; channel++)
         {
-            const int bin = sample_to_bin_op[channel](values[i].values[channel]);
-            if(bin != -1)
+            unsigned int bin;
+            if(sample_to_bin_op[channel](values[i].values[channel], bin))
             {
                 const unsigned int pos = flat_id * ItemsPerThread + i;
                 unsigned long long same_bin_lanes_mask = ::rocprim::ballot(pos < valid_count);
