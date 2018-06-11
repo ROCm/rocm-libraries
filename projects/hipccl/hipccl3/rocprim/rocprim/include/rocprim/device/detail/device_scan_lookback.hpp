@@ -49,7 +49,7 @@ template<class LookBackScanState>
 ROCPRIM_DEVICE inline
 void init_lookback_scan_state_kernel_impl(LookBackScanState lookback_scan_state,
                                           const unsigned int number_of_blocks,
-                                          ordered_block_id<unsigned int> ordered_block_id)
+                                          ordered_block_id<unsigned int> ordered_bid)
 {
     const unsigned int block_id = ::rocprim::detail::block_id<0>();
     const unsigned int block_size = ::rocprim::detail::block_size<0>();
@@ -59,7 +59,7 @@ void init_lookback_scan_state_kernel_impl(LookBackScanState lookback_scan_state,
     // Reset ordered_block_id
     if(id == 0)
     {
-        ordered_block_id.reset();
+        ordered_bid.reset();
     }
     // Initialize lookback scan status
     lookback_scan_state.initialize_prefix(id, number_of_blocks);
