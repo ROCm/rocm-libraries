@@ -168,9 +168,8 @@ auto lookback_block_scan(T (&values)[ItemsPerThread],
 }
 
 template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
     bool Exclusive,
+    class Config,
     class InputIterator,
     class OutputIterator,
     class BinaryFunction,
@@ -193,17 +192,21 @@ void lookback_scan_kernel_impl(InputIterator input,
         "value_type of LookbackScanState must be result_type"
     );
 
+    constexpr auto block_size = Config::block_size;
+    constexpr auto items_per_thread = Config::items_per_thread;
+    constexpr unsigned int items_per_block = block_size * items_per_thread;
+
     using block_load_type = ::rocprim::block_load<
-        result_type, BlockSize, ItemsPerThread,
-        ::rocprim::block_load_method::block_load_transpose
+        result_type, block_size, items_per_thread,
+        Config::block_load_method
     >;
     using block_store_type = ::rocprim::block_store<
-        result_type, BlockSize, ItemsPerThread,
-        ::rocprim::block_store_method::block_store_transpose
+        result_type, block_size, items_per_thread,
+        Config::block_store_method
     >;
     using block_scan_type = ::rocprim::block_scan<
-        result_type, BlockSize,
-        ::rocprim::block_scan_algorithm::using_warp_scan
+        result_type, block_size,
+        Config::block_scan_method
     >;
 
     using order_bid_type = ordered_block_id<unsigned int>;
@@ -219,15 +222,13 @@ void lookback_scan_kernel_impl(InputIterator input,
         typename block_scan_type::storage_type scan;
     } storage;
 
-    constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
-
     const auto flat_block_thread_id = ::rocprim::detail::block_thread_id<0>();
     const auto flat_block_id = ordered_bid.get(flat_block_thread_id, storage.ordered_bid);
     const unsigned int block_offset = flat_block_id * items_per_block;
     const auto valid_in_last_block = size - items_per_block * (number_of_blocks - 1);
 
     // For input values
-    result_type values[ItemsPerThread];
+    result_type values[items_per_thread];
 
     // load input values into values
     if(flat_block_id == (number_of_blocks - 1)) // last block
