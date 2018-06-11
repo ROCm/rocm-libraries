@@ -52,6 +52,8 @@ BEGIN_ROCPRIM_NAMESPACE
 /// * Ranges specified by \p keys_input, \p values_input, and \p values_output must have
 /// at least \p size elements.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p scan_config or
+/// a custom class with the same members.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. It can be
 /// a simple pointer type.
 /// \tparam ValuesInputIterator - random-access iterator type of the input range. It can be
@@ -127,6 +129,7 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class KeysInputIterator,
     class ValuesInputIterator,
     class ValuesOutputIterator,
@@ -151,7 +154,7 @@ hipError_t inclusive_scan_by_key(void * temporary_storage,
         input_type, key_type, BinaryFunction, KeyCompareFunction
     >;
 
-    return inclusive_scan(
+    return inclusive_scan<Config>(
         temporary_storage, storage_size,
         make_zip_iterator(
             make_tuple(values_input, keys_input)
@@ -180,6 +183,8 @@ hipError_t inclusive_scan_by_key(void * temporary_storage,
 /// * Ranges specified by \p keys_input, \p values_input, and \p values_output must have
 /// at least \p size elements.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p scan_config or
+/// a custom class with the same members.
 /// \tparam KeysInputIterator - random-access iterator type of the input range. It can be
 /// a simple pointer type.
 /// \tparam ValuesInputIterator - random-access iterator type of the input range. It can be
@@ -258,6 +263,7 @@ hipError_t inclusive_scan_by_key(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class KeysInputIterator,
     class ValuesInputIterator,
     class ValuesOutputIterator,
@@ -284,7 +290,7 @@ hipError_t exclusive_scan_by_key(void * temporary_storage,
         input_type, key_type, BinaryFunction, KeyCompareFunction
     >;
 
-    return inclusive_scan(
+    return inclusive_scan<Config>(
         temporary_storage, storage_size,
         make_transform_iterator(
             make_zip_iterator(
