@@ -111,8 +111,7 @@ auto segmented_scan_block_scan(T (&input)[ItemsPerThread],
 
 template<
     bool Exclusive,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
+    class Config,
     class ResultType,
     class InputIterator,
     class OutputIterator,
@@ -128,20 +127,22 @@ void segmented_scan(InputIterator input,
                     InitValueType initial_value,
                     BinaryFunction scan_op)
 {
-    constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
+    constexpr auto block_size = Config::block_size;
+    constexpr auto items_per_thread = Config::items_per_thread;
+    constexpr unsigned int items_per_block = block_size * items_per_thread;
 
     using result_type = ResultType;
     using block_load_type = ::rocprim::block_load<
-        result_type, BlockSize, ItemsPerThread,
-        ::rocprim::block_load_method::block_load_transpose
+        result_type, block_size, items_per_thread,
+        Config::block_load_method
     >;
     using block_store_type = ::rocprim::block_store<
-        result_type, BlockSize, ItemsPerThread,
-        ::rocprim::block_store_method::block_store_transpose
+        result_type, block_size, items_per_thread,
+        Config::block_store_method
     >;
     using block_scan_type = ::rocprim::block_scan<
-        result_type, BlockSize,
-        ::rocprim::block_scan_algorithm::using_warp_scan
+        result_type, block_size,
+        Config::block_scan_method
     >;
 
     ROCPRIM_SHARED_MEMORY union
@@ -162,7 +163,7 @@ void segmented_scan(InputIterator input,
     }
 
     // Input values
-    result_type values[ItemsPerThread];
+    result_type values[items_per_thread];
     result_type prefix = initial_value;
 
     unsigned int block_offset = begin_offset;
