@@ -46,9 +46,7 @@ namespace detail
 {
 
 template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    unsigned int RadixBits,
+    class Config,
     bool Descending,
     class KeysInputIterator,
     class KeysOutputIterator,
@@ -58,18 +56,25 @@ template<
 >
 __global__
 void segmented_sort_kernel(KeysInputIterator keys_input,
+                           typename std::iterator_traits<KeysInputIterator>::value_type * keys_tmp,
                            KeysOutputIterator keys_output,
                            ValuesInputIterator values_input,
+                           typename std::iterator_traits<ValuesInputIterator>::value_type * values_tmp,
                            ValuesOutputIterator values_output,
+                           bool to_output,
                            OffsetIterator begin_offsets,
                            OffsetIterator end_offsets,
-                           unsigned int bit,
-                           unsigned int current_radix_bits)
+                           unsigned int long_iterations,
+                           unsigned int short_iterations,
+                           unsigned int begin_bit,
+                           unsigned int end_bit)
 {
-    segmented_sort<BlockSize, ItemsPerThread, RadixBits, Descending>(
-        keys_input, keys_output, values_input, values_output,
+    segmented_sort<Config, Descending>(
+        keys_input, keys_tmp, keys_output, values_input, values_tmp, values_output,
+        to_output,
         begin_offsets, end_offsets,
-        bit, current_radix_bits
+        long_iterations, short_iterations,
+        begin_bit, end_bit
     );
 }
 
@@ -87,111 +92,6 @@ void segmented_sort_kernel(KeysInputIterator keys_input,
             std::cout << " " << d.count() * 1000 << " ms" << '\n'; \
         } \
     }
-
-template<
-    class Config,
-    unsigned int RadixBits,
-    bool Descending,
-    class KeysInputIterator,
-    class KeysOutputIterator,
-    class ValuesInputIterator,
-    class ValuesOutputIterator,
-    class OffsetIterator
->
-inline
-hipError_t segmented_radix_sort_iteration(KeysInputIterator keys_input,
-                                          typename std::iterator_traits<KeysInputIterator>::value_type * keys_tmp,
-                                          KeysOutputIterator keys_output,
-                                          ValuesInputIterator values_input,
-                                          typename std::iterator_traits<ValuesInputIterator>::value_type * values_tmp,
-                                          ValuesOutputIterator values_output,
-                                          bool to_output,
-                                          unsigned int segments,
-                                          OffsetIterator begin_offsets,
-                                          OffsetIterator end_offsets,
-                                          unsigned int bit,
-                                          unsigned int begin_bit,
-                                          unsigned int end_bit,
-                                          hipStream_t stream,
-                                          bool debug_synchronous)
-{
-    constexpr unsigned int block_size = Config::sort::block_size;
-    constexpr unsigned int items_per_thread = Config::sort::items_per_thread;
-
-    // Handle cases when (end_bit - bit) is not divisible by radix_bits, i.e. the last
-    // iteration has a shorter mask.
-    const unsigned int current_radix_bits = ::rocprim::min(RadixBits, end_bit - bit);
-
-    const bool is_first_iteration = (bit == begin_bit);
-
-    std::chrono::high_resolution_clock::time_point start;
-
-    if(debug_synchronous)
-    {
-        std::cout << "RadixBits " << RadixBits << '\n';
-        std::cout << "bit " << bit << '\n';
-        std::cout << "current_radix_bits " << current_radix_bits << '\n';
-    }
-
-    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    if(is_first_iteration)
-    {
-        if(to_output)
-        {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(segmented_sort_kernel<
-                    block_size, items_per_thread, RadixBits, Descending
-                >),
-                dim3(segments), dim3(block_size), 0, stream,
-                keys_input, keys_output, values_input, values_output,
-                begin_offsets, end_offsets,
-                bit, current_radix_bits
-            );
-        }
-        else
-        {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(segmented_sort_kernel<
-                    block_size, items_per_thread, RadixBits, Descending
-                >),
-                dim3(segments), dim3(block_size), 0, stream,
-                keys_input, keys_tmp, values_input, values_tmp,
-                begin_offsets, end_offsets,
-                bit, current_radix_bits
-            );
-        }
-    }
-    else
-    {
-        if(to_output)
-        {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(segmented_sort_kernel<
-                    block_size, items_per_thread, RadixBits, Descending
-                >),
-                dim3(segments), dim3(block_size), 0, stream,
-                keys_tmp, keys_output, values_tmp, values_output,
-                begin_offsets, end_offsets,
-                bit, current_radix_bits
-            );
-        }
-        else
-        {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(segmented_sort_kernel<
-                    block_size, items_per_thread, RadixBits, Descending
-                >),
-                dim3(segments), dim3(block_size), 0, stream,
-                keys_output, keys_tmp, values_output, values_tmp,
-                begin_offsets, end_offsets,
-                bit, current_radix_bits
-            );
-        }
-    }
-    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_sort", segments, start)
-
-    return hipSuccess;
-}
 
 template<
     class Config,
@@ -273,38 +173,23 @@ hipError_t segmented_radix_sort_impl(void * temporary_storage,
         values_tmp = with_values ? reinterpret_cast<value_type *>(ptr) : nullptr;
     }
 
-    bool to_output = with_double_buffer || (iterations - 1) % 2 == 0;
-    unsigned int bit = begin_bit;
-    for(unsigned int i = 0; i < long_iterations; i++)
-    {
-        hipError_t error = segmented_radix_sort_iteration<config, config::long_radix_bits, Descending>(
-            keys_input, keys_tmp, keys_output, values_input, values_tmp, values_output,
-            to_output,
-            segments, begin_offsets, end_offsets,
-            bit, begin_bit, end_bit,
-            stream, debug_synchronous
-        );
-        if(error != hipSuccess) return error;
+    const bool to_output = with_double_buffer || (iterations - 1) % 2 == 0;
 
-        is_result_in_output = to_output;
-        to_output = !to_output;
-        bit += config::long_radix_bits;
-    }
-    for(unsigned int i = 0; i < short_iterations; i++)
-    {
-        hipError_t error = segmented_radix_sort_iteration<config, config::short_radix_bits, Descending>(
-            keys_input, keys_tmp, keys_output, values_input, values_tmp, values_output,
-            to_output,
-            segments, begin_offsets, end_offsets,
-            bit, begin_bit, end_bit,
-            stream, debug_synchronous
-        );
-        if(error != hipSuccess) return error;
+    std::chrono::high_resolution_clock::time_point start;
 
-        is_result_in_output = to_output;
-        to_output = !to_output;
-        bit += config::short_radix_bits;
-    }
+    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
+    hipLaunchKernelGGL(
+        HIP_KERNEL_NAME(segmented_sort_kernel<config, Descending>),
+        dim3(segments), dim3(config::sort::block_size), 0, stream,
+        keys_input, keys_tmp, keys_output, values_input, values_tmp, values_output,
+        to_output,
+        begin_offsets, end_offsets,
+        long_iterations, short_iterations,
+        begin_bit, end_bit
+    );
+    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_sort", segments, start)
+
+    is_result_in_output = ((iterations % 2 == 0) != to_output);
 
     return hipSuccess;
 }
