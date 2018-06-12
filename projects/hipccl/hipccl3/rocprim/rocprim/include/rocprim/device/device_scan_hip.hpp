@@ -30,6 +30,7 @@
 #include "../detail/various.hpp"
 #include "../detail/match_result_type.hpp"
 
+#include "device_scan_config.hpp"
 #include "detail/device_scan_reduce_then_scan.hpp"
 #include "detail/device_scan_lookback.hpp"
 
@@ -41,11 +42,10 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-// Single kernel scan (handles only (BlockSize * ItemsPerThread) or less)
+// Single kernel scan (performs scan on one thread block only)
 template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
     bool Exclusive,
+    class Config,
     class InputIterator,
     class OutputIterator,
     class BinaryFunction,
@@ -58,7 +58,7 @@ void single_scan_kernel(InputIterator input,
                         OutputIterator output,
                         BinaryFunction scan_op)
 {
-    single_scan_kernel_impl<BlockSize, ItemsPerThread, Exclusive>(
+    single_scan_kernel_impl<Exclusive, Config>(
         input, size, initial_value, output, scan_op
     );
 }
@@ -68,8 +68,7 @@ void single_scan_kernel(InputIterator input,
 // Calculates block prefixes that will be used in final_scan_kernel
 // when performing block scan operations.
 template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
+    class Config,
     class InputIterator,
     class BinaryFunction,
     class ResultType
@@ -79,15 +78,14 @@ void block_reduce_kernel(InputIterator input,
                          BinaryFunction scan_op,
                          ResultType * block_prefixes)
 {
-    block_reduce_kernel_impl<BlockSize, ItemsPerThread>(
+    block_reduce_kernel_impl<Config>(
         input, scan_op, block_prefixes
     );
 }
 
 template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
     bool Exclusive,
+    class Config,
     class InputIterator,
     class OutputIterator,
     class BinaryFunction,
@@ -101,7 +99,7 @@ void final_scan_kernel(InputIterator input,
                        BinaryFunction scan_op,
                        ResultType * block_prefixes)
 {
-    final_scan_kernel_impl<BlockSize, ItemsPerThread, Exclusive>(
+    final_scan_kernel_impl<Exclusive, Config>(
         input, size, output, initial_value, scan_op, block_prefixes
     );
 }
@@ -109,9 +107,8 @@ void final_scan_kernel(InputIterator input,
 // Single pass (look-back kernels)
 
 template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
     bool Exclusive,
+    class Config,
     class InputIterator,
     class OutputIterator,
     class BinaryFunction,
@@ -128,7 +125,7 @@ void lookback_scan_kernel(InputIterator input,
                           const unsigned int number_of_blocks,
                           ordered_block_id<unsigned int> ordered_bid)
 {
-    lookback_scan_kernel_impl<BlockSize, ItemsPerThread, Exclusive>(
+    lookback_scan_kernel_impl<Exclusive, Config>(
         input, output, size, initial_value, scan_op,
         lookback_scan_state, number_of_blocks, ordered_bid
     );
@@ -172,9 +169,8 @@ void init_lookback_scan_state_kernel(LookBackScanState lookback_scan_state,
     }
 
 template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
     bool Exclusive,
+    class Config,
     class InputIterator,
     class OutputIterator,
     class InitValueType,
@@ -197,8 +193,14 @@ hipError_t scan_impl(void * temporary_storage,
         input_type, output_type, BinaryFunction
     >::type;
 
-    constexpr unsigned int block_size = BlockSize;
-    constexpr unsigned int items_per_thread = ItemsPerThread;
+    // Get default config if Config is default_config
+    using config = default_or_custom_config<
+        Config,
+        default_scan_config<ROCPRIM_TARGET_ARCH, result_type>
+    >;
+
+    constexpr unsigned int block_size = config::block_size;
+    constexpr unsigned int items_per_thread = config::items_per_thread;
     constexpr auto items_per_block = block_size * items_per_thread;
 
     // Calculate required temporary storage
@@ -233,8 +235,7 @@ hipError_t scan_impl(void * temporary_storage,
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(detail::block_reduce_kernel<
-                block_size, items_per_thread,
-                InputIterator, BinaryFunction, result_type
+                config, InputIterator, BinaryFunction, result_type
             >),
             dim3(grid_size), dim3(block_size), 0, stream,
             input, scan_op, block_prefixes
@@ -249,7 +250,7 @@ hipError_t scan_impl(void * temporary_storage,
         auto nested_temp_storage_size = storage_size - (number_of_blocks * sizeof(result_type));
 
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-        auto error = scan_impl<BlockSize, ItemsPerThread, false>(
+        auto error = scan_impl<false, config>(
             nested_temp_storage,
             nested_temp_storage_size,
             block_prefixes, // input
@@ -268,8 +269,8 @@ hipError_t scan_impl(void * temporary_storage,
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(detail::final_scan_kernel<
-                block_size, items_per_thread,
                 Exclusive, // flag for exclusive scan operation
+                config, // kernel configuration (block size, ipt)
                 InputIterator, OutputIterator,
                 BinaryFunction, result_type
             >),
@@ -285,17 +286,14 @@ hipError_t scan_impl(void * temporary_storage,
     }
     else
     {
-        constexpr unsigned int single_scan_bs = BlockSize;
-        constexpr unsigned int single_scan_ipt = ItemsPerThread;
-
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(detail::single_scan_kernel<
-                single_scan_bs, single_scan_ipt,
                 Exclusive, // flag for exclusive scan operation
+                config, // kernel configuration (block size, ipt)
                 InputIterator, OutputIterator, BinaryFunction
             >),
-            dim3(1), dim3(single_scan_bs), 0, stream,
+            dim3(1), dim3(block_size), 0, stream,
             input, size, static_cast<result_type>(initial_value), output, scan_op
         );
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("single_scan_kernel", size, start);
@@ -304,9 +302,8 @@ hipError_t scan_impl(void * temporary_storage,
 }
 
 template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
     bool Exclusive,
+    class Config,
     class InputIterator,
     class OutputIterator,
     class InitValueType,
@@ -329,11 +326,17 @@ hipError_t lookback_scan_impl(void * temporary_storage,
         input_type, output_type, BinaryFunction
     >::type;
 
+    // Get default config if Config is default_config
+    using config = default_or_custom_config<
+        Config,
+        default_scan_config<ROCPRIM_TARGET_ARCH, result_type>
+    >;
+
     using scan_state_type = detail::lookback_scan_state<result_type>;
     using ordered_block_id_type = detail::ordered_block_id<unsigned int>;
 
-    constexpr unsigned int block_size = BlockSize;
-    constexpr unsigned int items_per_thread = ItemsPerThread;
+    constexpr unsigned int block_size = config::block_size;
+    constexpr unsigned int items_per_thread = config::items_per_thread;
     constexpr auto items_per_block = block_size * items_per_thread;
     const unsigned int number_of_blocks = (size + items_per_block - 1)/items_per_block;
 
@@ -382,7 +385,8 @@ hipError_t lookback_scan_impl(void * temporary_storage,
         grid_size = number_of_blocks;
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(lookback_scan_kernel<
-                BlockSize, ItemsPerThread, Exclusive,
+                Exclusive, // flag for exclusive scan operation
+                config, // kernel configuration (block size, ipt)
                 InputIterator, OutputIterator,
                 BinaryFunction, result_type, scan_state_type
             >),
@@ -394,17 +398,14 @@ hipError_t lookback_scan_impl(void * temporary_storage,
     }
     else
     {
-        constexpr unsigned int single_scan_block_size = BlockSize;
-        constexpr unsigned int single_scan_ipt = ItemsPerThread;
-
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(single_scan_kernel<
-                single_scan_block_size, single_scan_ipt,
                 Exclusive, // flag for exclusive scan operation
+                config, // kernel configuration (block size, ipt)
                 InputIterator, OutputIterator, BinaryFunction
             >),
-            dim3(1), dim3(single_scan_block_size), 0, stream,
+            dim3(1), dim3(block_size), 0, stream,
             input, size, static_cast<result_type>(initial_value), output, scan_op
         );
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("single_scan_kernel", size, start);
@@ -490,6 +491,7 @@ hipError_t lookback_scan_impl(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class InputIterator,
     class OutputIterator,
     class BinaryFunction = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>
@@ -513,12 +515,7 @@ hipError_t inclusive_scan(void * temporary_storage,
     // Lookback scan has problems with types that are not arithmetic
     if(::rocprim::is_arithmetic<result_type>::value)
     {
-        constexpr unsigned int block_size = 256;
-        constexpr unsigned int items_per_thread =
-            ::rocprim::max<unsigned int>(
-                (16 * sizeof(unsigned int))/sizeof(result_type), 1
-            );
-        return detail::lookback_scan_impl<block_size, items_per_thread, false>(
+        return detail::lookback_scan_impl<false, Config>(
             temporary_storage, storage_size,
             // result_type() is a dummy initial value (not used)
             input, output, result_type(), size,
@@ -527,9 +524,7 @@ hipError_t inclusive_scan(void * temporary_storage,
     }
     else
     {
-        constexpr unsigned int block_size = 256;
-        constexpr unsigned int items_per_thread = 4;
-        return detail::scan_impl<block_size, items_per_thread, false>(
+        return detail::scan_impl<false, Config>(
             temporary_storage, storage_size,
             // result_type() is a dummy initial value (not used)
             input, output, result_type(), size,
@@ -621,6 +616,7 @@ hipError_t inclusive_scan(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class InputIterator,
     class OutputIterator,
     class InitValueType,
@@ -646,12 +642,7 @@ hipError_t exclusive_scan(void * temporary_storage,
     // Lookback scan has problems with types that are not arithmetic
     if(::rocprim::is_arithmetic<result_type>::value)
     {
-        constexpr unsigned int block_size = 256;
-        constexpr unsigned int items_per_thread =
-            ::rocprim::max<unsigned int>(
-                (16 * sizeof(unsigned int))/sizeof(result_type), 1
-            );
-        return detail::lookback_scan_impl<block_size, items_per_thread, true>(
+        return detail::lookback_scan_impl<true, Config>(
             temporary_storage, storage_size,
             input, output, initial_value, size,
             scan_op, stream, debug_synchronous
@@ -659,10 +650,7 @@ hipError_t exclusive_scan(void * temporary_storage,
     }
     else
     {
-        // TODO: Those values should depend on type size
-        constexpr unsigned int block_size = 256;
-        constexpr unsigned int items_per_thread = 4;
-        return detail::scan_impl<block_size, items_per_thread, true>(
+        return detail::scan_impl<true, Config>(
             temporary_storage, storage_size,
             input, output, initial_value, size,
             scan_op, stream, debug_synchronous

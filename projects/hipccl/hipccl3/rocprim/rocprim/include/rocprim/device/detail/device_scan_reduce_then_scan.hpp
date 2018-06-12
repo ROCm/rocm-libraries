@@ -95,9 +95,8 @@ auto single_scan_block_scan(T (&input)[ItemsPerThread],
 }
 
 template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
     bool Exclusive,
+    class Config,
     class InputIterator,
     class OutputIterator,
     class BinaryFunction,
@@ -110,19 +109,22 @@ void single_scan_kernel_impl(InputIterator input,
                              OutputIterator output,
                              BinaryFunction scan_op)
 {
+    constexpr unsigned int block_size = Config::block_size;
+    constexpr unsigned int items_per_thread = Config::items_per_thread;
+
     using result_type = ResultType;
 
     using block_load_type = ::rocprim::block_load<
-        result_type, BlockSize, ItemsPerThread,
-        ::rocprim::block_load_method::block_load_transpose
+        result_type, block_size, items_per_thread,
+        Config::block_load_method
     >;
     using block_store_type = ::rocprim::block_store<
-        result_type, BlockSize, ItemsPerThread,
-        ::rocprim::block_store_method::block_store_transpose
+        result_type, block_size, items_per_thread,
+        Config::block_store_method
     >;
     using block_scan_type = ::rocprim::block_scan<
-        result_type, BlockSize,
-        ::rocprim::block_scan_algorithm::reduce_then_scan
+        result_type, block_size,
+        Config::block_scan_method
     >;
 
     ROCPRIM_SHARED_MEMORY union
@@ -132,7 +134,7 @@ void single_scan_kernel_impl(InputIterator input,
         typename block_scan_type::storage_type scan;
     } storage;
 
-    result_type values[ItemsPerThread];
+    result_type values[items_per_thread];
     // load input values into values
     block_load_type()
         .load(
@@ -165,8 +167,7 @@ void single_scan_kernel_impl(InputIterator input,
 // Calculates block prefixes that will be used in final_scan
 // when performing block scan operations.
 template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
+    class Config,
     class InputIterator,
     class BinaryFunction,
     class ResultType
@@ -176,14 +177,17 @@ void block_reduce_kernel_impl(InputIterator input,
                               BinaryFunction scan_op,
                               ResultType * block_prefixes)
 {
+    constexpr unsigned int block_size = Config::block_size;
+    constexpr unsigned int items_per_thread = Config::items_per_thread;
+
     using result_type = ResultType;
     using block_reduce_type = ::rocprim::block_reduce<
-        result_type, BlockSize,
+        result_type, block_size,
         ::rocprim::block_reduce_algorithm::using_warp_reduce
     >;
     using block_load_type = ::rocprim::block_load<
-        result_type, BlockSize, ItemsPerThread,
-        ::rocprim::block_load_method::block_load_transpose
+        result_type, block_size, items_per_thread,
+        Config::block_load_method
     >;
 
     ROCPRIM_SHARED_MEMORY union
@@ -195,10 +199,10 @@ void block_reduce_kernel_impl(InputIterator input,
     // It's assumed kernel is executed in 1D
     const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
     const unsigned int flat_block_id = ::rocprim::detail::block_id<0>();
-    const unsigned int block_offset = flat_block_id * ItemsPerThread * BlockSize;
+    const unsigned int block_offset = flat_block_id * items_per_thread * block_size;
 
     // For input values
-    result_type values[ItemsPerThread];
+    result_type values[items_per_thread];
     result_type block_prefix;
 
     block_load_type()
@@ -309,9 +313,8 @@ auto final_scan_block_scan(const unsigned int flat_block_id,
 }
 
 template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
     bool Exclusive,
+    class Config,
     class InputIterator,
     class OutputIterator,
     class BinaryFunction,
@@ -325,19 +328,22 @@ void final_scan_kernel_impl(InputIterator input,
                             BinaryFunction scan_op,
                             ResultType * block_prefixes)
 {
+    constexpr unsigned int block_size = Config::block_size;
+    constexpr unsigned int items_per_thread = Config::items_per_thread;
+
     using result_type = ResultType;
 
     using block_load_type = ::rocprim::block_load<
-        result_type, BlockSize, ItemsPerThread,
-        ::rocprim::block_load_method::block_load_transpose
+        result_type, block_size, items_per_thread,
+        Config::block_load_method
     >;
     using block_store_type = ::rocprim::block_store<
-        result_type, BlockSize, ItemsPerThread,
-        ::rocprim::block_store_method::block_store_transpose
+        result_type, block_size, items_per_thread,
+        Config::block_store_method
     >;
     using block_scan_type = ::rocprim::block_scan<
-        result_type, BlockSize,
-        ::rocprim::block_scan_algorithm::using_warp_scan
+        result_type, block_size,
+        Config::block_scan_method
     >;
 
     ROCPRIM_SHARED_MEMORY union
@@ -350,13 +356,13 @@ void final_scan_kernel_impl(InputIterator input,
     // It's assumed kernel is executed in 1D
     const unsigned int flat_block_id = ::rocprim::detail::block_id<0>();
 
-    constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
+    constexpr unsigned int items_per_block = block_size * items_per_thread;
     const unsigned int block_offset = flat_block_id * items_per_block;
     // TODO: number_of_blocks can be calculated on host
     const unsigned int number_of_blocks = (input_size + items_per_block - 1)/items_per_block;
 
     // For input values
-    result_type values[ItemsPerThread];
+    result_type values[items_per_thread];
 
     // TODO: valid_in_last_block can be calculated on host
     auto valid_in_last_block = input_size - items_per_block * (number_of_blocks - 1);
