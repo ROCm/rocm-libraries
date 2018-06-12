@@ -786,7 +786,7 @@ TYPED_TEST(HipcubBlockScanSingleValueTests, CustomStruct)
     }
 
     // Calculate expected results on host
-    std::vector<T> expected(output.size());
+    std::vector<T> expected(output.size(), T(0));
     for(size_t i = 0; i < output.size() / block_size; i++)
     {
         for(size_t j = 0; j < block_size; j++)

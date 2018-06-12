@@ -37,15 +37,17 @@
 
 namespace rp = rocprim;
 
-template<unsigned int WarpSize>
+template<class T, unsigned int WarpSize>
 struct params
 {
+    using type = T;
     static constexpr unsigned int warp_size = WarpSize;
 };
 
 template<typename Params>
 class RocprimWarpSortShuffleBasedTests : public ::testing::Test {
 public:
+    using type = typename Params::type;
     static constexpr unsigned int warp_size = Params::warp_size;
 };
 
@@ -56,12 +58,21 @@ bool test(const T& a, const T& b) [[hc]]
 }
 
 typedef ::testing::Types<
-    params<2U>,
-    params<4U>,
-    params<8U>,
-    params<16U>,
-    params<32U>,
-    params<64U>
+
+    params<int, 2U>,
+    params<int, 4U>,
+    params<int, 8U>,
+    params<int, 16U>,
+    params<int, 32U>,
+    params<int, 64U>,
+
+    params<test_utils::custom_test_type<int>, 2U>,
+    params<test_utils::custom_test_type<int>, 4U>,
+    params<test_utils::custom_test_type<int>, 8U>,
+    params<test_utils::custom_test_type<int>, 16U>,
+    params<test_utils::custom_test_type<int>, 32U>,
+    params<test_utils::custom_test_type<int>, 64U>
+
 > WarpSizes;
 
 TYPED_TEST_CASE(RocprimWarpSortShuffleBasedTests, WarpSizes);
@@ -80,9 +91,10 @@ void test_hip_warp_sort(T* d_output)
     d_output[i] = value;
 }
 
-TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortInt)
+TYPED_TEST(RocprimWarpSortShuffleBasedTests, Sort)
 {
     // logical warp side for warp primitive, execution warp size is always rp::warp_size()
+    using T = typename TestFixture::type;
     constexpr size_t logical_warp_size = TestFixture::warp_size;
     const size_t block_size = std::max<size_t>(rp::warp_size(), 4 * logical_warp_size);
     constexpr size_t grid_size = 4;
@@ -95,10 +107,10 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortInt)
     }
 
     // Generate data
-    std::vector<int> output = test_utils::get_random_data<int>(size, -100, 100);
+    std::vector<T> output = test_utils::get_random_data<T>(size, -100, 100);
 
     // Calculate expected results on host
-    std::vector<int> expected(output);
+    std::vector<T> expected(output);
 
     for(size_t i = 0; i < output.size() / logical_warp_size; i++)
     {
@@ -106,7 +118,7 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortInt)
     }
 
     // Writing to device memory
-    int* d_output;
+    T* d_output;
     HIP_CHECK(
         hipMalloc(&d_output, output.size() * sizeof(typename decltype(output)::value_type))
     );
@@ -121,7 +133,7 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortInt)
 
     // Launching kernel
     hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(test_hip_warp_sort<int, logical_warp_size>),
+        HIP_KERNEL_NAME(test_hip_warp_sort<T, logical_warp_size>),
         dim3(grid_size), dim3(block_size), 0, 0,
         d_output 
     );
@@ -164,6 +176,7 @@ void test_hip_sort_key_value_kernel(KeyType* d_output_key, ValueType* d_output_v
 TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
 {
     // logical warp side for warp primitive, execution warp size is always rp::warp_size()
+    using T = typename TestFixture::type;
     constexpr size_t logical_warp_size = TestFixture::warp_size;
     const size_t block_size = std::max<size_t>(rp::warp_size(), 4 * logical_warp_size);
     constexpr size_t grid_size = 4;
@@ -176,18 +189,18 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
     }
 
     // Generate data
-    std::vector<int> output_key(size);
+    std::vector<T> output_key(size);
     std::iota(output_key.begin(), output_key.end(), 0);
     std::shuffle(output_key.begin(), output_key.end(), std::mt19937{std::random_device{}()});
-    std::vector<int> output_value = test_utils::get_random_data<int>(size, -100, 100);
+    std::vector<T> output_value = test_utils::get_random_data<T>(size, -100, 100);
 
     // Combine vectors to form pairs with key and value
-    std::vector<std::pair<int, int>> target(size);
+    std::vector<std::pair<T, T>> target(size);
     for (unsigned i = 0; i < target.size(); i++)
         target[i] = std::make_pair(output_key[i], output_value[i]);
 
     // Calculate expected results on host
-    std::vector<std::pair<int, int>> expected(target);
+    std::vector<std::pair<T, T>> expected(target);
 
     for(size_t i = 0; i < expected.size() / logical_warp_size; i++)
     {
@@ -195,8 +208,8 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
     }
 
     // Writing to device memory
-    int* d_output_key;
-    int* d_output_value;
+    T* d_output_key;
+    T* d_output_value;
     HIP_CHECK(
         hipMalloc(&d_output_key, output_key.size() * sizeof(typename decltype(output_key)::value_type))
     );
@@ -222,7 +235,7 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
     
     // Launching kernel
     hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(test_hip_sort_key_value_kernel<int, int, logical_warp_size>),
+        HIP_KERNEL_NAME(test_hip_sort_key_value_kernel<T, T, logical_warp_size>),
         dim3(grid_size), dim3(block_size), 0, 0,
         d_output_key, d_output_value 
     );

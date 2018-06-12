@@ -270,18 +270,33 @@ constexpr T get_min_warp_size(const T block_size, const T max_warp_size)
     return block_size >= max_warp_size ? max_warp_size : next_power_of_two(block_size);
 }
 
-// Custom type used in tests
 template<class T>
 struct custom_test_type
 {
+    using value_type = T;
+
     T x;
     T y;
 
-    HIPCUB_HOST_DEVICE
-    custom_test_type(T xx = 0, T yy = 0) : x(xx), y(yy) {}
+    HIPCUB_HOST_DEVICE inline
+    constexpr custom_test_type() {}
 
-    HIPCUB_HOST_DEVICE
-    ~custom_test_type() {}
+    HIPCUB_HOST_DEVICE inline
+    constexpr custom_test_type(T x, T y) : x(x), y(y) {}
+
+    HIPCUB_HOST_DEVICE inline
+    constexpr custom_test_type(T xy) : x(xy), y(xy) {}
+
+    template<class U>
+    ROCPRIM_HOST_DEVICE inline
+    custom_test_type(const custom_test_type<U>& other)
+    {
+        x = other.x;
+        y = other.y;
+    }
+
+    HIPCUB_HOST_DEVICE inline
+    ~custom_test_type() = default;
 
     HIPCUB_HOST_DEVICE inline
     custom_test_type& operator=(const custom_test_type& other)
@@ -298,12 +313,186 @@ struct custom_test_type
     }
 
     HIPCUB_HOST_DEVICE inline
+    custom_test_type operator-(const custom_test_type& other) const
+    {
+        return custom_test_type(x - other.x, y - other.y);
+    }
+
+    HIPCUB_HOST_DEVICE inline
+    bool operator<(const custom_test_type& other) const
+    {
+        return (x < other.x && y < other.y);
+    }
+
+    HIPCUB_HOST_DEVICE inline
+    bool operator>(const custom_test_type& other) const
+    {
+        return (x > other.x && y > other.y);
+    }
+
+    HIPCUB_HOST_DEVICE inline
     bool operator==(const custom_test_type& other) const
     {
         return (x == other.x && y == other.y);
     }
+
+    HIPCUB_HOST_DEVICE inline
+    bool operator!=(const custom_test_type& other) const
+    {
+        return !(*this == other);
+    }
 };
 
+template<class T>
+struct is_custom_test_type : std::false_type
+{
+};
+
+template<class T>
+struct is_custom_test_type<custom_test_type<T>> : std::true_type
+{
+};
+
+template<class T>
+inline auto get_random_data(size_t size, typename T::value_type min, typename T::value_type max)
+    -> typename std::enable_if<
+           is_custom_test_type<T>::value && std::is_integral<typename T::value_type>::value,
+           std::vector<T>
+       >::type
+{
+    std::random_device rd;
+    std::default_random_engine gen(rd());
+    std::uniform_int_distribution<typename T::value_type> distribution(min, max);
+    std::vector<T> data(size);
+    std::generate(data.begin(), data.end(), [&]() { return distribution(gen); });
+    return data;
+}
+
+template<class T>
+inline auto get_random_data(size_t size, typename T::value_type min, typename T::value_type max)
+    -> typename std::enable_if<
+           is_custom_test_type<T>::value && std::is_floating_point<typename T::value_type>::value,
+           std::vector<T>
+       >::type
+{
+    std::random_device rd;
+    std::default_random_engine gen(rd());
+    std::uniform_real_distribution<typename T::value_type> distribution(min, max);
+    std::vector<T> data(size);
+    std::generate(data.begin(), data.end(), [&]() { return T(distribution(gen)); });
+    return data;
+}
+
+template<class T>
+auto assert_near(const std::vector<T>& result, const std::vector<T>& expected, const float percent)
+    -> typename std::enable_if<!is_custom_test_type<T>::value && std::is_arithmetic<T>::value>::type
+{
+    ASSERT_EQ(result.size(), expected.size());
+    for(size_t i = 0; i < result.size(); i++)
+    {
+        auto diff = std::max<T>(std::abs(percent * expected[i]), T(percent));
+        if(std::is_integral<T>::value) diff = 0;
+        ASSERT_NEAR(result[i], expected[i], diff) << "where index = " << i;
+    }
+}
+
+template<class T>
+auto assert_near(const T& result, const T& expected, const float percent)
+    -> typename std::enable_if<!is_custom_test_type<T>::value && std::is_arithmetic<T>::value>::type
+{
+    auto diff = std::max<T>(std::abs(percent * expected), T(percent));
+    if(std::is_integral<T>::value) diff = 0;
+    ASSERT_NEAR(result, expected, diff);
+}
+
+
+template<class T>
+auto assert_near(const T& result, const T& expected, const float percent)
+    -> typename std::enable_if<is_custom_test_type<T>::value>::type
+{
+    using value_type = typename T::value_type;
+    auto diff1 = std::max<value_type>(std::abs(percent * expected.x), value_type(percent));
+    auto diff2 = std::max<value_type>(std::abs(percent * expected.y), value_type(percent));
+    if(std::is_integral<value_type>::value)
+    {
+        diff1 = 0;
+        diff2 = 0;
+    }
+    ASSERT_NEAR(result.x, expected.x, diff1);
+    ASSERT_NEAR(result.y, expected.y, diff2);
+}
+
+template<class T>
+auto assert_near(const std::vector<T>& result, const std::vector<T>& expected, const float percent)
+    -> typename std::enable_if<is_custom_test_type<T>::value>::type
+{
+    using value_type = typename T::value_type;
+    ASSERT_EQ(result.size(), expected.size());
+    for(size_t i = 0; i < result.size(); i++)
+    {
+        auto diff1 = std::max<value_type>(std::abs(percent * expected[i].x), value_type(percent));
+        auto diff2 = std::max<value_type>(std::abs(percent * expected[i].y), value_type(percent));
+        if(std::is_integral<value_type>::value)
+        {
+            diff1 = 0;
+            diff2 = 0;
+        }
+        ASSERT_NEAR(result[i].x, expected[i].x, diff1) << "where index = " << i;
+        ASSERT_NEAR(result[i].y, expected[i].y, diff2) << "where index = " << i;
+    }
+}
+
+template<class T>
+auto assert_near(const std::vector<T>& result, const std::vector<T>& expected, const float)
+    -> typename std::enable_if<!is_custom_test_type<T>::value && !std::is_arithmetic<T>::value>::type
+{
+    ASSERT_EQ(result.size(), expected.size());
+    for(size_t i = 0; i < result.size(); i++)
+    {
+        ASSERT_EQ(result[i], expected[i]) << "where index = " << i;
+    }
+}
+
 } // end test_util namespace
+
+// Need for hipcub::DeviceReduce::Min/Max etc.
+namespace std
+{
+    template<>
+    class numeric_limits<test_utils::custom_test_type<int>>
+    {
+        using T = typename test_utils::custom_test_type<int>;
+
+        public:
+
+        static constexpr inline T max()
+        {
+            return std::numeric_limits<typename T::value_type>::max();
+        }
+
+        static constexpr inline T lowest()
+        {
+            return std::numeric_limits<typename T::value_type>::lowest();
+        }
+    };
+
+    template<>
+    class numeric_limits<test_utils::custom_test_type<float>>
+    {
+        using T = typename test_utils::custom_test_type<float>;
+
+        public:
+
+        static constexpr inline T max()
+        {
+            return std::numeric_limits<typename T::value_type>::max();
+        }
+
+        static constexpr inline T lowest()
+        {
+            return std::numeric_limits<typename T::value_type>::lowest();
+        }
+    };
+}
 
 #endif // ROCPRIM_TEST_HIPCUB_TEST_UTILS_HPP_
