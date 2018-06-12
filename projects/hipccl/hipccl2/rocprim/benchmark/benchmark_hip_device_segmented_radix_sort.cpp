@@ -352,6 +352,7 @@ void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark*>& benc
         CREATE_SORT_KEYS_BENCHMARK(int, 1000),
         CREATE_SORT_KEYS_BENCHMARK(int, 10000),
         CREATE_SORT_KEYS_BENCHMARK(int, 100000),
+        CREATE_SORT_KEYS_BENCHMARK(int, 1000000),
 
         CREATE_SORT_KEYS_BENCHMARK(long long, 1),
         CREATE_SORT_KEYS_BENCHMARK(long long, 10),
@@ -359,6 +360,7 @@ void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark*>& benc
         CREATE_SORT_KEYS_BENCHMARK(long long, 1000),
         CREATE_SORT_KEYS_BENCHMARK(long long, 10000),
         CREATE_SORT_KEYS_BENCHMARK(long long, 100000),
+        CREATE_SORT_KEYS_BENCHMARK(long long, 1000000),
     };
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
@@ -386,6 +388,7 @@ void add_sort_pairs_benchmarks(std::vector<benchmark::internal::Benchmark*>& ben
         CREATE_SORT_PAIRS_BENCHMARK(int, float, 1000),
         CREATE_SORT_PAIRS_BENCHMARK(int, float, 10000),
         CREATE_SORT_PAIRS_BENCHMARK(int, float, 100000),
+        CREATE_SORT_PAIRS_BENCHMARK(int, float, 1000000),
 
         CREATE_SORT_PAIRS_BENCHMARK(long long, double, 1),
         CREATE_SORT_PAIRS_BENCHMARK(long long, double, 10),
@@ -393,6 +396,7 @@ void add_sort_pairs_benchmarks(std::vector<benchmark::internal::Benchmark*>& ben
         CREATE_SORT_PAIRS_BENCHMARK(long long, double, 1000),
         CREATE_SORT_PAIRS_BENCHMARK(long long, double, 10000),
         CREATE_SORT_PAIRS_BENCHMARK(long long, double, 100000),
+        CREATE_SORT_PAIRS_BENCHMARK(long long, double, 1000000),
 
         CREATE_SORT_PAIRS_BENCHMARK(int, custom_float2, 1),
         CREATE_SORT_PAIRS_BENCHMARK(int, custom_float2, 10),
@@ -400,6 +404,7 @@ void add_sort_pairs_benchmarks(std::vector<benchmark::internal::Benchmark*>& ben
         CREATE_SORT_PAIRS_BENCHMARK(int, custom_float2, 1000),
         CREATE_SORT_PAIRS_BENCHMARK(int, custom_float2, 10000),
         CREATE_SORT_PAIRS_BENCHMARK(int, custom_float2, 100000),
+        CREATE_SORT_PAIRS_BENCHMARK(int, custom_float2, 1000000),
 
         CREATE_SORT_PAIRS_BENCHMARK(long long, custom_double2, 1),
         CREATE_SORT_PAIRS_BENCHMARK(long long, custom_double2, 10),
@@ -407,6 +412,7 @@ void add_sort_pairs_benchmarks(std::vector<benchmark::internal::Benchmark*>& ben
         CREATE_SORT_PAIRS_BENCHMARK(long long, custom_double2, 1000),
         CREATE_SORT_PAIRS_BENCHMARK(long long, custom_double2, 10000),
         CREATE_SORT_PAIRS_BENCHMARK(long long, custom_double2, 100000),
+        CREATE_SORT_PAIRS_BENCHMARK(long long, custom_double2, 1000000),
     };
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }

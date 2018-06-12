@@ -44,6 +44,47 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
+// Wrapping functions that allow to call proper methods (with or without values)
+// (a variant with values is enabled only when Value is not empty_type)
+template<bool Descending = false, class SortType, class SortKey, class SortValue, unsigned int ItemsPerThread>
+ROCPRIM_DEVICE inline
+void sort_block(SortType sorter,
+                SortKey (&keys)[ItemsPerThread],
+                SortValue (&values)[ItemsPerThread],
+                typename SortType::storage_type& storage,
+                unsigned int begin_bit,
+                unsigned int end_bit)
+{
+    if(Descending)
+    {
+        sorter.sort_desc(keys, values, storage, begin_bit, end_bit);
+    }
+    else
+    {
+        sorter.sort(keys, values, storage, begin_bit, end_bit);
+    }
+}
+
+template<bool Descending = false, class SortType, class SortKey, unsigned int ItemsPerThread>
+ROCPRIM_DEVICE inline
+void sort_block(SortType sorter,
+                SortKey (&keys)[ItemsPerThread],
+                ::rocprim::empty_type (&values)[ItemsPerThread],
+                typename SortType::storage_type& storage,
+                unsigned int begin_bit,
+                unsigned int end_bit)
+{
+    (void) values;
+    if(Descending)
+    {
+        sorter.sort_desc(keys, storage, begin_bit, end_bit);
+    }
+    else
+    {
+        sorter.sort(keys, storage, begin_bit, end_bit);
+    }
+}
+
 template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
@@ -264,7 +305,7 @@ struct radix_sort_and_scatter_helper
             }
 
             ::rocprim::syncthreads();
-            sort_block(bit_keys, values, storage, bit, bit + current_radix_bits);
+            sort_block(sort_type(), bit_keys, values, storage.sort, bit, bit + current_radix_bits);
 
             unsigned int digits[ItemsPerThread];
             for(unsigned int i = 0; i < ItemsPerThread; i++)
@@ -333,31 +374,6 @@ struct radix_sort_and_scatter_helper
                 }
             }
         }
-    }
-
-    // Wrapping functions that allow to call proper methods (with or without values)
-    // (a variant with values is enabled only when Value is not empty_type)
-    template<class SortKey, class SortValue>
-    ROCPRIM_DEVICE inline
-    void sort_block(SortKey (&keys)[ItemsPerThread],
-                    SortValue (&values)[ItemsPerThread],
-                    storage_type& storage,
-                    unsigned int begin_bit,
-                    unsigned int end_bit)
-    {
-        sort_type().sort(keys, values, storage.sort, begin_bit, end_bit);
-    }
-
-    template<class SortKey>
-    ROCPRIM_DEVICE inline
-    void sort_block(SortKey (&keys)[ItemsPerThread],
-                    ::rocprim::empty_type (&values)[ItemsPerThread],
-                    storage_type& storage,
-                    unsigned int begin_bit,
-                    unsigned int end_bit)
-    {
-        (void) values;
-        sort_type().sort(keys, storage.sort, begin_bit, end_bit);
     }
 };
 
