@@ -59,121 +59,6 @@ namespace detail
 
 template<
     class Config,
-    unsigned int RadixBits,
-    bool Descending,
-    class KeysInputIterator,
-    class KeysOutputIterator,
-    class ValuesInputIterator,
-    class ValuesOutputIterator,
-    class OffsetIterator
->
-inline
-void segmented_radix_sort_iteration(KeysInputIterator keys_input,
-                                    typename std::iterator_traits<KeysInputIterator>::value_type * keys_tmp,
-                                    KeysOutputIterator keys_output,
-                                    ValuesInputIterator values_input,
-                                    typename std::iterator_traits<ValuesInputIterator>::value_type * values_tmp,
-                                    ValuesOutputIterator values_output,
-                                    bool to_output,
-                                    unsigned int segments,
-                                    OffsetIterator begin_offsets,
-                                    OffsetIterator end_offsets,
-                                    unsigned int bit,
-                                    unsigned int begin_bit,
-                                    unsigned int end_bit,
-                                    hc::accelerator_view& acc_view,
-                                    bool debug_synchronous)
-{
-    constexpr unsigned int block_size = Config::sort::block_size;
-    constexpr unsigned int items_per_thread = Config::sort::items_per_thread;
-
-    // Handle cases when (end_bit - bit) is not divisible by RadixBits, i.e. the last
-    // iteration has a shorter mask.
-    const unsigned int current_radix_bits = ::rocprim::min(RadixBits, end_bit - bit);
-
-    const bool is_first_iteration = (bit == begin_bit);
-
-    std::chrono::high_resolution_clock::time_point start;
-
-    if(debug_synchronous)
-    {
-        std::cout << "RadixBits " << RadixBits << '\n';
-        std::cout << "bit " << bit << '\n';
-        std::cout << "current_radix_bits " << current_radix_bits << '\n';
-    }
-
-    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    if(is_first_iteration)
-    {
-        if(to_output)
-        {
-            hc::parallel_for_each(
-                acc_view,
-                hc::tiled_extent<1>(segments * block_size, block_size),
-                [=](hc::tiled_index<1>) [[hc]]
-                {
-                    segmented_sort<block_size, items_per_thread, RadixBits, Descending>(
-                        keys_input, keys_output, values_input, values_output,
-                        begin_offsets, end_offsets,
-                        bit, current_radix_bits
-                    );
-                }
-            );
-        }
-        else
-        {
-            hc::parallel_for_each(
-                acc_view,
-                hc::tiled_extent<1>(segments * block_size, block_size),
-                [=](hc::tiled_index<1>) [[hc]]
-                {
-                    segmented_sort<block_size, items_per_thread, RadixBits, Descending>(
-                        keys_input, keys_tmp, values_input, values_tmp,
-                        begin_offsets, end_offsets,
-                        bit, current_radix_bits
-                    );
-                }
-            );
-        }
-    }
-    else
-    {
-        if(to_output)
-        {
-            hc::parallel_for_each(
-                acc_view,
-                hc::tiled_extent<1>(segments * block_size, block_size),
-                [=](hc::tiled_index<1>) [[hc]]
-                {
-                    segmented_sort<block_size, items_per_thread, RadixBits, Descending>(
-                        keys_tmp, keys_output, values_tmp, values_output,
-                        begin_offsets, end_offsets,
-                        bit, current_radix_bits
-                    );
-                }
-            );
-        }
-        else
-        {
-            hc::parallel_for_each(
-                acc_view,
-                hc::tiled_extent<1>(segments * block_size, block_size),
-                [=](hc::tiled_index<1>) [[hc]]
-                {
-                    segmented_sort<block_size, items_per_thread, RadixBits, Descending>(
-                        keys_output, keys_tmp, values_output, values_tmp,
-                        begin_offsets, end_offsets,
-                        bit, current_radix_bits
-                    );
-                }
-            );
-        }
-    }
-    ROCPRIM_DETAIL_HC_SYNC("segmented_sort", segments, start);
-}
-
-template<
-    class Config,
     bool Descending,
     class KeysInputIterator,
     class KeysOutputIterator,
@@ -202,6 +87,15 @@ void segmented_radix_sort_impl(void * temporary_storage,
 {
     using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
     using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
+
+    static_assert(
+        std::is_same<key_type, typename std::iterator_traits<KeysOutputIterator>::value_type>::value,
+        "KeysInputIterator and KeysOutputIterator must have the same value_type"
+    );
+    static_assert(
+        std::is_same<value_type, typename std::iterator_traits<ValuesOutputIterator>::value_type>::value,
+        "ValuesInputIterator and ValuesOutputIterator must have the same value_type"
+    );
 
     using config = default_or_custom_config<
         Config,
@@ -251,36 +145,28 @@ void segmented_radix_sort_impl(void * temporary_storage,
         values_tmp = with_values ? reinterpret_cast<value_type *>(ptr) : nullptr;
     }
 
-    bool to_output = with_double_buffer || (iterations - 1) % 2 == 0;
-    unsigned int bit = begin_bit;
-    for(unsigned int i = 0; i < long_iterations; i++)
-    {
-        segmented_radix_sort_iteration<config, config::long_radix_bits, Descending>(
-            keys_input, keys_tmp, keys_output, values_input, values_tmp, values_output,
-            to_output,
-            segments, begin_offsets, end_offsets,
-            bit, begin_bit, end_bit,
-            acc_view, debug_synchronous
-        );
+    const bool to_output = with_double_buffer || (iterations - 1) % 2 == 0;
 
-        is_result_in_output = to_output;
-        to_output = !to_output;
-        bit += config::long_radix_bits;
-    }
-    for(unsigned int i = 0; i < short_iterations; i++)
-    {
-        segmented_radix_sort_iteration<config, config::short_radix_bits, Descending>(
-            keys_input, keys_tmp, keys_output, values_input, values_tmp, values_output,
-            to_output,
-            segments, begin_offsets, end_offsets,
-            bit, begin_bit, end_bit,
-            acc_view, debug_synchronous
-        );
+    std::chrono::high_resolution_clock::time_point start;
 
-        is_result_in_output = to_output;
-        to_output = !to_output;
-        bit += config::short_radix_bits;
-    }
+    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
+    hc::parallel_for_each(
+        acc_view,
+        hc::tiled_extent<1>(segments * config::sort::block_size, config::sort::block_size),
+        [=](hc::tiled_index<1>) [[hc]]
+        {
+            segmented_sort<config, Descending>(
+                keys_input, keys_tmp, keys_output, values_input, values_tmp, values_output,
+                to_output,
+                begin_offsets, end_offsets,
+                long_iterations, short_iterations,
+                begin_bit, end_bit
+            );
+        }
+    );
+    ROCPRIM_DETAIL_HC_SYNC("segmented_sort", segments, start);
+
+    is_result_in_output = ((iterations % 2 == 0) != to_output);
 }
 
 #undef ROCPRIM_DETAIL_HC_SYNC
