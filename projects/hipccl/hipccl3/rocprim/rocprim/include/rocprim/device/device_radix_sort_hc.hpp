@@ -296,6 +296,15 @@ void radix_sort_impl(void * temporary_storage,
     using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
     using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
 
+    static_assert(
+        std::is_same<key_type, typename std::iterator_traits<KeysOutputIterator>::value_type>::value,
+        "KeysInputIterator and KeysOutputIterator must have the same value_type"
+    );
+    static_assert(
+        std::is_same<value_type, typename std::iterator_traits<ValuesOutputIterator>::value_type>::value,
+        "ValuesInputIterator and ValuesOutputIterator must have the same value_type"
+    );
+
     using config = default_or_custom_config<
         Config,
         default_radix_sort_config<ROCPRIM_TARGET_ARCH, key_type, value_type>
