@@ -43,15 +43,16 @@ const size_t DEFAULT_N = 1024 * 1024 * 128;
 
 namespace rp = rocprim;
 
-struct blocked_to_striped
+struct flag_heads
 {
     template<
         class T,
         unsigned int BlockSize,
         unsigned int ItemsPerThread,
+        bool WithTile,
         unsigned int Trials
     >
-    static void run(hc::array<T> & d_input, hc::array<T> & d_output,
+    static void run(const hc::array<T> & d_input, const hc::array<T> & d_output,
                     hc::accelerator_view acc_view, size_t size)
     {
         const size_t grid_size = size / ItemsPerThread;
@@ -69,8 +70,73 @@ struct blocked_to_striped
                 #pragma nounroll
                 for(unsigned int trial = 0; trial < Trials; trial++)
                 {
-                    rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
-                    exchange.blocked_to_striped(input, input);
+                    rp::block_discontinuity<T, BlockSize> bdiscontinuity;
+                    bool head_flags[ItemsPerThread];
+                    if(WithTile)
+                    {
+                        bdiscontinuity.flag_heads(head_flags, T(123), input, rp::equal_to<T>());
+                    }
+                    else
+                    {
+                        bdiscontinuity.flag_heads(head_flags, input, rp::equal_to<T>());
+                    }
+
+                    for(unsigned int i = 0; i < ItemsPerThread; i++)
+                    {
+                        input[i] += head_flags[i];
+                    }
+                    rp::syncthreads();
+                }
+
+                rp::block_store_direct_striped<BlockSize>(lid, d_output.data() + block_offset, input);
+            }
+        );
+    } 
+};
+
+struct flag_tails
+{
+    template<
+        class T,
+        unsigned int BlockSize,
+        unsigned int ItemsPerThread,
+        bool WithTile,
+        unsigned int Trials
+    >
+    static void run(const hc::array<T> & d_input, const hc::array<T> & d_output,
+                    hc::accelerator_view acc_view, size_t size)
+    {
+        const size_t grid_size = size / ItemsPerThread;
+        hc::parallel_for_each(
+            acc_view,
+            hc::extent<1>(grid_size).tile(BlockSize),
+            [&](hc::tiled_index<1> idx) [[hc]]
+            {
+                const unsigned int lid = idx.local[0];
+                const unsigned int block_offset = idx.tile[0] * ItemsPerThread * BlockSize;
+                
+                T input[ItemsPerThread];
+                rp::block_load_direct_striped<BlockSize>(lid, d_input.data() + block_offset, input);
+
+                #pragma nounroll
+                for(unsigned int trial = 0; trial < Trials; trial++)
+                {
+                    rp::block_discontinuity<T, BlockSize> bdiscontinuity;
+                    bool tail_flags[ItemsPerThread];
+                    if(WithTile)
+                    {
+                        bdiscontinuity.flag_tails(tail_flags, T(123), input, rp::equal_to<T>());
+                    }
+                    else
+                    {
+                        bdiscontinuity.flag_tails(tail_flags, input, rp::equal_to<T>());
+                    }
+
+                    for(unsigned int i = 0; i < ItemsPerThread; i++)
+                    {
+                        input[i] += tail_flags[i];
+                    }
+                    rp::syncthreads();
                 }
 
                 rp::block_store_direct_striped<BlockSize>(lid, d_output.data() + block_offset, input);
@@ -79,15 +145,16 @@ struct blocked_to_striped
     }
 };
 
-struct striped_to_blocked
+struct flag_heads_and_tails
 {
     template<
         class T,
         unsigned int BlockSize,
         unsigned int ItemsPerThread,
+        bool WithTile,
         unsigned int Trials
     >
-    static void run(hc::array<T> & d_input, hc::array<T> & d_output,
+static void run(const hc::array<T> & d_input, const hc::array<T> & d_output,
                     hc::accelerator_view acc_view, size_t size)
     {
         const size_t grid_size = size / ItemsPerThread;
@@ -105,154 +172,24 @@ struct striped_to_blocked
                 #pragma nounroll
                 for(unsigned int trial = 0; trial < Trials; trial++)
                 {
-                    rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
-                    exchange.striped_to_blocked(input, input);
-                }
+                    rp::block_discontinuity<T, BlockSize> bdiscontinuity;
+                    bool head_flags[ItemsPerThread];
+                    bool tail_flags[ItemsPerThread];
+                    if(WithTile)
+                    {
+                        bdiscontinuity.flag_heads_and_tails(head_flags, T(123), tail_flags, T(234), input, rp::equal_to<T>());
+                    }
+                    else
+                    {
+                        bdiscontinuity.flag_heads_and_tails(head_flags, tail_flags, input, rp::equal_to<T>());
+                    }
 
-                rp::block_store_direct_striped<BlockSize>(lid, d_output.data() + block_offset, input);
-            }
-        );
-    }
-};
-
-struct blocked_to_warp_striped
-{
-    template<
-        class T,
-        unsigned int BlockSize,
-        unsigned int ItemsPerThread,
-        unsigned int Trials
-    >
-    static void run(hc::array<T> & d_input, hc::array<T> & d_output,
-                    hc::accelerator_view acc_view, size_t size)
-    {
-        const size_t grid_size = size / ItemsPerThread;
-        hc::parallel_for_each(
-            acc_view,
-            hc::extent<1>(grid_size).tile(BlockSize),
-            [&](hc::tiled_index<1> idx) [[hc]]
-            {
-                const unsigned int lid = idx.local[0];
-                const unsigned int block_offset = idx.tile[0] * ItemsPerThread * BlockSize;
-
-                T input[ItemsPerThread];
-                rp::block_load_direct_striped<BlockSize>(lid, d_input.data() + block_offset, input);
-
-                #pragma nounroll
-                for(unsigned int trial = 0; trial < Trials; trial++)
-                {
-                    rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
-                    exchange.blocked_to_warp_striped(input, input);
-                }
-
-                rp::block_store_direct_striped<BlockSize>(lid, d_output.data() + block_offset, input);
-            }
-        );
-    }
-};
-
-struct warp_striped_to_blocked
-{
-    template<
-        class T,
-        unsigned int BlockSize,
-        unsigned int ItemsPerThread,
-        unsigned int Trials
-    >
-    static void run(hc::array<T> & d_input, hc::array<T> & d_output,
-                    hc::accelerator_view acc_view, size_t size)
-    {
-        const size_t grid_size = size / ItemsPerThread;
-        hc::parallel_for_each(
-            acc_view,
-            hc::extent<1>(grid_size).tile(BlockSize),
-            [&](hc::tiled_index<1> idx) [[hc]]
-            {
-                const unsigned int lid = idx.local[0];
-                const unsigned int block_offset = idx.tile[0] * ItemsPerThread * BlockSize;
-
-                T input[ItemsPerThread];
-                rp::block_load_direct_striped<BlockSize>(lid, d_input.data() + block_offset, input);
-
-                #pragma nounroll
-                for(unsigned int trial = 0; trial < Trials; trial++)
-                {
-                    rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
-                    exchange.warp_striped_to_blocked(input, input);
-                }
-
-                rp::block_store_direct_striped<BlockSize>(lid, d_output.data() + block_offset, input);
-            }
-        );
-    }
-};
-
-struct scatter_to_blocked
-{
-    template<
-        class T,
-        unsigned int BlockSize,
-        unsigned int ItemsPerThread,
-        unsigned int Trials
-    >
-    static void run(hc::array<T> & d_input, hc::array<T> & d_output,
-                    hc::accelerator_view acc_view, size_t size)
-    {
-        const size_t grid_size = size / ItemsPerThread;
-        hc::parallel_for_each(
-            acc_view,
-            hc::extent<1>(grid_size).tile(BlockSize),
-            [&](hc::tiled_index<1> idx) [[hc]]
-            {
-                const unsigned int lid = idx.local[0];
-                const unsigned int block_offset = idx.tile[0] * ItemsPerThread * BlockSize;
-                T input[ItemsPerThread];
-                unsigned int ranks[ItemsPerThread];
-                rp::block_load_direct_striped<BlockSize>(lid, d_input.data() + block_offset, input);
-                rp::block_load_direct_striped<BlockSize>(lid, d_input.data() + block_offset, ranks);
-
-                #pragma nounroll
-                for(unsigned int trial = 0; trial < Trials; trial++)
-                {
-                    rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
-                    exchange.scatter_to_blocked(input, input, ranks);
-                }
-
-                rp::block_store_direct_striped<BlockSize>(lid, d_output.data() + block_offset, input);
-            }
-        );
-    }
-};
-
-struct scatter_to_striped
-{
-    template<
-        class T,
-        unsigned int BlockSize,
-        unsigned int ItemsPerThread,
-        unsigned int Trials
-    >
-    static void run(hc::array<T> & d_input, hc::array<T> & d_output,
-                    hc::accelerator_view acc_view, size_t size)
-    {
-        const size_t grid_size = size / ItemsPerThread;
-        hc::parallel_for_each(
-            acc_view,
-            hc::extent<1>(grid_size).tile(BlockSize),
-            [&](hc::tiled_index<1> idx) [[hc]]
-            {
-                const unsigned int lid = idx.local[0];
-                const unsigned int block_offset = idx.tile[0] * ItemsPerThread * BlockSize;
-                T input[ItemsPerThread];
-                unsigned int ranks[ItemsPerThread];
-                rp::block_load_direct_striped<BlockSize>(lid, d_input.data() + block_offset, input);
-                rp::block_load_direct_striped<BlockSize>(lid, d_input.data() + block_offset, ranks);
-
-                #pragma nounroll
-                for(unsigned int trial = 0; trial < Trials; trial++)
-                {
-                    rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
-                    exchange.scatter_to_striped(input, input, ranks);
+                    for(unsigned int i = 0; i < ItemsPerThread; i++)
+                    {
+                        input[i] += head_flags[i];
+                        input[i] += tail_flags[i];
+                    }
+                    rp::syncthreads();
                 }
 
                 rp::block_store_direct_striped<BlockSize>(lid, d_output.data() + block_offset, input);
@@ -266,10 +203,12 @@ template<
     class T,
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
+    bool WithTile,
     unsigned int Trials = 100
 >
 void run_benchmark(benchmark::State& state, hc::accelerator_view acc_view, size_t N)
 {
+
     constexpr auto items_per_block = BlockSize * ItemsPerThread;
     const auto size = items_per_block * ((N + items_per_block - 1)/items_per_block);
 
@@ -292,7 +231,7 @@ void run_benchmark(benchmark::State& state, hc::accelerator_view acc_view, size_
     {
         auto start = std::chrono::high_resolution_clock::now();
 
-        Benchmark::template run<T, BlockSize, ItemsPerThread, Trials>
+        Benchmark::template run<T, BlockSize, ItemsPerThread, WithTile, Trials>
             (d_input, d_output, acc_view, size);
 
         acc_view.wait();
@@ -306,10 +245,10 @@ void run_benchmark(benchmark::State& state, hc::accelerator_view acc_view, size_
     state.SetItemsProcessed(state.iterations() * Trials * size);
 }
 
-#define CREATE_BENCHMARK(T, BS, IPT) \
+#define CREATE_BENCHMARK(T, BS, IPT, WITH_TILE) \
 benchmark::RegisterBenchmark( \
-    (std::string("block_exchange<" #T ", " #BS ", " #IPT ">.") + name).c_str(), \
-    run_benchmark<Benchmark, T, BS, IPT>, \
+    (std::string("block_discontinuity<" #T ", " #BS ">.") + name + ("<" #IPT ", " #WITH_TILE ">")).c_str(), \
+    run_benchmark<Benchmark, T, BS, IPT, WITH_TILE>, \
     acc_view, size \
 )
 
@@ -321,20 +260,34 @@ void add_benchmarks(const std::string& name,
 {
     std::vector<benchmark::internal::Benchmark*> bs =
     {
-        CREATE_BENCHMARK(int, 256, 1),
-        CREATE_BENCHMARK(int, 256, 2),
-        CREATE_BENCHMARK(int, 256, 3),
-        CREATE_BENCHMARK(int, 256, 4),
-        CREATE_BENCHMARK(int, 256, 6),
-        CREATE_BENCHMARK(int, 256, 7),
-        CREATE_BENCHMARK(int, 256, 8),
-        CREATE_BENCHMARK(long long, 256, 1),
-        CREATE_BENCHMARK(long long, 256, 2),
-        CREATE_BENCHMARK(long long, 256, 3),
-        CREATE_BENCHMARK(long long, 256, 4),
-        CREATE_BENCHMARK(long long, 256, 6),
-        CREATE_BENCHMARK(long long, 256, 7),
-        CREATE_BENCHMARK(long long, 256, 8),
+        CREATE_BENCHMARK(int, 256, 1, false),
+        CREATE_BENCHMARK(int, 256, 2, false),
+        CREATE_BENCHMARK(int, 256, 3, false),
+        CREATE_BENCHMARK(int, 256, 4, false),
+        CREATE_BENCHMARK(int, 256, 6, false),
+        CREATE_BENCHMARK(int, 256, 7, false),
+        CREATE_BENCHMARK(int, 256, 8, false),
+        CREATE_BENCHMARK(int, 256, 1, true),
+        CREATE_BENCHMARK(int, 256, 2, true),
+        CREATE_BENCHMARK(int, 256, 3, true),
+        CREATE_BENCHMARK(int, 256, 4, true),
+        CREATE_BENCHMARK(int, 256, 6, true),
+        CREATE_BENCHMARK(int, 256, 7, true),
+        CREATE_BENCHMARK(int, 256, 8, true),
+        CREATE_BENCHMARK(long long, 256, 1, false),
+        CREATE_BENCHMARK(long long, 256, 2, false),
+        CREATE_BENCHMARK(long long, 256, 3, false),
+        CREATE_BENCHMARK(long long, 256, 4, false),
+        CREATE_BENCHMARK(long long, 256, 6, false),
+        CREATE_BENCHMARK(long long, 256, 7, false),
+        CREATE_BENCHMARK(long long, 256, 8, false),
+        CREATE_BENCHMARK(long long, 256, 1, true),
+        CREATE_BENCHMARK(long long, 256, 2, true),
+        CREATE_BENCHMARK(long long, 256, 3, true),
+        CREATE_BENCHMARK(long long, 256, 4, true),
+        CREATE_BENCHMARK(long long, 256, 6, true),
+        CREATE_BENCHMARK(long long, 256, 7, true),
+        CREATE_BENCHMARK(long long, 256, 8, true),
     };
 
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
@@ -351,19 +304,16 @@ int main(int argc, char *argv[])
     benchmark::Initialize(&argc, argv);
     const size_t size = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
-
+    
     // HC
     hc::accelerator acc;
     auto acc_view = acc.get_default_view();
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_benchmarks<blocked_to_striped>("blocked_to_striped", benchmarks, acc_view, size);
-    add_benchmarks<striped_to_blocked>("striped_to_blocked", benchmarks, acc_view, size);
-    add_benchmarks<blocked_to_warp_striped>("blocked_to_warp_striped", benchmarks, acc_view, size);
-    add_benchmarks<warp_striped_to_blocked>("warp_striped_to_blocked", benchmarks, acc_view, size);
-    add_benchmarks<scatter_to_blocked>("scatter_to_blocked", benchmarks, acc_view, size);
-    add_benchmarks<scatter_to_striped>("scatter_to_striped", benchmarks, acc_view, size);
+    add_benchmarks<flag_heads>("flag_heads", benchmarks, acc_view, size);
+    add_benchmarks<flag_tails>("flag_tails", benchmarks, acc_view, size);
+    add_benchmarks<flag_heads_and_tails>("flag_heads_and_tails", benchmarks, acc_view, size);
 
     // Use manual timing
     for(auto& b : benchmarks)
