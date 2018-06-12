@@ -65,13 +65,16 @@ typedef ::testing::Types<
     params<int, int, 128U>,
     params<unsigned int, int, 256U>,
     params<unsigned short, char, 1024U>,
+    params<int, test_utils::custom_test_type<int>, 128U>,
+    params<int, test_utils::custom_test_type<int>, 1024U>,
 
     // Non-power of 2 BlockSize
     params<double, unsigned int, 65U>,
     params<float, int, 37U>,
     params<long long, char, 510U>,
     params<unsigned int, long long, 162U>,
-    params<unsigned char, float, 255U>
+    params<unsigned char, float, 255U>,
+    params<int, test_utils::custom_test_type<int>, 255U>
 > BlockSizes;
 
 TYPED_TEST_CASE(RocprimBlockSortTests, BlockSizes);

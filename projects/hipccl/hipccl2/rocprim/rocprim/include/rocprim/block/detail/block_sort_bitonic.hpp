@@ -165,7 +165,10 @@ private:
         Key next_key = storage_.key[next_id];
         bool compare = compare_function(next_key, key);
         bool swap = compare ^ (next_id < flat_tid) ^ dir;
-        key = swap ? next_key : key;
+        if(swap)
+        {
+            key = next_key;
+        }
     }
 
     template<class BinaryFunction>
@@ -183,8 +186,11 @@ private:
         Value next_value = storage_.value[next_id];
         bool compare = compare_function(next_key, key);
         bool swap = compare ^ (next_id < flat_tid) ^ dir;
-        key = swap ? next_key : key;
-        value = swap ? next_value : value;
+        if(swap)
+        {
+            key = next_key;
+            value = next_value;
+        }
     }
 
     template<
@@ -229,7 +235,7 @@ private:
                 return !r;
             };
         wsort.sort(kv..., compare_function2);
-
+ 
         #pragma unroll
         for(unsigned int length = ::rocprim::warp_size(); length < Size; length *= 2)
         {

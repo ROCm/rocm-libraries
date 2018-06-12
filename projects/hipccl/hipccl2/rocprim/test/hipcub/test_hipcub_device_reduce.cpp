@@ -64,7 +64,10 @@ typedef ::testing::Types<
     DeviceReduceParams<int, long>,
     DeviceReduceParams<unsigned long>,
     DeviceReduceParams<short>,
-    DeviceReduceParams<int, double>
+    DeviceReduceParams<int, double>,
+    DeviceReduceParams<test_utils::custom_test_type<float>, test_utils::custom_test_type<float>>,
+    DeviceReduceParams<test_utils::custom_test_type<int>, test_utils::custom_test_type<float>>
+
 > HipcubDeviceReduceTestsParams;
 
 std::vector<size_t> get_sizes()
@@ -113,7 +116,11 @@ TYPED_TEST(HipcubDeviceReduceTests, Reduce)
         HIP_CHECK(hipDeviceSynchronize());
 
         // Calculate expected results on host
-        U expected = std::accumulate(input.begin(), input.end(), 0);
+        U expected = U(0);
+        for(unsigned int i = 0; i < input.size(); i++)
+        {
+            expected = expected + input[i];
+        }
 
         // temp storage
         size_t temp_storage_size_bytes;
@@ -156,9 +163,7 @@ TYPED_TEST(HipcubDeviceReduceTests, Reduce)
         HIP_CHECK(hipDeviceSynchronize());
 
         // Check if output values are as expected
-        auto diff = std::max<U>(std::abs(0.01f * expected), U(0.01f));
-        if(std::is_integral<U>::value) diff = 0;
-        ASSERT_NEAR(output[0], expected, diff);
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output[0], expected, 0.01f));
 
         hipFree(d_input);
         hipFree(d_output);
@@ -198,10 +203,11 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceMinimum)
 
         hipcub::Min min_op;
         // Calculate expected results on host
-        U expected = std::accumulate(
-            input.begin(), input.end(),
-            std::numeric_limits<T>::max(), min_op
-        );
+        U expected = U(std::numeric_limits<U>::max());
+        for(unsigned int i = 0; i < input.size(); i++)
+        {
+            expected = min_op(expected, U(input[i]));
+        }
 
         // temp storage
         size_t temp_storage_size_bytes;
@@ -244,7 +250,7 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceMinimum)
         HIP_CHECK(hipDeviceSynchronize());
 
         // Check if output values are as expected
-        ASSERT_EQ(output[0], expected);
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output[0], expected, 0.01f));
 
         hipFree(d_input);
         hipFree(d_output);
@@ -283,10 +289,9 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceArgMinimum)
         );
         HIP_CHECK(hipDeviceSynchronize());
 
-        const key_value max(1, std::numeric_limits<T>::max());
-
         // Calculate expected results on host
         Iterator x(input.data());
+        const key_value max(1, std::numeric_limits<T>::max());
         key_value expected = std::accumulate(x, x + size, max, hipcub::ArgMin());
 
         // temp storage
@@ -330,8 +335,8 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceArgMinimum)
         HIP_CHECK(hipDeviceSynchronize());
 
         // Check if output values are as expected
-        ASSERT_EQ(output[0].key, expected.key);
-        ASSERT_EQ(output[0].value, expected.value);
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output[0].key, expected.key, 0.01f));
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output[0].value, expected.value, 0.01f));
 
         hipFree(d_input);
         hipFree(d_output);
@@ -354,7 +359,7 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceArgMaximum)
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, T(-100), T(100));
+        std::vector<T> input = test_utils::get_random_data<T>(size, -100, 100);
         std::vector<key_value> output(1);
 
         T * d_input;
@@ -370,11 +375,10 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceArgMaximum)
         );
         HIP_CHECK(hipDeviceSynchronize());
 
-        const key_value max(1, std::numeric_limits<T>::lowest());
-
         // Calculate expected results on host
         Iterator x(input.data());
-        key_value expected = std::accumulate(x, x + size, max, hipcub::ArgMax());
+        const key_value min(1, std::numeric_limits<T>::lowest());
+        key_value expected = std::accumulate(x, x + size, min, hipcub::ArgMax());
 
         // temp storage
         size_t temp_storage_size_bytes;
@@ -418,7 +422,7 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceArgMaximum)
 
         // Check if output values are as expected
         ASSERT_EQ(output[0].key, expected.key);
-        ASSERT_EQ(output[0].value, expected.value);
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output[0].value, expected.value, 0.01f));
 
         hipFree(d_input);
         hipFree(d_output);
