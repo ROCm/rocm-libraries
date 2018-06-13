@@ -51,6 +51,7 @@ template<
     class OutputIterator,
     class SelectedCountOutputIterator,
     class UnaryPredicate,
+    class InequalityOp,
     class OffsetLookbackScanState
 >
 __global__
@@ -60,13 +61,14 @@ void partition_kernel(InputIterator input,
                       SelectedCountOutputIterator selected_count_output,
                       const size_t size,
                       UnaryPredicate predicate,
+                      InequalityOp inequality_op,
                       OffsetLookbackScanState offset_scan_state,
                       const unsigned int number_of_blocks,
                       ordered_block_id<unsigned int> ordered_bid)
 {
     partition_kernel_impl<SelectMethod, OnlySelected, Config, ResultType>(
         input, flags, output, selected_count_output, size, predicate,
-        offset_scan_state, number_of_blocks, ordered_bid
+        inequality_op, offset_scan_state, number_of_blocks, ordered_bid
     );
 }
 
@@ -117,6 +119,7 @@ template<
     class FlagIterator,
     class OutputIterator,
     class UnaryPredicate,
+    class InequalityOp,
     class SelectedCountOutputIterator
 >
 inline
@@ -128,6 +131,7 @@ hipError_t partition_impl(void * temporary_storage,
                           SelectedCountOutputIterator selected_count_output,
                           const size_t size,
                           UnaryPredicate predicate,
+                          InequalityOp inequality_op,
                           const hipStream_t stream,
                           bool debug_synchronous)
 {
@@ -207,11 +211,11 @@ hipError_t partition_impl(void * temporary_storage,
         HIP_KERNEL_NAME(partition_kernel<
             SelectMethod, OnlySelected, config, result_type,
             InputIterator, FlagIterator, OutputIterator, SelectedCountOutputIterator,
-            UnaryPredicate, offset_scan_state_type
+            UnaryPredicate, decltype(inequality_op), offset_scan_state_type
         >),
         dim3(grid_size), dim3(block_size), 0, stream,
-        input, flags, output, selected_count_output, size,
-        predicate, offset_scan_state, number_of_blocks, ordered_bid
+        input, flags, output, selected_count_output, size, predicate,
+        inequality_op, offset_scan_state, number_of_blocks, ordered_bid
     );
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("partition_kernel", size, start)
 
@@ -320,12 +324,14 @@ hipError_t partition(void * temporary_storage,
                      const hipStream_t stream = 0,
                      const bool debug_synchronous = false)
 {
-    // Dummy unary preficate
-    using unary_preficate_type = ::rocprim::empty_type;
+    // Dummy unary predicate
+    using unary_predicate_type = ::rocprim::empty_type;
+    // Dummy inequality operation
+    using inequality_op_type = ::rocprim::empty_type;
 
     return detail::partition_impl<detail::select_method::flag, false, Config>(
         temporary_storage, storage_size, input, flags, output, selected_count_output,
-        size, unary_preficate_type(), stream, debug_synchronous
+        size, unary_predicate_type(), inequality_op_type(), stream, debug_synchronous
     );
 }
 
@@ -437,10 +443,12 @@ hipError_t partition(void * temporary_storage,
     // Dummy flag type
     using flag_type = ::rocprim::empty_type;
     flag_type * flags = nullptr;
+    // Dummy inequality operation
+    using inequality_op_type = ::rocprim::empty_type;
 
     return detail::partition_impl<detail::select_method::predicate, false, Config>(
         temporary_storage, storage_size, input, flags, output, selected_count_output,
-        size, predicate, stream, debug_synchronous
+        size, predicate, inequality_op_type(), stream, debug_synchronous
     );
 }
 

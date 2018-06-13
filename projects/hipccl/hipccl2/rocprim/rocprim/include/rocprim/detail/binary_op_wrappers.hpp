@@ -157,6 +157,29 @@ private:
     KCompare compare_keys_op_;
 };
 
+template<class EqualityOp>
+struct inequality_wrapper
+{
+    using equality_op_type = EqualityOp;
+
+    ROCPRIM_HOST_DEVICE inline
+    inequality_wrapper() = default;
+
+    ROCPRIM_HOST_DEVICE inline
+    inequality_wrapper(equality_op_type equality_op)
+        : equality_op(equality_op)
+    {}
+
+    template<class T, class U>
+    ROCPRIM_DEVICE inline
+    bool operator()(const T &a, const U &b)
+    {
+        return !equality_op(a, b);
+    }
+
+    equality_op_type equality_op;
+};
+
 } // end of detail namespace
 
 END_ROCPRIM_NAMESPACE

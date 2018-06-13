@@ -236,7 +236,7 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, 0, 1);
+        std::vector<T> input = test_utils::get_random_data<T>(size, 0, 100);
 
         T * d_input;
         U * d_output;

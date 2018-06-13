@@ -26,10 +26,10 @@
 
 #include "../config.hpp"
 #include "../detail/various.hpp"
+#include "../detail/binary_op_wrappers.hpp"
 
 #include "../iterator/transform_iterator.hpp"
 
-#include "detail/device_select.hpp"
 #include "device_scan_hc.hpp"
 #include "device_partition_hc.hpp"
 
@@ -154,19 +154,21 @@ void select(void * temporary_storage,
             hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
             const bool debug_synchronous = false)
 {
-    // Dummy unary preficate
-    using unary_preficate_type = ::rocprim::empty_type;
+    // Dummy unary predicate
+    using unary_predicate_type = ::rocprim::empty_type;
+    // Dummy inequality operation
+    using inequality_op_type = ::rocprim::empty_type;
 
     detail::partition_impl<detail::select_method::flag, true, Config>(
         temporary_storage, storage_size, input, flags, output, selected_count_output,
-        size, unary_preficate_type(), acc_view, debug_synchronous
+        size, unary_predicate_type(), inequality_op_type(), acc_view, debug_synchronous
     );
 }
 
 /// \brief HC parallel select primitive for device level using selection operator.
 ///
 /// Performs a device-wide selection using selection operator. If a value \p x from \p input
-/// should be selected and copied into \p output range, then <tt>select_op(x)</tt> has to
+/// should be selected and copied into \p output range, then <tt>predicate(x)</tt> has to
 /// return \p true.
 ///
 /// \par Overview
@@ -212,7 +214,7 @@ void select(void * temporary_storage,
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>
 ///
-/// auto select_op =
+/// auto predicate =
 ///     [](int a) [[hcc]] -> bool
 ///     {
 ///         return (a%2) == 0;
@@ -232,7 +234,7 @@ void select(void * temporary_storage,
 ///     nullptr, temporary_storage_size_bytes,
 ///     input.accelerator_pointer(), output.accelerator_pointer(),
 //      output_count.accelerator_pointer(),
-///     select_op, size, acc_view, false
+///     predicate, size, acc_view, false
 /// );
 ///
 /// // allocate temporary storage
@@ -243,7 +245,7 @@ void select(void * temporary_storage,
 ///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
 ///     input.accelerator_pointer(), output.accelerator_pointer(),
 //      output_count.accelerator_pointer(),
-///     select_op, size, acc_view, false
+///     predicate, size, acc_view, false
 /// );
 /// // output: [2, 4, 6, 8]
 /// // output_count: 4
@@ -270,10 +272,12 @@ void select(void * temporary_storage,
     // Dummy flag type
     using flag_type = ::rocprim::empty_type;
     flag_type * flags = nullptr;
+    // Dummy inequality operation
+    using inequality_op_type = ::rocprim::empty_type;
 
     detail::partition_impl<detail::select_method::predicate, true, Config>(
         temporary_storage, storage_size, input, flags, output, selected_count_output,
-        size, predicate, acc_view, debug_synchronous
+        size, predicate, inequality_op_type(), acc_view, debug_synchronous
     );
 }
 
@@ -292,6 +296,8 @@ void select(void * temporary_storage,
 /// * By default <tt>InputIterator::value_type</tt>'s equality operator is used to check
 /// if elements are equivalent.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p select_config or
+/// a custom class with the same members.
 /// \tparam InputIterator - random-access iterator type of the input range. It can be
 /// a simple pointer type.
 /// \tparam OutputIterator - random-access iterator type of the output range. It can be
@@ -356,6 +362,7 @@ void select(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class InputIterator,
     class OutputIterator,
     class UniqueCountOutputIterator,
@@ -372,78 +379,20 @@ void unique(void * temporary_storage,
             hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
             const bool debug_synchronous = false)
 {
-    using input_type = typename std::iterator_traits<InputIterator>::value_type;
+    // Dummy unary predicate
+    using unary_predicate_type = ::rocprim::empty_type;
 
-    // Get temporary storage required by select operation
-    size_t select_storage_size = 0;
-    unsigned char * dummy_flags_ptr = nullptr;
-    ::rocprim::select(
-        static_cast<void*>(nullptr), select_storage_size,
-        input, dummy_flags_ptr, output, unique_count_output, size,
-        acc_view, debug_synchronous
+    // Dummy flag type
+    using flag_type = ::rocprim::empty_type;
+    flag_type * flags = nullptr;
+
+    // Convert equality operator to inequality operator
+    auto inequality_op = detail::inequality_wrapper<EqualityOp>(equality_op);
+
+    return detail::partition_impl<detail::select_method::unique, true, Config>(
+        temporary_storage, storage_size, input, flags, output, unique_count_output,
+        size, unary_predicate_type(), inequality_op, acc_view, debug_synchronous
     );
-    // Align
-    select_storage_size = ::rocprim::detail::align_size(select_storage_size);
-
-    // Calculate required temporary storage
-    if(temporary_storage == nullptr)
-    {
-        storage_size = select_storage_size;
-        // Add storage required for flags
-        storage_size += size * sizeof(unsigned char);
-        // Make sure user won't try to allocate 0 bytes memory, otherwise
-        // user may again pass nullptr as temporary_storage
-        storage_size = storage_size == 0 ? 4 : storage_size;
-        return;
-    }
-
-    // Return for empty input
-    if(size == 0) return;
-
-    // TODO: Those values should depend on type size
-    constexpr unsigned int block_size = 256;
-    constexpr unsigned int items_per_thread = 4;
-    constexpr auto items_per_block = block_size * items_per_thread;
-
-    auto number_of_blocks = (size + items_per_block - 1)/items_per_block;
-    if(debug_synchronous)
-    {
-        std::cout << "block_size " << block_size << '\n';
-        std::cout << "number of blocks " << number_of_blocks << '\n';
-        std::cout << "items_per_block " << items_per_block << '\n';
-        std::cout << "temporary storage size " << storage_size << '\n';
-    }
-
-    // Start point for time measurements
-    std::chrono::high_resolution_clock::time_point start;
-
-    auto flags = static_cast<unsigned char*>(temporary_storage) + select_storage_size;
-    auto inequality_op =
-        [equality_op](const input_type& a, const input_type& b) [[hc]] -> bool
-        {
-            return !equality_op(a, b);
-        };
-    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    hc::parallel_for_each(
-        acc_view,
-        hc::tiled_extent<1>(number_of_blocks * block_size, block_size),
-        [=](hc::tiled_index<1>) [[hc]]
-        {
-            detail::flag_unique_kernel_impl<block_size, items_per_thread>(
-                input, size, flags, inequality_op
-            );
-        }
-    );
-    ROCPRIM_DETAIL_HC_SYNC("flag_unique_kernel", size, start)
-
-    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    // select unique values
-    ::rocprim::select(
-        temporary_storage, select_storage_size,
-        input, flags, output, unique_count_output, size,
-        acc_view, debug_synchronous
-    );
-    ROCPRIM_DETAIL_HC_SYNC("rocprim::select", size, start)
 }
 
 #undef ROCPRIM_DETAIL_HC_SYNC

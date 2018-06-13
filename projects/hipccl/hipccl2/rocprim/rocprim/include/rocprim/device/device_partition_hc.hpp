@@ -63,6 +63,7 @@ template<
     class FlagIterator,
     class OutputIterator,
     class UnaryPredicate,
+    class InequalityOp,
     class SelectedCountOutputIterator
 >
 inline
@@ -74,6 +75,7 @@ void partition_impl(void * temporary_storage,
                     SelectedCountOutputIterator selected_count_output,
                     const size_t size,
                     UnaryPredicate predicate,
+                    InequalityOp inequality_op,
                     hc::accelerator_view acc_view,
                     bool debug_synchronous)
 {
@@ -161,7 +163,7 @@ void partition_impl(void * temporary_storage,
         {
             partition_kernel_impl<SelectMethod, OnlySelected, config, result_type>(
                 input, flags, output, selected_count_output, size, predicate,
-                offset_scan_state, number_of_blocks, ordered_bid
+                inequality_op, offset_scan_state, number_of_blocks, ordered_bid
             );
         }
     );
@@ -271,12 +273,14 @@ void partition(void * temporary_storage,
                hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
                const bool debug_synchronous = false)
 {
-    // Dummy unary preficate
-    using unary_preficate_type = ::rocprim::empty_type;
+    // Dummy unary predicate
+    using unary_predicate_type = ::rocprim::empty_type;
+    // Dummy inequality operation
+    using inequality_op_type = ::rocprim::empty_type;
 
     detail::partition_impl<detail::select_method::flag, false, Config>(
         temporary_storage, storage_size, input, flags, output, selected_count_output,
-        size, unary_preficate_type(), acc_view, debug_synchronous
+        size, unary_predicate_type(), inequality_op_type(), acc_view, debug_synchronous
     );
 }
 
@@ -388,10 +392,12 @@ void partition(void * temporary_storage,
     // Dummy flag type
     using flag_type = ::rocprim::empty_type;
     flag_type * flags = nullptr;
+    // Dummy inequality operation
+    using inequality_op_type = ::rocprim::empty_type;
 
     detail::partition_impl<detail::select_method::predicate, false, Config>(
         temporary_storage, storage_size, input, flags, output, selected_count_output,
-        size, predicate, acc_view, debug_synchronous
+        size, predicate, inequality_op_type(), acc_view, debug_synchronous
     );
 }
 
