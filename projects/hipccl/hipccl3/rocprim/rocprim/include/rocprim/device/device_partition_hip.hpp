@@ -28,8 +28,9 @@
 #include "../functional.hpp"
 #include "../type_traits.hpp"
 #include "../detail/various.hpp"
+#include "../detail/match_result_type.hpp"
 
-#include "device_partition_config.hpp"
+#include "device_select_config.hpp"
 #include "detail/device_partition.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -107,7 +108,9 @@ void init_offset_scan_state_kernel(OffsetLookBackScanState offset_scan_state,
     }
 
 template<
+    // Method of selection: flag, predicate, unique
     select_method SelectMethod,
+     // if true, it doesn't copy rejected values to output
     bool OnlySelected,
     class Config,
     class InputIterator,
@@ -131,9 +134,12 @@ hipError_t partition_impl(void * temporary_storage,
     using offset_type = unsigned int;
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     using output_type = typename std::iterator_traits<OutputIterator>::value_type;
-    // Fix for cases when output_type is void (there's no sizeof(void))
+    // Fix for cases when output_type is void (there's no sizeof(void) or it's
+    // a tuple which contains an item of type void)
+    static constexpr bool is_output_type_invalid =
+        std::is_same<void, output_type>::value || tuple_contains_type<void, output_type>::value;
     using value_type = typename std::conditional<
-        std::is_same<void, output_type>::value, input_type, output_type
+        is_output_type_invalid, input_type, output_type
     >::type;
     // Use smaller type for private storage
     using result_type = typename std::conditional<
@@ -143,7 +149,7 @@ hipError_t partition_impl(void * temporary_storage,
     // Get default config if Config is default_config
     using config = default_or_custom_config<
         Config,
-        default_partition_config<ROCPRIM_TARGET_ARCH, result_type>
+        default_select_config<ROCPRIM_TARGET_ARCH, result_type>
     >;
 
     using offset_scan_state_type = detail::lookback_scan_state<offset_type>;
@@ -233,7 +239,7 @@ hipError_t partition_impl(void * temporary_storage,
 /// * Relative order is preserved for the elements for which the corresponding values from \p flags
 /// are \p true. Other elements are copied in reverse order.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It can be \p partition_config or
+/// \tparam Config - [optional] configuration of the primitive. It can be \p select_config or
 /// a custom class with the same members.
 /// \tparam InputIterator - random-access iterator type of the input range. It can be
 /// a simple pointer type.
@@ -337,7 +343,7 @@ hipError_t partition(void * temporary_storage,
 /// * Relative order is preserved for the elements for which the \p predicate returns \p true. Other
 /// elements are copied in reverse order.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It can be \p partition_config or
+/// \tparam Config - [optional] configuration of the primitive. It can be \p select_config or
 /// a custom class with the same members.
 /// \tparam InputIterator - random-access iterator type of the input range. It can be
 /// a simple pointer type.

@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_DEVICE_DEVICE_PARTITION_CONFIG_HPP_
-#define ROCPRIM_DEVICE_DEVICE_PARTITION_CONFIG_HPP_
+#ifndef ROCPRIM_DEVICE_DEVICE_SELECT_CONFIG_HPP_
+#define ROCPRIM_DEVICE_DEVICE_SELECT_CONFIG_HPP_
 
 #include <type_traits>
 
@@ -36,7 +36,7 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// \brief Configuration of device-level partition operation.
+/// \brief Configuration of device-level select operation.
 ///
 /// \tparam BlockSize - number of threads in a block.
 /// \tparam ItemsPerThread - number of items in processed by each thread.
@@ -50,7 +50,7 @@ template<
     ::rocprim::block_load_method FlagBlockLoadMethod,
     ::rocprim::block_scan_algorithm BlockScanMethod
 >
-struct partition_config
+struct select_config
 {
     static constexpr unsigned int block_size = BlockSize;
     static constexpr unsigned int items_per_thread = ItemsPerThread;
@@ -65,12 +65,12 @@ namespace detail
 {
 
 template<class Value>
-struct partition_config_803
+struct select_config_803
 {
     static constexpr unsigned int item_scale =
         ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
 
-    using type = partition_config<
+    using type = select_config<
         256,
         ::rocprim::max(1u, 13u / item_scale),
         ::rocprim::block_load_method::block_load_transpose,
@@ -80,12 +80,12 @@ struct partition_config_803
 };
 
 template<class Value>
-struct partition_config_900
+struct select_config_900
 {
     static constexpr unsigned int item_scale =
         ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
 
-    using type = partition_config<
+    using type = select_config<
         256,
         ::rocprim::max(1u, 15u / item_scale),
         ::rocprim::block_load_method::block_load_transpose,
@@ -95,12 +95,12 @@ struct partition_config_900
 };
 
 template<unsigned int TargetArch, class Value>
-struct default_partition_config
+struct default_select_config
     : select_arch<
         TargetArch,
-        select_arch_case<803, partition_config_803<Value>>,
-        select_arch_case<900, partition_config_900<Value>>,
-        partition_config_803<Value>
+        select_arch_case<803, select_config_803<Value>>,
+        select_arch_case<900, select_config_900<Value>>,
+        select_config_803<Value>
     > { };
 
 } // end namespace detail
@@ -110,4 +110,4 @@ END_ROCPRIM_NAMESPACE
 /// @}
 // end of group primitivesmodule_deviceconfigs
 
-#endif // ROCPRIM_DEVICE_DEVICE_PARTITION_CONFIG_HPP_
+#endif // ROCPRIM_DEVICE_DEVICE_SELECT_CONFIG_HPP_
