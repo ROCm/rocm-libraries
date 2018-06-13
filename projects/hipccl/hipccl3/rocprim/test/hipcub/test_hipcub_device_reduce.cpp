@@ -64,9 +64,12 @@ typedef ::testing::Types<
     DeviceReduceParams<int, long>,
     DeviceReduceParams<unsigned long>,
     DeviceReduceParams<short>,
-    DeviceReduceParams<int, double>,
+    DeviceReduceParams<int, double>
+    #ifdef HIPCUB_ROCPRIM_API
+    ,
     DeviceReduceParams<test_utils::custom_test_type<float>, test_utils::custom_test_type<float>>,
     DeviceReduceParams<test_utils::custom_test_type<int>, test_utils::custom_test_type<float>>
+    #endif
 
 > HipcubDeviceReduceTestsParams;
 
@@ -359,7 +362,7 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceArgMaximum)
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, -100, 100);
+        std::vector<T> input = test_utils::get_random_data<T>(size, 0, 100);
         std::vector<key_value> output(1);
 
         T * d_input;
