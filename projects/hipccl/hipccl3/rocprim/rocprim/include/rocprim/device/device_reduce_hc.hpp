@@ -28,6 +28,7 @@
 #include "../detail/various.hpp"
 #include "../detail/match_result_type.hpp"
 
+#include "device_reduce_config.hpp"
 #include "detail/device_reduce.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -51,9 +52,8 @@ namespace detail
     }
 
 template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
     bool WithInitialValue, // true when inital_value should be used in reduction
+    class Config,
     class InputIterator,
     class OutputIterator,
     class InitValueType,
@@ -76,8 +76,14 @@ void reduce_impl(void * temporary_storage,
         input_type, output_type, BinaryFunction
     >::type;
 
-    constexpr unsigned int block_size = BlockSize;
-    constexpr unsigned int items_per_thread = ItemsPerThread;
+    // Get default config if Config is default_config
+    using config = default_or_custom_config<
+        Config,
+        default_reduce_config<ROCPRIM_TARGET_ARCH, result_type>
+    >;
+
+    constexpr unsigned int block_size = config::block_size;
+    constexpr unsigned int items_per_thread = config::items_per_thread;
     constexpr auto items_per_block = block_size * items_per_thread;
 
     // Calculate required temporary storage
@@ -104,19 +110,16 @@ void reduce_impl(void * temporary_storage,
 
     if(number_of_blocks > 1)
     {
-        // Grid size for block_reduce_kernel and final_reduce_kernel
-        auto grid_size = number_of_blocks * block_size;
-
         // Pointer to array with block_prefixes
         result_type * block_prefixes = static_cast<result_type*>(temporary_storage);
 
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         hc::parallel_for_each(
             acc_view,
-            hc::tiled_extent<1>(grid_size, block_size),
+            hc::tiled_extent<1>(number_of_blocks * block_size, block_size),
             [=](hc::tiled_index<1>) [[hc]]
             {
-                block_reduce_kernel_impl<block_size, items_per_thread, false, result_type>(
+                block_reduce_kernel_impl<false, config, result_type>(
                     input, size, block_prefixes, initial_value, reduce_op
                 );
             }
@@ -127,7 +130,7 @@ void reduce_impl(void * temporary_storage,
         auto nested_temp_storage_size = storage_size - (number_of_blocks * sizeof(result_type));
 
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-        reduce_impl<BlockSize, ItemsPerThread, WithInitialValue>(
+        reduce_impl<WithInitialValue, config>(
             nested_temp_storage,
             nested_temp_storage_size,
             block_prefixes, // input
@@ -139,7 +142,6 @@ void reduce_impl(void * temporary_storage,
             debug_synchronous
         );
         ROCPRIM_DETAIL_HC_SYNC("nested_device_reduce", number_of_blocks, start);
-        acc_view.wait();
     }
     else
     {
@@ -149,7 +151,7 @@ void reduce_impl(void * temporary_storage,
             hc::tiled_extent<1>(block_size, block_size),
             [=](hc::tiled_index<1>) [[hc]]
             {
-                block_reduce_kernel_impl<block_size, items_per_thread, WithInitialValue, result_type>(
+                block_reduce_kernel_impl<WithInitialValue, config, result_type>(
                     input, size, output, initial_value, reduce_op
                 );
             }
@@ -176,6 +178,8 @@ void reduce_impl(void * temporary_storage,
 /// * Ranges specified by \p input must have at least \p size elements, while \p output
 /// only needs one element.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p reduce_config or
+/// a custom class with the same members.
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
@@ -246,6 +250,7 @@ void reduce_impl(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class InputIterator,
     class OutputIterator,
     class InitValueType,
@@ -262,10 +267,7 @@ void reduce(void * temporary_storage,
             hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
             bool debug_synchronous = false)
 {
-    // TODO: Those values should depend on type size
-    constexpr unsigned int block_size = 256;
-    constexpr unsigned int items_per_thread = 4;
-    return detail::reduce_impl<block_size, items_per_thread, true>(
+    return detail::reduce_impl<true, Config>(
         temporary_storage, storage_size,
         input, output, initial_value, size,
         reduce_op, acc_view, debug_synchronous
@@ -286,6 +288,8 @@ void reduce(void * temporary_storage,
 /// * Ranges specified by \p input must have at least \p size elements, while \p output
 /// only needs one element.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p reduce_config or
+/// a custom class with the same members.
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
@@ -346,6 +350,7 @@ void reduce(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class InputIterator,
     class OutputIterator,
     class BinaryFunction = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>
@@ -362,10 +367,7 @@ void reduce(void * temporary_storage,
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
 
-    // TODO: Those values should depend on type size
-    constexpr unsigned int block_size = 256;
-    constexpr unsigned int items_per_thread = 4;
-    return detail::reduce_impl<block_size, items_per_thread, false>(
+    return detail::reduce_impl<false, Config>(
         temporary_storage, storage_size,
         input, output, input_type(), size,
         reduce_op, acc_view, debug_synchronous
