@@ -26,10 +26,10 @@
 
 #include "../config.hpp"
 #include "../detail/various.hpp"
+#include "../detail/binary_op_wrappers.hpp"
 
 #include "../iterator/transform_iterator.hpp"
 
-#include "detail/device_select.hpp"
 #include "device_scan_hip.hpp"
 #include "device_partition_hip.hpp"
 
@@ -40,24 +40,6 @@ BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
 {
-
-template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    class InputIterator,
-    class OutputFlagIterator,
-    class InequalityOp
->
-__global__
-void flag_unique_kernel(InputIterator input,
-                        const size_t size,
-                        OutputFlagIterator flags,
-                        InequalityOp inequality_op)
-{
-    detail::flag_unique_kernel_impl<BlockSize, ItemsPerThread>(
-        input, size, flags, inequality_op
-    );
-}
 
 #define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start) \
     { \
@@ -172,19 +154,21 @@ hipError_t select(void * temporary_storage,
                   const hipStream_t stream = 0,
                   const bool debug_synchronous = false)
 {
-    // Dummy unary preficate
-    using unary_preficate_type = ::rocprim::empty_type;
+    // Dummy unary predicate
+    using unary_predicate_type = ::rocprim::empty_type;
+    // Dummy inequality operation
+    using inequality_op_type = ::rocprim::empty_type;
 
     return detail::partition_impl<detail::select_method::flag, true, Config>(
         temporary_storage, storage_size, input, flags, output, selected_count_output,
-        size, unary_preficate_type(), stream, debug_synchronous
+        size, unary_predicate_type(), inequality_op_type(), stream, debug_synchronous
     );
 }
 
 /// \brief HIP parallel select primitive for device level using selection operator.
 ///
 /// Performs a device-wide selection using selection operator. If a value \p x from \p input
-/// should be selected and copied into \p output range, then <tt>select_op(x)</tt> has to
+/// should be selected and copied into \p output range, then <tt>predicate(x)</tt> has to
 /// return \p true.
 ///
 /// \par Overview
@@ -284,10 +268,12 @@ hipError_t select(void * temporary_storage,
     // Dummy flag type
     using flag_type = ::rocprim::empty_type;
     flag_type * flags = nullptr;
+    // Dummy inequality operation
+    using inequality_op_type = ::rocprim::empty_type;
 
-    return detail::partition_impl<detail::select_method::predicate, false, Config>(
+    return detail::partition_impl<detail::select_method::predicate, true, Config>(
         temporary_storage, storage_size, input, flags, output, selected_count_output,
-        size, predicate, stream, debug_synchronous
+        size, predicate, inequality_op_type(), stream, debug_synchronous
     );
 }
 
@@ -366,6 +352,7 @@ hipError_t select(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class InputIterator,
     class OutputIterator,
     class UniqueCountOutputIterator,
@@ -382,79 +369,20 @@ hipError_t unique(void * temporary_storage,
                   const hipStream_t stream = 0,
                   const bool debug_synchronous = false)
 {
-    using input_type = typename std::iterator_traits<InputIterator>::value_type;
+    // Dummy unary predicate
+    using unary_predicate_type = ::rocprim::empty_type;
 
-    // Get temporary storage required by select operation
-    size_t select_storage_size = 0;
-    unsigned char * dummy_flags_ptr = nullptr;
-    auto error = ::rocprim::select(
-        static_cast<void*>(nullptr), select_storage_size,
-        input, dummy_flags_ptr, output, unique_count_output, size,
-        stream, debug_synchronous
+    // Dummy flag type
+    using flag_type = ::rocprim::empty_type;
+    flag_type * flags = nullptr;
+
+    // Convert equality operator to inequality operator
+    auto inequality_op = detail::inequality_wrapper<EqualityOp>(equality_op);
+
+    return detail::partition_impl<detail::select_method::unique, true, Config>(
+        temporary_storage, storage_size, input, flags, output, unique_count_output,
+        size, unary_predicate_type(), inequality_op, stream, debug_synchronous
     );
-    // Align
-    select_storage_size = ::rocprim::detail::align_size(select_storage_size);
-
-    // Calculate required temporary storage
-    if(temporary_storage == nullptr)
-    {
-        storage_size = select_storage_size;
-        // Add storage required for flags
-        storage_size += size * sizeof(unsigned char);
-        // Make sure user won't try to allocate 0 bytes memory, otherwise
-        // user may again pass nullptr as temporary_storage
-        storage_size = storage_size == 0 ? 4 : storage_size;
-        return hipSuccess;
-    }
-
-    // Return for empty input
-    if(size == 0) return hipSuccess;
-
-    // TODO: Those values should depend on type size
-    constexpr unsigned int block_size = 256;
-    constexpr unsigned int items_per_thread = 4;
-    constexpr auto items_per_block = block_size * items_per_thread;
-
-    auto number_of_blocks = (size + items_per_block - 1)/items_per_block;
-    if(debug_synchronous)
-    {
-        std::cout << "block_size " << block_size << '\n';
-        std::cout << "number of blocks " << number_of_blocks << '\n';
-        std::cout << "items_per_block " << items_per_block << '\n';
-        std::cout << "temporary storage size " << storage_size << '\n';
-    }
-
-    // Start point for time measurements
-    std::chrono::high_resolution_clock::time_point start;
-
-    auto flags = static_cast<unsigned char*>(temporary_storage) + select_storage_size;
-    auto inequality_op =
-        [equality_op] __device__ (const input_type& a, const input_type& b) -> bool
-        {
-            return !equality_op(a, b);
-        };
-    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(detail::flag_unique_kernel<
-            block_size, items_per_thread,
-            InputIterator, decltype(flags), decltype(inequality_op)
-        >),
-        dim3(number_of_blocks), dim3(block_size), 0, stream,
-        input, size, flags, inequality_op
-    );
-    error = hipPeekAtLastError();
-    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("flag_unique_kernel", size, start)
-
-    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    // select unique values
-    error = ::rocprim::select(
-        temporary_storage, select_storage_size,
-        input, flags, output, unique_count_output, size,
-        stream, debug_synchronous
-    );
-    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("rocprim::select", size, start)
-
-    return hipSuccess;
 }
 
 #undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
