@@ -31,6 +31,7 @@
 
 #include "detail/device_select.hpp"
 #include "device_scan_hc.hpp"
+#include "device_partition_hc.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -70,6 +71,8 @@ namespace detail
 /// * Range specified by \p selected_count_output must have at least 1 element.
 /// * Values of \p flag range should be implicitly convertible to `bool` type.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p select_config or
+/// a custom class with the same members.
 /// \tparam InputIterator - random-access iterator type of the input range. It can be
 /// a simple pointer type.
 /// \tparam FlagIterator - random-access iterator type of the flag range. It can be
@@ -134,6 +137,7 @@ namespace detail
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class InputIterator,
     class FlagIterator,
     class OutputIterator,
@@ -153,7 +157,6 @@ void select(void * temporary_storage,
     // Dummy unary preficate
     using unary_preficate_type = ::rocprim::empty_type;
 
-    using Config = default_config;
     detail::partition_impl<detail::select_method::flag, true, Config>(
         temporary_storage, storage_size, input, flags, output, selected_count_output,
         size, unary_preficate_type(), acc_view, debug_synchronous
@@ -174,13 +177,15 @@ void select(void * temporary_storage,
 /// values can be copied into it.
 /// * Range specified by \p selected_count_output must have at least 1 element.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p select_config or
+/// a custom class with the same members.
 /// \tparam InputIterator - random-access iterator type of the input range. It can be
 /// a simple pointer type.
 /// \tparam OutputIterator - random-access iterator type of the output range. It can be
 /// a simple pointer type.
 /// \tparam SelectedCountOutputIterator - random-access iterator type of the selected_count_output
 /// value. It can be a simple pointer type.
-/// \tparam SelectOp - type of a unary selection operator.
+/// \tparam UnaryPredicate - type of a unary selection operator.
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -190,7 +195,7 @@ void select(void * temporary_storage,
 /// \param [out] output - iterator to the first element in the output range.
 /// \param [out] selected_count_output - iterator to the total number of selected values (length of \p output).
 /// \param [in] size - number of element in the input range.
-/// \param [in] select_op - unary function object that will be used for selecting values.
+/// \param [in] predicate - unary function object that will be used for selecting values.
 /// The signature of the function should be equivalent to the following:
 /// <tt>bool f(const T &a);</tt>. The signature does not need to have
 /// <tt>const &</tt>, but function object must not modify the object passed to it.
@@ -245,10 +250,11 @@ void select(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class InputIterator,
     class OutputIterator,
     class SelectedCountOutputIterator,
-    class SelectOp
+    class UnaryPredicate
 >
 inline
 void select(void * temporary_storage,
@@ -257,7 +263,7 @@ void select(void * temporary_storage,
             OutputIterator output,
             SelectedCountOutputIterator selected_count_output,
             const size_t size,
-            SelectOp select_op,
+            UnaryPredicate predicate,
             hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
             const bool debug_synchronous = false)
 {
@@ -265,7 +271,6 @@ void select(void * temporary_storage,
     using flag_type = ::rocprim::empty_type;
     flag_type * flags = nullptr;
 
-    using Config = default_config;
     detail::partition_impl<detail::select_method::predicate, true, Config>(
         temporary_storage, storage_size, input, flags, output, selected_count_output,
         size, predicate, acc_view, debug_synchronous
