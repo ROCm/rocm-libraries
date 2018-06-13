@@ -288,15 +288,17 @@ struct custom_test_type
     constexpr custom_test_type(T xy) : x(xy), y(xy) {}
 
     template<class U>
-    ROCPRIM_HOST_DEVICE inline
+    HIPCUB_HOST_DEVICE inline
     custom_test_type(const custom_test_type<U>& other)
     {
         x = other.x;
         y = other.y;
     }
 
+    #ifndef HIPCUB_CUB_API
     HIPCUB_HOST_DEVICE inline
     ~custom_test_type() = default;
+    #endif
 
     HIPCUB_HOST_DEVICE inline
     custom_test_type& operator=(const custom_test_type& other)
