@@ -41,7 +41,8 @@ namespace detail
 {
 
 template<
-    bool UsePredicate,
+    select_method SelectMethod,
+    bool OnlySelected,
     class Config,
     class ResultType,
     class InputIterator,
@@ -62,7 +63,7 @@ void partition_kernel(InputIterator input,
                       const unsigned int number_of_blocks,
                       ordered_block_id<unsigned int> ordered_bid)
 {
-    partition_kernel_impl<UsePredicate, Config, ResultType>(
+    partition_kernel_impl<SelectMethod, OnlySelected, Config, ResultType>(
         input, flags, output, selected_count_output, size, predicate,
         offset_scan_state, number_of_blocks, ordered_bid
     );
@@ -106,7 +107,8 @@ void init_offset_scan_state_kernel(OffsetLookBackScanState offset_scan_state,
     }
 
 template<
-    bool UsePredicate,
+    select_method SelectMethod,
+    bool OnlySelected,
     class Config,
     class InputIterator,
     class FlagIterator,
@@ -197,7 +199,7 @@ hipError_t partition_impl(void * temporary_storage,
     grid_size = number_of_blocks;
     hipLaunchKernelGGL(
         HIP_KERNEL_NAME(partition_kernel<
-            UsePredicate, config, result_type,
+            SelectMethod, OnlySelected, config, result_type,
             InputIterator, FlagIterator, OutputIterator, SelectedCountOutputIterator,
             UnaryPredicate, offset_scan_state_type
         >),
@@ -315,7 +317,7 @@ hipError_t partition(void * temporary_storage,
     // Dummy unary preficate
     using unary_preficate_type = ::rocprim::empty_type;
 
-    return detail::partition_impl<false, Config>(
+    return detail::partition_impl<detail::select_method::flag, false, Config>(
         temporary_storage, storage_size, input, flags, output, selected_count_output,
         size, unary_preficate_type(), stream, debug_synchronous
     );
@@ -343,7 +345,7 @@ hipError_t partition(void * temporary_storage,
 /// a simple pointer type.
 /// \tparam SelectedCountOutputIterator - random-access iterator type of the selected_count_output
 /// value. It can be a simple pointer type.
-/// \tparam UnaryPredicate - type of an unary selection predicate.
+/// \tparam UnaryPredicate - type of a unary selection predicate.
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -430,7 +432,7 @@ hipError_t partition(void * temporary_storage,
     using flag_type = ::rocprim::empty_type;
     flag_type * flags = nullptr;
 
-    return detail::partition_impl<true, Config>(
+    return detail::partition_impl<detail::select_method::predicate, false, Config>(
         temporary_storage, storage_size, input, flags, output, selected_count_output,
         size, predicate, stream, debug_synchronous
     );

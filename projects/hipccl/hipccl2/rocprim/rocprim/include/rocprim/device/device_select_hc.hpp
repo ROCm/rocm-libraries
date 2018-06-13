@@ -150,74 +150,14 @@ void select(void * temporary_storage,
             hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
             const bool debug_synchronous = false)
 {
-    // Get temporary storage required by scan operation
-    size_t scan_storage_size = 0;
-    unsigned int * dummy_ptr = nullptr;
-    ::rocprim::exclusive_scan(
-        nullptr, scan_storage_size,
-        flags, dummy_ptr, 0U, size, ::rocprim::plus<unsigned int>(),
-        acc_view, debug_synchronous
+    // Dummy unary preficate
+    using unary_preficate_type = ::rocprim::empty_type;
+
+    using Config = default_config;
+    detail::partition_impl<detail::select_method::flag, true, Config>(
+        temporary_storage, storage_size, input, flags, output, selected_count_output,
+        size, unary_preficate_type(), acc_view, debug_synchronous
     );
-    // Align
-    scan_storage_size = ::rocprim::detail::align_size(scan_storage_size);
-
-    // Calculate required temporary storage
-    if(temporary_storage == nullptr)
-    {
-        storage_size = scan_storage_size;
-        // Add storage required for indexes
-        storage_size += size * sizeof(unsigned int);
-        // Make sure user won't try to allocate 0 bytes memory, otherwise
-        // user may again pass nullptr as temporary_storage
-        storage_size = storage_size == 0 ? 4 : storage_size;
-        return;
-    }
-
-    // Return for empty input
-    if(size == 0) return;
-
-    // Start point for time measurements
-    std::chrono::high_resolution_clock::time_point start;
-
-    // Calculate output indices to scatter selected values
-    auto indices = reinterpret_cast<unsigned int*>(
-        static_cast<unsigned char*>(temporary_storage) + scan_storage_size
-    );
-    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    ::rocprim::exclusive_scan(
-        temporary_storage, scan_storage_size,
-        flags, indices, 0U, size, ::rocprim::plus<unsigned int>(),
-        acc_view, debug_synchronous
-    );
-    ROCPRIM_DETAIL_HC_SYNC("rocprim::exclusive_scan", size, start)
-
-    // TODO: Those values should depend on type size
-    constexpr unsigned int block_size = 256;
-    constexpr unsigned int items_per_thread = 4;
-    constexpr auto items_per_block = block_size * items_per_thread;
-
-    auto number_of_blocks = (size + items_per_block - 1)/items_per_block;
-    if(debug_synchronous)
-    {
-        std::cout << "block_size " << block_size << '\n';
-        std::cout << "number of blocks " << number_of_blocks << '\n';
-        std::cout << "items_per_block " << items_per_block << '\n';
-        std::cout << "temporary storage size " << storage_size << '\n';
-    }
-
-    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    hc::parallel_for_each(
-        acc_view,
-        hc::tiled_extent<1>(number_of_blocks * block_size, block_size),
-        [=](hc::tiled_index<1>) [[hc]]
-        {
-            detail::scatter_kernel_impl<block_size, items_per_thread>(
-                input, size, flags, indices,
-                output, selected_count_output
-            );
-        }
-    );
-    ROCPRIM_DETAIL_HC_SYNC("scatter_kernel", size, start)
 }
 
 /// \brief HC parallel select primitive for device level using selection operator.
@@ -240,7 +180,7 @@ void select(void * temporary_storage,
 /// a simple pointer type.
 /// \tparam SelectedCountOutputIterator - random-access iterator type of the selected_count_output
 /// value. It can be a simple pointer type.
-/// \tparam SelectOp - type of an unary selection operator.
+/// \tparam SelectOp - type of a unary selection operator.
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -321,78 +261,15 @@ void select(void * temporary_storage,
             hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
             const bool debug_synchronous = false)
 {
-    // Get temporary storage required by scan operation
-    size_t scan_storage_size = 0;
-    unsigned char * dummy_in_ptr = nullptr;
-    unsigned int *  dummy_out_ptr = nullptr;
-    ::rocprim::exclusive_scan(
-        nullptr, scan_storage_size,
-        dummy_in_ptr, dummy_out_ptr,
-        0U, size, ::rocprim::plus<unsigned int>(),
-        acc_view, debug_synchronous
+    // Dummy flag type
+    using flag_type = ::rocprim::empty_type;
+    flag_type * flags = nullptr;
+
+    using Config = default_config;
+    detail::partition_impl<detail::select_method::predicate, true, Config>(
+        temporary_storage, storage_size, input, flags, output, selected_count_output,
+        size, predicate, acc_view, debug_synchronous
     );
-    // Align
-    scan_storage_size = ::rocprim::detail::align_size(scan_storage_size);
-
-    // Calculate required temporary storage
-    if(temporary_storage == nullptr)
-    {
-        storage_size = scan_storage_size;
-        // Add storage required for indexes
-        storage_size += size * sizeof(unsigned int);
-        // Make sure user won't try to allocate 0 bytes memory, otherwise
-        // user may again pass nullptr as temporary_storage
-        storage_size = storage_size == 0 ? 4 : storage_size;
-        return;
-    }
-
-    // Return for empty input
-    if(size == 0) return;
-
-    // Start point for time measurements
-    std::chrono::high_resolution_clock::time_point start;
-
-    // Calculate output indices to scatter selected values
-    auto indices = reinterpret_cast<unsigned int*>(
-        static_cast<unsigned char*>(temporary_storage) + scan_storage_size
-    );
-    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    ::rocprim::exclusive_scan(
-        temporary_storage, scan_storage_size,
-        ::rocprim::make_transform_iterator(input, select_op),
-        indices, 0U, size, ::rocprim::plus<unsigned int>(),
-        acc_view, debug_synchronous
-    );
-    ROCPRIM_DETAIL_HC_SYNC("rocprim::exclusive_scan", size, start)
-
-    // TODO: Those values should depend on type size
-    constexpr unsigned int block_size = 256;
-    constexpr unsigned int items_per_thread = 4;
-    constexpr auto items_per_block = block_size * items_per_thread;
-
-    auto number_of_blocks = (size + items_per_block - 1)/items_per_block;
-    if(debug_synchronous)
-    {
-        std::cout << "block_size " << block_size << '\n';
-        std::cout << "number of blocks " << number_of_blocks << '\n';
-        std::cout << "items_per_block " << items_per_block << '\n';
-        std::cout << "temporary storage size " << storage_size << '\n';
-    }
-
-    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    hc::parallel_for_each(
-        acc_view,
-        hc::tiled_extent<1>(number_of_blocks * block_size, block_size),
-        [=](hc::tiled_index<1>) [[hc]]
-        {
-            detail::scatter_if_kernel_impl<block_size, items_per_thread>(
-                input, size, indices,
-                output, selected_count_output,
-                select_op
-            );
-        }
-    );
-    ROCPRIM_DETAIL_HC_SYNC("scatter_if_kernel", size, start)
 }
 
 /// \brief HC device-level parallel unique primitive.
