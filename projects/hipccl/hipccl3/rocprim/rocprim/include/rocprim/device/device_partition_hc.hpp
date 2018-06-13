@@ -53,7 +53,10 @@ namespace detail
     }
 
 template<
-    bool UsePredicate,
+    // Method of selection: flag, predicate, unique
+    select_method SelectMethod,
+     // if true, it doesn't copy rejected values to output
+    bool SelectedOnly,
     class Config,
     class InputIterator,
     class FlagIterator,
@@ -152,7 +155,7 @@ void partition_impl(void * temporary_storage,
         hc::tiled_extent<1>(grid_size, block_size),
         [=](hc::tiled_index<1>) [[hc]]
         {
-            partition_kernel_impl<UsePredicate, config, result_type>(
+            partition_kernel_impl<SelectMethod, SelectedOnly, config, result_type>(
                 input, flags, output, selected_count_output, size, predicate,
                 offset_scan_state, number_of_blocks, ordered_bid
             );
@@ -267,7 +270,7 @@ void partition(void * temporary_storage,
     // Dummy unary preficate
     using unary_preficate_type = ::rocprim::empty_type;
 
-    detail::partition_impl<false, Config>(
+    detail::partition_impl<detail::select_method::flag, false, Config>(
         temporary_storage, storage_size, input, flags, output, selected_count_output,
         size, unary_preficate_type(), acc_view, debug_synchronous
     );
@@ -295,7 +298,7 @@ void partition(void * temporary_storage,
 /// a simple pointer type.
 /// \tparam SelectedCountOutputIterator - random-access iterator type of the selected_count_output
 /// value. It can be a simple pointer type.
-/// \tparam UnaryPredicate - type of an unary selection predicate.
+/// \tparam UnaryPredicate - type of a unary selection predicate.
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -382,7 +385,7 @@ void partition(void * temporary_storage,
     using flag_type = ::rocprim::empty_type;
     flag_type * flags = nullptr;
 
-    detail::partition_impl<true, Config>(
+    detail::partition_impl<detail::select_method::predicate, false, Config>(
         temporary_storage, storage_size, input, flags, output, selected_count_output,
         size, predicate, acc_view, debug_synchronous
     );
