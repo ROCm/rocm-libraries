@@ -24,10 +24,25 @@
 #include <type_traits>
 
 #include "../config.hpp"
+#include "../types/tuple.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
+
+// tuple_contains_type::value is false if Tuple is not rocprim::tuple<> or Tuple is
+// rocprim::tuple<> class which does not contain element of type T; otherwise it's true.
+template<class T, class Tuple>
+struct tuple_contains_type : std::false_type {};
+
+template<class T>
+struct tuple_contains_type<T, ::rocprim::tuple<>> : std::false_type {};
+
+template<class T, class U, class... Ts>
+struct tuple_contains_type<T, ::rocprim::tuple<U, Ts...>> : tuple_contains_type<T, ::rocprim::tuple<Ts...>> {};
+
+template<class T, class... Ts>
+struct tuple_contains_type<T, ::rocprim::tuple<T, Ts...>> : std::true_type {};
 
 template<class InputType, class OutputType, class BinaryFunction>
 struct match_result_type
@@ -38,20 +53,19 @@ private:
     #else
     using binary_result_type = typename std::result_of<BinaryFunction(InputType, InputType)>::type;
     #endif
-    // Fixed output_type in case OutputType is void
-    using output_type =
-        typename std::conditional<
-            std::is_void<OutputType>::value, InputType, OutputType
-        >::type;
-    // output_type is not a valid result_type if we can't covert it to binary_result_type
-    static constexpr bool is_output_type_valid =
-        std::is_convertible<output_type, binary_result_type>::value;
+
+    // Fixed output_type in case OutputType is void or is a tuple containing void
+    static constexpr bool is_output_type_invalid =
+        std::is_void<OutputType>::value || tuple_contains_type<void, OutputType>::value;
+    using value_type =
+        typename std::conditional<is_output_type_invalid, InputType, OutputType>::type;
+
+    // value_type is not a valid result_type if we can't covert it to binary_result_type
+    static constexpr bool is_value_type_valid =
+        std::is_convertible<value_type, binary_result_type>::value;
 
 public:
-    using type =
-        typename std::conditional<
-            is_output_type_valid, output_type, binary_result_type
-        >::type;
+    using type = typename std::conditional<is_value_type_valid, value_type, binary_result_type>::type;
 };
 
 } // end namespace detail

@@ -28,8 +28,9 @@
 #include "../functional.hpp"
 #include "../type_traits.hpp"
 #include "../detail/various.hpp"
+#include "../detail/match_result_type.hpp"
 
-#include "device_partition_config.hpp"
+#include "device_select_config.hpp"
 #include "detail/device_partition.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -41,7 +42,8 @@ namespace detail
 {
 
 template<
-    bool UsePredicate,
+    select_method SelectMethod,
+    bool OnlySelected,
     class Config,
     class ResultType,
     class InputIterator,
@@ -49,6 +51,7 @@ template<
     class OutputIterator,
     class SelectedCountOutputIterator,
     class UnaryPredicate,
+    class InequalityOp,
     class OffsetLookbackScanState
 >
 __global__
@@ -58,13 +61,14 @@ void partition_kernel(InputIterator input,
                       SelectedCountOutputIterator selected_count_output,
                       const size_t size,
                       UnaryPredicate predicate,
+                      InequalityOp inequality_op,
                       OffsetLookbackScanState offset_scan_state,
                       const unsigned int number_of_blocks,
                       ordered_block_id<unsigned int> ordered_bid)
 {
-    partition_kernel_impl<UsePredicate, Config, ResultType>(
+    partition_kernel_impl<SelectMethod, OnlySelected, Config, ResultType>(
         input, flags, output, selected_count_output, size, predicate,
-        offset_scan_state, number_of_blocks, ordered_bid
+        inequality_op, offset_scan_state, number_of_blocks, ordered_bid
     );
 }
 
@@ -106,12 +110,16 @@ void init_offset_scan_state_kernel(OffsetLookBackScanState offset_scan_state,
     }
 
 template<
-    bool UsePredicate,
+    // Method of selection: flag, predicate, unique
+    select_method SelectMethod,
+     // if true, it doesn't copy rejected values to output
+    bool OnlySelected,
     class Config,
     class InputIterator,
     class FlagIterator,
     class OutputIterator,
     class UnaryPredicate,
+    class InequalityOp,
     class SelectedCountOutputIterator
 >
 inline
@@ -123,15 +131,19 @@ hipError_t partition_impl(void * temporary_storage,
                           SelectedCountOutputIterator selected_count_output,
                           const size_t size,
                           UnaryPredicate predicate,
+                          InequalityOp inequality_op,
                           const hipStream_t stream,
                           bool debug_synchronous)
 {
     using offset_type = unsigned int;
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     using output_type = typename std::iterator_traits<OutputIterator>::value_type;
-    // Fix for cases when output_type is void (there's no sizeof(void))
+    // Fix for cases when output_type is void (there's no sizeof(void) or it's
+    // a tuple which contains an item of type void)
+    static constexpr bool is_output_type_invalid =
+        std::is_same<void, output_type>::value || tuple_contains_type<void, output_type>::value;
     using value_type = typename std::conditional<
-        std::is_same<void, output_type>::value, input_type, output_type
+        is_output_type_invalid, input_type, output_type
     >::type;
     // Use smaller type for private storage
     using result_type = typename std::conditional<
@@ -141,7 +153,7 @@ hipError_t partition_impl(void * temporary_storage,
     // Get default config if Config is default_config
     using config = default_or_custom_config<
         Config,
-        default_partition_config<ROCPRIM_TARGET_ARCH, result_type>
+        default_select_config<ROCPRIM_TARGET_ARCH, result_type>
     >;
 
     using offset_scan_state_type = detail::lookback_scan_state<offset_type>;
@@ -197,13 +209,13 @@ hipError_t partition_impl(void * temporary_storage,
     grid_size = number_of_blocks;
     hipLaunchKernelGGL(
         HIP_KERNEL_NAME(partition_kernel<
-            UsePredicate, config, result_type,
+            SelectMethod, OnlySelected, config, result_type,
             InputIterator, FlagIterator, OutputIterator, SelectedCountOutputIterator,
-            UnaryPredicate, offset_scan_state_type
+            UnaryPredicate, decltype(inequality_op), offset_scan_state_type
         >),
         dim3(grid_size), dim3(block_size), 0, stream,
-        input, flags, output, selected_count_output, size,
-        predicate, offset_scan_state, number_of_blocks, ordered_bid
+        input, flags, output, selected_count_output, size, predicate,
+        inequality_op, offset_scan_state, number_of_blocks, ordered_bid
     );
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("partition_kernel", size, start)
 
@@ -231,7 +243,7 @@ hipError_t partition_impl(void * temporary_storage,
 /// * Relative order is preserved for the elements for which the corresponding values from \p flags
 /// are \p true. Other elements are copied in reverse order.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It can be \p partition_config or
+/// \tparam Config - [optional] configuration of the primitive. It can be \p select_config or
 /// a custom class with the same members.
 /// \tparam InputIterator - random-access iterator type of the input range. It can be
 /// a simple pointer type.
@@ -312,12 +324,14 @@ hipError_t partition(void * temporary_storage,
                      const hipStream_t stream = 0,
                      const bool debug_synchronous = false)
 {
-    // Dummy unary preficate
-    using unary_preficate_type = ::rocprim::empty_type;
+    // Dummy unary predicate
+    using unary_predicate_type = ::rocprim::empty_type;
+    // Dummy inequality operation
+    using inequality_op_type = ::rocprim::empty_type;
 
-    return detail::partition_impl<false, Config>(
+    return detail::partition_impl<detail::select_method::flag, false, Config>(
         temporary_storage, storage_size, input, flags, output, selected_count_output,
-        size, unary_preficate_type(), stream, debug_synchronous
+        size, unary_predicate_type(), inequality_op_type(), stream, debug_synchronous
     );
 }
 
@@ -335,7 +349,7 @@ hipError_t partition(void * temporary_storage,
 /// * Relative order is preserved for the elements for which the \p predicate returns \p true. Other
 /// elements are copied in reverse order.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It can be \p partition_config or
+/// \tparam Config - [optional] configuration of the primitive. It can be \p select_config or
 /// a custom class with the same members.
 /// \tparam InputIterator - random-access iterator type of the input range. It can be
 /// a simple pointer type.
@@ -343,7 +357,7 @@ hipError_t partition(void * temporary_storage,
 /// a simple pointer type.
 /// \tparam SelectedCountOutputIterator - random-access iterator type of the selected_count_output
 /// value. It can be a simple pointer type.
-/// \tparam UnaryPredicate - type of an unary selection predicate.
+/// \tparam UnaryPredicate - type of a unary selection predicate.
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -429,10 +443,12 @@ hipError_t partition(void * temporary_storage,
     // Dummy flag type
     using flag_type = ::rocprim::empty_type;
     flag_type * flags = nullptr;
+    // Dummy inequality operation
+    using inequality_op_type = ::rocprim::empty_type;
 
-    return detail::partition_impl<true, Config>(
+    return detail::partition_impl<detail::select_method::predicate, false, Config>(
         temporary_storage, storage_size, input, flags, output, selected_count_output,
-        size, predicate, stream, debug_synchronous
+        size, predicate, inequality_op_type(), stream, debug_synchronous
     );
 }
 
