@@ -43,10 +43,10 @@ struct default_config { };
 template<unsigned int BlockSize, unsigned int ItemsPerThread>
 struct kernel_config
 {
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
+    /// value of BlockSize - number of threads in a block.
     static constexpr unsigned int block_size = BlockSize;
+    /// value of ItemsPerThread - number of items in processed by each thread.
     static constexpr unsigned int items_per_thread = ItemsPerThread;
-#endif
 };
 
 namespace detail
