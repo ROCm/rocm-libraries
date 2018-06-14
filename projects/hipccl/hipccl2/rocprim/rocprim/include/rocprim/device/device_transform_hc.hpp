@@ -29,6 +29,7 @@
 #include "../types/tuple.hpp"
 #include "../iterator/zip_iterator.hpp"
 
+#include "device_transform_config.hpp"
 #include "detail/device_transform.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -61,6 +62,8 @@ namespace detail
 /// \par Overview
 /// * Ranges specified by \p input and \p output must have at least \p size elements.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p transform_config or
+/// a custom class with the same members.
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
@@ -110,6 +113,7 @@ namespace detail
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class InputIterator,
     class OutputIterator,
     class UnaryFunction
@@ -129,9 +133,14 @@ void transform(InputIterator input,
     using result_type = typename std::result_of<UnaryFunction(input_type)>::type;
     #endif
 
-    // TODO: Those values should depend on type size
-    constexpr unsigned int block_size = 256;
-    constexpr unsigned int items_per_thread = 4;
+    // Get default config if Config is default_config
+    using config = detail::default_or_custom_config<
+        Config,
+        detail::default_transform_config<ROCPRIM_TARGET_ARCH, result_type>
+    >;
+
+    constexpr unsigned int block_size = config::block_size;
+    constexpr unsigned int items_per_thread = config::items_per_thread;
     constexpr auto items_per_block = block_size * items_per_thread;
 
     // Start point for time measurements
@@ -177,6 +186,8 @@ void transform(InputIterator input,
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
 /// \tparam BinaryFunction - type of binary function used for transform.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p transform_config or
+/// a custom class with the same members.
 /// \param [in] input1 - iterator to the first element in the 1st range to transform.
 /// \param [in] input2 - iterator to the first element in the 2nd range to transform.
 /// \param [out] output - iterator to the first element in the output range.
@@ -223,6 +234,7 @@ void transform(InputIterator input,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class InputIterator1,
     class InputIterator2,
     class OutputIterator,
@@ -239,7 +251,7 @@ void transform(InputIterator1 input1,
 {
     using value_type1 = typename std::iterator_traits<InputIterator1>::value_type;
     using value_type2 = typename std::iterator_traits<InputIterator2>::value_type;
-    return transform(
+    transform<Config>(
         ::rocprim::make_zip_iterator(::rocprim::make_tuple(input1, input2)), output,
         size, detail::unpack_binary_op<value_type1, value_type2, BinaryFunction>(transform_op),
         acc_view, debug_synchronous
