@@ -61,7 +61,8 @@ public:
 
 typedef ::testing::Types<
     DeviceSelectParams<int, long>,
-    DeviceSelectParams<unsigned char, float>
+    DeviceSelectParams<unsigned char, float>,
+    DeviceSelectParams<test_utils::custom_test_type<double>>
 > RocprimDeviceSelectTestsParams;
 
 std::vector<size_t> get_sizes()
@@ -161,8 +162,7 @@ TYPED_TEST(RocprimDeviceSelectTests, Flagged)
         std::vector<U> output = d_output;
         for(size_t i = 0; i < expected.size(); i++)
         {
-            SCOPED_TRACE(testing::Message() << "where index = " << i);
-            ASSERT_EQ(output[i], expected[i]);
+            ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
         }
     }
 }
@@ -178,7 +178,7 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
 
     auto select_op = [](const T& value) [[hc,cpu]] -> bool
         {
-            if(value > 50) return true;
+            if(value < T(50)) return true;
             return false;
         };
 
@@ -251,8 +251,7 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
         std::vector<U> output = d_output;
         for(size_t i = 0; i < expected.size(); i++)
         {
-            SCOPED_TRACE(testing::Message() << "where index = " << i);
-            ASSERT_EQ(output[i], expected[i]);
+            ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
         }
     }
 }
@@ -355,8 +354,7 @@ TYPED_TEST(RocprimDeviceSelectTests, Unique)
             std::vector<U> output = d_output;
             for(size_t i = 0; i < expected.size(); i++)
             {
-                SCOPED_TRACE(testing::Message() << "where index = " << i);
-                ASSERT_EQ(output[i], expected[i]);
+                ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
             }
         }
     }
