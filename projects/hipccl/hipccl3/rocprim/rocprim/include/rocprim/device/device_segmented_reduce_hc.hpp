@@ -51,6 +51,7 @@ namespace detail
     }
 
 template<
+    class Config,
     class InputIterator,
     class OutputIterator,
     class OffsetIterator,
@@ -76,8 +77,13 @@ void segmented_reduce_impl(void * temporary_storage,
         input_type, output_type, BinaryFunction
     >::type;
 
-    constexpr unsigned int block_size = 256;
-    constexpr unsigned int items_per_thread = 8;
+    // Get default config if Config is default_config
+    using config = default_or_custom_config<
+        Config,
+        default_reduce_config<ROCPRIM_TARGET_ARCH, result_type>
+    >;
+
+    constexpr unsigned int block_size = config::block_size;
 
     if(temporary_storage == nullptr)
     {
@@ -95,7 +101,7 @@ void segmented_reduce_impl(void * temporary_storage,
         hc::tiled_extent<1>(segments * block_size, block_size),
         [=](hc::tiled_index<1>) [[hc]]
         {
-            segmented_reduce<block_size, items_per_thread>(
+            segmented_reduce<config>(
                 input, output,
                 begin_offsets, end_offsets,
                 reduce_op, static_cast<result_type>(initial_value)
@@ -124,6 +130,8 @@ void segmented_reduce_impl(void * temporary_storage,
 /// <tt>segments + 1</tt> elements: <tt>offsets</tt> for \p begin_offsets and
 /// <tt>offsets + 1</tt> for \p end_offsets.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p reduce_config or
+/// a custom class with the same members.
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
@@ -206,6 +214,7 @@ void segmented_reduce_impl(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class InputIterator,
     class OutputIterator,
     class OffsetIterator,
@@ -225,7 +234,7 @@ void segmented_reduce(void * temporary_storage,
                       hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
                       bool debug_synchronous = false)
 {
-    detail::segmented_reduce_impl(
+    detail::segmented_reduce_impl<Config>(
         temporary_storage, storage_size,
         input, output,
         segments, begin_offsets, end_offsets,

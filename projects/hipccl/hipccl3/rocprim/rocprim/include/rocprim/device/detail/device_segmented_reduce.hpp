@@ -39,8 +39,7 @@ namespace detail
 {
 
 template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
+    class Config,
     class InputIterator,
     class OutputIterator,
     class OffsetIterator,
@@ -55,10 +54,14 @@ void segmented_reduce(InputIterator input,
                       BinaryFunction reduce_op,
                       ResultType initial_value)
 {
-    constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
+    constexpr unsigned int block_size = Config::block_size;
+    constexpr unsigned int items_per_thread = Config::items_per_thread;
+    constexpr unsigned int items_per_block = block_size * items_per_thread;
 
-    using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    using reduce_type = ::rocprim::block_reduce<ResultType, BlockSize>;
+    using reduce_type = ::rocprim::block_reduce<
+        ResultType, block_size,
+        Config::block_reduce_method
+    >;
 
     ROCPRIM_SHARED_MEMORY typename reduce_type::storage_type reduce_storage;
 
@@ -90,16 +93,16 @@ void segmented_reduce(InputIterator input,
         {
             unsigned int offset = block_offset + flat_id;
             result = input[offset];
-            offset += BlockSize;
+            offset += block_size;
             while(offset < end_offset)
             {
                 result = reduce_op(result, static_cast<ResultType>(input[offset]));
-                offset += BlockSize;
+                offset += block_size;
             }
         }
 
         // Reduce threads' reductions to compute the final result
-        if(valid_count >= BlockSize)
+        if(valid_count >= block_size)
         {
             // All threads have at least one value, i.e. result has valid value
             reduce_type().reduce(result, result, reduce_storage, reduce_op);
@@ -113,36 +116,36 @@ void segmented_reduce(InputIterator input,
     {
         // Long segments
 
-        input_type values[ItemsPerThread];
+        ResultType values[items_per_thread];
 
         // Load the first block and reduce the current thread's values
-        block_load_direct_striped<BlockSize>(flat_id, input + block_offset, values);
+        block_load_direct_striped<block_size>(flat_id, input + block_offset, values);
         result = values[0];
-        for(unsigned int i = 1; i < ItemsPerThread; i++)
+        for(unsigned int i = 1; i < items_per_thread; i++)
         {
-            result = reduce_op(result, static_cast<ResultType>(values[i]));
+            result = reduce_op(result, values[i]);
         }
         block_offset += items_per_block;
 
         // Load next full blocks and continue reduction
         while(block_offset + items_per_block < end_offset)
         {
-            block_load_direct_striped<BlockSize>(flat_id, input + block_offset, values);
-            for(unsigned int i = 0; i < ItemsPerThread; i++)
+            block_load_direct_striped<block_size>(flat_id, input + block_offset, values);
+            for(unsigned int i = 0; i < items_per_thread; i++)
             {
-                result = reduce_op(result, static_cast<ResultType>(values[i]));
+                result = reduce_op(result, values[i]);
             }
             block_offset += items_per_block;
         }
 
         // Load the last (probably partial) block and continue reduction
         const unsigned int valid_count = end_offset - block_offset;
-        block_load_direct_striped<BlockSize>(flat_id, input + block_offset, values, valid_count);
-        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        block_load_direct_striped<block_size>(flat_id, input + block_offset, values, valid_count);
+        for(unsigned int i = 0; i < items_per_thread; i++)
         {
-            if(i * BlockSize + flat_id < valid_count)
+            if(i * block_size + flat_id < valid_count)
             {
-                result = reduce_op(result, static_cast<ResultType>(values[i]));
+                result = reduce_op(result, values[i]);
             }
         }
 

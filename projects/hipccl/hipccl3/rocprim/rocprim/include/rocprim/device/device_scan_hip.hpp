@@ -431,6 +431,8 @@ hipError_t lookback_scan_impl(void * temporary_storage,
 /// if \p temporary_storage in a null pointer.
 /// * Ranges specified by \p input and \p output must have at least \p size elements.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p scan_config or
+/// a custom class with the same members.
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
@@ -546,6 +548,8 @@ hipError_t inclusive_scan(void * temporary_storage,
 /// if \p temporary_storage in a null pointer.
 /// * Ranges specified by \p input and \p output must have at least \p size elements.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p scan_config or
+/// a custom class with the same members.
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
