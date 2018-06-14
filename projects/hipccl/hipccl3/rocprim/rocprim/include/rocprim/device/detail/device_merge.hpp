@@ -161,25 +161,18 @@ void load(unsigned int flat_id,
           const size_t input1_size,
           const size_t input2_size)
 {
-    KeyType keys[ItemsPerThread];
-    keys_input2 -= input1_size;
-
-    unsigned int count = input1_size + input2_size;
-
     #pragma unroll
     for(unsigned int i = 0; i < ItemsPerThread; ++i)
     {
         unsigned int index = BlockSize * i + flat_id;
-        if(index < count)
+        if(index < input1_size)
         {
-            keys[i] = (index < input1_size) ? keys_input1[index] : keys_input2[index];
+            keys_shared[index] = keys_input1[index];
         }
-    }
-
-    #pragma unroll
-    for(unsigned int i = 0; i < ItemsPerThread; ++i)
-    {
-        keys_shared[BlockSize * i + flat_id] = keys[i];
+        else if(index < input1_size + input2_size)
+        {
+            keys_shared[index] = keys_input2[index - input1_size];
+        }
     }
 
     ::rocprim::syncthreads();
@@ -239,15 +232,10 @@ void merge_keys(unsigned int flat_id,
                 KeysInputIterator2 keys_input2,
                 KeyType (&key_inputs)[ItemsPerThread],
                 unsigned int (&index)[ItemsPerThread],
+                KeyType * keys_shared,
                 range_t range,
                 BinaryFunction compare_function)
 {
-    using key_type = typename std::iterator_traits<KeysInputIterator1>::value_type;
-
-    constexpr unsigned int input_block_size = BlockSize * ItemsPerThread + 1;
-
-    ROCPRIM_SHARED_MEMORY key_type keys_shared[input_block_size];
-
     load<BlockSize, ItemsPerThread>(
         flat_id, keys_input1 + range.begin1, keys_input2 + range.begin2,
         keys_shared, range.count1(), range.count2()
@@ -307,7 +295,6 @@ merge_values(unsigned int flat_id,
     unsigned int count = input1_size + input2_size;
 
     value_type values[ItemsPerThread];
-    values_input2 -= input1_size;
 
     if(count >= ItemsPerThread * BlockSize)
     {
@@ -315,7 +302,7 @@ merge_values(unsigned int flat_id,
         for(unsigned int i = 0; i < ItemsPerThread; ++i)
         {
             values[i] = (index[i] < input1_size) ? values_input1[index[i]] :
-                                                   values_input2[index[i]];
+                                                   values_input2[index[i] - input1_size];
         }
     }
     else
@@ -327,7 +314,7 @@ merge_values(unsigned int flat_id,
             if(id < count)
             {
                 values[i] = (index[i] < input1_size) ? values_input1[index[i]] :
-                                                       values_input2[index[i]];
+                                                       values_input2[index[i] - input1_size];
             }
         }
     }
@@ -395,9 +382,20 @@ void merge_kernel_impl(IndexIterator indices,
 {
     using key_type = typename std::iterator_traits<KeysInputIterator1>::value_type;
     using value_type = typename std::iterator_traits<ValuesInputIterator1>::value_type;
+    using keys_store_type = ::rocprim::block_store<
+        key_type, BlockSize, ItemsPerThread,
+        ::rocprim::block_store_method::block_store_transpose
+    >;
     constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
 
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
+    constexpr unsigned int input_block_size = BlockSize * ItemsPerThread + 1;
+
+    ROCPRIM_SHARED_MEMORY union
+    {
+        key_type keys_shared[input_block_size];
+        typename keys_store_type::storage_type keys_store;
+    } storage;
 
     key_type input[ItemsPerThread];
     unsigned int index[ItemsPerThread];
@@ -420,24 +418,27 @@ void merge_kernel_impl(IndexIterator indices,
 
     merge_keys<BlockSize>(
         flat_id, keys_input1, keys_input2, input, index,
+        storage.keys_shared,
         range, compare_function
     );
 
+    ::rocprim::syncthreads();
+
     if(flat_block_id == (number_of_blocks - 1)) // last block
     {
-        block_store_direct_blocked(
-            flat_id,
+        keys_store_type().store(
             keys_output + block_offset,
             input,
-            valid_in_last_block
+            valid_in_last_block,
+            storage.keys_store
         );
     }
     else
     {
-        block_store_direct_blocked(
-            flat_id,
+        keys_store_type().store(
             keys_output + block_offset,
-            input
+            input,
+            storage.keys_store
         );
     }
 
