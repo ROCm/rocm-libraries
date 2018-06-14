@@ -54,6 +54,9 @@
 const size_t DEFAULT_N = 1024 * 1024 * 128;
 #endif
 
+const unsigned int batch_size = 10;
+const unsigned int warmup_size = 5;
+
 template<
     class T,
     class BinaryFunction
@@ -63,19 +66,7 @@ void run_benchmark(benchmark::State& state,
                    const hipStream_t stream,
                    BinaryFunction reduce_op)
 {
-    std::vector<T> input;
-    if(std::is_floating_point<T>::value)
-    {
-        input = get_random_data<T>(size, (T)-1000, (T)+1000);
-    }
-    else
-    {
-        input = get_random_data<T>(
-            size,
-            std::numeric_limits<T>::min(),
-            std::numeric_limits<T>::max()
-        );
-    }
+    std::vector<T> input = get_random_data<T>(size, T(0), T(1000));
 
     T * d_input;
     T * d_output;
@@ -105,7 +96,7 @@ void run_benchmark(benchmark::State& state,
     HIP_CHECK(hipDeviceSynchronize());
 
     // Warm-up
-    for(size_t i = 0; i < 10; i++)
+    for(size_t i = 0; i < warmup_size; i++)
     {
         HIP_CHECK(
             rocprim::reduce(
@@ -117,7 +108,6 @@ void run_benchmark(benchmark::State& state,
     }
     HIP_CHECK(hipDeviceSynchronize());
 
-    const unsigned int batch_size = 10;
     for(auto _ : state)
     {
         auto start = std::chrono::high_resolution_clock::now();
@@ -149,7 +139,7 @@ void run_benchmark(benchmark::State& state,
 
 #define CREATE_BENCHMARK(T, REDUCE_OP) \
 benchmark::RegisterBenchmark( \
-    ("device_reduce<" #T "," #REDUCE_OP ">"), \
+    ("reduce<" #T ", " #REDUCE_OP ">"), \
     run_benchmark<T, REDUCE_OP>, size, stream, REDUCE_OP() \
 )
 
@@ -173,14 +163,20 @@ int main(int argc, char *argv[])
     HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
     std::cout << "[HIP] Device name: " << devProp.name << std::endl;
 
+    using custom_float2 = custom_type<float, float>;
+    using custom_double2 = custom_type<double, double>;
+
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks =
     {
-        CREATE_BENCHMARK(unsigned int, rocprim::plus<unsigned int>),
-        CREATE_BENCHMARK(unsigned long long, rocprim::plus<unsigned long long>),
+        CREATE_BENCHMARK(int, rocprim::plus<int>),
+        CREATE_BENCHMARK(long long, rocprim::plus<long long>),
 
         CREATE_BENCHMARK(float, rocprim::plus<float>),
         CREATE_BENCHMARK(double, rocprim::plus<double>),
+
+        CREATE_BENCHMARK(custom_float2, rocprim::plus<custom_float2>),
+        CREATE_BENCHMARK(custom_double2, rocprim::plus<custom_double2>),
     };
 
     // Use manual timing

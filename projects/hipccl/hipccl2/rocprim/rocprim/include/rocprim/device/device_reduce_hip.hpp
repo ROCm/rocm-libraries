@@ -28,6 +28,7 @@
 #include "../detail/various.hpp"
 #include "../detail/match_result_type.hpp"
 
+#include "device_reduce_config.hpp"
 #include "detail/device_reduce.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -39,9 +40,8 @@ namespace detail
 {
 
 template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
     bool WithInitialValue,
+    class Config,
     class ResultType,
     class InputIterator,
     class OutputIterator,
@@ -55,7 +55,7 @@ void block_reduce_kernel(InputIterator input,
                          InitValueType initial_value,
                          BinaryFunction reduce_op)
 {
-    block_reduce_kernel_impl<BlockSize, ItemsPerThread, WithInitialValue, ResultType>(
+    block_reduce_kernel_impl<WithInitialValue, Config, ResultType>(
         input, size, output, initial_value, reduce_op
     );
 }
@@ -88,9 +88,8 @@ void block_reduce_kernel(InputIterator input,
 
 
 template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
     bool WithInitialValue, // true when inital_value should be used in reduction
+    class Config,
     class InputIterator,
     class OutputIterator,
     class InitValueType,
@@ -113,8 +112,14 @@ hipError_t reduce_impl(void * temporary_storage,
         input_type, output_type, BinaryFunction
     >::type;
 
-    constexpr unsigned int block_size = BlockSize;
-    constexpr unsigned int items_per_thread = ItemsPerThread;
+    // Get default config if Config is default_config
+    using config = default_or_custom_config<
+        Config,
+        default_reduce_config<ROCPRIM_TARGET_ARCH, result_type>
+    >;
+
+    constexpr unsigned int block_size = config::block_size;
+    constexpr unsigned int items_per_thread = config::items_per_thread;
     constexpr auto items_per_block = block_size * items_per_thread;
 
     if(temporary_storage == nullptr)
@@ -138,17 +143,13 @@ hipError_t reduce_impl(void * temporary_storage,
 
     if(number_of_blocks > 1)
     {
-        const unsigned int grid_size = number_of_blocks;
-
         // Pointer to array with block_prefixes
         result_type * block_prefixes = static_cast<result_type*>(temporary_storage);
+
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(detail::block_reduce_kernel<
-                block_size, items_per_thread, false, result_type,
-                InputIterator, result_type *, InitValueType, BinaryFunction
-            >),
-            dim3(grid_size), dim3(block_size), 0, stream,
+            HIP_KERNEL_NAME(detail::block_reduce_kernel<false, config, result_type>),
+            dim3(number_of_blocks), dim3(block_size), 0, stream,
             input, size, block_prefixes, initial_value, reduce_op
         );
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("block_reduce_kernel", size, start);
@@ -157,7 +158,7 @@ hipError_t reduce_impl(void * temporary_storage,
         auto nested_temp_storage_size = storage_size - (number_of_blocks * sizeof(result_type));
 
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-        auto error = reduce_impl<BlockSize, ItemsPerThread, WithInitialValue>(
+        auto error = reduce_impl<WithInitialValue, config>(
             nested_temp_storage,
             nested_temp_storage_size,
             block_prefixes, // input
@@ -173,16 +174,10 @@ hipError_t reduce_impl(void * temporary_storage,
     }
     else
     {
-        constexpr unsigned int single_reduce_block_size = BlockSize;
-        constexpr unsigned int single_reduce_items_per_thread = ItemsPerThread;
-
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(detail::block_reduce_kernel<
-                single_reduce_block_size, single_reduce_items_per_thread, WithInitialValue,
-                result_type, InputIterator, OutputIterator, InitValueType, BinaryFunction
-            >),
-            dim3(1), dim3(single_reduce_block_size), 0, stream,
+            HIP_KERNEL_NAME(detail::block_reduce_kernel<WithInitialValue, config, result_type>),
+            dim3(1), dim3(block_size), 0, stream,
             input, size, output, initial_value, reduce_op
         );
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("block_reduce_kernel", size, start);
@@ -210,6 +205,8 @@ hipError_t reduce_impl(void * temporary_storage,
 /// * Ranges specified by \p input must have at least \p size elements, while \p output
 /// only needs one element.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p reduce_config or
+/// a custom class with the same members.
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
@@ -280,6 +277,7 @@ hipError_t reduce_impl(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class InputIterator,
     class OutputIterator,
     class InitValueType,
@@ -296,10 +294,7 @@ hipError_t reduce(void * temporary_storage,
                  const hipStream_t stream = 0,
                  bool debug_synchronous = false)
 {
-    // TODO: Those values should depend on type size
-    constexpr unsigned int block_size = 256;
-    constexpr unsigned int items_per_thread = 4;
-    return detail::reduce_impl<block_size, items_per_thread, true>(
+    return detail::reduce_impl<true, Config>(
         temporary_storage, storage_size,
         input, output, initial_value, size,
         reduce_op, stream, debug_synchronous
@@ -320,6 +315,8 @@ hipError_t reduce(void * temporary_storage,
 /// * Ranges specified by \p input must have at least \p size elements, while \p output
 /// only needs one element.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p reduce_config or
+/// a custom class with the same members.
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
@@ -380,6 +377,7 @@ hipError_t reduce(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class InputIterator,
     class OutputIterator,
     class BinaryFunction = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>
@@ -396,10 +394,7 @@ hipError_t reduce(void * temporary_storage,
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
 
-    // TODO: Those values should depend on type size
-    constexpr unsigned int block_size = 256;
-    constexpr unsigned int items_per_thread = 4;
-    return detail::reduce_impl<block_size, items_per_thread, false>(
+    return detail::reduce_impl<false, Config>(
         temporary_storage, storage_size,
         input, output, input_type(), size,
         reduce_op, stream, debug_synchronous

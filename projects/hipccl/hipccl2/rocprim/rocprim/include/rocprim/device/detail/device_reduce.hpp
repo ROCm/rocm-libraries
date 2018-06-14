@@ -72,9 +72,8 @@ auto reduce_with_initial(T output,
 }
 
 template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
     bool WithInitialValue,
+    class Config,
     class ResultType,
     class InputIterator,
     class OutputIterator,
@@ -88,30 +87,28 @@ void block_reduce_kernel_impl(InputIterator input,
                               InitValueType initial_value,
                               BinaryFunction reduce_op)
 {
-    using output_value_type = typename std::iterator_traits<OutputIterator>::value_type;
-    using output_type = typename std::conditional<
-        std::is_same<output_value_type, void>::value,
-        ResultType,
-        output_value_type
-    >::type;
+    constexpr unsigned int block_size = Config::block_size;
+    constexpr unsigned int items_per_thread = Config::items_per_thread;
+
+    using result_type = ResultType;
 
     using block_reduce_type = ::rocprim::block_reduce<
-        output_type, BlockSize,
-        ::rocprim::block_reduce_algorithm::using_warp_reduce
+        result_type, block_size,
+        Config::block_reduce_method
     >;
-    constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
+    constexpr unsigned int items_per_block = block_size * items_per_thread;
 
     const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
     const unsigned int flat_block_id = ::rocprim::detail::block_id<0>();
-    const unsigned int block_offset = flat_block_id * BlockSize * ItemsPerThread;
+    const unsigned int block_offset = flat_block_id * items_per_block;
     const unsigned int number_of_blocks = (input_size + items_per_block - 1)/items_per_block;
     auto valid_in_last_block = input_size - items_per_block * (number_of_blocks - 1);
 
-    output_type values[ItemsPerThread];
-    output_type output_value;
+    result_type values[items_per_thread];
+    result_type output_value;
     if(flat_block_id == (number_of_blocks - 1)) // last block
     {
-        block_load_direct_striped<BlockSize>(
+        block_load_direct_striped<block_size>(
             flat_id,
             input + block_offset,
             values,
@@ -120,9 +117,9 @@ void block_reduce_kernel_impl(InputIterator input,
 
         output_value = values[0];
         #pragma unroll
-        for(unsigned int i = 1; i < ItemsPerThread; i++)
+        for(unsigned int i = 1; i < items_per_thread; i++)
         {
-            unsigned int offset = i * BlockSize;
+            unsigned int offset = i * block_size;
             if(flat_id + offset < valid_in_last_block)
             {
                 output_value = reduce_op(output_value, values[i]);
@@ -139,7 +136,7 @@ void block_reduce_kernel_impl(InputIterator input,
     }
     else
     {
-        block_load_direct_striped<BlockSize>(
+        block_load_direct_striped<block_size>(
             flat_id,
             input + block_offset,
             values
@@ -160,7 +157,7 @@ void block_reduce_kernel_impl(InputIterator input,
         output[flat_block_id] =
             reduce_with_initial<WithInitialValue>(
                 output_value,
-                static_cast<output_type>(initial_value),
+                static_cast<result_type>(initial_value),
                 reduce_op
             );
     }
