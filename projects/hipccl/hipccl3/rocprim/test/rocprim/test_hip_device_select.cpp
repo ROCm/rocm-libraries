@@ -64,7 +64,9 @@ public:
 
 typedef ::testing::Types<
     DeviceSelectParams<int, long>,
-    DeviceSelectParams<unsigned char, float, int, true>
+    DeviceSelectParams<unsigned char, float, int, true>,
+    DeviceSelectParams<double, double, int, true>,
+    DeviceSelectParams<test_utils::custom_test_type<double>, test_utils::custom_test_type<double>, int, true>
 > RocprimDeviceSelectTestsParams;
 
 std::vector<size_t> get_sizes()
@@ -203,8 +205,7 @@ TYPED_TEST(RocprimDeviceSelectTests, Flagged)
         HIP_CHECK(hipDeviceSynchronize());
         for(size_t i = 0; i < expected.size(); i++)
         {
-            SCOPED_TRACE(testing::Message() << "where index = " << i);
-            ASSERT_EQ(output[i], expected[i]);
+            ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
         }
 
         hipFree(d_input);
@@ -226,7 +227,7 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
 
     auto select_op = [] __host__ __device__ (const T& value) -> bool
         {
-            if(value > 50) return true;
+            if(value < T(50)) return true;
             return false;
         };
 
@@ -330,8 +331,7 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
         HIP_CHECK(hipDeviceSynchronize());
         for(size_t i = 0; i < expected.size(); i++)
         {
-            SCOPED_TRACE(testing::Message() << "where index = " << i);
-            ASSERT_EQ(output[i], expected[i]);
+            ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
         }
 
         hipFree(d_input);
@@ -344,7 +344,7 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
 std::vector<float> get_discontinuity_probabilities()
 {
     std::vector<float> probabilities = {
-        0.5, 0.25, 0.5, 0.75, 0.95
+        0.05, 0.25, 0.5, 0.75, 0.95, 1
     };
     return probabilities;
 }
@@ -470,8 +470,7 @@ TYPED_TEST(RocprimDeviceSelectTests, Unique)
             HIP_CHECK(hipDeviceSynchronize());
             for(size_t i = 0; i < expected.size(); i++)
             {
-                SCOPED_TRACE(testing::Message() << "where index = " << i);
-                ASSERT_EQ(output[i], expected[i]);
+                ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
             }
 
             hipFree(d_input);
