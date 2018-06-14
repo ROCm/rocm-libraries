@@ -62,7 +62,6 @@ void run_flagged_benchmark(benchmark::State& state,
 {
     std::vector<T> input;
     std::vector<FlagType> flags = get_random_data01<FlagType>(size, true_probability);
-    std::vector<T> output(size);
     std::vector<unsigned int> selected_count_output(1);
     if(std::is_floating_point<T>::value)
     {
@@ -169,6 +168,7 @@ void run_flagged_benchmark(benchmark::State& state,
     hipFree(d_output);
     hipFree(d_selected_count_output);
     hipFree(d_temp_storage);
+    HIP_CHECK(hipDeviceSynchronize());
 }
 
 template<class T>
@@ -178,7 +178,6 @@ void run_selectop_benchmark(benchmark::State& state,
                             float true_probability)
 {
     std::vector<T> input = get_random_data<T>(size, T(0), T(1000));
-    std::vector<T> output(size);
     std::vector<unsigned int> selected_count_output(1);
 
     auto select_op = [true_probability] __device__ (const T& value) -> bool
@@ -270,6 +269,7 @@ void run_selectop_benchmark(benchmark::State& state,
     hipFree(d_output);
     hipFree(d_selected_count_output);
     hipFree(d_temp_storage);
+    HIP_CHECK(hipDeviceSynchronize());
 }
 
 template<class T>
@@ -282,12 +282,12 @@ void run_unique_benchmark(benchmark::State& state,
     {
         auto input01 = get_random_data01<T>(size, discontinuity_probability);
         auto acc = input01[0];
+        input[0] = acc;
         for(size_t i = 1; i < input01.size(); i++)
         {
             input[i] = acc + input01[i];
         }
     }
-    std::vector<T> output(size);
     std::vector<unsigned int> selected_count_output(1);
     auto equality_op = rocprim::equal_to<T>();
 
@@ -420,37 +420,41 @@ int main(int argc, char *argv[])
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks =
     {
+        CREATE_SELECT_FLAGGED_BENCHMARK(int, unsigned char, 0.95f),
+        CREATE_SELECT_FLAGGED_BENCHMARK(int, unsigned char, 0.75f),
         CREATE_SELECT_FLAGGED_BENCHMARK(int, unsigned char, 0.5f),
+        CREATE_SELECT_FLAGGED_BENCHMARK(int, unsigned char, 0.25f),
+        CREATE_SELECT_FLAGGED_BENCHMARK(int, unsigned char, 0.10f),
+
         CREATE_SELECT_FLAGGED_BENCHMARK(float, unsigned char, 0.5f),
         CREATE_SELECT_FLAGGED_BENCHMARK(double, unsigned char, 0.5f),
         CREATE_SELECT_FLAGGED_BENCHMARK(custom_double2, unsigned char, 0.5f),
         CREATE_SELECT_FLAGGED_BENCHMARK(custom_int_double, unsigned char, 0.5f),
 
-        CREATE_SELECT_FLAGGED_BENCHMARK(int, unsigned char, 0.75f),
-        CREATE_SELECT_FLAGGED_BENCHMARK(int, unsigned char, 0.25f),
-        CREATE_SELECT_FLAGGED_BENCHMARK(int, unsigned char, 0.10f),
+        CREATE_SELECT_IF_BENCHMARK(int, 0.95f),
+        CREATE_SELECT_IF_BENCHMARK(int, 0.75f),
+        CREATE_SELECT_IF_BENCHMARK(int, 0.5f),
+        CREATE_SELECT_IF_BENCHMARK(int, 0.25f),
+        CREATE_SELECT_IF_BENCHMARK(int, 0.10f),
 
         CREATE_SELECT_IF_BENCHMARK(unsigned char, 0.5f),
-        CREATE_SELECT_IF_BENCHMARK(int, 0.5f),
         CREATE_SELECT_IF_BENCHMARK(float, 0.5f),
         CREATE_SELECT_IF_BENCHMARK(double, 0.5f),
         CREATE_SELECT_IF_BENCHMARK(custom_double2, 0.5f),
         CREATE_SELECT_IF_BENCHMARK(custom_int_double, 0.5f),
 
-        CREATE_SELECT_IF_BENCHMARK(int, 0.75f),
-        CREATE_SELECT_IF_BENCHMARK(int, 0.25f),
-        CREATE_SELECT_IF_BENCHMARK(int, 0.10f),
-
-        CREATE_UNIQUE_BENCHMARK(unsigned char, 0.1f),
+        CREATE_UNIQUE_BENCHMARK(int, 0.75f),
+        CREATE_UNIQUE_BENCHMARK(int, 0.5f),
         CREATE_UNIQUE_BENCHMARK(int, 0.1f),
-        CREATE_UNIQUE_BENCHMARK(float, 0.1f),
-        CREATE_UNIQUE_BENCHMARK(double, 0.1f),
-        CREATE_UNIQUE_BENCHMARK(custom_double2, 0.1f),
-        CREATE_UNIQUE_BENCHMARK(custom_int_double, 0.1f),
-
         CREATE_UNIQUE_BENCHMARK(int, 0.05f),
         CREATE_UNIQUE_BENCHMARK(int, 0.01f),
         CREATE_UNIQUE_BENCHMARK(int, 0.005f),
+
+        CREATE_UNIQUE_BENCHMARK(unsigned char, 0.1f),
+        CREATE_UNIQUE_BENCHMARK(float, 0.1f),
+        CREATE_UNIQUE_BENCHMARK(double, 0.1f),
+        CREATE_UNIQUE_BENCHMARK(custom_double2, 0.1f),
+        CREATE_UNIQUE_BENCHMARK(custom_int_double, 0.1f)
     };
 
     // Use manual timing
