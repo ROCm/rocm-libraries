@@ -260,7 +260,7 @@ void merge_keys(unsigned int flat_id,
         };
 
     unsigned int diag = ItemsPerThread * flat_id;
-        unsigned int partition =
+    unsigned int partition =
         merge_path(
             keys_shared + range_local.begin1,
             keys_shared + range_local.begin2,
@@ -407,6 +407,7 @@ void merge_kernel_impl(IndexIterator indices,
     const unsigned int block_offset = flat_block_id * items_per_block;
     const unsigned int count = input1_size + input2_size;
     const unsigned int number_of_blocks = (count + items_per_block - 1)/items_per_block;
+    const auto valid_in_last_block = count - items_per_block * (number_of_blocks - 1);
 
     const unsigned int p1 = indices[flat_block_id];
     const unsigned int p2 = indices[flat_block_id + 1];
@@ -428,7 +429,7 @@ void merge_kernel_impl(IndexIterator indices,
             flat_id,
             keys_output + block_offset,
             input,
-            count
+            valid_in_last_block
         );
     }
     else
