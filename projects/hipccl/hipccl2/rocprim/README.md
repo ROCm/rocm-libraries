@@ -12,7 +12,8 @@ performant GPU-accelerated code on AMD ROCm platform.
 * Git
 * CMake (3.5.1 or later)
 * AMD [ROCm](https://rocm.github.io/install.html) platform (1.7.1 or later)
-  * Including [HCC](https://github.com/RadeonOpenCompute/hcc) compiler, which must be set as C++ compiler on ROCm platform.
+  * Including [HCC](https://github.com/RadeonOpenCompute/hcc) compiler, which must be
+    set as C++ compiler on ROCm platform.
 
 Optional:
 
@@ -51,6 +52,46 @@ ctest --output-on-failure
 # Install
 [sudo] make install
 ```
+
+### Using rocPRIM's HC and HIP APIs
+
+rocPRIM provides two separate APIs that work on ROCm platform: HC and HIP API. After including
+`<rocprim/rocprim.hpp>` header the default API is HIP. In order to switch to HC API user has to
+define `ROCPRIM_HC_API` before the `#include` statement. Alternatively, user can include
+`<rocprim/rocprim_hc.hpp>` or `<rocprim/rocprim_hip.hpp>`, in this case `ROCPRIM_HIP_API` or
+`ROCPRIM_HC_API` should not be defined.
+
+```cpp
+#include <rocprim/rocprim.hpp>     // defaults to HIP API, unless ROCPRIM_HC_API defined before
+#include <rocprim/rocprim_hip.hpp> // HIP API
+#include <rocprim/rocprim_hc.hpp>  // HC API
+```
+
+Recommended way of including rocPRIM or hipCUB into a CMake project is by using their package
+configuration files. hipCUB package name is `hipcub`, rocPRIM package name is `rocprim`.
+
+```cmake
+# "/opt/rocm" - default install prefix
+find_package(rocprim REQUIRED CONFIG PATHS "/opt/rocm/rocprim")
+find_package(hipcub REQUIRED CONFIG PATHS "/opt/rocm/hipcub")
+
+...
+
+# Includes only rocPRIM headers, HC/HIP libraries have
+# to be linked manually by user
+target_link_libraries(<your_target> roc::rocprim)
+
+# Includes rocPRIM headers and required HC dependencies
+target_link_libraries(<your_target> roc::rocprim_hc)
+
+# Includes rocPRIM headers and required  HIP dependencies
+target_link_libraries(<your_target> roc::rocprim_hip)
+
+# On ROCm: includes hipCUB headers and roc::rocprim_hip target
+# On CUDA: includes only hipCUB headers, user has to include CUB directory
+target_link_libraries(<your_target> hip::hipcub)
+```
+
 ## Running Unit Tests
 
 ```
