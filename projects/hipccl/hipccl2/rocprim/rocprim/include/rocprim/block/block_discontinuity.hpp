@@ -166,7 +166,7 @@ public:
     #ifndef DOXYGEN_SHOULD_SKIP_THIS // hides storage_type implementation for Doxygen
     using storage_type = detail::raw_storage<storage_type_>;
     #else
-    using storage_type = storage_type_; 
+    using storage_type = storage_type_;
     #endif
 
     /// \brief Tags \p head_flags that indicate discontinuities between items partitioned
@@ -983,16 +983,23 @@ private:
         {
             if(WithTilePredecessor)
             {
-                const T predecessor_item = (flat_id == 0)
-                    ? tile_predecessor_item
-                    : storage_.last_items[flat_id - 1];
+                T predecessor_item = tile_predecessor_item;
+                if(flat_id != 0)
+                {
+                    predecessor_item = storage_.last_items[flat_id - 1];
+                }
                 head_flags[0] = detail::apply(flag_op, predecessor_item, items[0], flat_id * ItemsPerThread);
             }
             else
             {
-                head_flags[0] = (flat_id == 0)
-                    ? Flag(true) // The first item in the block is always flagged
-                    : detail::apply(flag_op, storage_.last_items[flat_id - 1], items[0], flat_id * ItemsPerThread);
+                // The first item in the block is always flagged
+                head_flags[0] = true;
+                if(flat_id != 0)
+                {
+                    head_flags[0] = detail::apply(
+                        flag_op, storage_.last_items[flat_id - 1], items[0], flat_id * ItemsPerThread
+                    );
+                }
             }
 
             for(unsigned int i = 1; i < ItemsPerThread; i++)
@@ -1009,9 +1016,11 @@ private:
 
             if(WithTileSuccessor)
             {
-                const T successor_item = (flat_id == BlockSize - 1)
-                    ? tile_successor_item
-                    : storage_.first_items[flat_id + 1];
+                T successor_item = tile_successor_item;
+                if(flat_id != BlockSize - 1)
+                {
+                    successor_item = storage_.first_items[flat_id + 1];
+                }
                 tail_flags[ItemsPerThread - 1] = detail::apply(
                     flag_op, items[ItemsPerThread - 1], successor_item,
                     flat_id * ItemsPerThread + ItemsPerThread
@@ -1019,12 +1028,15 @@ private:
             }
             else
             {
-                tail_flags[ItemsPerThread - 1] = (flat_id == BlockSize - 1)
-                    ? Flag(true) // The last item in the block is always flagged
-                    : detail::apply(
+                // The last item in the block is always flagged
+                tail_flags[ItemsPerThread - 1] = true;
+                if(flat_id != BlockSize - 1)
+                {
+                    tail_flags[ItemsPerThread - 1] = detail::apply(
                         flag_op, items[ItemsPerThread - 1], storage_.first_items[flat_id + 1],
                         flat_id * ItemsPerThread + ItemsPerThread
                     );
+                }
             }
         }
     }
