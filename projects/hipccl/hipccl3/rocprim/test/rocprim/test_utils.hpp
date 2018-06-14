@@ -35,6 +35,8 @@
 
 // Identity iterator
 #include "identity_iterator.hpp"
+// Bounds checking iterator
+#include "bounds_checking_iterator.hpp"
 
 // For better Google Test reporting and debug output of half values
 inline

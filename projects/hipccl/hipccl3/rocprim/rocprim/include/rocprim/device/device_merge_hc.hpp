@@ -27,6 +27,7 @@
 #include "../config.hpp"
 #include "../detail/various.hpp"
 
+#include "device_merge_config.hpp"
 #include "detail/device_merge.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -50,8 +51,7 @@ namespace detail
     }
 
 template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
+    class Config,
     class KeysInputIterator1,
     class KeysInputIterator2,
     class KeysOutputIterator,
@@ -76,9 +76,18 @@ void merge_impl(void * temporary_storage,
                 bool debug_synchronous)
 
 {
-    constexpr unsigned int block_size = BlockSize;
+    using key_type = typename std::iterator_traits<KeysInputIterator1>::value_type;
+    using value_type = typename std::iterator_traits<ValuesInputIterator1>::value_type;
+
+    // Get default config if Config is default_config
+    using config = detail::default_or_custom_config<
+        Config,
+        detail::default_merge_config<ROCPRIM_TARGET_ARCH, key_type, value_type>
+    >;
+
+    constexpr unsigned int block_size = config::block_size;
     constexpr unsigned int half_block = block_size / 2;
-    constexpr unsigned int items_per_thread = ItemsPerThread;
+    constexpr unsigned int items_per_thread = config::items_per_thread;
     constexpr auto items_per_block = block_size * items_per_thread;
 
     const unsigned int partitions = ((input1_size + input2_size) + items_per_block - 1) / items_per_block;
@@ -86,9 +95,8 @@ void merge_impl(void * temporary_storage,
 
     if(temporary_storage == nullptr)
     {
+        // storage_size is never zero
         storage_size = partition_bytes;
-        // Make sure user won't try to allocate 0 bytes memory
-        storage_size = storage_size == 0 ? 4 : storage_size;
         return;
     }
 
@@ -135,7 +143,7 @@ void merge_impl(void * temporary_storage,
             );
         }
     );
-    ROCPRIM_DETAIL_HC_SYNC("serial_merge_kernel", input1_size, start);
+    ROCPRIM_DETAIL_HC_SYNC("merge_kernel", input1_size, start);
 }
 
 #undef ROCPRIM_DETAIL_HC_SYNC
@@ -153,6 +161,8 @@ void merge_impl(void * temporary_storage,
 /// if \p temporary_storage in a null pointer.
 /// * Accepts custom compare_functions for merging across the device.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p merge_config or
+/// a custom class with the same members.
 /// \tparam KeysInputIterator1 - random-access iterator type of the first input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam KeysInputIterator2 - random-access iterator type of the second input range. Must meet the
@@ -217,6 +227,7 @@ void merge_impl(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class KeysInputIterator1,
     class KeysInputIterator2,
     class KeysOutputIterator,
@@ -234,11 +245,8 @@ void merge(void * temporary_storage,
            hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
            bool debug_synchronous = false)
 {
-    // TODO: Those values should depend on type size
-    constexpr unsigned int block_size = 256;
-    constexpr unsigned int items_per_thread = 8;
     empty_type * values = nullptr;
-    detail::merge_impl<block_size, items_per_thread>(
+    detail::merge_impl<Config>(
         temporary_storage, storage_size,
         keys_input1, keys_input2, keys_output,
         values, values, values,

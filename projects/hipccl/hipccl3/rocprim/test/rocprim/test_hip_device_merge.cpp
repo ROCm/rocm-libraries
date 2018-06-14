@@ -82,6 +82,7 @@ std::vector<std::tuple<size_t, size_t>> get_dims()
         std::make_tuple(17867, 41),
         std::make_tuple(17867, 34567),
         std::make_tuple(34567, (1 << 17) - 1220),
+        std::make_tuple(924353, 1723454),
     };
     return sizes;
 }
@@ -112,6 +113,8 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
         std::sort(keys_input1.begin(), keys_input1.end());
         std::sort(keys_input2.begin(), keys_input2.end());
         std::vector<key_type> keys_output(size1 + size2, 0);
+
+        test_utils::out_of_bounds_flag out_of_bounds;
 
         key_type * d_keys_input1;
         key_type * d_keys_input2;
@@ -145,6 +148,12 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
             expected.begin()
         );
 
+        test_utils::bounds_checking_iterator<key_type> d_keys_checking_output(
+            d_keys_output,
+            out_of_bounds.device_pointer(),
+            size1 + size2
+        );
+
         // compare function
         ::rocprim::less<key_type> lesser_op;
         // temp storage
@@ -154,8 +163,9 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
         HIP_CHECK(
             rocprim::merge(
                 d_temp_storage, temp_storage_size_bytes,
-                d_keys_input1, d_keys_input2, d_keys_output, keys_input1.size(),
-                keys_input2.size(),
+                d_keys_input1, d_keys_input2,
+                d_keys_checking_output,
+                keys_input1.size(), keys_input2.size(),
                 lesser_op, stream, debug_synchronous
             )
         );
@@ -171,13 +181,16 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
         HIP_CHECK(
             rocprim::merge(
                 d_temp_storage, temp_storage_size_bytes,
-                d_keys_input1, d_keys_input2, d_keys_output, keys_input1.size(),
-                keys_input2.size(),
+                d_keys_input1, d_keys_input2,
+                d_keys_checking_output,
+                keys_input1.size(), keys_input2.size(),
                 lesser_op, stream, debug_synchronous
             )
         );
         HIP_CHECK(hipPeekAtLastError());
         HIP_CHECK(hipDeviceSynchronize());
+
+        ASSERT_FALSE(out_of_bounds.get());
 
         // Copy keys_output to host
         HIP_CHECK(

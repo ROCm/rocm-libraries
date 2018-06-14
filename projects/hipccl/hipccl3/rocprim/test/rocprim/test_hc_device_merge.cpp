@@ -78,6 +78,7 @@ std::vector<std::tuple<size_t, size_t>> get_dims()
         std::make_tuple(17867, 41),
         std::make_tuple(17867, 34567),
         std::make_tuple(34567, (1 << 17) - 1220),
+        std::make_tuple(924353, 1723454),
     };
     return sizes;
 }
@@ -108,6 +109,8 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
         std::sort(keys_input1.begin(), keys_input1.end());
         std::sort(keys_input2.begin(), keys_input2.end());
 
+        test_utils::out_of_bounds_flag out_of_bounds(acc_view);
+
         hc::array<key_type> d_keys_input1(hc::extent<1>(size1), keys_input1.begin(), acc_view);
         hc::array<key_type> d_keys_input2(hc::extent<1>(size2), keys_input2.begin(), acc_view);
         hc::array<key_type> d_keys_output(size1 + size2, acc_view);
@@ -122,6 +125,12 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
             expected.begin()
         );
 
+        test_utils::bounds_checking_iterator<key_type> d_keys_checking_output(
+            d_keys_output.accelerator_pointer(),
+            out_of_bounds.device_pointer(),
+            size1 + size2
+        );
+
         // compare function
         ::rocprim::less<key_type> lesser_op;
         // temp storage
@@ -132,7 +141,7 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
             nullptr, temp_storage_size_bytes,
             d_keys_input1.accelerator_pointer(),
             d_keys_input2.accelerator_pointer(),
-            d_keys_output.accelerator_pointer(),
+            d_keys_checking_output,
             keys_input1.size(), keys_input2.size(),
             lesser_op, acc_view, debug_synchronous
         );
@@ -148,11 +157,13 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
             d_temp_storage.accelerator_pointer(), temp_storage_size_bytes,
             d_keys_input1.accelerator_pointer(),
             d_keys_input2.accelerator_pointer(),
-            d_keys_output.accelerator_pointer(),
+            d_keys_checking_output,
             keys_input1.size(), keys_input2.size(),
             lesser_op, acc_view, debug_synchronous
         );
         acc_view.wait();
+
+        ASSERT_FALSE(out_of_bounds.get());
 
         // Check if keys_output values are as expected
         std::vector<key_type> keys_output = d_keys_output;
