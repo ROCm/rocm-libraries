@@ -172,7 +172,7 @@ struct inequality_wrapper
 
     template<class T, class U>
     ROCPRIM_DEVICE inline
-    bool operator()(const T &a, const U &b)
+    bool operator()(const T &a, const U &b) const
     {
         return !equality_op(a, b);
     }

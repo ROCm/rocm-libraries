@@ -233,7 +233,7 @@ auto partition_block_load_flags(InputIterator block_predecessor,
 {
     if(block_id > 0)
     {
-        ValueType predecessor = *block_predecessor;
+        const ValueType predecessor = *block_predecessor;
         BlockDiscontinuityType()
             .flag_heads(
                 is_selected,
