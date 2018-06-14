@@ -267,6 +267,7 @@ auto partition_block_load_flags(InputIterator block_predecessor,
             }
         }
     }
+    ::rocprim::syncthreads(); // sync threads to reuse shared memory
 }
 
 template<
@@ -360,14 +361,39 @@ auto partition_scatter(ValueType (&values)[ItemsPerThread],
     (void) flat_block_thread_id;
     (void) valid_in_last_block;
 
-    #pragma unroll
-    for(unsigned int i = 0; i < ItemsPerThread; i++)
+    if(selected_in_block > BlockSize)
     {
-        if(!is_last_block || output_indices[i] < (selected_prefix + selected_in_block))
+        // Scatter selected values to shared memory
+        auto scatter_storage = storage.get();
+        #pragma unroll
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
+            unsigned int scatter_index = output_indices[i] - selected_prefix;
             if(is_selected[i])
             {
-                output[output_indices[i]] = values[i];
+                scatter_storage[scatter_index] = values[i];
+            }
+        }
+        ::rocprim::syncthreads(); // sync threads to reuse shared memory
+
+        // Coalesced write from shared memory to global memory
+        #pragma unroll
+        for(unsigned int i = flat_block_thread_id; i < selected_in_block; i += BlockSize)
+        {
+            output[selected_prefix + i] = scatter_storage[i];
+        }
+    }
+    else
+    {
+        #pragma unroll
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            if(!is_last_block || output_indices[i] < (selected_prefix + selected_in_block))
+            {
+                if(is_selected[i])
+                {
+                    output[output_indices[i]] = values[i];
+                }
             }
         }
     }
@@ -434,16 +460,12 @@ void partition_kernel_impl(InputIterator input,
 
     ROCPRIM_SHARED_MEMORY union
     {
-        struct
-        {
-            typename block_scan_offset_type::storage_type scan_offsets;
-            // typename offset_scan_prefix_op_type::storage_type prefix_op;
-        };
+        raw_exchange_storage_type exchange_values;
         typename order_bid_type::storage_type ordered_bid;
         typename block_load_value_type::storage_type load_values;
         typename block_load_flag_type::storage_type load_flags;
         typename block_discontinuity_value_type::storage_type discontinuity_values;
-        raw_exchange_storage_type exchange_values;
+        typename block_scan_offset_type::storage_type scan_offsets;
     } storage;
 
     const auto flat_block_thread_id = ::rocprim::detail::block_thread_id<0>();
@@ -534,7 +556,6 @@ void partition_kernel_impl(InputIterator input,
         auto prefix_op = offset_scan_prefix_op_type(
             flat_block_id,
             offset_scan_state,
-            // storage.prefix_op
             storage_prefix_op
         );
         block_scan_offset_type()
