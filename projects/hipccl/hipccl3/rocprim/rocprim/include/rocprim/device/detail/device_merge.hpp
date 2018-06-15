@@ -393,7 +393,7 @@ void merge_kernel_impl(IndexIterator indices,
 
     ROCPRIM_SHARED_MEMORY union
     {
-        key_type keys_shared[input_block_size];
+        typename detail::raw_storage<key_type[input_block_size]> keys_shared;
         typename keys_store_type::storage_type keys_store;
     } storage;
 
@@ -418,7 +418,7 @@ void merge_kernel_impl(IndexIterator indices,
 
     merge_keys<BlockSize>(
         flat_id, keys_input1, keys_input2, input, index,
-        storage.keys_shared,
+        storage.keys_shared.get(),
         range, compare_function
     );
 

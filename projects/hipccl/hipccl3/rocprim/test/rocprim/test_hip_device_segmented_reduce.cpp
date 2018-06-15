@@ -57,7 +57,7 @@ struct params
     using input_type = Input;
     using output_type = Output;
     using reduce_op_type = ReduceOp;
-    static constexpr input_type init = Init;
+    static constexpr int init = Init;
     static constexpr unsigned int min_segment_length = MinSegmentLength;
     static constexpr unsigned int max_segment_length = MaxSegmentLength;
     static constexpr bool use_identity_iterator = UseIdentityIterator;
@@ -69,12 +69,16 @@ public:
     using params = Params;
 };
 
+using custom_short2 = test_utils::custom_test_type<short>;
+using custom_int2 = test_utils::custom_test_type<int>;
+using custom_double2 = test_utils::custom_test_type<double>;
+
 typedef ::testing::Types<
     params<unsigned char, unsigned int, rp::plus<unsigned int>>,
     params<int, int, rp::plus<int>, -100, 0, 10000>,
     params<double, double, rp::minimum<double>, 1000, 0, 10000>,
-    params<int, short, rp::maximum<int>, 10, 1000, 10000>,
-    params<float, double, rp::maximum<double>, 50, 2, 10>,
+    params<custom_short2, custom_int2, rp::plus<custom_int2>, 10, 1000, 10000>,
+    params<custom_double2, custom_double2, rp::maximum<custom_double2>, 50, 2, 10>,
     params<float, float, rp::plus<float>, 123, 100, 200, true>
 > Params;
 
@@ -99,13 +103,12 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
     using input_type = typename TestFixture::params::input_type;
     using output_type = typename TestFixture::params::output_type;
     using reduce_op_type = typename TestFixture::params::reduce_op_type;
-    static constexpr bool use_identity_iterator =
-        TestFixture::params::use_identity_iterator;
+    constexpr bool use_identity_iterator = TestFixture::params::use_identity_iterator;
 
     using result_type = output_type;
     using offset_type = unsigned int;
 
-    constexpr input_type init = TestFixture::params::init;
+    const input_type init = TestFixture::params::init;
     const bool debug_synchronous = false;
     reduce_op_type reduce_op;
 
@@ -116,8 +119,7 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
         TestFixture::params::max_segment_length
     );
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(size_t size : sizes)
+    for(size_t size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
@@ -217,17 +219,6 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
         HIP_CHECK(hipFree(d_offsets));
         HIP_CHECK(hipFree(d_aggregates_output));
 
-        for(size_t i = 0; i < segments_count; i++)
-        {
-            if(std::is_integral<output_type>::value)
-            {
-                ASSERT_EQ(aggregates_output[i], aggregates_expected[i]);
-            }
-            else
-            {
-                auto diff = std::max<output_type>(std::abs(0.01 * aggregates_expected[i]), 0.01);
-                ASSERT_NEAR(aggregates_output[i], aggregates_expected[i], diff);
-            }
-        }
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(aggregates_output, aggregates_expected, 0.01f));
     }
 }

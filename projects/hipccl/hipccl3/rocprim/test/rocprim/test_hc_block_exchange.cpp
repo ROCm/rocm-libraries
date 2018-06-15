@@ -57,45 +57,29 @@ public:
     using params = Params;
 };
 
-template<class T>
-struct dummy
-{
-    T x;
-    T y;
-
-    ROCPRIM_HOST_DEVICE
-    dummy() = default;
-
-    template<class U>
-    ROCPRIM_HOST_DEVICE
-    dummy(U a) : x(a + 1), y(a * 2) { }
-
-    ROCPRIM_HOST_DEVICE
-    bool operator==(const dummy& rhs) const
-    {
-        return std::tie(x, y) == std::tie(rhs.x, rhs.y);
-    }
-};
+using custom_short2 = test_utils::custom_test_type<short>;
+using custom_int2 = test_utils::custom_test_type<int>;
+using custom_double2 = test_utils::custom_test_type<double>;
 
 typedef ::testing::Types<
     // Power of 2 BlockSize and ItemsPerThread = 1 (no rearrangement)
     params<int, int, 128, 4>,
     params<int, long long, 64, 1>,
     params<unsigned long long, unsigned long long, 128, 1>,
-    params<short, dummy<int>, 256, 1>,
+    params<short, custom_int2, 256, 1>,
     params<long long, long long, 512, 1>,
 
     // Power of 2 BlockSize and ItemsPerThread > 1
     params<int, int, 64, 2>,
     params<long long, long long, 256, 4>,
     params<int, int, 512, 5>,
-    params<short, dummy<float>, 128, 7>,
+    params<custom_short2, custom_double2, 128, 7>,
     params<int, int, 128, 3>,
     params<unsigned long long, unsigned long long, 64, 3>,
 
     // Non-power of 2 BlockSize and ItemsPerThread > 1
     params<int, double, 33U, 5>,
-    params<char, dummy<double>, 464U, 2>,
+    params<char, custom_double2, 464U, 2>,
     params<unsigned short, unsigned int, 100U, 3>,
     params<short, int, 234U, 9>
 > Params;
