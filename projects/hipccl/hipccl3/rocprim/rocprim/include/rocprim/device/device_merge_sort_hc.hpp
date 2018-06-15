@@ -29,6 +29,7 @@
 
 #include "detail/device_merge_sort.hpp"
 #include "device_transform_hc.hpp"
+#include "device_merge_sort_config.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -51,8 +52,7 @@ namespace detail
     }
 
 template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
+    class Config,
     class KeysInputIterator,
     class KeysOutputIterator,
     class ValuesInputIterator,
@@ -75,11 +75,19 @@ void merge_sort_impl(void * temporary_storage,
     using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
     using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
     constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
+
+    // Get default config if Config is default_config
+    using config = default_or_custom_config<
+        Config,
+        default_merge_sort_config<ROCPRIM_TARGET_ARCH, key_type, value_type>
+    >;
+
+    // Block size
+    constexpr unsigned int block_size = config::block_size;
+
     const size_t keys_bytes = ::rocprim::detail::align_size(size * sizeof(key_type));
-    const size_t values_bytes = with_values ? ::rocprim::detail::align_size(size * sizeof(value_type)) : 0;
-
-    constexpr unsigned int block_size = BlockSize;
-
+    const size_t values_bytes =
+        with_values ? ::rocprim::detail::align_size(size * sizeof(value_type)) : 0;
     if(temporary_storage == nullptr)
     {
         storage_size = keys_bytes;
@@ -92,9 +100,6 @@ void merge_sort_impl(void * temporary_storage,
         return;
     }
 
-    // Start point for time measurements
-    std::chrono::high_resolution_clock::time_point start;
-
     auto number_of_blocks = (size + block_size - 1)/block_size;
     if(debug_synchronous)
     {
@@ -102,23 +107,23 @@ void merge_sort_impl(void * temporary_storage,
         std::cout << "number of blocks " << number_of_blocks << '\n';
     }
 
-    const unsigned int grid_size = number_of_blocks * block_size;
-
-    bool temporary_store = false;
     char * ptr = reinterpret_cast<char *>(temporary_storage);
     key_type * keys_buffer = reinterpret_cast<key_type *>(ptr);
     ptr += keys_bytes;
-    value_type * values_buffer = with_values ?
-                                 reinterpret_cast<value_type *>(ptr) :
-                                 nullptr;
+    value_type * values_buffer =
+        with_values ? reinterpret_cast<value_type *>(ptr) : nullptr;
 
+    // Start point for time measurements
+    std::chrono::high_resolution_clock::time_point start;
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
+
+    const unsigned int grid_size = number_of_blocks * block_size;
     hc::parallel_for_each(
         acc_view,
         hc::tiled_extent<1>(grid_size, block_size),
         [=](hc::tiled_index<1>) [[hc]]
         {
-            block_sort_kernel_impl<BlockSize>(
+            block_sort_kernel_impl<block_size>(
                 keys_input, keys_output, values_input, values_output,
                 size, compare_function
             );
@@ -126,6 +131,7 @@ void merge_sort_impl(void * temporary_storage,
     );
     ROCPRIM_DETAIL_HC_SYNC("block_sort_kernel", size, start)
 
+    bool temporary_store = false;
     for(unsigned int block = block_size ; block < size; block *= 2)
     {
         temporary_store = !temporary_store;
@@ -255,6 +261,7 @@ void merge_sort_impl(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class KeysInputIterator,
     class KeysOutputIterator,
     class BinaryFunction = ::rocprim::less<typename std::iterator_traits<KeysInputIterator>::value_type>
@@ -269,10 +276,8 @@ void merge_sort(void * temporary_storage,
                 hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
                 bool debug_synchronous = false)
 {
-    constexpr unsigned int block_size = 256;
-    constexpr unsigned int items_per_thread = 8;
     empty_type * values = nullptr;
-    return detail::merge_sort_impl<block_size, items_per_thread>(
+    return detail::merge_sort_impl<Config>(
         temporary_storage, storage_size,
         keys_input, keys_output, values, values, size,
         compare_function, acc_view, debug_synchronous
@@ -359,6 +364,7 @@ void merge_sort(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class KeysInputIterator,
     class KeysOutputIterator,
     class ValuesInputIterator,
@@ -377,9 +383,7 @@ void merge_sort(void * temporary_storage,
                 hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
                 bool debug_synchronous = false)
 {
-    constexpr unsigned int block_size = 256;
-    constexpr unsigned int items_per_thread = 8;
-    return detail::merge_sort_impl<block_size, items_per_thread>(
+    return detail::merge_sort_impl<Config>(
         temporary_storage, storage_size,
         keys_input, keys_output, values_input, values_output, size,
         compare_function, acc_view, debug_synchronous
