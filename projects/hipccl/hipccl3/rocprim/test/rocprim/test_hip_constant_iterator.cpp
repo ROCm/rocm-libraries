@@ -119,15 +119,14 @@ TYPED_TEST(RocprimConstantIteratorTests, Transform)
     // Validating results
     for(size_t i = 0; i < output.size(); i++)
     {
-        SCOPED_TRACE(testing::Message() << "where index = " << i);
         if(std::is_integral<T>::value)
         {
-            ASSERT_EQ(output[i], expected[i]);
+            ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
         }
         else if(std::is_floating_point<T>::value)
         {
             auto tolerance = std::max<T>(std::abs(0.1f * expected[i]), T(0.01f));
-            ASSERT_NEAR(output[i], expected[i], tolerance);
+            ASSERT_NEAR(output[i], expected[i], tolerance) << "where index = " << i;
         }
     }
 

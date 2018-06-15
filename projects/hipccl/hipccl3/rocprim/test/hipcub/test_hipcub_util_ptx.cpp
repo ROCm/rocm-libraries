@@ -190,8 +190,7 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleUp)
 
         for(size_t i = 0; i < output.size(); i++)
         {
-            SCOPED_TRACE(testing::Message() << "where index = " << i);
-            ASSERT_EQ(output[i], expected[i]);
+            ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
         }
     }
     hipFree(device_data);
@@ -284,8 +283,7 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleDown)
 
         for(size_t i = 0; i < output.size(); i++)
         {
-            SCOPED_TRACE(testing::Message() << "where index = " << i);
-            ASSERT_EQ(output[i], expected[i]);
+            ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
         }
     }
     hipFree(device_data);
@@ -385,8 +383,7 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleIndex)
 
     for(size_t i = 0; i < output.size(); i++)
     {
-        SCOPED_TRACE(testing::Message() << "where index = " << i);
-        ASSERT_EQ(output[i], expected[i]);
+        ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
     }
 
     hipFree(device_data);
@@ -469,8 +466,7 @@ TEST(HipcubUtilPtxTests, ShuffleUpCustomStruct)
 
         for(size_t i = 0; i < output.size(); i++)
         {
-            SCOPED_TRACE(testing::Message() << "where index = " << i);
-            ASSERT_EQ(output[i], expected[i]);
+            ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
         }
     }
     hipFree(device_data);
@@ -551,8 +547,7 @@ TEST(HipcubUtilPtxTests, ShuffleUpCustomAlignedStruct)
 
         for(size_t i = 0; i < output.size(); i++)
         {
-            SCOPED_TRACE(testing::Message() << "where index = " << i);
-            ASSERT_EQ(output[i], expected[i]);
+            ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
         }
     }
     hipFree(device_data);
