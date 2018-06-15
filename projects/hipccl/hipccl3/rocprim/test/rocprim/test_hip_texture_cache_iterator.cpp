@@ -141,8 +141,7 @@ TYPED_TEST(RocprimTextureCacheIteratorTests, Transform)
     // Validating results
     for(size_t i = 0; i < output.size(); i++)
     {
-        SCOPED_TRACE(testing::Message() << "where index = " << i);
-        ASSERT_EQ(output[i], expected[i]);
+        ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
     }
 
     x.unbind_texture();
