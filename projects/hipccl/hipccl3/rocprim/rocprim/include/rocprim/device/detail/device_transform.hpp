@@ -54,7 +54,7 @@ struct unpack_binary_op
     unpack_binary_op() = default;
 
     ROCPRIM_HOST_DEVICE inline
-    unpack_binary_op(BinaryFunction f) : _f(f)
+    unpack_binary_op(BinaryFunction binary_op) : binary_op_(binary_op)
     {
     }
 
@@ -62,13 +62,13 @@ struct unpack_binary_op
     ~unpack_binary_op() = default;
 
     ROCPRIM_HOST_DEVICE inline
-    result_type operator()(const ::rocprim::tuple<T1, T2>& t) const
+    result_type operator()(const ::rocprim::tuple<T1, T2>& t)
     {
-        return _f(::rocprim::get<0>(t), ::rocprim::get<1>(t));
+        return binary_op_(::rocprim::get<0>(t), ::rocprim::get<1>(t));
     }
 
 private:
-    BinaryFunction _f;
+    BinaryFunction binary_op_;
 };
 
 template<
