@@ -39,7 +39,7 @@ namespace rp = rocprim;
 // Params for tests
 template<
     class KeyType,
-    class ValueType = KeyType
+    class ValueType
 >
 struct DeviceMergeParams
 {
@@ -56,15 +56,20 @@ public:
     const bool debug_synchronous = false;
 };
 
+using custom_int2 = test_utils::custom_test_type<int>;
+using custom_double2 = test_utils::custom_test_type<double>;
+
 typedef ::testing::Types<
-    DeviceMergeParams<int>,
-    DeviceMergeParams<unsigned long>,
-    DeviceMergeParams<float, int>,
-    DeviceMergeParams<int, float>
+    DeviceMergeParams<int, double>,
+    DeviceMergeParams<unsigned long, unsigned int>,
+    DeviceMergeParams<float, custom_double2>,
+    DeviceMergeParams<int, float>,
+    DeviceMergeParams<custom_double2, custom_int2>,
+    DeviceMergeParams<custom_int2, char>
 > RocprimDeviceMergeTestsParams;
 
 // size1, size2
-std::vector<std::tuple<size_t, size_t>> get_dims()
+std::vector<std::tuple<size_t, size_t>> get_sizes()
 {
     std::vector<std::tuple<size_t, size_t>> sizes = {
         std::make_tuple(2, 1),
@@ -93,15 +98,15 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
     hc::accelerator acc;
     hc::accelerator_view acc_view = acc.create_view();
 
-    for(auto dim : get_dims())
+    for(auto sizes : get_sizes())
     {
         SCOPED_TRACE(
-            testing::Message() << "with dim = {" <<
-            std::get<0>(dim) << ", " << std::get<1>(dim) << "}"
+            testing::Message() << "with sizes = {" <<
+            std::get<0>(sizes) << ", " << std::get<1>(sizes) << "}"
         );
 
-        const size_t size1 = std::get<0>(dim);
-        const size_t size2 = std::get<1>(dim);
+        const size_t size1 = std::get<0>(sizes);
+        const size_t size2 = std::get<1>(sizes);
 
         // Generate data
         std::vector<key_type> keys_input1 = test_utils::get_random_data<key_type>(size1, 0, size1);
@@ -169,9 +174,7 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
         std::vector<key_type> keys_output = d_keys_output;
         for(size_t i = 0; i < keys_output.size(); i++)
         {
-            auto diff = std::max<key_type>(std::abs(0.01f * expected[i]), key_type(0.01f));
-            if(std::is_integral<key_type>::value) diff = 0;
-            ASSERT_NEAR(keys_output[i], expected[i], diff);
+            ASSERT_EQ(keys_output[i], expected[i]);
         }
     }
 }

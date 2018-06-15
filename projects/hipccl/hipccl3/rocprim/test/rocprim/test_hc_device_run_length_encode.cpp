@@ -58,19 +58,23 @@ public:
     using params = Params;
 };
 
+using custom_int2 = test_utils::custom_test_type<int>;
+using custom_double2 = test_utils::custom_test_type<double>;
+
 typedef ::testing::Types<
     params<int, int, 1, 1>,
     params<double, int, 3, 5>,
     params<float, int, 1, 10>,
     params<unsigned long long, size_t, 1, 30>,
-    params<int, unsigned int, 20, 100>,
+    params<custom_int2, unsigned int, 20, 100>,
     params<float, unsigned long long, 100, 400>,
     params<unsigned int, unsigned int, 200, 600>,
     params<double, int, 100, 2000>,
+    params<custom_double2, custom_int2, 10, 30000>,
     params<int, unsigned int, 1000, 5000>,
     params<unsigned int, size_t, 2048, 2048>,
     params<unsigned int, unsigned int, 1000, 50000>,
-    params<unsigned long long, unsigned long long, 100000, 100000>
+    params<unsigned long long, custom_double2, 100000, 100000>
 > Params;
 
 TYPED_TEST_CASE(RocprimDeviceRunLengthEncode, Params);
@@ -93,10 +97,11 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, Encode)
 {
     using key_type = typename TestFixture::params::key_type;
     using count_type = typename TestFixture::params::count_type;
+    using key_inner_type = typename test_utils::inner_type<key_type>::type;
     using key_distribution_type = typename std::conditional<
-        std::is_floating_point<key_type>::value,
-        std::uniform_real_distribution<key_type>,
-        std::uniform_int_distribution<key_type>
+        std::is_floating_point<key_inner_type>::value,
+        std::uniform_real_distribution<key_inner_type>,
+        std::uniform_int_distribution<key_inner_type>
     >::type;
 
     hc::accelerator acc;
@@ -104,12 +109,10 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, Encode)
 
     const bool debug_synchronous = false;
 
-    const std::vector<size_t> sizes = get_sizes();
-
     const unsigned int seed = 123;
     std::default_random_engine gen(seed);
 
-    for(size_t size : sizes)
+    for(size_t size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
@@ -131,7 +134,7 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, Encode)
         while(offset < size)
         {
             size_t key_count = key_count_dis(gen);
-            current_key += key_delta_dis(gen);
+            current_key = current_key + key_delta_dis(gen);
 
             const size_t end = std::min(size, offset + key_count);
             key_count = end - offset;
@@ -199,10 +202,11 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, NonTrivialRuns)
     using key_type = typename TestFixture::params::key_type;
     using count_type = typename TestFixture::params::count_type;
     using offset_type = typename TestFixture::params::count_type;
+    using key_inner_type = typename test_utils::inner_type<key_type>::type;
     using key_distribution_type = typename std::conditional<
-        std::is_floating_point<key_type>::value,
-        std::uniform_real_distribution<key_type>,
-        std::uniform_int_distribution<key_type>
+        std::is_floating_point<key_inner_type>::value,
+        std::uniform_real_distribution<key_inner_type>,
+        std::uniform_int_distribution<key_inner_type>
     >::type;
 
     hc::accelerator acc;
@@ -210,12 +214,10 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, NonTrivialRuns)
 
     const bool debug_synchronous = false;
 
-    const std::vector<size_t> sizes = get_sizes();
-
     const unsigned int seed = 123;
     std::default_random_engine gen(seed);
 
-    for(size_t size : sizes)
+    for(size_t size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
@@ -247,7 +249,7 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, NonTrivialRuns)
             {
                 key_count = key_count_dis(gen);
             }
-            current_key += key_delta_dis(gen);
+            current_key = current_key + key_delta_dis(gen);
 
             const size_t end = std::min(size, offset + key_count);
             key_count = end - offset;

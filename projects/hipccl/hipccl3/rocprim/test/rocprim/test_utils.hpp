@@ -215,6 +215,12 @@ struct is_custom_test_type : std::false_type
 {
 };
 
+template<class T>
+struct inner_type
+{
+    using type = T;
+};
+
 #if defined(ROCPRIM_HC_API) || defined(ROCPRIM_HIP_API)
 // Custom type used in tests
 template<class T>
@@ -301,6 +307,12 @@ std::ostream& operator<<(std::ostream& stream,
 template<class T>
 struct is_custom_test_type<custom_test_type<T>> : std::true_type
 {
+};
+
+template<class T>
+struct inner_type<custom_test_type<T>>
+{
+    using type = T;
 };
 
 namespace detail

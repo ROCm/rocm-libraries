@@ -81,7 +81,7 @@ typedef ::testing::Types<
     params<unsigned int, double, true, 4, 21>,
     params<unsigned int, rp::half, true, 0, 15>,
     params<unsigned long long, char, false, 8, 20>,
-    params<unsigned short, double, false, 8, 11>,
+    params<unsigned short, test_utils::custom_test_type<double>, false, 8, 11>,
 
     // huge sizes to check correctness of more than 1 block per batch
     params<float, char, true, 0, 32, true>

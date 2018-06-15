@@ -80,11 +80,11 @@ typedef ::testing::Types<
     // start_bit and end_bit
     params<unsigned char, int, true, 0, 7>,
     params<unsigned short, int, true, 4, 10>,
-    params<unsigned int, rp::half, false, 3, 22>,
+    params<unsigned int, short, false, 3, 22>,
     params<unsigned int, double, true, 4, 21>,
-    params<unsigned int, short, true, 0, 15>,
+    params<unsigned int, rp::half, true, 0, 15>,
     params<unsigned long long, char, false, 8, 20>,
-    params<unsigned short, double, false, 8, 11>,
+    params<unsigned short, test_utils::custom_test_type<double>, false, 8, 11>,
 
     // huge sizes to check correctness of more than 1 block per batch
     params<float, char, true, 0, 32, true>
