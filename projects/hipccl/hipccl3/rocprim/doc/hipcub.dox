@@ -24,13 +24,11 @@
  *
  *     Not-supported features and differences:
  *
- *     * Functions, classes and macros which are not in the public API are not supported.
+ *     * Functions, classes and macros which are not in the public API or not documented are not supported.
  *     * Device-wide primitives can't be called from kernels (dynamic parallelism is not supported in HIP/HC).
- *     * From device-wide primitives `DeviceRadixSort`, `DeviceReduce`, `DeviceScan`, `DeviceHistogram` (limited support),
- *     `DeviceSegmentedRadixSort`, and `DeviceSegmentedReduce` are supported. It's planned to add support for all
- *     device-wide primitives except `DeviceSpmv`.
- *     * Fancy iterators: `CacheModifiedInputIterator`, `CacheModifiedOutputIterator`, `TexObjInputIterator`, and `TexRefInputIterator`
- *     are not supported. Support for `TexObjInputIterator` is planned.
+ *     * `DeviceSpmv` is not supported.
+ *     * Fancy iterators: `CacheModifiedInputIterator`, `CacheModifiedOutputIterator`, and `TexRefInputIterator`
+ *     are not supported.
  *     * Thread I/O:
  *          * `CacheLoadModifier`, `CacheStoreModifier` cache modifiers are not supported.
  *          * `ThreadLoad`, `ThreadStore` functions are not supported.
@@ -43,8 +41,7 @@
  *          * `member_mask` input argument is ignored in `WARP_*` functions.
  *          * Arguments `first_lane`, `last_lane`, and `member_mask` are ignored in `Shuffle*` functions.
  *     * Utilities:
- *          * `SwizzleScanOp`, `ReduceBySegmentOp`, `ReduceByKeyOp` - not supported.
- *          * `If`, `Log2`, `PowerOfTwo`, `IsPointer`, `IsVolatile`, `RemoveQualifiers`, `CastOp` - not supported.
+ *          * `SwizzleScanOp`, `ReduceBySegmentOp`, `ReduceByKeyOp`, CastOp` - not supported.
  *
  * @}
  */
