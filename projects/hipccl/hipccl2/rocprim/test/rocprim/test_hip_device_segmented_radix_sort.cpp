@@ -73,7 +73,7 @@ typedef ::testing::Types<
     params<signed char, double, true, 0, 8, 0, 1000>,
     params<int, short, false, 0, 32, 0, 100>,
     params<short, int, true, 0, 16, 0, 10000>,
-    params<long long, char, false, 0, 64, 4000, 8000>,
+    params<long long, test_utils::custom_test_type<char>, false, 0, 64, 4000, 8000>,
     params<double, unsigned int, false, 0, 64, 2, 10>,
     params<rp::half, int, true, 0, 16, 2000, 10000>,
     params<float, int, false, 0, 32, 0, 1000>,
@@ -85,7 +85,7 @@ typedef ::testing::Types<
     params<unsigned int, double, true, 4, 21, 100, 100000>,
     params<unsigned int, short, true, 0, 15, 100000, 200000>,
     params<unsigned long long, char, false, 8, 20, 0, 1000>,
-    params<unsigned short, double, false, 8, 11, 50, 200>
+    params<unsigned short, test_utils::custom_test_type<double>, false, 8, 11, 50, 200>
 > Params;
 
 TYPED_TEST_CASE(RocprimDeviceSegmentedRadixSort, Params);

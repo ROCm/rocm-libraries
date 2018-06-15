@@ -66,6 +66,9 @@ public:
     using params = Params;
 };
 
+using custom_int2 = test_utils::custom_test_type<int>;
+using custom_double2 = test_utils::custom_test_type<double>;
+
 typedef ::testing::Types<
     // Power of 2 BlockSize
     params<unsigned int, int, 64U, 1>,
@@ -90,7 +93,7 @@ typedef ::testing::Types<
     // Non-power of 2 BlockSize and ItemsPerThread > 1
     params<double, int, 33U, 5>,
     params<char, double, 464U, 2, true, true>,
-    params<unsigned short, int, 100U, 3>,
+    params<unsigned short, custom_int2, 100U, 3>,
     params<rp::half, int, 234U, 9>,
 
     // StartBit and EndBit
@@ -101,7 +104,7 @@ typedef ::testing::Types<
     // Stability (a number of key values is lower than BlockSize * ItemsPerThread: some keys appear
     // multiple times with different values or key parts outside [StartBit, EndBit))
     params<unsigned char, int, 512U, 2, false, true>,
-    params<unsigned short, double, 60U, 1, true, false, 8, 11>
+    params<unsigned short, custom_double2, 60U, 1, true, false, 8, 11>
 > Params;
 
 TYPED_TEST_CASE(RocprimBlockRadixSort, Params);
@@ -260,19 +263,7 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeysValues)
         );
     }
 
-    std::vector<value_type> values_output;
-    if(rp::is_floating_point<value_type>::value)
-    {
-        values_output = test_utils::get_random_data<value_type>(size, (value_type)-1000, (value_type)+1000);
-    }
-    else
-    {
-        values_output = test_utils::get_random_data<value_type>(
-            size,
-            std::numeric_limits<value_type>::min(),
-            std::numeric_limits<value_type>::max()
-        );
-    }
+    std::vector<value_type> values_output = test_utils::get_random_data<value_type>(size, 0, 100);
 
     using key_value = std::pair<key_type, value_type>;
 
