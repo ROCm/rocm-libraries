@@ -40,7 +40,7 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \brief Configuration of device-level scan primitives.
 ///
 /// \tparam BlockSize - number of threads in a block.
-/// \tparam ItemsPerThread - number of items in processed by each thread.
+/// \tparam ItemsPerThread - number of items processed by each thread.
 /// \tparam BlockLoadMethod - method for loading input values.
 /// \tparam StoreLoadMethod - method for storing values.
 /// \tparam BlockScanMethod - algorithm for block scan.
@@ -53,11 +53,15 @@ template<
 >
 struct scan_config
 {
+    /// \brief Number of threads in a block.
     static constexpr unsigned int block_size = BlockSize;
+    /// \brief Number of items processed by each thread.
     static constexpr unsigned int items_per_thread = ItemsPerThread;
-
+    /// \brief Method for loading input values.
     static constexpr block_load_method block_load_method = BlockLoadMethod;
+    /// \brief Method for storing values.
     static constexpr block_store_method block_store_method = BlockStoreMethod;
+    /// \brief Algorithm for block scan.
     static constexpr block_scan_algorithm block_scan_method = BlockScanMethod;
 };
 

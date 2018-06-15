@@ -1,7 +1,3 @@
-# Warning (pre-production state)
-
-rocPRIM is in its pre-production state and should be used for development purposes only.
-
 # rocPRIM
 
 The rocPRIM is a header-only library providing HIP and HC parallel primitives for developing

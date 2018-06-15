@@ -45,7 +45,9 @@ template<
 >
 struct run_length_encode_config
 {
+    /// \brief Configuration of device-level reduce-by-key operation.
     using reduce_by_key = ReduceByKeyConfig;
+    /// \brief Configuration of device-level select operation.
     using select = SelectConfig;
 };
 
