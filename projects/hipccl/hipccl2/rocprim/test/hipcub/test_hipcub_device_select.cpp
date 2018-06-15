@@ -199,8 +199,7 @@ TYPED_TEST(HipcubDeviceSelectTests, Flagged)
         HIP_CHECK(hipDeviceSynchronize());
         for(size_t i = 0; i < expected.size(); i++)
         {
-            SCOPED_TRACE(testing::Message() << "where index = " << i);
-            ASSERT_EQ(output[i], expected[i]);
+            ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
         }
 
         hipFree(d_input);
@@ -332,8 +331,7 @@ TYPED_TEST(HipcubDeviceSelectTests, SelectOp)
         HIP_CHECK(hipDeviceSynchronize());
         for(size_t i = 0; i < expected.size(); i++)
         {
-            SCOPED_TRACE(testing::Message() << "where index = " << i);
-            ASSERT_EQ(output[i], expected[i]);
+            ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
         }
 
         hipFree(d_input);
@@ -469,8 +467,7 @@ TYPED_TEST(HipcubDeviceSelectTests, Unique)
             HIP_CHECK(hipDeviceSynchronize());
             for(size_t i = 0; i < expected.size(); i++)
             {
-                SCOPED_TRACE(testing::Message() << "where index = " << i);
-                ASSERT_EQ(output[i], expected[i]);
+                ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
             }
 
             hipFree(d_input);

@@ -180,8 +180,7 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleUp)
 
             for(size_t i = 0; i < output.size(); i++)
             {
-                SCOPED_TRACE(testing::Message() << "where index = " << i);
-                ASSERT_EQ(output[i], expected[i]);
+                ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
             }
         }
     }
@@ -271,8 +270,7 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleDown)
 
             for(size_t i = 0; i < output.size(); i++)
             {
-                SCOPED_TRACE(testing::Message() << "where index = " << i);
-                ASSERT_EQ(output[i], expected[i]);
+                ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
             }
         }
     }
@@ -375,8 +373,7 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleIndex)
 
         for(size_t i = 0; i < output.size(); i++)
         {
-            SCOPED_TRACE(testing::Message() << "where index = " << i);
-            ASSERT_EQ(output[i], expected[i]);
+            ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
         }
     }
     hipFree(device_data);
@@ -464,8 +461,7 @@ TEST(RocprimIntrinsicsTests, ShuffleUpCustomStruct)
 
             for(size_t i = 0; i < output.size(); i++)
             {
-                SCOPED_TRACE(testing::Message() << "where index = " << i);
-                ASSERT_EQ(output[i], expected[i]);
+                ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
             }
         }
     }
@@ -552,8 +548,7 @@ TEST(RocprimIntrinsicsTests, ShuffleUpCustomAlignedStruct)
 
             for(size_t i = 0; i < output.size(); i++)
             {
-                SCOPED_TRACE(testing::Message() << "where index = " << i);
-                ASSERT_EQ(output[i], expected[i]);
+                ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
             }
         }
     }
