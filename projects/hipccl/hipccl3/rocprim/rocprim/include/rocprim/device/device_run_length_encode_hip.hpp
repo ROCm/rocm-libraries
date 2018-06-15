@@ -32,6 +32,7 @@
 #include "../iterator/discard_iterator.hpp"
 #include "../iterator/zip_iterator.hpp"
 
+#include "device_run_length_encode_config.hpp"
 #include "device_reduce_by_key_hip.hpp"
 #include "device_select_hip.hpp"
 
@@ -74,6 +75,8 @@ namespace detail
 /// * Ranges specified by \p unique_output and \p counts_output must have at least
 /// <tt>*runs_count_output</tt> (i.e. the number of runs) elements.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p run_length_encode_config or
+/// a custom class with the same members.
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam UniqueOutputIterator - random-access iterator type of the output range. Must meet the
@@ -138,6 +141,7 @@ namespace detail
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class InputIterator,
     class UniqueOutputIterator,
     class CountsOutputIterator,
@@ -157,7 +161,12 @@ hipError_t run_length_encode(void * temporary_storage,
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     using count_type = unsigned int;
 
-    return ::rocprim::reduce_by_key(
+    using config = detail::default_or_custom_config<
+        Config,
+        detail::default_run_length_encode_config
+    >;
+
+    return ::rocprim::reduce_by_key<typename config::reduce_by_key>(
         temporary_storage, storage_size,
         input, make_constant_iterator<count_type>(1), size,
         unique_output, counts_output, runs_count_output,
@@ -182,6 +191,8 @@ hipError_t run_length_encode(void * temporary_storage,
 /// * Ranges specified by \p offsets_output and \p counts_output must have at least
 /// <tt>*runs_count_output</tt> (i.e. the number of non-trivial runs) elements.
 ///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p run_length_encode_config or
+/// a custom class with the same members.
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam OffsetsOutputIterator - random-access iterator type of the output range. Must meet the
@@ -246,6 +257,7 @@ hipError_t run_length_encode(void * temporary_storage,
 /// \endcode
 /// \endparblock
 template<
+    class Config = default_config,
     class InputIterator,
     class OffsetsOutputIterator,
     class CountsOutputIterator,
@@ -267,6 +279,11 @@ hipError_t run_length_encode_non_trivial_runs(void * temporary_storage,
     using count_type = unsigned int;
     using offset_count_pair = typename ::rocprim::tuple<offset_type, count_type>;
 
+    using config = detail::default_or_custom_config<
+        Config,
+        detail::default_run_length_encode_config
+    >;
+
     hipError_t error;
 
     auto reduce_op = [] __device__ (const offset_count_pair& a, const offset_count_pair& b)
@@ -287,7 +304,7 @@ hipError_t run_length_encode_non_trivial_runs(void * temporary_storage,
 
     // Calculate size of temporary storage for reduce_by_key operation
     size_t reduce_by_key_bytes;
-    error = ::rocprim::reduce_by_key(
+    error = ::rocprim::reduce_by_key<typename config::reduce_by_key>(
         nullptr, reduce_by_key_bytes,
         input,
         ::rocprim::make_zip_iterator(
@@ -308,7 +325,7 @@ hipError_t run_length_encode_non_trivial_runs(void * temporary_storage,
 
     // Calculate size of temporary storage for select operation
     size_t select_bytes;
-    error = ::rocprim::select(
+    error = ::rocprim::select<typename config::select>(
         nullptr, select_bytes,
         ::rocprim::make_zip_iterator(::rocprim::make_tuple(offsets_tmp, counts_tmp)),
         ::rocprim::make_zip_iterator(::rocprim::make_tuple(offsets_output, counts_output)),
@@ -341,7 +358,7 @@ hipError_t run_length_encode_non_trivial_runs(void * temporary_storage,
     std::chrono::high_resolution_clock::time_point start;
 
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    error = ::rocprim::reduce_by_key(
+    error = ::rocprim::reduce_by_key<typename config::reduce_by_key>(
         temporary_storage, reduce_by_key_bytes,
         input,
         ::rocprim::make_zip_iterator(
@@ -368,7 +385,7 @@ hipError_t run_length_encode_non_trivial_runs(void * temporary_storage,
 
     // Select non-trivial runs
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    error = ::rocprim::select(
+    error = ::rocprim::select<typename config::select>(
         temporary_storage, select_bytes,
         ::rocprim::make_zip_iterator(::rocprim::make_tuple(offsets_tmp, counts_tmp)),
         ::rocprim::make_zip_iterator(::rocprim::make_tuple(offsets_output, counts_output)),
