@@ -96,7 +96,7 @@ struct key_flag_op
     {}
 
     ROCPRIM_DEVICE inline
-    bool operator()(const Key& a, const Key& b) const
+    bool operator()(const Key& a, const Key& b)
     {
         return !key_compare_op(a, b);
     }
@@ -116,7 +116,7 @@ struct guarded_key_flag_op
     {}
 
     ROCPRIM_DEVICE inline
-    bool operator()(const Key& a, const Key& b, unsigned int b_index) const
+    bool operator()(const Key& a, const Key& b, unsigned int b_index)
     {
         return (b_index < valid_count && !key_compare_op(a, b)) || b_index == valid_count;
     }

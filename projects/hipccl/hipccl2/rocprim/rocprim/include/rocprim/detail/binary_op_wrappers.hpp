@@ -58,7 +58,7 @@ struct reverse_binary_op_wrapper
     ~reverse_binary_op_wrapper() = default;
 
     ROCPRIM_HOST_DEVICE inline
-    result_type operator()(const input_type& t1, const input_type& t2) const
+    result_type operator()(const input_type& t1, const input_type& t2)
     {
         return binary_op_(t2, t1);
     }
@@ -94,7 +94,7 @@ struct headflag_scan_op_wrapper
     ~headflag_scan_op_wrapper() = default;
 
     ROCPRIM_HOST_DEVICE inline
-    result_type operator()(const input_type& t1, const input_type& t2) const
+    result_type operator()(const input_type& t1, const input_type& t2)
     {
         if(!rocprim::get<1>(t2))
         {
@@ -140,7 +140,7 @@ struct scan_by_key_op_wrapper
     ~scan_by_key_op_wrapper() = default;
 
     ROCPRIM_HOST_DEVICE inline
-    result_type operator()(const input_type& t1, const input_type& t2) const
+    result_type operator()(const input_type& t1, const input_type& t2)
     {
         if(compare_keys_op_(rocprim::get<1>(t1), rocprim::get<1>(t2)))
         {
