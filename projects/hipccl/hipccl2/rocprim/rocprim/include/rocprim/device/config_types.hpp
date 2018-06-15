@@ -39,13 +39,13 @@ struct default_config { };
 /// \brief Configuration of particular kernels launched by device-level operation
 ///
 /// \tparam BlockSize - number of threads in a block.
-/// \tparam ItemsPerThread - number of items in processed by each thread.
+/// \tparam ItemsPerThread - number of items processed by each thread.
 template<unsigned int BlockSize, unsigned int ItemsPerThread>
 struct kernel_config
 {
-    /// value of BlockSize - number of threads in a block.
+    /// \brief Number of threads in a block.
     static constexpr unsigned int block_size = BlockSize;
-    /// value of ItemsPerThread - number of items in processed by each thread.
+    /// \brief Number of items processed by each thread.
     static constexpr unsigned int items_per_thread = ItemsPerThread;
 };
 
