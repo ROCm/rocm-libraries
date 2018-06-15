@@ -38,7 +38,7 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \brief Configuration of device-level reduce primitives.
 ///
 /// \tparam BlockSize - number of threads in a block.
-/// \tparam ItemsPerThread - number of items in processed by each thread.
+/// \tparam ItemsPerThread - number of items processed by each thread.
 /// \tparam BlockReduceMethod - algorithm for block reduce.
 template<
     unsigned int BlockSize,
@@ -47,9 +47,11 @@ template<
 >
 struct reduce_config
 {
+    /// \brief Number of threads in a block.
     static constexpr unsigned int block_size = BlockSize;
+    /// \brief Number of items processed by each thread.
     static constexpr unsigned int items_per_thread = ItemsPerThread;
-
+    /// \brief Algorithm for block reduce.
     static constexpr block_reduce_algorithm block_reduce_method = BlockReduceMethod;
 };
 

@@ -52,11 +52,12 @@ template<
 >
 struct segmented_radix_sort_config
 {
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
+    /// \brief Number of bits in long iterations.
     static constexpr unsigned int long_radix_bits = LongRadixBits;
+    /// \brief Number of bits in short iterations
     static constexpr unsigned int short_radix_bits = ShortRadixBits;
+    /// \brief Configuration of radix sort kernel.
     using sort = SortConfig;
-#endif
 };
 
 namespace detail

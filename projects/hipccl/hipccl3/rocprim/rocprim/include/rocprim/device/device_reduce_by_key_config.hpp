@@ -43,7 +43,9 @@ template<
 >
 struct reduce_by_key_config
 {
+    /// \brief Configuration of carry-outs scan kernel.
     using scan = ScanConfig;
+    /// \brief Configuration of the main reduce-by-key kernel.
     using reduce = ReduceConfig;
 };
 
