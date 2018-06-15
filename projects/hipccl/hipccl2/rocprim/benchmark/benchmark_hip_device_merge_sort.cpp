@@ -301,6 +301,7 @@ void add_sort_pairs_benchmarks(std::vector<benchmark::internal::Benchmark*>& ben
 
         CREATE_SORT_PAIRS_BENCHMARK(int, custom_float2),
         CREATE_SORT_PAIRS_BENCHMARK(long long, custom_double2),
+        CREATE_SORT_PAIRS_BENCHMARK(custom_double2, custom_double2),
     };
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
