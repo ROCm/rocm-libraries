@@ -59,9 +59,17 @@ public:
     const bool debug_synchronous = false;
 };
 
+using custom_short2 = test_utils::custom_test_type<short>;
+using custom_int2 = test_utils::custom_test_type<int>;
+using custom_double2 = test_utils::custom_test_type<double>;
+
 typedef ::testing::Types<
-    DeviceTransformParams<int, long>,
-    DeviceTransformParams<unsigned char, float>
+    DeviceTransformParams<int, int>,
+    DeviceTransformParams<unsigned long>,
+    DeviceTransformParams<short, int>,
+    DeviceTransformParams<custom_short2, custom_int2>,
+    DeviceTransformParams<int, float>,
+    DeviceTransformParams<custom_double2, custom_double2>
 > RocprimDeviceTransformTestsParams;
 
 std::vector<size_t> get_sizes()
@@ -127,13 +135,7 @@ TYPED_TEST(RocprimDeviceTransformTests, Transform)
 
         // Check if output values are as expected
         std::vector<U> output = d_output;
-        for(size_t i = 0; i < output.size(); i++)
-        {
-            SCOPED_TRACE(testing::Message() << "where index = " << i);
-            auto diff = std::max<U>(std::abs(0.01f * expected[i]), U(0.01f));
-            if(std::is_integral<U>::value) diff = 0;
-            ASSERT_NEAR(output[i], expected[i], diff);
-        }
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, 0.01f));
     }
 }
 
@@ -192,12 +194,6 @@ TYPED_TEST(RocprimDeviceTransformTests, BinaryTransform)
 
         // Check if output values are as expected
         std::vector<U> output = d_output;
-        for(size_t i = 0; i < output.size(); i++)
-        {
-            SCOPED_TRACE(testing::Message() << "where index = " << i);
-            auto diff = std::max<U>(std::abs(0.01f * expected[i]), U(0.01f));
-            if(std::is_integral<U>::value) diff = 0;
-            ASSERT_NEAR(output[i], expected[i], diff);
-        }
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, 0.01f));
     }
 }

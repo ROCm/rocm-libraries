@@ -50,7 +50,7 @@ struct params
     using input_type = Input;
     using output_type = Output;
     using scan_op_type = ScanOp;
-    static constexpr input_type init = Init;
+    static constexpr int init = Init;
     static constexpr unsigned int min_segment_length = MinSegmentLength;
     static constexpr unsigned int max_segment_length = MaxSegmentLength;
 };
@@ -61,11 +61,15 @@ public:
     using params = Params;
 };
 
+using custom_short2 = test_utils::custom_test_type<short>;
+using custom_int2 = test_utils::custom_test_type<int>;
+using custom_double2 = test_utils::custom_test_type<double>;
+
 typedef ::testing::Types<
     params<unsigned char, unsigned int, rocprim::plus<unsigned int>>,
     params<int, int, rocprim::plus<int>, -100, 0, 10000>,
-    params<double, double, rocprim::minimum<double>, 1000, 0, 10000>,
-    params<int, short, rocprim::maximum<int>, 10, 1000, 10000>,
+    params<custom_double2, custom_double2, rocprim::minimum<custom_double2>, 1000, 0, 10000>,
+    params<custom_int2, custom_short2, rocprim::maximum<custom_int2>, 10, 1000, 10000>,
     params<float, double, rocprim::maximum<double>, 50, 2, 10>,
     params<float, float, rocprim::plus<float>, 123, 100, 200>
 > Params;
@@ -166,20 +170,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScan)
         acc_view.wait();
 
         std::vector<output_type> values_output = d_values_output;
-        for(size_t i = 0; i < values_output.size(); i++)
-        {
-            if(std::is_integral<output_type>::value)
-            {
-                ASSERT_EQ(values_output[i], values_expected[i]) << "with index: " << i;
-            }
-            else
-            {
-                auto diff = std::max<output_type>(
-                    std::abs(0.01 * values_expected[i]), output_type(0.01)
-                );
-                ASSERT_NEAR(values_output[i], values_expected[i], diff) << "with index: " << i;
-            }
-        }
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(values_output, values_expected, 0.01f));
     }
 }
 
@@ -191,7 +182,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScan)
     using result_type = output_type;
     using offset_type = unsigned int;
 
-    constexpr input_type init = TestFixture::params::init;
+    const input_type init = TestFixture::params::init;
     const bool debug_synchronous = false;
     scan_op_type scan_op;
 
@@ -265,18 +256,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScan)
         acc_view.wait();
 
         std::vector<output_type> values_output = d_values_output;
-        for(size_t i = 0; i < values_output.size(); i++)
-        {
-            if(std::is_integral<output_type>::value)
-            {
-                ASSERT_EQ(values_output[i], values_expected[i]) << "with index: " << i;
-            }
-            else
-            {
-                auto diff = std::max<output_type>(std::abs(0.01 * values_expected[i]), 0.01);
-                ASSERT_NEAR(values_output[i], values_expected[i], diff) << "with index: " << i;
-            }
-        }
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(values_output, values_expected, 0.01f));
     }
 }
 
@@ -379,12 +359,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScanUsingHeadFlags)
 
         // Check if output values are as expected
         std::vector<output_type> output = d_output;
-        for(size_t i = 0; i < output.size(); i++)
-        {
-            auto diff = std::max<output_type>(std::abs(0.1f * expected[i]), output_type(0.01f));
-            if(std::is_integral<output_type>::value) diff = 0;
-            ASSERT_NEAR(output[i], expected[i], diff) << "with index: " << i;
-        }
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, 0.01f));
     }
 }
 
@@ -394,7 +369,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScanUsingHeadFlags)
     using flag_type = unsigned int;
     using output_type = typename TestFixture::params::output_type;
     using scan_op_type = typename TestFixture::params::scan_op_type;
-    constexpr input_type init = TestFixture::params::init;
+    const input_type init = TestFixture::params::init;
     const bool debug_synchronous = false;
 
     hc::accelerator acc;
@@ -437,13 +412,13 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScanUsingHeadFlags)
             rocprim::make_zip_iterator(
                 rocprim::make_tuple(expected.begin() + 1, rocprim::make_discard_iterator())
             ),
-            [](const rocprim::tuple<input_type, flag_type>& t)
+            [init](const rocprim::tuple<input_type, flag_type>& t)
                 -> rocprim::tuple<input_type, flag_type>
             {
                 if(rocprim::get<1>(t))
                 {
                     return rocprim::make_tuple(
-                        static_cast<input_type>(init),
+                        init,
                         rocprim::get<1>(t)
                     );
                 }
@@ -517,11 +492,6 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScanUsingHeadFlags)
 
         // Check if output values are as expected
         std::vector<output_type> output = d_output;
-        for(size_t i = 0; i < output.size(); i++)
-        {
-            auto diff = std::max<output_type>(std::abs(0.1f * expected[i]), output_type(0.01f));
-            if(std::is_integral<output_type>::value) diff = 0;
-            ASSERT_NEAR(output[i], expected[i], diff) << "with index: " << i;
-        }
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, 0.01f));
     }
 }

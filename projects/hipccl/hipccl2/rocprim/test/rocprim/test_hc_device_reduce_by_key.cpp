@@ -86,16 +86,20 @@ struct custom_key_compare_op1
     }
 };
 
+using custom_int2 = test_utils::custom_test_type<int>;
+using custom_double2 = test_utils::custom_test_type<double>;
+
 typedef ::testing::Types<
     params<int, int, rp::plus<int>, 1, 1>,
     params<double, int, custom_reduce_op1, 3, 5, long long, custom_key_compare_op1<double>>,
-    params<float, int, rp::plus<int>, 1, 10>,
+    params<float, custom_double2, rp::minimum<custom_double2>, 1, 10000>,
+    params<custom_double2, custom_int2, rp::plus<custom_int2>, 1, 10>,
     params<unsigned long long, float, rp::minimum<float>, 1, 30>,
     params<int, unsigned int, rp::maximum<unsigned int>, 20, 100>,
     params<float, long long, rp::maximum<unsigned long long>, 100, 400, long long, custom_key_compare_op1<float>>,
     params<unsigned int, unsigned int, rp::plus<unsigned int>, 200, 600>,
     params<double, int, rp::plus<int>, 100, 2000, double, custom_key_compare_op1<double>>,
-    params<int, unsigned int, rp::plus<unsigned int>, 1000, 5000>,
+    params<custom_int2, unsigned int, rp::plus<unsigned int>, 1000, 5000>,
     params<unsigned int, int, rp::plus<int>, 2048, 2048>,
     params<long long, short, rp::plus<long long>, 1000, 10000, long long>,
     params<unsigned int, double, rp::minimum<double>, 1000, 50000>,
@@ -125,10 +129,11 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
     using aggregate_type = typename TestFixture::params::aggregate_type;
     using reduce_op_type = typename TestFixture::params::reduce_op_type;
     using key_compare_op_type = typename TestFixture::params::key_compare_op;
+    using key_inner_type = typename test_utils::inner_type<key_type>::type;
     using key_distribution_type = typename std::conditional<
-        std::is_floating_point<key_type>::value,
-        std::uniform_real_distribution<key_type>,
-        std::uniform_int_distribution<key_type>
+        std::is_floating_point<key_inner_type>::value,
+        std::uniform_real_distribution<key_inner_type>,
+        std::uniform_int_distribution<key_inner_type>
     >::type;
 
     hc::accelerator acc;
@@ -139,12 +144,10 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
     reduce_op_type reduce_op;
     key_compare_op_type key_compare_op;
 
-    const std::vector<size_t> sizes = get_sizes();
-
     const unsigned int seed = 123;
     std::default_random_engine gen(seed);
 
-    for(size_t size : sizes)
+    for(size_t size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
@@ -167,7 +170,7 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
         while(offset < size)
         {
             const size_t key_count = key_count_dis(gen);
-            current_key += key_delta_dis(gen);
+            current_key = current_key + key_delta_dis(gen);
 
             const size_t end = std::min(size, offset + key_count);
             for(size_t i = offset; i < end; i++)

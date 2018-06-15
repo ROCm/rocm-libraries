@@ -111,15 +111,17 @@ TEST(RocprimDiscardIteratorTests, ReduceByKey)
 
     // Get temporary storage size
     size_t temporary_storage_bytes;
-    rocprim::reduce_by_key(
-        nullptr, temporary_storage_bytes,
-        d_keys_input,
-        d_values_input, values_input.size(),
-        rocprim::make_discard_iterator(),
-        d_aggregates_output,
-        rocprim::make_discard_iterator(),
-        rocprim::plus<int>(), rocprim::equal_to<int>(),
-        stream, debug_synchronous
+    HIP_CHECK(
+        rocprim::reduce_by_key(
+            nullptr, temporary_storage_bytes,
+            d_keys_input,
+            d_values_input, values_input.size(),
+            rocprim::make_discard_iterator(),
+            d_aggregates_output,
+            rocprim::make_discard_iterator(),
+            rocprim::plus<int>(), rocprim::equal_to<int>(),
+            stream, debug_synchronous
+        )
     );
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -128,15 +130,17 @@ TEST(RocprimDiscardIteratorTests, ReduceByKey)
     void * d_temporary_storage;
     HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
-    rocprim::reduce_by_key(
-        d_temporary_storage, temporary_storage_bytes,
-        d_keys_input,
-        d_values_input, values_input.size(),
-        rocprim::make_discard_iterator(),
-        d_aggregates_output,
-        rocprim::make_discard_iterator(),
-        rocprim::plus<int>(), rocprim::equal_to<int>(),
-        stream, debug_synchronous
+    HIP_CHECK(
+        rocprim::reduce_by_key(
+            d_temporary_storage, temporary_storage_bytes,
+            d_keys_input,
+            d_values_input, values_input.size(),
+            rocprim::make_discard_iterator(),
+            d_aggregates_output,
+            rocprim::make_discard_iterator(),
+            rocprim::plus<int>(), rocprim::equal_to<int>(),
+            stream, debug_synchronous
+        )
     );
     HIP_CHECK(hipDeviceSynchronize());
 
