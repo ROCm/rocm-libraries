@@ -39,7 +39,7 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \brief Configuration of device-level select operation.
 ///
 /// \tparam BlockSize - number of threads in a block.
-/// \tparam ItemsPerThread - number of items in processed by each thread.
+/// \tparam ItemsPerThread - number of items processed by each thread.
 /// \tparam ValueBlockLoadMethod - method for loading input values.
 /// \tparam FlagBlockLoadMethod - method for loading flag values.
 /// \tparam BlockScanMethod - algorithm for block scan.
@@ -52,12 +52,15 @@ template<
 >
 struct select_config
 {
+    /// \brief Number of threads in a block.
     static constexpr unsigned int block_size = BlockSize;
+    /// \brief Number of items processed by each thread.
     static constexpr unsigned int items_per_thread = ItemsPerThread;
-
+    /// \brief Method for loading input values.
     static constexpr block_load_method value_block_load_method = ValueBlockLoadMethod;
+    /// \brief Method for loading flag values.
     static constexpr block_load_method flag_block_load_method = FlagBlockLoadMethod;
-
+    /// \brief Algorithm for block scan.
     static constexpr block_scan_algorithm block_scan_method = BlockScanMethod;
 };
 

@@ -323,6 +323,25 @@ public:
         base_type::reduce(input, output, valid_items, storage, reduce_op);
     }
 
+    /// \brief Performs head-segmented reduction across threads in a logical warp.
+    ///
+    /// \tparam Flag - type of head flags. Must be contextually convertible to \p bool.
+    /// \tparam BinaryFunction - type of binary function used for reduce. Default type
+    /// is rocprim::plus<T>.
+    ///
+    /// \param [in] input - thread input value.
+    /// \param [out] output - reference to a thread output value. May be aliased with \p input.
+    /// \param [in] flag - thread head flag, \p true flags mark beginnings of segments.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] reduce_op - binary operation function object that will be used for reduce.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
+    /// <tt>const &</tt>, but function object must not modify the objects passed to it.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
+    /// universal rocprim::syncthreads().
     template<class Flag, class BinaryFunction = ::rocprim::plus<T>>
     ROCPRIM_DEVICE inline
     void head_segmented_reduce(T input,
@@ -334,6 +353,25 @@ public:
         base_type::head_segmented_reduce(input, output, flag, storage, reduce_op);
     }
 
+    /// \brief Performs tail-segmented reduction across threads in a logical warp.
+    ///
+    /// \tparam Flag - type of tail flags. Must be contextually convertible to \p bool.
+    /// \tparam BinaryFunction - type of binary function used for reduce. Default type
+    /// is rocprim::plus<T>.
+    ///
+    /// \param [in] input - thread input value.
+    /// \param [out] output - reference to a thread output value. May be aliased with \p input.
+    /// \param [in] flag - thread tail flag, \p true flags mark ends of segments.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] reduce_op - binary operation function object that will be used for reduce.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
+    /// <tt>const &</tt>, but function object must not modify the objects passed to it.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
+    /// universal rocprim::syncthreads().
     template<class Flag, class BinaryFunction = ::rocprim::plus<T>>
     ROCPRIM_DEVICE inline
     void tail_segmented_reduce(T input,
