@@ -21,11 +21,67 @@
 #ifndef HIPCUB_ROCPRIM_UTIL_TYPE_HPP_
 #define HIPCUB_ROCPRIM_UTIL_TYPE_HPP_
 
+#include <type_traits>
+
 #include "../config.hpp"
 
 BEGIN_HIPCUB_NAMESPACE
 
 using NullType = ::rocprim::empty_type;
+
+template<bool B, typename T, typename F>
+struct If
+{
+    using Type = typename std::conditional<B, T, F>::type;
+};
+
+template<typename T>
+struct IsPointer
+{
+    static constexpr bool VALUE = std::is_pointer<T>::value;
+};
+
+template<typename T>
+struct IsVolatile
+{
+    static constexpr bool VALUE = std::is_volatile<T>::value;
+};
+
+template<typename T>
+struct RemoveQualifiers
+{
+    using Type = typename std::remove_cv<T>::type;
+};
+
+template<int N>
+struct PowerOfTwo
+{
+    static constexpr bool VALUE = ::rocprim::detail::is_power_of_two<N>();
+};
+
+namespace detail
+{
+
+template<int N, int CURRENT_VAL = N, int COUNT = 0>
+struct Log2Impl
+{
+    static constexpr int VALUE = Log2Impl<N, (CURRENT_VAL >> 1), COUNT + 1>::VALUE;
+};
+
+template<int N, int COUNT>
+struct Log2Impl<N, 0, COUNT>
+{
+    static constexpr int VALUE = (1 << (COUNT - 1) < N) ? COUNT : COUNT - 1;
+};
+
+} // end of detail namespace
+
+template<int N>
+struct Log2
+{
+    static_assert(N != 0, "The logarithm of zero is undefined");
+    static constexpr int VALUE = detail::Log2Impl<N>::VALUE;
+};
 
 template<typename T>
 struct DoubleBuffer
