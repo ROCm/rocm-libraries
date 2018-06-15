@@ -198,10 +198,9 @@ TEST(RocprimZipIteratorTests, Transform)
     std::vector<U> output = d_output;
     for(size_t i = 0; i < output.size(); i++)
     {
-        SCOPED_TRACE(testing::Message() << "where index = " << i);
         auto diff = std::max<U>(std::abs(0.01f * expected[i]), U(0.01f));
         if(std::is_integral<U>::value) diff = 0;
-        ASSERT_NEAR(output[i], expected[i], diff);
+        ASSERT_NEAR(output[i], expected[i], diff) << "where index = " << i;
     }
 }
 
@@ -447,12 +446,10 @@ TEST(RocprimZipIteratorTests, ScanByKey)
     std::vector<U2> output_keys = d_output_keys;
     for(size_t i = 0; i < output.size(); i++)
     {
-        SCOPED_TRACE(testing::Message() << "where index = " << i);
-
         auto diff1 = std::max<U1>(std::abs(0.01f * expected[i]), U1(0.01f));
         if(std::is_integral<U1>::value) diff1 = 0;
-        ASSERT_NEAR(output[i], expected[i], diff1);
-        ASSERT_EQ(output_keys[i], expected_keys[i]);
+        ASSERT_NEAR(output[i], expected[i], diff1) << "where index = " << i;
+        ASSERT_EQ(output_keys[i], expected_keys[i]) << "where index = " << i;
     }
 }
 
@@ -572,12 +569,10 @@ TEST(RocprimZipIteratorTests, ScanByKeyWithConstantIterator)
 
     for(size_t i = 0; i < output.size(); i++)
     {
-        SCOPED_TRACE(testing::Message() << "where index = " << i);
-
         auto diff1 = std::max<U1>(std::abs(0.01f * expected[i]), U1(0.01f));
         if(std::is_integral<U1>::value) diff1 = 0;
-        ASSERT_NEAR(output[i], expected[i], diff1);
+        ASSERT_NEAR(output[i], expected[i], diff1) << "where index = " << i;
         ASSERT_NE(0, expected[i]);
-        ASSERT_EQ(output_keys[i], expected_keys[i]);
+        ASSERT_EQ(output_keys[i], expected_keys[i]) << "where index = " << i;
     }
 }

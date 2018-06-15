@@ -281,6 +281,12 @@ struct custom_test_type
     }
 
     ROCPRIM_HOST_DEVICE inline
+    bool operator>(const custom_test_type& other) const
+    {
+        return (x > other.x && y > other.y);
+    }
+
+    ROCPRIM_HOST_DEVICE inline
     bool operator==(const custom_test_type& other) const
     {
         return (x == other.x && y == other.y);
