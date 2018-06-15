@@ -53,7 +53,7 @@ class block_reduce_raking_reduce
     // BlockSize is multiple of hardware warp
     static constexpr bool block_size_smaller_than_warp_size_ = (BlockSize < warp_size_);
     using warp_reduce_prefix_type = ::rocprim::detail::warp_reduce_crosslane<T, warp_size_, false>;
-    
+
     struct storage_type_
     {
         T threads[BlockSize];
@@ -220,9 +220,10 @@ private:
             #pragma unroll
             for(unsigned int i = warp_size_ + flat_tid; i < BlockSize; i += warp_size_)
             {
-                thread_reduction = (i < valid_items) ? reduce_op(
-                    thread_reduction, storage_.threads[i]
-                ) : thread_reduction;
+                if(i < valid_items)
+                {
+                    thread_reduction = reduce_op(thread_reduction, storage_.threads[i]);
+                }
             }
             warp_reduce_prefix_type().reduce(thread_reduction, output, valid_items, reduce_op);
         }
