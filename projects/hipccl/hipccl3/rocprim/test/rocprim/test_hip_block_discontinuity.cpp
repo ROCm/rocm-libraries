@@ -113,10 +113,13 @@ TEST(RocprimBlockDiscontinuity, Traits)
     ASSERT_FALSE((rp::detail::with_b_index_arg<int, decltype(f4)>::value));
 }
 
+using custom_int2 = test_utils::custom_test_type<int>;
+using custom_double2 = test_utils::custom_test_type<double>;
+
 typedef ::testing::Types<
     // Power of 2 BlockSize
     params<unsigned int, int, 64U, 1, rocprim::equal_to<unsigned int> >,
-    params<int, bool, 128U, 1, rocprim::not_equal_to<int> >,
+    params<custom_int2, bool, 128U, 1, rocprim::not_equal_to<custom_int2> >,
     params<float, int, 256U, 1, rocprim::less<float> >,
     params<char, char, 1024U, 1, rocprim::less_equal<char> >,
     params<int, bool, 256U, 1, custom_flag_op1<int> >,
@@ -130,13 +133,13 @@ typedef ::testing::Types<
 
     // Power of 2 BlockSize and ItemsPerThread > 1
     params<int, char, 64U, 2, custom_flag_op2>,
-    params<int, short, 128U, 4, rocprim::less<int> >,
+    params<custom_int2, short, 128U, 4, rocprim::less<custom_int2> >,
     params<unsigned short, unsigned char, 256U, 7, custom_flag_op2>,
     params<short, short, 512U, 8, rocprim::equal_to<short> >,
 
     // Non-power of 2 BlockSize and ItemsPerThread > 1
     params<double, int, 33U, 5, custom_flag_op2>,
-    params<double, unsigned int, 464U, 2, rocprim::equal_to<double> >,
+    params<custom_double2, unsigned int, 464U, 2, rocprim::equal_to<custom_double2> >,
     params<unsigned short, int, 100U, 3, rocprim::greater<unsigned short> >,
     params<short, bool, 234U, 9, custom_flag_op1<short> >
 > Params;
@@ -201,7 +204,7 @@ TYPED_TEST(RocprimBlockDiscontinuity, FlagHeads)
     }
 
     // Generate data
-    std::vector<type> input = test_utils::get_random_data<type>(size, type(0), type(10));
+    std::vector<type> input = test_utils::get_random_data<type>(size, 0, 10);
     std::vector<long long> heads(size);
 
     // Calculate expected results on host
@@ -330,7 +333,7 @@ TYPED_TEST(RocprimBlockDiscontinuity, FlagTails)
     }
 
     // Generate data
-    std::vector<type> input = test_utils::get_random_data<type>(size, type(0), type(10));
+    std::vector<type> input = test_utils::get_random_data<type>(size, 0, 10);
     std::vector<long long> tails(size);
 
     // Calculate expected results on host
@@ -472,7 +475,7 @@ TYPED_TEST(RocprimBlockDiscontinuity, FlagHeadsAndTails)
     }
 
     // Generate data
-    std::vector<type> input = test_utils::get_random_data<type>(size, type(0), type(10));
+    std::vector<type> input = test_utils::get_random_data<type>(size, 0, 10);
     std::vector<long long> heads(size);
     std::vector<long long> tails(size);
 

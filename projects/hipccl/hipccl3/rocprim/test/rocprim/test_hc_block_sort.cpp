@@ -56,19 +56,25 @@ public:
     static constexpr unsigned int block_size = Params::block_size;
 };
 
+using custom_int2 = test_utils::custom_test_type<int>;
+using custom_double2 = test_utils::custom_test_type<double>;
+
 typedef ::testing::Types<
     // Power of 2 BlockSize
     params<unsigned int, int, 64U>,
     params<int, int, 128U>,
-    params<unsigned int, int, 256U>,
+    params<custom_int2, int, 256U>,
     params<unsigned short, char, 1024U>,
+    params<custom_double2, custom_double2, 128U>,
+    params<int, custom_int2, 1024U>,
 
     // Non-power of 2 BlockSize
     params<double, unsigned int, 65U>,
     params<float, int, 37U>,
     params<long long, char, 510U>,
     params<unsigned int, long long, 162U>,
-    params<unsigned char, float, 255U>
+    params<unsigned char, float, 255U>,
+    params<custom_int2, custom_double2, 255U>
 > BlockSizes;
 
 TYPED_TEST_CASE(RocprimBlockSortTests, BlockSizes);
