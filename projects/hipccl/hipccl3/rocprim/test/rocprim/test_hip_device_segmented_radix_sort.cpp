@@ -93,39 +93,33 @@ TYPED_TEST_CASE(RocprimDeviceSegmentedRadixSort, Params);
 template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
 struct key_comparator
 {
-private:
-    template<unsigned int CStartBit, unsigned int CEndBit>
-    constexpr static bool all_bits()
-    {
-        return (CStartBit == 0 && CEndBit == sizeof(Key) * 8);
-    }
+    static_assert(rp::is_unsigned<Key>::value, "Test supports start and end bits only for unsigned integers");
 
-    template<unsigned int CStartBit, unsigned int CEndBit>
-    auto compare(const Key& lhs, const Key& rhs) const
-        -> typename std::enable_if<all_bits<CStartBit, CEndBit>(), bool>::type
-    {
-        return Descending ? (rhs < lhs) : (lhs < rhs);
-    }
-
-    template<unsigned int CStartBit, unsigned int CEndBit>
-    auto compare(const Key& lhs, const Key& rhs) const
-        -> typename std::enable_if<!all_bits<CStartBit, CEndBit>(), bool>::type
+    bool operator()(const Key& lhs, const Key& rhs)
     {
         auto mask = (1ull << (EndBit - StartBit)) - 1;
         auto l = (static_cast<unsigned long long>(lhs) >> StartBit) & mask;
         auto r = (static_cast<unsigned long long>(rhs) >> StartBit) & mask;
         return Descending ? (r < l) : (l < r);
     }
+};
 
-public:
-    static_assert(
-        key_comparator::all_bits<StartBit, EndBit>() || std::is_unsigned<Key>::value,
-        "Test supports start and end bits only for unsigned integers"
-    );
-
+template<class Key, bool Descending>
+struct key_comparator<Key, Descending, 0, sizeof(Key) * 8>
+{
     bool operator()(const Key& lhs, const Key& rhs)
     {
-        return this->compare<StartBit, EndBit>(lhs, rhs);
+        return Descending ? (rhs < lhs) : (lhs < rhs);
+    }
+};
+
+template<bool Descending>
+struct key_comparator<rp::half, Descending, 0, sizeof(rp::half) * 8>
+{
+    bool operator()(const rp::half& lhs, const rp::half& rhs)
+    {
+        // HIP's half doesn't have __host__ comparison operators, use floats instead
+        return key_comparator<float, Descending, 0, sizeof(float) * 8>()(lhs, rhs);
     }
 };
 

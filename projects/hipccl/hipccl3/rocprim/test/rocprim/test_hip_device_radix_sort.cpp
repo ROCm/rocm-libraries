@@ -115,6 +115,16 @@ struct key_comparator<Key, Descending, 0, sizeof(Key) * 8>
     }
 };
 
+template<bool Descending>
+struct key_comparator<rp::half, Descending, 0, sizeof(rp::half) * 8>
+{
+    bool operator()(const rp::half& lhs, const rp::half& rhs)
+    {
+        // HIP's half doesn't have __host__ comparison operators, use floats instead
+        return key_comparator<float, Descending, 0, sizeof(float) * 8>()(lhs, rhs);
+    }
+};
+
 template<class Key, class Value, bool Descending, unsigned int StartBit, unsigned int EndBit>
 struct key_value_comparator
 {
