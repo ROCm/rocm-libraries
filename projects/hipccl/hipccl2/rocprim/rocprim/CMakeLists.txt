@@ -59,8 +59,7 @@ add_library(rocprim_hip INTERFACE)
 target_link_libraries(rocprim_hip
   INTERFACE
     rocprim
-    hip::hip_hcc
-    hip::hip_device
+    hip::device
 )
 target_compile_definitions(rocprim_hip
   INTERFACE
