@@ -59,8 +59,15 @@ add_library(rocprim_hip INTERFACE)
 target_link_libraries(rocprim_hip
   INTERFACE
     rocprim
-    hip::device
 )
+
+# Remove this check when we no longer build with older rocm stack(ie < 1.8.2)
+if(TARGET hip::device)
+  target_link_libraries( rocprim_hip INTERFACE hip::device )
+else()
+  target_link_libraries( rocprim_hip INTERFACE hip::hip_hcc hip::hip_device )
+endif()
+
 target_compile_definitions(rocprim_hip
   INTERFACE
     ROCPRIM_HIP_API=1
