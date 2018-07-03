@@ -266,10 +266,7 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeys)
     );
 
     // Verifying results
-    for(size_t i = 0; i < size; i++)
-    {
-        ASSERT_EQ(keys_output[i], expected[i]);
-    }
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
 
     HIP_CHECK(hipFree(device_keys_output));
 }
@@ -376,6 +373,14 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeysValues)
         );
     }
 
+    std::vector<key_type> keys_expected(size);
+    std::vector<value_type> values_expected(size);
+    for(size_t i = 0; i < size; i++)
+    {
+        keys_expected[i] = expected[i].first;
+        values_expected[i] = expected[i].second;
+    }
+
     key_type* device_keys_output;
     HIP_CHECK(hipMalloc(&device_keys_output, keys_output.size() * sizeof(key_type)));
     value_type* device_values_output;
@@ -421,11 +426,8 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeysValues)
         )
     );
 
-    for(size_t i = 0; i < size; i++)
-    {
-        ASSERT_EQ(keys_output[i], expected[i].first);
-        ASSERT_EQ(values_output[i], expected[i].second);
-    }
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, keys_expected));
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, values_expected));
 
     HIP_CHECK(hipFree(device_keys_output));
     HIP_CHECK(hipFree(device_values_output));
