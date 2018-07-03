@@ -56,12 +56,14 @@ target_compile_definitions(rocprim_hc
 # This target allows using both HIP and HC interfaces,
 # links against HIP library (which depends on HC)
 add_library(rocprim_hip INTERFACE)
-target_link_libraries(rocprim_hip
-  INTERFACE
-    rocprim
-    hip::hip_hcc
-    hip::hip_device
-)
+
+# Remove this check when we no longer build with older rocm stack(ie < 1.8.2)
+if(TARGET hip::device)
+  target_link_libraries( rocprim_hip INTERFACE rocprim hip::device )
+else()
+  target_link_libraries( rocprim_hip INTERFACE rocprim hip::hip_hcc hip::hip_device )
+endif()
+
 target_compile_definitions(rocprim_hip
   INTERFACE
     ROCPRIM_HIP_API=1
