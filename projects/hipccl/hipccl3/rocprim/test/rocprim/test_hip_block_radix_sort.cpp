@@ -132,6 +132,16 @@ struct key_comparator<Key, Descending, 0, sizeof(Key) * 8>
     }
 };
 
+template<bool Descending>
+struct key_comparator<rp::half, Descending, 0, sizeof(rp::half) * 8>
+{
+    bool operator()(const rp::half& lhs, const rp::half& rhs)
+    {
+        // HIP's half doesn't have __host__ comparison operators, use floats instead
+        return key_comparator<float, Descending, 0, sizeof(float) * 8>()(lhs, rhs);
+    }
+};
+
 template<class Key, class Value, bool Descending, unsigned int StartBit, unsigned int EndBit>
 struct key_value_comparator
 {
@@ -256,10 +266,7 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeys)
     );
 
     // Verifying results
-    for(size_t i = 0; i < size; i++)
-    {
-        ASSERT_EQ(keys_output[i], expected[i]);
-    }
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
 
     HIP_CHECK(hipFree(device_keys_output));
 }
@@ -366,6 +373,14 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeysValues)
         );
     }
 
+    std::vector<key_type> keys_expected(size);
+    std::vector<value_type> values_expected(size);
+    for(size_t i = 0; i < size; i++)
+    {
+        keys_expected[i] = expected[i].first;
+        values_expected[i] = expected[i].second;
+    }
+
     key_type* device_keys_output;
     HIP_CHECK(hipMalloc(&device_keys_output, keys_output.size() * sizeof(key_type)));
     value_type* device_values_output;
@@ -411,11 +426,8 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeysValues)
         )
     );
 
-    for(size_t i = 0; i < size; i++)
-    {
-        ASSERT_EQ(keys_output[i], expected[i].first);
-        ASSERT_EQ(values_output[i], expected[i].second);
-    }
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, keys_expected));
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, values_expected));
 
     HIP_CHECK(hipFree(device_keys_output));
     HIP_CHECK(hipFree(device_values_output));

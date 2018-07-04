@@ -93,39 +93,33 @@ TYPED_TEST_CASE(RocprimDeviceSegmentedRadixSort, Params);
 template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
 struct key_comparator
 {
-private:
-    template<unsigned int CStartBit, unsigned int CEndBit>
-    constexpr static bool all_bits()
-    {
-        return (CStartBit == 0 && CEndBit == sizeof(Key) * 8);
-    }
+    static_assert(rp::is_unsigned<Key>::value, "Test supports start and end bits only for unsigned integers");
 
-    template<unsigned int CStartBit, unsigned int CEndBit>
-    auto compare(const Key& lhs, const Key& rhs) const
-        -> typename std::enable_if<all_bits<CStartBit, CEndBit>(), bool>::type
-    {
-        return Descending ? (rhs < lhs) : (lhs < rhs);
-    }
-
-    template<unsigned int CStartBit, unsigned int CEndBit>
-    auto compare(const Key& lhs, const Key& rhs) const
-        -> typename std::enable_if<!all_bits<CStartBit, CEndBit>(), bool>::type
+    bool operator()(const Key& lhs, const Key& rhs)
     {
         auto mask = (1ull << (EndBit - StartBit)) - 1;
         auto l = (static_cast<unsigned long long>(lhs) >> StartBit) & mask;
         auto r = (static_cast<unsigned long long>(rhs) >> StartBit) & mask;
         return Descending ? (r < l) : (l < r);
     }
+};
 
-public:
-    static_assert(
-        key_comparator::all_bits<StartBit, EndBit>() || std::is_unsigned<Key>::value,
-        "Test supports start and end bits only for unsigned integers"
-    );
-
+template<class Key, bool Descending>
+struct key_comparator<Key, Descending, 0, sizeof(Key) * 8>
+{
     bool operator()(const Key& lhs, const Key& rhs)
     {
-        return this->compare<StartBit, EndBit>(lhs, rhs);
+        return Descending ? (rhs < lhs) : (lhs < rhs);
+    }
+};
+
+template<bool Descending>
+struct key_comparator<rp::half, Descending, 0, sizeof(rp::half) * 8>
+{
+    bool operator()(const rp::half& lhs, const rp::half& rhs)
+    {
+        // HIP's half doesn't have __host__ comparison operators, use floats instead
+        return key_comparator<float, Descending, 0, sizeof(float) * 8>()(lhs, rhs);
     }
 };
 
@@ -292,10 +286,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeys)
         HIP_CHECK(hipFree(d_keys_output));
         HIP_CHECK(hipFree(d_offsets));
 
-        for(size_t i = 0; i < size; i++)
-        {
-            ASSERT_EQ(keys_output[i], expected[i]);
-        }
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
     }
 }
 
@@ -406,6 +397,13 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairs)
                 key_value_comparator<key_type, value_type, descending, start_bit, end_bit>()
             );
         }
+        std::vector<key_type> keys_expected(size);
+        std::vector<value_type> values_expected(size);
+        for(size_t i = 0; i < size; i++)
+        {
+            keys_expected[i] = expected[i].first;
+            values_expected[i] = expected[i].second;
+        }
 
         void * d_temporary_storage = nullptr;
         size_t temporary_storage_bytes = 0;
@@ -472,11 +470,8 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairs)
         HIP_CHECK(hipFree(d_values_output));
         HIP_CHECK(hipFree(d_offsets));
 
-        for(size_t i = 0; i < size; i++)
-        {
-            ASSERT_EQ(keys_output[i], expected[i].first);
-            ASSERT_EQ(values_output[i], expected[i].second);
-        }
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, keys_expected));
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, values_expected));
     }
 }
 
@@ -625,10 +620,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
         HIP_CHECK(hipFree(d_keys_output));
         HIP_CHECK(hipFree(d_offsets));
 
-        for(size_t i = 0; i < size; i++)
-        {
-            ASSERT_EQ(keys_output[i], expected[i]);
-        }
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
     }
 }
 
@@ -739,6 +731,13 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
                 key_value_comparator<key_type, value_type, descending, start_bit, end_bit>()
             );
         }
+        std::vector<key_type> keys_expected(size);
+        std::vector<value_type> values_expected(size);
+        for(size_t i = 0; i < size; i++)
+        {
+            keys_expected[i] = expected[i].first;
+            values_expected[i] = expected[i].second;
+        }
 
         rp::double_buffer<key_type> d_keys(d_keys_input, d_keys_output);
         rp::double_buffer<value_type> d_values(d_values_input, d_values_output);
@@ -808,10 +807,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
         HIP_CHECK(hipFree(d_values_output));
         HIP_CHECK(hipFree(d_offsets));
 
-        for(size_t i = 0; i < size; i++)
-        {
-            ASSERT_EQ(keys_output[i], expected[i].first);
-            ASSERT_EQ(values_output[i], expected[i].second);
-        }
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, keys_expected));
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, values_expected));
     }
 }
