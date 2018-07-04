@@ -444,6 +444,25 @@ auto assert_near(const std::vector<T>& result, const std::vector<T>& expected, c
     }
 }
 
+template<class T>
+void assert_eq(const std::vector<T>& result, const std::vector<T>& expected)
+{
+    ASSERT_EQ(result.size(), expected.size());
+    for(size_t i = 0; i < result.size(); i++)
+    {
+        ASSERT_EQ(result[i], expected[i]) << "where index = " << i;
+    }
+}
+
+void assert_eq(const std::vector<rocprim::half>& result, const std::vector<rocprim::half>& expected)
+{
+    ASSERT_EQ(result.size(), expected.size());
+    for(size_t i = 0; i < result.size(); i++)
+    {
+        ASSERT_EQ(static_cast<float>(result[i]), static_cast<float>(expected[i])) << "where index = " << i;
+    }
+}
+
 } // end test_utils namespace
 
 #endif // TEST_TEST_UTILS_HPP_
