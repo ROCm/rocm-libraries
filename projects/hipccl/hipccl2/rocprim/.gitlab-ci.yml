@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-image: rocm/rocm-terminal:1.8.0
+image: rocm/rocm-terminal:latest
 
 variables:
   SUDO_CMD: "" # Must be "sudo" on images which don't use root user
