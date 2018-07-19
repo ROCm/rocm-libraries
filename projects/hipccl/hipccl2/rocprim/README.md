@@ -7,7 +7,7 @@ performant GPU-accelerated code on AMD ROCm platform.
 
 * Git
 * CMake (3.5.1 or later)
-* AMD [ROCm](https://rocm.github.io/install.html) platform (1.7.1 or later)
+* AMD [ROCm](https://rocm.github.io/install.html) platform (1.8.2 or later)
   * Including [HCC](https://github.com/RadeonOpenCompute/hcc) compiler, which must be
     set as C++ compiler on ROCm platform.
 
