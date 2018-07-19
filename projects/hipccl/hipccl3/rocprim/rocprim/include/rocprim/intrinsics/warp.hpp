@@ -39,7 +39,7 @@ unsigned long long ballot(int predicate)
     #ifdef ROCPRIM_HC_API
         return hc::__ballot(predicate);
     #else // HIP
-        return __ballot(predicate);
+        return ::__ballot(predicate);
     #endif
 }
 
@@ -56,10 +56,9 @@ unsigned int masked_bit_count(unsigned long long x, unsigned int add = 0)
         c = hc::__amdgcn_mbcnt_hi(static_cast<int>(x >> 32), c);
         return c;
     #else // HIP
-        // TODO: Use HIP function(s)
         int c;
-        c = hc::__amdgcn_mbcnt_lo(static_cast<int>(x), add);
-        c = hc::__amdgcn_mbcnt_hi(static_cast<int>(x >> 32), c);
+        c = ::__mbcnt_lo(static_cast<int>(x), add);
+        c = ::__mbcnt_hi(static_cast<int>(x >> 32), c);
         return c;
     #endif
 }
