@@ -21,7 +21,7 @@
 #include <thrust/detail/integer_traits.h>
 
 // for floating point infinity
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
+#if (THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC) || (THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC)
 #include <math_constants.h>
 #else
 #include <limits>
