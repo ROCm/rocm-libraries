@@ -43,19 +43,20 @@
 #define THRUST_DEVICE_COMPILER_GCC     2
 #define THRUST_DEVICE_COMPILER_NVCC    3
 #define THRUST_DEVICE_COMPILER_CLANG   4
+#define THRUST_DEVICE_COMPILER_HCC     5
 
 // figure out which host compiler we're using
 // XXX we should move the definition of THRUST_DEPRECATED out of this logic
 #if   defined(_MSC_VER)
 #define THRUST_HOST_COMPILER THRUST_HOST_COMPILER_MSVC
 #define THRUST_DEPRECATED __declspec(deprecated)
-#elif defined(__clang__)
+#elif defined(__clang__) || defined(__HCC__)
 #define THRUST_HOST_COMPILER THRUST_HOST_COMPILER_CLANG
-#define THRUST_DEPRECATED __attribute__ ((deprecated)) 
+#define THRUST_DEPRECATED __attribute__ ((deprecated))
 #define THRUST_CLANG_VERSION (__clang_major__ * 10000 + __clang_minor__ * 100 + __clang_patchlevel__)
 #elif defined(__GNUC__)
 #define THRUST_HOST_COMPILER THRUST_HOST_COMPILER_GCC
-#define THRUST_DEPRECATED __attribute__ ((deprecated)) 
+#define THRUST_DEPRECATED __attribute__ ((deprecated))
 #define THRUST_GCC_VERSION (__GNUC__ * 10000 + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__)
 #else
 #define THRUST_HOST_COMPILER THRUST_HOST_COMPILER_UNKNOWN
@@ -76,6 +77,8 @@
 #else
 #define THRUST_DEVICE_COMPILER THRUST_DEVICE_COMPILER_CLANG
 #endif
+#elif defined(__HCC__)
+#define THRUST_DEVICE_COMPILER THRUST_DEVICE_COMPILER_HCC
 #else
 #define THRUST_DEVICE_COMPILER THRUST_DEVICE_COMPILER_UNKNOWN
 #endif
