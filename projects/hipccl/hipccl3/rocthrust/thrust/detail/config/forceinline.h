@@ -26,9 +26,14 @@
 
 #define __thrust_forceinline__ __forceinline__
 
+#elif defined(__HCC__)
+
+// STREAMHPC Should we add static?
+#define __thrust_forceinline__ __forceinline__
+
 #else
 
-// TODO add 
+// TODO add
 
 #define __thrust_forceinline__
 
