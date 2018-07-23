@@ -17,8 +17,8 @@
 
 #pragma once
 
-#include <thrust/system/cuda/error.h>
-#include <thrust/system/cuda/detail/guarded_cuda_runtime_api.h>
+#include <thrust/system/hip/error.h>
+#include <thrust/system/hip/detail/guarded_hip_runtime_api.h>
 
 namespace thrust
 {
@@ -27,64 +27,64 @@ namespace system
 {
 
 
-error_code make_error_code(cuda_cub::errc::errc_t e)
+error_code make_error_code(hip_rocprim::errc::errc_t e)
 {
-  return error_code(static_cast<int>(e), cuda_category());
+  return error_code(static_cast<int>(e), hip_category());
 } // end make_error_code()
 
 
-error_condition make_error_condition(cuda_cub::errc::errc_t e)
+error_condition make_error_condition(hip_rocprim::errc::errc_t e)
 {
-  return error_condition(static_cast<int>(e), cuda_category());
+  return error_condition(static_cast<int>(e), hip_category());
 } // end make_error_condition()
 
 
-namespace cuda_cub
+namespace hip_rocprim
 {
 
 namespace detail
 {
 
 
-class cuda_error_category
+class hip_error_category
   : public error_category
 {
   public:
-    inline cuda_error_category(void) {}
+    inline hip_error_category(void) {}
 
     inline virtual const char *name(void) const
     {
-      return "cuda";
+      return "hip";
     }
 
     inline virtual std::string message(int ev) const
     {
       static const std::string unknown_err("Unknown error");
-      const char *c_str = ::cudaGetErrorString(static_cast<cudaError_t>(ev));
+      const char *c_str = ::hipGetErrorString(static_cast<hipError_t>(ev));
       return c_str ? std::string(c_str) : unknown_err;
     }
 
     inline virtual error_condition default_error_condition(int ev) const
     {
-      using namespace cuda_cub::errc;
+      using namespace hip_rocprim::errc;
 
-      if(ev < ::cudaErrorApiFailureBase)
+      if(ev < ::hipErrorApiFailureBase)
       {
         return make_error_condition(static_cast<errc_t>(ev));
       }
 
       return system_category().default_error_condition(ev);
     }
-}; // end cuda_error_category
+}; // end hip_error_category
 
 } // end detail
 
-} // end namespace cuda_cub
+} // end namespace hip_rocprim
 
 
-const error_category &cuda_category(void)
+const error_category &hip_category(void)
 {
-  static const cuda_cub::detail::cuda_error_category result;
+  static const hip_rocprim::detail::hip_error_category result;
   return result;
 }
 
