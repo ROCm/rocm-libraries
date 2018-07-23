@@ -15,8 +15,8 @@
  */
 
 
-/*! \file thrust/system/cuda/error.h
- *  \brief CUDA-specific error reporting
+/*! \file thrust/system/hip/error.h
+ *  \brief HIP-specific error reporting
  */
 
 #pragma once
@@ -24,7 +24,7 @@
 #include <thrust/detail/config.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/system/error_code.h>
-#include <thrust/system/cuda/detail/guarded_driver_types.h>
+#include <thrust/system/hip/detail/guarded_driver_types.h>
 
 namespace thrust
 {
@@ -32,137 +32,135 @@ namespace thrust
 namespace system
 {
 
-namespace cuda_cub
+namespace hip_rocprim
 {
 
 /*! \addtogroup system
  *  \{
  */
 
-// To construct an error_code after a CUDA Runtime error:
+// To construct an error_code after a HIP Runtime error:
 //
-//   error_code(::cudaGetLastError(), cuda_category())
+//   error_code(::hipGetLastError(), hip_category())
 
 // XXX N3000 prefers enum class errc { ... }
 namespace errc
 {
 
-/*! \p errc_t enumerates the kinds of CUDA Runtime errors.
+/*! \p errc_t enumerates the kinds of HIP Runtime errors.
  */
 enum errc_t
 {
-  // from cuda/include/driver_types.h
+  // from hip/include/driver_types.h
   // mirror their order
-  success                            = cudaSuccess,
-  missing_configuration              = cudaErrorMissingConfiguration,
-  memory_allocation                  = cudaErrorMemoryAllocation,
-  initialization_error               = cudaErrorInitializationError,
-  launch_failure                     = cudaErrorLaunchFailure,
-  prior_launch_failure               = cudaErrorPriorLaunchFailure,
-  launch_timeout                     = cudaErrorLaunchTimeout,
-  launch_out_of_resources            = cudaErrorLaunchOutOfResources,
-  invalid_device_function            = cudaErrorInvalidDeviceFunction,
-  invalid_configuration              = cudaErrorInvalidConfiguration,
-  invalid_device                     = cudaErrorInvalidDevice,
-  invalid_value                      = cudaErrorInvalidValue,
-  invalid_pitch_value                = cudaErrorInvalidPitchValue,
-  invalid_symbol                     = cudaErrorInvalidSymbol,
-  map_buffer_object_failed           = cudaErrorMapBufferObjectFailed,
-  unmap_buffer_object_failed         = cudaErrorUnmapBufferObjectFailed,
-  invalid_host_pointer               = cudaErrorInvalidHostPointer,
-  invalid_device_pointer             = cudaErrorInvalidDevicePointer,
-  invalid_texture                    = cudaErrorInvalidTexture,
-  invalid_texture_binding            = cudaErrorInvalidTextureBinding,
-  invalid_channel_descriptor         = cudaErrorInvalidChannelDescriptor,
-  invalid_memcpy_direction           = cudaErrorInvalidMemcpyDirection,
-  address_of_constant_error          = cudaErrorAddressOfConstant,
-  texture_fetch_failed               = cudaErrorTextureFetchFailed,
-  texture_not_bound                  = cudaErrorTextureNotBound,
-  synchronization_error              = cudaErrorSynchronizationError,
-  invalid_filter_setting             = cudaErrorInvalidFilterSetting,
-  invalid_norm_setting               = cudaErrorInvalidNormSetting,
-  mixed_device_execution             = cudaErrorMixedDeviceExecution,
-  cuda_runtime_unloading             = cudaErrorCudartUnloading,
-  unknown                            = cudaErrorUnknown,
-  not_yet_implemented                = cudaErrorNotYetImplemented,
-  memory_value_too_large             = cudaErrorMemoryValueTooLarge,
-  invalid_resource_handle            = cudaErrorInvalidResourceHandle,
-  not_ready                          = cudaErrorNotReady,
-  insufficient_driver                = cudaErrorInsufficientDriver,
-  set_on_active_process_error        = cudaErrorSetOnActiveProcess,
-  no_device                          = cudaErrorNoDevice,
-  ecc_uncorrectable                  = cudaErrorECCUncorrectable,
+  success                            = hipSuccess,
+  missing_configuration              = hipErrorMissingConfiguration,
+  memory_allocation                  = hipErrorMemoryAllocation,
+  initialization_error               = hipErrorInitializationError,
+  launch_failure                     = hipErrorLaunchFailure,
+  prior_launch_failure               = hipErrorPriorLaunchFailure,
+  launch_timeout                     = hipErrorLaunchTimeOut,
+  launch_out_of_resources            = hipErrorLaunchOutOfResources,
+  invalid_device_function            = hipErrorInvalidDeviceFunction,
+  invalid_configuration              = hipErrorInvalidConfiguration,
+  invalid_device                     = hipErrorInvalidDevice,
+  invalid_value                      = hipErrorInvalidValue,
+  invalid_pitch_value                = hipErrorTbd,
+  invalid_symbol                     = hipErrorInvalidSymbol,
+  map_buffer_object_failed           = hipErrorMapBufferObjectFailed,
+  unmap_buffer_object_failed         = hipErrorTbd,
+  invalid_host_pointer               = hipErrorTbd,
+  invalid_device_pointer             = hipErrorInvalidDevicePointer,
+  invalid_texture                    = hipErrorTbd,
+  invalid_texture_binding            = hipErrorTbd,
+  invalid_channel_descriptor         = hipErrorTbd,
+  invalid_memcpy_direction           = hipErrorInvalidMemcpyDirection,
+  address_of_constant_error          = hipErrorTbd,
+  texture_fetch_failed               = hipErrorTbd,
+  texture_not_bound                  = hipErrorTbd,
+  synchronization_error              = hipErrorTbd,
+  invalid_filter_setting             = hipErrorTbd,
+  invalid_norm_setting               = hipErrorTbd,
+  mixed_device_execution             = hipErrorTbd,
+  cuda_runtime_unloading             = hipErrorTbd,
+  unknown                            = hipErrorUnknown,
+  not_yet_implemented                = hipErrorTbd,
+  memory_value_too_large             = hipErrorTbd,
+  invalid_resource_handle            = hipErrorInvalidResourceHandle,
+  not_ready                          = hipErrorNotReady,
+  insufficient_driver                = hipErrorTbd,
+  set_on_active_process_error        = hipErrorSetOnActiveProcess,
+  no_device                          = hipErrorNoDevice,
+  ecc_uncorrectable                  = hipErrorTbd,
 
-#if CUDART_VERSION >= 4020
-  shared_object_symbol_not_found     = cudaErrorSharedObjectSymbolNotFound,
-  shared_object_init_failed          = cudaErrorSharedObjectInitFailed,
-  unsupported_limit                  = cudaErrorUnsupportedLimit,
-  duplicate_variable_name            = cudaErrorDuplicateVariableName,
-  duplicate_texture_name             = cudaErrorDuplicateTextureName,
-  duplicate_surface_name             = cudaErrorDuplicateSurfaceName,
-  devices_unavailable                = cudaErrorDevicesUnavailable,
-  invalid_kernel_image               = cudaErrorInvalidKernelImage,
-  no_kernel_image_for_device         = cudaErrorNoKernelImageForDevice,
-  incompatible_driver_context        = cudaErrorIncompatibleDriverContext,
-  peer_access_already_enabled        = cudaErrorPeerAccessAlreadyEnabled,
-  peer_access_not_enabled            = cudaErrorPeerAccessNotEnabled,
-  device_already_in_use              = cudaErrorDeviceAlreadyInUse,
-  profiler_disabled                  = cudaErrorProfilerDisabled,
-  assert_triggered                   = cudaErrorAssert,
-  too_many_peers                     = cudaErrorTooManyPeers,
-  host_memory_already_registered     = cudaErrorHostMemoryAlreadyRegistered,
-  host_memory_not_registered         = cudaErrorHostMemoryNotRegistered,
-  operating_system_error             = cudaErrorOperatingSystem,
+#if defined(__HCC__)
+  shared_object_symbol_not_found     = hipErrorSharedObjectSymbolNotFound,
+  shared_object_init_failed          = hipErrorSharedObjectInitFailed,
+  unsupported_limit                  = hipErrorUnsupportedLimit,
+  duplicate_variable_name            = hipErrorTbd,
+  duplicate_texture_name             = hipErrorTbd,
+  duplicate_surface_name             = hipErrorTbd,
+  devices_unavailable                = hipErrorTbd,
+  invalid_kernel_image               = hipErrorTbd,
+  no_kernel_image_for_device         = hipErrorTbd,
+  incompatible_driver_context        = hipErrorTbd,
+  peer_access_already_enabled        = hipErrorPeerAccessAlreadyEnabled,
+  peer_access_not_enabled            = hipErrorPeerAccessNotEnabled,
+  device_already_in_use              = hipErrorTbd,
+  profiler_disabled                  = hipErrorTbd,
+  assert_triggered                   = hipErrorTbd,
+  too_many_peers                     = hipErrorTbd,
+  host_memory_already_registered     = hipErrorHostMemoryAlreadyRegistered,
+  host_memory_not_registered         = hipErrorHostMemoryNotRegistered,
+  operating_system_error             = hipErrorTbd,
 #endif
 
-#if CUDART_VERSION >= 5000
-  peer_access_unsupported            = cudaErrorPeerAccessUnsupported,
-  launch_max_depth_exceeded          = cudaErrorLaunchMaxDepthExceeded,
-  launch_file_scoped_texture_used    = cudaErrorLaunchFileScopedTex,
-  launch_file_scoped_surface_used    = cudaErrorLaunchFileScopedSurf,
-  sync_depth_exceeded                = cudaErrorSyncDepthExceeded,
-  attempted_operation_not_permitted  = cudaErrorNotPermitted,
-  attempted_operation_not_supported  = cudaErrorNotSupported,
+#if defined(__HCC__)
+  peer_access_unsupported            = hipErrorTbd,
+  launch_max_depth_exceeded          = hipErrorTbd,
+  launch_file_scoped_texture_used    = hipErrorTbd,
+  launch_file_scoped_surface_used    = hipErrorTbd,
+  sync_depth_exceeded                = hipErrorTbd,
+  attempted_operation_not_permitted  = hipErrorTbd,
+  attempted_operation_not_supported  = hipErrorTbd,
 #endif
 
-  startup_failure                    = cudaErrorStartupFailure
+  startup_failure                    = hipErrorTbd
 }; // end errc_t
 
 
 } // end namespace errc
 
-} // end namespace cuda_cub
+} // end namespace hip_rocprim
 
 /*! \return A reference to an object of a type derived from class \p thrust::error_category.
  *  \note The object's \p equivalent virtual functions shall behave as specified
  *        for the class \p thrust::error_category. The object's \p name virtual function shall
- *        return a pointer to the string <tt>"cuda"</tt>. The object's
+ *        return a pointer to the string <tt>"hip"</tt>. The object's
  *        \p default_error_condition virtual function shall behave as follows:
  *
- *        If the argument <tt>ev</tt> corresponds to a CUDA error value, the function
- *        shall return <tt>error_condition(ev,cuda_category())</tt>.
+ *        If the argument <tt>ev</tt> corresponds to a HIP error value, the function
+ *        shall return <tt>error_condition(ev,hip_category())</tt>.
  *        Otherwise, the function shall return <tt>system_category.default_error_condition(ev)</tt>.
  */
-inline const error_category &cuda_category(void);
+inline const error_category &hip_category(void);
 
 
-// XXX N3000 prefers is_error_code_enum<cuda::errc>
+// XXX N3000 prefers is_error_code_enum<hip::errc>
 
-/*! Specialization of \p is_error_code_enum for \p cuda::errc::errc_t
+/*! Specialization of \p is_error_code_enum for \p hip::errc::errc_t
  */
-template<> struct is_error_code_enum<cuda_cub::errc::errc_t> : thrust::detail::true_type {};
+template<> struct is_error_code_enum<hip_rocprim::errc::errc_t> : thrust::detail::true_type {};
 
 
-// XXX replace cuda::errc::errc_t with cuda::errc upon c++0x
-/*! \return <tt>error_code(static_cast<int>(e), cuda::error_category())</tt>
+/*! \return <tt>error_code(static_cast<int>(e), hip::error_category())</tt>
  */
-inline error_code make_error_code(cuda_cub::errc::errc_t e);
+inline error_code make_error_code(hip_rocprim::errc::errc_t e);
 
 
-// XXX replace cuda::errc::errc_t with cuda::errc upon c++0x
-/*! \return <tt>error_condition(static_cast<int>(e), cuda::error_category())</tt>.
+/*! \return <tt>error_condition(static_cast<int>(e), hip::error_category())</tt>.
  */
-inline error_condition make_error_condition(cuda_cub::errc::errc_t e);
+inline error_condition make_error_condition(hip_rocprim::errc::errc_t e);
 
 /*! \} // end system
  */
@@ -171,22 +169,21 @@ inline error_condition make_error_condition(cuda_cub::errc::errc_t e);
 } // end system
 
 namespace system {
-namespace cuda {
+namespace hip {
 namespace errc {
-using system::cuda_cub::errc::errc_t;
+using system::hip_rocprim::errc::errc_t;
 } // namespace errc
-} // namespace cuda
+} // namespace hip
 } // namespace system
 
-namespace cuda
-{
-// XXX replace with using system::cuda_errc upon c++0x
-namespace errc = system::cuda::errc;
-} // end cuda_cub
+namespace hip
+// XXX replace with using system::hip_errc upon c++0x
+namespace errc = system::hip::errc;
+} // end hip_rocprim
 
-using system::cuda_category;
+using system::hip_category;
 
 } // end namespace thrust
 
-#include <thrust/system/cuda/detail/error.inl>
+#include <thrust/system/hip/detail/error.inl>
 
