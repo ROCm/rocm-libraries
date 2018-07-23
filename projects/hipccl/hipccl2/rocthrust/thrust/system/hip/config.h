@@ -33,20 +33,10 @@
 
 #define THRUST_UNUSED_VAR(expr) do { (void)(expr); } while (0)
 
-#if defined(__CUDACC__)
-#  if !defined(__CUDA_ARCH__) || (__CUDA_ARCH__>= 350 && defined(__CUDACC_RDC__))
-#    define __THRUST_HAS_CUDART__ 1
-#    define THRUST_RUNTIME_FUNCTION __host__ __device__ __forceinline__
-#  else
-#    define __THRUST_HAS_CUDART__ 0
-#    define THRUST_RUNTIME_FUNCTION __host__ __forceinline__
-#  endif
-#else
-#  define __THRUST_HAS_CUDART__ 0
-#  define THRUST_RUNTIME_FUNCTION __host__ __forceinline__
-#endif
+#define __THRUST_HAS_CUDART__ 0
+#define THRUST_RUNTIME_FUNCTION __host__ __forceinline__
 
-#ifdef __CUDA_ARCH__
+#ifdef __HIP_DEVICE_COMPILE__
 #define THRUST_DEVICE_CODE
 #endif
 
@@ -74,8 +64,8 @@
 #define THRUST_DEBUG_SYNC_FLAG false
 #endif
 
-#define THRUST_CUB_NS_PREFIX namespace thrust {   namespace cuda_cub {
-#define THRUST_CUB_NS_POSTFIX }  }
+#define THRUST_ROCPRIM_NS_PREFIX namespace thrust {   namespace hip_rocprim {
+#define THRUST_ROCPRIM_NS_POSTFIX }  }
 
 
 #ifndef END_NS_THRUST
