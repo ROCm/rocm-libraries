@@ -29,148 +29,87 @@
 #include <cstdio>
 #include <thrust/detail/config.h>
 #include <thrust/iterator/iterator_traits.h>
-#include <thrust/system/cuda/detail/cub/util_arch.cuh>
-#include <thrust/system/cuda/detail/execution_policy.h>
+// Not present in rocPRIM
+// #include <thrust/system/cuda/detail/cub/util_arch.cuh>
+#include <thrust/system/hip/detail/execution_policy.h>
 #include <thrust/system_error.h>
-#include <thrust/system/cuda/error.h>
+#include <thrust/system/hip/error.h>
 
 
 BEGIN_NS_THRUST
 
-namespace cuda_cub {
+namespace hip_rocprim {
 
 __thrust_exec_check_disable__
 template <class Policy>
-__host__ __device__ cudaError_t
+__host__ __device__ hipError_t
 synchronize(Policy &policy)
 {
   return synchronize_stream(derived_cast(policy));
 }
 
 template <class Derived>
-__host__ __device__ cudaStream_t
+__host__ __device__ hipStream_t
 stream(execution_policy<Derived> &policy)
 {
   return get_stream(derived_cast(policy));
 }
 
-
-#if 0
-template <class Policy, class Type>
-CUB_RUNTIME_FUNCTION cudaError_t
-trivial_copy_from_device(Policy &    policy,
-                         Type *      dst,
-                         Type const *src,
-                         size_t      count)
-{
-  cudaError status = cudaSuccess;
-  if (count == 0) return status;
-#ifdef __CUDA_ARCH__
-  for (size_t i = 0; i != count; ++i)
-  {
-    dst[i] = src[i];
-  }
-#else
-  cudaStream_t stream = cuda_cub::stream(policy);
-  //
-  status = ::cudaMemcpyAsync(dst,
-                             src,
-                             sizeof(Type) * count,
-                             cudaMemcpyDeviceToHost,
-                             stream);
-  cuda_cub::synchronize(policy);
-
-#endif
-  return status;
-}
-#endif
-
 template <class Type>
-THRUST_HOST_FUNCTION cudaError_t
+THRUST_HOST_FUNCTION hipError_t
 trivial_copy_from_device(Type *       dst,
                          Type const * src,
                          size_t       count,
-                         cudaStream_t stream)
+                         hipStream_t stream)
 {
-  cudaError status = cudaSuccess;
+  hipError status = hipSuccess;
   if (count == 0) return status;
 
-  status = ::cudaMemcpyAsync(dst,
+  status = ::hipMemcpyAsync(dst,
                              src,
                              sizeof(Type) * count,
-                             cudaMemcpyDeviceToHost,
+                             hipMemcpyDeviceToHost,
                              stream);
-  cudaStreamSynchronize(stream);
+  hipStreamSynchronize(stream);
   return status;
 }
 
-#if 0
-template <class Policy, class Type>
-CUB_RUNTIME_FUNCTION cudaError_t
-trivial_copy_to_device(Policy &    ,
-                       Type *      dst,
-                       Type const *src,
-                       size_t      count)
-{
-  cudaError status = cudaSuccess;
-  if (count == 0) return status;
-#ifdef __CUDA_ARCH__
-  for (size_t i = 0; i != count; ++i)
-  {
-    dst[i] = src[i];
-  }
-#else
-  cudaStream_t stream = cuda_cub::stream(policy);
-  //
-  status = ::cudaMemcpyAsync(dst,
-                             src,
-                             sizeof(Type) * count,
-                             cudaMemcpyHostToDevice,
-                             stream);
-  cuda_cub::synchronize(policy);
-#endif
-  return status;
-}
-#else
 template <class Type>
-THRUST_HOST_FUNCTION cudaError_t
+THRUST_HOST_FUNCTION hipError_t
 trivial_copy_to_device(Type *       dst,
                        Type const * src,
                        size_t       count,
-                       cudaStream_t stream)
+                       hipStream_t stream)
 {
-  cudaError status = cudaSuccess;
+  hipError status = hipSuccess;
   if (count == 0) return status;
 
-  status = ::cudaMemcpyAsync(dst,
+  status = ::hipMemcpyAsync(dst,
                              src,
                              sizeof(Type) * count,
-                             cudaMemcpyHostToDevice,
+                             hipMemcpyHostToDevice,
                              stream);
-  cudaStreamSynchronize(stream);
+  hipStreamSynchronize(stream);
   return status;
 }
-#endif
-
-
 template <class Policy, class Type>
-__host__ __device__ cudaError_t
+__host__ __device__ hipError_t
 trivial_copy_device_to_device(Policy &    policy,
                               Type *      dst,
                               Type const *src,
                               size_t      count)
 {
-  cudaError_t  status = cudaSuccess;
+  hipError_t  status = hipSuccess;
   if (count == 0) return status;
 
-  cudaStream_t stream = cuda_cub::stream(policy);
+  hipStream_t stream = hip_rocprim::stream(policy);
   //
-  status = ::cudaMemcpyAsync(dst,
+  status = ::hipMemcpyAsync(dst,
                              src,
                              sizeof(Type) * count,
-                             cudaMemcpyDeviceToDevice,
+                             hipMemcpyDeviceToDevice,
                              stream);
-  cuda_cub::synchronize(policy);
+  hip_rocprim::synchronize(policy);
   return status;
 }
 
@@ -178,29 +117,29 @@ trivial_copy_device_to_device(Policy &    policy,
 inline void __host__ __device__
 terminate()
 {
-#ifdef __CUDA_ARCH__
+#ifdef __HIP_DEVICE_COMPILE__
   asm("trap;");
 #else
   std::terminate();
 #endif
 }
 
-static void __host__ __device__ 
-throw_on_error(cudaError_t status, char const *msg)
+static void __host__ __device__
+throw_on_error(hipError_t status, char const *msg)
 {
-  if (cudaSuccess != status)
+  if (hipSuccess != status)
   {
-#if !defined(__CUDA_ARCH__)
-    throw thrust::system_error(status, thrust::cuda_category(), msg);
+#if !defined(__HIP_DEVICE_COMPILE__)
+    throw thrust::system_error(status, thrust::hip_category(), msg);
 #else
 #if __THRUST_HAS_CUDART__
     printf("Error after %s: %s\n",
            msg,
-           cudaGetErrorString(status));
+           hipGetErrorString(status));
 #else
     printf("Error %d: %s \n", (int)status, msg);
 #endif
-    cuda_cub::terminate();
+    hip_rocprim::terminate();
 #endif
   }
 }
@@ -855,6 +794,6 @@ struct counting_iterator_t
 };    // struct count_iterator_t
 
 
-}    // cuda_
+}    // hip_rocprim
 
 END_NS_THRUST
