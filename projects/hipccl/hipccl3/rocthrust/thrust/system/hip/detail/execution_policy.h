@@ -28,10 +28,10 @@
 
 #include <thrust/detail/execution_policy.h>
 #include <thrust/iterator/detail/any_system_tag.h>
-#include <thrust/system/cuda/config.h>
+#include <thrust/system/hip/config.h>
 
 BEGIN_NS_THRUST
-namespace cuda_cub {
+namespace hip_rocprim {
 
   struct tag;
 
@@ -50,19 +50,19 @@ namespace cuda_cub {
   {
     inline operator tag() const { return tag(); }
   };
-}    // namespace cuda_cub
+}    // namespace hip_rocprim
 
 namespace system {
-namespace cuda {
-  using thrust::cuda_cub::tag;
-  using thrust::cuda_cub::execution_policy;
-} // namespace cuda
+namespace hip {
+  using thrust::hip_rocprim::tag;
+  using thrust::hip_rocprim::execution_policy;
+} // namespace hip
 } // namespace system
 
-namespace cuda {
-using thrust::cuda_cub::execution_policy;
-using thrust::cuda_cub::tag;
-} // namespace cuda
+namespace hip {
+using thrust::hip_rocprim::execution_policy;
+using thrust::hip_rocprim::tag;
+} // namespace hip
 
 END_NS_THRUST
 
