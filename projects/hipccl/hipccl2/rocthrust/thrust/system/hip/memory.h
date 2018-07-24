@@ -2,7 +2,7 @@
  *  Copyright 2008-2013 NVIDIA Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
- *  you may not use this file except in ccudaliance with the License.
+ *  you may not use this file except in compliance with the License.
  *  You may obtain a copy of the License at
  *
  *      http://www.apache.org/licenses/LICENSE-2.0
@@ -14,26 +14,26 @@
  *  limitations under the License.
  */
 
-/*! \file thrust/system/cuda/memory.h
- *  \brief Managing memory associated with Thrust's CUDA system.
+/*! \file thrust/system/hip/memory.h
+ *  \brief Managing memory associated with Thrust's hip system.
  */
 
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/system/cuda/execution_policy.h>
+#include <thrust/system/hip/execution_policy.h>
 #include <thrust/memory.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/allocator/malloc_allocator.h>
 #include <ostream>
 
 BEGIN_NS_THRUST
-namespace cuda_cub {
+namespace hip_rocprim {
 
 template <typename>
 class pointer;
 
-}    // end cuda_
+}    // end hip_rocprim
 END_NS_THRUST
 
 
@@ -44,10 +44,10 @@ END_NS_THRUST
 BEGIN_NS_THRUST
 
 template <typename Element>
-struct iterator_traits<thrust::cuda_cub::pointer<Element> >
+struct iterator_traits<thrust::hip_rocprim::pointer<Element> >
 {
 private:
-  typedef thrust::cuda_cub::pointer<Element> ptr;
+  typedef thrust::hip_rocprim::pointer<Element> ptr;
 
 public:
   typedef typename ptr::iterator_category iterator_category;
@@ -57,36 +57,37 @@ public:
   typedef typename ptr::reference         reference;
 };    // end iterator_traits
 
-namespace cuda_cub {
+namespace hip_rocprim {
 
 // forward declaration of reference for pointer
 template <typename Element>
 class reference;
 
-// XXX nvcc + msvc have trouble instantiating reference below
-//     this is a workaround
-template <typename Element>
-struct reference_msvc_workaround
-{
-  typedef thrust::cuda_cub::reference<Element> type;
-};    // end reference_msvc_workaround
+// STREAMHPC Not needed for HIP
+// // XXX nvcc + msvc have trouble instantiating reference below
+// //     this is a workaround
+// template <typename Element>
+// struct reference_msvc_workaround
+// {
+//   typedef thrust::hip_rocprim::reference<Element> type;
+// };    // end reference_msvc_workaround
 
 
 template <typename T>
 class pointer
     : public thrust::pointer<
           T,
-          thrust::cuda_cub::tag,
-          thrust::cuda_cub::reference<T>,
-          thrust::cuda_cub::pointer<T> >
+          thrust::hip_rocprim::tag,
+          thrust::hip_rocprim::reference<T>,
+          thrust::hip_rocprim::pointer<T> >
 {
 
 private:
   typedef thrust::pointer<
       T,
-      thrust::cuda_cub::tag,
+      thrust::hip_rocprim::tag,
       typename reference_msvc_workaround<T>::type,
-      thrust::cuda_cub::pointer<T> >
+      thrust::hip_rocprim::pointer<T> >
       super_t;
 
 public:
@@ -124,15 +125,15 @@ template <typename T>
 class reference
     : public thrust::reference<
           T,
-          thrust::cuda_cub::pointer<T>,
-          thrust::cuda_cub::reference<T> >
+          thrust::hip_rocprim::pointer<T>,
+          thrust::hip_rocprim::reference<T> >
 {
 
 private:
   typedef thrust::reference<
       T,
-      thrust::cuda_cub::pointer<T>,
-      thrust::cuda_cub::reference<T> >
+      thrust::hip_rocprim::pointer<T>,
+      thrust::hip_rocprim::reference<T> >
       super_t;
 
 public:
@@ -197,7 +198,7 @@ struct allocator
   __host__ __device__ inline allocator() {}
 
   __host__ __device__ inline allocator(const allocator &)
-    : thrust::detail::malloc_allocator<T, tag, thrust::cuda_cub::pointer<T> >()
+    : thrust::detail::malloc_allocator<T, tag, thrust::hip_rocprim::pointer<T> >()
   {}
 
   template <typename U>
@@ -208,28 +209,28 @@ struct allocator
   __host__ __device__ inline ~allocator() {}
 };    // struct allocator
 
-}    // namespace cuda_cub
+}    // namespace hip_rocprim
 
 namespace system {
-namespace cuda {
-using thrust::cuda_cub::pointer;
-using thrust::cuda_cub::reference;
-using thrust::cuda_cub::swap;
-using thrust::cuda_cub::malloc;
-using thrust::cuda_cub::free;
-using thrust::cuda_cub::allocator;
-} // namespace cuda
+namespace hip {
+using thrust::hip_rocprim::pointer;
+using thrust::hip_rocprim::reference;
+using thrust::hip_rocprim::swap;
+using thrust::hip_rocprim::malloc;
+using thrust::hip_rocprim::free;
+using thrust::hip_rocprim::allocator;
+} // namespace hip
 } /// namespace system
 
-namespace cuda {
-using thrust::cuda_cub::pointer;
-using thrust::cuda_cub::reference;
-using thrust::cuda_cub::malloc;
-using thrust::cuda_cub::free;
-using thrust::cuda_cub::allocator;
-}    // end cuda
+namespace hip {
+using thrust::hip_rocprim::pointer;
+using thrust::hip_rocprim::reference;
+using thrust::hip_rocprim::malloc;
+using thrust::hip_rocprim::free;
+using thrust::hip_rocprim::allocator;
+}    // end hip
 
 END_NS_THRUST
 
-#include <thrust/system/cuda/detail/memory.inl>
+#include <thrust/system/hip/detail/memory.inl>
 

@@ -15,31 +15,32 @@
  */
 
 #include <thrust/detail/config.h>
-#include <thrust/system/cuda/memory.h>
-#include <thrust/system/cuda/detail/malloc_and_free.h>
+#include <thrust/system/hip/memory.h>
+#include <thrust/system/hip/detail/malloc_and_free.h>
 #include <limits>
 
 namespace thrust
 {
 
-// XXX WAR an issue with MSVC 2005 (cl v14.00) incorrectly implementing
-//     pointer_raw_pointer for pointer by specializing it here
-//     note that we specialize it here, before the use of raw_pointer_cast
-//     below, which causes pointer_raw_pointer's instantiation
-#if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC) && (_MSC_VER <= 1400)
-namespace detail
-{
+// STREAMHPC Not needed for HIP
+// // XXX WAR an issue with MSVC 2005 (cl v14.00) incorrectly implementing
+// //     pointer_raw_pointer for pointer by specializing it here
+// //     note that we specialize it here, before the use of raw_pointer_cast
+// //     below, which causes pointer_raw_pointer's instantiation
+// #if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC) && (_MSC_VER <= 1400)
+// namespace detail
+// {
 
-template<typename T>
-  struct pointer_raw_pointer< thrust::cuda_cub::pointer<T> >
-{
-  typedef typename thrust::cuda_cub::pointer<T>::raw_pointer type;
-}; // end pointer_raw_pointer
+// template<typename T>
+//   struct pointer_raw_pointer< thrust::hip_rocprim::pointer<T> >
+// {
+//   typedef typename thrust::hip_rocprim::pointer<T>::raw_pointer type;
+// }; // end pointer_raw_pointer
 
-} // end detail
-#endif
+// } // end detail
+// #endif
 
-namespace cuda_cub {
+namespace hip_rocprim {
 
 template <typename T>
 template <typename OtherT>
@@ -63,25 +64,25 @@ void swap(reference<T> a, reference<T> b)
 __host__ __device__
 pointer<void> malloc(std::size_t n)
 {
-  tag cuda_tag;
-  return pointer<void>(thrust::cuda_cub::malloc(cuda_tag, n));
+  tag hip_tag;
+  return pointer<void>(thrust::hip_rocprim::malloc(hip_tag, n));
 } // end malloc()
 
 template<typename T>
 __host__ __device__
 pointer<T> malloc(std::size_t n)
 {
-  pointer<void> raw_ptr = thrust::cuda_cub::malloc(sizeof(T) * n);
+  pointer<void> raw_ptr = thrust::hip_rocprim::malloc(sizeof(T) * n);
   return pointer<T>(reinterpret_cast<T*>(raw_ptr.get()));
 } // end malloc()
 
 __host__ __device__
 void free(pointer<void> ptr)
 {
-  tag cuda_tag;
-  return thrust::cuda_cub::free(cuda_tag, ptr.get());
+  tag hip_tag;
+  return thrust::hip_rocprim::free(hip_tag, ptr.get());
 } // end free()
 
-} // end cuda_
+} // end hip_rocprim
 } // end thrust
 

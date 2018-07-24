@@ -16,55 +16,58 @@
 
 #pragma once
 
-#include <thrust/system/cuda/detail/guarded_cuda_runtime_api.h>
+#include <thrust/system/hip/detail/guarded_hip_runtime_api.h>
 
 #include <thrust/detail/config.h>
 #include <thrust/detail/seq.h>
 #include <thrust/memory.h>
-#include <thrust/system/cuda/config.h>
-#ifdef THRUST_CACHING_DEVICE_MALLOC
-#include <thrust/system/cuda/detail/cub/util_allocator.cuh>
-#endif
-#include <thrust/system/cuda/detail/util.h>
+#include <thrust/system/hip/config.h>
+// STREAMHPC No caching allocator in rocPRIM
+// #ifdef THRUST_CACHING_DEVICE_MALLOC
+// #include <thrust/system/cuda/detail/cub/util_allocator.cuh>
+// #endif
+#include <thrust/system/hip/detail/util.h>
 #include <thrust/system/detail/bad_alloc.h>
 
 
 BEGIN_NS_THRUST
-namespace cuda_cub {
+namespace hip_rocprim {
 
-#ifdef THRUST_CACHING_DEVICE_MALLOC
-#define __CUB_CACHING_MALLOC
-#ifndef __CUDA_ARCH__
-inline cub::CachingDeviceAllocator &get_allocator()
-{
-  static cub::CachingDeviceAllocator g_allocator(true);
-  return g_allocator;
-}
-#endif
-#endif
+// STREAMHPC No caching allocator in rocPRIM
+// #ifdef THRUST_CACHING_DEVICE_MALLOC
+// #define __CUB_CACHING_MALLOC
+// #ifndef __CUDA_ARCH__
+// inline cub::CachingDeviceAllocator &get_allocator()
+// {
+//   static cub::CachingDeviceAllocator g_allocator(true);
+//   return g_allocator;
+// }
+// #endif
+// #endif
 
 
 // note that malloc returns a raw pointer to avoid
-// depending on the heavyweight thrust/system/cuda/memory.h header
+// depending on the heavyweight thrust/system/hip/memory.h header
 template<typename DerivedPolicy>
 __host__ __device__
 void *malloc(execution_policy<DerivedPolicy> &, std::size_t n)
 {
   void *result = 0;
 
-#ifndef __CUDA_ARCH__
-#ifdef __CUB_CACHING_MALLOC
-  cub::CachingDeviceAllocator &alloc = get_allocator();
-  cudaError_t status = alloc.DeviceAllocate(&result, n);
-#else
-  cudaError_t status = cudaMalloc(&result, n);
-#endif
+#ifndef __HIP_DEVICE_COMPILE__
+// STREAMHPC No caching allocator in rocPRIM
+// #ifdef __CUB_CACHING_MALLOC
+//   cub::CachingDeviceAllocator &alloc = get_allocator();
+//   cudsError_t status = alloc.DeviceAllocate(&result, n);
+// #else
+  hipError_t status = hipMalloc(&result, n);
+// #endif
 
-  if(status != cudaSuccess)
+  if(status != hipSuccess)
   {
-  //  cuda_cub::throw_on_error(status, "device malloc failed");
-    thrust::system::detail::bad_alloc(thrust::cuda_category().message(status).c_str());
-  } 
+  //  hip_rocprim::throw_on_error(status, "device malloc failed");
+    thrust::system::detail::bad_alloc(thrust::hip_category().message(status).c_str());
+  }
 #else
   result = thrust::raw_pointer_cast(thrust::malloc(thrust::seq, n));
 #endif
@@ -77,18 +80,19 @@ template<typename DerivedPolicy, typename Pointer>
 __host__ __device__
 void free(execution_policy<DerivedPolicy> &, Pointer ptr)
 {
-#ifndef __CUDA_ARCH__
-#ifdef __CUB_CACHING_MALLOC
-  cub::CachingDeviceAllocator &alloc = get_allocator();
-  cudaError_t status = alloc.DeviceFree(thrust::raw_pointer_cast(ptr));
-#else
-  cudaError_t status = cudaFree(thrust::raw_pointer_cast(ptr));
-#endif
-  cuda_cub::throw_on_error(status, "device free failed");
+#ifndef __HIP_DEVICE_COMPILE__
+// STREAMHPC No caching allocator in rocPRIM
+// #ifdef __CUB_CACHING_MALLOC
+//   cub::CachingDeviceAllocator &alloc = get_allocator();
+//   hipError_t status = alloc.DeviceFree(thrust::raw_pointer_cast(ptr));
+// #else
+  hipError_t status = hipFree(thrust::raw_pointer_cast(ptr));
+// #endif
+  hip_rocprim::throw_on_error(status, "device free failed");
 #else
   thrust::free(thrust::seq, ptr);
 #endif
 } // end free()
 
-}    // namespace cuda_cub
+}    // namespace hip_rocprim
 END_NS_THRUST
