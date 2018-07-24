@@ -36,7 +36,7 @@
 #    define THRUST_DEVICE_NEEDS_RESTORATION
 #  endif
 #else // GNUC pre 4.5.0
-#  if !defined(__DRIVER_TYPES_H__)
+#  if (defined(__HCC__) && !defined(HIP_INCLUDE_HIP_HCC_DETAIL_DRIVER_TYPES_H))
 #    ifdef __host__
 #      undef __host__
 #    endif
@@ -46,9 +46,7 @@
 #  endif // __DRIVER_TYPES_H__
 #endif // __GNUC__
 
-
-// #include <driver_types.h>
-
+#include <hip/hcc_detail/host_defines.h>
 
 #if !defined(__GNUC__) || ((10000 * __GNUC__ + 100 * __GNUC_MINOR__ + __GNUC_PATCHLEVEL__) >= 40500)
 #  ifdef THRUST_HOST_NEEDS_RESTORATION
