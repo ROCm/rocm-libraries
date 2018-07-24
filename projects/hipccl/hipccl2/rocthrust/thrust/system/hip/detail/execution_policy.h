@@ -26,6 +26,7 @@
  ******************************************************************************/
 #pragma once
 
+#include <hip/hip_runtime.h>
 #include <thrust/detail/execution_policy.h>
 #include <thrust/iterator/detail/any_system_tag.h>
 #include <thrust/system/hip/config.h>

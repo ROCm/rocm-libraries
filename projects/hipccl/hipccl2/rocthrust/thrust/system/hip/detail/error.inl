@@ -68,7 +68,7 @@ class hip_error_category
     {
       using namespace hip_rocprim::errc;
 
-      if(ev < ::hipErrorApiFailureBase)
+      if(ev < (::hipErrorMissingConfiguration - 1) /* ::hipErrorApiFailureBase */ )
       {
         return make_error_condition(static_cast<errc_t>(ev));
       }

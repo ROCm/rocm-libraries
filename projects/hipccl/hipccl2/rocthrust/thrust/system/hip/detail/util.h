@@ -62,14 +62,14 @@ trivial_copy_from_device(Type *       dst,
                          size_t       count,
                          hipStream_t stream)
 {
-  hipError status = hipSuccess;
+  hipError_t status = hipSuccess;
   if (count == 0) return status;
 
   status = ::hipMemcpyAsync(dst,
-                             src,
-                             sizeof(Type) * count,
-                             hipMemcpyDeviceToHost,
-                             stream);
+                            src,
+                            sizeof(Type) * count,
+                            hipMemcpyDeviceToHost,
+                            stream);
   hipStreamSynchronize(stream);
   return status;
 }
@@ -81,14 +81,14 @@ trivial_copy_to_device(Type *       dst,
                        size_t       count,
                        hipStream_t stream)
 {
-  hipError status = hipSuccess;
+  hipError_t status = hipSuccess;
   if (count == 0) return status;
 
   status = ::hipMemcpyAsync(dst,
-                             src,
-                             sizeof(Type) * count,
-                             hipMemcpyHostToDevice,
-                             stream);
+                            src,
+                            sizeof(Type) * count,
+                            hipMemcpyHostToDevice,
+                            stream);
   hipStreamSynchronize(stream);
   return status;
 }
@@ -105,10 +105,10 @@ trivial_copy_device_to_device(Policy &    policy,
   hipStream_t stream = hip_rocprim::stream(policy);
   //
   status = ::hipMemcpyAsync(dst,
-                             src,
-                             sizeof(Type) * count,
-                             hipMemcpyDeviceToDevice,
-                             stream);
+                            src,
+                            sizeof(Type) * count,
+                            hipMemcpyDeviceToDevice,
+                            stream);
   hip_rocprim::synchronize(policy);
   return status;
 }

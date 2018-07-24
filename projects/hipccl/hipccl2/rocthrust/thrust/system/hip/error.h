@@ -177,9 +177,10 @@ using system::hip_rocprim::errc::errc_t;
 } // namespace system
 
 namespace hip
+{
 // XXX replace with using system::hip_errc upon c++0x
 namespace errc = system::hip::errc;
-} // end hip_rocprim
+} // end hip
 
 using system::hip_category;
 
