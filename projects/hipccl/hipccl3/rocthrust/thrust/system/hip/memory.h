@@ -20,6 +20,8 @@
 
 #pragma once
 
+#include <hip/hip_runtime.h>
+
 #include <thrust/detail/config.h>
 #include <thrust/system/hip/execution_policy.h>
 #include <thrust/memory.h>
