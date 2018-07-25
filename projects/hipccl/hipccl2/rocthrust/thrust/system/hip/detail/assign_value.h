@@ -16,41 +16,41 @@
 
 #pragma once
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 #include <thrust/detail/config.h>
-#include <thrust/system/cuda/config.h>
-#include <thrust/system/cuda/detail/execution_policy.h>
+#include <thrust/system/hip/config.h>
+#include <thrust/system/hip/detail/execution_policy.h>
 #include <thrust/detail/raw_pointer_cast.h>
-#include <thrust/system/cuda/detail/copy.h>
+// #include <thrust/system/hip/detail/copy.h>
 
 
 BEGIN_NS_THRUST
-namespace cuda_cub {
+namespace hip_rocprim {
 
 
 template<typename DerivedPolicy, typename Pointer1, typename Pointer2>
 inline __host__ __device__
-  void assign_value(thrust::cuda::execution_policy<DerivedPolicy> &exec, Pointer1 dst, Pointer2 src)
+  void assign_value(thrust::hip::execution_policy<DerivedPolicy> &exec, Pointer1 dst, Pointer2 src)
 {
   // XXX war nvbugs/881631
   struct war_nvbugs_881631
   {
-    __host__ inline static void host_path(thrust::cuda::execution_policy<DerivedPolicy> &exec, Pointer1 dst, Pointer2 src)
+    __host__ inline static void host_path(thrust::hip::execution_policy<DerivedPolicy> &exec, Pointer1 dst, Pointer2 src)
     {
-      cuda_cub::copy(exec, src, src + 1, dst);
+      // hip_rocprim::copy(exec, src, src + 1, dst);
     }
 
-    __device__ inline static void device_path(thrust::cuda::execution_policy<DerivedPolicy> &, Pointer1 dst, Pointer2 src)
+    __device__ inline static void device_path(thrust::hip::execution_policy<DerivedPolicy> &, Pointer1 dst, Pointer2 src)
     {
       *thrust::raw_pointer_cast(dst) = *thrust::raw_pointer_cast(src);
     }
   };
 
-#ifndef __CUDA_ARCH__
+#ifndef __HIP_DEVICE_COMPILE__
   war_nvbugs_881631::host_path(exec,dst,src);
 #else
   war_nvbugs_881631::device_path(exec,dst,src);
-#endif // __CUDA_ARCH__
+#endif // __HIP_DEVICE_COMPILE__
 } // end assign_value()
 
 
@@ -66,19 +66,19 @@ inline __host__ __device__
       // rotate the systems so that they are ordered the same as (src, dst)
       // for the call to thrust::copy
       cross_system<System2,System1> rotated_systems = systems.rotate();
-      cuda_cub::copy(rotated_systems, src, src + 1, dst);
+      // hip_rocprim::copy(rotated_systems, src, src + 1, dst);
     }
 
     __device__ inline static void device_path(cross_system<System1,System2> &, Pointer1 dst, Pointer2 src)
     {
-      // XXX forward the true cuda::execution_policy inside systems here
+      // XXX forward the true hip::execution_policy inside systems here
       //     instead of materializing a tag
-      thrust::cuda::tag cuda_tag;
-      thrust::cuda_cub::assign_value(cuda_tag, dst, src);
+      thrust::hip::tag cuda_tag;
+      thrust::hip_rocprim::assign_value(cuda_tag, dst, src);
     }
   };
 
-#if __CUDA_ARCH__
+#if __HIP_DEVICE_COMPILE__
   war_nvbugs_881631::device_path(systems,dst,src);
 #else
   war_nvbugs_881631::host_path(systems,dst,src);
@@ -87,7 +87,7 @@ inline __host__ __device__
 
 
 
-  
-} // end cuda_cub
+
+} // end hip_rocprim
 END_NS_THRUST
 #endif
