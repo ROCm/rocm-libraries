@@ -16,15 +16,15 @@
 
 #pragma once
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 #include <thrust/detail/config.h>
-#include <thrust/system/cuda/config.h>
+#include <thrust/system/hip/config.h>
 
 #include <thrust/detail/raw_pointer_cast.h>
 #include <thrust/swap.h>
 
 BEGIN_NS_THRUST
-namespace cuda_cub {
+namespace hip_rocprim {
 
 
 template<typename Pointer1, typename Pointer2>
@@ -36,7 +36,7 @@ void iter_swap(tag, Pointer1 a, Pointer2 b)
   {
     __host__ inline static void host_path(Pointer1 a, Pointer2 b)
     {
-      cuda_cub::swap_ranges(a, a + 1, b);
+      hip_rocprim::swap_ranges(a, a + 1, b);
     }
 
     __device__ inline static void device_path(Pointer1 a, Pointer2 b)
@@ -47,14 +47,14 @@ void iter_swap(tag, Pointer1 a, Pointer2 b)
     }
   };
 
-#ifndef __CUDA_ARCH__
+#ifndef __HIP_DEVICE_COMPILE__
   return war_nvbugs_881631::host_path(a,b);
 #else
   return war_nvbugs_881631::device_path(a,b);
-#endif // __CUDA_ARCH__
+#endif // __HIP_DEVICE_COMPILE__
 } // end iter_swap()
 
 
-} // end cuda_cub
+} // end hip_rocprim
 END_NS_THRUST
 #endif
