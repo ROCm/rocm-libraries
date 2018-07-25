@@ -101,6 +101,10 @@ public:
   {
   }
 
+    // STREAMHPC Fixes HCC linkage error
+  __host__ __device__
+  explicit pointer(T *ptr) : super_t(ptr) {}
+
   template <typename OtherPointer>
   __host__ __device__
   pointer(const OtherPointer &other,
