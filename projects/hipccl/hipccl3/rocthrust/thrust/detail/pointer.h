@@ -141,7 +141,7 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
     typedef typename super_t::base_type raw_pointer;
 
     // constructors
-    
+
     __host__ __device__
     pointer();
 
@@ -150,6 +150,10 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
     template<typename OtherElement>
     __host__ __device__
     explicit pointer(OtherElement *ptr);
+
+    // STREAMHPC Fixes HCC linkage error
+    __host__ __device__
+    explicit pointer(Element *ptr);
 
     // OtherPointer's element_type shall be convertible to Element
     // OtherPointer's system shall be convertible to Tag
@@ -162,7 +166,7 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
             >::type * = 0);
 
     // assignment
-    
+
     // OtherPointer's element_type shall be convertible to Element
     // OtherPointer's system shall be convertible to Tag
     template<typename OtherPointer>
