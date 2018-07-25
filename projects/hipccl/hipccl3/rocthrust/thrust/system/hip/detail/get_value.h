@@ -16,15 +16,15 @@
 
 #pragma once
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 #include <thrust/detail/config.h>
-#include <thrust/system/cuda/config.h>
-#include <thrust/system/cuda/detail/cross_system.h>
+#include <thrust/system/hip/config.h>
+#include <thrust/system/hip/detail/cross_system.h>
 #include <thrust/detail/raw_pointer_cast.h>
 #include <thrust/iterator/iterator_traits.h>
 
 BEGIN_NS_THRUST
-namespace cuda_cub {
+namespace hip_rocprim {
 
 
 namespace
@@ -61,11 +61,11 @@ inline __host__ __device__
     }
   };
 
-#ifndef __CUDA_ARCH__
+#ifndef __HIP_DEVICE_COMPILE__
   return war_nvbugs_881631::host_path(exec, ptr);
 #else
   return war_nvbugs_881631::device_path(exec, ptr);
-#endif // __CUDA_ARCH__
+#endif // __HIP_DEVICE_COMPILE__
 } // end get_value_msvc2005_war()
 
 
@@ -81,7 +81,7 @@ inline __host__ __device__
 } // end get_value()
 
 
-} // end cuda_cub
+} // end hip_rocprim
 END_NS_THRUST
 
 #endif
