@@ -22,12 +22,20 @@
 
 #include <iostream>
 #include <type_traits>
+#include <cstdlib>
 
 // Google Test
 #include <gtest/gtest.h>
 
-// HIP Thrust
+// Thrust
 #include <thrust/memory.h>
+
+// HIP API
+#ifdef __HCC__ // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+#include <hip/hip_runtime_api.h>
+
+#define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
+#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
 TEST(HipThrustMemory, VoidMalloc)
 {
@@ -52,3 +60,20 @@ TEST(HipThrustMemory, TypeMalloc)
   // Free
   thrust::free(dev_tag, ptr);
 }
+
+#ifdef __HCC__ // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+TEST(HipThrustMemory, MallocUseMemory)
+{
+  const size_t n = 1024;
+  thrust::device_system_tag dev_tag;
+
+  // Malloc on device
+  auto ptr = thrust::malloc<int>(dev_tag, sizeof(int) * n);
+
+  // Try allocated memory with HIP function
+  HIP_CHECK(hipMemset(ptr.get(), 0, n * sizeof(int)));
+
+  // Free
+  thrust::free(dev_tag, ptr);
+}
+#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
