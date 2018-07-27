@@ -29,16 +29,16 @@
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 #include <iterator>
-#include <thrust/system/cuda/config.h>
+#include <thrust/system/hip/config.h>
 
-#include <thrust/system/cuda/detail/util.h>
-#include <thrust/system/cuda/detail/parallel_for.h>
+#include <thrust/system/hip/detail/util.h>
+#include <thrust/system/hip/detail/parallel_for.h>
 #include <thrust/detail/function.h>
 #include <thrust/distance.h>
 
 BEGIN_NS_THRUST
 
-namespace cuda_cub {
+namespace hip_rocprim {
 
   // for_each functor
   template <class Input, class UnaryOp>
@@ -76,9 +76,9 @@ namespace cuda_cub {
     typedef detail::wrapped_function<UnaryOp, void> wrapped_t;
     wrapped_t wrapped_op(op);
 
-    cuda_cub::parallel_for(policy,
-                           for_each_f<Input, wrapped_t>(first, wrapped_op),
-                           count);
+    hip_rocprim::parallel_for(policy,
+                              for_each_f<Input, wrapped_t>(first, wrapped_op),
+                              count);
     return first + count;
   }
 
@@ -94,9 +94,9 @@ namespace cuda_cub {
   {
     typedef typename iterator_traits<Input>::difference_type size_type;
     size_type count = static_cast<size_type>(thrust::distance(first,last));
-    return cuda_cub::for_each_n(policy, first,  count, op);
+    return hip_rocprim::for_each_n(policy, first,  count, op);
   }
-}    // namespace cuda_cub
+}    // namespace hip_rocprim
 
 END_NS_THRUST
 #endif

@@ -79,10 +79,7 @@
 #if defined(__CUDA__)
 #define THRUST_DEVICE_COMPILER THRUST_DEVICE_COMPILER_NVCC
 #elif defined(__HCC__)
-// STREAMHPC
-// We don't set THRUST_DEVICE_COMPILER to THRUST_DEVICE_COMPILER_HCC to limit
-// number of headers that need to be ported to HCC before testing simple features like malloc.
-#define THRUST_DEVICE_COMPILER THRUST_DEVICE_COMPILER_NVCC //THRUST_DEVICE_COMPILER_HCC
+#define THRUST_DEVICE_COMPILER THRUST_DEVICE_COMPILER_HCC
 #else
 #define THRUST_DEVICE_COMPILER THRUST_DEVICE_COMPILER_CLANG
 #endif

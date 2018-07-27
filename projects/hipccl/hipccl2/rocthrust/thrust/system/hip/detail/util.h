@@ -132,7 +132,7 @@ throw_on_error(hipError_t status, char const *msg)
 #if !defined(__HIP_DEVICE_COMPILE__)
     throw thrust::system_error(status, thrust::hip_category(), msg);
 #else
-#if __THRUST_HAS_CUDART__
+#if __THRUST_HAS_HIPRT__
     printf("Error after %s: %s\n",
            msg,
            hipGetErrorString(status));

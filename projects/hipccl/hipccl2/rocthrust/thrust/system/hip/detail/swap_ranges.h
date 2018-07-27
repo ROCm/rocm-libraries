@@ -27,17 +27,18 @@
 #pragma once
 
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 #include <iterator>
-#include <thrust/system/cuda/detail/transform.h>
-#include <thrust/system/cuda/detail/par_to_seq.h>
+// STREAMHPC this include is not required
+// #include <thrust/system/hip/detail/transform.h>
+#include <thrust/system/hip/detail/par_to_seq.h>
 #include <thrust/swap.h>
-#include <thrust/system/cuda/detail/parallel_for.h>
+#include <thrust/system/hip/detail/parallel_for.h>
 #include <thrust/distance.h>
 
 BEGIN_NS_THRUST
 
-namespace cuda_cub {
+namespace hip_rocprim {
 
 namespace __swap_ranges {
 
@@ -86,16 +87,16 @@ swap_ranges(execution_policy<Derived> &policy,
 
   size_type num_items = static_cast<size_type>(thrust::distance(first1, last1));
 
-  cuda_cub::parallel_for(policy,
-                         __swap_ranges::swap_f<ItemsIt1,
-                                               ItemsIt2>(first1, first2),
-                         num_items);
-
+  hip_rocprim::parallel_for(
+    policy,
+    __swap_ranges::swap_f<ItemsIt1, ItemsIt2>(first1, first2),
+    num_items
+  );
   return first2 + num_items;
 }
 
 
-}    // namespace cuda_
+}    // namespace hip_rocprim
 
 END_NS_THRUST
 #endif

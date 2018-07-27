@@ -37,6 +37,7 @@ inline __host__ __device__
   {
     __host__ inline static void host_path(thrust::hip::execution_policy<DerivedPolicy> &exec, Pointer1 dst, Pointer2 src)
     {
+      (void) exec; (void) dst; (void) src;
       // hip_rocprim::copy(exec, src, src + 1, dst);
     }
 
@@ -66,6 +67,7 @@ inline __host__ __device__
       // rotate the systems so that they are ordered the same as (src, dst)
       // for the call to thrust::copy
       cross_system<System2,System1> rotated_systems = systems.rotate();
+      (void) rotated_systems; (void) dst; (void) src;
       // hip_rocprim::copy(rotated_systems, src, src + 1, dst);
     }
 
@@ -73,8 +75,8 @@ inline __host__ __device__
     {
       // XXX forward the true hip::execution_policy inside systems here
       //     instead of materializing a tag
-      thrust::hip::tag cuda_tag;
-      thrust::hip_rocprim::assign_value(cuda_tag, dst, src);
+      thrust::hip::tag hip_tag;
+      thrust::hip_rocprim::assign_value(hip_tag, dst, src);
     }
   };
 
