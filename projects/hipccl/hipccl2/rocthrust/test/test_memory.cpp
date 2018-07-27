@@ -31,7 +31,7 @@
 #include <thrust/memory.h>
 
 // HIP API
-#ifdef __HCC__ // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 #include <hip/hip_runtime_api.h>
 
 #define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
@@ -61,7 +61,7 @@ TEST(HipThrustMemory, TypeMalloc)
   thrust::free(dev_tag, ptr);
 }
 
-#ifdef __HCC__ // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 TEST(HipThrustMemory, MallocUseMemory)
 {
   const size_t n = 1024;
