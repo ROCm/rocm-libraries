@@ -27,10 +27,10 @@
 #pragma once
 
 #include <thrust/detail/seq.h>
-#include <thrust/system/cuda/detail/par.h>
+#include <thrust/system/hip/detail/par.h>
 
 BEGIN_NS_THRUST
-namespace cuda_cub {
+namespace hip_rocprim {
 
 template <int PAR>
 struct has_par : thrust::detail::true_type {};
@@ -80,11 +80,11 @@ cvt_to_seq(Policy& policy)
   return cvt_to_seq_impl<Policy>::doit(policy);
 }
 
-#if __THRUST_HAS_CUDART__
-#define THRUST_CUDART_DISPATCH par
+#if __THRUST_HAS_HIPRT__
+#define THRUST_HIPRT_DISPATCH par
 #else
-#define THRUST_CUDART_DISPATCH seq
+#define THRUST_HIPRT_DISPATCH seq
 #endif
 
-} // namespace cuda_
+} // namespace hip_rocprim
 END_NS_THRUST

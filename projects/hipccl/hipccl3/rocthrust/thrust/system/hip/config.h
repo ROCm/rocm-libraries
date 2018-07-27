@@ -33,8 +33,17 @@
 
 #define THRUST_UNUSED_VAR(expr) do { (void)(expr); } while (0)
 
-#define __THRUST_HAS_CUDART__ 0
-#define THRUST_RUNTIME_FUNCTION __host__ __forceinline__
+#ifdef __HIPCC__
+    #ifndef __HIP_DEVICE_COMPILE__
+        #define __THRUST_HAS_HIPRT__ 1
+    #else
+        #define __THRUST_HAS_HIPRT__ 0
+    #endif
+    #define THRUST_RUNTIME_FUNCTION __host__ __forceinline__
+#else
+    #define __THRUST_HAS_HIPRT__ 0
+#endif
+
 
 #ifdef __HIP_DEVICE_COMPILE__
 #define THRUST_DEVICE_CODE

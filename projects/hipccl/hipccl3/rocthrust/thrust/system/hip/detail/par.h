@@ -29,29 +29,29 @@
 #include <thrust/detail/config.h>
 #include <thrust/detail/allocator/allocator_traits.h>
 #include <thrust/detail/execute_with_allocator.h>
-#include <thrust/system/cuda/detail/execution_policy.h>
+#include <thrust/system/hip/detail/execution_policy.h>
 
 BEGIN_NS_THRUST
-namespace cuda_cub {
+namespace hip_rocprim {
 
-__host__ __device__ inline cudaStream_t default_stream()
+__host__ __device__ inline hipStream_t default_stream()
 {
-  return cudaStreamLegacy;
+  return hipStreamDefault; // STREAMHPC There's not hipStreamLegacy
 }
 
 template <class Derived>
-cudaStream_t __host__ __device__ 
+hipStream_t __host__ __device__
 get_stream(execution_policy<Derived> &)
 {
   return default_stream();
 }
 
 template <class Derived>
-cudaError_t THRUST_RUNTIME_FUNCTION
+hipError_t THRUST_RUNTIME_FUNCTION
 synchronize_stream(execution_policy<Derived> &)
 {
-  cudaDeviceSynchronize();
-  return cudaGetLastError();
+  hipDeviceSynchronize();
+  return hipGetLastError();
 }
 
 
@@ -59,16 +59,16 @@ template <class Derived>
 struct execute_on_stream_base : execution_policy<Derived>
 {
 private:
-  cudaStream_t stream;
+  hipStream_t stream;
 
 public:
   __host__ __device__
-  execute_on_stream_base(cudaStream_t stream_ = default_stream())
+  execute_on_stream_base(hipStream_t stream_ = default_stream())
       : stream(stream_) {}
 
   __host__ __device__
       Derived
-      on(cudaStream_t const &s) const
+      on(hipStream_t const &s) const
   {
     Derived result = derived_cast(*this);
     result.stream  = s;
@@ -76,24 +76,24 @@ public:
   }
 
 private:
-  friend cudaStream_t __host__ __device__
+  friend hipStream_t __host__ __device__
   get_stream(execute_on_stream_base &exec)
   {
     return exec.stream;
   }
 
-  friend cudaError_t THRUST_RUNTIME_FUNCTION
+  friend hipError_t THRUST_RUNTIME_FUNCTION
   synchronize_stream(execute_on_stream_base &exec)
   {
-#ifdef __CUDA_ARCH__
-#ifdef __THRUST_HAS_CUDART__
+#ifdef __HIP_DEVICE_COMPILE__
+#ifdef __THRUST_HAS_HIPRT__
     THRUST_UNUSED_VAR(exec);
-    cudaDeviceSynchronize();
+    hipDeviceSynchronize();
 #endif
 #else
-    cudaStreamSynchronize(exec.stream);
+    hipStreamSynchronize(exec.stream);
 #endif
-    return cudaGetLastError();
+    return hipGetLastError();
   }
 };
 
@@ -104,7 +104,7 @@ struct execute_on_stream : execute_on_stream_base<execute_on_stream>
   __host__ __device__
   execute_on_stream() : base_t(){};
   __host__ __device__
-  execute_on_stream(cudaStream_t stream) : base_t(stream){};
+  execute_on_stream(hipStream_t stream) : base_t(stream){};
 };
 
 
@@ -135,31 +135,31 @@ struct par_t : execution_policy<par_t>
   }
 
   execute_on_stream __device__ __host__
-  on(cudaStream_t const &stream) const
+  on(hipStream_t const &stream) const
   {
     return execute_on_stream(stream);
   }
 };
 
-#ifdef __CUDA_ARCH__
+#ifdef __HIP_DEVICE_COMPILE__
 static const __device__ par_t par;
 #else
 static const par_t par;
 #endif
-}    // namespace cuda_
+}    // namespace hip_rocprim
 
 namespace system {
-namespace cuda {
-  using thrust::cuda_cub::par;
+namespace hip {
+  using thrust::hip_rocprim::par;
   namespace detail {
-    using thrust::cuda_cub::par_t;
+    using thrust::hip_rocprim::par_t;
   }
-} // namesapce cuda
+} // namesapce hip
 } // namespace system
 
-namespace cuda {
-using thrust::cuda_cub::par;
-} // namespace cuda
+namespace hip {
+using thrust::hip_rocprim::par;
+} // namespace hip
 
 END_NS_THRUST
 
