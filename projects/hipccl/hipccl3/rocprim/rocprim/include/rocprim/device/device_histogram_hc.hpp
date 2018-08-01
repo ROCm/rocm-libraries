@@ -128,7 +128,7 @@ void histogram_impl(void * temporary_storage,
 
     // Workaround: HCC cannot pass structs with array fields of composite types
     // even with custom serializer and deserializer (see fixed_array).
-    // It seems that they work only with primitive types).
+    // It seems that they work only with primitive types.
     // Hence a new fixed_array is recreated inside kernels using individual values that can be passed correctly.
     auto sample_to_bin_op0 = sample_to_bin_op[std::min(0u, ActiveChannels - 1)];
     auto sample_to_bin_op1 = sample_to_bin_op[std::min(1u, ActiveChannels - 1)];
@@ -147,6 +147,11 @@ void histogram_impl(void * temporary_storage,
         }
     );
     ROCPRIM_DETAIL_HC_SYNC("init_histogram", max_bins, start);
+
+    if(columns == 0 || rows == 0)
+    {
+        return;
+    }
 
     if(total_bins <= config::shared_impl_max_bins)
     {
