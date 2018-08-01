@@ -201,6 +201,11 @@ hipError_t histogram_impl(void * temporary_storage,
     );
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_histogram", max_bins, start);
 
+    if(columns == 0 || rows == 0)
+    {
+        return hipSuccess;
+    }
+
     if(total_bins <= config::shared_impl_max_bins)
     {
         dim3 grid_size;
