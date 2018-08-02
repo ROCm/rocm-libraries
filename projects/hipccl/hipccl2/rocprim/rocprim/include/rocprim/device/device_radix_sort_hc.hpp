@@ -317,7 +317,7 @@ void radix_sort_impl(void * temporary_storage,
     constexpr unsigned int scan_size = config::scan::block_size * config::scan::items_per_thread;
     constexpr unsigned int sort_size = config::sort::block_size * config::sort::items_per_thread;
 
-    const unsigned int blocks = ::rocprim::detail::ceiling_div(static_cast<unsigned int>(size), sort_size);
+    const unsigned int blocks = std::max(1u, ::rocprim::detail::ceiling_div(size, sort_size));
     const unsigned int blocks_per_full_batch = ::rocprim::detail::ceiling_div(blocks, scan_size);
     const unsigned int full_batches = blocks % scan_size != 0
         ? blocks % scan_size

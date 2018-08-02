@@ -82,6 +82,50 @@ std::vector<size_t> get_sizes()
 
 TYPED_TEST_CASE(RocprimDeviceScanTests, RocprimDeviceScanTestsParams);
 
+TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSumEmptyInput)
+{
+    using T = typename TestFixture::input_type;
+    using U = typename TestFixture::output_type;
+    const bool debug_synchronous = TestFixture::debug_synchronous;
+
+    hc::accelerator acc;
+    hc::accelerator_view acc_view = acc.create_view();
+
+    hc::array<U> d_output(1, acc_view);
+
+    test_utils::out_of_bounds_flag out_of_bounds(acc_view);
+    test_utils::bounds_checking_iterator<U> d_checking_output(
+        d_output.accelerator_pointer(),
+        out_of_bounds.device_pointer(),
+        0
+    );
+
+    // temp storage
+    size_t temp_storage_size_bytes;
+    // Get size of d_temp_storage
+    rocprim::inclusive_scan(
+        nullptr, temp_storage_size_bytes,
+        rocprim::make_constant_iterator<T>(345),
+        d_checking_output,
+        0, ::rocprim::plus<U>(), acc_view, debug_synchronous
+    );
+
+    // allocate temporary storage
+    hc::array<char> d_temp_storage(temp_storage_size_bytes, acc_view);
+    acc_view.wait();
+
+    // Run
+    rocprim::inclusive_scan(
+        d_temp_storage.accelerator_pointer(), temp_storage_size_bytes,
+        rocprim::make_constant_iterator<T>(345),
+        d_checking_output,
+        0, ::rocprim::plus<U>(), acc_view, debug_synchronous
+    );
+    acc_view.wait();
+
+    ASSERT_FALSE(out_of_bounds.get());
+}
+
 TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
 {
     using T = typename TestFixture::input_type;

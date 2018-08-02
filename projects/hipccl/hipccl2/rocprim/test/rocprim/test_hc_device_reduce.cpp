@@ -83,6 +83,46 @@ std::vector<size_t> get_sizes()
 
 TYPED_TEST_CASE(RocprimDeviceReduceTests, RocprimDeviceReduceTestsParams);
 
+TYPED_TEST(RocprimDeviceReduceTests, ReduceEmptyInput)
+{
+    using T = typename TestFixture::input_type;
+    using U = typename TestFixture::output_type;
+    const bool debug_synchronous = TestFixture::debug_synchronous;
+
+    hc::accelerator acc;
+    hc::accelerator_view acc_view = acc.create_view();
+
+    hc::array<U> d_output(1, acc_view);
+
+    const U initial_value = U(1234);
+
+    size_t temp_storage_size_bytes;
+    // Get size of d_temp_storage
+    rocprim::reduce(
+        nullptr, temp_storage_size_bytes,
+        rocprim::make_constant_iterator<T>(345),
+        d_output.accelerator_pointer(),
+        initial_value,
+        0, rocprim::minimum<U>(), acc_view, debug_synchronous
+    );
+
+    hc::array<char> d_temp_storage(temp_storage_size_bytes, acc_view);
+    acc_view.wait();
+
+    // Run
+    rocprim::reduce(
+        d_temp_storage.accelerator_pointer(), temp_storage_size_bytes,
+        rocprim::make_constant_iterator<T>(345),
+        d_output.accelerator_pointer(),
+        initial_value,
+        0, rocprim::minimum<U>(), acc_view, debug_synchronous
+    );
+    acc_view.wait();
+
+    std::vector<U> output = d_output;
+    ASSERT_EQ(output[0], initial_value);
+}
+
 TYPED_TEST(RocprimDeviceReduceTests, Reduce)
 {
     using T = typename TestFixture::input_type;
