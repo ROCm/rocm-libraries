@@ -47,7 +47,7 @@ get_stream(execution_policy<Derived> &)
 }
 
 template <class Derived>
-hipError_t THRUST_RUNTIME_FUNCTION
+hipError_t THRUST_HIP_RUNTIME_FUNCTION
 synchronize_stream(execution_policy<Derived> &)
 {
   hipDeviceSynchronize();
@@ -82,7 +82,7 @@ private:
     return exec.stream;
   }
 
-  friend hipError_t THRUST_RUNTIME_FUNCTION
+  friend hipError_t THRUST_HIP_RUNTIME_FUNCTION
   synchronize_stream(execute_on_stream_base &exec)
   {
 #ifdef __HIP_DEVICE_COMPILE__

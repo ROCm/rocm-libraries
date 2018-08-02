@@ -47,12 +47,12 @@ namespace hip_rocprim {
     Input input;
     UnaryOp op;
 
-    THRUST_FUNCTION
+    THRUST_HIP_FUNCTION
     for_each_f(Input input, UnaryOp op)
         : input(input), op(op) {}
 
     template <class Size>
-    THRUST_FUNCTION
+    THRUST_HIP_FUNCTION
     void operator()(Size idx)
     {
       op(raw_reference_cast(input[idx]));
@@ -68,7 +68,7 @@ namespace hip_rocprim {
             class Input,
             class Size,
             class UnaryOp>
-  Input THRUST_FUNCTION
+  Input THRUST_HIP_FUNCTION
   for_each_n(execution_policy<Derived> &policy,
              Input                      first,
              Size                       count,
@@ -87,7 +87,7 @@ namespace hip_rocprim {
   template <class Derived,
             class Input,
             class UnaryOp>
-  Input THRUST_FUNCTION
+  Input THRUST_HIP_FUNCTION
   for_each(execution_policy<Derived> &policy,
            Input                      first,
            Input                      last,

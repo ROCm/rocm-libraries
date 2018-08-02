@@ -54,8 +54,8 @@ namespace __parallel_for {
            unsigned int ItemsPerThread,
            class F,
            class Size>
-  __global__ void
-  kernel(F f, Size num_items)
+  __global__
+  void kernel(F f, Size num_items)
   {
       constexpr auto items_per_block = BlockSize * ItemsPerThread;
       Size tile_base     = blockIdx.x * items_per_block;
@@ -87,14 +87,13 @@ namespace __parallel_for {
 
   template <class F,
             class Size>
-  THRUST_RUNTIME_FUNCTION hipError_t
+  THRUST_HIP_RUNTIME_FUNCTION hipError_t
   parallel_for(Size         num_items,
                F            f,
                hipStream_t stream)
   {
     using config = kernel_config<256, 1>;
-
-    bool debug_sync = THRUST_DEBUG_SYNC_FLAG;
+    bool debug_sync = THRUST_HIP_DEBUG_SYNC_FLAG;
     // STREAMHPC Use debug_sync
     (void) debug_sync;
 
@@ -104,9 +103,7 @@ namespace __parallel_for {
     const auto number_of_blocks = (num_items + items_per_block - 1)/items_per_block;
 
     hipLaunchKernelGGL(
-      HIP_KERNEL_NAME(kernel<
-          block_size, items_per_thread, F, Size
-      >),
+      HIP_KERNEL_NAME(kernel<block_size, items_per_thread, F, Size>),
       dim3(number_of_blocks), dim3(block_size), 0, stream,
       f, num_items
     );
@@ -131,7 +128,6 @@ parallel_for(execution_policy<Derived> &policy,
 
 #if __THRUST_HAS_HIPRT__
   {
-    std::cout << "HOST PATH" << std::endl;
     hipStream_t stream = hip_rocprim::stream(policy);
     hipError_t  status = __parallel_for::parallel_for(count, f, stream);
     hip_rocprim::throw_on_error(status, "parallel_for failed");

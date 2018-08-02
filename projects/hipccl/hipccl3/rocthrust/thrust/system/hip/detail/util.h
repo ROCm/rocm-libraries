@@ -56,7 +56,7 @@ stream(execution_policy<Derived> &policy)
 }
 
 template <class Type>
-THRUST_HOST_FUNCTION hipError_t
+THRUST_HIP_HOST_FUNCTION hipError_t
 trivial_copy_from_device(Type *       dst,
                          Type const * src,
                          size_t       count,
@@ -75,7 +75,7 @@ trivial_copy_from_device(Type *       dst,
 }
 
 template <class Type>
-THRUST_HOST_FUNCTION hipError_t
+THRUST_HIP_HOST_FUNCTION hipError_t
 trivial_copy_to_device(Type *       dst,
                        Type const * src,
                        size_t       count,
