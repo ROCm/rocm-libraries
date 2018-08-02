@@ -27,16 +27,16 @@
 #pragma once
 
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 #include <iterator>
 #include <thrust/distance.h>
-#include <thrust/system/cuda/detail/execution_policy.h>
-#include <thrust/system/cuda/detail/util.h>
-#include <thrust/system/cuda/detail/parallel_for.h>
+#include <thrust/system/hip/detail/execution_policy.h>
+#include <thrust/system/hip/detail/util.h>
+#include <thrust/system/hip/detail/parallel_for.h>
 
 BEGIN_NS_THRUST
 
-namespace cuda_cub {
+namespace hip_rocprim {
 
 namespace __uninitialized_copy {
 
@@ -49,17 +49,18 @@ namespace __uninitialized_copy {
     typedef typename iterator_traits<InputIt>::value_type  InputType;
     typedef typename iterator_traits<OutputIt>::value_type OutputType;
 
-    THRUST_FUNCTION
+    THRUST_HIP_FUNCTION
     functor(InputIt input_, OutputIt output_)
         : input(input_), output(output_) {}
 
     template<class Size>
-    void THRUST_DEVICE_FUNCTION operator()(Size idx)
+    void THRUST_HIP_DEVICE_FUNCTION operator()(Size idx)
     {
       InputType const &in  = raw_reference_cast(input[idx]);
       OutputType &     out = raw_reference_cast(output[idx]);
 
-#if defined(__CUDA__) && defined(__clang__)
+// STREAMHPC Check if this is a problem for HCC too
+#if defined(__HCC__) && defined(__clang__)
       // XXX unsafe, but clang is seemngly unable to call in-place new
       out = in;
 #else
@@ -82,7 +83,7 @@ uninitialized_copy_n(execution_policy<Derived> &policy,
 {
   typedef __uninitialized_copy::functor<InputIt,OutputIt> functor_t;
 
-  cuda_cub::parallel_for(policy,
+  hip_rocprim::parallel_for(policy,
                          functor_t(first, result),
                          count);
   return result + count;
@@ -97,13 +98,13 @@ uninitialized_copy(execution_policy<Derived>& policy,
                    InputIt                    last,
                    OutputIt                   result)
 {
-  return cuda_cub::uninitialized_copy_n(policy,
+  return hip_rocprim::uninitialized_copy_n(policy,
                                         first,
                                         thrust::distance(first, last),
                                         result);
 }
 
-}    // namespace cuda_
+}    // namespace hip_rocprim
 
 END_NS_THRUST
 #endif
