@@ -43,32 +43,6 @@
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-// COMPILATION ERROR
-// In file included from /home/jakub/amd/hipThrust/test/test_copy.cpp:31:
-// In file included from /home/jakub/amd/hipThrust/thrust/../thrust/memory.h:25:
-// In file included from /home/jakub/amd/hipThrust/thrust/../thrust/detail/reference.h:173:
-// In file included from /home/jakub/amd/hipThrust/thrust/../thrust/detail/reference.inl:24:
-// In file included from /home/jakub/amd/hipThrust/thrust/../thrust/system/detail/adl/assign_value.h:42:
-// In file included from /home/jakub/amd/hipThrust/thrust/../thrust/system/hip/detail/assign_value.h:24:
-// In file included from /home/jakub/amd/hipThrust/thrust/../thrust/system/hip/detail/copy.h:204:
-// In file included from /home/jakub/amd/hipThrust/thrust/../thrust/detail/temporary_array.h:26:
-// In file included from /home/jakub/amd/hipThrust/thrust/../thrust/detail/contiguous_storage.h:155:
-// In file included from /home/jakub/amd/hipThrust/thrust/../thrust/detail/contiguous_storage.inl:22:
-// In file included from /home/jakub/amd/hipThrust/thrust/../thrust/detail/allocator/copy_construct_range.h:46:
-// In file included from /home/jakub/amd/hipThrust/thrust/../thrust/detail/allocator/copy_construct_range.inl:21:
-// In file included from /home/jakub/amd/hipThrust/thrust/../thrust/detail/copy.h:90:
-// In file included from /home/jakub/amd/hipThrust/thrust/../thrust/detail/copy.inl:21:
-// In file included from /home/jakub/amd/hipThrust/thrust/../thrust/system/detail/generic/copy.h:58:
-// In file included from /home/jakub/amd/hipThrust/thrust/../thrust/system/detail/generic/copy.inl:23:
-// In file included from /home/jakub/amd/hipThrust/thrust/../thrust/transform.h:724:
-// In file included from /home/jakub/amd/hipThrust/thrust/../thrust/detail/transform.inl:25:
-// In file included from /home/jakub/amd/hipThrust/thrust/../thrust/system/detail/generic/transform.h:105:
-// In file included from /home/jakub/amd/hipThrust/thrust/../thrust/system/detail/generic/transform.inl:19:
-// In file included from /home/jakub/amd/hipThrust/thrust/../thrust/detail/for_each.inl:26:
-// /home/jakub/amd/hipThrust/thrust/../thrust/system/detail/generic/for_each.h:49:3:
-// error: implicit instantiation of undefined template 'thrust::detail::STATIC_ASSERTION_FAILURE<false>'
-//   THRUST_STATIC_ASSERT( (thrust::detail::depend_on_instantiation<InputIterator, false>::value) );
-
 TEST(HipThrustCopy, HostToDevice)
 {
   const size_t size = 256;
@@ -85,6 +59,8 @@ TEST(HipThrustCopy, HostToDevice)
     *h_ptr = i;
   }
 
+  // Compiles thanks to a temporary fix in
+  // thrust/system/detail/generic/for_each.h
   thrust::copy(h_ptr, h_ptr + 256, d_ptr);
 
   // Free
@@ -92,7 +68,6 @@ TEST(HipThrustCopy, HostToDevice)
   thrust::free(dev_tag, d_ptr);
 }
 
-// COMPILES, PASSING
 TEST(HipThrustCopy, DeviceToDevice)
 {
   const size_t size = 256;
