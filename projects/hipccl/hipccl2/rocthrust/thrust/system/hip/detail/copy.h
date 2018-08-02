@@ -27,9 +27,9 @@
 #pragma once
 
 
-#include <thrust/system/cuda/config.h>
-#include <thrust/system/cuda/detail/execution_policy.h>
-#include <thrust/system/cuda/detail/cross_system.h>
+#include <thrust/system/hip/config.h>
+#include <thrust/system/hip/detail/execution_policy.h>
+#include <thrust/system/hip/detail/cross_system.h>
 
 BEGIN_NS_THRUST
 
@@ -47,9 +47,9 @@ copy_n(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
        Size                                                        n,
        OutputIt                                                    result);
 
-namespace cuda_cub {
+namespace hip_rocprim {
 
-// D->D copy requires NVCC compiler
+// D->D copy requires HCC compiler
 template <class System,
           class InputIterator,
           class OutputIterator>
@@ -90,21 +90,21 @@ copy_n(cross_system<System1, System2> systems,
        Size           n,
        OutputIterator result);
 
-}    // namespace cuda_
+}    // namespace hip_rocprim
 END_NS_THRUST
 
 
 
-#include <thrust/system/cuda/detail/internal/copy_device_to_device.h>
-#include <thrust/system/cuda/detail/internal/copy_cross_system.h>
-#include <thrust/system/cuda/detail/par_to_seq.h>
+#include <thrust/system/hip/detail/internal/copy_device_to_device.h>
+#include <thrust/system/hip/detail/internal/copy_cross_system.h>
+#include <thrust/system/hip/detail/par_to_seq.h>
 
 BEGIN_NS_THRUST
-namespace cuda_cub {
+namespace hip_rocprim {
 
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
-// D->D copy requires NVCC compiler
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+// D->D copy requires HCC compiler
 
 __thrust_exec_check_disable__
 template <class System,
@@ -117,20 +117,24 @@ copy(execution_policy<System> &system,
      OutputIterator            result)
 {
   OutputIterator ret = result;
-  if (__THRUST_HAS_CUDART__)
+  {
+    auto ptr = __copy::device_to_device<
+      System, InputIterator, OutputIterator
+    >;
+    (void) ptr;
+  }
+#if __THRUST_HAS_HIPRT__
   {
     ret = __copy::device_to_device(system, first, last, result);
   }
-  else
+#else
   {
-#if !__THRUST_HAS_CUDART__
     ret = thrust::copy(cvt_to_seq(derived_cast(system)),
                        first,
                        last,
                        result);
-#endif
   }
-
+#endif
   return ret;
 }    // end copy()
 
@@ -146,17 +150,21 @@ copy_n(execution_policy<System> &system,
        OutputIterator            result)
 {
   OutputIterator ret = result;
-  if (__THRUST_HAS_CUDART__)
+  {
+    auto ptr = __copy::device_to_device<
+      System, InputIterator, OutputIterator
+    >;
+    (void) ptr;
+  }
+#if __THRUST_HAS_HIPRT__
   {
     ret = __copy::device_to_device(system, first, first + n, result);
   }
-  else
+#else
   {
-#if !__THRUST_HAS_CUDART__
     ret = thrust::copy_n(cvt_to_seq(derived_cast(system)), first, n, result);
-#endif
   }
-
+#endif
   return ret;
 } // end copy_n()
 #endif
@@ -189,7 +197,7 @@ copy_n(cross_system<System1, System2> systems,
 } // end copy_n()
 
 
-}    // namespace cuda_cub
+}    // namespace hip_rocprim
 END_NS_THRUST
 
 #include <thrust/memory.h>
