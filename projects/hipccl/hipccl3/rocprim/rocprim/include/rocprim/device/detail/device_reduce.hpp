@@ -101,7 +101,7 @@ void block_reduce_kernel_impl(InputIterator input,
     const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
     const unsigned int flat_block_id = ::rocprim::detail::block_id<0>();
     const unsigned int block_offset = flat_block_id * items_per_block;
-    const unsigned int number_of_blocks = (input_size + items_per_block - 1)/items_per_block;
+    const unsigned int number_of_blocks = ::rocprim::detail::grid_size<0>();
     auto valid_in_last_block = input_size - items_per_block * (number_of_blocks - 1);
 
     result_type values[items_per_thread];
@@ -154,8 +154,9 @@ void block_reduce_kernel_impl(InputIterator input,
     // Save value into output
     if(flat_id == 0)
     {
-        output[flat_block_id] =
-            reduce_with_initial<WithInitialValue>(
+        output[flat_block_id] = input_size == 0
+            ? static_cast<result_type>(initial_value)
+            : reduce_with_initial<WithInitialValue>(
                 output_value,
                 static_cast<result_type>(initial_value),
                 reduce_op

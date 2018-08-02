@@ -88,6 +88,58 @@ std::vector<size_t> get_sizes()
 
 TYPED_TEST_CASE(RocprimDeviceScanTests, RocprimDeviceScanTestsParams);
 
+TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSumEmptyInput)
+{
+    using T = typename TestFixture::input_type;
+    using U = typename TestFixture::output_type;
+    const bool debug_synchronous = TestFixture::debug_synchronous;
+
+    hipStream_t stream = 0; // default
+
+    U * d_output;
+    HIP_CHECK(hipMalloc(&d_output, sizeof(U)));
+
+    test_utils::out_of_bounds_flag out_of_bounds;
+    test_utils::bounds_checking_iterator<U> d_checking_output(
+        d_output,
+        out_of_bounds.device_pointer(),
+        0
+    );
+
+    // temp storage
+    size_t temp_storage_size_bytes;
+    void * d_temp_storage = nullptr;
+    // Get size of d_temp_storage
+    HIP_CHECK(
+        rocprim::inclusive_scan(
+            d_temp_storage, temp_storage_size_bytes,
+            rocprim::make_constant_iterator<T>(345),
+            d_checking_output,
+            0, ::rocprim::plus<U>(), stream, debug_synchronous
+        )
+    );
+
+    // allocate temporary storage
+    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+
+    // Run
+    HIP_CHECK(
+        rocprim::inclusive_scan(
+            d_temp_storage, temp_storage_size_bytes,
+            rocprim::make_constant_iterator<T>(345),
+            d_checking_output,
+            0, ::rocprim::plus<U>(), stream, debug_synchronous
+        )
+    );
+    HIP_CHECK(hipPeekAtLastError());
+    HIP_CHECK(hipDeviceSynchronize());
+
+    ASSERT_FALSE(out_of_bounds.get());
+
+    hipFree(d_output);
+    hipFree(d_temp_storage);
+}
+
 TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
 {
     using T = typename TestFixture::input_type;
