@@ -178,6 +178,73 @@ TYPED_TEST(RocprimDevicePartitionTests, Flagged)
     }
 }
 
+TYPED_TEST(RocprimDevicePartitionTests, PredicateEmptyInput)
+{
+    using T = typename TestFixture::input_type;
+    using U = typename TestFixture::output_type;
+    const bool debug_synchronous = TestFixture::debug_synchronous;
+
+    hc::accelerator acc;
+    hc::accelerator_view acc_view = acc.create_view();
+
+    auto select_op = [](const T& value) [[hc,cpu]] -> bool
+        {
+            if(value == T(50)) return true;
+            return false;
+        };
+
+    hc::array<U> d_output(1, acc_view);
+    hc::array<unsigned int> d_selected_count_output(1, acc_view);
+    std::vector<unsigned int> selected_count_output(1, 123);
+    hc::copy(selected_count_output.begin(), selected_count_output.end(), d_selected_count_output);
+
+    test_utils::out_of_bounds_flag out_of_bounds(acc_view);
+    test_utils::bounds_checking_iterator<U> d_checking_output(
+        d_output.accelerator_pointer(),
+        out_of_bounds.device_pointer(),
+        0
+    );
+
+    // temp storage
+    size_t temp_storage_size_bytes;
+    // Get size of d_temp_storage
+    rocprim::partition(
+        nullptr,
+        temp_storage_size_bytes,
+        rocprim::make_constant_iterator<T>(345),
+        d_checking_output,
+        d_selected_count_output.accelerator_pointer(),
+        0,
+        select_op,
+        acc_view,
+        debug_synchronous
+    );
+
+    // allocate temporary storage
+    hc::array<char> d_temp_storage(temp_storage_size_bytes, acc_view);
+    acc_view.wait();
+
+    // Run
+    rocprim::partition(
+        d_temp_storage.accelerator_pointer(),
+        temp_storage_size_bytes,
+        rocprim::make_constant_iterator<T>(345),
+        d_checking_output,
+        d_selected_count_output.accelerator_pointer(),
+        0,
+        select_op,
+        acc_view,
+        debug_synchronous
+    );
+    acc_view.wait();
+
+    ASSERT_FALSE(out_of_bounds.get());
+
+    // Check if number of selected value is 0
+    selected_count_output = d_selected_count_output;
+    ASSERT_EQ(selected_count_output[0], 0);
+}
+
 TYPED_TEST(RocprimDevicePartitionTests, Predicate)
 {
     using T = typename TestFixture::input_type;

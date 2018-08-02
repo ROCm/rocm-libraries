@@ -230,6 +230,95 @@ TYPED_TEST(RocprimDevicePartitionTests, Flagged)
     }
 }
 
+TYPED_TEST(RocprimDevicePartitionTests, PredicateEmptyInput)
+{
+    using T = typename TestFixture::input_type;
+    using U = typename TestFixture::output_type;
+    const bool debug_synchronous = TestFixture::debug_synchronous;
+
+    hipStream_t stream = 0; // default stream
+
+    auto select_op = [] __host__ __device__ (const T& value) -> bool
+    {
+        if(value == T(50)) return true;
+        return false;
+    };
+
+    U * d_output;
+    unsigned int * d_selected_count_output;
+    HIP_CHECK(hipMalloc(&d_output, sizeof(U)));
+    HIP_CHECK(hipMalloc(&d_selected_count_output, sizeof(unsigned int)));
+    unsigned int selected_count_output = 123;
+    HIP_CHECK(
+        hipMemcpy(
+            d_selected_count_output, &selected_count_output,
+            sizeof(unsigned int),
+            hipMemcpyHostToDevice
+        )
+    );
+
+    test_utils::out_of_bounds_flag out_of_bounds;
+    test_utils::bounds_checking_iterator<U> d_checking_output(
+        d_output,
+        out_of_bounds.device_pointer(),
+        0
+    );
+
+    // temp storage
+    size_t temp_storage_size_bytes;
+    // Get size of d_temp_storage
+    HIP_CHECK(
+        rocprim::partition(
+            nullptr,
+            temp_storage_size_bytes,
+            rocprim::make_constant_iterator<T>(345),
+            d_checking_output,
+            d_selected_count_output,
+            0,
+            select_op,
+            stream,
+            debug_synchronous
+        )
+    );
+    HIP_CHECK(hipDeviceSynchronize());
+
+    // allocate temporary storage
+    void * d_temp_storage = nullptr;
+    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+
+    // Run
+    HIP_CHECK(
+        rocprim::partition(
+            d_temp_storage,
+            temp_storage_size_bytes,
+            rocprim::make_constant_iterator<T>(345),
+            d_checking_output,
+            d_selected_count_output,
+            0,
+            select_op,
+            stream,
+            debug_synchronous
+        )
+    );
+    HIP_CHECK(hipDeviceSynchronize());
+
+    ASSERT_FALSE(out_of_bounds.get());
+
+    // Check if number of selected value is 0
+    HIP_CHECK(
+        hipMemcpy(
+            &selected_count_output, d_selected_count_output,
+            sizeof(unsigned int),
+            hipMemcpyDeviceToHost
+        )
+    );
+    ASSERT_EQ(selected_count_output, 0);
+
+    hipFree(d_output);
+    hipFree(d_selected_count_output);
+    hipFree(d_temp_storage);
+}
+
 TYPED_TEST(RocprimDevicePartitionTests, Predicate)
 {
     using T = typename TestFixture::input_type;
