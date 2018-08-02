@@ -55,5 +55,5 @@ endfunction()
 # Tests
 # ****************************************************************************
 
-add_hipthrust_test("thrust.hip.memory" test_memory.cpp)
 add_hipthrust_test("thrust.hip.for_each" test_for_each.cpp)
+add_hipthrust_test("thrust.hip.memory" test_memory.cpp)

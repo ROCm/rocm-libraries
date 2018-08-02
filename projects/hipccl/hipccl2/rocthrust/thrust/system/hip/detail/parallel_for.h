@@ -126,6 +126,13 @@ parallel_for(execution_policy<Derived> &policy,
   if (count == 0)
     return;
 
+  // Workaround, so kernel called by __parallel_for::parallel_for is not lost,
+  // Implicit instantiation of __parallel_for::parallel_for function template
+  // that will be used in #if __THRUST_HAS_HIPRT__ block.
+  {
+    auto ptr = __parallel_for::parallel_for<F, Size>;
+    (void) ptr;
+  }
 #if __THRUST_HAS_HIPRT__
   {
     hipStream_t stream = hip_rocprim::stream(policy);
