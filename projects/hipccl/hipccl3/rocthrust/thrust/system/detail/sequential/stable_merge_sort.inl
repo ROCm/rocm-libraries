@@ -354,7 +354,7 @@ void stable_merge_sort(sequential::execution_policy<DerivedPolicy> &exec,
                        StrictWeakOrdering comp)
 {
   // avoid recursion in CUDA threads
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HCC_ACCELERATOR__)
   stable_merge_sort_detail::iterative_stable_merge_sort(exec, first, last, comp);
 #else
   stable_merge_sort_detail::recursive_stable_merge_sort(exec, first, last, comp);
@@ -374,7 +374,7 @@ void stable_merge_sort_by_key(sequential::execution_policy<DerivedPolicy> &exec,
                               StrictWeakOrdering comp)
 {
   // avoid recursion in CUDA threads
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HCC_ACCELERATOR__)
   stable_merge_sort_detail::iterative_stable_merge_sort_by_key(exec, first1, last1, first2, comp);
 #else
   stable_merge_sort_detail::recursive_stable_merge_sort_by_key(exec, first1, last1, first2, comp);

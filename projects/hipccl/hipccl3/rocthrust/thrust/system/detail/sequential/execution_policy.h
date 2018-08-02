@@ -66,7 +66,7 @@ template<typename Derived>
 };
 
 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HCC_ACCELERATOR__)
 static const __device__ tag seq;
 #else
 static const tag seq;

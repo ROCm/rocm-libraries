@@ -28,7 +28,7 @@ template<typename BaseAllocator>
 {
   private:
     typedef BaseAllocator super_t;
-  
+
   public:
     inline __host__ __device__
     no_throw_allocator(const BaseAllocator &other = BaseAllocator())
@@ -44,7 +44,7 @@ template<typename BaseAllocator>
     __host__ __device__
     void deallocate(typename super_t::pointer p, typename super_t::size_type n)
     {
-#ifndef __CUDA_ARCH__
+#if !defined(__CUDA_ARCH__) && !defined(__HCC_ACCELERATOR__)
       try
       {
         super_t::deallocate(p, n);
