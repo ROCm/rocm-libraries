@@ -52,12 +52,12 @@ namespace __swap_ranges {
     typedef  typename iterator_traits<ItemsIt1>::value_type value1_type;
     typedef  typename iterator_traits<ItemsIt2>::value_type value2_type;
 
-    THRUST_FUNCTION
+    THRUST_HIP_FUNCTION
     swap_f(ItemsIt1 items1_, ItemsIt2 items2_)
         : items1(items1_), items2(items2_) {}
 
     template<class Size>
-    void THRUST_DEVICE_FUNCTION operator()(Size idx)
+    void THRUST_HIP_DEVICE_FUNCTION operator()(Size idx)
     {
       value1_type item1 = items1[idx];
       value2_type item2 = items2[idx];

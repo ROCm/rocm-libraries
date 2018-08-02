@@ -33,44 +33,32 @@
 
 #define THRUST_UNUSED_VAR(expr) do { (void)(expr); } while (0)
 
-#ifdef __HIPCC__
-    #ifndef __HIP_DEVICE_COMPILE__
-        #define __THRUST_HAS_HIPRT__ 1
-    #else
+#ifdef __HCC__
+    #ifdef __HCC_ACCELERATOR__
         #define __THRUST_HAS_HIPRT__ 0
+        #define THRUST_HIP_RUNTIME_FUNCTION __host__ __forceinline__
+    #else
+        #define __THRUST_HAS_HIPRT__ 1
+        #define THRUST_HIP_RUNTIME_FUNCTION __host__ __forceinline__
     #endif
-    #define THRUST_RUNTIME_FUNCTION __host__ __forceinline__
 #else
     #define __THRUST_HAS_HIPRT__ 0
+    #define THRUST_HIP_RUNTIME_FUNCTION __host__ __forceinline__
 #endif
 
-
-#ifdef __HIP_DEVICE_COMPILE__
-#define THRUST_DEVICE_CODE
+#ifdef __HCC_ACCELERATOR__
+#define THRUST_HIP_DEVICE_CODE
 #endif
 
-#ifdef THRUST_AGENT_ENTRY_NOINLINE
-#define THRUST_AGENT_ENTRY_INLINE_ATTR __noinline__
-#else
-#define THRUST_AGENT_ENTRY_INLINE_ATTR __forceinline__
-#endif
+#define THRUST_HIP_DEVICE_FUNCTION __device__ __forceinline__
+#define THRUST_HIP_HOST_FUNCTION __host__ __forceinline__
+#define THRUST_HIP_FUNCTION __host__ __device__ __forceinline__
 
-#define THRUST_DEVICE_FUNCTION __device__ __forceinline__
-#define THRUST_HOST_FUNCTION __host__     __forceinline__
-#define THRUST_FUNCTION __host__ __device__ __forceinline__
-#if 0
-#define THRUST_ARGS(...) __VA_ARGS__
-#define THRUST_STRIP_PARENS(X) X
-#define THRUST_AGENT_ENTRY(ARGS) THRUST_FUNCTION static void entry(THRUST_STRIP_PARENS(THRUST_ARGS ARGS))
-#else
-#define THRUST_AGENT_ENTRY(...) THRUST_AGENT_ENTRY_INLINE_ATTR __device__ static void entry(__VA_ARGS__)
-#endif
-
-#ifdef THRUST_DEBUG_SYNC
-#define THRUST_DEBUG_SYNC_FLAG true
+#ifdef THRUST_HIP_DEBUG_SYNC
+#define THRUST_HIP_DEBUG_SYNC_FLAG true
 #define DEBUG
 #else
-#define THRUST_DEBUG_SYNC_FLAG false
+#define THRUST_HIP_DEBUG_SYNC_FLAG false
 #endif
 
 #define THRUST_ROCPRIM_NS_PREFIX namespace thrust {   namespace hip_rocprim {
