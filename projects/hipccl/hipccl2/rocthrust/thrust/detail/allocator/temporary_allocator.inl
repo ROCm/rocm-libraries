@@ -24,6 +24,10 @@
 #include <thrust/system/cuda/detail/terminate.h>
 #endif
 
+#ifdef __HCC__
+#include <thrust/system/hip/detail/terminate.h>
+#endif
+
 namespace thrust
 {
 namespace detail
@@ -45,10 +49,12 @@ __host__ __device__
     // note that we pass cnt to deallocate, not a value derived from result.second
     deallocate(result.first, cnt);
 
-#if !defined(__CUDA_ARCH__)
-    throw thrust::system::detail::bad_alloc("temporary_buffer::allocate: get_temporary_buffer failed");
-#else
+#if defined(__CUDA_ARCH__)
     thrust::system::cuda::detail::terminate_with_message("temporary_buffer::allocate: get_temporary_buffer failed");
+#elif defined(__HCC_ACCELERATOR__)
+    thrust::system::hip::detail::terminate_with_message("temporary_buffer::allocate: get_temporary_buffer failed");
+#else
+    throw thrust::system::detail::bad_alloc("temporary_buffer::allocate: get_temporary_buffer failed");
 #endif
   } // end if
 

@@ -40,7 +40,7 @@ __host__ __device__
                     std::ptrdiff_t n,
                     T *result)
 {
-#ifndef __CUDA_ARCH__
+#if !defined(__CUDA_ARCH__) && !defined(__HCC_ACCELERATOR__)
   std::memmove(result, first, n * sizeof(T));
   return result + n;
 #else
