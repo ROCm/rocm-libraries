@@ -92,6 +92,60 @@ std::vector<size_t> get_sizes()
 
 TYPED_TEST_CASE(RocprimDeviceReduceTests, RocprimDeviceReduceTestsParams);
 
+TYPED_TEST(RocprimDeviceReduceTests, ReduceEmptyInput)
+{
+    using T = typename TestFixture::input_type;
+    using U = typename TestFixture::output_type;
+    const bool debug_synchronous = TestFixture::debug_synchronous;
+
+    hipStream_t stream = 0; // default stream
+
+    U * d_output;
+    HIP_CHECK(hipMalloc(&d_output, sizeof(U)));
+
+    const U initial_value = U(1234);
+
+    size_t temp_storage_size_bytes;
+    // Get size of d_temp_storage
+    HIP_CHECK(
+        rocprim::reduce(
+            nullptr, temp_storage_size_bytes,
+            rocprim::make_constant_iterator<T>(345),
+            d_output,
+            initial_value,
+            0, rocprim::minimum<U>(), stream, debug_synchronous
+        )
+    );
+
+    void * d_temp_storage = nullptr;
+    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+
+    // Run
+    HIP_CHECK(
+        rocprim::reduce(
+            d_temp_storage, temp_storage_size_bytes,
+            rocprim::make_constant_iterator<T>(345),
+            d_output,
+            initial_value,
+            0, rocprim::minimum<U>(), stream, debug_synchronous
+        )
+    );
+    HIP_CHECK(hipDeviceSynchronize());
+
+    U output;
+    HIP_CHECK(
+        hipMemcpy(
+            &output, d_output,
+            sizeof(U),
+            hipMemcpyDeviceToHost
+        )
+    );
+    ASSERT_EQ(output, initial_value);
+
+    hipFree(d_output);
+    hipFree(d_temp_storage);
+}
+
 TYPED_TEST(RocprimDeviceReduceTests, Reduce)
 {
     using T = typename TestFixture::input_type;
