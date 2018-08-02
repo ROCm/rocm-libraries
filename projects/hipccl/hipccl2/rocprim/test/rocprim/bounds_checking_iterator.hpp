@@ -201,6 +201,8 @@ public:
     out_of_bounds_flag(hc::accelerator_view& acc_view)
         : device_pointer_(hc::array<bool>(1, acc_view))
     {
+        bool value = false;
+        hc::copy(&value, &value + 1, device_pointer_);
     }
 
     bool get() const
