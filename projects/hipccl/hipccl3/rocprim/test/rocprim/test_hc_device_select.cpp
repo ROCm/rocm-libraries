@@ -264,6 +264,58 @@ std::vector<float> get_discontinuity_probabilities()
     return probabilities;
 }
 
+TYPED_TEST(RocprimDeviceSelectTests, UniqueEmptyInput)
+{
+    using T = typename TestFixture::input_type;
+    using U = typename TestFixture::output_type;
+    const bool debug_synchronous = TestFixture::debug_synchronous;
+
+    hc::accelerator acc;
+    hc::accelerator_view acc_view = acc.create_view();
+
+    hc::array<U> d_output(1, acc_view);
+    hc::array<unsigned int> d_selected_count_output(1, acc_view);
+    std::vector<unsigned int> selected_count_output(1, 123);
+    hc::copy(selected_count_output.begin(), selected_count_output.end(), d_selected_count_output);
+
+    // temp storage
+    size_t temp_storage_size_bytes;
+    // Get size of d_temp_storage
+    rocprim::unique(
+        nullptr,
+        temp_storage_size_bytes,
+        rocprim::make_constant_iterator<T>(123),
+        static_cast<T *>(nullptr),
+        d_selected_count_output.accelerator_pointer(),
+        0,
+        ::rocprim::equal_to<T>(),
+        acc_view,
+        debug_synchronous
+    );
+
+    // allocate temporary storage
+    hc::array<char> d_temp_storage(temp_storage_size_bytes, acc_view);
+    acc_view.wait();
+
+    // Run
+    rocprim::unique(
+        d_temp_storage.accelerator_pointer(),
+        temp_storage_size_bytes,
+        rocprim::make_constant_iterator<T>(123),
+        static_cast<T *>(nullptr),
+        d_selected_count_output.accelerator_pointer(),
+        0,
+        ::rocprim::equal_to<T>(),
+        acc_view,
+        debug_synchronous
+    );
+    acc_view.wait();
+
+    // Check if number of selected value is 0
+    selected_count_output = d_selected_count_output;
+    ASSERT_EQ(selected_count_output[0], 0);
+}
+
 TYPED_TEST(RocprimDeviceSelectTests, Unique)
 {
     using T = typename TestFixture::input_type;

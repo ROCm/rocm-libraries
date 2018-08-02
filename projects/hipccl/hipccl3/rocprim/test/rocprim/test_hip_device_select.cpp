@@ -349,6 +349,67 @@ std::vector<float> get_discontinuity_probabilities()
     return probabilities;
 }
 
+TYPED_TEST(RocprimDeviceSelectTests, UniqueEmptyInput)
+{
+    using T = typename TestFixture::input_type;
+    const bool debug_synchronous = TestFixture::debug_synchronous;
+
+    hipStream_t stream = 0; // default stream
+
+    // Allocate and copy to device
+    unsigned int * d_selected_count_output;
+    HIP_CHECK(hipMalloc(&d_selected_count_output, sizeof(unsigned int)));
+
+    size_t temp_storage_size_bytes;
+    // Get size of d_temp_storage
+    HIP_CHECK(
+        rocprim::unique(
+            nullptr,
+            temp_storage_size_bytes,
+            rocprim::make_constant_iterator<T>(123),
+            static_cast<T *>(nullptr),
+            d_selected_count_output,
+            0,
+            ::rocprim::equal_to<T>(),
+            stream,
+            debug_synchronous
+        )
+    );
+
+    void * d_temp_storage = nullptr;
+    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+
+    // Run
+    HIP_CHECK(
+        rocprim::unique(
+            d_temp_storage,
+            temp_storage_size_bytes,
+            rocprim::make_constant_iterator<T>(123),
+            static_cast<T *>(nullptr),
+            d_selected_count_output,
+            0,
+            ::rocprim::equal_to<T>(),
+            stream,
+            debug_synchronous
+        )
+    );
+    HIP_CHECK(hipDeviceSynchronize());
+
+    // Check if number of selected value is 0
+    unsigned int selected_count_output = 0;
+    HIP_CHECK(
+        hipMemcpy(
+            &selected_count_output, d_selected_count_output,
+            sizeof(unsigned int),
+            hipMemcpyDeviceToHost
+        )
+    );
+    ASSERT_EQ(selected_count_output, 0);
+
+    hipFree(d_selected_count_output);
+    hipFree(d_temp_storage);
+}
+
 TYPED_TEST(RocprimDeviceSelectTests, Unique)
 {
     using T = typename TestFixture::input_type;
