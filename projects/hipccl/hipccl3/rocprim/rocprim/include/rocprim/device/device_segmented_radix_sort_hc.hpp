@@ -118,14 +118,10 @@ void segmented_radix_sort_impl(void * temporary_storage,
     const size_t values_bytes = with_values ? ::rocprim::detail::align_size(size * sizeof(value_type)) : 0;
     if(temporary_storage == nullptr)
     {
-        if(!with_double_buffer)
-        {
-            storage_size = keys_bytes + values_bytes;
-        }
-        else
-        {
-            storage_size = 4;
-        }
+        storage_size = with_double_buffer ? 0 : (keys_bytes + values_bytes);
+        // Make sure user won't try to allocate 0 bytes memory, otherwise
+        // user may again pass nullptr as temporary_storage
+        storage_size = storage_size == 0 ? 4 : storage_size;
         return;
     }
 
