@@ -82,10 +82,18 @@ void partition_impl(void * temporary_storage,
     using offset_type = unsigned int;
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     using output_type = typename std::iterator_traits<OutputIterator>::value_type;
-    // Fix for cases when output_type is void (there's no sizeof(void) or it's
-    // a tuple which contains an item of type void)
-    static constexpr bool is_output_type_invalid =
+    // Fix for cases when output_type is void (there's no sizeof(void)), it's
+    // a tuple which contains an item of type void, or is not convertible to
+    // input_type which is used in InequalityOp
+    static constexpr bool is_output_type_voidlike =
         std::is_same<void, output_type>::value || tuple_contains_type<void, output_type>::value;
+    // If output_type is voidlike we don't want std::is_convertible<output_type, input_type> to
+    // be evaluated, it leads to errors if input_type is a tuple
+    using is_output_type_convertible = typename std::conditional<
+        is_output_type_voidlike, std::false_type, std::is_convertible<output_type, input_type>
+    >::type;
+    static constexpr bool is_output_type_invalid =
+        is_output_type_voidlike || !(is_output_type_convertible::value);
     using value_type = typename std::conditional<
         is_output_type_invalid, input_type, output_type
     >::type;
