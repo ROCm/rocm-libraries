@@ -57,7 +57,7 @@ void TestPartitionSimple(void)
     ASSERT_EQUAL(iter - data.begin(), 2);
     ASSERT_EQUAL(data, ref);
 }
-DECLARE_VECTOR_UNITTEST(TestPartitionSimple);
+DECLARE_INTEGRAL_VECTOR_UNITTEST(TestPartitionSimple);
 
 template<typename Vector>
 void TestPartitionStencilSimple(void)
@@ -91,7 +91,7 @@ void TestPartitionStencilSimple(void)
     ASSERT_EQUAL(iter - data.begin(), 2);
     ASSERT_EQUAL(data, ref);
 }
-DECLARE_VECTOR_UNITTEST(TestPartitionStencilSimple);
+DECLARE_INTEGRAL_VECTOR_UNITTEST(TestPartitionStencilSimple);
 
 
 template<typename Vector>
@@ -126,7 +126,7 @@ void TestPartitionCopySimple(void)
     ASSERT_EQUAL(true_ref, true_results);
     ASSERT_EQUAL(false_ref, false_results);
 }
-DECLARE_VECTOR_UNITTEST(TestPartitionCopySimple);
+DECLARE_INTEGRAL_VECTOR_UNITTEST(TestPartitionCopySimple);
 
 
 template<typename Vector>
@@ -168,7 +168,7 @@ void TestPartitionCopyStencilSimple(void)
     ASSERT_EQUAL(true_ref, true_results);
     ASSERT_EQUAL(false_ref, false_results);
 }
-DECLARE_VECTOR_UNITTEST(TestPartitionCopyStencilSimple);
+DECLARE_INTEGRAL_VECTOR_UNITTEST(TestPartitionCopyStencilSimple);
 
 
 template<typename Vector>
@@ -196,7 +196,7 @@ void TestStablePartitionSimple(void)
     ASSERT_EQUAL(iter - data.begin(), 2);
     ASSERT_EQUAL(data, ref);
 }
-DECLARE_VECTOR_UNITTEST(TestStablePartitionSimple);
+DECLARE_INTEGRAL_VECTOR_UNITTEST(TestStablePartitionSimple);
 
 
 template<typename Vector>
@@ -266,7 +266,7 @@ void TestStablePartitionCopySimple(void)
     ASSERT_EQUAL(true_ref, true_results);
     ASSERT_EQUAL(false_ref, false_results);
 }
-DECLARE_VECTOR_UNITTEST(TestStablePartitionCopySimple);
+DECLARE_INTEGRAL_VECTOR_UNITTEST(TestStablePartitionCopySimple);
 
 
 template<typename Vector>
