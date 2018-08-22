@@ -56,7 +56,7 @@ void TestForEachSimple(void)
     ASSERT_EQUAL(output[6], 1);
     ASSERT_EQUAL_QUIET(result, input.end());
 }
-DECLARE_VECTOR_UNITTEST(TestForEachSimple);
+DECLARE_INTEGRAL_VECTOR_UNITTEST(TestForEachSimple);
 
 
 template<typename InputIterator, typename Function>
@@ -124,7 +124,7 @@ void TestForEachNSimple(void)
     ASSERT_EQUAL(output[6], 1);
     ASSERT_EQUAL_QUIET(result, input.end());
 }
-DECLARE_VECTOR_UNITTEST(TestForEachNSimple);
+DECLARE_INTEGRAL_VECTOR_UNITTEST(TestForEachNSimple);
 
 
 template<typename InputIterator, typename Size, typename Function>

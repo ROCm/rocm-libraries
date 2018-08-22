@@ -1,5 +1,5 @@
 /*
- *  Copyright 2008-2013 NVIDIA Corporation
+ *  Copyright 2008-2018 NVIDIA Corporation
  *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
@@ -117,7 +117,8 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
 // 1. no-argument constructor
 // 2. constructor from OtherElement *
 // 3. constructor from OtherPointer related by convertibility
-// 4. assignment from OtherPointer related by convertibility
+// 4. constructor from OtherPointer to void
+// 5. assignment from OtherPointer related by convertibility
 // These should just call the corresponding members of pointer.
 template<typename Element, typename Tag, typename Reference, typename Derived>
   class pointer
@@ -162,6 +163,17 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
     __host__ __device__
     pointer(const OtherPointer &other,
             typename thrust::detail::enable_if_pointer_is_convertible<
+              OtherPointer,
+              pointer<Element,Tag,Reference,Derived>
+            >::type * = 0);
+
+    // OtherPointer's element_type shall be void
+    // OtherPointer's system shall be convertible to Tag
+    template<typename OtherPointer>
+    __host__ __device__
+    explicit
+    pointer(const OtherPointer &other,
+            typename thrust::detail::enable_if_void_pointer_is_system_convertible<
               OtherPointer,
               pointer<Element,Tag,Reference,Derived>
             >::type * = 0);
