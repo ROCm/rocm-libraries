@@ -39,6 +39,7 @@
 template<class T>
 struct times_two
 {
+    ROCPRIM_HOST_DEVICE
     T operator()(const T& value) const
     {
         return 2 * value;
@@ -48,6 +49,7 @@ struct times_two
 template<class T>
 struct plus_ten
 {
+    ROCPRIM_HOST_DEVICE
     T operator()(const T& value) const
     {
         return value + 10;
