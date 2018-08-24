@@ -186,7 +186,7 @@ namespace detail
     using is_final = std::integral_constant<bool, __is_final(T)>;
 #else
     template<class T>
-    struct is_final : std::false_type;
+    struct is_final : std::false_type
     {
     };
 #endif
