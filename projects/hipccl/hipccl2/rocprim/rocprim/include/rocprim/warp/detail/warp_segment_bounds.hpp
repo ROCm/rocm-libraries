@@ -55,8 +55,9 @@ unsigned int last_in_warp_segment(Flag flag)
     // Calculate logical lane id of the last valid value in the segment
     #ifdef __HIP_CLANG_ONLY__
     return ::__lastbit_u32_u64(warp_flags);
-    #endif
+    #else
     return hc::__lastbit_u32_u64(warp_flags);
+    #endif
 }
 
 } // end namespace detail
