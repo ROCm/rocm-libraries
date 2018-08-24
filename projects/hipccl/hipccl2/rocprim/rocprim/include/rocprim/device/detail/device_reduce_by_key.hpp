@@ -44,6 +44,16 @@ namespace detail
 template<class Key, class Value>
 struct carry_out
 {
+    ROCPRIM_HOST_DEVICE inline
+    carry_out& operator=(carry_out rhs)
+    {
+        key = rhs.key;
+        value = rhs.value;
+        destination = rhs.destination;
+        next_has_carry_in = rhs.next_has_carry_in;
+        return *this;
+    }
+
     Key key;
     Value value; // carry-out of the current batch
     unsigned int destination;
@@ -53,6 +63,14 @@ struct carry_out
 template<class Value>
 struct scan_by_key_pair
 {
+    ROCPRIM_HOST_DEVICE inline
+    scan_by_key_pair& operator=(scan_by_key_pair rhs)
+    {
+        key = rhs.key;
+        value = rhs.value;
+        return *this;
+    }
+
     unsigned int key;
     Value value;
 };
@@ -339,7 +357,7 @@ void reduce_by_key(KeysInputIterator keys_input,
         };
         unsigned int unique_count;
         bool has_carry_in;
-        result_type carry_in;
+        detail::raw_storage<result_type> carry_in;
     } storage;
 
     const unsigned int flat_id = ::rocprim::flat_block_thread_id();
@@ -394,7 +412,7 @@ void reduce_by_key(KeysInputIterator keys_input,
         if(bi > 0 && flat_id == 0 && storage.has_carry_in)
         {
             // Apply carry-out of the previous block as carry-in for the first segment
-            values[0] = reduce_op(storage.carry_in, values[0]);
+            values[0] = reduce_op(storage.carry_in.get(), values[0]);
         }
 
         bool head_flags[ItemsPerThread];
@@ -489,7 +507,7 @@ void reduce_by_key(KeysInputIterator keys_input,
             {
                 // Save carry-out to use it as carry-in for the next block of the current batch
                 storage.has_carry_in = !tail_flags[ItemsPerThread - 1];
-                storage.carry_in = values[ItemsPerThread - 1];
+                storage.carry_in.get() = values[ItemsPerThread - 1];
             }
         }
         if(batch_id > 0 && block_start == batch_start)
