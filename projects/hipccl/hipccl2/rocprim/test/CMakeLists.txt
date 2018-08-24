@@ -61,12 +61,19 @@ function(add_hc_test TEST_NAME TEST_SOURCES)
     PUBLIC
       ${GTEST_INCLUDE_DIRS}
   )
-  target_link_libraries(${TEST_TARGET}
-    PRIVATE
-      hcc::hccrt
-      hcc::hc_am
-      ${GTEST_BOTH_LIBRARIES}
-  )
+  if(HIP_COMPILER STREQUAL "HCC")
+    target_link_libraries(${TEST_TARGET}
+      PRIVATE
+        hcc::hccrt
+        hcc::hc_am
+        ${GTEST_BOTH_LIBRARIES}
+    )
+  elseif(HIP_COMPILER STREQUAL "clang")
+    target_link_libraries(${TEST_TARGET}
+      PRIVATE
+        ${GTEST_BOTH_LIBRARIES}
+    )
+  endif()
   foreach(amdgpu_target ${AMDGPU_TARGETS})
     target_link_libraries(${TEST_TARGET}
       PRIVATE
@@ -86,8 +93,10 @@ endfunction()
 
 # HC and HIP tests without using rocPRIM
 if(HIP_PLATFORM STREQUAL "hcc")
-  add_hip_test("hc.device_api"  test_hip_api.cpp)
-  add_hc_test ("hip.device_api" test_hc_api.cpp)
+  add_hip_test("hip.device_api"  test_hip_api.cpp)
+  if(HIP_COMPILER STREQUAL "HCC")
+    add_hc_test ("hc.device_api" test_hc_api.cpp)
+  endif()
 endif()
 
 # rocPRIM test (run only on ROCm/hcc)

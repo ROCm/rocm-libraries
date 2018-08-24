@@ -52,6 +52,21 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror")
 
+# Determine if CXX Compiler is hcc, hip-clang or other
+execute_process(COMMAND ${CMAKE_CXX_COMPILER} "--version" OUTPUT_VARIABLE CXX_OUTPUT
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_STRIP_TRAILING_WHITESPACE)
+string(REGEX MATCH "[A-Za-z]* ?clang version" TMP_CXX_VERSION ${CXX_OUTPUT})
+string(REGEX MATCH "[A-Za-z]+" CXX_VERSION_STRING ${TMP_CXX_VERSION})
+ if(CXX_VERSION_STRING MATCHES "HCC")
+    set(HIP_COMPILER "hcc" CACHE STRING "HIP Compiler")
+elseif(CXX_VERSION_STRING MATCHES "clang")
+    set(HIP_COMPILER "clang" CACHE STRING "HIP Compiler")
+else()
+    message(FATAL_ERROR "CXX Compiler version ${CXX_VERSION_STRING} unsupported.")
+endif()
+message(STATUS "HIP Compiler: " ${HIP_COMPILER})
+
 # Build options
 option(BUILD_TEST "Build tests (requires googletest)" ON)
 option(BUILD_BENCHMARK "Build benchmarks" OFF)
