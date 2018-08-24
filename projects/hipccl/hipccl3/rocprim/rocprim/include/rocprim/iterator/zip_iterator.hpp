@@ -74,6 +74,7 @@ void for_each_in_tuple(::rocprim::tuple<Types...>& t, Function f)
 struct increment_iterator
 {
     template<class Iterator>
+    ROCPRIM_HOST_DEVICE inline
     void operator()(Iterator& it)
     {
         ++it;
@@ -83,6 +84,7 @@ struct increment_iterator
 struct decrement_iterator
 {
     template<class Iterator>
+    ROCPRIM_HOST_DEVICE inline
     void operator()(Iterator& it)
     {
         --it;
@@ -92,12 +94,14 @@ struct decrement_iterator
 template<class Difference>
 struct advance_iterator
 {
+    ROCPRIM_HOST_DEVICE inline
     advance_iterator(Difference distance)
         : distance_(distance)
     {
     }
 
     template<class Iterator>
+    ROCPRIM_HOST_DEVICE inline
     void operator()(Iterator& it)
     {
         using it_distance_type = typename std::iterator_traits<Iterator>::difference_type;

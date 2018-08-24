@@ -617,7 +617,8 @@ hipError_t segmented_exclusive_scan(void * temporary_storage,
                     head_flags
                 )
             ),
-            [initial_value](const ::rocprim::tuple<input_type, flag_type>& t)
+            [initial_value] ROCPRIM_HOST_DEVICE
+            (const ::rocprim::tuple<input_type, flag_type>& t)
                 -> ::rocprim::tuple<input_type, flag_type>
             {
                 if(::rocprim::get<1>(t))
