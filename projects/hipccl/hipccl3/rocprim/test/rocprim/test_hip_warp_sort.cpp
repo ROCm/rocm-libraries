@@ -52,7 +52,7 @@ public:
 };
 
 template<class T>
-bool test(const T& a, const T& b) [[hc]]
+bool test(const T& a, const T& b)
 {
     return a < b;
 }
