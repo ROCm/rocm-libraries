@@ -44,7 +44,7 @@ namespace detail
 template<class Key, class Value>
 struct carry_out
 {
-    ROCPRIM_HOST_DEVICE inline
+    ROCPRIM_DEVICE inline
     carry_out& operator=(carry_out rhs)
     {
         key = rhs.key;
@@ -63,7 +63,7 @@ struct carry_out
 template<class Value>
 struct scan_by_key_pair
 {
-    ROCPRIM_HOST_DEVICE inline
+    ROCPRIM_DEVICE inline
     scan_by_key_pair& operator=(scan_by_key_pair rhs)
     {
         key = rhs.key;
