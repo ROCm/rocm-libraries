@@ -304,7 +304,8 @@ hipError_t exclusive_scan_by_key(void * temporary_storage,
                     )
                 )
             ),
-            [initial_value, key_compare_op](const ::rocprim::tuple<input_type, key_type, key_type>& t)
+            [initial_value, key_compare_op] ROCPRIM_HOST_DEVICE
+            (const ::rocprim::tuple<input_type, key_type, key_type>& t)
                 -> ::rocprim::tuple<input_type, key_type>
             {
                 if(!key_compare_op(::rocprim::get<1>(t), ::rocprim::get<2>(t)))
