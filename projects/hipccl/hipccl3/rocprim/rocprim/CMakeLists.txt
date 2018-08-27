@@ -79,7 +79,7 @@ set(INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_INCLUDEDIR})
 
 # We need to install headers manually as rocm_install_targets
 # does not support header-only libraries (INTERFACE targets)
-if(rocprim_hc)
+if(TARGET rocprim_hc)
 rocm_install_targets(
   TARGETS rocprim rocprim_hip rocprim_hc
 #   INCLUDE
