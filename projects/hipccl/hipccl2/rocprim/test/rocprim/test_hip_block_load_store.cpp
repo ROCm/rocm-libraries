@@ -26,9 +26,9 @@
 
 // Google Test
 #include <gtest/gtest.h>
-// HC API
-#include <hcc/hc.hpp>
-#include <hcc/hc_short_vector.hpp>
+// HIP API
+#include <hip/hip_runtime.h>
+#include <hip/hip_vector_types.h>
 // rocPRIM API
 #include <rocprim/rocprim.hpp>
 
@@ -221,26 +221,26 @@ typedef ::testing::Types<
     params<float, int, 11, false>,
     params<float, rp::detail::int4, 16, true>,
 
-    params<hc::short_vector::int2, rp::detail::int2, 3, false>,
-    params<hc::short_vector::int2, rp::detail::int4, 4, true>,
-    params<hc::short_vector::int2, rp::detail::int2, 7, false>,
-    params<hc::short_vector::int2, rp::detail::int4, 8, true>,
-    params<hc::short_vector::int2, rp::detail::int2, 11, false>,
-    params<hc::short_vector::int2, rp::detail::int4, 16, true>,
+    params<int2, rp::detail::int2, 3, false>,
+    params<int2, rp::detail::int4, 4, true>,
+    params<int2, rp::detail::int2, 7, false>,
+    params<int2, rp::detail::int4, 8, true>,
+    params<int2, rp::detail::int2, 11, false>,
+    params<int2, rp::detail::int4, 16, true>,
 
-    params<hc::short_vector::float2, rp::detail::int2, 3, false>,
-    params<hc::short_vector::float2, rp::detail::int4, 4, true>,
-    params<hc::short_vector::float2, rp::detail::int2, 7, false>,
-    params<hc::short_vector::float2, rp::detail::int4, 8, true>,
-    params<hc::short_vector::float2, rp::detail::int2, 11, false>,
-    params<hc::short_vector::float2, rp::detail::int4, 16, true>,
+    params<float2, rp::detail::int2, 3, false>,
+    params<float2, rp::detail::int4, 4, true>,
+    params<float2, rp::detail::int2, 7, false>,
+    params<float2, rp::detail::int4, 8, true>,
+    params<float2, rp::detail::int2, 11, false>,
+    params<float2, rp::detail::int4, 16, true>,
 
-    params<hc::short_vector::char4, int, 3, false>,
-    params<hc::short_vector::char4, rp::detail::int4, 4, true>,
-    params<hc::short_vector::char4, int, 7, false>,
-    params<hc::short_vector::char4, rp::detail::int4, 8, true>,
-    params<hc::short_vector::char4, int, 11, false>,
-    params<hc::short_vector::char4, rp::detail::int4, 16, true>
+    params<char4, int, 3, false>,
+    params<char4, rp::detail::int4, 4, true>,
+    params<char4, int, 7, false>,
+    params<char4, rp::detail::int4, 8, true>,
+    params<char4, int, 11, false>,
+    params<char4, rp::detail::int4, 16, true>
 > Params;
 
 TYPED_TEST_CASE(RocprimBlockLoadStoreClassTests, ClassParams);
