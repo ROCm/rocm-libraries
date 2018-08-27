@@ -28,8 +28,6 @@
 
 // Google Test
 #include <gtest/gtest.h>
-// HC API
-#include <hcc/hc.hpp>
 // rocPRIM API
 #include <rocprim/rocprim.hpp>
 
