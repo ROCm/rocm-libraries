@@ -41,17 +41,20 @@ target_include_directories(rocprim
 
 # This target allows using only HC interface, links only
 # against HC/HSA library, doesn't require HIP
-add_library(rocprim_hc INTERFACE)
-target_link_libraries(rocprim_hc
-  INTERFACE
-    rocprim
-    hcc::hccrt
-    hcc::hc_am
-)
-target_compile_definitions(rocprim_hc
-  INTERFACE
-    ROCPRIM_HC_API=1
-)
+if(HIP_COMPILER STREQUAL "HCC" OR hcc_FOUND)
+  add_library(rocprim_hc INTERFACE)
+  target_link_libraries(rocprim_hc
+    INTERFACE
+      rocprim
+      hcc::hccrt
+      hcc::hc_am
+  )
+  target_compile_definitions(rocprim_hc
+    INTERFACE
+      ROCPRIM_HC_API=1
+  )
+endif()
+
 
 # This target allows using both HIP and HC interfaces,
 # links against HIP library (which depends on HC)
@@ -76,6 +79,7 @@ set(INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_INCLUDEDIR})
 
 # We need to install headers manually as rocm_install_targets
 # does not support header-only libraries (INTERFACE targets)
+if(TARGET rocprim_hc)
 rocm_install_targets(
   TARGETS rocprim rocprim_hip rocprim_hc
 #   INCLUDE
@@ -83,6 +87,16 @@ rocm_install_targets(
 #   ${CMAKE_BINARY_DIR}/rocprim/include
   PREFIX rocprim
 )
+else()
+rocm_install_targets(
+  TARGETS rocprim rocprim_hip
+#   INCLUDE
+#   ${CMAKE_SOURCE_DIR}/rocprim/include
+#   ${CMAKE_BINARY_DIR}/rocprim/include
+  PREFIX rocprim
+)
+endif()
+
 install(
   DIRECTORY
     "include/"
