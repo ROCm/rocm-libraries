@@ -63,6 +63,7 @@ endfunction()
 #
 
 # HCP basic test, which also checks if there are no linkage problems when there are multiple sources
+if(HIP_COMPILER STREQUAL "HCC")
 add_rocprim_test_hc("rocprim.hc.basic_test" "test_hc_basic.cpp;detail/get_rocprim_version_hc.cpp")
 
 add_rocprim_test_hc("rocprim.hc.arg_index_iterator" test_hc_arg_index_iterator.cpp)
@@ -98,6 +99,7 @@ add_rocprim_test_hc("rocprim.hc.warp_reduce" test_hc_warp_reduce.cpp)
 add_rocprim_test_hc("rocprim.hc.warp_scan" test_hc_warp_scan.cpp)
 add_rocprim_test_hc("rocprim.hc.warp_sort" test_hc_warp_sort.cpp)
 add_rocprim_test_hc("rocprim.hc.zip_iterator" test_hc_zip_iterator.cpp)
+endif()
 
 #
 # rocPRIM HIP API tests
