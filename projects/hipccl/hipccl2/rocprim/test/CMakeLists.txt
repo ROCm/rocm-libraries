@@ -61,7 +61,7 @@ function(add_hc_test TEST_NAME TEST_SOURCES)
     PUBLIC
       ${GTEST_INCLUDE_DIRS}
   )
-  if(HIP_COMPILER STREQUAL "HCC")
+  if(HIP_COMPILER STREQUAL "hcc")
     target_link_libraries(${TEST_TARGET}
       PRIVATE
         hcc::hccrt
@@ -94,7 +94,7 @@ endfunction()
 # HC and HIP tests without using rocPRIM
 if(HIP_PLATFORM STREQUAL "hcc")
   add_hip_test("hip.device_api"  test_hip_api.cpp)
-  if(HIP_COMPILER STREQUAL "HCC")
+  if(HIP_COMPILER STREQUAL "hcc")
     add_hc_test ("hc.device_api" test_hc_api.cpp)
   endif()
 endif()

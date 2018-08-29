@@ -41,7 +41,7 @@ target_include_directories(rocprim
 
 # This target allows using only HC interface, links only
 # against HC/HSA library, doesn't require HIP
-if(HIP_COMPILER STREQUAL "HCC" OR hcc_FOUND)
+if(HIP_COMPILER STREQUAL "hcc" OR hcc_FOUND)
   add_library(rocprim_hc INTERFACE)
   target_link_libraries(rocprim_hc
     INTERFACE

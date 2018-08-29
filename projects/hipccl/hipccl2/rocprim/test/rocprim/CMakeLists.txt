@@ -63,7 +63,7 @@ endfunction()
 #
 
 # HCP basic test, which also checks if there are no linkage problems when there are multiple sources
-if(HIP_COMPILER STREQUAL "HCC")
+if(HIP_COMPILER STREQUAL "hcc")
 add_rocprim_test_hc("rocprim.hc.basic_test" "test_hc_basic.cpp;detail/get_rocprim_version_hc.cpp")
 
 add_rocprim_test_hc("rocprim.hc.arg_index_iterator" test_hc_arg_index_iterator.cpp)

@@ -79,7 +79,7 @@ add_rocprim_benchmark_hip(benchmark_hip_warp_sort.cpp)
 add_rocprim_benchmark_hip(benchmark_hip_device_memory.cpp)
 
 # rocPRIM HC benchmarks
-if(HIP_COMPILER STREQUAL "HCC")
+if(HIP_COMPILER STREQUAL "hcc")
 add_rocprim_benchmark_hc(benchmark_hc_block_discontinuity.cpp)
 add_rocprim_benchmark_hc(benchmark_hc_block_exchange.cpp)
 add_rocprim_benchmark_hc(benchmark_hc_block_histogram.cpp)

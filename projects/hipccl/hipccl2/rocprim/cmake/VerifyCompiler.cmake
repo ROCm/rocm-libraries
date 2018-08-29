@@ -55,7 +55,7 @@ elseif(HIP_PLATFORM STREQUAL "hcc")
     list(APPEND CMAKE_PREFIX_PATH /opt/rocm/hcc /opt/rocm/hip)
     # Ignore hcc warning: argument unused during compilation: '-isystem /opt/rocm/hip/include'
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-command-line-argument")
-    if(HIP_COMPILER STREQUAL "HCC")
+    if(HIP_COMPILER STREQUAL "hcc")
       find_package(hcc REQUIRED CONFIG PATHS /opt/rocm)
     else()
       find_package(hcc QUIET CONFIG PATHS /opt/rocm)
