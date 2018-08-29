@@ -52,6 +52,6 @@ endfunction()
 # ****************************************************************************
 
 add_rocprim_example_hip(example_hip_temporary_storage.cpp)
-if(HIP_COMPILER STREQUAL "HCC")
+if(HIP_COMPILER STREQUAL "hcc")
 add_rocprim_example_hc(example_hc_temporary_storage.cpp)
 endif()
