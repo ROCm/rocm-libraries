@@ -29,6 +29,7 @@
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 #include <thrust/system/hip/config.h>
+#include <thrust/system/hip/pointer.h>
 
 #include <thrust/system/hip/detail/util.h>
 #include <thrust/detail/type_traits/iterator/is_output_iterator.h>
@@ -371,44 +372,44 @@ transform(execution_policy<Derived> &policy,
           OutputIt                   result,
           TransformOp                transform_op)
 {
-    typedef typename iterator_traits<InputIt>::difference_type size_type;
-    size_type num_items = static_cast<size_type>(thrust::distance(first, last));
+  typedef typename iterator_traits<InputIt>::difference_type size_type;
+  size_type num_items = static_cast<size_type>(thrust::distance(first, last));
 
-    if (num_items == 0)
+  if (num_items == 0)
     return result;
 
-    // Workaround, so kernel called by __transform::rocprim_unary is not lost,
-    // Implicit instantiation of __transform::rocprim_unary function template
-    // that will be used in #if __THRUST_HAS_HIPRT__ block.
-    {
-      auto ptr = ::rocprim::transform<::rocprim::default_config, InputIt, OutputIt, TransformOp>;
-      (void) ptr;
-    }
-    #if __THRUST_HAS_HIPRT__
-    {
-      hipStream_t stream = hip_rocprim::stream(policy);
-      hipError_t status = ::rocprim::transform(
-                            first,
-                            result,
-                            num_items,
-                            transform_op,
-                            stream,
-                            false
-                          );
-      hip_rocprim::throw_on_error(status, "transform failed");
+  // Workaround, so kernel called by __transform::rocprim_unary is not lost,
+  // Implicit instantiation of __transform::rocprim_unary function template
+  // that will be used in #if __THRUST_HAS_HIPRT__ block.
+  {
+    auto ptr = ::rocprim::transform<::rocprim::default_config, InputIt, OutputIt, TransformOp>;
+    (void) ptr;
+  }
+#if __THRUST_HAS_HIPRT__
+  {
+    hipStream_t stream = hip_rocprim::stream(policy);
+    hipError_t status = ::rocprim::transform(
+                          first,
+                          result,
+                          num_items,
+                          transform_op,
+                          stream,
+                          false
+                        );
+    hip_rocprim::throw_on_error(status, "transform failed");
 
-      return result + num_items;
-    }
-    #else
+    return result + num_items;
+  }
+#else
+  {
+    (void) policy;
+    while(first != last)
     {
-      (void) policy;
-      while(first != last)
-      {
-        *result++ = transform_op(*first++);
-      }
-    return result;
+      *result++ = transform_op(*first++);
     }
-    #endif
+    return result;
+  }
+#endif
 } // func transform
 
 //-------------------------

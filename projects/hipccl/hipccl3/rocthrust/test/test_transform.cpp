@@ -112,7 +112,6 @@ TYPED_TEST(TransformTests, UnaryTransform)
     for(size_t i = 0; i < size; i++)
     {
         input[i] = i;
-        //input_ptr[i] = i;
     }
 
     hipMemcpy(
@@ -120,7 +119,6 @@ TYPED_TEST(TransformTests, UnaryTransform)
         input.size() * sizeof(T),
         hipMemcpyHostToDevice
     );
-    //thrust::copy(input, input + size, input_ptr);
 
     // Calculate expected results on host
     std::vector<U> expected(input.size());
@@ -133,7 +131,6 @@ TYPED_TEST(TransformTests, UnaryTransform)
         size * sizeof(U),
         hipMemcpyDeviceToHost
     );
-    //thrust::copy(output_ptr, output_ptr + size, output);
 
     for(size_t i = 0; i < size; i++)
     {
