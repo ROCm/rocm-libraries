@@ -31,6 +31,7 @@ function(add_hipthrust_test TEST_NAME TEST_SOURCES)
     target_link_libraries(${TEST_TARGET}
         PRIVATE
             hipthrust
+            roc::rocprim_hip
             ${GTEST_BOTH_LIBRARIES}
     )
     foreach(amdgpu_target ${AMDGPU_TARGETS})
