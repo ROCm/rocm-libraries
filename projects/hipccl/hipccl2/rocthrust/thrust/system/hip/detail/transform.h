@@ -31,8 +31,11 @@
 #include <thrust/system/hip/config.h>
 
 #include <thrust/system/hip/detail/util.h>
+#include <thrust/detail/type_traits/iterator/is_output_iterator.h>
 #include <thrust/detail/type_traits/result_of_adaptable_function.h>
 #include <thrust/system/hip/detail/parallel_for.h>
+#include <thrust/system/hip/detail/rocprim/functional.hpp>
+#include <thrust/system/hip/detail/rocprim/device/device_transform_hip.hpp>
 #include <thrust/distance.h>
 
 BEGIN_NS_THRUST
@@ -233,6 +236,32 @@ namespace __transform {
     return result + num_items;
   }
 
+  template <class InputIt,
+            class OutputIt,
+            class Size,
+            class TransformOp>
+  hipError_t THRUST_HIP_FUNCTION
+  rocprim_unary(InputIt      items,
+                OutputIt     result,
+                Size         num_items,
+                TransformOp  transform_op,
+                hipStream_t stream)
+  {
+    typedef typename thrust::iterator_value<InputIt>::type InputTy;
+
+    InputTy * first_ptr = thrust::raw_pointer_cast(&items[0]);
+    InputTy * result_ptr = thrust::raw_pointer_cast(&result[0]);
+
+    return ::rocprim::transform(
+             first_ptr,
+             result_ptr,
+             num_items,
+             transform_op,
+             stream,
+             false
+           );
+  }
+
   template <class Policy,
             class InputIt1,
             class InputIt2,
@@ -342,12 +371,44 @@ transform(execution_policy<Derived> &policy,
           OutputIt                   result,
           TransformOp                transform_op)
 {
-  return hip_rocprim::transform_if(policy,
-                                first,
-                                last,
-                                result,
-                                transform_op,
-                                __transform::always_true_predicate());
+    typedef typename iterator_traits<InputIt>::difference_type size_type;
+    size_type num_items = static_cast<size_type>(thrust::distance(first, last));
+
+    if (num_items == 0)
+    return result;
+
+    // Workaround, so kernel called by __transform::rocprim_unary is not lost,
+    // Implicit instantiation of __transform::rocprim_unary function template
+    // that will be used in #if __THRUST_HAS_HIPRT__ block.
+    {
+      auto ptr = ::rocprim::transform<::rocprim::default_config, InputIt, OutputIt, TransformOp>;
+      (void) ptr;
+    }
+    #if __THRUST_HAS_HIPRT__
+    {
+      hipStream_t stream = hip_rocprim::stream(policy);
+      hipError_t status = ::rocprim::transform(
+                            first,
+                            result,
+                            num_items,
+                            transform_op,
+                            stream,
+                            false
+                          );
+      hip_rocprim::throw_on_error(status, "transform failed");
+
+      return result + num_items;
+    }
+    #else
+    {
+      (void) policy;
+      while(first != last)
+      {
+        *result++ = transform_op(*first++);
+      }
+    return result;
+    }
+    #endif
 } // func transform
 
 //-------------------------
