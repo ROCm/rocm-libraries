@@ -36,6 +36,6 @@ public:
   typedef typename ptr::iterator_category iterator_category;
   typedef typename ptr::value_type        value_type;
   typedef typename ptr::difference_type   difference_type;
-  typedef ptr                             pointer;
+  typedef Element *                       pointer;
   typedef typename ptr::reference         reference;
 };

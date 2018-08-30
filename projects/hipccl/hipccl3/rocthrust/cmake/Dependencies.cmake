@@ -43,6 +43,24 @@ if (NOT Git_FOUND)
   message(FATAL_ERROR "Please ensure Git is installed on the system")
 endif()
 
+# rocPRIM (https://github.com/ROCmSoftwarePlatform/rocPRIM)
+message(STATUS "Downloading and building rocPRIM.")
+set(ROCPRIM_ROOT ${CMAKE_CURRENT_BINARY_DIR}/rocPRIM CACHE PATH "")
+download_project(
+  PROJ           rocPRIM
+  GIT_REPOSITORY https://github.com/ROCmSoftwarePlatform/rocPRIM.git
+  GIT_TAG        master
+  INSTALL_DIR    ${ROCPRIM_ROOT}
+  CMAKE_ARGS     -DBUILD_TEST=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
+  LOG_DOWNLOAD   TRUE
+  LOG_CONFIGURE  TRUE
+  LOG_BUILD      TRUE
+  LOG_INSTALL    TRUE
+  BUILD_PROJECT  TRUE
+  ${UPDATE_DISCONNECTED_IF_AVAILABLE}
+)
+find_package(rocprim REQUIRED CONFIG PATHS ${ROCPRIM_ROOT})
+
 # Test dependencies
 if(BUILD_TEST)
   # Google Test (https://github.com/google/googletest)

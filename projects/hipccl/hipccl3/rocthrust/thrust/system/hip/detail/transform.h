@@ -29,21 +29,28 @@
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 #include <thrust/system/hip/config.h>
+// This include is needed to circumvent issue with thrust::pointer
+// not having a value_type member when passing to a rocPRIM function
 #include <thrust/system/hip/pointer.h>
 
 #include <thrust/system/hip/detail/util.h>
 #include <thrust/detail/type_traits/iterator/is_output_iterator.h>
 #include <thrust/detail/type_traits/result_of_adaptable_function.h>
 #include <thrust/system/hip/detail/parallel_for.h>
-#include <thrust/system/hip/detail/rocprim/functional.hpp>
-#include <thrust/system/hip/detail/rocprim/device/device_transform_hip.hpp>
 #include <thrust/distance.h>
+
+// rocPRIM includes
+#include <rocprim/functional.hpp>
+#include <rocprim/device/device_transform_hip.hpp>
 
 BEGIN_NS_THRUST
 
 namespace hip_rocprim {
 
 /// STREAMHPC TODO Use rocPRIM transform
+/// - rocPRIM transform for stencil unary transform
+/// - rocPRIM transform for binary transform
+/// - rocPRIM transform for stencil binary transform
 namespace __transform {
 
   struct no_stencil_tag
@@ -237,32 +244,6 @@ namespace __transform {
     return result + num_items;
   }
 
-  template <class InputIt,
-            class OutputIt,
-            class Size,
-            class TransformOp>
-  hipError_t THRUST_HIP_FUNCTION
-  rocprim_unary(InputIt      items,
-                OutputIt     result,
-                Size         num_items,
-                TransformOp  transform_op,
-                hipStream_t stream)
-  {
-    typedef typename thrust::iterator_value<InputIt>::type InputTy;
-
-    InputTy * first_ptr = thrust::raw_pointer_cast(&items[0]);
-    InputTy * result_ptr = thrust::raw_pointer_cast(&result[0]);
-
-    return ::rocprim::transform(
-             first_ptr,
-             result_ptr,
-             num_items,
-             transform_op,
-             stream,
-             false
-           );
-  }
-
   template <class Policy,
             class InputIt1,
             class InputIt2,
@@ -378,8 +359,8 @@ transform(execution_policy<Derived> &policy,
   if (num_items == 0)
     return result;
 
-  // Workaround, so kernel called by __transform::rocprim_unary is not lost,
-  // Implicit instantiation of __transform::rocprim_unary function template
+  // Workaround, so kernel(s) called by ::rocprim::transform is/are not lost,
+  // Implicit instantiation of ::rocprim::transform function template
   // that will be used in #if __THRUST_HAS_HIPRT__ block.
   {
     auto ptr = ::rocprim::transform<::rocprim::default_config, InputIt, OutputIt, TransformOp>;
