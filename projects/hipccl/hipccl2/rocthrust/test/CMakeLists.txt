@@ -31,6 +31,7 @@ function(add_hipthrust_test TEST_NAME TEST_SOURCES)
     target_link_libraries(${TEST_TARGET}
         PRIVATE
             hipthrust
+            roc::rocprim_hip
             ${GTEST_BOTH_LIBRARIES}
     )
     foreach(amdgpu_target ${AMDGPU_TARGETS})
@@ -58,3 +59,4 @@ endfunction()
 add_hipthrust_test("thrust.hip.copy" test_copy.cpp)
 add_hipthrust_test("thrust.hip.for_each" test_for_each.cpp)
 add_hipthrust_test("thrust.hip.memory" test_memory.cpp)
+add_hipthrust_test("thrust.hip.transform" test_transform.cpp)
