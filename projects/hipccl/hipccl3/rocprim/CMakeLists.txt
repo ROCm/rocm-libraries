@@ -67,7 +67,7 @@ include(cmake/Summary.cmake)
 print_configuration_summary()
 
 # AMD targets
-set(AMDGPU_TARGETS gfx803;gfx900 CACHE STRING "List of specific machine types for library to target")
+set(AMDGPU_TARGETS gfx803;gfx900;gfx906 CACHE STRING "List of specific machine types for library to target")
 
 # rocPRIM works only on hcc
 if(HIP_PLATFORM STREQUAL "hcc")
