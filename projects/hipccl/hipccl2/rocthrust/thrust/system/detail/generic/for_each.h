@@ -44,12 +44,23 @@ __host__ __device__
 InputIterator for_each(thrust::execution_policy<DerivedPolicy> &,
                        InputIterator first,
                        InputIterator ,
+<<<<<<< HEAD
                        UnaryFunction );
 // {
 //   // unimplemented
 //   THRUST_STATIC_ASSERT( (thrust::detail::depend_on_instantiation<InputIterator, false>::value) );
 //   return first;
 // } // end for_each()
+=======
+                       UnaryFunction )
+{
+  THRUST_STATIC_ASSERT_MSG(
+    (thrust::detail::depend_on_instantiation<InputIterator, false>::value)
+  , "unimplemented for this system"
+  );
+  return first;
+} // end for_each()
+>>>>>>> 14f8a540... Thrust 10.1 asynchronous algorithms (core functionality).
 
 
 template<typename DerivedPolicy,
@@ -60,12 +71,23 @@ __host__ __device__
 InputIterator for_each_n(thrust::execution_policy<DerivedPolicy> &,
                          InputIterator first,
                          Size ,
+<<<<<<< HEAD
                          UnaryFunction );
 // {
 //   // unimplemented
 //   THRUST_STATIC_ASSERT( (thrust::detail::depend_on_instantiation<InputIterator, false>::value) );
 //   return first;
 // } // end for_each_n()
+=======
+                         UnaryFunction )
+{
+  THRUST_STATIC_ASSERT_MSG(
+    (thrust::detail::depend_on_instantiation<InputIterator, false>::value)
+  , "unimplemented for this system"
+  );
+  return first;
+} // end for_each_n()
+>>>>>>> 14f8a540... Thrust 10.1 asynchronous algorithms (core functionality).
 
 
 } // end namespace generic

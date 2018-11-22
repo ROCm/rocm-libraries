@@ -127,8 +127,23 @@ __THRUST_DISABLE_MSVC_WARNING_BEGIN(4800)
 #define __THRUST_DISABLE_MSVC_FORCING_VALUE_TO_BOOL_END \
 __THRUST_DISABLE_MSVC_WARNING_END(4800)
 
+<<<<<<< HEAD
 #if __cplusplus >= 201103L
   #define THRUST_NOEXCEPT noexcept
 #else
   #define THRUST_NOEXCEPT throw()
 #endif
+=======
+// figure out which host compiler we're using
+// XXX we should move the definition of THRUST_DEPRECATED out of this logic
+#if   THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
+  #define THRUST_DEPRECATED __declspec(deprecated)
+#elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG
+  #define THRUST_DEPRECATED __attribute__((deprecated))
+#elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC
+  #define THRUST_DEPRECATED __attribute__((deprecated))
+#else
+  #define THRUST_DEPRECATED
+#endif
+
+>>>>>>> 14f8a540... Thrust 10.1 asynchronous algorithms (core functionality).
