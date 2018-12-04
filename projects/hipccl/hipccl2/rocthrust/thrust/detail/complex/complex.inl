@@ -25,14 +25,20 @@ namespace thrust
 
 /* --- Constructors --- */
 
-#if THRUST_CPP_DIALECT < 2011
 template <typename T>
 __host__ __device__
 complex<T>::complex()
+#if THRUST_CPP_DIALECT >= 2011
+  // Initialize the storage in the member initializer list using C++ unicorn
+  // initialization. This allows `complex<T const>` to work.
+  // We do a functional-style cast here to suppress conversion warnings.
+  : data{T(), T()}
+{}
+#else
 {
   real(T());
   imag(T());
-}
+} 
 #endif
 
 template <typename T>
@@ -64,12 +70,17 @@ complex<T>::complex(const T& re, const T& im)
   real(re);
   imag(im);
 }
-#endif
+#endif 
 
-#if THRUST_CPP_DIALECT < 2011
 template <typename T>
 __host__ __device__
 complex<T>::complex(const complex<T>& z)
+#if THRUST_CPP_DIALECT >= 2011
+  // Initialize the storage in the member initializer list using C++ unicorn
+  // initialization. This allows `complex<T const>` to work.
+  : data{z.real(), z.imag()}
+{}
+#else
 {
   real(z.real());
   imag(z.imag());
