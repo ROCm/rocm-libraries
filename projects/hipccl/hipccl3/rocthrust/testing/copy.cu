@@ -258,7 +258,7 @@ template<typename T>
 struct is_even
 {
     __host__ __device__
-    bool operator()(T x) { return (static_cast<unsigned int>(x) & 1) == 0; }
+    bool operator()(T x) { return (x & 1) == 0; }
 };
 
 template<typename T>
@@ -272,9 +272,8 @@ template<typename T>
 struct mod_3
 {
     __host__ __device__
-    unsigned int operator()(T x) { return static_cast<unsigned int>(x) % 3; }
+    unsigned int operator()(T x) { return x % 3; }
 };
-
 
 
 template <class Vector>
@@ -285,20 +284,46 @@ void TestCopyIfSimple(void)
     Vector v(5);
     v[0] = 0; v[1] = 1; v[2] = 2; v[3] = 3; v[4] = 4;
 
-    Vector dest(3);
+    Vector dest(4);
 
-    typename Vector::iterator dest_end = thrust::copy_if(v.begin(), v.end(), dest.begin(), is_even<T>());
+    typename Vector::iterator dest_end = thrust::copy_if(v.begin(), v.end(), dest.begin(), is_true<T>());
 
-    ASSERT_EQUAL(0, dest[0]);
+    ASSERT_EQUAL(1, dest[0]);
     ASSERT_EQUAL(2, dest[1]);
-    ASSERT_EQUAL(4, dest[2]);
+    ASSERT_EQUAL(3, dest[2]);
+    ASSERT_EQUAL(4, dest[3]);
     ASSERT_EQUAL_QUIET(dest.end(), dest_end);
 }
-DECLARE_INTEGRAL_VECTOR_UNITTEST(TestCopyIfSimple);
+DECLARE_VECTOR_UNITTEST(TestCopyIfSimple);
 
 
 template <typename T>
 void TestCopyIf(const size_t n)
+{
+    thrust::host_vector<T>   h_data = unittest::random_integers<T>(n);
+    thrust::device_vector<T> d_data = h_data;
+
+    typename thrust::host_vector<T>::iterator   h_new_end;
+    typename thrust::device_vector<T>::iterator d_new_end;
+
+    {
+        thrust::host_vector<T>   h_result(n);
+        thrust::device_vector<T> d_result(n);
+
+        h_new_end = thrust::copy_if(h_data.begin(), h_data.end(), h_result.begin(), is_true<T>());
+        d_new_end = thrust::copy_if(d_data.begin(), d_data.end(), d_result.begin(), is_true<T>());
+
+        h_result.resize(h_new_end - h_result.begin());
+        d_result.resize(d_new_end - d_result.begin());
+
+        ASSERT_EQUAL(h_result, d_result);
+    }
+}
+DECLARE_INTEGRAL_VARIABLE_UNITTEST(TestCopyIf);
+
+
+template <typename T>
+void TestCopyIfIntegral(const size_t n)
 {
     thrust::host_vector<T>   h_data = unittest::random_integers<T>(n);
     thrust::device_vector<T> d_data = h_data;
@@ -334,40 +359,14 @@ void TestCopyIf(const size_t n)
         ASSERT_EQUAL(h_result, d_result);
     }
 }
-DECLARE_VARIABLE_UNITTEST(TestCopyIf);
-
-
-template <class Vector>
-void TestCopyIfStencilSimple(void)
-{
-    typedef typename Vector::value_type T;
-
-    Vector v(5);
-    v[0] = 0; v[1] = 1; v[2] = 2; v[3] = 3; v[4] = 4;
-
-    Vector s(5);
-    s[0] = 1; s[1] = 1; s[2] = 0; s[3] = 1; s[4] = 0;
-
-    Vector dest(3);
-
-    typename Vector::iterator dest_end = thrust::copy_if(v.begin(), v.end(), s.begin(), dest.begin(), is_true<T>());
-
-    ASSERT_EQUAL(0, dest[0]);
-    ASSERT_EQUAL(1, dest[1]);
-    ASSERT_EQUAL(3, dest[2]);
-    ASSERT_EQUAL_QUIET(dest.end(), dest_end);
-}
-DECLARE_INTEGRAL_VECTOR_UNITTEST(TestCopyIfStencilSimple);
+DECLARE_INTEGRAL_VARIABLE_UNITTEST(TestCopyIfIntegral);
 
 
 template <typename T>
-void TestCopyIfStencil(const size_t n)
+void TestCopyIfSequence(const size_t n)
 {
     thrust::host_vector<T>   h_data(n); thrust::sequence(h_data.begin(), h_data.end());
     thrust::device_vector<T> d_data(n); thrust::sequence(d_data.begin(), d_data.end());
-
-    thrust::host_vector<T>   h_stencil = unittest::random_integers<T>(n);
-    thrust::device_vector<T> d_stencil = unittest::random_integers<T>(n);
 
     thrust::host_vector<T>   h_result(n);
     thrust::device_vector<T> d_result(n);
@@ -403,7 +402,63 @@ void TestCopyIfStencil(const size_t n)
         ASSERT_EQUAL(h_result, d_result);
     }
 }
-DECLARE_VARIABLE_UNITTEST(TestCopyIfStencil);
+DECLARE_INTEGRAL_VARIABLE_UNITTEST(TestCopyIfSequence);
+
+
+template <class Vector>
+void TestCopyIfStencilSimple(void)
+{
+    typedef typename Vector::value_type T;
+
+    Vector v(5);
+    v[0] = 0; v[1] = 1; v[2] = 2; v[3] = 3; v[4] = 4;
+
+    Vector s(5);
+    s[0] = 1; s[1] = 1; s[2] = 0; s[3] = 1; s[4] = 0;
+
+    Vector dest(3);
+
+    typename Vector::iterator dest_end = thrust::copy_if(v.begin(), v.end(), s.begin(), dest.begin(), is_true<T>());
+
+    ASSERT_EQUAL(0, dest[0]);
+    ASSERT_EQUAL(1, dest[1]);
+    ASSERT_EQUAL(3, dest[2]);
+    ASSERT_EQUAL_QUIET(dest.end(), dest_end);
+}
+DECLARE_VECTOR_UNITTEST(TestCopyIfStencilSimple);
+
+
+template <typename T>
+void TestCopyIfStencil(const size_t n)
+{
+    thrust::host_vector<T>   h_data(n); thrust::sequence(h_data.begin(), h_data.end());
+    thrust::device_vector<T> d_data(n); thrust::sequence(d_data.begin(), d_data.end());
+
+    thrust::host_vector<T>   h_stencil = unittest::random_integers<T>(n);
+    thrust::device_vector<T> d_stencil = unittest::random_integers<T>(n);
+
+    thrust::host_vector<T>   h_result(n);
+    thrust::device_vector<T> d_result(n);
+
+    typename thrust::host_vector<T>::iterator   h_new_end;
+    typename thrust::device_vector<T>::iterator d_new_end;
+
+    {
+        thrust::host_vector<T>   h_result(n);
+        thrust::device_vector<T> d_result(n);
+
+        h_new_end = thrust::copy_if(h_data.begin(), h_data.end(), h_stencil.begin(), h_result.begin(), is_even<T>());
+        d_new_end = thrust::copy_if(d_data.begin(), d_data.end(), d_stencil.begin(), d_result.begin(), is_even<T>());
+
+        h_result.resize(h_new_end - h_result.begin());
+        d_result.resize(d_new_end - d_result.begin());
+
+        ASSERT_EQUAL(h_result, d_result);
+    }
+
+}
+DECLARE_INTEGRAL_VARIABLE_UNITTEST(TestCopyIfStencil);
+
 
 template <typename Vector>
 void TestCopyCountingIterator(void)
