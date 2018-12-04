@@ -40,7 +40,7 @@ void TestTransformUnarySimple(void)
 
     iter = thrust::transform(input.begin(), input.end(), output.begin(), thrust::negate<T>());
 
-    ASSERT_EQUAL(iter - output.begin(), input.size());
+    ASSERT_EQUAL(std::size_t(iter - output.begin()), input.size());
     ASSERT_EQUAL(output, result);
 }
 DECLARE_VECTOR_UNITTEST(TestTransformUnarySimple);
@@ -116,7 +116,7 @@ void TestTransformIfUnaryNoStencilSimple(void)
                                 thrust::negate<T>(),
                                 thrust::identity<T>());
 
-    ASSERT_EQUAL(iter - output.begin(), input.size());
+    ASSERT_EQUAL(std::size_t(iter - output.begin()), input.size());
     ASSERT_EQUAL(output, result);
 }
 DECLARE_VECTOR_UNITTEST(TestTransformIfUnaryNoStencilSimple);
@@ -209,7 +209,7 @@ void TestTransformIfUnarySimple(void)
                                 thrust::negate<T>(),
                                 thrust::identity<T>());
 
-    ASSERT_EQUAL(iter - output.begin(), input.size());
+    ASSERT_EQUAL(std::size_t(iter - output.begin()), input.size());
     ASSERT_EQUAL(output, result);
 }
 DECLARE_VECTOR_UNITTEST(TestTransformIfUnarySimple);
@@ -298,7 +298,7 @@ void TestTransformBinarySimple(void)
 
     iter = thrust::transform(input1.begin(), input1.end(), input2.begin(), output.begin(), thrust::minus<T>());
 
-    ASSERT_EQUAL(iter - output.begin(), input1.size());
+    ASSERT_EQUAL(std::size_t(iter - output.begin()), input1.size());
     ASSERT_EQUAL(output, result);
 }
 DECLARE_VECTOR_UNITTEST(TestTransformBinarySimple);
@@ -388,7 +388,7 @@ void TestTransformIfBinarySimple(void)
                                 thrust::minus<T>(),
                                 thrust::not1(identity));
 
-    ASSERT_EQUAL(iter - output.begin(), input1.size());
+    ASSERT_EQUAL(std::size_t(iter - output.begin()), input1.size());
     ASSERT_EQUAL(output, result);
 }
 DECLARE_VECTOR_UNITTEST(TestTransformIfBinarySimple);
@@ -767,16 +767,19 @@ void TestTransformIfBinaryToDiscardIterator(const size_t n)
 DECLARE_VARIABLE_UNITTEST(TestTransformIfBinaryToDiscardIterator);
 
 
-template <class T>
-  void TestTransformUnaryCountingIterator(size_t n)
+#if ((__GNUC__ * 10000 + __GNUC_MINOR__ * 100) == 40400) || defined(__INTEL_COMPILER)
+template <typename T>
+void TestTransformUnaryCountingIterator(size_t)
 {
     // GCC 4.4.x has a known failure with auto-vectorization (due to -O3 or -ftree-vectorize) of this test
     // See https://gcc.gnu.org/bugzilla/show_bug.cgi?id=43251
 #if (__GNUC__ * 10000 + __GNUC_MINOR__ * 100) == 40400
     KNOWN_FAILURE;
 #else
-    // be careful not to generate a range larger than we can represent
-    n = thrust::min<size_t>(n, std::numeric_limits<T>::max());
+template <typename T>
+void TestTransformUnaryCountingIterator(size_t n)
+{
+    n = unittest::truncate_to_max_representable<T>(n);
 
     thrust::counting_iterator<T, thrust::host_system_tag>   h_first = thrust::make_counting_iterator<T>(0);
     thrust::counting_iterator<T, thrust::device_system_tag> d_first = thrust::make_counting_iterator<T>(0);
@@ -800,8 +803,10 @@ template <typename T>
 #if (__GNUC__ * 10000 + __GNUC_MINOR__ * 100) == 40400
     KNOWN_FAILURE;
 #else
-    // be careful not to generate a range larger than we can represent
-    n = thrust::min<size_t>(n, std::numeric_limits<T>::max());
+template <typename T>
+void TestTransformBinaryCountingIterator(size_t n)
+{
+    n = unittest::truncate_to_max_representable<T>(n);
 
     thrust::counting_iterator<T, thrust::host_system_tag>   h_first = thrust::make_counting_iterator<T>(0);
     thrust::counting_iterator<T, thrust::device_system_tag> d_first = thrust::make_counting_iterator<T>(0);
