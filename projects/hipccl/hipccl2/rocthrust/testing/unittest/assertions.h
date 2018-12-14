@@ -21,45 +21,29 @@
 
 #define ASSERT_EQUAL_RANGES(X,Y,Z)  unittest::assert_equal((X),(Y),(Z), __FILE__,  __LINE__)
 
-#define ASSERT_THROWS_WITH_FILE_AND_LINE(                                     \
-  EXPR, EXCEPTION_TYPE, FILE_, LINE_                                          \
-)                                                                             \
+#define ASSERT_THROWS(expr, exception_type)                                   \
   {                                                                           \
-    unittest::threw_status THRUST_PP_CAT2(__s, LINE_)                         \
-      = unittest::did_not_throw;                                              \
-    try { EXPR; }                                                             \
-    catch (EXCEPTION_TYPE const&)                                             \
-    { THRUST_PP_CAT2(__s, LINE_) = unittest::threw_right_type; }              \
-    catch (...)                                                               \
-    { THRUST_PP_CAT2(__s, LINE_) = unittest::threw_wrong_type; }              \
-    unittest::check_assert_throws(                                            \
-      THRUST_PP_CAT2(__s, LINE_), THRUST_PP_STRINGIZE(EXCEPTION_TYPE)         \
-    , FILE_, LINE_                                                            \
-    );                                                                        \
+    unittest::threw_status s = unittest::did_not_throw;                       \
+    try { expr; }                                                             \
+    catch (exception_type const&) { s = unittest::threw_right_type; }         \
+    catch (...)                   { s = unittest::threw_wrong_type; }         \
+    unittest::check_assert_throws(s, #exception_type, __FILE__, __LINE__);    \
   }                                                                           \
   /**/
 
-#define ASSERT_THROWS_EQUAL_WITH_FILE_AND_LINE(                               \
-  EXPR, EXCEPTION_TYPE, VALUE, FILE_, LINE_                                   \
-)                                                                             \
+#define ASSERT_THROWS_EQUAL(expr, exception_type, value)                      \
   {                                                                           \
-    unittest::threw_status THRUST_PP_CAT2(__s, LINE_)                         \
-      = unittest::did_not_throw;                                              \
-    try { EXPR; }                                                             \
-    catch (EXCEPTION_TYPE const& THRUST_PP_CAT2(__e, LINE_))                  \
+    unittest::threw_status s = unittest::did_not_throw;                       \
+    try { expr; }                                                             \
+    catch (exception_type const& e)                                           \
     {                                                                         \
-      if (VALUE == THRUST_PP_CAT2(__e, LINE_))                                \
-        THRUST_PP_CAT2(__s, LINE_)                                            \
-          = unittest::threw_right_type;                                       \
+      if (value == e)                                                         \
+        s = unittest::threw_right_type;                                       \
       else                                                                    \
-        THRUST_PP_CAT2(__s, LINE_)                                            \
-          = unittest::threw_right_type_but_wrong_value;                       \
+        s = unittest::threw_right_type_but_wrong_value;                       \
     }                                                                         \
-    catch (...) { THRUST_PP_CAT2(__s, LINE_) = unittest::threw_wrong_type; }  \
-    unittest::check_assert_throws(                                            \
-      THRUST_PP_CAT2(__s, LINE_), THRUST_PP_STRINGIZE(EXCEPTION_TYPE)         \
-    , FILE_, LINE_                                                            \
-    );                                                                        \
+    catch (...) { s = unittest::threw_wrong_type; }                           \
+    unittest::check_assert_throws(s, #exception_type, __FILE__, __LINE__);    \
   }                                                                           \
   /**/
 
