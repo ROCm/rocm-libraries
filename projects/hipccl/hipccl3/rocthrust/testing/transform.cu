@@ -769,7 +769,7 @@ DECLARE_VARIABLE_UNITTEST(TestTransformIfBinaryToDiscardIterator);
 
 #if ((__GNUC__ * 10000 + __GNUC_MINOR__ * 100) == 40400) || defined(__INTEL_COMPILER)
 template <typename T>
-void TestTransformUnaryCountingIterator(size_t)
+void TestTransformUnaryCountingIterator()
 {
     // GCC 4.4.x has a known failure with auto-vectorization (due to -O3 or -ftree-vectorize) of this test
     // See https://gcc.gnu.org/bugzilla/show_bug.cgi?id=43251
@@ -777,9 +777,11 @@ void TestTransformUnaryCountingIterator(size_t)
     KNOWN_FAILURE;
 #else
 template <typename T>
-void TestTransformUnaryCountingIterator(size_t n)
+void TestTransformUnaryCountingIterator()
 {
-    n = unittest::truncate_to_max_representable<T>(n);
+    size_t const n = 15 * sizeof(T);
+
+    ASSERT_LEQUAL(T(n), unittest::truncate_to_max_representable<T>(n));
 
     thrust::counting_iterator<T, thrust::host_system_tag>   h_first = thrust::make_counting_iterator<T>(0);
     thrust::counting_iterator<T, thrust::device_system_tag> d_first = thrust::make_counting_iterator<T>(0);
@@ -793,10 +795,11 @@ void TestTransformUnaryCountingIterator(size_t n)
     ASSERT_EQUAL(h_result, d_result);
 #endif
 }
-DECLARE_VARIABLE_UNITTEST(TestTransformUnaryCountingIterator);
+#endif
+DECLARE_GENERIC_UNITTEST(TestTransformUnaryCountingIterator);
 
 template <typename T>
-  void TestTransformBinaryCountingIterator(size_t n)
+void TestTransformBinaryCountingIterator()
 {
     // GCC 4.4.x has a known failure with auto-vectorization (due to -O3 or -ftree-vectorize) of this test
     // See https://gcc.gnu.org/bugzilla/show_bug.cgi?id=43251
@@ -804,9 +807,11 @@ template <typename T>
     KNOWN_FAILURE;
 #else
 template <typename T>
-void TestTransformBinaryCountingIterator(size_t n)
+void TestTransformBinaryCountingIterator()
 {
-    n = unittest::truncate_to_max_representable<T>(n);
+    size_t const n = 15 * sizeof(T);
+
+    ASSERT_LEQUAL(T(n), unittest::truncate_to_max_representable<T>(n));
 
     thrust::counting_iterator<T, thrust::host_system_tag>   h_first = thrust::make_counting_iterator<T>(0);
     thrust::counting_iterator<T, thrust::device_system_tag> d_first = thrust::make_counting_iterator<T>(0);
@@ -820,7 +825,8 @@ void TestTransformBinaryCountingIterator(size_t n)
     ASSERT_EQUAL(h_result, d_result);
 #endif
 }
-DECLARE_VARIABLE_UNITTEST(TestTransformBinaryCountingIterator);
+#endif
+DECLARE_GENERIC_UNITTEST(TestTransformBinaryCountingIterator);
 
 
 template <typename T>
