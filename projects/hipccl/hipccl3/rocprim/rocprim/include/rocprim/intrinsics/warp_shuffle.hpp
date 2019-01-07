@@ -40,16 +40,19 @@ T warp_shuffle_op(T input, ShuffleOp&& op)
 {
     constexpr int words_no = (sizeof(T) + sizeof(int) - 1) / sizeof(int);
 
-    int * shfl_input = reinterpret_cast<int *>(&input);
-    int shfl_output_words[words_no];
-    T * shfl_output = reinterpret_cast<T*>(shfl_output_words);
+    int words[words_no];
+    __builtin_memcpy(words, &input, sizeof(T));
 
     #pragma unroll
     for(int i = 0; i < words_no; i++)
     {
-        shfl_output_words[i] = op(shfl_input[i]);
+        words[i] = op(words[i]);
     }
-    return *shfl_output;
+
+    T output;
+    __builtin_memcpy(&output, words, sizeof(T));
+
+    return output;
 }
 
 ROCPRIM_DEVICE
@@ -63,19 +66,22 @@ T warp_move_dpp(T input, int dpp_ctrl,
 {
     constexpr int words_no = (sizeof(T) + sizeof(int) - 1) / sizeof(int);
 
-    int * int_input = reinterpret_cast<int *>(&input);
-    int int_output_words[words_no];
-    T * int_output = reinterpret_cast<T*>(int_output_words);
+    int words[words_no];
+    __builtin_memcpy(words, &input, sizeof(T));
 
     #pragma unroll
     for(int i = 0; i < words_no; i++)
     {
-        int_output_words[i] = __amdgcn_update_dpp(
-            0, int_input[i],
+        words[i] = __amdgcn_update_dpp(
+            0, words[i],
             dpp_ctrl, row_mask, bank_mask, bound_ctrl
         );
     }
-    return *int_output;
+
+    T output;
+    __builtin_memcpy(&output, words, sizeof(T));
+
+    return output;
 }
 
 } // end namespace detail
