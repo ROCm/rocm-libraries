@@ -53,6 +53,7 @@ install_manifest.txt
 compile_commands.json
 CTestTestfile.cmake
 build
+doc/html
 
 # End of https://www.gitignore.io/api/c++,cmake
 
