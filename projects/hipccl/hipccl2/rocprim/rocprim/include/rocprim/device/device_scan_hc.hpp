@@ -56,6 +56,7 @@ namespace detail
 
 template<
     bool Exclusive,
+    bool UseLoopback,
     class Config,
     class InputIterator,
     class OutputIterator,
@@ -63,7 +64,7 @@ template<
     class BinaryFunction
 >
 inline
-void scan_impl(void * temporary_storage,
+auto scan_impl(void * temporary_storage,
                size_t& storage_size,
                InputIterator input,
                OutputIterator output,
@@ -72,6 +73,7 @@ void scan_impl(void * temporary_storage,
                BinaryFunction scan_op,
                hc::accelerator_view acc_view,
                const bool debug_synchronous)
+    -> typename std::enable_if<!UseLoopback>::type
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     using output_type = typename std::iterator_traits<OutputIterator>::value_type;
@@ -140,7 +142,7 @@ void scan_impl(void * temporary_storage,
         auto nested_temp_storage_size = storage_size - (number_of_blocks * sizeof(result_type));
 
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-        scan_impl<false, config>(
+        scan_impl<false, false, config>(
             nested_temp_storage,
             nested_temp_storage_size,
             block_prefixes, // input
@@ -188,6 +190,7 @@ void scan_impl(void * temporary_storage,
 
 template<
     bool Exclusive,
+    bool UseLoopback,
     class Config,
     class InputIterator,
     class OutputIterator,
@@ -195,15 +198,16 @@ template<
     class BinaryFunction
 >
 inline
-void lookback_scan_impl(void * temporary_storage,
-                        size_t& storage_size,
-                        InputIterator input,
-                        OutputIterator output,
-                        const InitValueType initial_value,
-                        const size_t size,
-                        BinaryFunction scan_op,
-                        hc::accelerator_view acc_view,
-                        const bool debug_synchronous)
+auto scan_impl(void * temporary_storage,
+               size_t& storage_size,
+               InputIterator input,
+               OutputIterator output,
+               const InitValueType initial_value,
+               const size_t size,
+               BinaryFunction scan_op,
+               hc::accelerator_view acc_view,
+               const bool debug_synchronous)
+    -> typename std::enable_if<UseLoopback>::type
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     using output_type = typename std::iterator_traits<OutputIterator>::value_type;
@@ -404,24 +408,14 @@ void inclusive_scan(void * temporary_storage,
     >::type;
 
     // Lookback scan has problems with types that are not arithmetic
-    if(::rocprim::is_arithmetic<result_type>::value)
-    {
-        return detail::lookback_scan_impl<false, Config>(
-            temporary_storage, storage_size,
-            // result_type() is a dummy initial value (not used)
-            input, output, result_type(), size,
-            scan_op, acc_view, debug_synchronous
-        );
-    }
-    else
-    {
-        return detail::scan_impl<false, Config>(
-            temporary_storage, storage_size,
-            // result_type() is a dummy initial value (not used)
-            input, output, result_type(), size,
-            scan_op, acc_view, debug_synchronous
-        );
-    }
+    // TODO: Investigate why the compiler never finishes linking if half is used
+    // Workaround: rocprim::is_arithmetic is replaced by std::is_arithmetic
+    detail::scan_impl<false, std::is_arithmetic<result_type>::value, Config>(
+        temporary_storage, storage_size,
+        // result_type() is a dummy initial value (not used)
+        input, output, result_type(), size,
+        scan_op, acc_view, debug_synchronous
+    );
 }
 
 /// \brief HC parallel exclusive scan primitive for device level.
@@ -533,22 +527,13 @@ void exclusive_scan(void * temporary_storage,
     >::type;
 
     // Lookback scan has problems with types that are not arithmetic
-    if(::rocprim::is_arithmetic<result_type>::value)
-    {
-        return detail::lookback_scan_impl<true, Config>(
-            temporary_storage, storage_size,
-            input, output, initial_value, size,
-            scan_op, acc_view, debug_synchronous
-        );
-    }
-    else
-    {
-        return detail::scan_impl<true, Config>(
-            temporary_storage, storage_size,
-            input, output, initial_value, size,
-            scan_op, acc_view, debug_synchronous
-        );
-    }
+    // TODO: Investigate why the compiler never finishes linking if half is used
+    // Workaround: rocprim::is_arithmetic is replaced by std::is_arithmetic
+    detail::scan_impl<true, std::is_arithmetic<result_type>::value, Config>(
+        temporary_storage, storage_size,
+        input, output, initial_value, size,
+        scan_op, acc_view, debug_synchronous
+    );
 }
 
 /// @}

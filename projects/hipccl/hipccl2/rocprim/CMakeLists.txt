@@ -62,12 +62,12 @@ option(ONLY_INSTALL "Only install" OFF)
 # Get dependencies
 include(cmake/Dependencies.cmake)
 
+# AMD targets
+set(AMDGPU_TARGETS gfx803;gfx900;gfx906 CACHE STRING "List of specific machine types for library to target")
+
 # Print configuration summary
 include(cmake/Summary.cmake)
 print_configuration_summary()
-
-# AMD targets
-set(AMDGPU_TARGETS gfx803;gfx900 CACHE STRING "List of specific machine types for library to target")
 
 # rocPRIM works only on hcc
 if(HIP_PLATFORM STREQUAL "hcc")
@@ -118,12 +118,12 @@ if(HIP_PLATFORM STREQUAL "hcc")
   rocm_create_package(
     NAME rocprim
     DESCRIPTION "Radeon Open Compute Parallel Primitives Libary"
-    MAINTAINER "Jakub Szuppe <jakub@streamhpc.com>"
+    MAINTAINER "Stream HPC Maintainers <maintainer@streamhpc.com>"
   )
 else()
   rocm_create_package(
     NAME rocprim-hipcub
     DESCRIPTION "Radeon Open Compute Parallel Primitives Libary (hipCUB only)"
-    MAINTAINER "Jakub Szuppe <jakub@streamhpc.com>"
+    MAINTAINER "Stream HPC Maintainers <maintainer@streamhpc.com>"
   )
 endif()

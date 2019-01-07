@@ -122,6 +122,7 @@ typedef ::testing::Types<
     params<float, int, 256U, 1, rocprim::less<float> >,
     params<char, char, 1024U, 1, rocprim::less_equal<char> >,
     params<int, bool, 256U, 1, custom_flag_op1<int> >,
+    params<rp::half, bool, 128U, 1, test_utils::half_greater>,
 
     // Non-power of 2 BlockSize
     params<double, unsigned int, 65U, 1, rocprim::greater<double> >,
@@ -135,12 +136,14 @@ typedef ::testing::Types<
     params<custom_int2, short, 128U, 4, rocprim::less<custom_int2> >,
     params<unsigned short, unsigned char, 256U, 7, custom_flag_op2>,
     params<short, short, 512U, 8, rocprim::equal_to<short> >,
+    params<rp::half, unsigned char, 256U, 3, test_utils::half_less_equal>,
 
     // Non-power of 2 BlockSize and ItemsPerThread > 1
     params<double, int, 33U, 5, custom_flag_op2>,
     params<custom_double2, unsigned int, 464U, 2, rocprim::equal_to<custom_double2> >,
     params<unsigned short, int, 100U, 3, rocprim::greater<unsigned short> >,
-    params<short, bool, 234U, 9, custom_flag_op1<short> >
+    params<short, bool, 234U, 9, custom_flag_op1<short> >,
+    params<rp::half, int, 111U, 2, test_utils::half_less>
 > Params;
 
 TYPED_TEST_CASE(RocprimBlockDiscontinuity, Params);

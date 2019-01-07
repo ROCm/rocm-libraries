@@ -176,7 +176,7 @@ hipError_t merge_sort_impl(void * temporary_storage,
 
     const unsigned int grid_size = number_of_blocks;
     hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(detail::block_sort_kernel<block_size>),
+        HIP_KERNEL_NAME(block_sort_kernel<block_size>),
         dim3(grid_size), dim3(block_size), 0, stream,
         keys_input, keys_output, values_input, values_output,
         size, compare_function
@@ -184,25 +184,25 @@ hipError_t merge_sort_impl(void * temporary_storage,
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("block_sort_kernel", size, start);
 
     bool temporary_store = false;
-    for(unsigned int block = block_size ; block < size; block *= 2)
+    for(unsigned int block = block_size; block < size; block *= 2)
     {
         temporary_store = !temporary_store;
         if(temporary_store)
         {
             if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(detail::block_merge_kernel),
+                HIP_KERNEL_NAME(block_merge_kernel),
                 dim3(grid_size), dim3(block_size), 0, stream,
                 keys_output, keys_buffer, values_output, values_buffer,
                 size, block, compare_function
             );
-            ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("block_merge_buffer_kernel", size, start);
+            ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("block_merge_kernel", size, start);
         }
         else
         {
             if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(detail::block_merge_kernel),
+                HIP_KERNEL_NAME(block_merge_kernel),
                 dim3(grid_size), dim3(block_size), 0, stream,
                 keys_buffer, keys_output, values_buffer, values_output,
                 size, block, compare_function
