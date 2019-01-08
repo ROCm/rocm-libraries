@@ -49,6 +49,137 @@ std::ostream& operator<<(std::ostream& stream, const rocprim::half& value)
 namespace test_utils
 {
 
+// Support half operators on host side
+
+#if defined(__HCC_ACCELERATOR__) || defined(__HIP_DEVICE_COMPILE__)
+
+ROCPRIM_DEVICE inline
+rocprim::half half_to_native(const rocprim::half& x)
+{
+    return x;
+}
+
+ROCPRIM_DEVICE inline
+rocprim::half native_to_half(const rocprim::half& x)
+{
+    return x;
+}
+
+#else
+
+ROCPRIM_HOST inline
+_Float16 half_to_native(const rocprim::half& x)
+{
+    return *reinterpret_cast<const _Float16 *>(&x);
+}
+
+ROCPRIM_HOST inline
+rocprim::half native_to_half(const _Float16& x)
+{
+    return *reinterpret_cast<const rocprim::half *>(&x);
+}
+
+#endif
+
+struct half_less
+{
+    ROCPRIM_HOST_DEVICE inline
+    bool operator()(const rocprim::half& a, const rocprim::half& b) const
+    {
+        return half_to_native(a) < half_to_native(b);
+    }
+};
+
+struct half_less_equal
+{
+    ROCPRIM_HOST_DEVICE inline
+    bool operator()(const rocprim::half& a, const rocprim::half& b) const
+    {
+        return half_to_native(a) <= half_to_native(b);
+    }
+};
+
+struct half_greater
+{
+    ROCPRIM_HOST_DEVICE inline
+    bool operator()(const rocprim::half& a, const rocprim::half& b) const
+    {
+        return half_to_native(a) > half_to_native(b);
+    }
+};
+
+struct half_greater_equal
+{
+    ROCPRIM_HOST_DEVICE inline
+    bool operator()(const rocprim::half& a, const rocprim::half& b) const
+    {
+        return half_to_native(a) >= half_to_native(b);
+    }
+};
+
+struct half_equal_to
+{
+    ROCPRIM_HOST_DEVICE inline
+    bool operator()(const rocprim::half& a, const rocprim::half& b) const
+    {
+        return half_to_native(a) == half_to_native(b);
+    }
+};
+
+struct half_not_equal_to
+{
+    ROCPRIM_HOST_DEVICE inline
+    bool operator()(const rocprim::half& a, const rocprim::half& b) const
+    {
+        return half_to_native(a) != half_to_native(b);
+    }
+};
+
+struct half_plus
+{
+    ROCPRIM_HOST_DEVICE inline
+    rocprim::half operator()(const rocprim::half& a, const rocprim::half& b) const
+    {
+        return native_to_half(half_to_native(a) + half_to_native(b));
+    }
+};
+
+struct half_minus
+{
+    ROCPRIM_HOST_DEVICE inline
+    rocprim::half operator()(const rocprim::half& a, const rocprim::half& b) const
+    {
+        return native_to_half(half_to_native(a) - half_to_native(b));
+    }
+};
+
+struct half_multiplies
+{
+    ROCPRIM_HOST_DEVICE inline
+    rocprim::half operator()(const rocprim::half& a, const rocprim::half& b) const
+    {
+        return native_to_half(half_to_native(a) * half_to_native(b));
+    }
+};
+
+struct half_maximum
+{
+    ROCPRIM_HOST_DEVICE inline
+    rocprim::half operator()(const rocprim::half& a, const rocprim::half& b) const
+    {
+        return half_to_native(a) < half_to_native(b) ? b : a;
+    }
+};
+
+struct half_minimum
+{
+    ROCPRIM_HOST_DEVICE inline
+    rocprim::half operator()(const rocprim::half& a, const rocprim::half& b) const
+    {
+        return half_to_native(a) < half_to_native(b) ? a : b;
+    }
+};
+
 template<class T>
 inline auto get_random_data(size_t size, T min, T max)
     -> typename std::enable_if<rocprim::is_integral<T>::value, std::vector<T>>::type
@@ -249,9 +380,6 @@ struct custom_test_type
     }
 
     ROCPRIM_HOST_DEVICE inline
-    custom_test_type(const custom_test_type& other) : x(other.x), y(other.y) {}
-
-    ROCPRIM_HOST_DEVICE inline
     ~custom_test_type() {}
 
     ROCPRIM_HOST_DEVICE inline
@@ -277,13 +405,13 @@ struct custom_test_type
     ROCPRIM_HOST_DEVICE inline
     bool operator<(const custom_test_type& other) const
     {
-        return (x < other.x && y < other.y);
+        return (x < other.x || (x == other.x && y < other.y));
     }
 
     ROCPRIM_HOST_DEVICE inline
     bool operator>(const custom_test_type& other) const
     {
-        return (x > other.x && y > other.y);
+        return (x > other.x || (x == other.x && y > other.y));
     }
 
     ROCPRIM_HOST_DEVICE inline
@@ -347,7 +475,7 @@ inline auto get_random_data(size_t size, typename T::value_type min, typename T:
     std::default_random_engine gen(rd());
     std::uniform_int_distribution<typename T::value_type> distribution(min, max);
     std::vector<T> data(size);
-    std::generate(data.begin(), data.end(), [&]() { return distribution(gen); });
+    std::generate(data.begin(), data.end(), [&]() { return T(distribution(gen), distribution(gen)); });
     return data;
 }
 
@@ -362,7 +490,7 @@ inline auto get_random_data(size_t size, typename T::value_type min, typename T:
     std::default_random_engine gen(rd());
     std::uniform_real_distribution<typename T::value_type> distribution(min, max);
     std::vector<T> data(size);
-    std::generate(data.begin(), data.end(), [&]() { return T(distribution(gen)); });
+    std::generate(data.begin(), data.end(), [&]() { return T(distribution(gen), distribution(gen)); });
     return data;
 }
 
@@ -381,9 +509,25 @@ auto assert_near(const std::vector<T>& result, const std::vector<T>& expected, c
     ASSERT_EQ(result.size(), expected.size());
     for(size_t i = 0; i < result.size(); i++)
     {
-        auto diff = std::max<T>(std::abs(percent * expected[i]), T(percent));
-        if(std::is_integral<T>::value) diff = 0;
-        ASSERT_NEAR(result[i], expected[i], diff) << "where index = " << i;
+        if(std::is_integral<T>::value)
+        {
+            ASSERT_EQ(result[i], expected[i]) << "where index = " << i;
+        }
+        else
+        {
+            auto diff = std::max<T>(std::abs(percent * expected[i]), T(percent));
+            ASSERT_NEAR(result[i], expected[i], diff) << "where index = " << i;
+        }
+    }
+}
+
+void assert_near(const std::vector<rocprim::half>& result, const std::vector<rocprim::half>& expected, float percent)
+{
+    ASSERT_EQ(result.size(), expected.size());
+    for(size_t i = 0; i < result.size(); i++)
+    {
+        auto diff = std::max<float>(std::abs(percent * static_cast<float>(expected[i])), percent);
+        ASSERT_NEAR(static_cast<float>(result[i]), static_cast<float>(expected[i]), diff) << "where index = " << i;
     }
 }
 
@@ -459,7 +603,7 @@ void assert_eq(const std::vector<rocprim::half>& result, const std::vector<rocpr
     ASSERT_EQ(result.size(), expected.size());
     for(size_t i = 0; i < result.size(); i++)
     {
-        ASSERT_EQ(static_cast<float>(result[i]), static_cast<float>(expected[i])) << "where index = " << i;
+        ASSERT_EQ(half_to_native(result[i]), half_to_native(expected[i])) << "where index = " << i;
     }
 }
 

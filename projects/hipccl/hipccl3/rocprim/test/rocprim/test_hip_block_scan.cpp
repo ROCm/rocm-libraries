@@ -39,11 +39,13 @@ template<
     class T,
     unsigned int BlockSize = 256U,
     unsigned int ItemsPerThread = 1U,
-    rocprim::block_scan_algorithm Algorithm = rocprim::block_scan_algorithm::using_warp_scan
+    rocprim::block_scan_algorithm Algorithm = rocprim::block_scan_algorithm::using_warp_scan,
+    class BinaryOp = rocprim::plus<T>
 >
 struct params
 {
     using type = T;
+    using binary_op_type = BinaryOp;
     static constexpr rocprim::block_scan_algorithm algorithm = Algorithm;
     static constexpr unsigned int block_size = BlockSize;
     static constexpr unsigned int items_per_thread = ItemsPerThread;
@@ -58,6 +60,7 @@ class RocprimBlockScanSingleValueTests : public ::testing::Test
 {
 public:
     using type = typename Params::type;
+    using binary_op_type = typename Params::binary_op_type;
     static constexpr rocprim::block_scan_algorithm algorithm = Params::algorithm;
     static constexpr unsigned int block_size = Params::block_size;
 };
@@ -79,6 +82,10 @@ typedef ::testing::Types<
     params<unsigned int, 64U>,
     params<unsigned int, 256U>,
     params<unsigned int, 377U>,
+    // char tests
+    params<char, 64U>,
+    params<char, 256U>,
+    params<char, 377U>,
     // long tests
     params<long, 64U>,
     params<long, 256U>,
@@ -131,7 +138,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScan)
     const size_t size = block_size * 113;
     const size_t grid_size = size / block_size;
     // Generate data
-    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200);
+    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 100);
 
     // Calculate expected results on host
     std::vector<T> expected(output.size(), 0);
@@ -219,7 +226,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanReduce)
     const size_t size = block_size * 113;
     const size_t grid_size = size / block_size;
     // Generate data
-    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200);
+    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 100);
     std::vector<T> output_reductions(size / block_size);
 
     // Calculate expected results on host
@@ -341,7 +348,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanPrefixCallback)
     const size_t size = block_size * 113;
     const size_t grid_size = size / block_size;
     // Generate data
-    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200);
+    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 100);
     std::vector<T> output_block_prefixes(size / block_size);
     T block_prefix = test_utils::get_random_value<T>(0, 100);
 
@@ -450,7 +457,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScan)
     const size_t size = block_size * 113;
     const size_t grid_size = size / block_size;
     // Generate data
-    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 241);
+    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 100);
     const T init = test_utils::get_random_value<T>(0, 100);
 
     // Calculate expected results on host
@@ -539,7 +546,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanReduce)
     const size_t size = block_size * 113;
     const size_t grid_size = size / block_size;
     // Generate data
-    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200);
+    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 100);
     const T init = test_utils::get_random_value<T>(0, 100);
 
     // Output reduce results
@@ -671,7 +678,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanPrefixCallback)
     const size_t size = block_size * 113;
     const size_t grid_size = size / block_size;
     // Generate data
-    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200);
+    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 100);
     std::vector<T> output_block_prefixes(size / block_size);
     T block_prefix = test_utils::get_random_value<T>(0, 100);
 
@@ -775,7 +782,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, CustomStruct)
     std::vector<T> output(size);
     {
         std::vector<base_type> random_values =
-            test_utils::get_random_data<base_type>(2 * output.size(), 2, 200);
+            test_utils::get_random_data<base_type>(2 * output.size(), 2, 100);
         for(size_t i = 0; i < output.size(); i++)
         {
             output[i].x = random_values[i],
@@ -843,6 +850,7 @@ class RocprimBlockScanInputArrayTests : public ::testing::Test
 {
 public:
     using type = typename Params::type;
+    using binary_op_type = typename Params::binary_op_type;
     static constexpr unsigned int block_size = Params::block_size;
     static constexpr rocprim::block_scan_algorithm algorithm = Params::algorithm;
     static constexpr unsigned int items_per_thread = Params::items_per_thread;
@@ -861,6 +869,9 @@ typedef ::testing::Types<
     params<float, 65,   5>,
     params<float, 162,  7>,
     params<float, 255,  15>,
+    params<char, 1024, 1>,
+    params<char, 37,   2>,
+    params<char, 65,   5>,
     // -----------------------------------------------------------------------
     // rocprim::block_scan_algorithm::reduce_then_scan
     // -----------------------------------------------------------------------
@@ -872,7 +883,10 @@ typedef ::testing::Types<
     params<float, 37,   2,  rocprim::block_scan_algorithm::reduce_then_scan>,
     params<float, 65,   5,  rocprim::block_scan_algorithm::reduce_then_scan>,
     params<float, 162,  7,  rocprim::block_scan_algorithm::reduce_then_scan>,
-    params<float, 255,  15, rocprim::block_scan_algorithm::reduce_then_scan>
+    params<float, 255,  15, rocprim::block_scan_algorithm::reduce_then_scan>,
+    params<char, 1024, 1,  rocprim::block_scan_algorithm::reduce_then_scan>,
+    params<char, 37,   2,  rocprim::block_scan_algorithm::reduce_then_scan>,
+    params<char, 65,   5,  rocprim::block_scan_algorithm::reduce_then_scan>
 > InputArrayTestParams;
 
 TYPED_TEST_CASE(RocprimBlockScanInputArrayTests, InputArrayTestParams);
@@ -923,7 +937,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScan)
     const size_t size = items_per_block * 37;
     const size_t grid_size = size / items_per_block;
     // Generate data
-    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200);
+    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 100);
 
     // Calculate expected results on host
     std::vector<T> expected(output.size(), 0);
@@ -1030,7 +1044,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScanReduce)
     const size_t size = items_per_block * 37;
     const size_t grid_size = size / items_per_block;
     // Generate data
-    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200);
+    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 100);
 
     // Output reduce results
     std::vector<T> output_reductions(size / block_size, 0);
@@ -1181,7 +1195,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScanPrefixCallback)
     const size_t size = items_per_block * 37;
     const size_t grid_size = size / items_per_block;
     // Generate data
-    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200);
+    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 100);
     std::vector<T> output_block_prefixes(size / items_per_block, 0);
     T block_prefix = test_utils::get_random_value<T>(0, 100);
 
@@ -1320,7 +1334,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScan)
     const size_t size = items_per_block * 37;
     const size_t grid_size = size / items_per_block;
     // Generate data
-    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200);
+    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 100);
     const T init = test_utils::get_random_value<T>(0, 100);
 
     // Calculate expected results on host
@@ -1428,7 +1442,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScanReduce)
     const size_t size = items_per_block * 37;
     const size_t grid_size = size / items_per_block;
     // Generate data
-    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200);
+    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 100);
 
     // Output reduce results
     std::vector<T> output_reductions(size / block_size);
@@ -1579,7 +1593,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScanPrefixCallback)
     const size_t size = items_per_block * 37;
     const size_t grid_size = size / items_per_block;
     // Generate data
-    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200);
+    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 100);
     std::vector<T> output_block_prefixes(size / items_per_block);
     T block_prefix = test_utils::get_random_value<T>(0, 100);
 
@@ -1670,4 +1684,3 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScanPrefixCallback)
     HIP_CHECK(hipFree(device_output));
     HIP_CHECK(hipFree(device_output_bp));
 }
-

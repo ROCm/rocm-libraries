@@ -1,0 +1,14 @@
+test:rocm241:
+  extends: .unittest
+  tags:
+    - tag241
+
+test:rocm243:
+  extends: .unittest
+  tags:
+    - tag243
+
+test:rocm244:
+  extends: .unittest
+  tags:
+    - tag244
