@@ -132,7 +132,7 @@ void merge_sort_impl(void * temporary_storage,
     ROCPRIM_DETAIL_HC_SYNC("block_sort_kernel", size, start)
 
     bool temporary_store = false;
-    for(unsigned int block = block_size ; block < size; block *= 2)
+    for(unsigned int block = block_size; block < size; block *= 2)
     {
         temporary_store = !temporary_store;
         if(temporary_store)
@@ -149,7 +149,7 @@ void merge_sort_impl(void * temporary_storage,
                     );
                 }
             );
-            ROCPRIM_DETAIL_HC_SYNC("block_merge_buffer_kernel", size, start)
+            ROCPRIM_DETAIL_HC_SYNC("block_merge_kernel", size, start)
         }
         else
         {

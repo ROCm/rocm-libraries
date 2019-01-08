@@ -359,11 +359,11 @@ void block_sort_kernel_impl(KeysInputIterator keys_input,
     );
 
     block_sort_impl<with_values, BlockSize>(
-            key[0],
-            value[0],
-            valid_in_last_block,
-            last_block,
-            compare_function
+        key[0],
+        value[0],
+        valid_in_last_block,
+        last_block,
+        compare_function
     );
 
     block_store_impl<with_values, BlockSize>(

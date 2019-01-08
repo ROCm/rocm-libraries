@@ -68,8 +68,10 @@ typedef ::testing::Types<
     DeviceSortParams<int>,
     DeviceSortParams<test_utils::custom_test_type<int>>,
     DeviceSortParams<unsigned long>,
-    DeviceSortParams<float, int>,
+    DeviceSortParams<float, double>,
     DeviceSortParams<int, float>,
+    DeviceSortParams<int, test_utils::custom_test_type<int>>,
+    DeviceSortParams<double, test_utils::custom_test_type<double>>,
     DeviceSortParams<int, test_utils::custom_test_type<float>>
 > RocprimDeviceSortTestsParams;
 
@@ -80,7 +82,7 @@ std::vector<size_t> get_sizes()
         1024, 2048, 5096,
         34567, (1 << 17) - 1220
     };
-    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(2, 1, 16384);
+    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(5, 1, 100000);
     sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
     std::sort(sizes.begin(), sizes.end());
     return sizes;
@@ -102,7 +104,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
 
         // Generate data
         std::vector<key_type> input = test_utils::get_random_data<key_type>(size, 0, size);
-        std::vector<key_type> output(size, 0);
+        std::vector<key_type> output(size);
 
         key_type * d_input;
         key_type * d_output;
@@ -169,7 +171,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
         // Check if output values are as expected
         for(size_t i = 0; i < output.size(); i++)
         {
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output[i], expected[i], 0.01f));
+            ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
         }
 
         hipFree(d_input);
@@ -200,8 +202,8 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
             std::mt19937{std::random_device{}()}
         );
         std::vector<value_type> values_input = test_utils::get_random_data<value_type>(size, -1000, 1000);
-        std::vector<key_type> keys_output(size, key_type(0));
-        std::vector<value_type> values_output(size, value_type(0));
+        std::vector<key_type> keys_output(size);
+        std::vector<value_type> values_output(size);
 
         key_type * d_keys_input;
         key_type * d_keys_output;
@@ -295,8 +297,8 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
         // Check if output values are as expected
         for(size_t i = 0; i < keys_output.size(); i++)
         {
-            ASSERT_EQ(keys_output[i], expected[i].first);
-            ASSERT_EQ(values_output[i], expected[i].second);
+            ASSERT_EQ(keys_output[i], expected[i].first) << "where index = " << i;
+            ASSERT_EQ(values_output[i], expected[i].second) << "where index = " << i;
         }
 
         hipFree(d_keys_input);

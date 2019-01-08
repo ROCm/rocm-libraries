@@ -26,7 +26,7 @@ cmake_minimum_required(VERSION 3.5.1 FATAL_ERROR)
 set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended onto install directories")
 
 # rocPRIM project
-project(rocprim VERSION 1.0.1.0 LANGUAGES CXX)
+project(rocprim VERSION 1.0.2.0 LANGUAGES CXX)
 
 # CMake modules
 list(APPEND CMAKE_MODULE_PATH
@@ -69,12 +69,12 @@ option(ONLY_INSTALL "Only install" OFF)
 # Get dependencies
 include(cmake/Dependencies.cmake)
 
+# AMD targets
+set(AMDGPU_TARGETS gfx803;gfx900;gfx906 CACHE STRING "List of specific machine types for library to target")
+
 # Print configuration summary
 include(cmake/Summary.cmake)
 print_configuration_summary()
-
-# AMD targets
-set(AMDGPU_TARGETS gfx803;gfx900;gfx906 CACHE STRING "List of specific machine types for library to target")
 
 # rocPRIM works only on hcc
 if(HIP_PLATFORM STREQUAL "hcc")
