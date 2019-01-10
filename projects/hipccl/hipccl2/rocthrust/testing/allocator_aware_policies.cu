@@ -12,6 +12,10 @@
 #include <thrust/system/omp/detail/par.h>
 #include <thrust/system/tbb/detail/par.h>
 
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#include <thrust/system/cuda/detail/par.h>
+#endif
+
 template<typename T>
 struct test_allocator_t
 {
@@ -139,10 +143,20 @@ typedef policy_info<
     thrust::system::tbb::detail::execution_policy
 > tbb_par_info;
 
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+typedef policy_info<
+    thrust::system::cuda::detail::par_t,
+    thrust::cuda_cub::execute_on_stream_base
+> cuda_par_info;
+#endif
+
 SimpleUnitTest<
     TestAllocatorAttachment,
     unittest::type_list<
         sequential_info,
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+        cuda_par_info,
+#endif
         cpp_par_info,
         THRUST_DEVICE_BACKEND_par_info,
         omp_par_info,

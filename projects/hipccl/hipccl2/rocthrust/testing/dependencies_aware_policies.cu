@@ -12,6 +12,10 @@
 #include <thrust/system/omp/detail/par.h>
 #include <thrust/system/tbb/detail/par.h>
 
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#  include <thrust/system/cuda/detail/par.h>
+#endif
+
 #if __cplusplus >= 201103L
 
 template<typename T>
@@ -163,6 +167,13 @@ typedef policy_info<
     thrust::system::tbb::detail::par_t,
     thrust::system::tbb::detail::execution_policy
 > tbb_par_info;
+
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+typedef policy_info<
+    thrust::system::cuda::detail::par_t,
+    thrust::cuda_cub::execute_on_stream_base
+> cuda_par_info;
+#endif
 
 SimpleUnitTest<
     TestDependencyAttachment,
