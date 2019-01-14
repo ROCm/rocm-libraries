@@ -154,9 +154,9 @@ hipError_t radix_sort_iteration(KeysInputIterator keys_input,
                                 unsigned int size,
                                 unsigned int * batch_digit_counts,
                                 unsigned int * digit_counts,
+                                bool from_input,
                                 bool to_output,
                                 unsigned int bit,
-                                unsigned int begin_bit,
                                 unsigned int end_bit,
                                 unsigned int blocks_per_full_batch,
                                 unsigned int full_batches,
@@ -170,8 +170,6 @@ hipError_t radix_sort_iteration(KeysInputIterator keys_input,
     // iteration has a shorter mask.
     const unsigned int current_radix_bits = ::rocprim::min(RadixBits, end_bit - bit);
 
-    const bool is_first_iteration = (bit == begin_bit);
-
     std::chrono::high_resolution_clock::time_point start;
 
     if(debug_synchronous)
@@ -182,7 +180,7 @@ hipError_t radix_sort_iteration(KeysInputIterator keys_input,
     }
 
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    if(is_first_iteration)
+    if(from_input)
     {
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(fill_digit_counts_kernel<
@@ -243,7 +241,7 @@ hipError_t radix_sort_iteration(KeysInputIterator keys_input,
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("scan_digits", radix_size, start)
 
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    if(is_first_iteration)
+    if(from_input)
     {
         if(to_output)
         {
@@ -415,20 +413,48 @@ hipError_t radix_sort_impl(void * temporary_storage,
     }
 
     bool to_output = with_double_buffer || (iterations - 1) % 2 == 0;
+    bool from_input = true;
+    if(!with_double_buffer && to_output)
+    {
+        // Copy input keys and values if necessary (in-place sorting: input and output iterators are equal)
+        const bool keys_equal = ::rocprim::detail::are_iterators_equal(keys_input, keys_output);
+        const bool values_equal = with_values && ::rocprim::detail::are_iterators_equal(values_input, values_output);
+        if(keys_equal || values_equal)
+        {
+            hipError_t error = ::rocprim::transform(
+                keys_input, keys_tmp, size,
+                ::rocprim::identity<key_type>(), stream, debug_synchronous
+            );
+            if(error != hipSuccess) return error;
+
+            if(with_values)
+            {
+                hipError_t error = ::rocprim::transform(
+                    values_input, values_tmp, size,
+                    ::rocprim::identity<value_type>(), stream, debug_synchronous
+                );
+                if(error != hipSuccess) return error;
+            }
+
+            from_input = false;
+        }
+    }
+
     unsigned int bit = begin_bit;
     for(unsigned int i = 0; i < long_iterations; i++)
     {
         hipError_t error = radix_sort_iteration<config, config::long_radix_bits, Descending>(
             keys_input, keys_tmp, keys_output, values_input, values_tmp, values_output, size,
             batch_digit_counts, digit_counts,
-            to_output,
-            bit, begin_bit, end_bit,
+            from_input, to_output,
+            bit, end_bit,
             blocks_per_full_batch, full_batches, batches,
             stream, debug_synchronous
         );
         if(error != hipSuccess) return error;
 
         is_result_in_output = to_output;
+        from_input = false;
         to_output = !to_output;
         bit += config::long_radix_bits;
     }
@@ -437,14 +463,15 @@ hipError_t radix_sort_impl(void * temporary_storage,
         hipError_t error = radix_sort_iteration<config, config::short_radix_bits, Descending>(
             keys_input, keys_tmp, keys_output, values_input, values_tmp, values_output, size,
             batch_digit_counts, digit_counts,
-            to_output,
-            bit, begin_bit, end_bit,
+            from_input, to_output,
+            bit, end_bit,
             blocks_per_full_batch, full_batches, batches,
             stream, debug_synchronous
         );
         if(error != hipSuccess) return error;
 
         is_result_in_output = to_output;
+        from_input = false;
         to_output = !to_output;
         bit += config::short_radix_bits;
     }
