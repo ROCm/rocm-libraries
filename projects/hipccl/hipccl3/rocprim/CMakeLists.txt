@@ -124,13 +124,13 @@ set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PR
 if(HIP_PLATFORM STREQUAL "hcc")
   rocm_create_package(
     NAME rocprim
-    DESCRIPTION "Radeon Open Compute Parallel Primitives Libary"
+    DESCRIPTION "Radeon Open Compute Parallel Primitives Library"
     MAINTAINER "Stream HPC Maintainers <maintainer@streamhpc.com>"
   )
 else()
   rocm_create_package(
     NAME rocprim-hipcub
-    DESCRIPTION "Radeon Open Compute Parallel Primitives Libary (hipCUB only)"
+    DESCRIPTION "Radeon Open Compute Parallel Primitives Library (hipCUB only)"
     MAINTAINER "Stream HPC Maintainers <maintainer@streamhpc.com>"
   )
 endif()
