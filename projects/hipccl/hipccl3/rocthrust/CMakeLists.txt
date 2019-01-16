@@ -94,6 +94,10 @@ if ("TBB" STREQUAL "${THRUST_DEVICE_SYSTEM}")
     set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${TBB_LD_FLAGS}")
     set (THRUST_ADDITIONAL_LIBRARIES "${TBB_LIBRARIES}")
   endif ()
+
+  # there's a ton of these in the TBB backend, even though the code is correct
+  # TODO: silence these warnings in code instead
+  append_option_if_available("-Wno-unused-parameter" THRUST_CXX_WARNINGS)
 endif ()
 
 if ("MSVC" STREQUAL "${CMAKE_CXX_COMPILER_ID}")
@@ -153,13 +157,13 @@ if (("Clang" STREQUAL "${CMAKE_CXX_COMPILER_ID}") OR
   # xlC and Clang warn about unused parameters in uninstantiated templates.
   # This causes xlC to choke on the OMP backend, which is mostly #ifdef'd out
   # (and thus has unused parameters) when you aren't using it.
-  append_option_if_available(CXX "-Wno-unused-parameters" THRUST_OPTIONS_WARNINGS)
+  append_option_if_available("-Wno-unused-parameters" THRUST_CXX_WARNINGS)
 endif ()
         
 if ("Clang" STREQUAL "${CMAKE_CXX_COMPILER_ID}")
   # -Wunneeded-internal-declaration misfires in the unit test framework
   # on older versions of Clang.
-  append_option_if_available(CXX "-Wno-unneeded-internal-declaration" THRUST_OPTIONS_WARNINGS)
+  append_option_if_available("-Wno-unneeded-internal-declaration" THRUST_CXX_WARNINGS)
 endif ()
   
 append_option_if_available(CUDA "-rdc=true" THRUST_OPTIONS_RDC)
