@@ -1,5 +1,5 @@
 /******************************************************************************
- * Copyright (c) 2016, NVIDIA CORPORATION.  All rights meserved.
+ * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -26,18 +26,51 @@
  ******************************************************************************/
 #pragma once
 
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+
 #include <thrust/detail/pointer.h>
+#include <thrust/detail/raw_pointer_cast.h>
+#include <thrust/pair.h>
+#include <thrust/system/hip/config.h>
+#include <thrust/system/hip/detail/execution_policy.h>
 
-template<typename Element, typename Tag, typename Reference, typename Derived>
-struct std::iterator_traits<thrust::pointer<Element,Tag,Reference,Derived> >
-  {
-private:
-  typedef thrust::pointer<Element,Tag,Reference,Derived> ptr;
+BEGIN_NS_THRUST
 
-public:
-  typedef typename ptr::iterator_category iterator_category;
-  typedef typename ptr::value_type        value_type;
-  typedef typename ptr::difference_type   difference_type;
-  typedef Element *                       pointer;
-  typedef typename ptr::reference         reference;
-};
+// XXX forward declare thrust::get/return_temporary_buffer
+// to avoid circular include dependency from thrust/memory.h
+//
+template<typename T, typename DerivedPolicy>
+__host__ __device__
+thrust::pair<thrust::pointer<T,DerivedPolicy>, typename thrust::pointer<T,DerivedPolicy>::difference_type>
+get_temporary_buffer(const thrust::detail::execution_policy_base<DerivedPolicy> &system, typename thrust::pointer<T,DerivedPolicy>::difference_type n);
+
+template<typename DerivedPolicy, typename Pointer>
+__host__ __device__
+void return_temporary_buffer(const thrust::detail::execution_policy_base<DerivedPolicy> &system, Pointer p);
+
+namespace hip_rocprim {
+
+template <class Derived>
+__host__ __device__ void *
+get_memory_buffer(execution_policy<Derived> &policy, std::ptrdiff_t n)
+{
+  return (void *)thrust::raw_pointer_cast(
+      thrust::get_temporary_buffer<char>(policy, n).first);
+}
+
+template <class Derived>
+void __host__ __device__
+return_memory_buffer(execution_policy<Derived> &policy, void* ptr)
+{
+  thrust::return_temporary_buffer(policy, ptr);
+}
+
+} // namespace hip_rocprim
+END_NS_THRUST
+
+// include thrust/memory.h  after
+// we define get/return_memory_buffer
+//
+//#include <thrust/memory.h>
+
+#endif

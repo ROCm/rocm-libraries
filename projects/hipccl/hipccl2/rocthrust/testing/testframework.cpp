@@ -134,6 +134,7 @@ void process_args(int argc, char ** argv,
 
 void usage(int argc, char** argv)
 {
+  (void)argc;
   std::string indent = "  ";
   
   std::cout << "Example Usage:\n";
@@ -259,6 +260,8 @@ void UnitTestDriver::list_tests(void)
 
 bool UnitTestDriver::post_test_sanity_check(const UnitTest &test, bool concise)
 {
+  (void)test;
+  (void)concise;
   return true;
 }
 
@@ -468,6 +471,7 @@ bool UnitTestDriver::run_tests(const ArgumentSet& args, const ArgumentMap& kwarg
 template<typename DeviceSystem>
 UnitTestDriver &driver_instance(DeviceSystem tag)
 {
+  (void)tag;
   static UnitTestDriver s_instance;
   return s_instance;
 }
@@ -518,4 +522,3 @@ int main(int argc, char **argv)
   
   return (passed) ? EXIT_SUCCESS : EXIT_FAILURE;
 }
-

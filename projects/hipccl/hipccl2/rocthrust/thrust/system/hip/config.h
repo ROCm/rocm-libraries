@@ -61,6 +61,15 @@
 #define THRUST_HIP_DEBUG_SYNC_FLAG false
 #endif
 
+// Workaround, so kernel(s) called by function is/are not lost,
+// Implicit instantiation of function template
+// that will be used in #if __THRUST_HAS_HIPRT__ block.
+#define THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(function) do \
+  { \
+    auto ptr = function; \
+    (void) ptr; \
+  } while (0)
+
 #define THRUST_ROCPRIM_NS_PREFIX namespace thrust {   namespace hip_rocprim {
 #define THRUST_ROCPRIM_NS_POSTFIX }  }
 
@@ -68,4 +77,3 @@
 #ifndef END_NS_THRUST
 #define END_NS_THRUST }
 #endif
-

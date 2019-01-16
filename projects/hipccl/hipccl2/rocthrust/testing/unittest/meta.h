@@ -135,6 +135,7 @@ template<typename TypeList,
   template<typename U>
     void operator()(U n)
   {
+    (void)n;
     // no-op
   }
 
@@ -257,4 +258,3 @@ template<typename TypeList1,
 };
 
 } // end unittest
-
