@@ -335,6 +335,7 @@ void block_sort_kernel_impl(KeysInputIterator keys_input,
 {
     using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
     using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
+    using stable_key_type = rocprim::tuple<key_type, unsigned int>;
     constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
 
     const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
@@ -358,13 +359,23 @@ void block_sort_kernel_impl(KeysInputIterator keys_input,
         value
     );
 
+    // Special comparison that preserves relative order of equal keys
+    auto stable_compare_function = [compare_function](const stable_key_type& a, const stable_key_type& b) -> bool
+    {
+        const bool ab = compare_function(rocprim::get<0>(a), rocprim::get<0>(b));
+        const bool ba = compare_function(rocprim::get<0>(b), rocprim::get<0>(a));
+        return ab || (!ba && (rocprim::get<1>(a) < rocprim::get<1>(b)));
+    };
+
+    stable_key_type stable_key = rocprim::make_tuple(key[0], flat_id);
     block_sort_impl<with_values, BlockSize>(
-        key[0],
+        stable_key,
         value[0],
         valid_in_last_block,
         last_block,
-        compare_function
+        stable_compare_function
     );
+    key[0] = rocprim::get<0>(stable_key);
 
     block_store_impl<with_values, BlockSize>(
         flat_id,
