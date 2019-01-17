@@ -77,7 +77,6 @@
 // #include <thrust/system/hip/detail/merge.h>
 // #include <thrust/system/hip/detail/scan_by_key.h>
 // #include <thrust/system/hip/detail/set_operations.h>
-// #include <thrust/system/hip/detail/sort.h>
+#include <thrust/system/hip/detail/sort.h>
 
 // // work in progress
-

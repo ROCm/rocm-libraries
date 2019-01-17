@@ -132,7 +132,7 @@ struct comp_mod3
     comp_mod3(T * table) : table(table) {}
 
     __host__ __device__
-    bool operator()(T a, T b)
+    bool operator()(T a, T b) const
     {
         return table[(int) a] < table[(int) b];
     }
@@ -172,4 +172,3 @@ void TestStableSortWithIndirection(void)
     ASSERT_EQUAL(data[6], T(2));
 }
 DECLARE_VECTOR_UNITTEST(TestStableSortWithIndirection);
-
