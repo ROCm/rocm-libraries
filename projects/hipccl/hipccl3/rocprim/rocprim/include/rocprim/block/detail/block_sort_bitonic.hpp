@@ -293,8 +293,8 @@ private:
         copy_to_shared(kv..., flat_tid, storage);
 
         bool is_even = (flat_tid % 2) == 0;
-        unsigned int odd_id = (is_even) ? std::max(flat_tid, (unsigned int) 1) - 1 : std::min(flat_tid + 1, Size - 1);
-        unsigned int even_id = (is_even) ? std::min(flat_tid + 1, Size - 1) : std::max(flat_tid, (unsigned int) 1) - 1;
+        unsigned int odd_id = (is_even) ? ::rocprim::max(flat_tid, 1u) - 1 : ::rocprim::min(flat_tid + 1, Size - 1);
+        unsigned int even_id = (is_even) ? ::rocprim::min(flat_tid + 1, Size - 1) : ::rocprim::max(flat_tid, 1u) - 1;
 
         #pragma unroll
         for(unsigned int length = 0; length < Size; length++)
@@ -331,13 +331,18 @@ private:
         copy_to_shared(kv..., flat_tid, storage);
 
         bool is_even = (flat_tid % 2 == 0);
-        unsigned int odd_id = (is_even) ? std::max(flat_tid, (unsigned int) 1) - 1 : std::min(flat_tid + 1, size - 1);
-        unsigned int even_id = (is_even) ? std::min(flat_tid + 1, size - 1) : std::max(flat_tid, (unsigned int) 1) - 1;
+        unsigned int odd_id = (is_even) ? ::rocprim::max(flat_tid, 1u) - 1 : ::rocprim::min(flat_tid + 1, size - 1);
+        unsigned int even_id = (is_even) ? ::rocprim::min(flat_tid + 1, size - 1) : ::rocprim::max(flat_tid, 1u) - 1;
 
         for(unsigned int length = 0; length < size; length++)
         {
             unsigned int next_id = (length % 2 == 0) ? even_id : odd_id;
-            swap(kv..., flat_tid, next_id, 0, storage, compare_function);
+            // Use only "valid" keys to ensure that compare_function will not use garbage keys
+            // for example, as indices of an array (a lookup table)
+            if(flat_tid < size)
+            {
+                swap(kv..., flat_tid, next_id, 0, storage, compare_function);
+            }
             ::rocprim::syncthreads();
             copy_to_shared(kv..., flat_tid, storage);
         }
