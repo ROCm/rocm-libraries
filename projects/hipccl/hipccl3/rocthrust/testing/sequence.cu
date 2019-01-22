@@ -5,7 +5,7 @@
 
 
 template<typename ForwardIterator>
-void sequence(my_system &system, ForwardIterator first, ForwardIterator)
+void sequence(my_system &system, ForwardIterator, ForwardIterator)
 {
     system.validate_dispatch();
 }
@@ -114,4 +114,3 @@ void TestSequenceToDiscardIterator(size_t n)
     // nothing to check -- just make sure it compiles
 }
 DECLARE_VARIABLE_UNITTEST(TestSequenceToDiscardIterator);
-

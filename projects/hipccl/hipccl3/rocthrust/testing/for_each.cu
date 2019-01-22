@@ -43,6 +43,7 @@ DECLARE_VECTOR_UNITTEST(TestForEachSimple);
 
 
 template<typename InputIterator, typename Function>
+__host__ __device__
 InputIterator for_each(my_system &system, InputIterator first, InputIterator, Function)
 {
     system.validate_dispatch();
@@ -62,6 +63,7 @@ DECLARE_UNITTEST(TestForEachDispatchExplicit);
 
 
 template<typename InputIterator, typename Function>
+__host__ __device__
 InputIterator for_each(my_tag, InputIterator first, InputIterator, Function)
 {
     *first = 13;
@@ -109,6 +111,7 @@ DECLARE_VECTOR_UNITTEST(TestForEachNSimple);
 
 
 template<typename InputIterator, typename Size, typename Function>
+__host__ __device__
 InputIterator for_each_n(my_system &system, InputIterator first, Size, Function)
 {
     system.validate_dispatch();
@@ -128,6 +131,7 @@ DECLARE_UNITTEST(TestForEachNDispatchExplicit);
 
 
 template<typename InputIterator, typename Size, typename Function>
+__host__ __device__
 InputIterator for_each_n(my_tag, InputIterator first, Size, Function)
 {
     *first = 13;
