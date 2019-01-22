@@ -40,7 +40,8 @@ DECLARE_VECTOR_UNITTEST(TestGenerateSimple);
 
 
 template<typename ForwardIterator, typename Generator>
-void generate(my_system &system, ForwardIterator first, ForwardIterator, Generator)
+__host__ __device__
+void generate(my_system &system, ForwardIterator, ForwardIterator, Generator)
 {
     system.validate_dispatch();
 }
@@ -58,6 +59,7 @@ DECLARE_UNITTEST(TestGenerateDispatchExplicit);
 
 
 template<typename ForwardIterator, typename Generator>
+__host__ __device__
 void generate(my_tag, ForwardIterator first, ForwardIterator, Generator)
 {
     *first = 13;
@@ -94,6 +96,7 @@ DECLARE_VARIABLE_UNITTEST(TestGenerate);
 template <typename T>
 void TestGenerateToDiscardIterator(const size_t n)
 {
+    (void)n;
     T value = 13;
     return_value<T> f(value);
 
@@ -130,6 +133,7 @@ DECLARE_VECTOR_UNITTEST(TestGenerateNSimple);
 
 
 template<typename ForwardIterator, typename Size, typename Generator>
+__host__ __device__
 ForwardIterator generate_n(my_system &system, ForwardIterator first, Size, Generator)
 {
     system.validate_dispatch();
@@ -149,6 +153,7 @@ DECLARE_UNITTEST(TestGenerateNDispatchExplicit);
 
 
 template<typename ForwardIterator, typename Size, typename Generator>
+__host__ __device__
 ForwardIterator generate_n(my_tag, ForwardIterator first, Size, Generator)
 {
     *first = 13;

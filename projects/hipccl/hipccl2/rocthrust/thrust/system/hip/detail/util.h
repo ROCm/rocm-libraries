@@ -70,7 +70,8 @@ trivial_copy_from_device(Type *       dst,
                             sizeof(Type) * count,
                             hipMemcpyDeviceToHost,
                             stream);
-  hipStreamSynchronize(stream);
+  if (status != hipSuccess) return status;
+  status = hipStreamSynchronize(stream);
   return status;
 }
 
@@ -89,7 +90,8 @@ trivial_copy_to_device(Type *       dst,
                             sizeof(Type) * count,
                             hipMemcpyHostToDevice,
                             stream);
-  hipStreamSynchronize(stream);
+  if (status != hipSuccess) return status;
+  status = hipStreamSynchronize(stream);
   return status;
 }
 template <class Policy, class Type>

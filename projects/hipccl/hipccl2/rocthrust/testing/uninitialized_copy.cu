@@ -147,6 +147,7 @@ struct CopyConstructTest
   __host__ __device__
   CopyConstructTest(const CopyConstructTest &exemplar)
   {
+    (void)exemplar;
 #if __CUDA_ARCH__
     copy_constructed_on_device = true;
     copy_constructed_on_host   = false;
@@ -173,6 +174,7 @@ struct TestUninitializedCopyNonPODDevice
 {
   void operator()(const size_t dummy)
   {
+    (void)dummy;
     typedef CopyConstructTest T;
 
     thrust::device_vector<T> v1(5), v2(5);
@@ -199,6 +201,7 @@ struct TestUninitializedCopyNNonPODDevice
 {
   void operator()(const size_t dummy)
   {
+    (void)dummy;
     typedef CopyConstructTest T;
 
     thrust::device_vector<T> v1(5), v2(5);
@@ -225,6 +228,7 @@ struct TestUninitializedCopyNonPODHost
 {
   void operator()(const size_t dummy)
   {
+    (void)dummy;
     typedef CopyConstructTest T;
 
     thrust::host_vector<T> v1(5), v2(5);
@@ -251,6 +255,7 @@ struct TestUninitializedCopyNNonPODHost
 {
   void operator()(const size_t dummy)
   {
+    (void)dummy;
     typedef CopyConstructTest T;
 
     thrust::host_vector<T> v1(5), v2(5);
@@ -271,4 +276,3 @@ struct TestUninitializedCopyNNonPODHost
   }
 };
 DECLARE_UNITTEST(TestUninitializedCopyNNonPODHost);
-
