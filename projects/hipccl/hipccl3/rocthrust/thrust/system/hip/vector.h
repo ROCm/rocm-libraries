@@ -2,7 +2,7 @@
  *  Copyright 2008-2013 NVIDIA Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
- *  you may not use this file except in ccudaliance with the License.
+ *  you may not use this file except in compliance with the License.
  *  You may obtain a copy of the License at
  *
  *      http://www.apache.org/licenses/LICENSE-2.0
@@ -14,9 +14,9 @@
  *  limitations under the License.
  */
 
-/*! \file thrust/system/cuda_bulk/vector.h
+/*! \file thrust/system/hip/vector.h
  *  \brief A dynamically-sizable array of elements which reside in memory available to
- *         Thrust's CUDA system.
+ *         Thrust's hip system.
  */
 
 #pragma once
@@ -38,19 +38,19 @@ namespace hip_rocprim
 // XXX upon c++11
 // template<typename T, typename Allocator = allocator<T> > using vector = thrust::detail::vector_base<T,Allocator>;
 
-/*! \p cuda_bulk::vector is a container that supports random access to elements,
+/*! \p hip_rocprim::vector is a container that supports random access to elements,
  *  constant time removal of elements at the end, and linear time insertion
  *  and removal of elements at the beginning or in the middle. The number of
- *  elements in a \p cuda_bulk::vector may vary dynamically; memory management is
- *  automatic. The elements contained in a \p cuda_bulk::vector reside in memory
- *  available to the \p cuda_bulk system.
+ *  elements in a \p hip_rocprim::vector may vary dynamically; memory management is
+ *  automatic. The elements contained in a \p hip_rocprim::vector reside in memory
+ *  available to the \p hip_rocprim system.
  *
- *  \tparam T The element type of the \p cuda_bulk::vector.
- *  \tparam Allocator The allocator type of the \p cuda_bulk::vector. Defaults to \p cuda_bulk::allocator.
+ *  \tparam T The element type of the \p hip_rocprim::vector.
+ *  \tparam Allocator The allocator type of the \p hip_rocprim::vector. Defaults to \p hip_rocprim::allocator.
  *
  *  \see http://www.sgi.com/tech/stl/Vector.html
  *  \see host_vector For the documentation of the complete interface which is
- *                   shared by \p cuda_bulk::vector
+ *                   shared by \p hip_rocprim::vector
  *  \see device_vector
  */
 template<typename T, typename Allocator = allocator<T> >
@@ -73,23 +73,23 @@ template<typename T, typename Allocator = allocator<T> >
   /*! \endcond
    */
 
-    /*! This constructor creates an empty \p cuda_bulk::vector.
+    /*! This constructor creates an empty \p hip_rocprim::vector.
      */
     vector();
 
-    /*! This constructor creates a \p cuda_bulk::vector with \p n default-constructed elements.
-     *  \param n The size of the \p cuda_bulk::vector to create.
+    /*! This constructor creates a \p hip_rocprim::vector with \p n default-constructed elements.
+     *  \param n The size of the \p hip_rocprim::vector to create.
      */
     explicit vector(size_type n);
 
-    /*! This constructor creates a \p cuda_bulk::vector with \p n copies of \p value.
-     *  \param n The size of the \p cuda_bulk::vector to create.
+    /*! This constructor creates a \p hip_rocprim::vector with \p n copies of \p value.
+     *  \param n The size of the \p hip_rocprim::vector to create.
      *  \param value An element to copy.
      */
     explicit vector(size_type n, const value_type &value);
 
-    /*! Copy constructor copies from another \p cuda_bulk::vector.
-     *  \param x The other \p cuda_bulk::vector to copy.
+    /*! Copy constructor copies from another \p hip_rocprim::vector.
+     *  \param x The other \p hip_rocprim::vector to copy.
      */
     vector(const vector &x);
 
@@ -105,7 +105,7 @@ template<typename T, typename Allocator = allocator<T> >
     template<typename OtherT, typename OtherAllocator>
     vector(const std::vector<OtherT,OtherAllocator> &x);
 
-    /*! This constructor creates a \p cuda_bulk::vector by copying from a range.
+    /*! This constructor creates a \p hip_rocprim::vector by copying from a range.
      *  \param first The beginning of the range.
      *  \param last The end of the range.
      */
@@ -131,21 +131,14 @@ template<typename T, typename Allocator = allocator<T> >
 
 } // end hip_rocprim
 
-// alias system::cuda_bulk names at top-level
+// alias system::hip_rocprim names at top-level
 namespace hip_rocprim
 {
 
-using thrust::cuda_cub::vector;
+using thrust::hip_rocprim::vector;
 
 } // end hip_rocprim
 
-namespace system {
-namespace hip {
-using thrust::hip_rocprim::vector;
-}
-}
-
 } // end thrust
 
-#include <thrust/system/cuda/detail/vector.inl>
-
+#include <thrust/system/hip/detail/vector.inl>
