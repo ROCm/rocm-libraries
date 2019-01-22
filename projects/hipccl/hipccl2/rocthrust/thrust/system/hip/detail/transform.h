@@ -49,21 +49,11 @@ namespace hip_rocprim {
 
 /// STREAMHPC TODO Use rocPRIM transform
 /// - rocPRIM transform for stencil unary transform
-/// - rocPRIM transform for binary transform
 /// - rocPRIM transform for stencil binary transform
 namespace __transform {
 
   struct no_stencil_tag
   {
-  };
-
-  struct always_true_predicate
-  {
-    template <class T>
-    bool THRUST_HIP_DEVICE_FUNCTION operator()(T const &) const
-    {
-      return true;
-    }
   };
 
   template <class InputIt,
@@ -235,12 +225,12 @@ namespace __transform {
         unary_transform_t;
 
     hip_rocprim::parallel_for(policy,
-                           unary_transform_t(items,
-                                             result,
-                                             stencil,
-                                             transform_op,
-                                             predicate),
-                           num_items);
+                              unary_transform_t(items,
+                                                result,
+                                                stencil,
+                                                transform_op,
+                                                predicate),
+                              num_items);
     return result + num_items;
   }
 
@@ -274,13 +264,13 @@ namespace __transform {
         binary_transform_t;
 
     hip_rocprim::parallel_for(policy,
-                           binary_transform_t(items1,
-                                              items2,
-                                              result,
-                                              stencil,
-                                              transform_op,
-                                              predicate),
-                           num_items);
+                              binary_transform_t(items1,
+                                                 items2,
+                                                 result,
+                                                 stencil,
+                                                 transform_op,
+                                                 predicate),
+                              num_items);
     return result + num_items;
   }
 
@@ -334,12 +324,12 @@ transform_if(execution_policy<Derived> &policy,
              Predicate                  predicate)
 {
   return hip_rocprim::transform_if(policy,
-                                first,
-                                last,
-                                __transform::no_stencil_tag(),
-                                result,
-                                transform_op,
-                                predicate);
+                                   first,
+                                   last,
+                                   __transform::no_stencil_tag(),
+                                   result,
+                                   transform_op,
+                                   predicate);
 }    // func transform_if
 
 template <class Derived,
@@ -359,24 +349,19 @@ transform(execution_policy<Derived> &policy,
   if (num_items == 0)
     return result;
 
-  // Workaround, so kernel(s) called by ::rocprim::transform is/are not lost,
-  // Implicit instantiation of ::rocprim::transform function template
-  // that will be used in #if __THRUST_HAS_HIPRT__ block.
-  {
-    auto ptr = ::rocprim::transform<::rocprim::default_config, InputIt, OutputIt, TransformOp>;
-    (void) ptr;
-  }
+  THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((
+    rocprim::transform<rocprim::default_config, InputIt, OutputIt, TransformOp>
+  ));
 #if __THRUST_HAS_HIPRT__
   {
     hipStream_t stream = hip_rocprim::stream(policy);
-    hipError_t status = ::rocprim::transform(
-                          first,
-                          result,
-                          num_items,
-                          transform_op,
-                          stream,
-                          false
-                        );
+    bool debug_sync = THRUST_HIP_DEBUG_SYNC_FLAG;
+    hipError_t status = rocprim::transform(first,
+                                           result,
+                                           num_items,
+                                           transform_op,
+                                           stream,
+                                           debug_sync);
     hip_rocprim::throw_on_error(status, "transform failed");
 
     return result + num_items;
@@ -384,7 +369,7 @@ transform(execution_policy<Derived> &policy,
 #else
   {
     (void) policy;
-    while(first != last)
+    while (first != last)
     {
       *result++ = transform_op(*first++);
     }
@@ -440,14 +425,40 @@ transform(execution_policy<Derived> &policy,
           OutputIt                   result,
           TransformOp                transform_op)
 {
-  return hip_rocprim::transform_if(policy,
-                                first1,
-                                last1,
-                                first2,
-                                __transform::no_stencil_tag(),
-                                result,
-                                transform_op,
-                                __transform::always_true_predicate());
+  typedef typename iterator_traits<InputIt1>::difference_type size_type;
+  size_type num_items = static_cast<size_type>(thrust::distance(first1, last1));
+
+  if (num_items == 0)
+    return result;
+
+  THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((
+    rocprim::transform<rocprim::default_config, InputIt1, InputIt2, OutputIt, TransformOp>
+  ));
+#if __THRUST_HAS_HIPRT__
+  {
+    hipStream_t stream = hip_rocprim::stream(policy);
+    bool debug_sync = THRUST_HIP_DEBUG_SYNC_FLAG;
+    hipError_t status = rocprim::transform(first1,
+                                           first2,
+                                           result,
+                                           num_items,
+                                           transform_op,
+                                           stream,
+                                           debug_sync);
+    hip_rocprim::throw_on_error(status, "transform failed");
+
+    return result + num_items;
+  }
+#else
+  {
+    (void) policy;
+    while (first1 != last1)
+    {
+      *result++ = transform_op(*first1++, *first2++);
+    }
+    return result;
+  }
+#endif
 } // func transform
 
 }    // namespace hip_rocprim

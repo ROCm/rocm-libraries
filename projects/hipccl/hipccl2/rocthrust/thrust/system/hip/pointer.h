@@ -26,6 +26,8 @@
  ******************************************************************************/
 #pragma once
 
+#include <thrust/detail/pointer.h>
+
 template<typename Element, typename Tag, typename Reference, typename Derived>
 struct std::iterator_traits<thrust::pointer<Element,Tag,Reference,Derived> >
   {

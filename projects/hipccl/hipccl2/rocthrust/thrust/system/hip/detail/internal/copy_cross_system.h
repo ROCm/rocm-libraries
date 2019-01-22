@@ -93,7 +93,7 @@ namespace __copy {
             class InputIt,
             class Size,
             class OutputIt>
-  OutputIt __host__
+  OutputIt __host__ /* STREAMHPC WORKAROUND */ __device__
   cross_system_copy_n(thrust::execution_policy<System1>& sys1,
                       thrust::execution_policy<System2>& sys2,
                       InputIt                            begin,
@@ -102,15 +102,26 @@ namespace __copy {
                       thrust::detail::true_type)    // trivial copy
 
   {
-    typedef typename iterator_traits<InputIt>::value_type InputTy;
+    // STREAMHPC WORKAROUND
+#if defined(THRUST_HIP_DEVICE_CODE)
 
+    THRUST_UNUSED_VAR(sys1);
+    THRUST_UNUSED_VAR(sys2);
+    THRUST_UNUSED_VAR(n);
+    THRUST_UNUSED_VAR(begin);
+    return result;
+
+#else
+
+    typedef typename iterator_traits<InputIt>::value_type InputTy;
     trivial_device_copy(derived_cast(sys1),
                         derived_cast(sys2),
                         reinterpret_cast<InputTy*>(thrust::raw_pointer_cast(&*result)),
                         reinterpret_cast<InputTy const*>(thrust::raw_pointer_cast(&*begin)),
                         n);
-
     return result + n;
+
+#endif
   }
 
   // non-trivial H->D copy
@@ -119,7 +130,7 @@ namespace __copy {
             class InputIt,
             class Size,
             class OutputIt>
-  OutputIt __host__
+  OutputIt __host__ /* STREAMHPC WORKAROUND */ __device__
   cross_system_copy_n(thrust::cpp::execution_policy<H>&      host_s,
                       thrust::hip_rocprim::execution_policy<D>& device_s,
                       InputIt                                first,
@@ -131,6 +142,19 @@ namespace __copy {
     // get type of the input data
     typedef typename thrust::iterator_value<InputIt>::type InputTy;
 
+    // STREAMHPC WORKAROUND
+#if defined(THRUST_HIP_DEVICE_CODE)
+
+    THRUST_UNUSED_VAR(host_s);
+    THRUST_UNUSED_VAR(device_s);
+    THRUST_UNUSED_VAR(first);
+    THRUST_UNUSED_VAR(num_items);
+    THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((
+      hip_rocprim::copy_n<D, InputTy*, Size, OutputIt>
+    ));
+    return result;
+
+#else
 
     // copy input data into host temp storage
     InputIt last = first;
@@ -172,6 +196,8 @@ namespace __copy {
     thrust::return_temporary_buffer(device_s, d_in_ptr);
 
     return ret;
+
+#endif
   }
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
@@ -183,7 +209,7 @@ namespace __copy {
             class InputIt,
             class Size,
             class OutputIt>
-  OutputIt __host__
+  OutputIt __host__ /* STREAMHPC WORKAROUND */ __device__
   cross_system_copy_n(thrust::hip_rocprim::execution_policy<D>& device_s,
                       thrust::cpp::execution_policy<H>&   host_s,
                       InputIt                             first,
@@ -194,6 +220,21 @@ namespace __copy {
   {
     // get type of the input data
     typedef typename thrust::iterator_value<InputIt>::type InputTy;
+
+    // STREAMHPC WORKAROUND
+#if defined(THRUST_HIP_DEVICE_CODE)
+
+    THRUST_UNUSED_VAR(device_s);
+    THRUST_UNUSED_VAR(host_s);
+    THRUST_UNUSED_VAR(first);
+    THRUST_UNUSED_VAR(num_items);
+
+    THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((
+      hip_rocprim::uninitialized_copy_n<D, InputIt, Size, InputTy*>
+    ));
+    return result;
+
+#else
 
     // allocate device temp storage
     hipError_t status;
@@ -235,6 +276,8 @@ namespace __copy {
     thrust::return_temporary_buffer(host_s, temp);
 
     return ret;
+
+#endif
   }
 #endif
 
@@ -243,7 +286,7 @@ namespace __copy {
             class InputIt,
             class Size,
             class OutputIt>
-  OutputIt __host__
+  OutputIt __host__ /* STREAMHPC WORKAROUND */ __device__
   cross_system_copy_n(cross_system<System1, System2> systems,
                       InputIt  begin,
                       Size     n,
