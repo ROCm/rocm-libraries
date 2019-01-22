@@ -21,7 +21,7 @@
 #include <thrust/detail/integer_traits.h>
 
 // for floating point infinity
-#if (THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC) || (THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC)
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 #include <math_constants.h>
 #else
 #include <limits>
@@ -252,4 +252,3 @@ operator>>(std::basic_istream<CharT,Traits> &is,
 } // end random
 
 } // end thrust
-

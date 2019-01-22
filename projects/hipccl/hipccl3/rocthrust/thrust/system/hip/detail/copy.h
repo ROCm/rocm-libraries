@@ -84,7 +84,7 @@ template <class System1,
           class InputIterator,
           class Size,
           class OutputIterator>
-OutputIterator __host__
+OutputIterator __host__ /* STREAMHPC WORKAROUND */ __device__
 copy_n(cross_system<System1, System2> systems,
        InputIterator  first,
        Size           n,
@@ -117,12 +117,9 @@ copy(execution_policy<System> &system,
      OutputIterator            result)
 {
   OutputIterator ret = result;
-  {
-    auto ptr = __copy::device_to_device<
-      System, InputIterator, OutputIterator
-    >;
-    (void) ptr;
-  }
+  THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((
+    __copy::device_to_device<System, InputIterator, OutputIterator>
+  ));
 #if __THRUST_HAS_HIPRT__
   {
     ret = __copy::device_to_device(system, first, last, result);
@@ -150,12 +147,9 @@ copy_n(execution_policy<System> &system,
        OutputIterator            result)
 {
   OutputIterator ret = result;
-  {
-    auto ptr = __copy::device_to_device<
-      System, InputIterator, OutputIterator
-    >;
-    (void) ptr;
-  }
+  THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((
+    __copy::device_to_device<System, InputIterator, OutputIterator>
+  ));
 #if __THRUST_HAS_HIPRT__
   {
     ret = __copy::device_to_device(system, first, first + n, result);
@@ -187,13 +181,27 @@ template <class System1,
           class InputIterator,
           class Size,
           class OutputIterator>
-OutputIterator __host__
+OutputIterator __host__ /* STREAMHPC WORKAROUND */ __device__
 copy_n(cross_system<System1, System2> systems,
        InputIterator  first,
        Size           n,
        OutputIterator result)
 {
+  // STREAMHPC WORKAROUND
+#if defined(THRUST_HIP_DEVICE_CODE)
+
+  THRUST_UNUSED_VAR(systems);
+  THRUST_UNUSED_VAR(first);
+  THRUST_UNUSED_VAR(n);
+  OutputIterator (*ptr)(cross_system<System1, System2>, InputIterator, Size, OutputIterator) = __copy::cross_system_copy_n;
+  (void) ptr;
+  return result;
+
+#else
+
   return __copy::cross_system_copy_n(systems, first, n, result);
+
+#endif
 } // end copy_n()
 
 
