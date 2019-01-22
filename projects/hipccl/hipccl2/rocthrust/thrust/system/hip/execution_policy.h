@@ -54,7 +54,7 @@
 // #include <thrust/system/hip/detail/reverse.h>
 // #include <thrust/system/hip/detail/scatter.h>
 #include <thrust/system/hip/detail/swap_ranges.h>
-// #include <thrust/system/hip/detail/tabulate.h>
+#include <thrust/system/hip/detail/tabulate.h>
 #include <thrust/system/hip/detail/transform.h>
 // #include <thrust/system/hip/detail/transform_reduce.h>
 // #include <thrust/system/hip/detail/transform_scan.h>
@@ -77,7 +77,6 @@
 // #include <thrust/system/hip/detail/merge.h>
 // #include <thrust/system/hip/detail/scan_by_key.h>
 // #include <thrust/system/hip/detail/set_operations.h>
-// #include <thrust/system/hip/detail/sort.h>
+#include <thrust/system/hip/detail/sort.h>
 
 // // work in progress
-

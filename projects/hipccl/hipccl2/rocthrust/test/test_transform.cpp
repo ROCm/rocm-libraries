@@ -23,124 +23,140 @@
 #include <iostream>
 #include <type_traits>
 #include <cstdlib>
-#include <algorithm>
-#include <vector>
 
 // Google Test
 #include <gtest/gtest.h>
 
 // Thrust
-#include <thrust/memory.h>
 #include <thrust/transform.h>
 // STREAMHPC TODO replace <thrust/detail/seq.h> with <thrust/execution_policy.h>
 #include <thrust/detail/seq.h>
-#include <thrust/device_ptr.h>
-#include <thrust/device_malloc.h>
-#include <thrust/device_free.h>
+#include <thrust/device_vector.h>
+#include <thrust/host_vector.h>
 #include <thrust/iterator/counting_iterator.h>
 
-// HIP API
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-#include <hip/hip_runtime_api.h>
-#include <hip/hip_runtime.h>
-
-#define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 template<
-    class InputType,
-    class OutputType = InputType
+  class Input,
+  class Output = Input
 >
 struct Params
 {
-    using input_type = InputType;
-    using output_type = OutputType;
+  using input_type = Input;
+  using output_type = Output;
 };
 
 template<class Params>
 class TransformTests : public ::testing::Test
 {
 public:
-    using input_type = typename Params::input_type;
-    using output_type = typename Params::output_type;
+  using input_type = typename Params::input_type;
+  using output_type = typename Params::output_type;
 };
 
 typedef ::testing::Types<
-    Params<int>,
-    Params<unsigned short>
+  Params<int>,
+  Params<unsigned short>,
+  Params<int, long long>
 > TransformTestsParams;
 
 TYPED_TEST_CASE(TransformTests, TransformTestsParams);
 
 std::vector<size_t> get_sizes()
 {
-    std::vector<size_t> sizes = {
-        0, 1, 2, 12, 63, 64, 211, 256, 344,
-        1024, 2048, 5096, 34567, (1 << 17) - 1220
-    };
-    return sizes;
+  std::vector<size_t> sizes = {
+    0, 1, 2, 12, 63, 64, 211, 256, 344,
+    1024, 2048, 5096, 34567, (1 << 17) - 1220
+  };
+  return sizes;
 }
 
 template<class T>
-struct transform
+struct unary_transform
 {
-    __device__ __host__ inline
-    constexpr T operator()(const T& a) const
-    {
-        return a + 5;
-    }
+  __device__ __host__ inline
+  constexpr T operator()(const T& a) const
+  {
+    return a + 5;
+  }
 };
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+template<class T>
+struct binary_transform
+{
+  __device__ __host__ inline
+  constexpr T operator()(const T& a, const T& b) const
+  {
+    return a * 2 + b * 5;
+  }
+};
 
 TYPED_TEST(TransformTests, UnaryTransform)
 {
   using T = typename TestFixture::input_type;
   using U = typename TestFixture::output_type;
 
-  const std::vector<size_t> sizes = get_sizes();
-  for(auto size : sizes)
+  for(auto size : get_sizes())
   {
     SCOPED_TRACE(testing::Message() << "with size = " << size);
 
-    std::vector<T> input(size, 0);
-    std::vector<U> output(size, 0);
-
-    thrust::device_ptr<T> input_ptr = thrust::device_malloc<T>(size);
-    thrust::device_ptr<U> output_ptr = thrust::device_malloc<U>(size);
-
+    thrust::host_vector<T> h_input(size);
     for(size_t i = 0; i < size; i++)
     {
-        input[i] = i;
+      h_input[i] = i;
     }
-
-    hipMemcpy(
-        thrust::raw_pointer_cast(input_ptr), input.data(),
-        input.size() * sizeof(T),
-        hipMemcpyHostToDevice
-    );
 
     // Calculate expected results on host
-    std::vector<U> expected(input.size());
-    std::transform(input.begin(), input.end(), expected.begin(), transform<U>());
+    thrust::host_vector<U> expected(size);
+    thrust::transform(h_input.begin(), h_input.end(), expected.begin(), unary_transform<U>());
 
-    thrust::transform(input_ptr, input_ptr + size, output_ptr, transform<U>());
+    thrust::device_vector<T> d_input(h_input);
+    thrust::device_vector<U> d_output(size);
+    thrust::transform(d_input.begin(), d_input.end(), d_output.begin(), unary_transform<U>());
 
-    hipMemcpy(
-        output.data(), thrust::raw_pointer_cast(output_ptr),
-        size * sizeof(U),
-        hipMemcpyDeviceToHost
-    );
-
+    thrust::host_vector<U> h_output = d_output;
     for(size_t i = 0; i < size; i++)
     {
-        ASSERT_EQ(output[i], expected[i]);
+      ASSERT_EQ(h_output[i], expected[i]) << "where index = " << i;
     }
-
-    // Free
-    thrust::device_free(input_ptr);
-    thrust::device_free(output_ptr);
   }
 }
 
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+TYPED_TEST(TransformTests, BinaryTransform)
+{
+  using T = typename TestFixture::input_type;
+  using U = typename TestFixture::output_type;
+
+  for(auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+    thrust::host_vector<T> h_input1(size);
+    thrust::host_vector<T> h_input2(size);
+    for(size_t i = 0; i < size; i++)
+    {
+      h_input1[i] = i * 3;
+      h_input2[i] = i;
+    }
+
+    // Calculate expected results on host
+    thrust::host_vector<U> expected(size);
+    thrust::transform(
+      h_input1.begin(), h_input1.end(), h_input2.begin(), expected.begin(),
+      binary_transform<U>()
+    );
+
+    thrust::device_vector<T> d_input1(h_input1);
+    thrust::device_vector<T> d_input2(h_input2);
+    thrust::device_vector<U> d_output(size);
+    thrust::transform(
+      d_input1.begin(), d_input1.end(), d_input2.begin(), d_output.begin(),
+      binary_transform<U>()
+    );
+
+    thrust::host_vector<U> h_output = d_output;
+    for(size_t i = 0; i < size; i++)
+    {
+      ASSERT_EQ(h_output[i], expected[i]) << "where index = " << i;
+    }
+  }
+}
