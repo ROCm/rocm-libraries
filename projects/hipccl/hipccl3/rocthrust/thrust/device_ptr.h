@@ -90,6 +90,10 @@ template<typename T>
     __host__ __device__
     explicit device_ptr(OtherT *ptr) : super_t(ptr) {}
 
+    // STREAMHPC Fixes HCC linkage error
+    __host__ __device__
+    explicit device_ptr(T *ptr) : super_t(ptr) {}
+
     /*! \p device_ptr's copy constructor allows copying from another device_ptr with related type.
      *  \param other The \p device_ptr to copy from.
      */
@@ -171,4 +175,3 @@ inline device_ptr<T> device_pointer_cast(const device_ptr<T> &ptr);
 
 #include <thrust/detail/device_ptr.inl>
 #include <thrust/detail/raw_pointer_cast.h>
-

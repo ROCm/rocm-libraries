@@ -22,7 +22,7 @@
 
 cmake_minimum_required(VERSION 3.5.1 FATAL_ERROR)
 
-project(rocprim VERSION 0.0.1.0 LANGUAGES CXX)
+project(thrust VERSION 0.0.1.0 LANGUAGES CXX)
 
 # CMake modules
 list(APPEND CMAKE_MODULE_PATH
@@ -46,7 +46,7 @@ include(cmake/VerifyCompiler.cmake)
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror -Wno-unused-function")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wno-unused-function")
 
 # Build options
 option(BUILD_TEST "Build tests" ON)
@@ -59,7 +59,7 @@ include(cmake/Summary.cmake)
 print_configuration_summary()
 
 # AMD targets
-set(AMDGPU_TARGETS gfx803;gfx900 CACHE STRING "List of specific machine types for library to target")
+set(AMDGPU_TARGETS gfx803;gfx900;gfx906 CACHE STRING "List of specific machine types for library to target")
 
 # Thrust (with HIP backend)
 add_subdirectory(thrust)
@@ -68,4 +68,5 @@ add_subdirectory(thrust)
 if(BUILD_TEST)
   enable_testing()
   add_subdirectory(test)
+  add_subdirectory(testing)
 endif()
