@@ -47,7 +47,7 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOLEAN "Add paths to linker se
 include(cmake/VerifyCompiler.cmake)
 
 # Build option to disable -Werror
-option(DISABLE_WERROR "Disable building with Werror" OFF)
+option(DISABLE_WERROR "Disable building with Werror" ON)
 
 # Set CXX flags
 set(CMAKE_CXX_STANDARD 11)
