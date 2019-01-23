@@ -65,6 +65,22 @@ typedef ::testing::Types<
 
 TYPED_TEST_CASE(DevicePtrTests, DevicePtrTestsParams);
 
+std::vector<size_t> get_sizes()
+{
+    std::vector<size_t> sizes = {
+        0, 1, 2, 12, 63, 64, 211, 256, 344,
+        1024, 2048, 5096, 34567, (1 << 17) - 1220
+    };
+    return sizes;
+}
+
+template <typename T>
+struct mark_processed_functor
+{
+    thrust::device_ptr<T> ptr;
+    __host__ __device__ void operator()(T x){ ptr[static_cast<int>(x)] = 1; }
+};
+
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
 TYPED_TEST(DevicePtrTests, MakeDevicePointer)
@@ -122,6 +138,71 @@ TEST(DevicePtrTests,TestDevicePointerManipulation)
     begin = begin - (thrust::device_ptr<int>::difference_type) 1;
 
     ASSERT_EQ(end - begin, 5);
+}
+
+TYPED_TEST(DevicePtrTests,TestRawPointerCast)
+{
+    using T = typename TestFixture::input_type;
+    thrust::device_vector<T> vec(3);
+
+    T * first;
+    T * last;
+
+    first = thrust::raw_pointer_cast(&vec[0]);
+    last  = thrust::raw_pointer_cast(&vec[3]);
+    ASSERT_EQ(last - first, 3);
+
+    first = thrust::raw_pointer_cast(&vec.front());
+    last  = thrust::raw_pointer_cast(&vec.back());
+    ASSERT_EQ(last - first, 2);
+}
+
+TYPED_TEST(DevicePtrTests, TestDevicePointerValue)
+{
+  using T = typename TestFixture::input_type;
+
+  const std::vector<size_t> sizes = get_sizes();
+  for(auto size : sizes)
+  {
+    SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+    thrust::device_vector<T> d_data(size);
+
+    thrust::device_ptr<T> begin(&d_data[0]);
+
+    auto raw_ptr_begin = thrust::raw_pointer_cast(begin);
+    if(size > 0) ASSERT_NE(raw_ptr_begin, nullptr);
+
+    // Zero input memory
+    if(size > 0) HIP_CHECK(hipMemset(raw_ptr_begin, 0, sizeof(T) * size));
+
+    // Create unary function
+    mark_processed_functor<T> func;
+    func.ptr = begin;
+
+    // Run for_each in [0; end] range
+    auto end = size < 2 ? size : size/2;
+    auto result = thrust::for_each(
+      thrust::make_counting_iterator<size_t>(0),
+      thrust::make_counting_iterator<size_t>(end),
+      func
+    );
+    ASSERT_EQ(result, thrust::make_counting_iterator<size_t>(end));
+
+    thrust::host_vector<T> h_data = d_data;
+
+    for(size_t i = 0; i < size; i++)
+    {
+      if(i < end)
+      {
+        ASSERT_EQ(h_data[i], T(1)) << "where index = " << i;
+      }
+      else
+      {
+        ASSERT_EQ(h_data[i], T(0)) << "where index = " << i;
+      }
+    }
+  }
 }
 
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
