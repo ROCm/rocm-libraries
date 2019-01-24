@@ -61,14 +61,22 @@ public:
 };
 
 typedef ::testing::Types<
-    Params<short>,
-    Params<int>,
-    Params<long long>,
-    Params<unsigned short>,
-    Params<unsigned int>,
-    Params<unsigned long long>,
-    Params<float>,
-    Params<double>
+    Params<thrust::host_vector<short>>,
+    Params<thrust::host_vector<int>>,
+    Params<thrust::host_vector<long long>>,
+    Params<thrust::host_vector<unsigned short>>,
+    Params<thrust::host_vector<unsigned int>>,
+    Params<thrust::host_vector<unsigned long long>>,
+    Params<thrust::host_vector<float>>,
+    Params<thrust::host_vector<double>>,
+    Params<thrust::device_vector<short>>,
+    Params<thrust::device_vector<int>>,
+    Params<thrust::device_vector<long long>>,
+    Params<thrust::device_vector<unsigned short>>,
+    Params<thrust::device_vector<unsigned int>>,
+    Params<thrust::device_vector<unsigned long long>>,
+    Params<thrust::device_vector<float>>,
+    Params<thrust::device_vector<double>>
 > VectorTestsParams;
 
 TYPED_TEST_CASE(VectorTests, VectorTestsParams);
@@ -86,17 +94,11 @@ std::vector<size_t> get_sizes()
 
 TYPED_TEST(VectorTests, TestVectorZeroSize)
 {
-  using T = typename TestFixture::input_type;
+  using Vector = typename TestFixture::input_type;
+  Vector v;
 
-  thrust::host_vector<T> h_v;
-
-  ASSERT_EQ(h_v.size(), 0);
-  ASSERT_EQ((h_v.begin() == h_v.end()), true);
-
-  thrust::device_vector<T> d_v;
-
-  ASSERT_EQ(d_v.size(), 0);
-  ASSERT_EQ((d_v.begin() == d_v.end()), true);
+  ASSERT_EQ(v.size(), 0);
+  ASSERT_EQ((v.begin() == v.end()), true);
 }
 
 TEST(VectorTests, TestVectorBool)
@@ -116,33 +118,24 @@ TEST(VectorTests, TestVectorBool)
   ASSERT_EQ(d[2], true);
 }
 
-TYPED_TEST(VectorTests, TestHostVectorFrontBack)
+TYPED_TEST(VectorTests, TestVectorFrontBack)
 {
-  using T = typename TestFixture::input_type;
+  using Vector = typename TestFixture::input_type;
+  using T = typename Vector::value_type;
 
-  thrust::host_vector<T> v(3);
+  Vector v(3);
   v[0] = T(0); v[1] = T(1); v[2] = T(2);
 
   ASSERT_EQ(v.front(), T(0));
   ASSERT_EQ(v.back(),  T(2));
 }
 
-TYPED_TEST(VectorTests, TestDeviceVectorFrontBack)
+TYPED_TEST(VectorTests, TestVectorData)
 {
-  using T = typename TestFixture::input_type;
+  using Vector = typename TestFixture::input_type;
+  using T = typename Vector::value_type;
 
-  thrust::device_vector<T> v(3);
-  v[0] = T(0); v[1] = T(1); v[2] = T(2);
-
-  ASSERT_EQ(v.front(), T(0));
-  ASSERT_EQ(v.back(),  T(2));
-}
-
-TYPED_TEST(VectorTests, TestHostVectorData)
-{
-  using T = typename TestFixture::input_type;
-
-  thrust::host_vector<T> v(3);
+  Vector v(3);
   v[0] = T(0); v[1] = T(1); v[2] = T(2);
 
   ASSERT_EQ(T(0),       *v.data());
@@ -152,7 +145,7 @@ TYPED_TEST(VectorTests, TestHostVectorData)
   ASSERT_EQ(&*v.begin(), v.data());
   ASSERT_EQ(&v[0],       v.data());
 
-  const thrust::host_vector<T> &c_v = v;
+  const Vector &c_v = v;
 
   ASSERT_EQ(T(0),         *c_v.data());
   ASSERT_EQ(T(1),         *(c_v.data() + 1));
@@ -162,28 +155,181 @@ TYPED_TEST(VectorTests, TestHostVectorData)
   ASSERT_EQ(&c_v[0],       c_v.data());
 }
 
-TYPED_TEST(VectorTests, TestDeviceVectorData)
+TYPED_TEST(VectorTests, TestVectorElementAssignment)
 {
-  using T = typename TestFixture::input_type;
+  using Vector = typename TestFixture::input_type;
+  using T = typename Vector::value_type;
 
-  thrust::device_vector<T> v(3);
+  // TODO: No device code available for function: _ZN7rocprim6detail16transform_kernelILj256ELj16ERKjN6thrust10device_ptrIjEES6_NS4_8identityIjEEEEvT2_mT3_T4_
+  // Vector v(3);
+  thrust::host_vector<T> v(3);
+
   v[0] = T(0); v[1] = T(1); v[2] = T(2);
 
-  ASSERT_EQ(T(0),       *v.data());
-  ASSERT_EQ(T(1),       *(v.data() + 1));
-  ASSERT_EQ(T(2),       *(v.data() + 2));
-  ASSERT_EQ(&v.front(),  v.data());
-  ASSERT_EQ(&*v.begin(), v.data());
-  ASSERT_EQ(&v[0],       v.data());
+  ASSERT_EQ(v[0], T(0));
+  ASSERT_EQ(v[1], T(1));
+  ASSERT_EQ(v[2], T(2));
 
-  const thrust::device_vector<T> &c_v = v;
+  v[0] = T(10); v[1] = T(11); v[2] = T(12);
 
-  ASSERT_EQ(T(0),         *c_v.data());
-  ASSERT_EQ(T(1),         *(c_v.data() + 1));
-  ASSERT_EQ(T(2),         *(c_v.data() + 2));
-  ASSERT_EQ(&c_v.front(),  c_v.data());
-  ASSERT_EQ(&*c_v.begin(), c_v.data());
-  ASSERT_EQ(&c_v[0],       c_v.data());
+  ASSERT_EQ(v[0], T(10));
+  ASSERT_EQ(v[1], T(11));
+  ASSERT_EQ(v[2], T(12));
+
+  // TODO: No device code available for function: _ZN7rocprim6detail16transform_kernelILj256ELj16ERKjN6thrust10device_ptrIjEES6_NS4_8identityIjEEEEvT2_mT3_T4_
+  // Vector w(3);
+  thrust::host_vector<T> w(3);
+  w[0] = v[0];
+  w[1] = v[1];
+  w[2] = v[2];
+
+  // TODO: Implement reduce in system
+  //ASSERT_EQ(v, w);
 }
 
+TYPED_TEST(VectorTests, TestVectorFromSTLVector)
+{
+  using Vector = typename TestFixture::input_type;
+  using T = typename Vector::value_type;
+
+  std::vector<T> stl_vector(3);
+  stl_vector[0] = T(0);
+  stl_vector[1] = T(1);
+  stl_vector[2] = T(2);
+
+  thrust::host_vector<T> v(stl_vector);
+
+  ASSERT_EQ(v.size(), 3);
+  ASSERT_EQ(v[0], T(0));
+  ASSERT_EQ(v[1], T(1));
+  ASSERT_EQ(v[2], T(2));
+
+  v = stl_vector;
+
+  ASSERT_EQ(v.size(), 3);
+  ASSERT_EQ(v[0], T(0));
+  ASSERT_EQ(v[1], T(1));
+  ASSERT_EQ(v[2], T(2));
+}
+
+TYPED_TEST(VectorTests, TestVectorFillAssign)
+{
+  using Vector = typename TestFixture::input_type;
+  using T = typename Vector::value_type;
+
+  thrust::host_vector<T> v;
+  v.assign(3, T(13));
+
+  ASSERT_EQ(v.size(), 3);
+  ASSERT_EQ(v[0], T(13));
+  ASSERT_EQ(v[1], T(13));
+  ASSERT_EQ(v[2], T(13));
+}
+
+TYPED_TEST(VectorTests, TestVectorAssignFromSTLVector)
+{
+  using Vector = typename TestFixture::input_type;
+  using T = typename Vector::value_type;
+
+  std::vector<T> stl_vector(3);
+  stl_vector[0] = T(0);
+  stl_vector[1] = T(1);
+  stl_vector[2] = T(2);
+
+  thrust::host_vector<T> v;
+  v.assign(stl_vector.begin(), stl_vector.end());
+
+  ASSERT_EQ(v.size(), 3);
+  ASSERT_EQ(v[0], T(0));
+  ASSERT_EQ(v[1], T(1));
+  ASSERT_EQ(v[2], T(2));
+}
+
+TYPED_TEST(VectorTests, TestVectorFromBiDirectionalIterator)
+{
+  using Vector = typename TestFixture::input_type;
+  using T = typename Vector::value_type;
+
+  std::list<T> stl_list;
+  stl_list.push_back(T(0));
+  stl_list.push_back(T(1));
+  stl_list.push_back(T(2));
+
+  thrust::host_vector<int> v(stl_list.begin(), stl_list.end());
+
+  ASSERT_EQ(v.size(), 3);
+  ASSERT_EQ(v[0], T(0));
+  ASSERT_EQ(v[1], T(1));
+  ASSERT_EQ(v[2], T(2));
+}
+
+TYPED_TEST(VectorTests, TestVectorAssignFromBiDirectionalIterator)
+{
+  using Vector = typename TestFixture::input_type;
+  using T = typename Vector::value_type;
+
+  std::list<T> stl_list;
+  stl_list.push_back(T(0));
+  stl_list.push_back(T(1));
+  stl_list.push_back(T(2));
+
+  // TODO: No device code available for function: _ZN7rocprim6detail16transform_kernelILj256ELj16ERKjN6thrust10device_ptrIjEES6_NS4_8identityIjEEEEvT2_mT3_T4_
+  // Vector v;
+  thrust::host_vector<int> v;
+  v.assign(stl_list.begin(), stl_list.end());
+
+  ASSERT_EQ(v.size(), 3);
+  ASSERT_EQ(v[0], T(0));
+  ASSERT_EQ(v[1], T(1));
+  ASSERT_EQ(v[2], T(2));
+}
+
+TYPED_TEST(VectorTests, TestVectorAssignFromHostVector)
+{
+  using Vector = typename TestFixture::input_type;
+  using T = typename Vector::value_type;
+
+  thrust::host_vector<T> h(3);
+  h[0] = T(0);
+  h[1] = T(1);
+  h[2] = T(2);
+
+  Vector v;
+  v.assign(h.begin(), h.end());
+
+  ASSERT_EQ(v, h);
+}
+
+TYPED_TEST(VectorTests, TestVectorToAndFromHostVector)
+{
+  using Vector = typename TestFixture::input_type;
+  using T = typename Vector::value_type;
+
+  thrust::host_vector<T> h(3);
+  h[0] = T(0);
+  h[1] = T(1);
+  h[2] = T(2);
+
+  Vector v(h);
+
+  ASSERT_EQ(v, h);
+
+  v[0] = T(10);
+  v[1] = T(11);
+  v[2] = T(12);
+
+  ASSERT_EQ(h[0], 0);  ASSERT_EQ(v[0], T(10));
+  ASSERT_EQ(h[1], 1);  ASSERT_EQ(v[1], T(11));
+  ASSERT_EQ(h[2], 2);  ASSERT_EQ(v[2], T(12));
+
+  h = v;
+
+  ASSERT_EQ(v, h);
+
+  h[1] = T(11);
+
+  v = h;
+
+  ASSERT_EQ(v, h);
+}
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
