@@ -144,7 +144,7 @@ TYPED_TEST(DeviceReferenceTests, TestDeviceReferenceConstructorFromDevicePointer
 }
 
 
-TEST(DeviceReferenceTests, TestDeviceReferenceAssignmentFromDeviceReference)
+/*TEST(DeviceReferenceTests, TestDeviceReferenceAssignmentFromDeviceReference)
 {
   // test same types
   using T0 = int;
@@ -171,7 +171,7 @@ TEST(DeviceReferenceTests, TestDeviceReferenceAssignmentFromDeviceReference)
   ASSERT_EQ(13.0f, ref2);
   ASSERT_EQ(ref0, ref2);
   ASSERT_EQ(ref1, ref2);
-}
+}*/
 
 TYPED_TEST(DeviceReferenceTests,TestDeviceReferenceManipulation)
 {
@@ -307,8 +307,8 @@ TYPED_TEST(DeviceReferenceIntegerTests,TestDeviceReferenceIntegerManipulation)
   thrust::device_reference<const T> ref1 = v[0];
   ASSERT_EQ(true, ref1 == ref);
 }
-/*
-TYPED_TEST(DeviceReferenceTests,TestDeviceReferenceSwap)
+
+/*TYPED_TEST(DeviceReferenceTests,TestDeviceReferenceSwap)
 {
     using T = typename TestFixture::input_type;
 

@@ -60,7 +60,14 @@ public:
 };
 
 typedef ::testing::Types<
-    Params<int>
+    Params<short>,
+    Params<int>,
+    Params<long long>,
+    Params<unsigned short>,
+    Params<unsigned int>,
+    Params<unsigned long long>,
+    Params<float>,
+    Params<double>
 > DevicePtrTestsParams;
 
 TYPED_TEST_CASE(DevicePtrTests, DevicePtrTestsParams);
@@ -78,7 +85,7 @@ template <typename T>
 struct mark_processed_functor
 {
     thrust::device_ptr<T> ptr;
-    __host__ __device__ void operator()(T x){ ptr[static_cast<int>(x)] = 1; }
+    __host__ __device__ void operator()(size_t x){ ptr[x] = 1; }
 };
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
