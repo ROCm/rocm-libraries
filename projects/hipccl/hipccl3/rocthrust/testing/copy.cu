@@ -182,6 +182,21 @@ void TestCopyVectorBool(void)
 DECLARE_UNITTEST(TestCopyVectorBool);
 
 
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+
+// Workaround: std::back_insert_iterator has void value_type.
+BEGIN_NS_THRUST
+template <> struct access_traits<void>
+{
+  typedef const int& const_type;
+  typedef int& non_const_type;
+
+  typedef const int& parameter_type;
+};
+END_NS_THRUST
+
+#endif
+
 template <class Vector>
 void TestCopyListTo(void)
 {
@@ -474,7 +489,8 @@ DECLARE_UNITTEST(TestCopyDispatchImplicit);
 
 
 template<typename InputIterator, typename OutputIterator, typename Predicate>
-OutputIterator copy_if(my_system &system, InputIterator, InputIterator, OutputIterator result, Predicate pred)
+__host__ __device__
+OutputIterator copy_if(my_system &system, InputIterator, InputIterator, OutputIterator result, Predicate)
 {
     system.validate_dispatch();
     return result;
@@ -497,7 +513,8 @@ DECLARE_UNITTEST(TestCopyIfDispatchExplicit);
 
 
 template<typename InputIterator, typename OutputIterator, typename Predicate>
-OutputIterator copy_if(my_tag, InputIterator, InputIterator, OutputIterator result, Predicate pred)
+__host__ __device__
+OutputIterator copy_if(my_tag, InputIterator, InputIterator, OutputIterator result, Predicate)
 {
     *result = 13;
     return result;
@@ -518,7 +535,8 @@ DECLARE_UNITTEST(TestCopyIfDispatchImplicit);
 
 
 template<typename InputIterator1, typename InputIterator2, typename OutputIterator, typename Predicate>
-OutputIterator copy_if(my_system &system, InputIterator1, InputIterator1, InputIterator2, OutputIterator result, Predicate pred)
+__host__ __device__
+OutputIterator copy_if(my_system &system, InputIterator1, InputIterator1, InputIterator2, OutputIterator result, Predicate)
 {
     system.validate_dispatch();
     return result;
@@ -542,7 +560,8 @@ DECLARE_UNITTEST(TestCopyIfStencilDispatchExplicit);
 
 
 template<typename InputIterator1, typename InputIterator2, typename OutputIterator, typename Predicate>
-OutputIterator copy_if(my_tag, InputIterator1, InputIterator1, InputIterator2, OutputIterator result, Predicate pred)
+__host__ __device__
+OutputIterator copy_if(my_tag, InputIterator1, InputIterator1, InputIterator2, OutputIterator result, Predicate)
 {
     *result = 13;
     return result;
@@ -561,4 +580,3 @@ void TestCopyIfStencilDispatchImplicit()
     ASSERT_EQUAL(13, vec.front());
 }
 DECLARE_UNITTEST(TestCopyIfStencilDispatchImplicit);
-
