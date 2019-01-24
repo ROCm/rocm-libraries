@@ -30,6 +30,7 @@
 #if 0
 #include <thrust/system/cpp/detail/get_value.h>
 #include <thrust/system/cuda/detail/get_value.h>
+#include <thrust/system/hip/detail/get_value.h>
 #include <thrust/system/omp/detail/get_value.h>
 #include <thrust/system/tbb/detail/get_value.h>
 #endif
@@ -41,4 +42,3 @@
 #define __THRUST_DEVICE_SYSTEM_GET_VALUE_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/detail/get_value.h>
 #include __THRUST_DEVICE_SYSTEM_GET_VALUE_HEADER
 #undef __THRUST_DEVICE_SYSTEM_GET_VALUE_HEADER
-

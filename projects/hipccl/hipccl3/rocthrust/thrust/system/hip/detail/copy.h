@@ -63,11 +63,11 @@ template <class System1,
           class System2,
           class InputIterator,
           class OutputIterator>
-OutputIterator __host__
+OutputIterator __host__ /* STREAMHPC WORKAROUND */ __device__
 copy(cross_system<System1, System2> systems,
-     InputIterator  first,
-     InputIterator  last,
-     OutputIterator result);
+     InputIterator                  first,
+     InputIterator                  last,
+     OutputIterator                 result);
 
 template <class System,
           class InputIterator,
@@ -86,9 +86,9 @@ template <class System1,
           class OutputIterator>
 OutputIterator __host__ /* STREAMHPC WORKAROUND */ __device__
 copy_n(cross_system<System1, System2> systems,
-       InputIterator  first,
-       Size           n,
-       OutputIterator result);
+       InputIterator                  first,
+       Size                           n,
+       OutputIterator                 result);
 
 }    // namespace hip_rocprim
 END_NS_THRUST
@@ -167,13 +167,13 @@ template <class System1,
           class System2,
           class InputIterator,
           class OutputIterator>
-OutputIterator __host__
+OutputIterator __host__ /* STREAMHPC WORKAROUND */ __device__
 copy(cross_system<System1, System2> systems,
-     InputIterator  first,
-     InputIterator  last,
-     OutputIterator result)
+     InputIterator                  first,
+     InputIterator                  last,
+     OutputIterator                 result)
 {
-  return __copy::cross_system_copy(systems,first,last,result);
+  return __copy::cross_system_copy(systems, first, last, result);
 } // end copy()
 
 template <class System1,
@@ -183,25 +183,11 @@ template <class System1,
           class OutputIterator>
 OutputIterator __host__ /* STREAMHPC WORKAROUND */ __device__
 copy_n(cross_system<System1, System2> systems,
-       InputIterator  first,
-       Size           n,
-       OutputIterator result)
+       InputIterator                  first,
+       Size                           n,
+       OutputIterator                 result)
 {
-  // STREAMHPC WORKAROUND
-#if defined(THRUST_HIP_DEVICE_CODE)
-
-  THRUST_UNUSED_VAR(systems);
-  THRUST_UNUSED_VAR(first);
-  THRUST_UNUSED_VAR(n);
-  OutputIterator (*ptr)(cross_system<System1, System2>, InputIterator, Size, OutputIterator) = __copy::cross_system_copy_n;
-  (void) ptr;
-  return result;
-
-#else
-
   return __copy::cross_system_copy_n(systems, first, n, result);
-
-#endif
 } // end copy_n()
 
 
