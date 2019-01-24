@@ -30,6 +30,7 @@
 #if 0
 #include <thrust/system/cpp/detail/remove.h>
 #include <thrust/system/cuda/detail/remove.h>
+#include <thrust/system/hip/detail/remove.h>
 #include <thrust/system/omp/detail/remove.h>
 #include <thrust/system/tbb/detail/remove.h>
 #endif
@@ -41,4 +42,3 @@
 #define __THRUST_DEVICE_SYSTEM_REMOVE_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/detail/remove.h>
 #include __THRUST_DEVICE_SYSTEM_REMOVE_HEADER
 #undef __THRUST_DEVICE_SYSTEM_REMOVE_HEADER
-
