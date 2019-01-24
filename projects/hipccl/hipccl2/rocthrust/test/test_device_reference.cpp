@@ -60,12 +60,36 @@ public:
 };
 
 typedef ::testing::Types<
+    Params<short>,
     Params<int>,
-    Params<unsigned short>/*,
-    Params<float>*/
+    Params<long long>,
+    Params<unsigned short>,
+    Params<unsigned int>,
+    Params<unsigned long long>,
+    Params<float>,
+    Params<double>
 > DeviceReferenceTestsParams;
 
 TYPED_TEST_CASE(DeviceReferenceTests, DeviceReferenceTestsParams);
+
+template<class Params>
+class DeviceReferenceIntegerTests : public ::testing::Test
+{
+public:
+    using input_type = typename Params::input_type;
+};
+
+typedef ::testing::Types<
+    Params<short>,
+    Params<int>,
+    Params<long long>,
+    Params<unsigned short>,
+    Params<unsigned int>,
+    Params<unsigned long long>
+> DeviceReferenceIntegerTestsParams;
+
+TYPED_TEST_CASE(DeviceReferenceIntegerTests, DeviceReferenceIntegerTestsParams);
+
 
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
@@ -74,7 +98,7 @@ TYPED_TEST(DeviceReferenceTests, TestDeviceReferenceConstructorFromDeviceReferen
 {
   using T = typename TestFixture::input_type;
 
-  thrust::device_vector<T> v(1,0);
+  thrust::device_vector<T> v(1,T(0));
   thrust::device_reference<T> ref = v[0];
 
   // ref equals the object at v[0]
@@ -98,7 +122,7 @@ TYPED_TEST(DeviceReferenceTests, TestDeviceReferenceConstructorFromDevicePointer
 {
   using T = typename TestFixture::input_type;
 
-  thrust::device_vector<T> v(T(1),T(0));
+  thrust::device_vector<T> v(1,T(0));
   thrust::device_ptr<T> ptr = &v[0];
   thrust::device_reference<T> ref(ptr);
 
@@ -153,7 +177,7 @@ TYPED_TEST(DeviceReferenceTests,TestDeviceReferenceManipulation)
 {
   using T = typename TestFixture::input_type;
 
-  thrust::device_vector<T> v(T(1),T(0));
+  thrust::device_vector<T> v(1,T(0));
   thrust::device_ptr<T> ptr = &v[0];
   thrust::device_reference<T> ref(ptr);
 
@@ -220,6 +244,19 @@ TYPED_TEST(DeviceReferenceTests,TestDeviceReferenceManipulation)
   ASSERT_EQ(T(1), ref);
   ASSERT_EQ(T(1), *ptr);
   ASSERT_EQ(T(1), v[0]);
+
+  // test equality of const references
+  thrust::device_reference<const T> ref1 = v[0];
+  ASSERT_EQ(true, ref1 == ref);
+}
+
+TYPED_TEST(DeviceReferenceIntegerTests,TestDeviceReferenceIntegerManipulation)
+{
+  using T = typename TestFixture::input_type;
+
+  thrust::device_vector<T> v(1,T(0));
+  thrust::device_ptr<T> ptr = &v[0];
+  thrust::device_reference<T> ref(ptr);
 
   // reset
   ref = T(5);
