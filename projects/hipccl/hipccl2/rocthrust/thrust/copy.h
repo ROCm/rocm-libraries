@@ -509,6 +509,4 @@ template<typename InputIterator1,
 } // end namespace thrust
 
 #include <thrust/detail/copy.h>
-// STREAMHPC temporarily disable
-// #include <thrust/detail/copy_if.h>
-
+#include <thrust/detail/copy_if.h>
