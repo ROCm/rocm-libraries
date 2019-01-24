@@ -306,7 +306,7 @@ namespace __copy {
             class System2,
             class InputIterator,
             class OutputIterator>
-  OutputIterator __host__
+  OutputIterator __host__ /* STREAMHPC WORKAROUND */ __device__
   cross_system_copy(cross_system<System1, System2> systems,
                     InputIterator  begin,
                     InputIterator  end,

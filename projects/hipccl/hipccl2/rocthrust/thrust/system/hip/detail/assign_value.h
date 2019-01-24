@@ -18,9 +18,9 @@
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 #include <thrust/detail/config.h>
+#include <thrust/detail/raw_pointer_cast.h>
 #include <thrust/system/hip/config.h>
 #include <thrust/system/hip/detail/execution_policy.h>
-#include <thrust/detail/raw_pointer_cast.h>
 #include <thrust/system/hip/detail/copy.h>
 
 
@@ -32,6 +32,7 @@ template<typename DerivedPolicy, typename Pointer1, typename Pointer2>
 inline __host__ __device__
   void assign_value(thrust::hip::execution_policy<DerivedPolicy> &exec, Pointer1 dst, Pointer2 src)
 {
+  // STREAMHPC TODO add workaround?
 #ifdef __HIP_DEVICE_COMPILE__
   (void) exec;
   *thrust::raw_pointer_cast(dst) = *thrust::raw_pointer_cast(src);
@@ -43,15 +44,23 @@ inline __host__ __device__
 
 template<typename System1, typename System2, typename Pointer1, typename Pointer2>
 inline __host__ __device__
-  void assign_value(cross_system<System1,System2> &systems, Pointer1 dst, Pointer2 src)
+  void assign_value(cross_system<System1, System2> &systems, Pointer1 dst, Pointer2 src)
 {
-#ifdef __HIP_DEVICE_COMPILE__
-  (void) systems;
+  // STREAMHPC WORKAROUND
+#if defined(THRUST_HIP_DEVICE_CODE)
+
+  THRUST_UNUSED_VAR(systems);
+  Pointer1 (*fptr)(cross_system<System2, System1>, Pointer2, Pointer2, Pointer1) = hip_rocprim::copy;
+  (void) fptr;
+
   thrust::hip::tag hip_tag;
   thrust::hip_rocprim::assign_value(hip_tag, dst, src);
+
 #else
-  cross_system<System2,System1> rotated_systems = systems.rotate();
+
+  cross_system<System2, System1> rotated_systems = systems.rotate();
   hip_rocprim::copy(rotated_systems, src, src + 1, dst);
+
 #endif
 } // end assign_value()
 
