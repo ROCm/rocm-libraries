@@ -49,7 +49,7 @@
 // #include <thrust/system/hip/detail/mismatch.h>
 // #include <thrust/system/hip/detail/partition.h>
 // #include <thrust/system/hip/detail/reduce_by_key.h>
-// #include <thrust/system/hip/detail/remove.h>
+#include <thrust/system/hip/detail/remove.h>
 #include <thrust/system/hip/detail/replace.h>
 // #include <thrust/system/hip/detail/reverse.h>
 // #include <thrust/system/hip/detail/scatter.h>
