@@ -30,6 +30,7 @@
 #if 0
 #include <thrust/system/cpp/detail/fill.h>
 #include <thrust/system/cuda/detail/fill.h>
+#include <thrust/system/hip/detail/fill.h>
 #include <thrust/system/omp/detail/fill.h>
 #include <thrust/system/tbb/detail/fill.h>
 #endif
@@ -41,4 +42,3 @@
 #define __THRUST_DEVICE_SYSTEM_FILL_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/detail/fill.h>
 #include __THRUST_DEVICE_SYSTEM_FILL_HEADER
 #undef __THRUST_DEVICE_SYSTEM_FILL_HEADER
-

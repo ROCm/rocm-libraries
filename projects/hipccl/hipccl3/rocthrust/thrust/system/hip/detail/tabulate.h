@@ -26,11 +26,11 @@
  ******************************************************************************/
 #pragma once
 
-
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 #include <thrust/distance.h>
+#include <thrust/iterator/counting_iterator.h>
 #include <thrust/system/hip/config.h>
-#include <thrust/system/hip/execution_policy.h>
+#include <thrust/system/hip/detail/execution_policy.h>
 #include <thrust/system/hip/detail/transform.h>
 
 BEGIN_NS_THRUST
