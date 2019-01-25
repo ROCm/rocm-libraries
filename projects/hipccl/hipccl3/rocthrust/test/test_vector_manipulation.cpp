@@ -35,35 +35,10 @@
 #include <hip/hip_runtime_api.h>
 #include <hip/hip_runtime.h>
 
-#include <algorithm>
-#include <random>
-
-template<class T>
-inline auto get_random_data(size_t size, T min, T max)
-  -> typename std::enable_if<rocprim::is_integral<T>::value, thrust::host_vector<T>>::type
-{
-  std::random_device rd;
-  std::default_random_engine gen(rd());
-  std::uniform_int_distribution<T> distribution(min, max);
-  thrust::host_vector<T> data(size);
-  std::generate(data.begin(), data.end(), [&]() { return distribution(gen); });
-  return data;
-}
-
-template<class T>
-inline auto get_random_data(size_t size, T min, T max)
-  -> typename std::enable_if<rocprim::is_floating_point<T>::value, thrust::host_vector<T>>::type
-{
-  std::random_device rd;
-  std::default_random_engine gen(rd());
-  std::uniform_real_distribution<T> distribution(min, max);
-  thrust::host_vector<T> data(size);
-  std::generate(data.begin(), data.end(), [&]() { return distribution(gen); });
-  return data;
-}
-
 #define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+
+#include "test_utils.hpp"
 
 template<
     class InputType
@@ -101,15 +76,6 @@ typedef ::testing::Types<
 
 TYPED_TEST_CASE(VectorManipulationTests, VectorManipulationTestsParams);
 
-std::vector<size_t> get_sizes()
-{
-    std::vector<size_t> sizes = {
-        0, 1, 2, 12, 63, 64, 211, 256, 344,
-        1024, 2048, 5096, 34567, (1 << 17) - 1220
-    };
-    return sizes;
-}
-
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
 TYPED_TEST(VectorManipulationTests, TestVectorManipulation)
@@ -144,11 +110,6 @@ TYPED_TEST(VectorManipulationTests, TestVectorManipulation)
     ASSERT_EQ(test1.size(), size);
     ASSERT_EQ((test1 == std::vector<T>(size, T(3))), true);
 
-    #if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC) && (_MSC_VER <= 1400)
-    // XXX MSVC 2005's STL unintentionally uses adl to dispatch advance which
-    //     produces an ambiguity between std::advance & thrust::advance
-    //     don't produce a KNOWN_FAILURE, just ignore the issue
-    #else
     // initializing from other vector
     std::vector<T> stl_vector(src.begin(), src.end());
     Vector cpy0 = src;
@@ -158,7 +119,6 @@ TYPED_TEST(VectorManipulationTests, TestVectorManipulation)
     //ASSERT_EQ(cpy0, src);
     //ASSERT_EQ(cpy1, src);
     //ASSERT_EQ(cpy2, src);
-    #endif
 
     // resizing
     Vector vec1(src);

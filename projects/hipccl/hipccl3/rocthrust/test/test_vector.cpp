@@ -35,7 +35,6 @@
 #include <thrust/sequence.h>
 #include <thrust/device_malloc_allocator.h>
 #include <thrust/device_vector.h>
-#include <thrust/host_vector.h>
 
 // HIP API
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
@@ -762,7 +761,6 @@ TYPED_TEST(VectorTests, TestVectorReversed)
   ASSERT_EQ(T(1), *(v.rend() - 2));
 }
 
-#if __cplusplus >= 201103L
 TYPED_TEST(VectorTests, TestVectorMove)
 {
   using Vector = typename TestFixture::input_type;
@@ -814,6 +812,5 @@ TYPED_TEST(VectorTests, TestVectorMove)
   // ensure v2 received the pointer from before
   ASSERT_EQ(ptr3, ptr4);
 }
-#endif
 
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

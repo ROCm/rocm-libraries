@@ -20,12 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <iostream>
-#include <type_traits>
-#include <cstdlib>
-#include <algorithm>
-#include <vector>
-
 // Google Test
 #include <gtest/gtest.h>
 
@@ -44,6 +38,8 @@
 
 #define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+
+#include "test_utils.hpp"
 
 template<
     class InputType
@@ -67,20 +63,11 @@ typedef ::testing::Types<
 
 TYPED_TEST_CASE(ForEachTests, ForEachTestsParams);
 
-std::vector<size_t> get_sizes()
-{
-    std::vector<size_t> sizes = {
-        0, 1, 2, 12, 63, 64, 211, 256, 344,
-        1024, 2048, 5096, 34567, (1 << 17) - 1220
-    };
-    return sizes;
-}
-
 template <typename T>
 struct mark_processed_functor
 {
     T * ptr;
-    __host__ __device__ void operator()(T x){ ptr[static_cast<int>(x)] = 1; }
+    __host__ __device__ void operator()(size_t x){ ptr[x] = 1; }
 };
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
