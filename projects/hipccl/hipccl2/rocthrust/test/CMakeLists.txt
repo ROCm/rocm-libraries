@@ -57,7 +57,11 @@ endfunction()
 # ****************************************************************************
 
 add_hipthrust_test("thrust.hip.copy" test_copy.cpp)
+add_hipthrust_test("thrust.hip.device_ptr" test_device_ptr.cpp)
+add_hipthrust_test("thrust.hip.device_reference" test_device_reference.cpp)
 add_hipthrust_test("thrust.hip.for_each" test_for_each.cpp)
 add_hipthrust_test("thrust.hip.memory" test_memory.cpp)
-add_hipthrust_test("thrust.hip.transform" test_transform.cpp)
 add_hipthrust_test("thrust.hip.sort" test_sort.cpp)
+add_hipthrust_test("thrust.hip.transform" test_transform.cpp)
+add_hipthrust_test("thrust.hip.vector" test_vector.cpp)
+add_hipthrust_test("thrust.hip.vector_manipulation" test_vector_manipulation.cpp)
