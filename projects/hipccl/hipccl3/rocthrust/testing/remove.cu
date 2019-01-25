@@ -207,10 +207,11 @@ DECLARE_VECTOR_UNITTEST(TestRemoveIfSimple);
 
 template<typename ForwardIterator,
          typename Predicate>
+__host__ __device__
 ForwardIterator remove_if(my_system &system,
                           ForwardIterator first,
                           ForwardIterator,
-                          Predicate pred)
+                          Predicate)
 {
     system.validate_dispatch();
     return first;
@@ -230,10 +231,11 @@ DECLARE_UNITTEST(TestRemoveIfDispatchExplicit);
 
 template<typename ForwardIterator,
          typename Predicate>
+__host__ __device__
 ForwardIterator remove_if(my_tag,
                           ForwardIterator first,
                           ForwardIterator,
-                          Predicate pred)
+                          Predicate)
 {
     *first = 13;
     return first;
@@ -288,11 +290,12 @@ DECLARE_VECTOR_UNITTEST(TestRemoveIfStencilSimple);
 template<typename ForwardIterator,
          typename InputIterator,
          typename Predicate>
+__host__ __device__
 ForwardIterator remove_if(my_system &system,
                           ForwardIterator first,
                           ForwardIterator,
                           InputIterator,
-                          Predicate pred)
+                          Predicate)
 {
     system.validate_dispatch();
     return first;
@@ -317,11 +320,12 @@ DECLARE_UNITTEST(TestRemoveIfStencilDispatchExplicit);
 template<typename ForwardIterator,
          typename InputIterator,
          typename Predicate>
+__host__ __device__
 ForwardIterator remove_if(my_tag,
                           ForwardIterator first,
                           ForwardIterator,
                           InputIterator,
-                          Predicate pred)
+                          Predicate)
 {
     *first = 13;
     return first;
@@ -372,6 +376,7 @@ DECLARE_VECTOR_UNITTEST(TestRemoveCopyIfSimple);
 template<typename InputIterator,
          typename OutputIterator,
          typename Predicate>
+__host__ __device__
 InputIterator remove_copy_if(my_system &system,
                              InputIterator first,
                              InputIterator,
@@ -401,6 +406,7 @@ DECLARE_UNITTEST(TestRemoveCopyIfDispatchExplicit);
 template<typename InputIterator,
          typename OutputIterator,
          typename Predicate>
+__host__ __device__
 InputIterator remove_copy_if(my_tag,
                              InputIterator first,
                              InputIterator,
@@ -465,6 +471,7 @@ template<typename InputIterator1,
          typename InputIterator2,
          typename OutputIterator,
          typename Predicate>
+__host__ __device__
 OutputIterator remove_copy_if(my_system &system,
                               InputIterator1,
                               InputIterator1,
@@ -497,6 +504,7 @@ template<typename InputIterator1,
          typename InputIterator2,
          typename OutputIterator,
          typename Predicate>
+__host__ __device__
 OutputIterator remove_copy_if(my_tag,
                               InputIterator1,
                               InputIterator1,
@@ -627,6 +635,8 @@ void TestRemoveCopyToDiscardIterator(const size_t n)
 }
 DECLARE_VARIABLE_UNITTEST(TestRemoveCopyToDiscardIterator);
 
+// STREAMHPC TODO fix rocPRIM select/partition for zip with discard_iterator
+#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_HIP
 
 template<typename T>
 void TestRemoveCopyToDiscardIteratorZipped(const size_t n)
@@ -665,6 +675,8 @@ void TestRemoveCopyToDiscardIteratorZipped(const size_t n)
     ASSERT_EQUAL_QUIET(reference, thrust::get<1>(d_result.get_iterator_tuple()));
 }
 DECLARE_VARIABLE_UNITTEST(TestRemoveCopyToDiscardIteratorZipped);
+
+#endif
 
 
 template<typename T>
@@ -759,4 +771,3 @@ void TestRemoveCopyIfStencilToDiscardIterator(const size_t n)
     ASSERT_EQUAL_QUIET(reference, d_result);
 }
 DECLARE_VARIABLE_UNITTEST(TestRemoveCopyIfStencilToDiscardIterator);
-

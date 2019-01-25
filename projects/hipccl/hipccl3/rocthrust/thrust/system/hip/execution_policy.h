@@ -36,7 +36,7 @@
 // // ----------------
 // #include <thrust/system/hip/detail/adjacent_difference.h>
 #include <thrust/system/hip/detail/copy.h>
-// #include <thrust/system/hip/detail/copy_if.h>
+#include <thrust/system/hip/detail/copy_if.h>
 // #include <thrust/system/hip/detail/count.h>
 // #include <thrust/system/hip/detail/equal.h>
 // #include <thrust/system/hip/detail/extrema.h>
@@ -49,7 +49,7 @@
 // #include <thrust/system/hip/detail/mismatch.h>
 // #include <thrust/system/hip/detail/partition.h>
 // #include <thrust/system/hip/detail/reduce_by_key.h>
-// #include <thrust/system/hip/detail/remove.h>
+#include <thrust/system/hip/detail/remove.h>
 #include <thrust/system/hip/detail/replace.h>
 // #include <thrust/system/hip/detail/reverse.h>
 // #include <thrust/system/hip/detail/scatter.h>
