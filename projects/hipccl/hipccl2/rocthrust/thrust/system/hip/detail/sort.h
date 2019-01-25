@@ -336,16 +336,16 @@ namespace __smart_sort {
 
 
   template <class SORT_ITEMS,
-            class Policy,
+            class Derived,
             class KeysIt,
             class ItemsIt,
             class CompareOp>
   THRUST_HIP_RUNTIME_FUNCTION typename enable_if_comparison_sort<KeysIt, CompareOp>::type
-  smart_sort(Policy&   policy,
-             KeysIt    keys_first,
-             KeysIt    keys_last,
-             ItemsIt   items_first,
-             CompareOp compare_op)
+  smart_sort(execution_policy<Derived>& policy,
+             KeysIt                     keys_first,
+             KeysIt                     keys_last,
+             ItemsIt                    items_first,
+             CompareOp                  compare_op)
   {
     __merge_sort::merge_sort<SORT_ITEMS>(policy,
                                          keys_first,
@@ -355,16 +355,16 @@ namespace __smart_sort {
   }
 
   template <class SORT_ITEMS,
-            class Policy,
+            class Derived,
             class KeysIt,
             class ItemsIt,
             class CompareOp>
   THRUST_HIP_RUNTIME_FUNCTION typename enable_if_primitive_sort<KeysIt, CompareOp>::type
-  smart_sort(execution_policy<Policy>& policy,
-             KeysIt                    keys_first,
-             KeysIt                    keys_last,
-             ItemsIt                   items_first,
-             CompareOp                 compare_op)
+  smart_sort(execution_policy<Derived>& policy,
+             KeysIt                     keys_first,
+             KeysIt                     keys_last,
+             ItemsIt                    items_first,
+             CompareOp                  compare_op)
   {
     __radix_sort::radix_sort<SORT_ITEMS>(policy,
                                          keys_first,
@@ -418,10 +418,10 @@ template <class Derived,
           class CompareOp>
 void THRUST_HIP_FUNCTION
 stable_sort_by_key(execution_policy<Derived> &policy,
-            KeysIt                     keys_first,
-            KeysIt                     keys_last,
-            ValuesIt                   values,
-            CompareOp                  compare_op)
+                   KeysIt                     keys_first,
+                   KeysIt                     keys_last,
+                   ValuesIt                   values,
+                   CompareOp                  compare_op)
 {
   THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((
     __smart_sort::smart_sort<detail::true_type, Derived, KeysIt, ValuesIt, CompareOp>
