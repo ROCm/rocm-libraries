@@ -27,6 +27,7 @@
 #include <vector>
 
 #include <thrust/host_vector.h>
+#include <thrust/execution_policy.h>
 
 std::vector<size_t> get_sizes()
 {
@@ -70,3 +71,40 @@ struct custom_compare_less
     return lhs < rhs;
   }
 }; // end less
+
+class my_system : public thrust::device_execution_policy<my_system>
+{
+  public:
+    my_system(int)
+      : correctly_dispatched(false),
+        num_copies(0)
+    {}
+
+    my_system(const my_system &other)
+      : correctly_dispatched(false),
+        num_copies(other.num_copies + 1)
+    {}
+
+    void validate_dispatch()
+    {
+      correctly_dispatched = (num_copies == 0);
+    }
+
+    bool is_valid()
+    {
+      return correctly_dispatched;
+    }
+
+  private:
+    bool correctly_dispatched;
+
+    // count the number of copies so that we can validate
+    // that dispatch does not introduce any
+    unsigned int num_copies;
+
+
+    // disallow default construction
+    my_system();
+};
+
+struct my_tag : thrust::device_execution_policy<my_tag> {};
