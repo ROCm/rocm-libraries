@@ -143,7 +143,7 @@ TYPED_TEST(DeviceReferenceTests, TestDeviceReferenceConstructorFromDevicePointer
   ASSERT_EQ(v[0], ref);
 }
 
-
+// TODO: No device code available for function: _ZN7rocprim6detail16transform_kernelILj256ELj16ERKjN6thrust10device_ptrIjEES6_NS4_8identityIjEEEEvT2_mT3_T4_
 /*TEST(DeviceReferenceTests, TestDeviceReferenceAssignmentFromDeviceReference)
 {
   // test same types

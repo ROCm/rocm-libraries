@@ -35,6 +35,8 @@
 #include <thrust/host_vector.h>
 #include <thrust/iterator/counting_iterator.h>
 
+#include "test_utils.hpp"
+
 template<
   class Input,
   class Output = Input
@@ -60,15 +62,6 @@ typedef ::testing::Types<
 > TransformTestsParams;
 
 TYPED_TEST_CASE(TransformTests, TransformTestsParams);
-
-std::vector<size_t> get_sizes()
-{
-  std::vector<size_t> sizes = {
-    0, 1, 2, 12, 63, 64, 211, 256, 344,
-    1024, 2048, 5096, 34567, (1 << 17) - 1220
-  };
-  return sizes;
-}
 
 template<class T>
 struct unary_transform
