@@ -20,8 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <iostream>
-#include <type_traits>
 #include <cstdlib>
 
 // Google Test
@@ -34,44 +32,7 @@
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
 
-
-// STREAMHPC TODO move to utils.h
-#include <algorithm>
-#include <random>
-
-template<class T>
-inline auto get_random_data(size_t size, T min, T max)
-  -> typename std::enable_if<rocprim::is_integral<T>::value, thrust::host_vector<T>>::type
-{
-  std::random_device rd;
-  std::default_random_engine gen(rd());
-  std::uniform_int_distribution<T> distribution(min, max);
-  thrust::host_vector<T> data(size);
-  std::generate(data.begin(), data.end(), [&]() { return distribution(gen); });
-  return data;
-}
-
-template<class T>
-inline auto get_random_data(size_t size, T min, T max)
-  -> typename std::enable_if<rocprim::is_floating_point<T>::value, thrust::host_vector<T>>::type
-{
-  std::random_device rd;
-  std::default_random_engine gen(rd());
-  std::uniform_real_distribution<T> distribution(min, max);
-  thrust::host_vector<T> data(size);
-  std::generate(data.begin(), data.end(), [&]() { return distribution(gen); });
-  return data;
-}
-
-template<class T>
-struct custom_compare
-{
-  __host__ __device__
-  bool operator()(const T &lhs, const T &rhs) const
-  {
-    return lhs < rhs;
-  }
-}; // end less
+#include "test_utils.hpp"
 
 template<
   class Key,
@@ -97,21 +58,14 @@ public:
 typedef ::testing::Types<
   Params<unsigned short, int, thrust::less<unsigned short> >,
   Params<unsigned short, int, thrust::greater<unsigned short> >,
-  Params<unsigned short, int, custom_compare<unsigned short> >,
+  Params<unsigned short, int, custom_compare_less<unsigned short> >,
   Params<unsigned short, double>,
   Params<int, long long>
 > SortTestsParams;
 
 TYPED_TEST_CASE(SortTests, SortTestsParams);
 
-std::vector<size_t> get_sizes()
-{
-  std::vector<size_t> sizes = {
-    0, 1, 2, 12, 63, 64, 211, 256, 344,
-    1024, 2048, 5096, 34567, (1 << 17) - 1220, 1000000, (1 << 20) - 123
-  };
-  return sizes;
-}
+
 
 TYPED_TEST(SortTests, Sort)
 {

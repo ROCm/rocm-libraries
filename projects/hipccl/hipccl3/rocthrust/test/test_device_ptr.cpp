@@ -25,11 +25,11 @@
 
 // Thrust
 #include <thrust/memory.h>
-#include <thrust/for_each.h>
+#include <thrust/transform.h>
 // STREAMHPC TODO replace <thrust/detail/seq.h> with <thrust/execution_policy.h>
 #include <thrust/detail/seq.h>
 #include <thrust/device_ptr.h>
-#include <thrust/iterator/counting_iterator.h>
+#include <thrust/device_vector.h>
 
 // HIP API
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
@@ -50,30 +50,110 @@ struct Params
 };
 
 template<class Params>
-class ForEachTests : public ::testing::Test
+class DevicePtrTests : public ::testing::Test
 {
 public:
     using input_type = typename Params::input_type;
 };
 
 typedef ::testing::Types<
+    Params<short>,
     Params<int>,
-    Params<unsigned short>
-> ForEachTestsParams;
+    Params<long long>,
+    Params<unsigned short>,
+    Params<unsigned int>,
+    Params<unsigned long long>,
+    Params<float>,
+    Params<double>
+> DevicePtrTestsParams;
 
-TYPED_TEST_CASE(ForEachTests, ForEachTestsParams);
+TYPED_TEST_CASE(DevicePtrTests, DevicePtrTestsParams);
 
 template <typename T>
 struct mark_processed_functor
 {
-    T * ptr;
+    thrust::device_ptr<T> ptr;
     __host__ __device__ void operator()(size_t x){ ptr[x] = 1; }
 };
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-TYPED_TEST(ForEachTests, HostPathSimpleTest)
+
+TYPED_TEST(DevicePtrTests, MakeDevicePointer)
 {
-  thrust::device_system_tag tag;
+  using T = typename TestFixture::input_type;
+
+  T *raw_ptr = 0;
+  thrust::device_ptr<T> p0 = thrust::device_pointer_cast(raw_ptr);
+
+  ASSERT_EQ(thrust::raw_pointer_cast(p0), raw_ptr);
+  thrust::device_ptr<T> p1 = thrust::device_pointer_cast(p0);
+  ASSERT_EQ(p0, p1);
+}
+
+TEST(DevicePtrTests,TestDevicePointerManipulation)
+{
+    thrust::device_vector<int> data(5);
+
+    thrust::device_ptr<int> begin(&data[0]);
+    thrust::device_ptr<int> end(&data[0] + 5);
+
+    ASSERT_EQ(end - begin, 5);
+
+    begin++;
+    begin--;
+
+    ASSERT_EQ(end - begin, 5);
+
+    begin += 1;
+    begin -= 1;
+
+    ASSERT_EQ(end - begin, 5);
+
+    begin = begin + (int) 1;
+    begin = begin - (int) 1;
+
+    ASSERT_EQ(end - begin, 5);
+
+    begin = begin + (unsigned int) 1;
+    begin = begin - (unsigned int) 1;
+
+    ASSERT_EQ(end - begin, 5);
+
+    begin = begin + (size_t) 1;
+    begin = begin - (size_t) 1;
+
+    ASSERT_EQ(end - begin, 5);
+
+    begin = begin + (ptrdiff_t) 1;
+    begin = begin - (ptrdiff_t) 1;
+
+    ASSERT_EQ(end - begin, 5);
+
+    begin = begin + (thrust::device_ptr<int>::difference_type) 1;
+    begin = begin - (thrust::device_ptr<int>::difference_type) 1;
+
+    ASSERT_EQ(end - begin, 5);
+}
+
+TYPED_TEST(DevicePtrTests,TestRawPointerCast)
+{
+    using T = typename TestFixture::input_type;
+    thrust::device_vector<T> vec(3);
+
+    T * first;
+    T * last;
+
+    first = thrust::raw_pointer_cast(&vec[0]);
+    last  = thrust::raw_pointer_cast(&vec[3]);
+    ASSERT_EQ(last - first, 3);
+
+    first = thrust::raw_pointer_cast(&vec.front());
+    last  = thrust::raw_pointer_cast(&vec.back());
+    ASSERT_EQ(last - first, 2);
+}
+
+TYPED_TEST(DevicePtrTests, TestDevicePointerValue)
+{
   using T = typename TestFixture::input_type;
 
   const std::vector<size_t> sizes = get_sizes();
@@ -81,16 +161,19 @@ TYPED_TEST(ForEachTests, HostPathSimpleTest)
   {
     SCOPED_TRACE(testing::Message() << "with size = " << size);
 
-    auto ptr = thrust::malloc<T>(tag, sizeof(T) * size);
-    auto raw_ptr = thrust::raw_pointer_cast(ptr);
-    if(size > 0) ASSERT_NE(raw_ptr, nullptr);
+    thrust::device_vector<T> d_data(size);
+
+    thrust::device_ptr<T> begin(&d_data[0]);
+
+    auto raw_ptr_begin = thrust::raw_pointer_cast(begin);
+    if(size > 0) ASSERT_NE(raw_ptr_begin, nullptr);
 
     // Zero input memory
-    if(size > 0) HIP_CHECK(hipMemset(raw_ptr, 0, sizeof(T) * size));
+    if(size > 0) HIP_CHECK(hipMemset(raw_ptr_begin, 0, sizeof(T) * size));
 
     // Create unary function
     mark_processed_functor<T> func;
-    func.ptr = raw_ptr;
+    func.ptr = begin;
 
     // Run for_each in [0; end] range
     auto end = size < 2 ? size : size/2;
@@ -101,93 +184,20 @@ TYPED_TEST(ForEachTests, HostPathSimpleTest)
     );
     ASSERT_EQ(result, thrust::make_counting_iterator<size_t>(end));
 
-    std::vector<T> output(size);
-    HIP_CHECK(
-      hipMemcpy(
-        output.data(), raw_ptr,
-        size * sizeof(T),
-        hipMemcpyDeviceToHost
-      )
-    );
+    thrust::host_vector<T> h_data = d_data;
 
     for(size_t i = 0; i < size; i++)
     {
       if(i < end)
       {
-        ASSERT_EQ(output[i], T(1)) << "where index = " << i;
+        ASSERT_EQ(h_data[i], T(1)) << "where index = " << i;
       }
       else
       {
-        ASSERT_EQ(output[i], T(0)) << "where index = " << i;
+        ASSERT_EQ(h_data[i], T(0)) << "where index = " << i;
       }
     }
-
-    // Free
-    thrust::free(tag, ptr);
   }
-}
-
-template<class F>
-__global__
-void simple_test_kernel(F func, int size)
-{
-  // (void) func; (void) size;
-  thrust::for_each(
-    thrust::seq,
-    thrust::make_counting_iterator<int>(0),
-    thrust::make_counting_iterator<int>(size),
-    func
-  );
-}
-
-TYPED_TEST(ForEachTests, DevicePathSimpleTest)
-{
-  thrust::device_system_tag tag;
-  using T = typename TestFixture::input_type;
-  const size_t size = 1024;
-
-  auto ptr = thrust::malloc<T>(tag, sizeof(T) * size);
-  auto raw_ptr = thrust::raw_pointer_cast(ptr);
-  ASSERT_NE(raw_ptr, nullptr);
-
-  // Zero input memory
-  HIP_CHECK(hipMemset(raw_ptr, 0, sizeof(T) * size));
-
-  // Create unary function
-  mark_processed_functor<T> func;
-  func.ptr = raw_ptr;
-
-  // Run for_each in [0; end] range
-  size_t end = 375;
-  hipLaunchKernelGGL(
-    HIP_KERNEL_NAME(simple_test_kernel<mark_processed_functor<T>>),
-    dim3(1), dim3(1), 0, 0,
-    func, static_cast<int>(end)
-  );
-
-  std::vector<T> output(size);
-  HIP_CHECK(
-    hipMemcpy(
-      output.data(), raw_ptr,
-      size * sizeof(T),
-      hipMemcpyDeviceToHost
-    )
-  );
-
-  for(size_t i = 0; i < size; i++)
-  {
-    if(i < end)
-    {
-      ASSERT_EQ(output[i], T(1)) << "where index = " << i;
-    }
-    else
-    {
-      ASSERT_EQ(output[i], T(0)) << "where index = " << i;
-    }
-  }
-
-  // Free
-  thrust::free(tag, ptr);
 }
 
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
