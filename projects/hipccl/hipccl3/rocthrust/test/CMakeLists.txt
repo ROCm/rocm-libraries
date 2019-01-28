@@ -56,9 +56,12 @@ endfunction()
 # Tests
 # ****************************************************************************
 
+add_hipthrust_test("thrust.hip.allocator" test_allocator.cpp)
 add_hipthrust_test("thrust.hip.copy" test_copy.cpp)
+add_hipthrust_test("thrust.hip.device_delete" test_device_delete.cpp)
 add_hipthrust_test("thrust.hip.device_ptr" test_device_ptr.cpp)
 add_hipthrust_test("thrust.hip.device_reference" test_device_reference.cpp)
+add_hipthrust_test("thrust.hip.fill" test_fill.cpp)
 add_hipthrust_test("thrust.hip.for_each" test_for_each.cpp)
 add_hipthrust_test("thrust.hip.memory" test_memory.cpp)
 add_hipthrust_test("thrust.hip.scatter" test_scatter.cpp)

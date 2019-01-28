@@ -276,4 +276,179 @@ TEST(ScatterTests, TestScatterIfDispatchExplicit)
   ASSERT_EQ(true, sys.is_valid());
 }
 
+template<typename InputIterator1,
+         typename InputIterator2,
+         typename InputIterator3,
+         typename RandomAccessIterator>
+void scatter_if(my_tag,
+                InputIterator1,
+                InputIterator1,
+                InputIterator2,
+                InputIterator3,
+                RandomAccessIterator output)
+{
+    *output = 13;
+}
+
+TEST(ScatterTests, TestScatterIfDispatchImplicit)
+{
+  thrust::device_vector<int> vec(1);
+
+  thrust::scatter_if(thrust::retag<my_tag>(vec.begin()),
+                     thrust::retag<my_tag>(vec.begin()),
+                     thrust::retag<my_tag>(vec.begin()),
+                     thrust::retag<my_tag>(vec.begin()),
+                     thrust::retag<my_tag>(vec.begin()));
+
+  ASSERT_EQ(13, vec.front());
+}
+
+template <typename T>
+class is_even_scatter_if
+{
+    public:
+    __host__ __device__ bool operator()(const T i) const { return (i % 2) == 0; }
+};
+
+TYPED_TEST(ScatterTests, TestScatterIf)
+{
+  using Vector = typename TestFixture::input_type;
+  using T = typename Vector::value_type;
+
+  const std::vector<size_t> sizes = get_sizes();
+  for(auto size : sizes)
+  {
+    const size_t output_size = std::min((size_t) 10, 2 * size);
+
+    thrust::host_vector<T> h_input(size, T(1));
+    thrust::device_vector<T> d_input(size, T(1));
+
+    thrust::host_vector<unsigned int> h_map= get_random_data<unsigned int>(size,
+                                                                           std::numeric_limits<unsigned int>::min(),
+                                                                           std::numeric_limits<unsigned int>::max());
+
+    for(size_t i = 0; i < size; i++)
+        h_map[i] =  h_map[i] % output_size;
+
+
+    thrust::device_vector<unsigned int> d_map = h_map;
+
+    thrust::host_vector<T>   h_output(output_size, T(0));
+    thrust::device_vector<T> d_output(output_size, T(0));
+
+    thrust::scatter_if(h_input.begin(), h_input.end(), h_map.begin(), h_map.begin(), h_output.begin(), is_even_scatter_if<unsigned int>());
+    thrust::scatter_if(d_input.begin(), d_input.end(), d_map.begin(), d_map.begin(), d_output.begin(), is_even_scatter_if<unsigned int>());
+
+    ASSERT_EQ(h_output, d_output);
+  }
+}
+
+TYPED_TEST(ScatterTests, TestScatterIfToDiscardIterator)
+{
+  using Vector = typename TestFixture::input_type;
+  using T = typename Vector::value_type;
+
+  const std::vector<size_t> sizes = get_sizes();
+  for(auto size : sizes)
+  {
+    const size_t output_size = std::min((size_t) 10, 2 * size);
+
+    thrust::host_vector<T> h_input(size, T(1));
+    thrust::device_vector<T> d_input(size, T(1));
+
+    thrust::host_vector<unsigned int> h_map= get_random_data<unsigned int>(size,
+                                                                           std::numeric_limits<unsigned int>::min(),
+                                                                           std::numeric_limits<unsigned int>::max());
+
+    for(size_t i = 0; i < size; i++)
+        h_map[i] =  h_map[i] % output_size;
+
+
+    thrust::device_vector<unsigned int> d_map = h_map;
+
+    thrust::scatter_if(h_input.begin(), h_input.end(), h_map.begin(), h_map.begin(), thrust::make_discard_iterator(), is_even_scatter_if<unsigned int>());
+    thrust::scatter_if(d_input.begin(), d_input.end(), d_map.begin(), d_map.begin(), thrust::make_discard_iterator(), is_even_scatter_if<unsigned int>());
+  }
+}
+
+// TODO: Implement reduce in system
+/*TYPED_TEST(ScatterTests, TestScatterCountingIterator)
+{
+  using Vector = typename TestFixture::input_type;
+
+  Vector source(10);
+  thrust::sequence(source.begin(), source.end(), 0);
+
+  Vector map(10);
+  thrust::sequence(map.begin(), map.end(), 0);
+
+  Vector output(10);
+
+  // source has any_system_tag
+  thrust::fill(output.begin(), output.end(), 0);
+  thrust::scatter(thrust::make_counting_iterator(0), thrust::make_counting_iterator(10),
+                  map.begin(),
+                  output.begin());
+
+  ASSERT_EQ(output, map);
+
+  // map has any_system_tag
+  thrust::fill(output.begin(), output.end(), 0);
+  thrust::scatter(source.begin(), source.end(),
+                  thrust::make_counting_iterator(0),
+                  output.begin());
+
+  ASSERT_EQ(output, map);
+
+  // source and map have any_system_tag
+  thrust::fill(output.begin(), output.end(), 0);
+  thrust::scatter(thrust::make_counting_iterator(0), thrust::make_counting_iterator(10),
+                  thrust::make_counting_iterator(0),
+                  output.begin());
+
+  ASSERT_EQ(output, map);
+}
+
+TYPED_TEST(ScatterTests, TestScatterIfCountingIterator)
+{
+  using Vector = typename TestFixture::input_type;
+
+  Vector source(10);
+  thrust::sequence(source.begin(), source.end(), 0);
+
+  Vector map(10);
+  thrust::sequence(map.begin(), map.end(), 0);
+
+  Vector stencil(10, 1);
+
+  Vector output(10);
+
+  // source has any_system_tag
+  thrust::fill(output.begin(), output.end(), 0);
+  thrust::scatter_if(thrust::make_counting_iterator(0), thrust::make_counting_iterator(10),
+                     map.begin(),
+                     stencil.begin(),
+                     output.begin());
+
+  ASSERT_EQ(output, map);
+
+  // map has any_system_tag
+  thrust::fill(output.begin(), output.end(), 0);
+  thrust::scatter_if(source.begin(), source.end(),
+                     thrust::make_counting_iterator(0),
+                     stencil.begin(),
+                     output.begin());
+
+  ASSERT_EQ(output, map);
+
+  // source and map have any_system_tag
+  thrust::fill(output.begin(), output.end(), 0);
+  thrust::scatter_if(thrust::make_counting_iterator(0), thrust::make_counting_iterator(10),
+                     thrust::make_counting_iterator(0),
+                     stencil.begin(),
+                     output.begin());
+
+  ASSERT_EQ(output, map);
+}*/
+
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
