@@ -214,12 +214,15 @@ void lookback_scan_kernel_impl(InputIterator input,
         result_type, BinaryFunction, LookbackScanState
     >;
 
-    ROCPRIM_SHARED_MEMORY union
+    ROCPRIM_SHARED_MEMORY struct
     {
         typename order_bid_type::storage_type ordered_bid;
-        typename block_load_type::storage_type load;
-        typename block_store_type::storage_type store;
-        typename block_scan_type::storage_type scan;
+        union
+        {
+            typename block_load_type::storage_type load;
+            typename block_store_type::storage_type store;
+            typename block_scan_type::storage_type scan;
+        };
     } storage;
 
     const auto flat_block_thread_id = ::rocprim::detail::block_thread_id<0>();
