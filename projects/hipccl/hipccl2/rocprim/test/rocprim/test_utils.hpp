@@ -347,6 +347,11 @@ struct is_custom_test_type : std::false_type
 };
 
 template<class T>
+struct is_custom_test_array_type : std::false_type
+{
+};
+
+template<class T>
 struct inner_type
 {
     using type = T;
@@ -427,6 +432,124 @@ struct custom_test_type
     }
 };
 
+// Custom type used in tests
+template<class T, size_t N>
+struct custom_test_array_type
+{
+    using value_type = T;
+    static constexpr size_t size = N;
+
+    T values[N];
+
+    ROCPRIM_HOST_DEVICE inline
+    custom_test_array_type()
+    {
+        for(size_t i = 0; i < N; i++)
+        {
+            values[i] = T();
+        }
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    custom_test_array_type(T v)
+    {
+        for(size_t i = 0; i < N; i++)
+        {
+            values[i] = v;
+        }
+    }
+
+    template<class U>
+    ROCPRIM_HOST_DEVICE inline
+    custom_test_array_type(const custom_test_array_type<U, N>& other)
+    {
+        for(size_t i = 0; i < N; i++)
+        {
+            values[i] = other.values[i];
+        }
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    ~custom_test_array_type() {}
+
+    ROCPRIM_HOST_DEVICE inline
+    custom_test_array_type& operator=(const custom_test_array_type& other)
+    {
+        for(size_t i = 0; i < N; i++)
+        {
+            values[i] = other.values[i];
+        }
+        return *this;
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    custom_test_array_type operator+(const custom_test_array_type& other) const
+    {
+        custom_test_array_type result;
+        for(size_t i = 0; i < N; i++)
+        {
+            result.values[i] = values[i] + other.values[i];
+        }
+        return result;
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    custom_test_array_type operator-(const custom_test_array_type& other) const
+    {
+        custom_test_array_type result;
+        for(size_t i = 0; i < N; i++)
+        {
+            result.values[i] = values[i] - other.values[i];
+        }
+        return result;
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    bool operator<(const custom_test_array_type& other) const
+    {
+        for(size_t i = 0; i < N; i++)
+        {
+            if(values[i] >= other.values[i])
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    bool operator>(const custom_test_array_type& other) const
+    {
+        for(size_t i = 0; i < N; i++)
+        {
+            if(values[i] <= other.values[i])
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    bool operator==(const custom_test_array_type& other) const
+    {
+        for(size_t i = 0; i < N; i++)
+        {
+            if(values[i] != other.values[i])
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    bool operator!=(const custom_test_array_type& other) const
+    {
+        return !(*this == other);
+    }
+};
+
 template<class T> inline
 std::ostream& operator<<(std::ostream& stream,
                          const custom_test_type<T>& value)
@@ -435,13 +558,42 @@ std::ostream& operator<<(std::ostream& stream,
     return stream;
 }
 
+template<class T, size_t N> inline
+std::ostream& operator<<(std::ostream& stream,
+                         const custom_test_array_type<T, N>& value)
+{
+    stream << "[";
+    for(size_t i = 0; i < N; i++)
+    {
+        stream << value.values[i];
+        if(i != N - 1)
+        {
+            stream << "; ";
+        }
+    }
+    stream << "]";
+    return stream;
+}
+
 template<class T>
 struct is_custom_test_type<custom_test_type<T>> : std::true_type
 {
 };
 
+template<class T, size_t N>
+struct is_custom_test_array_type<custom_test_array_type<T, N>> : std::true_type
+{
+};
+
+
 template<class T>
 struct inner_type<custom_test_type<T>>
+{
+    using type = T;
+};
+
+template<class T, size_t N>
+struct inner_type<custom_test_array_type<T, N>>
 {
     using type = T;
 };
@@ -495,8 +647,34 @@ inline auto get_random_data(size_t size, typename T::value_type min, typename T:
 }
 
 template<class T>
+inline auto get_random_data(size_t size, typename T::value_type min, typename T::value_type max)
+    -> typename std::enable_if<
+           is_custom_test_array_type<T>::value && std::is_integral<typename T::value_type>::value,
+           std::vector<T>
+       >::type
+{
+    std::random_device rd;
+    std::default_random_engine gen(rd());
+    std::uniform_int_distribution<typename T::value_type> distribution(min, max);
+    std::vector<T> data(size);
+    std::generate(
+        data.begin(), data.end(),
+        [&]()
+        {
+            T result;
+            for(size_t i = 0; i < T::size; i++)
+            {
+                result.values[i] = distribution(gen);
+            }
+            return result;
+        }
+    );
+    return data;
+}
+
+template<class T>
 inline auto get_random_value(typename T::value_type min, typename T::value_type max)
-    -> typename std::enable_if<is_custom_test_type<T>::value, T>::type
+    -> typename std::enable_if<is_custom_test_type<T>::value || is_custom_test_array_type<T>::value, T>::type
 {
     return get_random_data(1, min, max)[0];
 }
