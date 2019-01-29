@@ -337,7 +337,7 @@ void block_sort_kernel_impl(KeysInputIterator keys_input,
     using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
     constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
 
-    const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
+    const unsigned int flat_id = ::rocprim::flat_block_thread_id();
     const unsigned int flat_block_id = ::rocprim::detail::block_id<0>();
     const unsigned int block_offset = flat_block_id * BlockSize;
     const unsigned int number_of_blocks = (input_size + BlockSize - 1)/BlockSize;
