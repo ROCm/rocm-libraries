@@ -458,14 +458,17 @@ void partition_kernel_impl(InputIterator input,
     using exchange_storage_type = value_type[items_per_block];
     using raw_exchange_storage_type = typename detail::raw_storage<exchange_storage_type>;
 
-    ROCPRIM_SHARED_MEMORY union
+    ROCPRIM_SHARED_MEMORY struct
     {
-        raw_exchange_storage_type exchange_values;
         typename order_bid_type::storage_type ordered_bid;
-        typename block_load_value_type::storage_type load_values;
-        typename block_load_flag_type::storage_type load_flags;
-        typename block_discontinuity_value_type::storage_type discontinuity_values;
-        typename block_scan_offset_type::storage_type scan_offsets;
+        union
+        {
+            raw_exchange_storage_type exchange_values;
+            typename block_load_value_type::storage_type load_values;
+            typename block_load_flag_type::storage_type load_flags;
+            typename block_discontinuity_value_type::storage_type discontinuity_values;
+            typename block_scan_offset_type::storage_type scan_offsets;
+        };
     } storage;
 
     const auto flat_block_thread_id = ::rocprim::detail::block_thread_id<0>();
