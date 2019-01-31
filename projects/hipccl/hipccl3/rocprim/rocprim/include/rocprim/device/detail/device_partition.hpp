@@ -553,7 +553,12 @@ void partition_kernel_impl(InputIterator input,
         }
         ::rocprim::syncthreads(); // sync threads to reuse shared memory
     }
-    else
+    // Workaround: Fiji (gfx803) crashes with "Memory access fault by GPU node" on HCC 1.3.18482 (ROCm 2.0)
+    // Instead of just `} else {` we use `} syncthreads(); if() {`, because the else-branch can be executed
+    // for some unknown reason and 0-th block reads incorrect addresses in lookback_scan_prefix_op::get_prefix.
+    ::rocprim::syncthreads();
+    if(flat_block_id > 0)
+    // end of the workaround
     {
         ROCPRIM_SHARED_MEMORY typename offset_scan_prefix_op_type::storage_type storage_prefix_op;
         auto prefix_op = offset_scan_prefix_op_type(

@@ -270,7 +270,12 @@ void lookback_scan_kernel_impl(InputIterator input,
             scan_state.set_complete(flat_block_id, reduction);
         }
     }
-    else
+    // Workaround: Fiji (gfx803) crashes with "Memory access fault by GPU node" on HCC 1.3.18482 (ROCm 2.0)
+    // Instead of just `} else {` we use `} syncthreads(); if() {`, because the else-branch can be executed
+    // for some unknown reason and 0-th block reads incorrect addresses in lookback_scan_prefix_op::get_prefix.
+    ::rocprim::syncthreads();
+    if(flat_block_id > 0)
+    // original code: else
     {
         // Scan of block values
         auto prefix_op = lookback_scan_prefix_op_type(
