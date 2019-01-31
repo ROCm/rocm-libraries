@@ -64,18 +64,28 @@ public:
 };
 
 typedef ::testing::Types<
+    // Small
+    DeviceScanParams<char>,
     DeviceScanParams<unsigned short>,
-    DeviceScanParams<int>,
-    DeviceScanParams<double, double, rp::plus<double> >,
     DeviceScanParams<short, int>,
+    DeviceScanParams<int>,
+    DeviceScanParams<float, float, rp::maximum<float> >,
+    DeviceScanParams<rp::half, float>,
+    // Large
+    DeviceScanParams<int, double, rp::plus<int> >,
+    DeviceScanParams<int, double, rp::plus<double> >,
+    DeviceScanParams<int, long long, rp::plus<long long> >,
+    DeviceScanParams<unsigned int, unsigned long long, rp::plus<unsigned long long> >,
+    DeviceScanParams<long long, long long, rp::maximum<long long> >,
+    DeviceScanParams<double, double, rp::plus<double> >,
     DeviceScanParams<signed char, long, rp::plus<long> >,
     DeviceScanParams<float, double, rp::minimum<double> >,
+    DeviceScanParams<test_utils::custom_test_type<int> >,
     DeviceScanParams<
         test_utils::custom_test_type<double>, test_utils::custom_test_type<double>,
         rp::plus<test_utils::custom_test_type<double> >
     >,
-    DeviceScanParams<rp::half, rp::half, test_utils::half_maximum>,
-    DeviceScanParams<rp::half, float>
+    DeviceScanParams<test_utils::custom_test_type<int> >
 > RocprimDeviceScanTestsParams;
 
 std::vector<size_t> get_sizes()
@@ -83,7 +93,8 @@ std::vector<size_t> get_sizes()
     std::vector<size_t> sizes = {
         1, 10, 53, 211,
         1024, 2048, 5096,
-        34567, (1 << 18)
+        34567, (1 << 18),
+        (1 << 20) - 12345
     };
     const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(3, 1, 100000);
     sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
@@ -117,7 +128,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanEmptyInput)
     // Get size of d_temp_storage
     rocprim::inclusive_scan(
         nullptr, temp_storage_size_bytes,
-        rocprim::make_constant_iterator<T>(345),
+        rocprim::make_constant_iterator<T>(T(345)),
         d_checking_output,
         0, scan_op_type(), acc_view, debug_synchronous
     );
@@ -129,7 +140,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanEmptyInput)
     // Run
     rocprim::inclusive_scan(
         d_temp_storage.accelerator_pointer(), temp_storage_size_bytes,
-        rocprim::make_constant_iterator<T>(345),
+        rocprim::make_constant_iterator<T>(T(345)),
         d_checking_output,
         0, scan_op_type(), acc_view, debug_synchronous
     );
