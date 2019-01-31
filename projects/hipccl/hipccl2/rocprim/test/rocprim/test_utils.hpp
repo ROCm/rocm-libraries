@@ -367,8 +367,10 @@ struct custom_test_type
     T x;
     T y;
 
+    // Non-zero values in default constructor for checking reduce and scan:
+    // ensure that scan_op(custom_test_type(), value) != value
     ROCPRIM_HOST_DEVICE inline
-    custom_test_type() {}
+    custom_test_type() : x(12), y(34) {}
 
     ROCPRIM_HOST_DEVICE inline
     custom_test_type(T x, T y) : x(x), y(y) {}
@@ -446,7 +448,7 @@ struct custom_test_array_type
     {
         for(size_t i = 0; i < N; i++)
         {
-            values[i] = T();
+            values[i] = T(i + 1);
         }
     }
 
@@ -682,20 +684,25 @@ inline auto get_random_value(typename T::value_type min, typename T::value_type 
 
 template<class T>
 auto assert_near(const std::vector<T>& result, const std::vector<T>& expected, const float percent)
-    -> typename std::enable_if<!is_custom_test_type<T>::value && std::is_arithmetic<T>::value>::type
+    -> typename std::enable_if<std::is_floating_point<T>::value>::type
 {
     ASSERT_EQ(result.size(), expected.size());
     for(size_t i = 0; i < result.size(); i++)
     {
-        if(std::is_integral<T>::value)
-        {
-            ASSERT_EQ(result[i], expected[i]) << "where index = " << i;
-        }
-        else
-        {
-            auto diff = std::max<T>(std::abs(percent * expected[i]), T(percent));
-            ASSERT_NEAR(result[i], expected[i], diff) << "where index = " << i;
-        }
+        auto diff = std::max<T>(std::abs(percent * expected[i]), T(percent));
+        ASSERT_NEAR(result[i], expected[i], diff) << "where index = " << i;
+    }
+}
+
+template<class T>
+auto assert_near(const std::vector<T>& result, const std::vector<T>& expected, const float percent)
+    -> typename std::enable_if<!std::is_floating_point<T>::value>::type
+{
+    (void)percent;
+    ASSERT_EQ(result.size(), expected.size());
+    for(size_t i = 0; i < result.size(); i++)
+    {
+        ASSERT_EQ(result[i], expected[i]) << "where index = " << i;
     }
 }
 
@@ -710,60 +717,44 @@ void assert_near(const std::vector<rocprim::half>& result, const std::vector<roc
 }
 
 template<class T>
-auto assert_near(const T& result, const T& expected, const float percent)
-    -> typename std::enable_if<!is_custom_test_type<T>::value && std::is_arithmetic<T>::value>::type
+auto assert_near(const std::vector<custom_test_type<T>>& result, const std::vector<custom_test_type<T>>& expected, const float percent)
+    -> typename std::enable_if<std::is_floating_point<T>::value>::type
 {
-    auto diff = std::max<T>(std::abs(percent * expected), T(percent));
-    if(std::is_integral<T>::value) diff = 0;
-    ASSERT_NEAR(result, expected, diff);
-}
-
-
-template<class T>
-auto assert_near(const T& result, const T& expected, const float percent)
-    -> typename std::enable_if<is_custom_test_type<T>::value>::type
-{
-    using value_type = typename T::value_type;
-    auto diff1 = std::max<value_type>(std::abs(percent * expected.x), value_type(percent));
-    auto diff2 = std::max<value_type>(std::abs(percent * expected.y), value_type(percent));
-    if(std::is_integral<value_type>::value)
-    {
-        diff1 = 0;
-        diff2 = 0;
-    }
-    ASSERT_NEAR(result.x, expected.x, diff1);
-    ASSERT_NEAR(result.y, expected.y, diff2);
-}
-
-template<class T>
-auto assert_near(const std::vector<T>& result, const std::vector<T>& expected, const float percent)
-    -> typename std::enable_if<is_custom_test_type<T>::value>::type
-{
-    using value_type = typename T::value_type;
     ASSERT_EQ(result.size(), expected.size());
     for(size_t i = 0; i < result.size(); i++)
     {
-        auto diff1 = std::max<value_type>(std::abs(percent * expected[i].x), value_type(percent));
-        auto diff2 = std::max<value_type>(std::abs(percent * expected[i].y), value_type(percent));
-        if(std::is_integral<value_type>::value)
-        {
-            diff1 = 0;
-            diff2 = 0;
-        }
+        auto diff1 = std::max<T>(std::abs(percent * expected[i].x), T(percent));
+        auto diff2 = std::max<T>(std::abs(percent * expected[i].y), T(percent));
         ASSERT_NEAR(result[i].x, expected[i].x, diff1) << "where index = " << i;
         ASSERT_NEAR(result[i].y, expected[i].y, diff2) << "where index = " << i;
     }
 }
 
 template<class T>
-auto assert_near(const std::vector<T>& result, const std::vector<T>& expected, const float)
-    -> typename std::enable_if<!is_custom_test_type<T>::value && !std::is_arithmetic<T>::value>::type
+auto assert_near(const T& result, const T& expected, const float percent)
+    -> typename std::enable_if<std::is_floating_point<T>::value>::type
 {
-    ASSERT_EQ(result.size(), expected.size());
-    for(size_t i = 0; i < result.size(); i++)
-    {
-        ASSERT_EQ(result[i], expected[i]) << "where index = " << i;
-    }
+    auto diff = std::max<T>(std::abs(percent * expected), T(percent));
+    ASSERT_NEAR(result, expected, diff);
+}
+
+template<class T>
+auto assert_near(const T& result, const T& expected, const float percent)
+    -> typename std::enable_if<!std::is_floating_point<T>::value>::type
+{
+    (void)percent;
+    ASSERT_EQ(result, expected);
+}
+
+
+template<class T>
+auto assert_near(const custom_test_type<T>& result, const custom_test_type<T>& expected, const float percent)
+    -> typename std::enable_if<std::is_floating_point<T>::value>::type
+{
+    auto diff1 = std::max<T>(std::abs(percent * expected.x), T(percent));
+    auto diff2 = std::max<T>(std::abs(percent * expected.y), T(percent));
+    ASSERT_NEAR(result.x, expected.x, diff1);
+    ASSERT_NEAR(result.y, expected.y, diff2);
 }
 
 template<class T>

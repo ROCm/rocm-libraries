@@ -404,8 +404,8 @@ public:
     /// The signature of the \p prefix_callback_op should be equivalent to the following:
     /// <tt>T f(const T &block_reduction);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
-    /// The object will be called by the first thread in the first warp from the block with
-    /// block reduction of \p input values as input argument. The result will be used as the
+    /// The object will be called by the first warp of the block with block reduction of 
+    /// \p input values as input argument. The result of the first thread will be used as the
     /// block-wide prefix.
     /// \param [in] scan_op - binary operation function object that will be used for scan.
     /// The signature of the function should be equivalent to the following:
@@ -794,8 +794,8 @@ public:
     /// The signature of the \p prefix_callback_op should be equivalent to the following:
     /// <tt>T f(const T &block_reduction);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
-    /// The object will be called by the first thread in the first warp from the block with
-    /// block reduction of \p input values as input argument. The result will be used as the
+    /// The object will be called by the first warp of the block with block reduction of 
+    /// \p input values as input argument. The result of the first thread will be used as the
     /// block-wide prefix.
     /// \param [in] scan_op - binary operation function object that will be used for scan.
     /// The signature of the function should be equivalent to the following:
@@ -1168,8 +1168,8 @@ public:
     /// The signature of the \p prefix_callback_op should be equivalent to the following:
     /// <tt>T f(const T &block_reduction);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
-    /// The object will be called by the first thread in the first warp from the block with
-    /// block reduction of \p input values as input argument. The result will be used as the
+    /// The object will be called by the first warp of the block with block reduction of 
+    /// \p input values as input argument. The result of the first thread will be used as the
     /// block-wide prefix.
     /// \param [in] scan_op - binary operation function object that will be used for scan.
     /// The signature of the function should be equivalent to the following:
@@ -1579,8 +1579,8 @@ public:
     /// The signature of the \p prefix_callback_op should be equivalent to the following:
     /// <tt>T f(const T &block_reduction);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
-    /// The object will be called by the first thread in the first warp from the block with
-    /// block reduction of \p input values as input argument. The result will be used as the
+    /// The object will be called by the first warp of the block with block reduction of 
+    /// \p input values as input argument. The result of the first thread will be used as the
     /// block-wide prefix.
     /// \param [in] scan_op - binary operation function object that will be used for scan.
     /// The signature of the function should be equivalent to the following:
