@@ -76,6 +76,12 @@
     #define ROCPRIM_DETAIL_USE_DPP true
 #endif
 
+#ifdef ROCPRIM_DISABLE_LOOKBACK_SCAN
+    #define ROCPRIM_DETAIL_USE_LOOKBACK_SCAN false
+#else
+    #define ROCPRIM_DETAIL_USE_LOOKBACK_SCAN true
+#endif
+
 // Defines targeted AMD architecture. Supported values:
 // * 803 (gfx803)
 // * 900 (gfx900)

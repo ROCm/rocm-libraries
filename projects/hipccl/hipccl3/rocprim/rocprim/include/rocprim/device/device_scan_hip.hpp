@@ -170,7 +170,6 @@ void init_lookback_scan_state_kernel(LookBackScanState lookback_scan_state,
 
 template<
     bool Exclusive,
-    bool UseLoopback,
     class Config,
     class InputIterator,
     class OutputIterator,
@@ -187,7 +186,7 @@ auto scan_impl(void * temporary_storage,
                BinaryFunction scan_op,
                const hipStream_t stream,
                bool debug_synchronous)
-    -> typename std::enable_if<!UseLoopback, hipError_t>::type
+    -> typename std::enable_if<!Config::use_lookback, hipError_t>::type
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     using output_type = typename std::iterator_traits<OutputIterator>::value_type;
@@ -195,11 +194,7 @@ auto scan_impl(void * temporary_storage,
         input_type, output_type, BinaryFunction
     >::type;
 
-    // Get default config if Config is default_config
-    using config = default_or_custom_config<
-        Config,
-        default_scan_config<ROCPRIM_TARGET_ARCH, result_type>
-    >;
+    using config = Config;
 
     constexpr unsigned int block_size = config::block_size;
     constexpr unsigned int items_per_thread = config::items_per_thread;
@@ -252,7 +247,7 @@ auto scan_impl(void * temporary_storage,
         auto nested_temp_storage_size = storage_size - (number_of_blocks * sizeof(result_type));
 
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-        auto error = scan_impl<false, false, config>(
+        auto error = scan_impl<false, config>(
             nested_temp_storage,
             nested_temp_storage_size,
             block_prefixes, // input
@@ -305,7 +300,6 @@ auto scan_impl(void * temporary_storage,
 
 template<
     bool Exclusive,
-    bool UseLoopback,
     class Config,
     class InputIterator,
     class OutputIterator,
@@ -322,7 +316,7 @@ auto scan_impl(void * temporary_storage,
                BinaryFunction scan_op,
                const hipStream_t stream,
                bool debug_synchronous)
-    -> typename std::enable_if<UseLoopback, hipError_t>::type
+    -> typename std::enable_if<Config::use_lookback, hipError_t>::type
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     using output_type = typename std::iterator_traits<OutputIterator>::value_type;
@@ -330,11 +324,7 @@ auto scan_impl(void * temporary_storage,
         input_type, output_type, BinaryFunction
     >::type;
 
-    // Get default config if Config is default_config
-    using config = default_or_custom_config<
-        Config,
-        default_scan_config<ROCPRIM_TARGET_ARCH, result_type>
-    >;
+    using config = Config;
 
     using scan_state_type = detail::lookback_scan_state<result_type>;
     using ordered_block_id_type = detail::ordered_block_id<unsigned int>;
@@ -518,10 +508,13 @@ hipError_t inclusive_scan(void * temporary_storage,
         input_type, output_type, BinaryFunction
     >::type;
 
-    // Lookback scan has problems with types that are not arithmetic
-    // TODO: Investigate why the compiler never finishes linking if half is used
-    // Workaround: rocprim::is_arithmetic is replaced by std::is_arithmetic
-    return detail::scan_impl<false, std::is_arithmetic<result_type>::value, Config>(
+    // Get default config if Config is default_config
+    using config = detail::default_or_custom_config<
+        Config,
+        detail::default_scan_config<ROCPRIM_TARGET_ARCH, result_type>
+    >;
+
+    return detail::scan_impl<false, config>(
         temporary_storage, storage_size,
         // result_type() is a dummy initial value (not used)
         input, output, result_type(), size,
@@ -637,10 +630,13 @@ hipError_t exclusive_scan(void * temporary_storage,
         input_type, output_type, BinaryFunction
     >::type;
 
-    // Lookback scan has problems with types that are not arithmetic
-    // TODO: Investigate why the compiler never finishes linking if half is used
-    // Workaround: rocprim::is_arithmetic is replaced by std::is_arithmetic
-    return detail::scan_impl<true, std::is_arithmetic<result_type>::value, Config>(
+    // Get default config if Config is default_config
+    using config = detail::default_or_custom_config<
+        Config,
+        detail::default_scan_config<ROCPRIM_TARGET_ARCH, result_type>
+    >;
+
+    return detail::scan_impl<true, config>(
         temporary_storage, storage_size,
         input, output, initial_value, size,
         scan_op, stream, debug_synchronous
