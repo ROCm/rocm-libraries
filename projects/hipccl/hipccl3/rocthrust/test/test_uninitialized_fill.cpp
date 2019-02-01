@@ -24,6 +24,7 @@
 #include <gtest/gtest.h>
 
 // Thrust
+#include <thrust/system/hip/config.h>
 #include <thrust/uninitialized_fill.h>
 #include <thrust/device_malloc_allocator.h>
 #include <thrust/device_vector.h>
