@@ -30,7 +30,7 @@
 
 #include "test_utils.hpp"
 
-#define HIP_CHECK(error) ASSERT_EQ(static_cast<hipError_t>(error), hipSuccess)
+#define HIP_CHECK(error) ASSERT_EQ(error, hipSuccess)
 
 namespace rp = rocprim;
 
@@ -90,6 +90,9 @@ typedef ::testing::Types<
     params<long, 64U>,
     params<long, 256U>,
     params<long, 377U>,
+    // custom structs tests
+    params<test_utils::custom_test_type<int>, 128>,
+    params<test_utils::custom_test_type<double>, 256U>,
     // -----------------------------------------------------------------------
     // rocprim::block_scan_algorithm::reduce_then_scan
     // -----------------------------------------------------------------------
@@ -103,7 +106,9 @@ typedef ::testing::Types<
     params<short, 162U, 1, rocprim::block_scan_algorithm::reduce_then_scan>,
     params<unsigned int, 255U, 1, rocprim::block_scan_algorithm::reduce_then_scan>,
     params<int, 377U, 1, rocprim::block_scan_algorithm::reduce_then_scan>,
-    params<unsigned char, 377U, 1, rocprim::block_scan_algorithm::reduce_then_scan>
+    params<unsigned char, 377U, 1, rocprim::block_scan_algorithm::reduce_then_scan>,
+    params<test_utils::custom_test_type<int>, 140, 1, rocprim::block_scan_algorithm::reduce_then_scan>,
+    params<test_utils::custom_test_type<double>, 201U, 1, rocprim::block_scan_algorithm::reduce_then_scan>
 > SingleValueTestParams;
 
 TYPED_TEST_CASE(RocprimBlockScanSingleValueTests, SingleValueTestParams);
@@ -183,10 +188,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScan)
     );
 
     // Validating results
-    for(size_t i = 0; i < output.size(); i++)
-    {
-        ASSERT_EQ(output[i], expected[i]);
-    }
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, 0.01));
 
     HIP_CHECK(hipFree(device_output));
 }
@@ -289,15 +291,8 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanReduce)
     );
 
     // Validating results
-    for(size_t i = 0; i < output.size(); i++)
-    {
-        ASSERT_EQ(output[i], expected[i]);
-    }
-
-    for(size_t i = 0; i < output_reductions.size(); i++)
-    {
-        ASSERT_EQ(output_reductions[i], expected_reductions[i]);
-    }
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, 0.01));
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output_reductions, expected_reductions, 0.01));
 
     HIP_CHECK(hipFree(device_output));
     HIP_CHECK(hipFree(device_output_reductions));
@@ -316,7 +311,7 @@ void inclusive_scan_prefix_callback_kernel(T* device_output, T* device_output_bp
     auto prefix_callback = [&prefix_value](T reduction)
     {
         T prefix = prefix_value;
-        prefix_value += reduction;
+        prefix_value = prefix_value + reduction;
         return prefix;
     };
 
@@ -413,15 +408,8 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanPrefixCallback)
     );
 
     // Validating results
-    for(size_t i = 0; i < output.size(); i++)
-    {
-        ASSERT_EQ(output[i], expected[i]);
-    }
-
-    for(size_t i = 0; i < output_block_prefixes.size(); i++)
-    {
-        ASSERT_EQ(output_block_prefixes[i], expected_block_prefixes[i]);
-    }
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, 0.01));
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output_block_prefixes, expected_block_prefixes, 0.01));
 
     HIP_CHECK(hipFree(device_output));
     HIP_CHECK(hipFree(device_output_bp));
@@ -504,10 +492,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScan)
     );
 
     // Validating results
-    for(size_t i = 0; i < output.size(); i++)
-    {
-        ASSERT_EQ(output[i], expected[i]);
-    }
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, 0.01));
 
     HIP_CHECK(hipFree(device_output));
 }
@@ -568,7 +553,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanReduce)
         for(size_t j = 0; j < block_size; j++)
         {
             auto idx = i * block_size + j;
-            expected_reductions[i] += output[idx];
+            expected_reductions[i] = expected_reductions[i] + output[idx];
         }
     }
 
@@ -619,15 +604,8 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanReduce)
     );
 
     // Validating results
-    for(size_t i = 0; i < output.size(); i++)
-    {
-        ASSERT_EQ(output[i], expected[i]);
-    }
-
-    for(size_t i = 0; i < output_reductions.size(); i++)
-    {
-        ASSERT_EQ(output_reductions[i], expected_reductions[i]);
-    }
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, 0.01));
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output_reductions, expected_reductions, 0.01));
 
     HIP_CHECK(hipFree(device_output));
     HIP_CHECK(hipFree(device_output_reductions));
@@ -646,7 +624,7 @@ void exclusive_scan_prefix_callback_kernel(T* device_output, T* device_output_bp
     auto prefix_callback = [&prefix_value](T reduction)
     {
         T prefix = prefix_value;
-        prefix_value += reduction;
+        prefix_value = prefix_value + reduction;
         return prefix;
     };
 
@@ -698,7 +676,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanPrefixCallback)
         for(size_t j = 0; j < block_size; j++)
         {
             auto idx = i * block_size + j;
-            expected_block_prefixes[i] += output[idx];
+            expected_block_prefixes[i] = expected_block_prefixes[i] + output[idx];
         }
     }
 
@@ -749,96 +727,11 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanPrefixCallback)
     );
 
     // Validating results
-    for(size_t i = 0; i < output.size(); i++)
-    {
-        ASSERT_EQ(output[i], expected[i]);
-    }
-
-    for(size_t i = 0; i < output_block_prefixes.size(); i++)
-    {
-        ASSERT_EQ(output_block_prefixes[i], expected_block_prefixes[i]);
-    }
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, 0.01));
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output_block_prefixes, expected_block_prefixes, 0.01));
 
     HIP_CHECK(hipFree(device_output));
     HIP_CHECK(hipFree(device_output_bp));
-}
-
-TYPED_TEST(RocprimBlockScanSingleValueTests, CustomStruct)
-{
-    using base_type = typename TestFixture::type;
-    using T = test_utils::custom_test_type<base_type>;
-    constexpr auto algorithm = TestFixture::algorithm;
-    constexpr size_t block_size = TestFixture::block_size;
-
-    // Given block size not supported
-    if(block_size > test_utils::get_max_block_size())
-    {
-        return;
-    }
-
-    const size_t size = block_size * 113;
-    const size_t grid_size = size / block_size;
-    // Generate data
-    std::vector<T> output(size);
-    {
-        std::vector<base_type> random_values =
-            test_utils::get_random_data<base_type>(2 * output.size(), 2, 100);
-        for(size_t i = 0; i < output.size(); i++)
-        {
-            output[i].x = random_values[i],
-            output[i].y = random_values[i + output.size()];
-        }
-    }
-
-    // Calculate expected results on host
-    std::vector<T> expected(output.size(), T(0));
-    for(size_t i = 0; i < output.size() / block_size; i++)
-    {
-        for(size_t j = 0; j < block_size; j++)
-        {
-            auto idx = i * block_size + j;
-            expected[idx] = output[idx] + expected[j > 0 ? idx-1 : idx];
-        }
-    }
-
-    // Writing to device memory
-    T* device_output;
-    HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
-
-    HIP_CHECK(
-        hipMemcpy(
-            device_output, output.data(),
-            output.size() * sizeof(T),
-            hipMemcpyHostToDevice
-        )
-    );
-
-    // Launching kernel
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(inclusive_scan_kernel<block_size, algorithm, T>),
-        dim3(grid_size), dim3(block_size), 0, 0,
-        device_output
-    );
-
-    HIP_CHECK(hipPeekAtLastError());
-    HIP_CHECK(hipDeviceSynchronize());
-
-    // Read from device memory
-    HIP_CHECK(
-        hipMemcpy(
-            output.data(), device_output,
-            output.size() * sizeof(T),
-            hipMemcpyDeviceToHost
-        )
-    );
-
-    // Validating results
-    for(size_t i = 0; i < output.size(); i++)
-    {
-        ASSERT_EQ(output[i], expected[i]);
-    }
-
-    HIP_CHECK(hipFree(device_output));
 }
 
 // ---------------------------------------------------------
@@ -872,6 +765,8 @@ typedef ::testing::Types<
     params<char, 1024, 1>,
     params<char, 37,   2>,
     params<char, 65,   5>,
+    params<test_utils::custom_test_type<int>, 110, 4>,
+    params<test_utils::custom_test_type<double>, 256U, 3>,
     // -----------------------------------------------------------------------
     // rocprim::block_scan_algorithm::reduce_then_scan
     // -----------------------------------------------------------------------
@@ -886,7 +781,9 @@ typedef ::testing::Types<
     params<float, 255,  15, rocprim::block_scan_algorithm::reduce_then_scan>,
     params<char, 1024, 1,  rocprim::block_scan_algorithm::reduce_then_scan>,
     params<char, 37,   2,  rocprim::block_scan_algorithm::reduce_then_scan>,
-    params<char, 65,   5,  rocprim::block_scan_algorithm::reduce_then_scan>
+    params<char, 65,   5,  rocprim::block_scan_algorithm::reduce_then_scan>,
+    params<test_utils::custom_test_type<float>, 256, 5, rocprim::block_scan_algorithm::reduce_then_scan>,
+    params<test_utils::custom_test_type<int>,   180, 3, rocprim::block_scan_algorithm::reduce_then_scan>
 > InputArrayTestParams;
 
 TYPED_TEST_CASE(RocprimBlockScanInputArrayTests, InputArrayTestParams);
@@ -982,13 +879,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScan)
     );
 
     // Validating results
-    for(size_t i = 0; i < output.size(); i++)
-    {
-        ASSERT_NEAR(
-            output[i], expected[i],
-            static_cast<T>(0.05) * expected[i]
-        );
-    }
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, 0.01));
 
     HIP_CHECK(hipFree(device_output));
 }
@@ -1117,21 +1008,8 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScanReduce)
     );
 
     // Validating results
-    for(size_t i = 0; i < output.size(); i++)
-    {
-        ASSERT_NEAR(
-            output[i], expected[i],
-            static_cast<T>(0.05) * expected[i]
-        );
-    }
-
-    for(size_t i = 0; i < output_reductions.size(); i++)
-    {
-        ASSERT_NEAR(
-            output_reductions[i], expected_reductions[i],
-            static_cast<T>(0.05) * expected_reductions[i]
-        );
-    }
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, 0.01));
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output_reductions, expected_reductions, 0.01));
 
     HIP_CHECK(hipFree(device_output));
     HIP_CHECK(hipFree(device_output_reductions));
@@ -1151,7 +1029,7 @@ void inclusive_scan_array_prefix_callback_kernel(T* device_output, T* device_out
     auto prefix_callback = [&prefix_value](T reduction)
     {
         T prefix = prefix_value;
-        prefix_value += reduction;
+        prefix_value = prefix_value + reduction;
         return prefix;
     };
 
@@ -1270,21 +1148,8 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScanPrefixCallback)
     );
 
     // Validating results
-    for(size_t i = 0; i < output.size(); i++)
-    {
-        ASSERT_NEAR(
-            output[i], expected[i],
-            static_cast<T>(0.05) * expected[i]
-        );
-    }
-
-    for(size_t i = 0; i < output_block_prefixes.size(); i++)
-    {
-        ASSERT_NEAR(
-            output_block_prefixes[i], expected_block_prefixes[i],
-            static_cast<T>(0.05) * expected_block_prefixes[i]
-        );
-    }
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, 0.01));
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output_block_prefixes, expected_block_prefixes, 0.01));
 
     HIP_CHECK(hipFree(device_output));
     HIP_CHECK(hipFree(device_output_bp));
@@ -1381,13 +1246,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScan)
     );
 
     // Validating results
-    for(size_t i = 0; i < output.size(); i++)
-    {
-        ASSERT_NEAR(
-            output[i], expected[i],
-            static_cast<T>(0.05) * expected[i]
-        );
-    }
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, 0.01));
 
     HIP_CHECK(hipFree(device_output));
 }
@@ -1461,7 +1320,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScanReduce)
         }
         for(size_t j = 0; j < items_per_block; j++)
         {
-            expected_reductions[i] += output[i * items_per_block + j];
+            expected_reductions[i] = expected_reductions[i] + output[i * items_per_block + j];
         }
     }
 
@@ -1514,21 +1373,8 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScanReduce)
     );
 
     // Validating results
-    for(size_t i = 0; i < output.size(); i++)
-    {
-        ASSERT_NEAR(
-            output[i], expected[i],
-            static_cast<T>(0.05) * expected[i]
-        );
-    }
-
-    for(size_t i = 0; i < output_reductions.size(); i++)
-    {
-        ASSERT_NEAR(
-            output_reductions[i], expected_reductions[i],
-            static_cast<T>(0.05) * expected_reductions[i]
-        );
-    }
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, 0.01));
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output_reductions, expected_reductions, 0.01));
 }
 
 template<
@@ -1549,7 +1395,7 @@ void exclusive_scan_prefix_callback_array_kernel(
     auto prefix_callback = [&prefix_value](T reduction)
     {
         T prefix = prefix_value;
-        prefix_value += reduction;
+        prefix_value = prefix_value + reduction;
         return prefix;
     };
 
@@ -1612,7 +1458,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScanPrefixCallback)
         for(size_t j = 0; j < items_per_block; j++)
         {
             auto idx = i * items_per_block + j;
-            expected_block_prefixes[i] += output[idx];
+            expected_block_prefixes[i] = expected_block_prefixes[i] + output[idx];
         }
     }
 
@@ -1665,21 +1511,8 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScanPrefixCallback)
     );
 
     // Validating results
-    for(size_t i = 0; i < output.size(); i++)
-    {
-        ASSERT_NEAR(
-            output[i], expected[i],
-            static_cast<T>(0.05) * expected[i]
-        );
-    }
-
-    for(size_t i = 0; i < output_block_prefixes.size(); i++)
-    {
-        ASSERT_NEAR(
-            output_block_prefixes[i], expected_block_prefixes[i],
-            static_cast<T>(0.05) * expected_block_prefixes[i]
-        );
-    }
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, 0.01));
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output_block_prefixes, expected_block_prefixes, 0.01));
 
     HIP_CHECK(hipFree(device_output));
     HIP_CHECK(hipFree(device_output_bp));

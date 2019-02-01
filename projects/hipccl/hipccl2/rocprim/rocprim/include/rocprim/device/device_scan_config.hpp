@@ -41,12 +41,14 @@ BEGIN_ROCPRIM_NAMESPACE
 ///
 /// \tparam BlockSize - number of threads in a block.
 /// \tparam ItemsPerThread - number of items processed by each thread.
+/// \tparam UseLookback - whether to use lookback scan or reduce-then-scan algorithm.
 /// \tparam BlockLoadMethod - method for loading input values.
 /// \tparam StoreLoadMethod - method for storing values.
 /// \tparam BlockScanMethod - algorithm for block scan.
 template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
+    bool UseLookback,
     ::rocprim::block_load_method BlockLoadMethod,
     ::rocprim::block_store_method BlockStoreMethod,
     ::rocprim::block_scan_algorithm BlockScanMethod
@@ -57,6 +59,8 @@ struct scan_config
     static constexpr unsigned int block_size = BlockSize;
     /// \brief Number of items processed by each thread.
     static constexpr unsigned int items_per_thread = ItemsPerThread;
+    /// \brief Whether to use lookback scan or reduce-then-scan algorithm.
+    static constexpr bool use_lookback = UseLookback;
     /// \brief Method for loading input values.
     static constexpr block_load_method block_load_method = BlockLoadMethod;
     /// \brief Method for storing values.
@@ -77,6 +81,7 @@ struct scan_config_803
     using type = scan_config<
         256,
         ::rocprim::max(1u, 16u / item_scale),
+        ROCPRIM_DETAIL_USE_LOOKBACK_SCAN,
         ::rocprim::block_load_method::block_load_transpose,
         ::rocprim::block_store_method::block_store_transpose,
         ::rocprim::block_scan_algorithm::using_warp_scan
@@ -92,6 +97,7 @@ struct scan_config_900
     using type = scan_config<
         256,
         ::rocprim::max(1u, 16u / item_scale),
+        ROCPRIM_DETAIL_USE_LOOKBACK_SCAN,
         ::rocprim::block_load_method::block_load_transpose,
         ::rocprim::block_store_method::block_store_transpose,
         ::rocprim::block_scan_algorithm::using_warp_scan

@@ -98,7 +98,7 @@ void block_reduce_kernel_impl(InputIterator input,
     >;
     constexpr unsigned int items_per_block = block_size * items_per_thread;
 
-    const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
+    const unsigned int flat_id = ::rocprim::flat_block_thread_id();
     const unsigned int flat_block_id = ::rocprim::detail::block_id<0>();
     const unsigned int block_offset = flat_block_id * items_per_block;
     const unsigned int number_of_blocks = ::rocprim::detail::grid_size<0>();
