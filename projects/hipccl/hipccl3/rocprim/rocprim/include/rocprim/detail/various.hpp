@@ -226,6 +226,21 @@ struct raw_storage
     }
 };
 
+// Checks if two iterators have the same type and value
+template<class Iterator1, class Iterator2>
+inline
+bool are_iterators_equal(Iterator1, Iterator2)
+{
+    return false;
+}
+
+template<class Iterator>
+inline
+bool are_iterators_equal(Iterator iter1, Iterator iter2)
+{
+    return iter1 == iter2;
+}
+
 } // end namespace detail
 END_ROCPRIM_NAMESPACE
 

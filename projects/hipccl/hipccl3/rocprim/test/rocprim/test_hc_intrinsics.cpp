@@ -93,7 +93,7 @@ struct custom_16aligned
         this->f += rhs.f;
         return *this;
     }
-} __attribute__((aligned(16)));;
+} __attribute__((aligned(16)));
 
 inline ROCPRIM_HOST_DEVICE
 custom_16aligned operator+(custom_16aligned lhs, const custom_16aligned& rhs)
