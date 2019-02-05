@@ -94,12 +94,6 @@ replace(execution_policy<Derived> &policy,
         T const &                  old_value,
         T const &                  new_value)
 {
-  /*cuda_cub::transform_if(policy,
-                      first,
-                      last,
-                      first,
-                      __replace::constant_f<T>(new_value),
-                      detail::equal_to_value<T>(old_value));*/
     hip_rocprim::transform_if(policy,
                         first,
                         last,
@@ -119,12 +113,6 @@ replace_if(execution_policy<Derived> &policy,
            Predicate                  pred,
            T const &                  new_value)
 {
-  /*cuda_cub::transform_if(policy,
-                      first,
-                      last,
-                      first,
-                      __replace::constant_f<T>(new_value),
-                      pred);*/
     hip_rocprim::transform_if(policy,
                       first,
                       last,
@@ -146,13 +134,6 @@ replace_if(execution_policy<Derived> &policy,
            Predicate                  pred,
            T const &                  new_value)
 {
-  /*cuda_cub::transform_if(policy,
-                      first,
-                      last,
-                      stencil,
-                      first,
-                      __replace::constant_f<T>(new_value),
-                      pred);*/
     hip_rocprim::transform_if(policy,
                       first,
                       last,
@@ -175,13 +156,6 @@ replace_copy_if(execution_policy<Derived> &policy,
                 Predicate                  predicate,
                 T const &                  new_value)
 {
-  /*typedef typename iterator_traits<OutputIt>::value_type output_type;
-  typedef __replace::new_value_if_f<Predicate, T, output_type> new_value_if_t;
-  return cuda_cub::transform(policy,
-                             first,
-                             last,
-                             result,
-                             new_value_if_t(predicate, new_value));*/
     typedef typename iterator_traits<OutputIt>::value_type output_type;
     typedef __replace::new_value_if_f<Predicate, T, output_type> new_value_if_t;
     return hip_rocprim::transform(policy,
@@ -206,14 +180,6 @@ replace_copy_if(execution_policy<Derived> &policy,
                 Predicate                  predicate,
                 T const &                  new_value)
 {
-  /*typedef typename iterator_traits<OutputIt>::value_type output_type;
-  typedef __replace::new_value_if_f<Predicate, T, output_type> new_value_if_t;
-  return cuda_cub::transform(policy,
-                           first,
-                           last,
-                           stencil,
-                           result,
-                           new_value_if_t(predicate, new_value));*/
     typedef typename iterator_traits<OutputIt>::value_type output_type;
     typedef __replace::new_value_if_f<Predicate, T, output_type> new_value_if_t;
     return hip_rocprim::transform(policy,
@@ -236,12 +202,6 @@ replace_copy(execution_policy<Derived> &policy,
              T const &                  old_value,
              T const &                  new_value)
 {
-  /*return cuda_cub::replace_copy_if(policy,
-                                   first,
-                                   last,
-                                   result,
-                                   detail::equal_to_value<T>(old_value),
-                                   new_value);*/
     return hip_rocprim::replace_copy_if(policy,
                                    first,
                                    last,

@@ -20,31 +20,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <vector>
-#include <list>
-#include <limits>
-#include <utility>
-
 // Google Test
 #include <gtest/gtest.h>
 #include "test_utils.hpp"
 
 // Thrust
-///////////////////// This includes come from test_sort.cpp
-#include <thrust/memory.h>
-#include <thrust/transform.h>
-// STREAMHPC TODO replace <thrust/detail/seq.h> with <thrust/execution_policy.h>
-#include <thrust/sequence.h>
-#include <thrust/device_malloc_allocator.h>
 #include <thrust/device_vector.h>
-/////////////////////
-
-///////////////////////////This ones from replace.cu
 #include <thrust/replace.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
-#include <thrust/execution_policy.h>
-////////////////////////
 
 // HIP API
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
@@ -53,9 +37,6 @@
 
 #define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
-#include<iostream>
-
 
 template< class InputType >
 struct Params
@@ -107,38 +88,10 @@ typedef ::testing::Types<
     Params<double>
 > ReplaceTestsPrimitiveParams;
 
-
 TYPED_TEST_CASE(ReplaceTests, ReplaceTestsParams);
 TYPED_TEST_CASE(PrimitiveReplaceTests, ReplaceTestsPrimitiveParams);
 
-
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
-TYPED_TEST(PrimitiveReplaceTests, SimpleReplace)
-{
-    using T = typename TestFixture::input_type;
-
-    const std::vector<size_t> sizes = get_sizes_smaller();
-    for(auto size : sizes)
-    {
-        //size_t size = 12;
-        thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10);
-        thrust::device_vector<T> d_data = h_data;
-
-        T new_value = (T) 0;
-        T old_value = (T) 1;
-
-        thrust::replace(h_data.begin(), h_data.end(), old_value, new_value);
-        thrust::replace(d_data.begin(), d_data.end(), old_value, new_value);
-        
-        ASSERT_EQ(h_data.size(), size);
-        ASSERT_EQ(d_data.size(), size);
-
-        for (size_t i = 0; i < size; i++)
-            ASSERT_NEAR(h_data[i], d_data[i], 0.1);
-    }
-}
-
 
 TEST(ReplaceTests, UsingHip)
 {
@@ -213,7 +166,6 @@ TEST(ReplaceTests, ValidateDispatchImplicit)
     ASSERT_EQ(13, vec.front());
 }
 
-
 TYPED_TEST(PrimitiveReplaceTests, ReplaceWithRandomDataAndDifferentSizes)
 {
     using T = typename TestFixture::input_type;
@@ -221,7 +173,6 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceWithRandomDataAndDifferentSizes)
     const std::vector<size_t> sizes = get_sizes_smaller();
     for(auto size : sizes)
     {
-        //size_t size = 12;
         thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10);
         thrust::device_vector<T> d_data = h_data;
 
@@ -325,7 +276,6 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceCopyWithRandomData)
     const std::vector<size_t> sizes = get_sizes_smaller();
     for(auto size : sizes)
     {
-    //size_t size = 12;
 
         thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10);
         thrust::device_vector<T> d_data = h_data;
@@ -355,7 +305,6 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceCopyToDiscardIterator)
     const std::vector<size_t> sizes = get_sizes_smaller();
     for(auto size : sizes)
     {
-
         thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10);
         thrust::device_vector<T> d_data = h_data;
         
@@ -369,7 +318,6 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceCopyToDiscardIterator)
         thrust::replace_copy(d_data.begin(), d_data.end(), thrust::make_discard_iterator(), old_value, new_value);
 
         thrust::discard_iterator<> reference(size);
-
 
         ASSERT_EQ(reference, d_result);
         ASSERT_EQ(reference, h_result);
@@ -433,7 +381,6 @@ TEST(ReplaceTests, ValidateDispatchReplaceIf)
     ASSERT_EQ(sys.is_valid(), true);
 }
 
-
 template<typename ForwardIterator, typename Predicate, typename T>
 void replace_if(my_tag,
                 ForwardIterator first, ForwardIterator,
@@ -460,7 +407,6 @@ TEST(ReplaceTests, ValidateDispatchImplicitReplaceIf)
 
     ASSERT_EQ(13, vec.front());
 }
-
 
 TYPED_TEST(ReplaceTests, ReplaceIfStencilSimple)
 {
@@ -506,7 +452,6 @@ void replace_if(my_system &system,
     system.validate_dispatch();
 }
 
-
 TEST(ReplaceTests, ReplaceIfStencilDispatchExplicit)
 {
     thrust::device_vector<int> vec(1);
@@ -521,7 +466,6 @@ TEST(ReplaceTests, ReplaceIfStencilDispatchExplicit)
 
     ASSERT_EQ(true, sys.is_valid());
 }
-
 
 template<typename ForwardIterator, typename InputIterator, typename Predicate, typename T>
 void replace_if(my_tag,
@@ -554,7 +498,6 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceIfWithRandomData)
     const std::vector<size_t> sizes = get_sizes_smaller();
     for(auto size : sizes)
     {
-
         thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10);
         thrust::device_vector<T> d_data = h_data;
 
@@ -566,13 +509,10 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceIfWithRandomData)
     }
 }
 
-
-
 TYPED_TEST(ReplaceTests, ReplaceCopyIfSimple)
 {
     using Vector = typename TestFixture::input_type;
     using T = typename Vector::value_type;
-
     size_t size = 5;
     
     Vector data(5);
@@ -583,7 +523,6 @@ TYPED_TEST(ReplaceTests, ReplaceCopyIfSimple)
     data[4] =  5; 
 
     Vector dest(5);
-
     thrust::replace_copy_if(data.begin(), data.end(), dest.begin(), less_than_five<T>(), (T) 0);
 
     Vector result(5);
@@ -654,7 +593,6 @@ TYPED_TEST(ReplaceTests, ReplaceCopyIfStencilSimple)
 {
     using Vector = typename TestFixture::input_type;
     using T = typename Vector::value_type;
-
     size_t size = 5;
     
     Vector data(5);
@@ -672,7 +610,6 @@ TYPED_TEST(ReplaceTests, ReplaceCopyIfStencilSimple)
     stencil[4] = 8;
 
     Vector dest(5);
-
     thrust::replace_copy_if(data.begin(), data.end(), stencil.begin(), dest.begin(), less_than_five<T>(), (T) 0);
 
     Vector result(5);
