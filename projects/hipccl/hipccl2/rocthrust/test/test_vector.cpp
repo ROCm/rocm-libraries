@@ -681,6 +681,7 @@ TYPED_TEST(VectorTests, TestVectorShrinkToFit)
   ASSERT_EQ(   3, v.capacity());
 }
 
+// TODO: fix the LargeStruct test
 /*template <int N>
 struct LargeStruct
 {
