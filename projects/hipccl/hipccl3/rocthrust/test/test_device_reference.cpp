@@ -308,6 +308,7 @@ TYPED_TEST(DeviceReferenceIntegerTests,TestDeviceReferenceIntegerManipulation)
   ASSERT_EQ(true, ref1 == ref);
 }
 
+// TODO: Implement swap_ranges
 /*TYPED_TEST(DeviceReferenceTests,TestDeviceReferenceSwap)
 {
     using T = typename TestFixture::input_type;

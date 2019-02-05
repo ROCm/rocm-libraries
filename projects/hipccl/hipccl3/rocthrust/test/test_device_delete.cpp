@@ -66,8 +66,8 @@ TEST(DeviceDelete, TestDeviceDeleteDestructorInvocation)
 
   ASSERT_EQ(false, destructor_flag[0]);
 
+  // TODO
   //thrust::device_delete(foo_ptr);
-
   //ASSERT_EQ(true, destructor_flag[0]);
 }
 
