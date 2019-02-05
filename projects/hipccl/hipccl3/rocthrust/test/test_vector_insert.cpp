@@ -222,33 +222,13 @@ TYPED_TEST(VectorInsertTests, TestVectorRangeInsert)
   const std::vector<size_t> sizes = get_sizes();
   for(auto size : sizes)
   {
-    thrust::host_vector<T> h_src;
-    if (std::is_floating_point<T>::value)
-    {
-      h_src = get_random_data<T>(size + 3, (T)-1000, (T)+1000);
-    }
-    else
-    {
-      h_src = get_random_data<T>(
-        size + 3,
-        std::numeric_limits<T>::min(),
-        std::numeric_limits<T>::max()
-      );
-    }
+    thrust::host_vector<T> h_src = get_random_data<T>(size + 3,
+                                                      std::numeric_limits<T>::min(),
+                                                      std::numeric_limits<T>::max());
 
-    thrust::host_vector<T> h_dst;
-    if (std::is_floating_point<T>::value)
-    {
-      h_dst = get_random_data<T>(size, (T)-1000, (T)+1000);
-    }
-    else
-    {
-      h_dst = get_random_data<T>(
-        size,
-        std::numeric_limits<T>::min(),
-        std::numeric_limits<T>::max()
-      );
-    }
+    thrust::host_vector<T> h_dst = get_random_data<T>(size,
+                                                      std::numeric_limits<T>::min(),
+                                                      std::numeric_limits<T>::max());
 
     thrust::device_vector<T> d_src = h_src;
     thrust::device_vector<T> d_dst = h_dst;
@@ -403,19 +383,9 @@ TYPED_TEST(VectorInsertTests, TestVectorFillInsert)
   const std::vector<size_t> sizes = get_sizes();
   for(auto size : sizes)
   {
-    thrust::host_vector<T> h_dst;
-    if (std::is_floating_point<T>::value)
-    {
-      h_dst = get_random_data<T>(size + 2, (T)-1000, (T)+1000);
-    }
-    else
-    {
-      h_dst = get_random_data<T>(
-        size + 2,
-        std::numeric_limits<T>::min(),
-        std::numeric_limits<T>::max()
-      );
-    }
+    thrust::host_vector<T> h_dst = get_random_data<T>(size + 2,
+                                                      std::numeric_limits<T>::min(),
+                                                      std::numeric_limits<T>::max());
 
     thrust::device_vector<T> d_dst = h_dst;
 
