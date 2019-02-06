@@ -76,6 +76,26 @@ namespace detail
             return ::atomicInc(address, value);
         #endif
     }
+
+    ROCPRIM_DEVICE inline
+    unsigned int atomic_exch(unsigned int * address, unsigned int value)
+    {
+        #ifdef ROCPRIM_HC_API
+            return hc::atomic_exchange(address, value);
+        #else
+            return ::atomicExch(address, value);
+        #endif
+    }
+
+    ROCPRIM_DEVICE inline
+    unsigned long long atomic_exch(unsigned long long * address, unsigned long long value)
+    {
+        #ifdef ROCPRIM_HC_API
+            return hc::atomic_exchange(reinterpret_cast<uint64_t*>(address), static_cast<uint64_t>(value));
+        #else
+            return ::atomicExch(address, value);
+        #endif
+    }
 }
 
 END_ROCPRIM_NAMESPACE

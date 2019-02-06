@@ -58,38 +58,25 @@ enum prefix_flag
 // a look-back prefix scan. Initially every prefix can be either
 // invalid (padding values) or empty. One thread in a block should
 // later set it to partial, and later to complete.
-//
-// is_arithmetic - arithmetic types up to 8 bytes have separate faster
-// and simpler implementation. See below.
-// TODO: consider other types that can be loaded in single op.
-template<class T, bool is_arithmetic = ::rocprim::is_arithmetic<T>::value>
+template<class T, bool IsSmall = (sizeof(T) <= 4)>
 struct lookback_scan_state;
 
-// Flag and prefix value are load/store in one operation. Volatile
-// loads/stores are not used as there is no ordering of load/store
-// operation within one prefix (prefix_type).
+// Packed flag and prefix value are loaded/stored in one atomic operation.
 template<class T>
 struct lookback_scan_state<T, true>
 {
 private:
-    using flag_type_ =
-        typename std::conditional<
-            sizeof(T) == 8,
-            long long,
-            typename std::conditional<
-                sizeof(T) == 4,
-                int,
-                typename std::conditional<
-                    sizeof(T) == 2,
-                    short,
-                    char
-                >::type
-            >::type
-        >::type;
+    using flag_type_ = char;
 
     // Type which is used in store/load operations of block prefix (flag and value).
-    // It is essential that this type is load/store using single instruction.
-    using prefix_underlying_type = typename make_vector_type<flag_type_, 2>::type;
+    // It is 32-bit or 64-bit int and can be loaded/stored using single atomic instruction.
+    using prefix_underlying_type =
+        typename std::conditional<
+            (sizeof(T) > 2),
+            unsigned long long,
+            unsigned int
+        >::type;
+
     static constexpr unsigned int padding = ::rocprim::warp_size();
 
     // Helper struct
@@ -98,6 +85,8 @@ private:
         flag_type_ flag;
         T value;
     } __attribute__((aligned(sizeof(prefix_underlying_type))));
+
+    static_assert(sizeof(prefix_underlying_type) == sizeof(prefix_type), "");
 
 public:
     // Type used for flag/flag of block prefix
@@ -124,16 +113,21 @@ public:
     void initialize_prefix(const unsigned int block_id,
                            const unsigned int number_of_blocks)
     {
-        prefix_underlying_type prefix;
         if(block_id < number_of_blocks)
         {
-            reinterpret_cast<prefix_type*>(&prefix)->flag = PREFIX_EMPTY;
-            prefixes[padding + block_id] = prefix;
+            prefix_type prefix;
+            prefix.flag = PREFIX_EMPTY;
+            prefix_underlying_type p;
+            __builtin_memcpy(&p, &prefix, sizeof(prefix_type));
+            prefixes[padding + block_id] = p;
         }
         if(block_id < padding)
         {
-            reinterpret_cast<prefix_type*>(&prefix)->flag = PREFIX_INVALID;
-            prefixes[block_id] = prefix;
+            prefix_type prefix;
+            prefix.flag = PREFIX_INVALID;
+            prefix_underlying_type p;
+            __builtin_memcpy(&p, &prefix, sizeof(prefix_type));
+            prefixes[block_id] = p;
         }
     }
 
@@ -156,10 +150,10 @@ public:
         prefix_type prefix;
         do
         {
-            ::rocprim::detail::memory_fence_system();
-            auto p = prefixes[padding + block_id];
-            prefix = *reinterpret_cast<prefix_type*>(&p);
-        } while(::rocprim::detail::warp_any(prefix.flag == PREFIX_EMPTY));
+            // atomic_add(..., 0) is used to load values atomically
+            prefix_underlying_type p = ::rocprim::detail::atomic_add(&prefixes[padding + block_id], 0);
+            __builtin_memcpy(&prefix, &p, sizeof(prefix_type));
+        } while(prefix.flag == PREFIX_EMPTY);
 
         // return
         flag = prefix.flag;
@@ -171,17 +165,16 @@ private:
     void set(const unsigned int block_id, const flag_type flag, const T value)
     {
         prefix_type prefix = { flag, value };
-        prefix_underlying_type p = *reinterpret_cast<prefix_underlying_type*>(&prefix);
-        prefixes[padding + block_id] = p;
+        prefix_underlying_type p;
+        __builtin_memcpy(&p, &prefix, sizeof(prefix_type));
+        ::rocprim::detail::atomic_exch(&prefixes[padding + block_id], p);
     }
 
     prefix_underlying_type * prefixes;
 };
 
-#define ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_USE_VOLATILE 1
-
-// This does not work for unknown reasons. Lookback-based scan should
-// be only enabled for arithmetic types for now.
+// Flag, partial and final prefixes are stored in separate arrays.
+// Consistency ensured by memory fences between flag and prefixes load/store operations.
 template<class T>
 struct lookback_scan_state<T, false>
 {
@@ -237,67 +230,38 @@ public:
     ROCPRIM_DEVICE inline
     void set_partial(const unsigned int block_id, const T value)
     {
-        #ifdef ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_USE_VOLATILE
-            store_volatile(&prefixes_partial_values[padding + block_id], value);
-            ::rocprim::detail::memory_fence_device();
-            store_volatile<flag_type>(&prefixes_flags[padding + block_id], PREFIX_PARTIAL);
-        #else
-            prefixes_partial_values[padding + block_id] = value;
-            // ::rocprim::detail::memory_fence_device() (aka __threadfence()) should be
-            // enough, but does not work when T is 32 bytes or bigger.
-            ::rocprim::detail::memory_fence_system();
-            prefixes_flags[padding + block_id] = PREFIX_PARTIAL;
-        #endif
+        store_volatile(&prefixes_partial_values[padding + block_id], value);
+        ::rocprim::detail::memory_fence_device();
+        store_volatile<flag_type>(&prefixes_flags[padding + block_id], PREFIX_PARTIAL);
     }
 
     ROCPRIM_DEVICE inline
     void set_complete(const unsigned int block_id, const T value)
     {
-        #ifdef ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_USE_VOLATILE
-            store_volatile(&prefixes_complete_values[padding + block_id], value);
-            ::rocprim::detail::memory_fence_device();
-            store_volatile<flag_type>(&prefixes_flags[padding + block_id], PREFIX_COMPLETE);
-        #else
-            prefixes_complete_values[padding + block_id] = value;
-            // ::rocprim::detail::memory_fence_device() (aka __threadfence()) should be
-            // enough, but does not work when T is 32 bytes or bigger.
-            ::rocprim::detail::memory_fence_system();
-            prefixes_flags[padding + block_id] = PREFIX_COMPLETE;
-        #endif
+        store_volatile(&prefixes_complete_values[padding + block_id], value);
+        ::rocprim::detail::memory_fence_device();
+        store_volatile<flag_type>(&prefixes_flags[padding + block_id], PREFIX_COMPLETE);
     }
 
     // block_id must be > 0
     ROCPRIM_DEVICE inline
     void get(const unsigned int block_id, flag_type& flag, T& value)
     {
-        #ifdef ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_USE_VOLATILE
-            do
-            {
-                ::rocprim::detail::memory_fence_system();
-                flag = load_volatile(&prefixes_flags[padding + block_id]);
-            } while(flag == PREFIX_EMPTY);
+        do
+        {
+            flag = load_volatile(&prefixes_flags[padding + block_id]);
+            ::rocprim::detail::memory_fence_device();
+        } while(flag == PREFIX_EMPTY);
 
-            if(flag == PREFIX_PARTIAL)
-                value = load_volatile(&prefixes_partial_values[padding + block_id]);
-            else
-                value = load_volatile(&prefixes_complete_values[padding + block_id]);
-        #else
-            do
-            {
-                ::rocprim::detail::memory_fence_system();
-                flag = prefixes_flags[padding + block_id];
-            } while(flag == PREFIX_EMPTY);
-
-            if(flag == PREFIX_PARTIAL)
-                value = prefixes_partial_values[padding + block_id];
-            else
-                value = prefixes_complete_values[padding + block_id];
-        #endif
+        if(flag == PREFIX_PARTIAL)
+            value = load_volatile(&prefixes_partial_values[padding + block_id]);
+        else
+            value = load_volatile(&prefixes_complete_values[padding + block_id]);
     }
 
 private:
     flag_type * prefixes_flags;
-    // We need to seprate arrays for partial and final prefixes, because
+    // We need to separate arrays for partial and final prefixes, because
     // value can be overwritten before flag is changed (flag and value are
     // not stored in single instruction).
     T * prefixes_partial_values;

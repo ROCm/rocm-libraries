@@ -36,7 +36,7 @@
 
 namespace rp = rocprim;
 
-#define HIP_CHECK(error) ASSERT_EQ(static_cast<hipError_t>(error),hipSuccess)
+#define HIP_CHECK(error) ASSERT_EQ(error, hipSuccess)
 
 // Params for tests
 template<
@@ -71,18 +71,31 @@ public:
 };
 
 typedef ::testing::Types<
+    // Small
+    DeviceScanParams<char>,
     DeviceScanParams<unsigned short>,
-    DeviceScanParams<int>,
-    DeviceScanParams<double, double, rp::plus<double>, true>,
     DeviceScanParams<short, int>,
+    DeviceScanParams<int>,
+    DeviceScanParams<float, float, rp::maximum<float> >,
+    DeviceScanParams<rp::half, rp::half, test_utils::half_maximum>,
+    DeviceScanParams<rp::half, float>,
+    // Large
+    DeviceScanParams<int, double, rp::plus<int> >,
+    DeviceScanParams<int, double, rp::plus<double> >,
+    DeviceScanParams<int, long long, rp::plus<long long> >,
+    DeviceScanParams<unsigned int, unsigned long long, rp::plus<unsigned long long> >,
+    DeviceScanParams<long long, long long, rp::maximum<long long> >,
+    DeviceScanParams<double, double, rp::plus<double>, true>,
     DeviceScanParams<signed char, long, rp::plus<long> >,
     DeviceScanParams<float, double, rp::minimum<double> >,
+    DeviceScanParams<test_utils::custom_test_type<int> >,
     DeviceScanParams<
         test_utils::custom_test_type<double>, test_utils::custom_test_type<double>,
         rp::plus<test_utils::custom_test_type<double> >, true
     >,
-    DeviceScanParams<rp::half, rp::half, test_utils::half_maximum>,
-    DeviceScanParams<rp::half, float>
+    DeviceScanParams<test_utils::custom_test_type<int> >,
+    DeviceScanParams<test_utils::custom_test_array_type<long long, 5> >,
+    DeviceScanParams<test_utils::custom_test_array_type<int, 10> >
 > RocprimDeviceScanTestsParams;
 
 std::vector<size_t> get_sizes()
@@ -90,7 +103,8 @@ std::vector<size_t> get_sizes()
     std::vector<size_t> sizes = {
         1, 10, 53, 211,
         1024, 2048, 5096,
-        34567, (1 << 18)
+        34567, (1 << 18),
+        (1 << 20) - 12345
     };
     const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(3, 1, 100000);
     sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
@@ -126,7 +140,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanEmptyInput)
     HIP_CHECK(
         rocprim::inclusive_scan(
             d_temp_storage, temp_storage_size_bytes,
-            rocprim::make_constant_iterator<T>(345),
+            rocprim::make_constant_iterator<T>(T(345)),
             d_checking_output,
             0, scan_op_type(), stream, debug_synchronous
         )
@@ -139,7 +153,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanEmptyInput)
     HIP_CHECK(
         rocprim::inclusive_scan(
             d_temp_storage, temp_storage_size_bytes,
-            rocprim::make_constant_iterator<T>(345),
+            rocprim::make_constant_iterator<T>(T(345)),
             d_checking_output,
             0, scan_op_type(), stream, debug_synchronous
         )

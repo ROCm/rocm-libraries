@@ -34,7 +34,7 @@
 // HC API
 #include <hcc/hc.hpp>
 
-// rocPRIM HIP API
+// rocPRIM
 #include <rocprim/rocprim.hpp>
 
 // CmdParser

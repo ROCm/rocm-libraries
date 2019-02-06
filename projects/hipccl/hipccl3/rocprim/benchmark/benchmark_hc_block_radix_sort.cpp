@@ -24,9 +24,11 @@
 #include <chrono>
 #include <vector>
 #include <limits>
+#include <codecvt>
 #include <string>
 #include <cstdio>
 #include <cstdlib>
+#include <locale>
 
 // Google Benchmark
 #include "benchmark/benchmark.h"
