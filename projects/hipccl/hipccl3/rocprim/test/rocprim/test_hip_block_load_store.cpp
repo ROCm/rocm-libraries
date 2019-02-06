@@ -85,34 +85,34 @@ typedef ::testing::Types<
     // block_load_direct
     class_params<int, rp::block_load_method::block_load_direct,
                  rp::block_store_method::block_store_direct, 64U, 1>,
-    class_params<int, rp::block_load_method::block_load_direct,
-                 rp::block_store_method::block_store_direct, 64U, 4>,
+    class_params<rp::half, rp::block_load_method::block_load_direct,
+                 rp::block_store_method::block_store_direct, 64U, 7>,
     class_params<int, rp::block_load_method::block_load_direct,
                  rp::block_store_method::block_store_direct, 256U, 1>,
-    class_params<int, rp::block_load_method::block_load_direct,
+    class_params<char, rp::block_load_method::block_load_direct,
                  rp::block_store_method::block_store_direct, 256U, 4>,
     class_params<int, rp::block_load_method::block_load_direct,
                  rp::block_store_method::block_store_direct, 512U, 1>,
     class_params<int, rp::block_load_method::block_load_direct,
-                 rp::block_store_method::block_store_direct, 512U, 4>,
+                 rp::block_store_method::block_store_direct, 512U, 3>,
 
     class_params<double, rp::block_load_method::block_load_direct,
                  rp::block_store_method::block_store_direct, 64U, 1>,
-    class_params<double, rp::block_load_method::block_load_direct,
-                 rp::block_store_method::block_store_direct, 64U, 4>,
+    class_params<long long, rp::block_load_method::block_load_direct,
+                 rp::block_store_method::block_store_direct, 64U, 6>,
     class_params<double, rp::block_load_method::block_load_direct,
                  rp::block_store_method::block_store_direct, 256U, 1>,
-    class_params<double, rp::block_load_method::block_load_direct,
-                 rp::block_store_method::block_store_direct, 256U, 4>,
+    class_params<rp::half, rp::block_load_method::block_load_direct,
+                 rp::block_store_method::block_store_direct, 256U, 3>,
     class_params<double, rp::block_load_method::block_load_direct,
                  rp::block_store_method::block_store_direct, 512U, 1>,
     class_params<double, rp::block_load_method::block_load_direct,
-                 rp::block_store_method::block_store_direct, 512U, 4>,
+                 rp::block_store_method::block_store_direct, 512U, 2>,
 
     class_params<test_utils::custom_test_type<int>, rp::block_load_method::block_load_direct,
                  rp::block_store_method::block_store_direct, 64U, 1>,
     class_params<test_utils::custom_test_type<int>, rp::block_load_method::block_load_direct,
-                 rp::block_store_method::block_store_direct, 64U, 4>,
+                 rp::block_store_method::block_store_direct, 64U, 5>,
     class_params<test_utils::custom_test_type<double>, rp::block_load_method::block_load_direct,
                  rp::block_store_method::block_store_direct, 256U, 1>,
     class_params<test_utils::custom_test_type<double>, rp::block_load_method::block_load_direct,
@@ -122,12 +122,12 @@ typedef ::testing::Types<
     class_params<int, rp::block_load_method::block_load_vectorize,
                  rp::block_store_method::block_store_vectorize, 64U, 1>,
     class_params<int, rp::block_load_method::block_load_vectorize,
-                 rp::block_store_method::block_store_vectorize, 64U, 4>,
-    class_params<int, rp::block_load_method::block_load_vectorize,
+                 rp::block_store_method::block_store_vectorize, 64U, 8>,
+    class_params<rp::half, rp::block_load_method::block_load_vectorize,
                  rp::block_store_method::block_store_vectorize, 256U, 1>,
     class_params<int, rp::block_load_method::block_load_vectorize,
                  rp::block_store_method::block_store_vectorize, 256U, 4>,
-    class_params<int, rp::block_load_method::block_load_vectorize,
+    class_params<unsigned char, rp::block_load_method::block_load_vectorize,
                  rp::block_store_method::block_store_vectorize, 512U, 1>,
     class_params<int, rp::block_load_method::block_load_vectorize,
                  rp::block_store_method::block_store_vectorize, 512U, 4>,
@@ -139,11 +139,11 @@ typedef ::testing::Types<
     class_params<double, rp::block_load_method::block_load_vectorize,
                  rp::block_store_method::block_store_vectorize, 256U, 1>,
     class_params<double, rp::block_load_method::block_load_vectorize,
-                 rp::block_store_method::block_store_vectorize, 256U, 4>,
+                 rp::block_store_method::block_store_vectorize, 256U, 8>,
     class_params<double, rp::block_load_method::block_load_vectorize,
                  rp::block_store_method::block_store_vectorize, 512U, 1>,
     class_params<double, rp::block_load_method::block_load_vectorize,
-                 rp::block_store_method::block_store_vectorize, 512U, 4>,
+                 rp::block_store_method::block_store_vectorize, 512U, 2>,
 
     class_params<test_utils::custom_test_type<int>, rp::block_load_method::block_load_vectorize,
                  rp::block_store_method::block_store_vectorize, 64U, 1>,
@@ -158,20 +158,20 @@ typedef ::testing::Types<
     class_params<int, rp::block_load_method::block_load_transpose,
                  rp::block_store_method::block_store_transpose, 64U, 1>,
     class_params<int, rp::block_load_method::block_load_transpose,
-                 rp::block_store_method::block_store_transpose, 64U, 4>,
+                 rp::block_store_method::block_store_transpose, 64U, 9>,
     class_params<int, rp::block_load_method::block_load_transpose,
                  rp::block_store_method::block_store_transpose, 256U, 1>,
-    class_params<int, rp::block_load_method::block_load_transpose,
+    class_params<char, rp::block_load_method::block_load_transpose,
                  rp::block_store_method::block_store_transpose, 256U, 4>,
     class_params<int, rp::block_load_method::block_load_transpose,
                  rp::block_store_method::block_store_transpose, 512U, 1>,
-    class_params<int, rp::block_load_method::block_load_transpose,
+    class_params<rp::half, rp::block_load_method::block_load_transpose,
                  rp::block_store_method::block_store_transpose, 512U, 4>,
 
     class_params<double, rp::block_load_method::block_load_transpose,
                  rp::block_store_method::block_store_transpose, 64U, 1>,
     class_params<double, rp::block_load_method::block_load_transpose,
-                 rp::block_store_method::block_store_transpose, 64U, 4>,
+                 rp::block_store_method::block_store_transpose, 64U, 7>,
     class_params<double, rp::block_load_method::block_load_transpose,
                  rp::block_store_method::block_store_transpose, 256U, 1>,
     class_params<double, rp::block_load_method::block_load_transpose,
@@ -179,12 +179,12 @@ typedef ::testing::Types<
     class_params<double, rp::block_load_method::block_load_transpose,
                  rp::block_store_method::block_store_transpose, 512U, 1>,
     class_params<double, rp::block_load_method::block_load_transpose,
-                 rp::block_store_method::block_store_transpose, 512U, 4>,
+                 rp::block_store_method::block_store_transpose, 512U, 3>,
 
     class_params<test_utils::custom_test_type<int>, rp::block_load_method::block_load_transpose,
                  rp::block_store_method::block_store_transpose, 64U, 1>,
     class_params<test_utils::custom_test_type<int>, rp::block_load_method::block_load_transpose,
-                 rp::block_store_method::block_store_transpose, 64U, 4>,
+                 rp::block_store_method::block_store_transpose, 64U, 5>,
     class_params<test_utils::custom_test_type<double>, rp::block_load_method::block_load_transpose,
                  rp::block_store_method::block_store_transpose, 256U, 1>,
     class_params<test_utils::custom_test_type<double>, rp::block_load_method::block_load_transpose,
@@ -331,10 +331,7 @@ TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClass)
     );
 
     // Validating results
-    for(size_t i = 0; i < output.size(); i++)
-    {
-        ASSERT_EQ(output[i], expected[i]);
-    }
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
 
     HIP_CHECK(hipFree(device_input));
     HIP_CHECK(hipFree(device_output));
@@ -438,10 +435,7 @@ TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClassValid)
     );
 
     // Validating results
-    for(size_t i = 0; i < output.size(); i++)
-    {
-        ASSERT_EQ(output[i], expected[i]);
-    }
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
 
     HIP_CHECK(hipFree(device_input));
     HIP_CHECK(hipFree(device_output));
@@ -537,10 +531,7 @@ TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClassDefault)
     );
 
     // Validating results
-    for(size_t i = 0; i < output.size(); i++)
-    {
-        ASSERT_EQ(output[i], expected[i]);
-    }
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
 
     HIP_CHECK(hipFree(device_input));
     HIP_CHECK(hipFree(device_output));
@@ -564,5 +555,3 @@ TYPED_TEST(RocprimVectorizationTests, MatchVectorType)
     bool input = std::is_same<Vector, U>::value;
     ASSERT_TRUE(input);
 }
-
-

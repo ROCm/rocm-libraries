@@ -26,7 +26,7 @@ cmake_minimum_required(VERSION 3.5.1 FATAL_ERROR)
 set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended onto install directories")
 
 # rocPRIM project
-project(rocprim VERSION 1.0.1.0 LANGUAGES CXX)
+project(rocprim VERSION 1.0.2.0 LANGUAGES CXX)
 
 # CMake modules
 list(APPEND CMAKE_MODULE_PATH
@@ -46,11 +46,18 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOLEAN "Add paths to linker se
 # Verify that hcc compiler is used on ROCM platform
 include(cmake/VerifyCompiler.cmake)
 
+# Build option to disable -Werror
+option(DISABLE_WERROR "Disable building with Werror" ON)
+
 # Set CXX flags
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror")
+if(DISABLE_WERROR)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
+else()
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror")
+endif()
 
 # Build options
 option(BUILD_TEST "Build tests (requires googletest)" ON)
@@ -62,12 +69,12 @@ option(ONLY_INSTALL "Only install" OFF)
 # Get dependencies
 include(cmake/Dependencies.cmake)
 
+# AMD targets
+set(AMDGPU_TARGETS gfx803;gfx900;gfx906 CACHE STRING "List of specific machine types for library to target")
+
 # Print configuration summary
 include(cmake/Summary.cmake)
 print_configuration_summary()
-
-# AMD targets
-set(AMDGPU_TARGETS gfx803;gfx900;gfx906 CACHE STRING "List of specific machine types for library to target")
 
 # rocPRIM works only on hcc
 if(HIP_PLATFORM STREQUAL "hcc")
@@ -117,13 +124,13 @@ set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PR
 if(HIP_PLATFORM STREQUAL "hcc")
   rocm_create_package(
     NAME rocprim
-    DESCRIPTION "Radeon Open Compute Parallel Primitives Libary"
+    DESCRIPTION "Radeon Open Compute Parallel Primitives Library"
     MAINTAINER "Stream HPC Maintainers <maintainer@streamhpc.com>"
   )
 else()
   rocm_create_package(
     NAME rocprim-hipcub
-    DESCRIPTION "Radeon Open Compute Parallel Primitives Libary (hipCUB only)"
+    DESCRIPTION "Radeon Open Compute Parallel Primitives Library (hipCUB only)"
     MAINTAINER "Stream HPC Maintainers <maintainer@streamhpc.com>"
   )
 endif()

@@ -69,10 +69,9 @@ struct ordered_block_id
     ROCPRIM_DEVICE inline
     id_type get(unsigned int tid, storage_type& storage)
     {
-        constexpr static id_type max = std::numeric_limits<id_type>::max();
         if(tid == 0)
         {
-            storage.id = ::rocprim::detail::atomic_wrapinc(this->id, max);
+            storage.id = ::rocprim::detail::atomic_add(this->id, 1);
         }
         ::rocprim::syncthreads();
         return storage.id;

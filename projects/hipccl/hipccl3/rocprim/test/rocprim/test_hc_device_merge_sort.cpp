@@ -62,9 +62,13 @@ public:
 
 typedef ::testing::Types<
     DeviceSortParams<int>,
+    DeviceSortParams<test_utils::custom_test_type<int>>,
     DeviceSortParams<unsigned long>,
-    DeviceSortParams<float, int>,
-    DeviceSortParams<int, float>
+    DeviceSortParams<float, double>,
+    DeviceSortParams<int, float>,
+    DeviceSortParams<int, test_utils::custom_test_type<int>>,
+    DeviceSortParams<double, test_utils::custom_test_type<double>>,
+    DeviceSortParams<int, test_utils::custom_test_type<float>>
 > RocprimDeviceSortTestsParams;
 
 std::vector<size_t> get_sizes()
@@ -74,7 +78,7 @@ std::vector<size_t> get_sizes()
         1024, 2048, 5096,
         34567, (1 << 17) - 1220
     };
-    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(2, 1, 16384);
+    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(5, 1, 100000);
     sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
     std::sort(sizes.begin(), sizes.end());
     return sizes;
@@ -138,9 +142,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
         std::vector<key_type> output = d_output;
         for(size_t i = 0; i < output.size(); i++)
         {
-            auto diff = std::max<key_type>(std::abs(0.01f * expected[i]), key_type(0.01f));
-            if(std::is_integral<key_type>::value) diff = 0;
-            ASSERT_NEAR(output[i], expected[i], diff);
+            ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
         }
     }
 }
@@ -220,8 +222,8 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
         std::vector<value_type> values_output = d_values_output;
         for(size_t i = 0; i < keys_output.size(); i++)
         {
-            ASSERT_EQ(keys_output[i], expected[i].first);
-            ASSERT_EQ(values_output[i], expected[i].second);
+            ASSERT_EQ(keys_output[i], expected[i].first) << "where index = " << i;
+            ASSERT_EQ(values_output[i], expected[i].second) << "where index = " << i;
         }
     }
 }

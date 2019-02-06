@@ -63,7 +63,7 @@ template<
     class BinaryFunction
 >
 inline
-void scan_impl(void * temporary_storage,
+auto scan_impl(void * temporary_storage,
                size_t& storage_size,
                InputIterator input,
                OutputIterator output,
@@ -72,6 +72,7 @@ void scan_impl(void * temporary_storage,
                BinaryFunction scan_op,
                hc::accelerator_view acc_view,
                const bool debug_synchronous)
+    -> typename std::enable_if<!Config::use_lookback>::type
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     using output_type = typename std::iterator_traits<OutputIterator>::value_type;
@@ -80,10 +81,7 @@ void scan_impl(void * temporary_storage,
     >::type;
 
     // Get default config if Config is default_config
-    using config = default_or_custom_config<
-        Config,
-        default_scan_config<ROCPRIM_TARGET_ARCH, result_type>
-    >;
+    using config = Config;
 
     constexpr unsigned int block_size = config::block_size;
     constexpr unsigned int items_per_thread = config::items_per_thread;
@@ -195,15 +193,16 @@ template<
     class BinaryFunction
 >
 inline
-void lookback_scan_impl(void * temporary_storage,
-                        size_t& storage_size,
-                        InputIterator input,
-                        OutputIterator output,
-                        const InitValueType initial_value,
-                        const size_t size,
-                        BinaryFunction scan_op,
-                        hc::accelerator_view acc_view,
-                        const bool debug_synchronous)
+auto scan_impl(void * temporary_storage,
+               size_t& storage_size,
+               InputIterator input,
+               OutputIterator output,
+               const InitValueType initial_value,
+               const size_t size,
+               BinaryFunction scan_op,
+               hc::accelerator_view acc_view,
+               const bool debug_synchronous)
+    -> typename std::enable_if<Config::use_lookback>::type
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     using output_type = typename std::iterator_traits<OutputIterator>::value_type;
@@ -212,10 +211,7 @@ void lookback_scan_impl(void * temporary_storage,
     >::type;
 
     // Get default config if Config is default_config
-    using config = default_or_custom_config<
-        Config,
-        default_scan_config<ROCPRIM_TARGET_ARCH, result_type>
-    >;
+    using config = Config;
 
     using scan_state_type = detail::lookback_scan_state<result_type>;
     using ordered_block_id_type = detail::ordered_block_id<unsigned int>;
@@ -403,25 +399,18 @@ void inclusive_scan(void * temporary_storage,
         input_type, output_type, BinaryFunction
     >::type;
 
-    // Lookback scan has problems with types that are not arithmetic
-    if(::rocprim::is_arithmetic<result_type>::value)
-    {
-        return detail::lookback_scan_impl<false, Config>(
-            temporary_storage, storage_size,
-            // result_type() is a dummy initial value (not used)
-            input, output, result_type(), size,
-            scan_op, acc_view, debug_synchronous
-        );
-    }
-    else
-    {
-        return detail::scan_impl<false, Config>(
-            temporary_storage, storage_size,
-            // result_type() is a dummy initial value (not used)
-            input, output, result_type(), size,
-            scan_op, acc_view, debug_synchronous
-        );
-    }
+    // Get default config if Config is default_config
+    using config = detail::default_or_custom_config<
+        Config,
+        detail::default_scan_config<ROCPRIM_TARGET_ARCH, result_type>
+    >;
+
+    detail::scan_impl<false, config>(
+        temporary_storage, storage_size,
+        // result_type() is a dummy initial value (not used)
+        input, output, result_type(), size,
+        scan_op, acc_view, debug_synchronous
+    );
 }
 
 /// \brief HC parallel exclusive scan primitive for device level.
@@ -532,23 +521,17 @@ void exclusive_scan(void * temporary_storage,
         input_type, output_type, BinaryFunction
     >::type;
 
-    // Lookback scan has problems with types that are not arithmetic
-    if(::rocprim::is_arithmetic<result_type>::value)
-    {
-        return detail::lookback_scan_impl<true, Config>(
-            temporary_storage, storage_size,
-            input, output, initial_value, size,
-            scan_op, acc_view, debug_synchronous
-        );
-    }
-    else
-    {
-        return detail::scan_impl<true, Config>(
-            temporary_storage, storage_size,
-            input, output, initial_value, size,
-            scan_op, acc_view, debug_synchronous
-        );
-    }
+    // Get default config if Config is default_config
+    using config = detail::default_or_custom_config<
+        Config,
+        detail::default_scan_config<ROCPRIM_TARGET_ARCH, result_type>
+    >;
+
+    detail::scan_impl<true, config>(
+        temporary_storage, storage_size,
+        input, output, initial_value, size,
+        scan_op, acc_view, debug_synchronous
+    );
 }
 
 /// @}

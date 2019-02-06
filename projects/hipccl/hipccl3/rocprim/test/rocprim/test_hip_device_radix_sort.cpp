@@ -40,7 +40,7 @@
 
 namespace rp = rocprim;
 
-#define HIP_CHECK(error) ASSERT_EQ(static_cast<hipError_t>(error), hipSuccess)
+#define HIP_CHECK(error) ASSERT_EQ(error, hipSuccess)
 
 template<
     class Key,
@@ -154,12 +154,15 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
 
     const bool debug_synchronous = false;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(size_t size : sizes)
+    bool in_place = false;
+
+    for(size_t size : get_sizes())
     {
         if(size > (1 << 20) && !check_huge_sizes) continue;
 
         SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+        in_place = !in_place;
 
         // Generate data
         std::vector<key_type> keys_input;
@@ -179,7 +182,14 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
         key_type * d_keys_input;
         key_type * d_keys_output;
         HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
-        HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
+        if(in_place)
+        {
+            d_keys_output = d_keys_input;
+        }
+        else
+        {
+            HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
+        }
         HIP_CHECK(
             hipMemcpy(
                 d_keys_input, keys_input.data(),
@@ -232,8 +242,6 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
             );
         }
 
-        HIP_CHECK(hipFree(d_temporary_storage));
-        HIP_CHECK(hipFree(d_keys_input));
 
         std::vector<key_type> keys_output(size);
         HIP_CHECK(
@@ -244,7 +252,12 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
             )
         );
 
-        HIP_CHECK(hipFree(d_keys_output));
+        HIP_CHECK(hipFree(d_temporary_storage));
+        HIP_CHECK(hipFree(d_keys_input));
+        if(!in_place)
+        {
+            HIP_CHECK(hipFree(d_keys_output));
+        }
 
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
     }
@@ -263,12 +276,15 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairs)
 
     const bool debug_synchronous = false;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(size_t size : sizes)
+    bool in_place = false;
+
+    for(size_t size : get_sizes())
     {
         if(size > (1 << 20) && !check_huge_sizes) continue;
 
         SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+        in_place = !in_place;
 
         // Generate data
         std::vector<key_type> keys_input;
@@ -291,7 +307,14 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairs)
         key_type * d_keys_input;
         key_type * d_keys_output;
         HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
-        HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
+        if(in_place)
+        {
+            d_keys_output = d_keys_input;
+        }
+        else
+        {
+            HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
+        }
         HIP_CHECK(
             hipMemcpy(
                 d_keys_input, keys_input.data(),
@@ -303,7 +326,14 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairs)
         value_type * d_values_input;
         value_type * d_values_output;
         HIP_CHECK(hipMalloc(&d_values_input, size * sizeof(value_type)));
-        HIP_CHECK(hipMalloc(&d_values_output, size * sizeof(value_type)));
+        if(in_place)
+        {
+            d_values_output = d_values_input;
+        }
+        else
+        {
+            HIP_CHECK(hipMalloc(&d_values_output, size * sizeof(value_type)));
+        }
         HIP_CHECK(
             hipMemcpy(
                 d_values_input, values_input.data(),
@@ -369,9 +399,6 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairs)
             );
         }
 
-        HIP_CHECK(hipFree(d_temporary_storage));
-        HIP_CHECK(hipFree(d_keys_input));
-        HIP_CHECK(hipFree(d_values_input));
 
         std::vector<key_type> keys_output(size);
         HIP_CHECK(
@@ -391,8 +418,14 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairs)
             )
         );
 
-        HIP_CHECK(hipFree(d_keys_output));
-        HIP_CHECK(hipFree(d_values_output));
+        HIP_CHECK(hipFree(d_temporary_storage));
+        HIP_CHECK(hipFree(d_keys_input));
+        HIP_CHECK(hipFree(d_values_input));
+        if(!in_place)
+        {
+            HIP_CHECK(hipFree(d_keys_output));
+            HIP_CHECK(hipFree(d_values_output));
+        }
 
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, keys_expected));
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, values_expected));

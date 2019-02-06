@@ -34,16 +34,24 @@
 
 namespace rp = rocprim;
 
+template<class T, class BinaryOp>
+T apply(BinaryOp binary_op, const T& a, const T& b)
+{
+    return binary_op(a, b);
+}
+
 // Params for tests
 template<
     class T,
     unsigned int BlockSize = 256U,
     unsigned int ItemsPerThread = 1U,
-    rocprim::block_reduce_algorithm Algorithm = rocprim::block_reduce_algorithm::using_warp_reduce
+    rocprim::block_reduce_algorithm Algorithm = rocprim::block_reduce_algorithm::using_warp_reduce,
+    class BinaryOp = rocprim::plus<T>
 >
 struct params
 {
     using type = T;
+    using binary_op_type = BinaryOp;
     static constexpr rocprim::block_reduce_algorithm algorithm = Algorithm;
     static constexpr unsigned int block_size = BlockSize;
     static constexpr unsigned int items_per_thread = ItemsPerThread;
@@ -58,6 +66,7 @@ class RocprimBlockReduceSingleValueTests : public ::testing::Test
 {
 public:
     using type = typename Params::type;
+    using binary_op_type = typename Params::binary_op_type;
     static constexpr rocprim::block_reduce_algorithm algorithm = Params::algorithm;
     static constexpr unsigned int block_size = Params::block_size;
 };
@@ -77,6 +86,14 @@ typedef ::testing::Types<
     params<int, 129U>,
     params<int, 162U>,
     params<int, 255U>,
+    // char tests
+    params<char, 64U>,
+    params<char, 256U>,
+    params<char, 377U>,
+    // half tests
+    params<rp::half, 64U, 1, rp::block_reduce_algorithm::using_warp_reduce, test_utils::half_maximum>,
+    params<rp::half, 256U, 1, rp::block_reduce_algorithm::using_warp_reduce, test_utils::half_maximum>,
+    params<rp::half, 377U, 1, rp::block_reduce_algorithm::using_warp_reduce, test_utils::half_maximum>,
     // uint tests
     params<unsigned int, 64U>,
     params<unsigned int, 256U>,
@@ -94,6 +111,14 @@ typedef ::testing::Types<
     params<int, 256U, 1, rocprim::block_reduce_algorithm::raking_reduce>,
     params<int, 512U, 1, rocprim::block_reduce_algorithm::raking_reduce>,
     params<int, 1024U, 1, rocprim::block_reduce_algorithm::raking_reduce>,
+    params<char, 64U, 1, rp::block_reduce_algorithm::raking_reduce>,
+    params<char, 128U, 1, rp::block_reduce_algorithm::raking_reduce>,
+    params<char, 192U, 1, rp::block_reduce_algorithm::raking_reduce>,
+    params<char, 256U, 1, rp::block_reduce_algorithm::raking_reduce>,
+    params<rp::half, 64U, 1, rp::block_reduce_algorithm::raking_reduce, test_utils::half_maximum>,
+    params<rp::half, 128U, 1, rp::block_reduce_algorithm::raking_reduce, test_utils::half_maximum>,
+    params<rp::half, 192U, 1, rp::block_reduce_algorithm::raking_reduce, test_utils::half_maximum>,
+    params<rp::half, 256U, 1, rp::block_reduce_algorithm::raking_reduce, test_utils::half_maximum>,
     params<unsigned long, 65U, 1, rocprim::block_reduce_algorithm::raking_reduce>,
     params<long, 37U, 1, rocprim::block_reduce_algorithm::raking_reduce>,
     params<short, 162U, 1, rocprim::block_reduce_algorithm::raking_reduce>,
@@ -107,6 +132,7 @@ TYPED_TEST_CASE(RocprimBlockReduceSingleValueTests, SingleValueTestParams);
 TYPED_TEST(RocprimBlockReduceSingleValueTests, Reduce)
 {
     using T = typename TestFixture::type;
+    using binary_op_type = typename TestFixture::binary_op_type;
     constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;
 
@@ -119,18 +145,19 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, Reduce)
 
     const size_t size = block_size * 113;
     // Generate data
-    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200);
+    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 50);
     std::vector<T> output_reductions(size / block_size);
 
     // Calculate expected results on host
     std::vector<T> expected_reductions(output_reductions.size(), 0);
+    binary_op_type binary_op;
     for(size_t i = 0; i < output.size() / block_size; i++)
     {
         T value = 0;
         for(size_t j = 0; j < block_size; j++)
         {
             auto idx = i * block_size + j;
-            value += output[idx];
+            value = apply(binary_op, value, output[idx]);
         }
         expected_reductions[i] = value;
     }
@@ -147,7 +174,7 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, Reduce)
             T value = d_output[i];
             //T reduction;
             rp::block_reduce<T, block_size, algorithm> breduce;
-            breduce.reduce(value, value);
+            breduce.reduce(value, value, binary_op_type());
             //d_output[i] = value;
             if(i.local[0] == 0)
             {
@@ -158,10 +185,7 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, Reduce)
 
     d_output.synchronize();
     d_output_r.synchronize();
-    for(size_t i = 0; i < output_reductions.size(); i++)
-    {
-        ASSERT_EQ(output_reductions[i], expected_reductions[i]);
-    }
+    test_utils::assert_eq(output_reductions, expected_reductions);
 }
 
 TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceMultiplies)
@@ -169,6 +193,12 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceMultiplies)
     using T = typename TestFixture::type;
     constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;
+
+    // Half not tested here
+    if(std::is_same<T, rp::half>::value)
+    {
+        return;
+    }
 
     hc::accelerator acc;
     // Given block size not supported
@@ -223,15 +253,13 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceMultiplies)
 
     d_output.synchronize();
     d_output_r.synchronize();
-    for(size_t i = 0; i < output_reductions.size(); i++)
-    {
-        ASSERT_EQ(output_reductions[i], expected_reductions[i]);
-    }
+    test_utils::assert_eq(output_reductions, expected_reductions);
 }
 
 TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceValid)
 {
     using T = typename TestFixture::type;
+    using binary_op_type = typename TestFixture::binary_op_type;
     constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;
     const unsigned int valid_items = test_utils::get_random_value(block_size - 10, block_size);
@@ -245,18 +273,19 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceValid)
 
     const size_t size = block_size * 113;
     // Generate data
-    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200);
+    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 50);
     std::vector<T> output_reductions(size / block_size);
 
     // Calculate expected results on host
     std::vector<T> expected_reductions(output_reductions.size(), 0);
+    binary_op_type binary_op;
     for(size_t i = 0; i < output.size() / block_size; i++)
     {
         T value = 0;
         for(size_t j = 0; j < valid_items; j++)
         {
             auto idx = i * block_size + j;
-            value += output[idx];
+            value = apply(binary_op, value, output[idx]);
         }
         expected_reductions[i] = value;
     }
@@ -273,7 +302,7 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceValid)
             T value = d_output[i];
             //T reduction;
             rp::block_reduce<T, block_size, algorithm> breduce;
-            breduce.reduce(value, value, valid_items);
+            breduce.reduce(value, value, valid_items, binary_op_type());
             //d_output[i] = value;
             if(i.local[0] == 0)
             {
@@ -284,10 +313,7 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceValid)
 
     d_output.synchronize();
     d_output_r.synchronize();
-    for(size_t i = 0; i < output_reductions.size(); i++)
-    {
-        ASSERT_EQ(output_reductions[i], expected_reductions[i]);
-    }
+    test_utils::assert_eq(output_reductions, expected_reductions);
 }
 
 template<class Params>
@@ -295,6 +321,7 @@ class RocprimBlockReduceInputArrayTests : public ::testing::Test
 {
 public:
     using type = typename Params::type;
+    using binary_op_type = typename Params::binary_op_type;
     static constexpr unsigned int block_size = Params::block_size;
     static constexpr rocprim::block_reduce_algorithm algorithm = Params::algorithm;
     static constexpr unsigned int items_per_thread = Params::items_per_thread;
@@ -313,6 +340,12 @@ typedef ::testing::Types<
     params<float, 65,   5>,
     params<float, 162,  7>,
     params<float, 255,  15>,
+    params<char, 1024, 1>,
+    params<char, 37,   2>,
+    params<char, 65,   5>,
+    params<rp::half, 1024, 1, rp::block_reduce_algorithm::using_warp_reduce, test_utils::half_maximum>,
+    params<rp::half, 37,   2, rp::block_reduce_algorithm::using_warp_reduce, test_utils::half_maximum>,
+    params<rp::half, 65,   5, rp::block_reduce_algorithm::using_warp_reduce, test_utils::half_maximum>,
     // -----------------------------------------------------------------------
     // rocprim::block_reduce_algorithm::raking_reduce
     // -----------------------------------------------------------------------
@@ -324,7 +357,13 @@ typedef ::testing::Types<
     params<float, 37,   2,  rocprim::block_reduce_algorithm::raking_reduce>,
     params<float, 65,   5,  rocprim::block_reduce_algorithm::raking_reduce>,
     params<float, 162,  7,  rocprim::block_reduce_algorithm::raking_reduce>,
-    params<float, 255,  15, rocprim::block_reduce_algorithm::raking_reduce>
+    params<float, 255,  15, rocprim::block_reduce_algorithm::raking_reduce>,
+    params<char, 1024, 1,  rp::block_reduce_algorithm::raking_reduce>,
+    params<char, 37,   2,  rp::block_reduce_algorithm::raking_reduce>,
+    params<char, 65,   5,  rp::block_reduce_algorithm::raking_reduce>,
+    params<rp::half, 1024, 1,  rp::block_reduce_algorithm::raking_reduce, test_utils::half_maximum>,
+    params<rp::half, 37,   2,  rp::block_reduce_algorithm::raking_reduce, test_utils::half_maximum>,
+    params<rp::half, 65,   5,  rp::block_reduce_algorithm::raking_reduce, test_utils::half_maximum>
 > InputArrayTestParams;
 
 TYPED_TEST_CASE(RocprimBlockReduceInputArrayTests, InputArrayTestParams);
@@ -332,6 +371,7 @@ TYPED_TEST_CASE(RocprimBlockReduceInputArrayTests, InputArrayTestParams);
 TYPED_TEST(RocprimBlockReduceInputArrayTests, Reduce)
 {
     using T = typename TestFixture::type;
+    using binary_op_type = typename TestFixture::binary_op_type;
     constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;
     constexpr size_t items_per_thread = TestFixture::items_per_thread;
@@ -346,20 +386,21 @@ TYPED_TEST(RocprimBlockReduceInputArrayTests, Reduce)
     const size_t items_per_block = block_size * items_per_thread;
     const size_t size = items_per_block * 37;
     // Generate data
-    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200);
+    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 50);
 
     // Output reduce results
     std::vector<T> output_reductions(size / block_size);
 
     // Calculate expected results on host
     std::vector<T> expected_reductions(output_reductions.size(), 0);
+    binary_op_type binary_op;
     for(size_t i = 0; i < output.size() / items_per_block; i++)
     {
         T value = 0;
         for(size_t j = 0; j < items_per_block; j++)
         {
             auto idx = i * items_per_block + j;
-            value += output[idx];
+            value = apply(binary_op, value, output[idx]);
         }
         expected_reductions[i] = value;
     }
@@ -386,7 +427,7 @@ TYPED_TEST(RocprimBlockReduceInputArrayTests, Reduce)
 
             rp::block_reduce<T, block_size, algorithm> breduce;
             T reduction;
-            breduce.reduce(in_out, reduction);
+            breduce.reduce(in_out, reduction, binary_op_type());
 
             if(i.local[0] == 0)
             {
@@ -397,11 +438,5 @@ TYPED_TEST(RocprimBlockReduceInputArrayTests, Reduce)
 
     d_output.synchronize();
     d_output_r.synchronize();
-    for(size_t i = 0; i < output_reductions.size(); i++)
-    {
-        ASSERT_NEAR(
-            output_reductions[i], expected_reductions[i],
-            static_cast<T>(0.05) * expected_reductions[i]
-        );
-    }
+    test_utils::assert_near(output_reductions, expected_reductions, 0.05);
 }

@@ -377,7 +377,6 @@ auto partition_scatter(ValueType (&values)[ItemsPerThread],
         ::rocprim::syncthreads(); // sync threads to reuse shared memory
 
         // Coalesced write from shared memory to global memory
-        #pragma unroll
         for(unsigned int i = flat_block_thread_id; i < selected_in_block; i += BlockSize)
         {
             output[selected_prefix + i] = scatter_storage[i];
@@ -458,17 +457,20 @@ void partition_kernel_impl(InputIterator input,
     using exchange_storage_type = value_type[items_per_block];
     using raw_exchange_storage_type = typename detail::raw_storage<exchange_storage_type>;
 
-    ROCPRIM_SHARED_MEMORY union
+    ROCPRIM_SHARED_MEMORY struct
     {
-        raw_exchange_storage_type exchange_values;
         typename order_bid_type::storage_type ordered_bid;
-        typename block_load_value_type::storage_type load_values;
-        typename block_load_flag_type::storage_type load_flags;
-        typename block_discontinuity_value_type::storage_type discontinuity_values;
-        typename block_scan_offset_type::storage_type scan_offsets;
+        union
+        {
+            raw_exchange_storage_type exchange_values;
+            typename block_load_value_type::storage_type load_values;
+            typename block_load_flag_type::storage_type load_flags;
+            typename block_discontinuity_value_type::storage_type discontinuity_values;
+            typename block_scan_offset_type::storage_type scan_offsets;
+        };
     } storage;
 
-    const auto flat_block_thread_id = ::rocprim::detail::block_thread_id<0>();
+    const auto flat_block_thread_id = ::rocprim::flat_block_thread_id();
     const auto flat_block_id = ordered_bid.get(flat_block_thread_id, storage.ordered_bid);
     const unsigned int block_offset = flat_block_id * items_per_block;
     const auto valid_in_last_block = size - items_per_block * (number_of_blocks - 1);
@@ -550,7 +552,12 @@ void partition_kernel_impl(InputIterator input,
         }
         ::rocprim::syncthreads(); // sync threads to reuse shared memory
     }
-    else
+    // Workaround: Fiji (gfx803) crashes with "Memory access fault by GPU node" on HCC 1.3.18482 (ROCm 2.0)
+    // Instead of just `} else {` we use `} syncthreads(); if() {`, because the else-branch can be executed
+    // for some unknown reason and 0-th block reads incorrect addresses in lookback_scan_prefix_op::get_prefix.
+    ::rocprim::syncthreads();
+    if(flat_block_id > 0)
+    // end of the workaround
     {
         ROCPRIM_SHARED_MEMORY typename offset_scan_prefix_op_type::storage_type storage_prefix_op;
         auto prefix_op = offset_scan_prefix_op_type(

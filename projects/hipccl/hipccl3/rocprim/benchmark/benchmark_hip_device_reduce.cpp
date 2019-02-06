@@ -35,7 +35,7 @@
 #include <hip/hip_runtime.h>
 
 // rocPRIM HIP API
-#include <rocprim/device/device_reduce_hip.hpp>
+#include <rocprim/rocprim.hpp>
 
 // CmdParser
 #include "cmdparser.hpp"

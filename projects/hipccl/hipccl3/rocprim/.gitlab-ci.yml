@@ -47,6 +47,8 @@ before_script:
 
 build:rocm:
   stage: build
+  tags:
+    - rocm
   variables:
     SUDO_CMD: "sudo -E"
   script:
@@ -71,9 +73,7 @@ build:rocm:
     - build/rocprim*.zip
     expire_in: 2 weeks
 
-test:rocm243:
-  tags:
-    - tag243
+.unittest:
   stage: test
   variables:
     SUDO_CMD: "sudo -E"
@@ -83,20 +83,12 @@ test:rocm243:
     - cd build
     - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 2
 
-test:rocm244:
-  tags:
-    - tag244
-  stage: test
-  variables:
-    SUDO_CMD: "sudo -E"
-  dependencies:
-    - build:rocm
-  script:
-    - cd build
-    - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 2
+include: '.gitlab-ci-gputest.yml'
 
 test:rocm_package:
   stage: test
+  tags:
+    - rocm
   variables:
     SUDO_CMD: "sudo -E"
   dependencies:
@@ -112,6 +104,8 @@ test:rocm_package:
 
 test:rocm_install:
   stage: test
+  tags:
+    - rocm
   variables:
     SUDO_CMD: "sudo -E"
   script:

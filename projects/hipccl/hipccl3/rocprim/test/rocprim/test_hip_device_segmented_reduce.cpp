@@ -77,9 +77,13 @@ typedef ::testing::Types<
     params<unsigned char, unsigned int, rp::plus<unsigned int>>,
     params<int, int, rp::plus<int>, -100, 0, 10000>,
     params<double, double, rp::minimum<double>, 1000, 0, 10000>,
+    params<signed char, signed char, rp::maximum<signed char>, 0, 0, 2000>,
     params<custom_short2, custom_int2, rp::plus<custom_int2>, 10, 1000, 10000>,
     params<custom_double2, custom_double2, rp::maximum<custom_double2>, 50, 2, 10>,
-    params<float, float, rp::plus<float>, 123, 100, 200, true>
+    params<float, float, rp::plus<float>, 123, 100, 200>,
+    params<unsigned char, long long, rp::plus<int>, 10, 3000, 4000>,
+    params<rp::half, float, rp::plus<float>, 0, 10, 300>,
+    params<rp::half, rp::half, test_utils::half_minimum, 0, 1000, 30000>
 > Params;
 
 TYPED_TEST_CASE(RocprimDeviceSegmentedReduce, Params);

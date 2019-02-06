@@ -39,12 +39,14 @@ namespace rp = rocprim;
 // Params for tests
 template<
     class InputType,
-    class OutputType = InputType
+    class OutputType = InputType,
+    class ScanOp = ::rocprim::plus<OutputType>
 >
 struct DeviceScanParams
 {
     using input_type = InputType;
     using output_type = OutputType;
+    using scan_op_type = ScanOp;
 };
 
 // ---------------------------------------------------------
@@ -57,24 +59,44 @@ class RocprimDeviceScanTests : public ::testing::Test
 public:
     using input_type = typename Params::input_type;
     using output_type = typename Params::output_type;
+    using scan_op_type = typename Params::scan_op_type;
     const bool debug_synchronous = false;
 };
 
 typedef ::testing::Types<
-    DeviceScanParams<int, long>,
-    DeviceScanParams<long, long>,
-    DeviceScanParams<test_utils::custom_test_type<int>, test_utils::custom_test_type<int>>
-    // DeviceScanParams<unsigned char, float>
+    // Small
+    DeviceScanParams<char>,
+    DeviceScanParams<unsigned short>,
+    DeviceScanParams<short, int>,
+    DeviceScanParams<int>,
+    DeviceScanParams<float, float, rp::maximum<float> >,
+    DeviceScanParams<rp::half, float>,
+    // Large
+    DeviceScanParams<int, double, rp::plus<int> >,
+    DeviceScanParams<int, double, rp::plus<double> >,
+    DeviceScanParams<int, long long, rp::plus<long long> >,
+    DeviceScanParams<unsigned int, unsigned long long, rp::plus<unsigned long long> >,
+    DeviceScanParams<long long, long long, rp::maximum<long long> >,
+    DeviceScanParams<double, double, rp::plus<double> >,
+    DeviceScanParams<signed char, long, rp::plus<long> >,
+    DeviceScanParams<float, double, rp::minimum<double> >,
+    DeviceScanParams<test_utils::custom_test_type<int> >,
+    DeviceScanParams<
+        test_utils::custom_test_type<double>, test_utils::custom_test_type<double>,
+        rp::plus<test_utils::custom_test_type<double> >
+    >,
+    DeviceScanParams<test_utils::custom_test_type<int> >
 > RocprimDeviceScanTestsParams;
 
 std::vector<size_t> get_sizes()
 {
     std::vector<size_t> sizes = {
-        2, 32, 32, 32, 65, 378,
-        1512, 3048, 4096,
-        27845, (1 << 18) + 1111
+        1, 10, 53, 211,
+        1024, 2048, 5096,
+        34567, (1 << 18),
+        (1 << 20) - 12345
     };
-    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(2, 1, 16384);
+    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(3, 1, 100000);
     sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
     std::sort(sizes.begin(), sizes.end());
     return sizes;
@@ -82,10 +104,11 @@ std::vector<size_t> get_sizes()
 
 TYPED_TEST_CASE(RocprimDeviceScanTests, RocprimDeviceScanTestsParams);
 
-TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSumEmptyInput)
+TYPED_TEST(RocprimDeviceScanTests, InclusiveScanEmptyInput)
 {
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
+    using scan_op_type = typename TestFixture::scan_op_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
     hc::accelerator acc;
@@ -105,9 +128,9 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSumEmptyInput)
     // Get size of d_temp_storage
     rocprim::inclusive_scan(
         nullptr, temp_storage_size_bytes,
-        rocprim::make_constant_iterator<T>(345),
+        rocprim::make_constant_iterator<T>(T(345)),
         d_checking_output,
-        0, ::rocprim::plus<U>(), acc_view, debug_synchronous
+        0, scan_op_type(), acc_view, debug_synchronous
     );
 
     // allocate temporary storage
@@ -117,19 +140,20 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSumEmptyInput)
     // Run
     rocprim::inclusive_scan(
         d_temp_storage.accelerator_pointer(), temp_storage_size_bytes,
-        rocprim::make_constant_iterator<T>(345),
+        rocprim::make_constant_iterator<T>(T(345)),
         d_checking_output,
-        0, ::rocprim::plus<U>(), acc_view, debug_synchronous
+        0, scan_op_type(), acc_view, debug_synchronous
     );
     acc_view.wait();
 
     ASSERT_FALSE(out_of_bounds.get());
 }
 
-TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
+TYPED_TEST(RocprimDeviceScanTests, InclusiveScan)
 {
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
+    using scan_op_type = typename TestFixture::scan_op_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
     hc::accelerator acc;
@@ -148,12 +172,12 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
         acc_view.wait();
 
         // scan function
-        ::rocprim::plus<U> plus_op;
+        scan_op_type scan_op;
 
         // Calculate expected results on host
         std::vector<U> expected(input.size());
         test_utils::host_inclusive_scan(
-            input.begin(), input.end(), expected.begin(), plus_op
+            input.begin(), input.end(), expected.begin(), scan_op
         );
 
         // temp storage
@@ -165,7 +189,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
             d_input.accelerator_pointer(),
             d_output.accelerator_pointer(),
             input.size(),
-            plus_op,
+            scan_op,
             acc_view,
             debug_synchronous
         );
@@ -185,7 +209,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
             d_input.accelerator_pointer(),
             d_output.accelerator_pointer(),
             input.size(),
-            plus_op,
+            scan_op,
             acc_view,
             debug_synchronous
         );
@@ -197,10 +221,11 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
     }
 }
 
-TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanSum)
+TYPED_TEST(RocprimDeviceScanTests, ExclusiveScan)
 {
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
+    using scan_op_type = typename TestFixture::scan_op_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
     hc::accelerator acc;
@@ -219,14 +244,14 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanSum)
         acc_view.wait();
 
         // scan function
-        ::rocprim::plus<T> plus_op;
+        scan_op_type scan_op;
 
         // Calculate expected results on host
         std::vector<U> expected(input.size(), 0);
         T initial_value = test_utils::get_random_value<T>(1, 100);
         test_utils::host_exclusive_scan(
             input.begin(), input.end(),
-            initial_value, expected.begin(), plus_op
+            initial_value, expected.begin(), scan_op
         );
 
         // temp storage
@@ -238,7 +263,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanSum)
             d_output.accelerator_pointer(),
             initial_value,
             input.size(),
-            plus_op,
+            scan_op,
             acc_view,
             debug_synchronous
         );
@@ -259,7 +284,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanSum)
             d_output.accelerator_pointer(),
             initial_value,
             input.size(),
-            plus_op,
+            scan_op,
             acc_view,
             debug_synchronous
         );
@@ -276,6 +301,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanByKey)
     using T = typename TestFixture::input_type;
     using K = unsigned int; // key type
     using U = typename TestFixture::output_type;
+    using scan_op_type = typename TestFixture::scan_op_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
     hc::accelerator acc;
@@ -297,7 +323,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanByKey)
         acc_view.wait();
 
         // scan function
-        rocprim::plus<U> scan_op;
+        scan_op_type scan_op;
         // key compare function
         rocprim::equal_to<K> keys_compare_op;
 
@@ -378,6 +404,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
     using T = typename TestFixture::input_type;
     using K = unsigned int; // key type
     using U = typename TestFixture::output_type;
+    using scan_op_type = typename TestFixture::scan_op_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
     hc::accelerator acc;
@@ -400,7 +427,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
         acc_view.wait();
 
         // scan function
-        rocprim::plus<U> scan_op;
+        scan_op_type scan_op;
         // key compare function
         rocprim::equal_to<K> keys_compare_op;
 

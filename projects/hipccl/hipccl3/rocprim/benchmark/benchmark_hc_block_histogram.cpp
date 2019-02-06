@@ -35,7 +35,7 @@
 #include "benchmark_utils.hpp"
 
 // rocPRIM
-#include <rocprim/block/block_histogram.hpp>
+#include <rocprim/rocprim.hpp>
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 128;

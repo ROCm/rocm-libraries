@@ -214,15 +214,18 @@ void lookback_scan_kernel_impl(InputIterator input,
         result_type, BinaryFunction, LookbackScanState
     >;
 
-    ROCPRIM_SHARED_MEMORY union
+    ROCPRIM_SHARED_MEMORY struct
     {
         typename order_bid_type::storage_type ordered_bid;
-        typename block_load_type::storage_type load;
-        typename block_store_type::storage_type store;
-        typename block_scan_type::storage_type scan;
+        union
+        {
+            typename block_load_type::storage_type load;
+            typename block_store_type::storage_type store;
+            typename block_scan_type::storage_type scan;
+        };
     } storage;
 
-    const auto flat_block_thread_id = ::rocprim::detail::block_thread_id<0>();
+    const auto flat_block_thread_id = ::rocprim::flat_block_thread_id();
     const auto flat_block_id = ordered_bid.get(flat_block_thread_id, storage.ordered_bid);
     const unsigned int block_offset = flat_block_id * items_per_block;
     const auto valid_in_last_block = size - items_per_block * (number_of_blocks - 1);
@@ -267,7 +270,12 @@ void lookback_scan_kernel_impl(InputIterator input,
             scan_state.set_complete(flat_block_id, reduction);
         }
     }
-    else
+    // Workaround: Fiji (gfx803) crashes with "Memory access fault by GPU node" on HCC 1.3.18482 (ROCm 2.0)
+    // Instead of just `} else {` we use `} syncthreads(); if() {`, because the else-branch can be executed
+    // for some unknown reason and 0-th block reads incorrect addresses in lookback_scan_prefix_op::get_prefix.
+    ::rocprim::syncthreads();
+    if(flat_block_id > 0)
+    // original code: else
     {
         // Scan of block values
         auto prefix_op = lookback_scan_prefix_op_type(

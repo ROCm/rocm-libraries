@@ -95,10 +95,12 @@ typedef ::testing::Types<
     params<float, custom_double2, rp::minimum<custom_double2>, 1, 10000>,
     params<custom_double2, custom_int2, rp::plus<custom_int2>, 1, 10>,
     params<unsigned long long, float, rp::minimum<float>, 1, 30>,
+    params<int, rp::half, test_utils::half_minimum, 15, 100>,
     params<int, unsigned int, rp::maximum<unsigned int>, 20, 100>,
     params<float, long long, rp::maximum<unsigned long long>, 100, 400, long long, custom_key_compare_op1<float>>,
-    params<unsigned int, unsigned int, rp::plus<unsigned int>, 200, 600>,
+    params<unsigned int, unsigned char, rp::plus<unsigned char>, 200, 600>,
     params<double, int, rp::plus<int>, 100, 2000, double, custom_key_compare_op1<double>>,
+    params<char, rp::half, test_utils::half_maximum, 123, 1234>,
     params<custom_int2, unsigned int, rp::plus<unsigned int>, 1000, 5000>,
     params<unsigned int, int, rp::plus<int>, 2048, 2048>,
     params<long long, short, rp::plus<long long>, 1000, 10000, long long>,
@@ -238,14 +240,7 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
 
         ASSERT_EQ(unique_count_output[0], unique_count_expected);
 
-        for(size_t i = 0; i < unique_count_expected; i++)
-        {
-            ASSERT_EQ(unique_output[i], unique_expected[i]);
-        }
-
-        for(size_t i = 0; i < unique_count_expected; i++)
-        {
-            ASSERT_EQ(aggregates_output[i], aggregates_expected[i]);
-        }
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(unique_output, unique_expected));
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(aggregates_output, aggregates_expected));
     }
 }

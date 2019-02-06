@@ -36,18 +36,9 @@
 // HC API
 #include <hcc/hc.hpp>
 // rocPRIM
-#include <rocprim/warp/warp_sort.hpp>
+#include <rocprim/rocprim.hpp>
 
 #include "benchmark_utils.hpp"
-
-#define HIP_CHECK(condition)         \
-  {                                  \
-    hipError_t error = condition;    \
-    if(error != hipSuccess){         \
-        std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
-        exit(error); \
-    } \
-  }
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 32;
