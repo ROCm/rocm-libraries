@@ -60,10 +60,10 @@ equal(execution_policy<Derived>& policy,
 {
   typedef typename thrust::iterator_value<InputIt1>::type InputType1;
   return hip_rocprim::equal(policy,
-                         first1,
-                         last1,
-                         first2,
-                         equal_to<InputType1>());
+                            first1,
+                            last1,
+                            first2,
+                            equal_to<InputType1>());
 }
 
 

@@ -43,9 +43,8 @@
 #include <thrust/distance.h>
 #include <thrust/detail/alignment.h>
 
-// rocprim includes
-#include <rocprim/functional.hpp>
-#include <rocprim/device/device_reduce_hip.hpp>
+// rocprim include
+#include <rocprim/rocprim.hpp>
 
 
 BEGIN_NS_THRUST
@@ -119,21 +118,7 @@ reduce_n(execution_policy<Derived> &policy,
                     stream, THRUST_HIP_DEBUG_SYNC_FLAG),
     "after reduction step 2");
 
-  // Synchronize the stream and get the value.
-  hipDeviceSynchronize();
-  hip_rocprim::throw_on_error(hipGetLastError(),
-    "reduce failed to synchronize");
-
-  // `tmp.begin()` yields a `normal_iterator`, which dereferences to a
-  // `reference`, which has an `operator&` that returns a `pointer`, which
-  // has a `.get` method that returns a raw pointer, which we can (finally)
-  // `static_cast` to `void*`.
-  //
-  // The array was dynamically allocated, so we assume that it's suitably
-  // aligned for any type of data. `malloc`/`cudaMalloc`/`new`/`std::allocator`
-  // make this guarantee.
-  return hip_rocprim::get_value(policy,
-    detail::aligned_reinterpret_cast<T*>((&*tmp.begin()).get()));
+  return hip_rocprim::get_value(policy,ret_ptr);
 #else // __THRUST_HAS_HIPRT__
   return thrust::reduce(
     cvt_to_seq(derived_cast(policy)), first, first + num_items, init, binary_op);
@@ -178,7 +163,7 @@ reduce(execution_policy<Derived> &policy,
 }
 
 
-} // namespace rocprim
+} // namespace  hip_rocprim
 
 END_NS_THRUST
 

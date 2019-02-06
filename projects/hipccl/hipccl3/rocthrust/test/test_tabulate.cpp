@@ -155,7 +155,7 @@ TYPED_TEST(TabulateTests, TestTabulate)
   using T = typename Vector::value_type;
   using namespace thrust::placeholders;
 
-  for (auto size : get_sizes_smaller())
+  for (auto size : get_sizes())
   {
     SCOPED_TRACE(testing::Message() << "with size = " << size);
 
@@ -165,9 +165,10 @@ TYPED_TEST(TabulateTests, TestTabulate)
     thrust::tabulate(h_data.begin(), h_data.end(), _1 * _1 + T(13));
     thrust::tabulate(d_data.begin(), d_data.end(), _1 * _1 + T(13));
 
+    thrust::host_vector<T> h_result = d_data;
     for (size_t i = 0; i < size; i++)
     {
-      ASSERT_EQ(h_data[i], d_data[i]) << "where index = " << i;
+      ASSERT_EQ(h_data[i], h_result[i]) << "where index = " << i;
     }
 
     thrust::tabulate(h_data.begin(), h_data.end(), (_1 - T(7)) * _1);
@@ -179,7 +180,7 @@ TYPED_TEST(TabulateTests, TestTabulate)
 
 TEST(TabulateTests, TestTabulateToDiscardIterator)
 {
-  for (auto size : get_sizes_smaller())
+  for (auto size : get_sizes())
   {
     thrust::tabulate(thrust::discard_iterator<thrust::device_system_tag>(),
                      thrust::discard_iterator<thrust::device_system_tag>(size),
