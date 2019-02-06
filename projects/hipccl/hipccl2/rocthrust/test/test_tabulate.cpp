@@ -155,7 +155,7 @@ TYPED_TEST(TabulateTests, TestTabulate)
   using T = typename Vector::value_type;
   using namespace thrust::placeholders;
 
-  for (auto size : get_sizes())
+  for (auto size : get_sizes_smaller())
   {
     SCOPED_TRACE(testing::Message() << "with size = " << size);
 
@@ -179,7 +179,7 @@ TYPED_TEST(TabulateTests, TestTabulate)
 
 TEST(TabulateTests, TestTabulateToDiscardIterator)
 {
-  for (auto size : get_sizes())
+  for (auto size : get_sizes_smaller())
   {
     thrust::tabulate(thrust::discard_iterator<thrust::device_system_tag>(),
                      thrust::discard_iterator<thrust::device_system_tag>(size),
