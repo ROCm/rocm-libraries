@@ -76,9 +76,9 @@ void radix_sort_iteration(KeysInputIterator keys_input,
                           unsigned int size,
                           unsigned int * batch_digit_counts,
                           unsigned int * digit_counts,
+                          bool from_input,
                           bool to_output,
                           unsigned int bit,
-                          unsigned int begin_bit,
                           unsigned int end_bit,
                           unsigned int blocks_per_full_batch,
                           unsigned int full_batches,
@@ -92,8 +92,6 @@ void radix_sort_iteration(KeysInputIterator keys_input,
     // iteration has a shorter mask.
     const unsigned int current_radix_bits = ::rocprim::min(RadixBits, end_bit - bit);
 
-    const bool is_first_iteration = (bit == begin_bit);
-
     std::chrono::high_resolution_clock::time_point start;
 
     if(debug_synchronous)
@@ -104,7 +102,7 @@ void radix_sort_iteration(KeysInputIterator keys_input,
     }
 
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    if(is_first_iteration)
+    if(from_input)
     {
         hc::parallel_for_each(
             acc_view,
@@ -188,7 +186,7 @@ void radix_sort_iteration(KeysInputIterator keys_input,
     ROCPRIM_DETAIL_HC_SYNC("scan_digits", radix_size, start)
 
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    if(is_first_iteration)
+    if(from_input)
     {
         if(to_output)
         {
@@ -365,7 +363,7 @@ void radix_sort_impl(void * temporary_storage,
     ptr += batch_digit_counts_bytes;
     unsigned int * digit_counts = reinterpret_cast<unsigned int *>(ptr);
     ptr += digit_counts_bytes;
-   if(!with_double_buffer)
+    if(!with_double_buffer)
     {
         keys_tmp = reinterpret_cast<key_type *>(ptr);
         ptr += keys_bytes;
@@ -373,19 +371,45 @@ void radix_sort_impl(void * temporary_storage,
     }
 
     bool to_output = with_double_buffer || (iterations - 1) % 2 == 0;
+    bool from_input = true;
+    if(!with_double_buffer && to_output)
+    {
+        // Copy input keys and values if necessary (in-place sorting: input and output iterators are equal)
+        const bool keys_equal = ::rocprim::detail::are_iterators_equal(keys_input, keys_output);
+        const bool values_equal = with_values && ::rocprim::detail::are_iterators_equal(values_input, values_output);
+        if(keys_equal || values_equal)
+        {
+            ::rocprim::transform(
+                keys_input, keys_tmp, size,
+                ::rocprim::identity<key_type>(), acc_view, debug_synchronous
+            );
+
+            if(with_values)
+            {
+                ::rocprim::transform(
+                    values_input, values_tmp, size,
+                    ::rocprim::identity<value_type>(), acc_view, debug_synchronous
+                );
+            }
+
+            from_input = false;
+        }
+    }
+
     unsigned int bit = begin_bit;
     for(unsigned int i = 0; i < long_iterations; i++)
     {
         radix_sort_iteration<config, config::long_radix_bits, Descending>(
             keys_input, keys_tmp, keys_output, values_input, values_tmp, values_output, size,
             batch_digit_counts, digit_counts,
-            to_output,
-            bit, begin_bit, end_bit,
+            from_input, to_output,
+            bit, end_bit,
             blocks_per_full_batch, full_batches, batches,
             acc_view, debug_synchronous
         );
 
         is_result_in_output = to_output;
+        from_input = false;
         to_output = !to_output;
         bit += config::long_radix_bits;
     }
@@ -394,13 +418,14 @@ void radix_sort_impl(void * temporary_storage,
         radix_sort_iteration<config, config::short_radix_bits, Descending>(
             keys_input, keys_tmp, keys_output, values_input, values_tmp, values_output, size,
             batch_digit_counts, digit_counts,
-            to_output,
-            bit, begin_bit, end_bit,
+            from_input, to_output,
+            bit, end_bit,
             blocks_per_full_batch, full_batches, batches,
             acc_view, debug_synchronous
         );
 
         is_result_in_output = to_output;
+        from_input = false;
         to_output = !to_output;
         bit += config::short_radix_bits;
     }

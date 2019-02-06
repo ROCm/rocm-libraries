@@ -157,7 +157,7 @@ struct match_fundamental_type
 template<class T>
 ROCPRIM_DEVICE inline
 auto store_volatile(T * output, T value)
-    -> typename std::enable_if<::rocprim::is_fundamental<T>::value>::type
+    -> typename std::enable_if<std::is_fundamental<T>::value>::type
 {
     *const_cast<volatile T*>(output) = value;
 }
@@ -165,7 +165,7 @@ auto store_volatile(T * output, T value)
 template<class T>
 ROCPRIM_DEVICE inline
 auto store_volatile(T * output, T value)
-    -> typename std::enable_if<!::rocprim::is_fundamental<T>::value>::type
+    -> typename std::enable_if<!std::is_fundamental<T>::value>::type
 {
     using fundamental_type = typename match_fundamental_type<T>::type;
     constexpr unsigned int n = sizeof(T) / sizeof(fundamental_type);
@@ -183,7 +183,7 @@ auto store_volatile(T * output, T value)
 template<class T>
 ROCPRIM_DEVICE inline
 auto load_volatile(T * input)
-    -> typename std::enable_if<::rocprim::is_fundamental<T>::value, T>::type
+    -> typename std::enable_if<std::is_fundamental<T>::value, T>::type
 {
     T retval = *const_cast<volatile T*>(input);
     return retval;
@@ -192,7 +192,7 @@ auto load_volatile(T * input)
 template<class T>
 ROCPRIM_DEVICE inline
 auto load_volatile(T * input)
-    -> typename std::enable_if<!::rocprim::is_fundamental<T>::value, T>::type
+    -> typename std::enable_if<!std::is_fundamental<T>::value, T>::type
 {
     using fundamental_type = typename match_fundamental_type<T>::type;
     constexpr unsigned int n = sizeof(T) / sizeof(fundamental_type);
@@ -225,6 +225,21 @@ struct raw_storage
         return reinterpret_cast<T&>(*this);
     }
 };
+
+// Checks if two iterators have the same type and value
+template<class Iterator1, class Iterator2>
+inline
+bool are_iterators_equal(Iterator1, Iterator2)
+{
+    return false;
+}
+
+template<class Iterator>
+inline
+bool are_iterators_equal(Iterator iter1, Iterator iter2)
+{
+    return iter1 == iter2;
+}
 
 } // end namespace detail
 END_ROCPRIM_NAMESPACE
