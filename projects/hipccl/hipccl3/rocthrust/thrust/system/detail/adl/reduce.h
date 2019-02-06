@@ -30,6 +30,7 @@
 #if 0
 #include <thrust/system/cpp/detail/reduce.h>
 #include <thrust/system/cuda/detail/reduce.h>
+#include <thrust/system/hip/detail/reduce.h>
 #include <thrust/system/omp/detail/reduce.h>
 #include <thrust/system/tbb/detail/reduce.h>
 #endif
@@ -41,4 +42,3 @@
 #define __THRUST_DEVICE_SYSTEM_REDUCE_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/detail/reduce.h>
 #include __THRUST_DEVICE_SYSTEM_REDUCE_HEADER
 #undef __THRUST_DEVICE_SYSTEM_REDUCE_HEADER
-

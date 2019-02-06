@@ -39,9 +39,8 @@
 #include <thrust/system/hip/detail/parallel_for.h>
 #include <thrust/distance.h>
 
-// rocPRIM includes
-#include <rocprim/functional.hpp>
-#include <rocprim/device/device_transform_hip.hpp>
+// rocPRIM include
+#include <rocprim/rocprim.hpp>
 
 BEGIN_NS_THRUST
 
