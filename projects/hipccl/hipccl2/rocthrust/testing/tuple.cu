@@ -13,10 +13,7 @@ struct TestTupleConstructor
     using namespace thrust;
 
     host_vector<T> data = random_integers<T>(10);
-    thrust::host_vector<T> data = get_random_data<T>(size,
-                                                     std::numeric_limits<T>::min(),
-                                                     std::numeric_limits<T>::max() );
-    }
+
     tuple<T> t1(data[0]);
     ASSERT_EQUAL(data[0], get<0>(t1));
 
