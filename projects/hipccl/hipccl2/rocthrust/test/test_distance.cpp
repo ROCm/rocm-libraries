@@ -21,14 +21,17 @@
 // SOFTWARE.
 
 #include <vector>
+#include <list>
+#include <limits>
+#include <utility>
 
 // Google Test
 #include <gtest/gtest.h>
 
-// Thrust include
-#include <thrust/device_malloc_allocator.h>
-#include <thrust/device_vector.h>
+// Thrust
+#include <thrust/distance.h>
 #include <thrust/host_vector.h>
+#include <thrust/device_vector.h>
 
 // HIP API
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
@@ -37,8 +40,6 @@
 
 #define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
-#include "test_utils.hpp"
 
 template<
     class InputType
@@ -49,7 +50,7 @@ struct Params
 };
 
 template<class Params>
-class VectorManipulationTests : public ::testing::Test
+class DistanceTests : public ::testing::Test
 {
 public:
     using input_type = typename Params::input_type;
@@ -72,104 +73,60 @@ typedef ::testing::Types<
     Params<thrust::device_vector<unsigned long long>>,
     Params<thrust::device_vector<float>>,
     Params<thrust::device_vector<double>>
-> VectorManipulationTestsParams;
+> DistanceTestsParams;
 
-TYPED_TEST_CASE(VectorManipulationTests, VectorManipulationTestsParams);
+TYPED_TEST_CASE(DistanceTests, DistanceTestsParams);
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
-TYPED_TEST(VectorManipulationTests, TestVectorManipulation)
+
+TYPED_TEST(DistanceTests, TestDistance)
 {
   using Vector = typename TestFixture::input_type;
-  using T = typename Vector::value_type;
   using Iterator = typename Vector::iterator;
 
-  const std::vector<size_t> sizes = get_sizes();
-  for(auto size : sizes)
-  {
-    thrust::host_vector<T> src;
-    if (std::is_floating_point<T>::value)
-    {
-      src = get_random_data<T>(size, (T)-1000, (T)+1000);
-    }
-    else
-    {
-      src = get_random_data<T>(
-        size,
-        std::numeric_limits<T>::min(),
-        std::numeric_limits<T>::max()
-      );
-    }
+  Vector v(100);
 
-    ASSERT_EQ(src.size(), size);
+  Iterator i = v.begin();
 
-    // basic initialization
-    Vector test0(size);
-    Vector test1(size, T(3));
-    ASSERT_EQ(test0.size(), size);
-    ASSERT_EQ(test1.size(), size);
-    ASSERT_EQ((test1 == std::vector<T>(size, T(3))), true);
+  ASSERT_EQ(thrust::distance(i, v.end()), 100);
 
-    // initializing from other vector
-    std::vector<T> stl_vector(src.begin(), src.end());
-    Vector cpy0 = src;
-    Vector cpy1(stl_vector);
-    Vector cpy2(stl_vector.begin(), stl_vector.end());
+  i++;
 
-    ASSERT_EQ(cpy0, src);
-    ASSERT_EQ(cpy1, src);
-    ASSERT_EQ(cpy2, src);
+  ASSERT_EQ(thrust::distance(i, v.end()), 99);
 
-    // resizing
-    Vector vec1(src);
-    vec1.resize(size + 3);
-    ASSERT_EQ(vec1.size(), size + 3);
-    vec1.resize(size);
-    ASSERT_EQ(vec1.size(), size);
-    ASSERT_EQ(vec1, src);
+  i += 49;
 
-    vec1.resize(size + 20, T(11));
-    Vector tail(vec1.begin() + size, vec1.end());
-    ASSERT_EQ( (tail == std::vector<T>(20, T(11))), true);
+  ASSERT_EQ(thrust::distance(i, v.end()), 50);
 
-    // shrinking a vector should not invalidate iterators
-    Iterator first = vec1.begin();
-    vec1.resize(10);
-    ASSERT_EQ(first, vec1.begin());
-
-    vec1.resize(0);
-    ASSERT_EQ(vec1.size(), 0);
-    ASSERT_EQ(vec1.empty(), true);
-    vec1.resize(10);
-    ASSERT_EQ(vec1.size(), 10);
-    vec1.clear();
-    ASSERT_EQ(vec1.size(), 0);
-    vec1.resize(5);
-    ASSERT_EQ(vec1.size(), 5);
-
-    // push_back
-    Vector vec2;
-    for(size_t i = 0; i < 10; ++i)
-    {
-        ASSERT_EQ(vec2.size(), i);
-        vec2.push_back( (T) i );
-        ASSERT_EQ(vec2.size(), i + 1);
-        for(size_t j = 0; j <= i; j++)
-            ASSERT_EQ(vec2[j],     j);
-        ASSERT_EQ(vec2.back(), i);
-    }
-
-    // pop_back
-    for(size_t i = 10; i > 0; --i)
-    {
-        ASSERT_EQ(vec2.size(), i);
-        ASSERT_EQ(vec2.back(), i-1);
-        vec2.pop_back();
-        ASSERT_EQ(vec2.size(), i-1);
-        for(size_t j = 0; j < i; j++)
-            ASSERT_EQ(vec2[j], j);
-    }
-  }
+  ASSERT_EQ(thrust::distance(i, i), 0);
 }
+
+TYPED_TEST(DistanceTests, TestDistanceLarge)
+{
+  using Vector = typename TestFixture::input_type;
+  using Iterator = typename Vector::iterator;
+
+  Vector v(1000);
+
+  Iterator i = v.begin();
+
+  ASSERT_EQ(thrust::distance(i, v.end()), 1000);
+
+  i++;
+
+  ASSERT_EQ(thrust::distance(i, v.end()), 999);
+
+  i += 49;
+
+  ASSERT_EQ(thrust::distance(i, v.end()), 950);
+
+  i += 950;
+
+  ASSERT_EQ(thrust::distance(i, v.end()), 0);
+
+  ASSERT_EQ(thrust::distance(i, i), 0);
+}
+
 
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
