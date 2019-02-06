@@ -377,7 +377,6 @@ auto partition_scatter(ValueType (&values)[ItemsPerThread],
         ::rocprim::syncthreads(); // sync threads to reuse shared memory
 
         // Coalesced write from shared memory to global memory
-        #pragma unroll
         for(unsigned int i = flat_block_thread_id; i < selected_in_block; i += BlockSize)
         {
             output[selected_prefix + i] = scatter_storage[i];
