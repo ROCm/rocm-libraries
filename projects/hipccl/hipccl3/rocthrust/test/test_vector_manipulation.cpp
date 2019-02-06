@@ -115,10 +115,10 @@ TYPED_TEST(VectorManipulationTests, TestVectorManipulation)
     Vector cpy0 = src;
     Vector cpy1(stl_vector);
     Vector cpy2(stl_vector.begin(), stl_vector.end());
-    // TODO: Implement reduce in system
-    //ASSERT_EQ(cpy0, src);
-    //ASSERT_EQ(cpy1, src);
-    //ASSERT_EQ(cpy2, src);
+
+    ASSERT_EQ(cpy0, src);
+    ASSERT_EQ(cpy1, src);
+    ASSERT_EQ(cpy2, src);
 
     // resizing
     Vector vec1(src);
@@ -126,7 +126,7 @@ TYPED_TEST(VectorManipulationTests, TestVectorManipulation)
     ASSERT_EQ(vec1.size(), size + 3);
     vec1.resize(size);
     ASSERT_EQ(vec1.size(), size);
-    //ASSERT_EQ(vec1, src); // TODO: Implement reduce in system
+    ASSERT_EQ(vec1, src);
 
     vec1.resize(size + 20, T(11));
     Vector tail(vec1.begin() + size, vec1.end());

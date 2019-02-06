@@ -371,8 +371,7 @@ TYPED_TEST(ScatterTests, TestScatterIfToDiscardIterator)
   }
 }
 
-// TODO: Implement reduce in system
-/*TYPED_TEST(ScatterTests, TestScatterCountingIterator)
+TYPED_TEST(ScatterTests, TestScatterCountingIterator)
 {
   using Vector = typename TestFixture::input_type;
 
@@ -449,6 +448,6 @@ TYPED_TEST(ScatterTests, TestScatterIfCountingIterator)
                      output.begin());
 
   ASSERT_EQ(output, map);
-}*/
+}
 
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
