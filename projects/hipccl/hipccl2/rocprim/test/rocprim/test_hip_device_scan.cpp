@@ -34,12 +34,15 @@
 
 #include "test_utils.hpp"
 
-#define HIP_CHECK(error) ASSERT_EQ(static_cast<hipError_t>(error),hipSuccess)
+namespace rp = rocprim;
+
+#define HIP_CHECK(error) ASSERT_EQ(error, hipSuccess)
 
 // Params for tests
 template<
     class InputType,
     class OutputType = InputType,
+    class ScanOp = ::rocprim::plus<OutputType>,
     // Tests output iterator with void value_type (OutputIterator concept)
     // scan-by-key primitives don't support output iterator with void value_type
     bool UseIdentityIteratorIfSupported = false
@@ -48,6 +51,7 @@ struct DeviceScanParams
 {
     using input_type = InputType;
     using output_type = OutputType;
+    using scan_op_type = ScanOp;
     static constexpr bool use_identity_iterator = UseIdentityIteratorIfSupported;
 };
 
@@ -61,16 +65,37 @@ class RocprimDeviceScanTests : public ::testing::Test
 public:
     using input_type = typename Params::input_type;
     using output_type = typename Params::output_type;
+    using scan_op_type = typename Params::scan_op_type;
     const bool debug_synchronous = false;
     static constexpr bool use_identity_iterator = Params::use_identity_iterator;
 };
 
 typedef ::testing::Types<
-    DeviceScanParams<int>,
-    DeviceScanParams<double, double, true>,
+    // Small
+    DeviceScanParams<char>,
+    DeviceScanParams<unsigned short>,
     DeviceScanParams<short, int>,
-    DeviceScanParams<long, double>,
-    DeviceScanParams<test_utils::custom_test_type<double>, test_utils::custom_test_type<double>, true>
+    DeviceScanParams<int>,
+    DeviceScanParams<float, float, rp::maximum<float> >,
+    DeviceScanParams<rp::half, rp::half, test_utils::half_maximum>,
+    DeviceScanParams<rp::half, float>,
+    // Large
+    DeviceScanParams<int, double, rp::plus<int> >,
+    DeviceScanParams<int, double, rp::plus<double> >,
+    DeviceScanParams<int, long long, rp::plus<long long> >,
+    DeviceScanParams<unsigned int, unsigned long long, rp::plus<unsigned long long> >,
+    DeviceScanParams<long long, long long, rp::maximum<long long> >,
+    DeviceScanParams<double, double, rp::plus<double>, true>,
+    DeviceScanParams<signed char, long, rp::plus<long> >,
+    DeviceScanParams<float, double, rp::minimum<double> >,
+    DeviceScanParams<test_utils::custom_test_type<int> >,
+    DeviceScanParams<
+        test_utils::custom_test_type<double>, test_utils::custom_test_type<double>,
+        rp::plus<test_utils::custom_test_type<double> >, true
+    >,
+    DeviceScanParams<test_utils::custom_test_type<int> >,
+    DeviceScanParams<test_utils::custom_test_array_type<long long, 5> >,
+    DeviceScanParams<test_utils::custom_test_array_type<int, 10> >
 > RocprimDeviceScanTestsParams;
 
 std::vector<size_t> get_sizes()
@@ -78,9 +103,10 @@ std::vector<size_t> get_sizes()
     std::vector<size_t> sizes = {
         1, 10, 53, 211,
         1024, 2048, 5096,
-        34567, (1 << 18)
+        34567, (1 << 18),
+        (1 << 20) - 12345
     };
-    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(2, 1, 16384);
+    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(3, 1, 100000);
     sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
     std::sort(sizes.begin(), sizes.end());
     return sizes;
@@ -88,10 +114,11 @@ std::vector<size_t> get_sizes()
 
 TYPED_TEST_CASE(RocprimDeviceScanTests, RocprimDeviceScanTestsParams);
 
-TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSumEmptyInput)
+TYPED_TEST(RocprimDeviceScanTests, InclusiveScanEmptyInput)
 {
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
+    using scan_op_type = typename TestFixture::scan_op_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
     hipStream_t stream = 0; // default
@@ -113,9 +140,9 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSumEmptyInput)
     HIP_CHECK(
         rocprim::inclusive_scan(
             d_temp_storage, temp_storage_size_bytes,
-            rocprim::make_constant_iterator<T>(345),
+            rocprim::make_constant_iterator<T>(T(345)),
             d_checking_output,
-            0, ::rocprim::plus<U>(), stream, debug_synchronous
+            0, scan_op_type(), stream, debug_synchronous
         )
     );
 
@@ -126,9 +153,9 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSumEmptyInput)
     HIP_CHECK(
         rocprim::inclusive_scan(
             d_temp_storage, temp_storage_size_bytes,
-            rocprim::make_constant_iterator<T>(345),
+            rocprim::make_constant_iterator<T>(T(345)),
             d_checking_output,
-            0, ::rocprim::plus<U>(), stream, debug_synchronous
+            0, scan_op_type(), stream, debug_synchronous
         )
     );
     HIP_CHECK(hipPeekAtLastError());
@@ -140,10 +167,11 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSumEmptyInput)
     hipFree(d_temp_storage);
 }
 
-TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
+TYPED_TEST(RocprimDeviceScanTests, InclusiveScan)
 {
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
+    using scan_op_type = typename TestFixture::scan_op_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
 
@@ -172,13 +200,13 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
         HIP_CHECK(hipDeviceSynchronize());
 
         // scan function
-        ::rocprim::plus<U> plus_op;
+        scan_op_type scan_op;
 
         // Calculate expected results on host
         std::vector<U> expected(input.size());
         test_utils::host_inclusive_scan(
             input.begin(), input.end(),
-            expected.begin(), plus_op
+            expected.begin(), scan_op
         );
 
         // temp storage
@@ -190,7 +218,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
                 d_temp_storage, temp_storage_size_bytes,
                 d_input,
                 test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
-                input.size(), plus_op, stream, debug_synchronous
+                input.size(), scan_op, stream, debug_synchronous
             )
         );
 
@@ -207,7 +235,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
                 d_temp_storage, temp_storage_size_bytes,
                 d_input,
                 test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
-                input.size(), plus_op, stream, debug_synchronous
+                input.size(), scan_op, stream, debug_synchronous
             )
         );
         HIP_CHECK(hipPeekAtLastError());
@@ -232,10 +260,11 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanSum)
     }
 }
 
-TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanSum)
+TYPED_TEST(RocprimDeviceScanTests, ExclusiveScan)
 {
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
+    using scan_op_type = typename TestFixture::scan_op_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
 
@@ -264,7 +293,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanSum)
         HIP_CHECK(hipDeviceSynchronize());
 
         // scan function
-        ::rocprim::plus<U> plus_op;
+        scan_op_type scan_op;
 
         // Calculate expected results on host
         std::vector<U> expected(input.size());
@@ -272,7 +301,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanSum)
         test_utils::host_exclusive_scan(
             input.begin(), input.end(),
             initial_value, expected.begin(),
-            plus_op
+            scan_op
         );
 
         // temp storage
@@ -284,7 +313,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanSum)
                 d_temp_storage, temp_storage_size_bytes,
                 d_input,
                 test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
-                initial_value, input.size(), plus_op, stream, debug_synchronous
+                initial_value, input.size(), scan_op, stream, debug_synchronous
             )
         );
 
@@ -301,7 +330,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanSum)
                 d_temp_storage, temp_storage_size_bytes,
                 d_input,
                 test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
-                initial_value, input.size(), plus_op, stream, debug_synchronous
+                initial_value, input.size(), scan_op, stream, debug_synchronous
             )
         );
         HIP_CHECK(hipPeekAtLastError());
@@ -332,6 +361,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanByKey)
     using T = typename TestFixture::input_type;
     using K = unsigned int; // key type
     using U = typename TestFixture::output_type;
+    using scan_op_type = typename TestFixture::scan_op_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
     const std::vector<size_t> sizes = get_sizes();
@@ -370,7 +400,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanByKey)
         HIP_CHECK(hipDeviceSynchronize());
 
         // scan function
-        rocprim::plus<U> scan_op;
+        scan_op_type scan_op;
         // key compare function
         rocprim::equal_to<K> keys_compare_op;
 
@@ -457,6 +487,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
     using T = typename TestFixture::input_type;
     using K = unsigned int; // key type
     using U = typename TestFixture::output_type;
+    using scan_op_type = typename TestFixture::scan_op_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
     const std::vector<size_t> sizes = get_sizes();
@@ -496,7 +527,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
         HIP_CHECK(hipDeviceSynchronize());
 
         // scan function
-        rocprim::plus<U> scan_op;
+        scan_op_type scan_op;
         // key compare function
         rocprim::equal_to<K> keys_compare_op;
 

@@ -258,36 +258,61 @@ namespace detail
     }
 
     #ifdef ROCPRIM_HIP_API
+
     ROCPRIM_DEVICE inline
-    void memory_fence_system(void)
+    void memory_fence_system()
     {
         ::__threadfence_system();
     }
 
     ROCPRIM_DEVICE inline
-    void memory_fence_block(void)
+    void memory_fence_block()
     {
         ::__threadfence_block();
     }
 
     ROCPRIM_DEVICE inline
-    void memory_fence_device(void)
+    void memory_fence_device()
     {
         ::__threadfence();
     }
+
     #else
-    // __threadfence_system()
+
+    extern "C" ROCPRIM_DEVICE void __atomic_work_item_fence(unsigned int, unsigned int, unsigned int);
+
+    // Works like __threadfence_system()
     ROCPRIM_DEVICE inline
-    void memory_fence_system(void)
+    void memory_fence_system()
     {
-        std::atomic_thread_fence(std::memory_order_seq_cst);
+        __atomic_work_item_fence(
+            0,
+            /* memory_order_seq_cst */ __ATOMIC_SEQ_CST,
+            /* memory_scope_all_svm_devices */ __OPENCL_MEMORY_SCOPE_ALL_SVM_DEVICES
+        );
     }
 
     // Works like __threadfence_block()
-    extern __attribute__((const)) ROCPRIM_DEVICE void memory_fence_block() __asm("__llvm_fence_sc_wg");
+    ROCPRIM_DEVICE inline
+    void memory_fence_block()
+    {
+        __atomic_work_item_fence(
+            0,
+            /* memory_order_seq_cst */ __ATOMIC_SEQ_CST,
+            /* memory_scope_work_group */ __OPENCL_MEMORY_SCOPE_WORK_GROUP
+        );
+    }
 
     // Works like __threadfence()
-    extern __attribute__((const)) ROCPRIM_DEVICE void memory_fence_device() __asm("__llvm_fence_sc_dev");
+    ROCPRIM_DEVICE inline
+    void memory_fence_device()
+    {
+        __atomic_work_item_fence(
+            0,
+            /* memory_order_seq_cst */ __ATOMIC_SEQ_CST,
+            /* memory_scope_device */ __OPENCL_MEMORY_SCOPE_DEVICE
+        );
+    }
     #endif
 }
 

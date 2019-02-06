@@ -167,7 +167,7 @@ hipError_t merge_sort_impl(void * temporary_storage,
     char* ptr = reinterpret_cast<char*>(temporary_storage);
     key_type * keys_buffer = reinterpret_cast<key_type*>(ptr);
     ptr += keys_bytes;
-    value_type* values_buffer =
+    value_type * values_buffer =
         with_values ? reinterpret_cast<value_type*>(ptr) : nullptr;
 
     // Start point for time measurements
@@ -176,7 +176,7 @@ hipError_t merge_sort_impl(void * temporary_storage,
 
     const unsigned int grid_size = number_of_blocks;
     hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(detail::block_sort_kernel<block_size>),
+        HIP_KERNEL_NAME(block_sort_kernel<block_size>),
         dim3(grid_size), dim3(block_size), 0, stream,
         keys_input, keys_output, values_input, values_output,
         size, compare_function
@@ -184,25 +184,25 @@ hipError_t merge_sort_impl(void * temporary_storage,
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("block_sort_kernel", size, start);
 
     bool temporary_store = false;
-    for(unsigned int block = block_size ; block < size; block *= 2)
+    for(unsigned int block = block_size; block < size; block *= 2)
     {
         temporary_store = !temporary_store;
         if(temporary_store)
         {
             if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(detail::block_merge_kernel),
+                HIP_KERNEL_NAME(block_merge_kernel),
                 dim3(grid_size), dim3(block_size), 0, stream,
                 keys_output, keys_buffer, values_output, values_buffer,
                 size, block, compare_function
             );
-            ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("block_merge_buffer_kernel", size, start);
+            ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("block_merge_kernel", size, start);
         }
         else
         {
             if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(detail::block_merge_kernel),
+                HIP_KERNEL_NAME(block_merge_kernel),
                 dim3(grid_size), dim3(block_size), 0, stream,
                 keys_buffer, keys_output, values_buffer, values_output,
                 size, block, compare_function
@@ -213,20 +213,20 @@ hipError_t merge_sort_impl(void * temporary_storage,
 
     if(temporary_store)
     {
-        if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-        ::rocprim::transform(
+        hipError_t error = ::rocprim::transform(
             keys_buffer, keys_output, size,
             ::rocprim::identity<key_type>(), stream, debug_synchronous
         );
+        if(error != hipSuccess) return error;
 
         if(with_values)
         {
-            ::rocprim::transform(
+            hipError_t error = ::rocprim::transform(
                 values_buffer, values_output, size,
                 ::rocprim::identity<value_type>(), stream, debug_synchronous
             );
+            if(error != hipSuccess) return error;
         }
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("transform", size, start);
     }
 
     return hipSuccess;

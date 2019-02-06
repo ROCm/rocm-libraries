@@ -103,14 +103,32 @@ template<class Key, class Enable = void>
 struct radix_key_codec_base
 {
     static_assert(sizeof(Key) == 0,
-        "Only integral (except bool) and floating point types supported as radix sort keys");
+        "Only integral and floating point types supported as radix sort keys");
 };
 
 template<class Key>
 struct radix_key_codec_base<
     Key,
-    typename std::enable_if<::rocprim::is_integral<Key>::value && !std::is_same<bool, Key>::value>::type
+    typename std::enable_if<::rocprim::is_integral<Key>::value>::type
 > : radix_key_codec_integral<Key, typename std::make_unsigned<Key>::type> { };
+
+template<>
+struct radix_key_codec_base<bool>
+{
+    using bit_key_type = unsigned char;
+
+    ROCPRIM_DEVICE inline
+    static bit_key_type encode(bool key)
+    {
+        return static_cast<bit_key_type>(key);
+    }
+
+    ROCPRIM_DEVICE inline
+    static bool decode(bit_key_type bit_key)
+    {
+        return static_cast<bool>(bit_key);
+    }
+};
 
 template<>
 struct radix_key_codec_base<::rocprim::half> : radix_key_codec_floating<::rocprim::half, unsigned short> { };

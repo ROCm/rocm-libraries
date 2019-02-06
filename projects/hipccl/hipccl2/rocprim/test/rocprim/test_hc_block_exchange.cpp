@@ -68,20 +68,23 @@ typedef ::testing::Types<
     params<unsigned long long, unsigned long long, 128, 1>,
     params<short, custom_int2, 256, 1>,
     params<long long, long long, 512, 1>,
+    params<rp::half, rp::half, 256, 1>,
 
     // Power of 2 BlockSize and ItemsPerThread > 1
     params<int, int, 64, 2>,
     params<long long, long long, 256, 4>,
     params<int, int, 512, 5>,
     params<custom_short2, custom_double2, 128, 7>,
-    params<int, int, 128, 3>,
+    params<int, unsigned char, 128, 3>,
     params<unsigned long long, unsigned long long, 64, 3>,
+    params<rp::half, float, 256, 4>,
 
     // Non-power of 2 BlockSize and ItemsPerThread > 1
     params<int, double, 33U, 5>,
     params<char, custom_double2, 464U, 2>,
     params<unsigned short, unsigned int, 100U, 3>,
-    params<short, int, 234U, 9>
+    params<short, int, 234U, 9>,
+    params<rp::half, rp::half, 190, 7>
 > Params;
 
 TYPED_TEST_CASE(RocprimBlockExchangeTests, Params);
@@ -147,10 +150,7 @@ TYPED_TEST(RocprimBlockExchangeTests, BlockedToStriped)
     );
 
     d_output.synchronize();
-    for(size_t i = 0; i < size; i++)
-    {
-        ASSERT_EQ(output[i], expected[i]);
-    }
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
 }
 
 TYPED_TEST(RocprimBlockExchangeTests, StripedToBlocked)
@@ -214,10 +214,7 @@ TYPED_TEST(RocprimBlockExchangeTests, StripedToBlocked)
     );
 
     d_output.synchronize();
-    for(size_t i = 0; i < size; i++)
-    {
-        ASSERT_EQ(output[i], expected[i]);
-    }
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
 }
 
 TYPED_TEST(RocprimBlockExchangeTests, BlockedToWarpStriped)
@@ -292,10 +289,7 @@ TYPED_TEST(RocprimBlockExchangeTests, BlockedToWarpStriped)
     );
 
     d_output.synchronize();
-    for(size_t i = 0; i < size; i++)
-    {
-        ASSERT_EQ(output[i], expected[i]);
-    }
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
 }
 
 TYPED_TEST(RocprimBlockExchangeTests, WarpStripedToBlocked)
@@ -370,10 +364,7 @@ TYPED_TEST(RocprimBlockExchangeTests, WarpStripedToBlocked)
     );
 
     d_output.synchronize();
-    for(size_t i = 0; i < size; i++)
-    {
-        ASSERT_EQ(output[i], expected[i]);
-    }
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
 }
 
 TYPED_TEST(RocprimBlockExchangeTests, ScatterToBlocked)
@@ -447,10 +438,7 @@ TYPED_TEST(RocprimBlockExchangeTests, ScatterToBlocked)
     );
 
     d_output.synchronize();
-    for(size_t i = 0; i < size; i++)
-    {
-        ASSERT_EQ(output[i], expected[i]);
-    }
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
 }
 
 TYPED_TEST(RocprimBlockExchangeTests, ScatterToStriped)
@@ -526,8 +514,5 @@ TYPED_TEST(RocprimBlockExchangeTests, ScatterToStriped)
     );
 
     d_output.synchronize();
-    for(size_t i = 0; i < size; i++)
-    {
-        ASSERT_EQ(output[i], expected[i]);
-    }
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
 }

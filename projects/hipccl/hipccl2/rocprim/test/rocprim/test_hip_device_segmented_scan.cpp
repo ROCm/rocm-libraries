@@ -80,7 +80,10 @@ typedef ::testing::Types<
     params<custom_double2, custom_double2, rocprim::minimum<custom_double2>, 1000, 0, 10000>,
     params<custom_int2, custom_short2, rocprim::maximum<custom_int2>, 10, 1000, 10000>,
     params<float, double, rocprim::maximum<double>, 50, 2, 10>,
-    params<float, float, rocprim::plus<float>, 123, 100, 200, true>
+    params<float, float, rocprim::plus<float>, 123, 100, 200, true>,
+    params<unsigned char, long long, rocprim::plus<int>, 10, 3000, 4000>,
+    params<rp::half, float, rp::plus<float>, 0, 10, 300, true>,
+    params<rp::half, rp::half, test_utils::half_minimum, 0, 1000, 30000>
 > Params;
 
 TYPED_TEST_CASE(RocprimDeviceSegmentedScan, Params);
