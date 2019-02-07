@@ -30,6 +30,7 @@
 #if 0
 #include <thrust/system/cpp/detail/mismatch.h>
 #include <thrust/system/cuda/detail/mismatch.h>
+#include <thrust/system/hip/detail/mismatch.h>
 #include <thrust/system/omp/detail/mismatch.h>
 #include <thrust/system/tbb/detail/mismatch.h>
 #endif
@@ -41,4 +42,3 @@
 #define __THRUST_DEVICE_SYSTEM_MISMATCH_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/detail/mismatch.h>
 #include __THRUST_DEVICE_SYSTEM_MISMATCH_HEADER
 #undef __THRUST_DEVICE_SYSTEM_MISMATCH_HEADER
-

@@ -27,12 +27,22 @@
 #include <vector>
 
 #include <thrust/host_vector.h>
+#include <thrust/execution_policy.h>
 
 std::vector<size_t> get_sizes()
 {
   std::vector<size_t> sizes = {
     0, 1, 2, 12, 63, 64, 211, 256, 344,
     1024, 2048, 5096, 34567, (1 << 17) - 1220, 1000000, (1 << 20) - 123
+  };
+  return sizes;
+}
+
+std::vector<size_t> get_sizes_smaller()
+{
+  std::vector<size_t> sizes = {
+    0, 1, 2, 12, 63, 64, 211, 256, 344,
+    1024, 2048, 5096, 34567
   };
   return sizes;
 }
@@ -70,3 +80,63 @@ struct custom_compare_less
     return lhs < rhs;
   }
 }; // end less
+
+struct user_swappable
+{
+  inline __host__ __device__
+  user_swappable(bool swapped = false)
+    : was_swapped(swapped)
+  {}
+
+  bool was_swapped;
+};
+
+inline __host__ __device__
+bool operator==(const user_swappable &x, const user_swappable &y)
+{
+  return x.was_swapped == y.was_swapped;
+}
+
+inline __host__ __device__
+void swap(user_swappable &x, user_swappable &y)
+{
+  x.was_swapped = true;
+  y.was_swapped = false;
+}
+
+class my_system : public thrust::device_execution_policy<my_system>
+{
+  public:
+    my_system(int)
+      : correctly_dispatched(false),
+        num_copies(0)
+    {}
+
+    my_system(const my_system &other)
+      : correctly_dispatched(false),
+        num_copies(other.num_copies + 1)
+    {}
+
+    void validate_dispatch()
+    {
+      correctly_dispatched = (num_copies == 0);
+    }
+
+    bool is_valid()
+    {
+      return correctly_dispatched;
+    }
+
+  private:
+    bool correctly_dispatched;
+
+    // count the number of copies so that we can validate
+    // that dispatch does not introduce any
+    unsigned int num_copies;
+
+
+    // disallow default construction
+    my_system();
+};
+
+struct my_tag : thrust::device_execution_policy<my_tag> {};

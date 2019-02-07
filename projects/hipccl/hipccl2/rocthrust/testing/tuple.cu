@@ -487,5 +487,3 @@ void TestTupleSwap(void)
   ASSERT_EQUAL_QUIET(ref, (swappable_tuple)d_v1[0]);
 }
 DECLARE_UNITTEST(TestTupleSwap);
-
-
