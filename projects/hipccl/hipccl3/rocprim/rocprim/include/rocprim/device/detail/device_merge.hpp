@@ -310,8 +310,7 @@ merge_values(unsigned int flat_id,
         #pragma unroll
         for(unsigned int i = 0; i < ItemsPerThread; ++i)
         {
-            unsigned int id = ItemsPerThread * i + flat_id;
-            if(id < count)
+            if(flat_id * ItemsPerThread + i < count)
             {
                 values[i] = (index[i] < input1_size) ? values_input1[index[i]] :
                                                        values_input2[index[i] - input1_size];
