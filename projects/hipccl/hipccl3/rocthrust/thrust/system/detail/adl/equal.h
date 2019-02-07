@@ -30,6 +30,7 @@
 #if 0
 #include <thrust/system/cpp/detail/equal.h>
 #include <thrust/system/cuda/detail/equal.h>
+#include <thrust/system/hip/detail/equal.h>
 #include <thrust/system/omp/detail/equal.h>
 #include <thrust/system/tbb/detail/equal.h>
 #endif
@@ -41,4 +42,3 @@
 #define __THRUST_DEVICE_SYSTEM_EQUAL_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/detail/equal.h>
 #include __THRUST_DEVICE_SYSTEM_EQUAL_HEADER
 #undef __THRUST_DEVICE_SYSTEM_EQUAL_HEADER
-

@@ -173,8 +173,7 @@ TYPED_TEST(VectorTests, TestVectorElementAssignment)
   w[1] = v[1];
   w[2] = v[2];
 
-  // TODO: Implement reduce in system
-  //ASSERT_EQ(v, w);
+  ASSERT_EQ(v, w);
 }
 
 TYPED_TEST(VectorTests, TestVectorFromSTLVector)
@@ -323,8 +322,7 @@ TYPED_TEST(VectorTests, TestVectorToAndFromHostVector)
   ASSERT_EQ(v, h);
 }
 
-// TODO: Implement reduce in system
-/*TYPED_TEST(VectorTests, TestVectorAssignFromDeviceVector)
+TYPED_TEST(VectorTests, TestVectorAssignFromDeviceVector)
 {
   using Vector = typename TestFixture::input_type;
   using T = typename Vector::value_type;
@@ -340,7 +338,6 @@ TYPED_TEST(VectorTests, TestVectorToAndFromHostVector)
   ASSERT_EQ(v, d);
 }
 
-// TODO: Implement reduce in system
 TYPED_TEST(VectorTests, TestVectorToAndFromDeviceVector)
 {
   using Vector = typename TestFixture::input_type;
@@ -372,7 +369,7 @@ TYPED_TEST(VectorTests, TestVectorToAndFromDeviceVector)
   v = h;
 
   ASSERT_EQ(v, h);
-}*/
+}
 
 TYPED_TEST(VectorTests, TestVectorWithInitialValue)
 {
@@ -504,35 +501,34 @@ TYPED_TEST(VectorTests, TestVectorEquality)
   s_b[0] = T(0);    s_b[1] = T(1);    s_b[2] = T(3);
   s_b[0] = T(0);    s_b[1] = T(1);
 
-  // TODO: Implement reduce in system
-  ASSERT_EQ((h_a == h_a), true); //ASSERT_EQ((h_a == d_a), true); ASSERT_EQ((d_a == h_a), true);  ASSERT_EQ((d_a == d_a), true);
-  ASSERT_EQ((h_b == h_b), true); //ASSERT_EQ((h_b == d_b), true); ASSERT_EQ((d_b == h_b), true);  ASSERT_EQ((d_b == d_b), true);
-  ASSERT_EQ((h_c == h_c), true); //ASSERT_EQ((h_c == d_c), true); ASSERT_EQ((d_c == h_c), true);  ASSERT_EQ((d_c == d_c), true);
+  ASSERT_EQ((h_a == h_a), true); ASSERT_EQ((h_a == d_a), true); ASSERT_EQ((d_a == h_a), true);  ASSERT_EQ((d_a == d_a), true);
+  ASSERT_EQ((h_b == h_b), true); ASSERT_EQ((h_b == d_b), true); ASSERT_EQ((d_b == h_b), true);  ASSERT_EQ((d_b == d_b), true);
+  ASSERT_EQ((h_c == h_c), true); ASSERT_EQ((h_c == d_c), true); ASSERT_EQ((d_c == h_c), true);  ASSERT_EQ((d_c == d_c), true);
 
   // test vector vs device_vector
-  //ASSERT_EQ((s_a == d_a), true); ASSERT_EQ((d_a == s_a), true);
-  //ASSERT_EQ((s_b == d_b), true); ASSERT_EQ((d_b == s_b), true);
-  //ASSERT_EQ((s_c == d_c), true); ASSERT_EQ((d_c == s_c), true);
+  ASSERT_EQ((s_a == d_a), true); ASSERT_EQ((d_a == s_a), true);
+  ASSERT_EQ((s_b == d_b), true); ASSERT_EQ((d_b == s_b), true);
+  ASSERT_EQ((s_c == d_c), true); ASSERT_EQ((d_c == s_c), true);
 
   // test vector vs host_vector
   ASSERT_EQ((s_a == h_a), true); ASSERT_EQ((h_a == s_a), true);
   ASSERT_EQ((s_b == h_b), true); ASSERT_EQ((h_b == s_b), true);
   ASSERT_EQ((s_c == h_c), true); ASSERT_EQ((h_c == s_c), true);
 
-  ASSERT_EQ((h_a == h_b), false); /*ASSERT_EQ((h_a == d_b), false); ASSERT_EQ((d_a == h_b), false); ASSERT_EQ((d_a == d_b), false);*/
-  ASSERT_EQ((h_b == h_a), false); /*ASSERT_EQ((h_b == d_a), false); ASSERT_EQ((d_b == h_a), false); ASSERT_EQ((d_b == d_a), false);*/
-  ASSERT_EQ((h_a == h_c), false); /*ASSERT_EQ((h_a == d_c), false); ASSERT_EQ((d_a == h_c), false); ASSERT_EQ((d_a == d_c), false);*/
-  ASSERT_EQ((h_c == h_a), false); /*ASSERT_EQ((h_c == d_a), false); ASSERT_EQ((d_c == h_a), false); ASSERT_EQ((d_c == d_a), false);*/
-  ASSERT_EQ((h_b == h_c), false); /*ASSERT_EQ((h_b == d_c), false); ASSERT_EQ((d_b == h_c), false); ASSERT_EQ((d_b == d_c), false);*/
-  ASSERT_EQ((h_c == h_b), false); /*ASSERT_EQ((h_c == d_b), false); ASSERT_EQ((d_c == h_b), false); ASSERT_EQ((d_c == d_b), false);*/
+  ASSERT_EQ((h_a == h_b), false); ASSERT_EQ((h_a == d_b), false); ASSERT_EQ((d_a == h_b), false); ASSERT_EQ((d_a == d_b), false);
+  ASSERT_EQ((h_b == h_a), false); ASSERT_EQ((h_b == d_a), false); ASSERT_EQ((d_b == h_a), false); ASSERT_EQ((d_b == d_a), false);
+  ASSERT_EQ((h_a == h_c), false); ASSERT_EQ((h_a == d_c), false); ASSERT_EQ((d_a == h_c), false); ASSERT_EQ((d_a == d_c), false);
+  ASSERT_EQ((h_c == h_a), false); ASSERT_EQ((h_c == d_a), false); ASSERT_EQ((d_c == h_a), false); ASSERT_EQ((d_c == d_a), false);
+  ASSERT_EQ((h_b == h_c), false); ASSERT_EQ((h_b == d_c), false); ASSERT_EQ((d_b == h_c), false); ASSERT_EQ((d_b == d_c), false);
+  ASSERT_EQ((h_c == h_b), false); ASSERT_EQ((h_c == d_b), false); ASSERT_EQ((d_c == h_b), false); ASSERT_EQ((d_c == d_b), false);
 
   // test vector vs device_vector
-  //ASSERT_EQ((s_a == d_b), false); ASSERT_EQ((d_a == s_b), false);
-  //ASSERT_EQ((s_b == d_a), false); ASSERT_EQ((d_b == s_a), false);
-  //ASSERT_EQ((s_a == d_c), false); ASSERT_EQ((d_a == s_c), false);
-  //ASSERT_EQ((s_c == d_a), false); ASSERT_EQ((d_c == s_a), false);
-  //ASSERT_EQ((s_b == d_c), false); ASSERT_EQ((d_b == s_c), false);
-  //ASSERT_EQ((s_c == d_b), false); ASSERT_EQ((d_c == s_b), false);
+  ASSERT_EQ((s_a == d_b), false); ASSERT_EQ((d_a == s_b), false);
+  ASSERT_EQ((s_b == d_a), false); ASSERT_EQ((d_b == s_a), false);
+  ASSERT_EQ((s_a == d_c), false); ASSERT_EQ((d_a == s_c), false);
+  ASSERT_EQ((s_c == d_a), false); ASSERT_EQ((d_c == s_a), false);
+  ASSERT_EQ((s_b == d_c), false); ASSERT_EQ((d_b == s_c), false);
+  ASSERT_EQ((s_c == d_b), false); ASSERT_EQ((d_c == s_b), false);
 
   // test vector vs host_vector
   ASSERT_EQ((s_a == h_b), false); ASSERT_EQ((h_a == s_b), false);
@@ -569,35 +565,34 @@ TYPED_TEST(VectorTests, TestVectorInequality)
   s_b[0] = T(0);    s_b[1] = T(1);    s_b[2] = T(3);
   s_b[0] = T(0);    s_b[1] = T(1);
 
-  // TODO: Implement reduce in system
-  ASSERT_EQ((h_a != h_a), false); //ASSERT_EQ((h_a != d_a), false); ASSERT_EQ((d_a != h_a), false);  ASSERT_EQ((d_a != d_a), false);
-  ASSERT_EQ((h_b != h_b), false); //ASSERT_EQ((h_b != d_b), false); ASSERT_EQ((d_b != h_b), false);  ASSERT_EQ((d_b != d_b), false);
-  ASSERT_EQ((h_c != h_c), false); //ASSERT_EQ((h_c != d_c), false); ASSERT_EQ((d_c != h_c), false);  ASSERT_EQ((d_c != d_c), false);
+  ASSERT_EQ((h_a != h_a), false); ASSERT_EQ((h_a != d_a), false); ASSERT_EQ((d_a != h_a), false);  ASSERT_EQ((d_a != d_a), false);
+  ASSERT_EQ((h_b != h_b), false); ASSERT_EQ((h_b != d_b), false); ASSERT_EQ((d_b != h_b), false);  ASSERT_EQ((d_b != d_b), false);
+  ASSERT_EQ((h_c != h_c), false); ASSERT_EQ((h_c != d_c), false); ASSERT_EQ((d_c != h_c), false);  ASSERT_EQ((d_c != d_c), false);
 
   // test vector vs device_vector
-  //ASSERT_EQ((s_a != d_a), false); ASSERT_EQ((d_a != s_a), false);
-  //ASSERT_EQ((s_b != d_b), false); ASSERT_EQ((d_b != s_b), false);
-  //ASSERT_EQ((s_c != d_c), false); ASSERT_EQ((d_c != s_c), false);
+  ASSERT_EQ((s_a != d_a), false); ASSERT_EQ((d_a != s_a), false);
+  ASSERT_EQ((s_b != d_b), false); ASSERT_EQ((d_b != s_b), false);
+  ASSERT_EQ((s_c != d_c), false); ASSERT_EQ((d_c != s_c), false);
 
   // test vector vs host_vector
   ASSERT_EQ((s_a != h_a), false); ASSERT_EQ((h_a != s_a), false);
   ASSERT_EQ((s_b != h_b), false); ASSERT_EQ((h_b != s_b), false);
   ASSERT_EQ((s_c != h_c), false); ASSERT_EQ((h_c != s_c), false);
 
-  ASSERT_EQ((h_a != h_b), true); //ASSERT_EQ((h_a != d_b), true); ASSERT_EQ((d_a != h_b), true); ASSERT_EQ((d_a != d_b), true);
-  ASSERT_EQ((h_b != h_a), true); //ASSERT_EQ((h_b != d_a), true); ASSERT_EQ((d_b != h_a), true); ASSERT_EQ((d_b != d_a), true);
-  ASSERT_EQ((h_a != h_c), true); //ASSERT_EQ((h_a != d_c), true); ASSERT_EQ((d_a != h_c), true); ASSERT_EQ((d_a != d_c), true);
-  ASSERT_EQ((h_c != h_a), true); //ASSERT_EQ((h_c != d_a), true); ASSERT_EQ((d_c != h_a), true); ASSERT_EQ((d_c != d_a), true);
-  ASSERT_EQ((h_b != h_c), true); //ASSERT_EQ((h_b != d_c), true); ASSERT_EQ((d_b != h_c), true); ASSERT_EQ((d_b != d_c), true);
-  ASSERT_EQ((h_c != h_b), true); //ASSERT_EQ((h_c != d_b), true); ASSERT_EQ((d_c != h_b), true); ASSERT_EQ((d_c != d_b), true);
+  ASSERT_EQ((h_a != h_b), true); ASSERT_EQ((h_a != d_b), true); ASSERT_EQ((d_a != h_b), true); ASSERT_EQ((d_a != d_b), true);
+  ASSERT_EQ((h_b != h_a), true); ASSERT_EQ((h_b != d_a), true); ASSERT_EQ((d_b != h_a), true); ASSERT_EQ((d_b != d_a), true);
+  ASSERT_EQ((h_a != h_c), true); ASSERT_EQ((h_a != d_c), true); ASSERT_EQ((d_a != h_c), true); ASSERT_EQ((d_a != d_c), true);
+  ASSERT_EQ((h_c != h_a), true); ASSERT_EQ((h_c != d_a), true); ASSERT_EQ((d_c != h_a), true); ASSERT_EQ((d_c != d_a), true);
+  ASSERT_EQ((h_b != h_c), true); ASSERT_EQ((h_b != d_c), true); ASSERT_EQ((d_b != h_c), true); ASSERT_EQ((d_b != d_c), true);
+  ASSERT_EQ((h_c != h_b), true); ASSERT_EQ((h_c != d_b), true); ASSERT_EQ((d_c != h_b), true); ASSERT_EQ((d_c != d_b), true);
 
   // test vector vs device_vector
-  //ASSERT_EQ((s_a != d_b), true); ASSERT_EQ((d_a != s_b), true);
-  //ASSERT_EQ((s_b != d_a), true); ASSERT_EQ((d_b != s_a), true);
-  //ASSERT_EQ((s_a != d_c), true); ASSERT_EQ((d_a != s_c), true);
-  //ASSERT_EQ((s_c != d_a), true); ASSERT_EQ((d_c != s_a), true);
-  //ASSERT_EQ((s_b != d_c), true); ASSERT_EQ((d_b != s_c), true);
-  //ASSERT_EQ((s_c != d_b), true); ASSERT_EQ((d_c != s_b), true);
+  ASSERT_EQ((s_a != d_b), true); ASSERT_EQ((d_a != s_b), true);
+  ASSERT_EQ((s_b != d_a), true); ASSERT_EQ((d_b != s_a), true);
+  ASSERT_EQ((s_a != d_c), true); ASSERT_EQ((d_a != s_c), true);
+  ASSERT_EQ((s_c != d_a), true); ASSERT_EQ((d_c != s_a), true);
+  ASSERT_EQ((s_b != d_c), true); ASSERT_EQ((d_b != s_c), true);
+  ASSERT_EQ((s_c != d_b), true); ASSERT_EQ((d_c != s_b), true);
 
   // test vector vs host_vector
   ASSERT_EQ((s_a != h_b), true); ASSERT_EQ((h_a != s_b), true);
@@ -686,9 +681,8 @@ TYPED_TEST(VectorTests, TestVectorShrinkToFit)
   ASSERT_EQ(   3, v.capacity());
 }
 
-// TODO: Implement reduce in system
-/*
-template <int N>
+// TODO: fix the LargeStruct test
+/*template <int N>
 struct LargeStruct
 {
   int data[N];
@@ -706,7 +700,7 @@ struct LargeStruct
 TEST(VectorTests, TestVectorContainingLargeType)
 {
   const static int N = 100;
-  using T = LargeStruct<N> T;
+  using T = LargeStruct<N>;
 
   thrust::device_vector<T> dv1;
   thrust::host_vector<T>   hv1;

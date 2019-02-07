@@ -20,15 +20,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <vector>
-
 // Google Test
 #include <gtest/gtest.h>
 
-// Thrust include
-#include <thrust/device_malloc_allocator.h>
+// Thrust
+#include <thrust/tabulate.h>
+#include <thrust/functional.h>
+#include <thrust/iterator/discard_iterator.h>
+#include <thrust/iterator/retag.h>
 #include <thrust/device_vector.h>
-#include <thrust/host_vector.h>
 
 // HIP API
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
@@ -49,7 +49,7 @@ struct Params
 };
 
 template<class Params>
-class VectorManipulationTests : public ::testing::Test
+class MismatchTests : public ::testing::Test
 {
 public:
     using input_type = typename Params::input_type;
@@ -72,104 +72,79 @@ typedef ::testing::Types<
     Params<thrust::device_vector<unsigned long long>>,
     Params<thrust::device_vector<float>>,
     Params<thrust::device_vector<double>>
-> VectorManipulationTestsParams;
+> MismatchTestsParams;
 
-TYPED_TEST_CASE(VectorManipulationTests, VectorManipulationTestsParams);
+TYPED_TEST_CASE(MismatchTests, MismatchTestsParams);
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
-TYPED_TEST(VectorManipulationTests, TestVectorManipulation)
+TYPED_TEST(MismatchTests, TestMismatchSimple)
 {
   using Vector = typename TestFixture::input_type;
   using T = typename Vector::value_type;
-  using Iterator = typename Vector::iterator;
 
-  const std::vector<size_t> sizes = get_sizes();
-  for(auto size : sizes)
-  {
-    thrust::host_vector<T> src;
-    if (std::is_floating_point<T>::value)
-    {
-      src = get_random_data<T>(size, (T)-1000, (T)+1000);
-    }
-    else
-    {
-      src = get_random_data<T>(
-        size,
-        std::numeric_limits<T>::min(),
-        std::numeric_limits<T>::max()
-      );
-    }
+  Vector a(4); Vector b(4);
+  a[0] = T(1); b[0] = T(1);
+  a[1] = T(2); b[1] = T(2);
+  a[2] = T(3); b[2] = T(4);
+  a[3] = T(4); b[3] = T(3);
 
-    ASSERT_EQ(src.size(), size);
+  ASSERT_EQ(thrust::mismatch(a.begin(), a.end(), b.begin()).first  - a.begin(), 2);
+  ASSERT_EQ(thrust::mismatch(a.begin(), a.end(), b.begin()).second - b.begin(), 2);
 
-    // basic initialization
-    Vector test0(size);
-    Vector test1(size, T(3));
-    ASSERT_EQ(test0.size(), size);
-    ASSERT_EQ(test1.size(), size);
-    ASSERT_EQ((test1 == std::vector<T>(size, T(3))), true);
+  b[2] = T(3);
 
-    // initializing from other vector
-    std::vector<T> stl_vector(src.begin(), src.end());
-    Vector cpy0 = src;
-    Vector cpy1(stl_vector);
-    Vector cpy2(stl_vector.begin(), stl_vector.end());
+  ASSERT_EQ(thrust::mismatch(a.begin(), a.end(), b.begin()).first  - a.begin(), 3);
+  ASSERT_EQ(thrust::mismatch(a.begin(), a.end(), b.begin()).second - b.begin(), 3);
 
-    ASSERT_EQ(cpy0, src);
-    ASSERT_EQ(cpy1, src);
-    ASSERT_EQ(cpy2, src);
+  b[3] = T(4);
 
-    // resizing
-    Vector vec1(src);
-    vec1.resize(size + 3);
-    ASSERT_EQ(vec1.size(), size + 3);
-    vec1.resize(size);
-    ASSERT_EQ(vec1.size(), size);
-    ASSERT_EQ(vec1, src);
+  ASSERT_EQ(thrust::mismatch(a.begin(), a.end(), b.begin()).first  - a.begin(), 4);
+  ASSERT_EQ(thrust::mismatch(a.begin(), a.end(), b.begin()).second - b.begin(), 4);
+}
 
-    vec1.resize(size + 20, T(11));
-    Vector tail(vec1.begin() + size, vec1.end());
-    ASSERT_EQ( (tail == std::vector<T>(20, T(11))), true);
+template <typename InputIterator1, typename InputIterator2>
+thrust::pair<InputIterator1, InputIterator2> mismatch(my_system &system,
+                                                      InputIterator1 first,
+                                                      InputIterator1,
+                                                      InputIterator2)
+{
+    system.validate_dispatch();
+    return thrust::make_pair(first,first);
+}
 
-    // shrinking a vector should not invalidate iterators
-    Iterator first = vec1.begin();
-    vec1.resize(10);
-    ASSERT_EQ(first, vec1.begin());
+TEST(MismatchTests, TestMismatchDispatchExplicit)
+{
+  thrust::device_vector<int> vec(1);
 
-    vec1.resize(0);
-    ASSERT_EQ(vec1.size(), 0);
-    ASSERT_EQ(vec1.empty(), true);
-    vec1.resize(10);
-    ASSERT_EQ(vec1.size(), 10);
-    vec1.clear();
-    ASSERT_EQ(vec1.size(), 0);
-    vec1.resize(5);
-    ASSERT_EQ(vec1.size(), 5);
+  my_system sys(0);
+  thrust::mismatch(sys,
+                   vec.begin(),
+                   vec.begin(),
+                   vec.begin());
 
-    // push_back
-    Vector vec2;
-    for(size_t i = 0; i < 10; ++i)
-    {
-        ASSERT_EQ(vec2.size(), i);
-        vec2.push_back( (T) i );
-        ASSERT_EQ(vec2.size(), i + 1);
-        for(size_t j = 0; j <= i; j++)
-            ASSERT_EQ(vec2[j],     j);
-        ASSERT_EQ(vec2.back(), i);
-    }
+  ASSERT_EQ(true, sys.is_valid());
+}
 
-    // pop_back
-    for(size_t i = 10; i > 0; --i)
-    {
-        ASSERT_EQ(vec2.size(), i);
-        ASSERT_EQ(vec2.back(), i-1);
-        vec2.pop_back();
-        ASSERT_EQ(vec2.size(), i-1);
-        for(size_t j = 0; j < i; j++)
-            ASSERT_EQ(vec2[j], j);
-    }
-  }
+template <typename InputIterator1, typename InputIterator2>
+thrust::pair<InputIterator1, InputIterator2> mismatch(my_tag,
+                                                      InputIterator1 first,
+                                                      InputIterator1,
+                                                      InputIterator2)
+{
+    *first = 13;
+    return thrust::make_pair(first,first);
+}
+
+TEST(MismatchTests, TestMismatchDispatchImplicit)
+{
+  thrust::device_vector<int> vec(1);
+
+  thrust::mismatch(thrust::retag<my_tag>(vec.begin()),
+                   thrust::retag<my_tag>(vec.begin()),
+                   thrust::retag<my_tag>(vec.begin()));
+
+  ASSERT_EQ(13, vec.front());
 }
 
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
