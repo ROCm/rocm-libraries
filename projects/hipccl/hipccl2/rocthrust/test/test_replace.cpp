@@ -102,27 +102,25 @@ TYPED_TEST(ReplaceTests, SimpleReplace)
 {
     using Vector = typename TestFixture::input_type;
     using T = typename Vector::value_type;
-    const size_t size = 5;
 
     Vector data(5);
-    data[0] =  1; 
-    data[1] =  2; 
+    data[0] =  1;
+    data[1] =  2;
     data[2] =  1;
-    data[3] =  3; 
+    data[3] =  3;
     data[4] =  2;
 
     thrust::replace(data.begin(), data.end(), (T) 1, (T) 4);
     thrust::replace(data.begin(), data.end(), (T) 2, (T) 5);
 
     Vector result(5);
-    result[0] =  4; 
-    result[1] =  5; 
+    result[0] =  4;
+    result[1] =  5;
     result[2] =  4;
-    result[3] =  3; 
-    result[4] =  5; 
-        
-    for (size_t i = 0; i < size; i++)
-        ASSERT_EQ(data[i], result[i]);
+    result[3] =  3;
+    result[4] =  5;
+
+    ASSERT_EQ(data, result);
 }
 
 template<typename ForwardIterator, typename T>
@@ -181,42 +179,50 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceWithRandomDataAndDifferentSizes)
 
         thrust::replace(h_data.begin(), h_data.end(), old_value, new_value);
         thrust::replace(d_data.begin(), d_data.end(), old_value, new_value);
-        
+
         ASSERT_EQ(h_data.size(), size);
         ASSERT_EQ(d_data.size(), size);
 
+        thrust::host_vector<T> h_data_d(d_data);
         for (size_t i = 0; i < size; i++)
-            ASSERT_NEAR(h_data[i], d_data[i], 0.1);
+        {
+            ASSERT_NEAR(h_data[i], h_data_d[i], T(0.1));
+        }
     }
-       
+
 }
 
 TYPED_TEST(ReplaceTests, SimpleCopyReplace)
 {
     using Vector = typename TestFixture::input_type;
     using T = typename Vector::value_type;
+    const size_t size = 5;
 
-    Vector data(5);
-    data[0] = 1; 
-    data[1] = 2; 
+    Vector data(size);
+    data[0] = 1;
+    data[1] = 2;
     data[2] = 1;
-    data[3] = 3; 
-    data[4] = 2; 
+    data[3] = 3;
+    data[4] = 2;
 
-    Vector dest(5);
+    Vector dest(size);
 
     thrust::replace_copy(data.begin(), data.end(), dest.begin(), (T) 1, (T) 4);
     thrust::replace_copy(dest.begin(), dest.end(), dest.begin(), (T) 2, (T) 5);
 
-    Vector result(5);
-    result[0] = 4; 
-    result[1] = 5; 
+    Vector result(size);
+    result[0] = 4;
+    result[1] = 5;
     result[2] = 4;
-    result[3] = 3; 
-    result[4] = 5; 
+    result[3] = 3;
+    result[4] = 5;
 
-    for (size_t i = 0; i < 5; i++)
-        ASSERT_NEAR(dest[i], result[i], 0.1);
+    thrust::host_vector<T> h_dest(dest);
+    thrust::host_vector<T> h_result(result);
+    for (size_t i = 0; i < size; i++)
+    {
+        ASSERT_NEAR(h_dest[i], h_result[i], T(0.1));
+    }
 }
 
 template<typename InputIterator, typename OutputIterator, typename T>
@@ -279,22 +285,23 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceCopyWithRandomData)
 
         thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10);
         thrust::device_vector<T> d_data = h_data;
-        
+
         T old_value = (T) 0;
         T new_value = (T) 1;
-        
+
         thrust::host_vector<T>   h_dest(size);
         thrust::device_vector<T> d_dest(size);
 
         thrust::replace_copy(h_data.begin(), h_data.end(), h_dest.begin(), old_value, new_value);
         thrust::replace_copy(d_data.begin(), d_data.end(), d_dest.begin(), old_value, new_value);
 
-
+        thrust::host_vector<T> h_data_d(d_data);
+        thrust::host_vector<T> h_dest_d(d_dest);
         for (size_t i = 0; i < size; i++)
-            ASSERT_NEAR(h_data[i], d_data[i], 0.1);
-
-        for (size_t i = 0; i < size; i++)
-            ASSERT_NEAR(h_dest[i], d_dest[i], 0.1);
+        {
+            ASSERT_NEAR(h_data[i], h_data_d[i], T(0.1));
+            ASSERT_NEAR(h_dest[i], h_dest_d[i], T(0.1));
+        }
     }
 }
 
@@ -307,7 +314,7 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceCopyToDiscardIterator)
     {
         thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10);
         thrust::device_vector<T> d_data = h_data;
-        
+
         T old_value = 0;
         T new_value = 1;
 
@@ -338,23 +345,27 @@ TYPED_TEST(ReplaceTests, ReplaceIfSimple)
     size_t size = 5;
 
     Vector data(size);
-    data[0] =  1; 
-    data[1] =  3; 
+    data[0] =  1;
+    data[1] =  3;
     data[2] =  4;
-    data[3] =  6; 
-    data[4] =  5; 
+    data[3] =  6;
+    data[4] =  5;
 
     thrust::replace_if(data.begin(), data.end(), less_than_five<T>(), (T) 0);
 
     Vector result(size);
-    result[0] =  0; 
-    result[1] =  0; 
+    result[0] =  0;
+    result[1] =  0;
     result[2] =  0;
-    result[3] =  6; 
-    result[4] =  5; 
+    result[3] =  6;
+    result[4] =  5;
 
+    thrust::host_vector<T> h_data(data);
+    thrust::host_vector<T> h_result(result);
     for (size_t i = 0; i < size; i++)
-        ASSERT_NEAR(data[i], result[i], 0.1);
+    {
+        ASSERT_NEAR(h_data[i], h_result[i], T(0.1));
+    }
 }
 
 
@@ -391,7 +402,7 @@ void replace_if(my_tag,
 }
 
 template<class T>
-struct always_true 
+struct always_true
 {
   __host__ __device__ bool operator()(const T&) const {return true;}
 };
@@ -415,11 +426,11 @@ TYPED_TEST(ReplaceTests, ReplaceIfStencilSimple)
     size_t size = 5;
 
     Vector data(5);
-    data[0] =  1; 
-    data[1] =  3; 
+    data[0] =  1;
+    data[1] =  3;
     data[2] =  4;
-    data[3] =  6; 
-    data[4] =  5; 
+    data[3] =  6;
+    data[4] =  5;
 
     Vector stencil(5);
     stencil[0] = 5;
@@ -431,14 +442,18 @@ TYPED_TEST(ReplaceTests, ReplaceIfStencilSimple)
     thrust::replace_if(data.begin(), data.end(), stencil.begin(), less_than_five<T>(), (T) 0);
 
     Vector result(5);
-    result[0] =  1; 
-    result[1] =  0; 
+    result[0] =  1;
+    result[1] =  0;
     result[2] =  4;
-    result[3] =  0; 
-    result[4] =  5; 
+    result[3] =  0;
+    result[4] =  5;
 
+    thrust::host_vector<T> h_data(data);
+    thrust::host_vector<T> h_result(result);
     for (size_t i = 0; i < size; i++)
-        ASSERT_NEAR(data[i], result[i], 0.1);
+    {
+        ASSERT_NEAR(h_data[i], h_result[i], T(0.1));
+    }
 }
 
 
@@ -504,8 +519,11 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceIfWithRandomData)
         thrust::replace_if(h_data.begin(), h_data.end(), less_than_five<T>(), (T) 0);
         thrust::replace_if(d_data.begin(), d_data.end(), less_than_five<T>(), (T) 0);
 
+        thrust::host_vector<T> h_data_d(d_data);
         for (size_t i = 0; i < size; i++)
-            ASSERT_NEAR(h_data[i], d_data[i], 0.1);
+        {
+            ASSERT_NEAR(h_data[i], h_data_d[i], T(0.1));
+        }
     }
 }
 
@@ -514,26 +532,30 @@ TYPED_TEST(ReplaceTests, ReplaceCopyIfSimple)
     using Vector = typename TestFixture::input_type;
     using T = typename Vector::value_type;
     size_t size = 5;
-    
+
     Vector data(5);
-    data[0] =  1; 
-    data[1] =  3; 
+    data[0] =  1;
+    data[1] =  3;
     data[2] =  4;
-    data[3] =  6; 
-    data[4] =  5; 
+    data[3] =  6;
+    data[4] =  5;
 
     Vector dest(5);
     thrust::replace_copy_if(data.begin(), data.end(), dest.begin(), less_than_five<T>(), (T) 0);
 
     Vector result(5);
-    result[0] =  0; 
-    result[1] =  0; 
+    result[0] =  0;
+    result[1] =  0;
     result[2] =  0;
-    result[3] =  6; 
-    result[4] =  5; 
+    result[3] =  6;
+    result[4] =  5;
 
+    thrust::host_vector<T> h_dest(dest);
+    thrust::host_vector<T> h_result(result);
     for (size_t i = 0; i < size; i++)
-        ASSERT_NEAR(dest[i], result[i], 0.1);
+    {
+        ASSERT_NEAR(h_dest[i], h_result[i], T(0.1));
+    }
 }
 
 
@@ -594,13 +616,13 @@ TYPED_TEST(ReplaceTests, ReplaceCopyIfStencilSimple)
     using Vector = typename TestFixture::input_type;
     using T = typename Vector::value_type;
     size_t size = 5;
-    
+
     Vector data(5);
-    data[0] =  1; 
-    data[1] =  3; 
+    data[0] =  1;
+    data[1] =  3;
     data[2] =  4;
-    data[3] =  6; 
-    data[4] =  5; 
+    data[3] =  6;
+    data[4] =  5;
 
     Vector stencil(5);
     stencil[0] = 1;
@@ -613,14 +635,18 @@ TYPED_TEST(ReplaceTests, ReplaceCopyIfStencilSimple)
     thrust::replace_copy_if(data.begin(), data.end(), stencil.begin(), dest.begin(), less_than_five<T>(), (T) 0);
 
     Vector result(5);
-    result[0] =  0; 
-    result[1] =  3; 
+    result[0] =  0;
+    result[1] =  3;
     result[2] =  0;
-    result[3] =  6; 
-    result[4] =  5; 
+    result[3] =  6;
+    result[4] =  5;
 
+    thrust::host_vector<T> h_dest(dest);
+    thrust::host_vector<T> h_result(result);
     for (size_t i = 0; i < size; i++)
-        ASSERT_NEAR(dest[i], result[i], 0.1);
+    {
+        ASSERT_NEAR(h_dest[i], h_result[i], T(0.1));
+    }
 }
 
 
@@ -685,7 +711,7 @@ TEST(ReplaceTests, ReplaceCopyIfStencilDispatchImplicit)
 TYPED_TEST(PrimitiveReplaceTests, ReplaceCopyIfWithRandomData)
 {
     using T = typename TestFixture::input_type;
-    
+
     const std::vector<size_t> sizes = get_sizes_smaller();
     for(auto size : sizes)
     {
@@ -699,11 +725,13 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceCopyIfWithRandomData)
         thrust::replace_copy_if(h_data.begin(), h_data.end(), h_dest.begin(), less_than_five<T>(), 0);
         thrust::replace_copy_if(d_data.begin(), d_data.end(), d_dest.begin(), less_than_five<T>(), 0);
 
+        thrust::host_vector<T> h_data_d(d_data);
+        thrust::host_vector<T> h_dest_d(d_dest);
         for (size_t i = 0; i < size; i++)
-            ASSERT_NEAR(h_data[i], d_data[i], 0.1);
-
-        for (size_t i = 0; i < size; i++)
-            ASSERT_NEAR(h_dest[i], d_dest[i], 0.1);
+        {
+            ASSERT_NEAR(h_data[i], h_data_d[i], T(0.1));
+            ASSERT_NEAR(h_dest[i], h_dest_d[i], T(0.1));
+        }
     }
 }
 
@@ -750,11 +778,13 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceCopyIfStencil)
         thrust::replace_copy_if(h_data.begin(), h_data.end(), h_stencil.begin(), h_dest.begin(), less_than_five<T>(), 0);
         thrust::replace_copy_if(d_data.begin(), d_data.end(), d_stencil.begin(), d_dest.begin(), less_than_five<T>(), 0);
 
+        thrust::host_vector<T> h_data_d(d_data);
+        thrust::host_vector<T> h_dest_d(d_dest);
         for (size_t i = 0; i < size; i++)
-            ASSERT_NEAR(h_data[i], d_data[i], 0.1);
-
-        for (size_t i = 0; i < size; i++)
-            ASSERT_NEAR(h_dest[i], d_dest[i], 0.1);
+        {
+            ASSERT_NEAR(h_data[i], h_data_d[i], T(0.1));
+            ASSERT_NEAR(h_dest[i], h_dest_d[i], T(0.1));
+        }
     }
 }
 

@@ -39,7 +39,7 @@ namespace hip_rocprim {
 
   namespace __replace
   {
-    
+
     template<class T>
     struct constant_f
     {
@@ -80,7 +80,7 @@ namespace hip_rocprim {
         return pred(y) ? new_value : x;
       }
     }; // struct new_value_if_f
-    
+
 
   } // namespace __replace
 
@@ -95,11 +95,11 @@ replace(execution_policy<Derived> &policy,
         T const &                  new_value)
 {
     hip_rocprim::transform_if(policy,
-                        first,
-                        last,
-                        first,
-                        __replace::constant_f<T>(new_value),
-                        detail::equal_to_value<T>(old_value));
+                              first,
+                              last,
+                              first,
+                              __replace::constant_f<T>(new_value),
+                              detail::equal_to_value<T>(old_value));
 }
 
 template <class Derived,
@@ -114,11 +114,11 @@ replace_if(execution_policy<Derived> &policy,
            T const &                  new_value)
 {
     hip_rocprim::transform_if(policy,
-                      first,
-                      last,
-                      first,
-                      __replace::constant_f<T>(new_value),
-                      pred);
+                              first,
+                              last,
+                              first,
+                              __replace::constant_f<T>(new_value),
+                              pred);
 }
 
 template <class Derived,
@@ -135,12 +135,12 @@ replace_if(execution_policy<Derived> &policy,
            T const &                  new_value)
 {
     hip_rocprim::transform_if(policy,
-                      first,
-                      last,
-                      stencil,
-                      first,
-                      __replace::constant_f<T>(new_value),
-                      pred);
+                              first,
+                              last,
+                              stencil,
+                              first,
+                              __replace::constant_f<T>(new_value),
+                              pred);
 }
 
 template <class Derived,
@@ -159,10 +159,10 @@ replace_copy_if(execution_policy<Derived> &policy,
     typedef typename iterator_traits<OutputIt>::value_type output_type;
     typedef __replace::new_value_if_f<Predicate, T, output_type> new_value_if_t;
     return hip_rocprim::transform(policy,
-                                first,
-                                last,
-                                result,
-                                new_value_if_t(predicate, new_value));
+                                  first,
+                                  last,
+                                  result,
+                                  new_value_if_t(predicate, new_value));
 }
 
 template <class Derived,
@@ -183,11 +183,11 @@ replace_copy_if(execution_policy<Derived> &policy,
     typedef typename iterator_traits<OutputIt>::value_type output_type;
     typedef __replace::new_value_if_f<Predicate, T, output_type> new_value_if_t;
     return hip_rocprim::transform(policy,
-                            first,
-                            last,
-                            stencil,
-                            result,
-                            new_value_if_t(predicate, new_value));
+                                  first,
+                                  last,
+                                  stencil,
+                                  result,
+                                  new_value_if_t(predicate, new_value));
 }
 
 template <class Derived,
@@ -203,13 +203,13 @@ replace_copy(execution_policy<Derived> &policy,
              T const &                  new_value)
 {
     return hip_rocprim::replace_copy_if(policy,
-                                   first,
-                                   last,
-                                   result,
-                                   detail::equal_to_value<T>(old_value),
-                                   new_value);
+                                        first,
+                                        last,
+                                        result,
+                                        detail::equal_to_value<T>(old_value),
+                                        new_value);
 }
 
-}    
+}    // namespace hip_rocprim
 END_NS_THRUST
 #endif
