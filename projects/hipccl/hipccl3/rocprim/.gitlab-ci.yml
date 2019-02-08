@@ -45,18 +45,10 @@ before_script:
   - export CXXFLAGS=$CXXFLAGS" "$LOCAL_CXXFLAGS
   - export CMAKE_OPTIONS=$CXXFLAGS" "$LOCAL_CMAKE_OPTIONS
 
-build:rocm:
+.build:
   stage: build
-  tags:
-    - rocm
   variables:
     SUDO_CMD: "sudo -E"
-  script:
-    - mkdir build
-    - cd build
-    - CXX=hcc cmake -DBUILD_TEST=ON -DBUILD_EXAMPLE=ON -DBUILD_BENCHMARK=ON ../.
-    - make -j16
-    - make package
   artifacts:
     paths:
     - build/library/
@@ -72,13 +64,22 @@ build:rocm:
     - build/rocprim*.deb
     - build/rocprim*.zip
     expire_in: 2 weeks
+    
+build:rocm:
+  extends: .build
+  tags:
+    - rocm
+  script:
+    - mkdir build
+    - cd build
+    - CXX=hcc cmake -DBUILD_TEST=ON -DBUILD_EXAMPLE=ON -DBUILD_BENCHMARK=ON ../.
+    - make -j16
+    - make package
 
-.unittest:
+.test:
   stage: test
   variables:
     SUDO_CMD: "sudo -E"
-  dependencies:
-    - build:rocm
   script:
     - cd build
     - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 2
