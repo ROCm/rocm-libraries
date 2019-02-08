@@ -593,23 +593,23 @@ TEST(HipcubUtilPtxTests, WarpId)
         )
     );
 
-    std::vector<size_t> warp_ids(block_size/hardware_warp_size, 0);
-    for(size_t i = 0; i < output.size()/hardware_warp_size; i++)
+    for(size_t block_id = 0; block_id < size / block_size; block_id++)
     {
-        auto prev = output[i * hardware_warp_size];
-        for(size_t j = 0; j < hardware_warp_size; j++)
+        std::set<unsigned int> warp_ids;
+        for(size_t warp_id = 0; warp_id < block_size / hardware_warp_size; warp_id++)
         {
-            auto index = j + i * hardware_warp_size;
-            // less than number of warps in thread block
-            ASSERT_LT(output[index], block_size/hardware_warp_size);
-            ASSERT_GE(output[index], 0U); // > 0
-            ASSERT_EQ(output[index], prev); // all in warp_ids in warp are the same
+            auto reported_warp_id = output[block_id * block_size + warp_id * hardware_warp_size];
+
+            // Check if each warp_id is unique
+            ASSERT_EQ(warp_ids.find(reported_warp_id), warp_ids.end());
+            warp_ids.insert(reported_warp_id);
+
+            for(size_t thread_id = 0; thread_id < hardware_warp_size; thread_id++)
+            {
+                auto index = thread_id + block_id * block_size + warp_id * hardware_warp_size;
+                ASSERT_EQ(output[index], reported_warp_id); // all in warp_ids in warp are the same
+            }
         }
-        warp_ids[prev]++;
     }
-    // Check if each warp_id appears the same number of times.
-    for(auto warp_id_no : warp_ids)
-    {
-        ASSERT_EQ(warp_id_no, size/block_size);
-    }
+
 }
