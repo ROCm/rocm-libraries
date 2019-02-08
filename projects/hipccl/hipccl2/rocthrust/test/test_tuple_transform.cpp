@@ -24,14 +24,13 @@
 #include <gtest/gtest.h>
 
 // Thrust
-#include <thrust/host_vector.h>
-#include <thrust/pair.h>
 #include <thrust/tuple.h>
 #include <thrust/transform.h>
 
 // HIP API
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 #include <hip/hip_runtime_api.h>
+#include <hip/hip_runtime.h>
 
 #define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
@@ -48,87 +47,83 @@ struct Params
 };
 
 template<class Params>
-class PairTransformTests : public ::testing::Test
+class TupleTransformTests : public ::testing::Test
 {
 public:
     using input_type = typename Params::input_type;
 };
 
 typedef ::testing::Types<
-  Params<short>,
-  Params<int>,
-  Params<long long>,
-  Params<unsigned short>,
-  Params<unsigned int>,
-  Params<unsigned long long>,
-  Params<float>,
-  Params<double>
-> PairTransformTestsParams;
+    Params<short>,
+    Params<int>,
+    Params<long long>
+> TupleTransformTestsParams;
 
-TYPED_TEST_CASE(PairTransformTests, PairTransformTestsParams);
+TYPED_TEST_CASE(TupleTransformTests, TupleTransformTestsParams);
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
-struct make_pair_functor
+struct MakeTupleFunctor
 {
   template<typename T1, typename T2>
   __host__ __device__
-    thrust::pair<T1,T2> operator()(const T1 &x, const T2 &y)
+  thrust::tuple<T1,T2> operator()(T1 &lhs, T2 &rhs)
   {
-    return thrust::make_pair(x,y);
-  } // end operator()()
-}; // end make_pair_functor
+    return thrust::make_tuple(lhs, rhs);
+  }
+};
 
-struct add_pairs
+template<int N>
+struct GetFunctor
 {
-  template <typename Pair1, typename Pair2>
+  template<typename Tuple>
   __host__ __device__
-    Pair1 operator()(const Pair1 &x, const Pair2 &y)
+  typename thrust::access_traits<
+    typename thrust::tuple_element<N, Tuple>::type
+  >::const_type
+  operator()(const Tuple &t)
   {
-    return thrust::make_pair(x.first + y.first, x.second + y.second);
-  } // end operator()
-}; // end add_pairs
+    return thrust::get<N>(t);
+  }
+};
 
-TYPED_TEST(PairTransformTests, TestPairTransform)
+TYPED_TEST(TupleTransformTests, TestTupleTransform)
 {
   using T = typename TestFixture::input_type;
-  using P = thrust::pair<T,T>;
 
   const std::vector<size_t> sizes = get_sizes();
   for(auto size : sizes)
   {
-    thrust::host_vector<T> h_p1 = get_random_data<T>(size,
+    thrust::host_vector<T> h_t1 = get_random_data<T>(size,
                                                      std::numeric_limits<T>::min(),
-                                                     std::numeric_limits<T>::max());;
+                                                     std::numeric_limits<T>::max());
 
-    thrust::host_vector<T> h_p2 = get_random_data<T>(size,
+    thrust::host_vector<T> h_t2 = get_random_data<T>(size,
                                                      std::numeric_limits<T>::min(),
-                                                     std::numeric_limits<T>::max());;
+                                                     std::numeric_limits<T>::max());
 
-    thrust::host_vector<P>   h_result(size);
+    // zip up the data
+    thrust::host_vector< thrust::tuple<T,T> > h_tuples(size);
+    thrust::transform(h_t1.begin(), h_t1.end(),
+                      h_t2.begin(), h_tuples.begin(),
+                      MakeTupleFunctor());
 
-    thrust::device_vector<T> d_p1 = h_p1;
-    thrust::device_vector<T> d_p2 = h_p2;
-    thrust::device_vector<P> d_result(size);
+    // copy to device
+    thrust::device_vector< thrust::tuple<T,T> > d_tuples = h_tuples;
 
-    // zip up pairs on the host
-    thrust::transform(h_p1.begin(), h_p1.end(), h_p2.begin(), h_result.begin(), make_pair_functor());
+    thrust::device_vector<T> d_t1(size), d_t2(size);
 
-    // zip up pairs on the device
-    thrust::transform(d_p1.begin(), d_p1.end(), d_p2.begin(), d_result.begin(), make_pair_functor());
+    // select 0th
+    thrust::transform(d_tuples.begin(), d_tuples.end(), d_t1.begin(), GetFunctor<0>());
 
-    ASSERT_EQ_QUIET(h_result, d_result);
+    // select 1st
+    thrust::transform(d_tuples.begin(), d_tuples.end(), d_t2.begin(), GetFunctor<1>());
 
-    // TODO: add_pairs operator problem.
-    // add pairs on the host
-    thrust::transform(h_result.begin(), h_result.end(), h_result.begin(), h_result.begin(), add_pairs());
+    ASSERT_EQ(h_t1, d_t1);
+    ASSERT_EQ(h_t2, d_t2);
 
-    // add pairs on the device
-    thrust::transform(d_result.begin(), d_result.end(), d_result.begin(), d_result.begin(), add_pairs());
-
-    ASSERT_EQ_QUIET(h_result, d_result);
+    ASSERT_EQ_QUIET(h_tuples, d_tuples);
   }
 }
-
 
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
