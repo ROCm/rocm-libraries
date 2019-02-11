@@ -20,31 +20,16 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <vector>
-#include <list>
-#include <limits>
-#include <utility>
-
 // Google Test
 #include <gtest/gtest.h>
 #include "test_utils.hpp"
 
 // Thrust
-///////////////////// This includes come from test_sort.cpp
-#include <thrust/memory.h>
-#include <thrust/transform.h>
-// STREAMHPC TODO replace <thrust/detail/seq.h> with <thrust/execution_policy.h>
-#include <thrust/sequence.h>
-#include <thrust/device_malloc_allocator.h>
 #include <thrust/device_vector.h>
-/////////////////////
-
-///////////////////////////These ones are from constant_iterator.cu
 #include <thrust/iterator/constant_iterator.h>
 #include <thrust/copy.h>
 #include <thrust/transform.h>
 #include <thrust/reduce.h>
-////////////////////////
 
 // HIP API
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
@@ -54,8 +39,7 @@
 #define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
-#include<iostream>
-
+using namespace thrust;
 
 template< class InputType >
 struct Params
@@ -70,49 +54,42 @@ public:
     using input_type = typename Params::input_type;
 };
 
-
 typedef ::testing::Types<
-    Params<thrust::host_vector<short>>,
-    Params<thrust::host_vector<int>>,
-    Params<thrust::host_vector<long long>>,
-    Params<thrust::host_vector<float>>,
-    Params<thrust::host_vector<double>>,
-    Params<thrust::device_vector<short>>,
-    Params<thrust::device_vector<int>>,
-    Params<thrust::device_vector<long long>>,
-    Params<thrust::device_vector<float>>,
-    Params<thrust::device_vector<double>>
+    Params<host_vector<short>>,
+    Params<host_vector<int>>,
+    Params<host_vector<long long>>,
+    Params<host_vector<float>>,
+    Params<host_vector<double>>,
+    Params<device_vector<short>>,
+    Params<device_vector<int>>,
+    Params<device_vector<long long>>,
+    Params<device_vector<float>>,
+    Params<device_vector<double>>
 > ConstantIteratorTestsParams;
 
-
 TYPED_TEST_CASE(ConstantIteratorTests, ConstantIteratorTestsParams);
-
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
 TEST(ConstantIteratorTests, UsingHip)
 {
-  ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
+    ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
 }
 
 TEST(ConstantIteratorTests, ConstantIteratorConstructFromConvertibleSystem)
 {
-  using namespace thrust;
+    constant_iterator<int> default_system(13);
 
-  constant_iterator<int> default_system(13);
+    constant_iterator<int, use_default, host_system_tag> host_system = default_system;
+    ASSERT_EQ(*default_system, *host_system);
 
-  constant_iterator<int, use_default, host_system_tag> host_system = default_system;
-  ASSERT_EQ(*default_system, *host_system);
-
-  constant_iterator<int, use_default, device_system_tag> device_system = default_system;
-  ASSERT_EQ(*default_system, *device_system);
+    constant_iterator<int, use_default, device_system_tag> device_system = default_system;
+    ASSERT_EQ(*default_system, *device_system);
 }
 
 
 TEST(ConstantIteratorTests, ConstantIteratorIncrement)
 {
-    using namespace thrust;
-
     constant_iterator<int> lhs(0,0);
     constant_iterator<int> rhs(0,0);
 
@@ -134,8 +111,6 @@ TEST(ConstantIteratorTests, ConstantIteratorIncrement)
 
 TEST(ConstantIteratorTests, ConstantIteratorComparison)
 {
-    using namespace thrust;
-
     constant_iterator<int> iter1(0);
     constant_iterator<int> iter2(0);
 
@@ -162,8 +137,6 @@ TEST(ConstantIteratorTests, ConstantIteratorComparison)
 
 TEST(ConstantIteratorTests, TestMakeConstantIterator)
 {
-    using namespace thrust;
-
     // test one argument version
     constant_iterator<int> iter0 = make_constant_iterator<int>(13);
 
@@ -179,16 +152,15 @@ TEST(ConstantIteratorTests, TestMakeConstantIterator)
 
 TYPED_TEST(ConstantIteratorTests, MakeConstantIterator)
 {
-    using namespace thrust;
     using Vector = typename TestFixture::input_type;
 
-    typedef constant_iterator<int> ConstIter;
+    using ConstIter = constant_iterator<int>;
 
     Vector result(4);
 
     ConstIter first = make_constant_iterator<int>(7);
     ConstIter last  = first + result.size();
-    thrust::copy(first, last, result.begin());
+    copy(first, last, result.begin());
 
     ASSERT_EQ(7, result[0]);
     ASSERT_EQ(7, result[1]);
@@ -199,11 +171,10 @@ TYPED_TEST(ConstantIteratorTests, MakeConstantIterator)
 
 TYPED_TEST(ConstantIteratorTests, ConstantIteratorTransform)
 {
-    using namespace thrust;
     using Vector = typename TestFixture::input_type;
     using T = typename Vector::value_type;
 
-    typedef constant_iterator<T> ConstIter;
+    using ConstIter = constant_iterator<T>;
 
     Vector result(4);
 
@@ -211,14 +182,14 @@ TYPED_TEST(ConstantIteratorTests, ConstantIteratorTransform)
     ConstIter last1  = first1 + result.size();
     ConstIter first2 = make_constant_iterator<T>(3);
 
-    thrust::transform(first1, last1, result.begin(), thrust::negate<T>());
+    transform(first1, last1, result.begin(), negate<T>());
 
     ASSERT_EQ(-7, result[0]);
     ASSERT_EQ(-7, result[1]);
     ASSERT_EQ(-7, result[2]);
     ASSERT_EQ(-7, result[3]);
     
-    thrust::transform(first1, last1, first2, result.begin(), thrust::plus<T>());
+    transform(first1, last1, first2, result.begin(), plus<T>());
 
     ASSERT_EQ(10, result[0]);
     ASSERT_EQ(10, result[1]);
@@ -226,21 +197,20 @@ TYPED_TEST(ConstantIteratorTests, ConstantIteratorTransform)
     ASSERT_EQ(10, result[3]);
 };
 
-/*
+
 TYPED_TEST(ConstantIteratorTests, ConstantIteratorReduce)
 {
-    using namespace thrust;
     using Vector = typename TestFixture::input_type;
     using T = typename Vector::value_type;
   
-    typedef constant_iterator<T> ConstIter;
+    using ConstIter = constant_iterator<T>;
 
     ConstIter first = make_constant_iterator<T>(7);
     ConstIter last  = first + 4;
 
-    T sum = thrust::reduce(first, last);
+    T sum = reduce(first, last);
 
     ASSERT_EQ(sum, 4 * 7);
 };
-*/
+
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
