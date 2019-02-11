@@ -64,7 +64,7 @@ TEST(AllocatorTests, TestAllocatorCustomDefaultConstruct)
   thrust::device_vector<int> ref(10,13);
   thrust::device_vector<int, my_allocator_with_custom_construct1> vec(10);
 
-  //ASSERT_EQ(ref, vec);
+  ASSERT_EQ(ref, vec);
 }
 
 struct my_allocator_with_custom_construct2
@@ -88,7 +88,7 @@ TEST(AllocatorTests, TestAllocatorCustomCopyConstruct)
   thrust::device_vector<int> copy_from(10,7);
   thrust::device_vector<int, my_allocator_with_custom_construct2> vec(copy_from.begin(), copy_from.end());
 
-  //ASSERT_EQ(ref, vec);
+  ASSERT_EQ(ref, vec);
 }
 
 /*static int g_state;
@@ -112,7 +112,7 @@ struct my_allocator_with_custom_destroy
 
   template<typename T>
   __host__ __device__
-  void destroy(T *p)
+  void destroy(T*)
   {
     g_state = 13;
   }
@@ -141,9 +141,9 @@ TEST(AllocatorTests, TestAllocatorCustomDestroy)
   vec.shrink_to_fit();
 
   ASSERT_EQ(13, g_state);
-}*/
+}
 
-/*struct my_minimal_allocator
+struct my_minimal_allocator
 {
   typedef int         value_type;
 
