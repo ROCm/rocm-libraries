@@ -149,13 +149,23 @@ TYPED_TEST(TabulateTests, TestTabulateSimple)
   ASSERT_EQ(v[4], T(64));
 }
 
+// TODO: Workaround for Fiji. Remove it later.
+std::vector<size_t> get_sizes_alternative()
+{
+  std::vector<size_t> sizes = {
+    0, 1, 2, 12, 63, 64, 211, 256, 344,
+    999
+  };
+  return sizes;
+}
+
 TYPED_TEST(TabulateTests, TestTabulate)
 {
   using Vector = typename TestFixture::input_type;
   using T = typename Vector::value_type;
   using namespace thrust::placeholders;
 
-  for (auto size : get_sizes())
+  for (auto size : get_sizes_alternative())
   {
     SCOPED_TRACE(testing::Message() << "with size = " << size);
 
