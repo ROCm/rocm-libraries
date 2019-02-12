@@ -57,6 +57,8 @@ endfunction()
 # ****************************************************************************
 
 add_hipthrust_test("thrust.hip.allocator" test_allocator.cpp)
+# add_hipthrust_test("thrust.hip.complex_transform" test_complex_transform.cpp)
+# add_hipthrust_test("thrust.hip.complex" test_complex.cpp)
 add_hipthrust_test("thrust.hip.copy_n" test_copy_n.cpp)
 add_hipthrust_test("thrust.hip.copy" test_copy.cpp)
 add_hipthrust_test("thrust.hip.counting_iterator" test_counting_iterator.cpp)

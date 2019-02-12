@@ -33,8 +33,6 @@
 // HIP API
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 #include <hip/hip_runtime_api.h>
-
-#define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
 #include "test_utils.hpp"
@@ -303,7 +301,7 @@ TYPED_TEST(ComplexTransformTests, TestComplexArithmeticTransform)
 
     thrust::transform(h_p1.begin(), h_p1.end(), h_p2.begin(), h_result.begin(), basic_arithmetic_functor());
     thrust::transform(d_p1.begin(), d_p1.end(), d_p2.begin(), d_result.begin(), basic_arithmetic_functor());
-    ASSERT_EQ(h_result, d_result);
+    ASSERT_NEAR_COMPLEX(h_result, d_result);
   }
 }
 
@@ -323,7 +321,7 @@ TYPED_TEST(ComplexTransformTests, TestComplexPlaneTransform)
 
     thrust::transform(h_p1.begin(), h_p1.end(), h_result.begin(), complex_plane_functor());
     thrust::transform(d_p1.begin(), d_p1.end(), d_result.begin(), complex_plane_functor());
-    ASSERT_EQ(h_result, d_result);
+    ASSERT_NEAR_COMPLEX(h_result, d_result);
   }
 }
 
@@ -352,7 +350,7 @@ TYPED_TEST(ComplexTransformTests, TestComplexPowerTransform)
 
     thrust::transform(h_p1.begin(), h_p1.end(), h_result.begin(), sqrt_functor());
     thrust::transform(d_p1.begin(), d_p1.end(), d_result.begin(), sqrt_functor());
-    ASSERT_EQ(h_result, d_result);
+    ASSERT_NEAR_COMPLEX(h_result, d_result);
   }
 }
 
@@ -372,15 +370,15 @@ TYPED_TEST(ComplexTransformTests, TestComplexExponentialTransform)
 
     thrust::transform(h_p1.begin(), h_p1.end(), h_result.begin(), exp_functor());
     thrust::transform(d_p1.begin(), d_p1.end(), d_result.begin(), exp_functor());
-    ASSERT_EQ(h_result, d_result);
+    ASSERT_NEAR_COMPLEX(h_result, d_result);
 
     thrust::transform(h_p1.begin(), h_p1.end(), h_result.begin(), log_functor());
     thrust::transform(d_p1.begin(), d_p1.end(), d_result.begin(), log_functor());
-    ASSERT_EQ(h_result, d_result);
+    ASSERT_NEAR_COMPLEX(h_result, d_result);
 
     thrust::transform(h_p1.begin(), h_p1.end(), h_result.begin(), log10_functor());
     thrust::transform(d_p1.begin(), d_p1.end(), d_result.begin(), log10_functor());
-    ASSERT_EQ(h_result, d_result);
+    ASSERT_NEAR_COMPLEX(h_result, d_result);
 
   }
 }
@@ -401,55 +399,55 @@ TYPED_TEST(ComplexTransformTests, TestComplexTrigonometricTransform)
 
     thrust::transform(h_p1.begin(), h_p1.end(), h_result.begin(), sin_functor());
     thrust::transform(d_p1.begin(), d_p1.end(), d_result.begin(), sin_functor());
-    ASSERT_EQ(h_result, d_result);
+    ASSERT_NEAR_COMPLEX(h_result, d_result);
 
     thrust::transform(h_p1.begin(), h_p1.end(), h_result.begin(), cos_functor());
     thrust::transform(d_p1.begin(), d_p1.end(), d_result.begin(), cos_functor());
-    ASSERT_EQ(h_result, d_result);
+    ASSERT_NEAR_COMPLEX(h_result, d_result);
 
     thrust::transform(h_p1.begin(), h_p1.end(), h_result.begin(), tan_functor());
     thrust::transform(d_p1.begin(), d_p1.end(), d_result.begin(), tan_functor());
-    ASSERT_EQ(h_result, d_result);
+    ASSERT_NEAR_COMPLEX(h_result, d_result);
 
 
     thrust::transform(h_p1.begin(), h_p1.end(), h_result.begin(), sinh_functor());
     thrust::transform(d_p1.begin(), d_p1.end(), d_result.begin(), sinh_functor());
-    ASSERT_EQ(h_result, d_result);
+    ASSERT_NEAR_COMPLEX(h_result, d_result);
 
     thrust::transform(h_p1.begin(), h_p1.end(), h_result.begin(), cosh_functor());
     thrust::transform(d_p1.begin(), d_p1.end(), d_result.begin(), cosh_functor());
-    ASSERT_EQ(h_result, d_result);
+    ASSERT_NEAR_COMPLEX(h_result, d_result);
 
     thrust::transform(h_p1.begin(), h_p1.end(), h_result.begin(), tanh_functor());
     thrust::transform(d_p1.begin(), d_p1.end(), d_result.begin(), tanh_functor());
-    ASSERT_EQ(h_result, d_result);
+    ASSERT_NEAR_COMPLEX(h_result, d_result);
 
 
 
     thrust::transform(h_p1.begin(), h_p1.end(), h_result.begin(), asin_functor());
     thrust::transform(d_p1.begin(), d_p1.end(), d_result.begin(), asin_functor());
-    ASSERT_EQ(h_result, d_result);
+    ASSERT_NEAR_COMPLEX(h_result, d_result);
 
     thrust::transform(h_p1.begin(), h_p1.end(), h_result.begin(), acos_functor());
     thrust::transform(d_p1.begin(), d_p1.end(), d_result.begin(), acos_functor());
-    ASSERT_EQ(h_result, d_result);
+    ASSERT_NEAR_COMPLEX(h_result, d_result);
 
     thrust::transform(h_p1.begin(), h_p1.end(), h_result.begin(), atan_functor());
     thrust::transform(d_p1.begin(), d_p1.end(), d_result.begin(), atan_functor());
-    ASSERT_EQ(h_result, d_result);
+    ASSERT_NEAR_COMPLEX(h_result, d_result);
 
 
     thrust::transform(h_p1.begin(), h_p1.end(), h_result.begin(), asinh_functor());
     thrust::transform(d_p1.begin(), d_p1.end(), d_result.begin(), asinh_functor());
-    ASSERT_EQ(h_result, d_result);
+    ASSERT_NEAR_COMPLEX(h_result, d_result);
 
     thrust::transform(h_p1.begin(), h_p1.end(), h_result.begin(), acosh_functor());
     thrust::transform(d_p1.begin(), d_p1.end(), d_result.begin(), acosh_functor());
-    ASSERT_EQ(h_result, d_result);
+    ASSERT_NEAR_COMPLEX(h_result, d_result);
 
     thrust::transform(h_p1.begin(), h_p1.end(), h_result.begin(), atanh_functor());
     thrust::transform(d_p1.begin(), d_p1.end(), d_result.begin(), atanh_functor());
-    ASSERT_EQ(h_result, d_result);
+    ASSERT_NEAR_COMPLEX(h_result, d_result);
   }
 }
 
