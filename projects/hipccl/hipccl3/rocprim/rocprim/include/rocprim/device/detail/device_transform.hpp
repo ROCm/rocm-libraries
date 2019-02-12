@@ -96,20 +96,35 @@ void transform_kernel_impl(InputIterator input,
 
     const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
     const unsigned int flat_block_id = ::rocprim::detail::block_id<0>();
-    const unsigned int block_offset = flat_block_id * BlockSize * ItemsPerThread;
-    const unsigned int number_of_blocks = (input_size + items_per_block - 1)/items_per_block;
-    auto valid_in_last_block = input_size - items_per_block * (number_of_blocks - 1);
+    const unsigned int block_offset = flat_block_id * items_per_block;
+    const unsigned int number_of_blocks = ::rocprim::detail::grid_size<0>();
+    const unsigned int valid_in_last_block = input_size - block_offset;
 
     input_type input_values[ItemsPerThread];
     result_type output_values[ItemsPerThread];
 
-    // load input values into values
     if(flat_block_id == (number_of_blocks - 1)) // last block
     {
         block_load_direct_striped<BlockSize>(
             flat_id,
             input + block_offset,
             input_values,
+            valid_in_last_block
+        );
+
+        #pragma unroll
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            if(BlockSize * i + flat_id < valid_in_last_block)
+            {
+                output_values[i] = transform_op(input_values[i]);
+            }
+        }
+
+        block_store_direct_striped<BlockSize>(
+            flat_id,
+            output + block_offset,
+            output_values,
             valid_in_last_block
         );
     }
@@ -120,26 +135,13 @@ void transform_kernel_impl(InputIterator input,
             input + block_offset,
             input_values
         );
-    }
 
-    #pragma unroll
-    for(unsigned int i = 0; i < ItemsPerThread; i++)
-    {
-        output_values[i] = transform_op(input_values[i]);
-    }
+        #pragma unroll
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            output_values[i] = transform_op(input_values[i]);
+        }
 
-    // Save values into output array
-    if(flat_block_id == (number_of_blocks - 1)) // last block
-    {
-        block_store_direct_striped<BlockSize>(
-            flat_id,
-            output + block_offset,
-            output_values,
-            valid_in_last_block
-        );
-    }
-    else
-    {
         block_store_direct_striped<BlockSize>(
             flat_id,
             output + block_offset,
