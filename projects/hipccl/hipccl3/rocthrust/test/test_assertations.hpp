@@ -3,42 +3,25 @@
 
 //#include <thrust/complex.h>
 
-testing::AssertionResult EqFailureQuite(const char* lhs_expression,
-                                        const char* rhs_expression,
-                                        bool ignoring_case) {
+template <typename T1, typename T2>
+testing::AssertionResult CmpHelperEQQuite(const char* lhs_expression,
+                                          const char* rhs_expression,
+                                          const T1& lhs,
+                                          const T2& rhs) {
+  if (lhs == rhs) {
+    return testing::AssertionSuccess();
+  }
+
   testing::Message msg;
   msg << "Expressions during equality check:";
   msg << "\n  " << lhs_expression;
   msg << "\n  " << rhs_expression;
 
-  if (ignoring_case) {
-    msg << "\nIgnoring case";
-  }
-
   return testing::AssertionFailure() << msg;
 }
 
-testing::AssertionResult CmpHelperEQFailureQuite(const char* lhs_expression,
-                                                 const char* rhs_expression) {
-  return EqFailureQuite(lhs_expression,
-                        rhs_expression,
-                        false);
-}
-
-template <typename T1, typename T2>
-testing::AssertionResult CmpHelperEQ(const char* lhs_expression,
-                                     const char* rhs_expression,
-                                     const T1& lhs,
-                                     const T2& rhs) {
-  if (lhs == rhs) {
-    return testing::AssertionSuccess();
-  }
-
-  return CmpHelperEQFailureQuite(lhs_expression, rhs_expression);
-}
-
 #define ASSERT_EQ_QUIET(val1, val2)\
-  ASSERT_PRED_FORMAT2(CmpHelperEQ, \
+  ASSERT_PRED_FORMAT2(CmpHelperEQQuite, \
                       val1, val2)
 
 
