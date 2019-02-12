@@ -1,0 +1,84 @@
+# MIT License
+#
+# Copyright (c) 2017 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+image: rocm/rocm-terminal:latest
+
+variables:
+  SUDO_CMD: "" # Must be "sudo" on images which don't use root user
+  DEPS_DIR: "$CI_PROJECT_DIR/__dependencies"
+  CMAKE_URL: "https://cmake.org/files/v3.5/cmake-3.5.1-Linux-x86_64.tar.gz"
+  # General build flags
+  CXXFLAGS: ""
+  CMAKE_OPTIONS: ""
+  # Local build options
+  LOCAL_CXXFLAGS: ""
+  LOCAL_CMAKE_OPTIONS: ""
+
+before_script:
+  - $SUDO_CMD apt-get update -qq
+  - $SUDO_CMD apt-get install -y -qq libnuma-dev libunwind-dev git wget tar xz-utils bzip2 build-essential pkg-config ca-certificates
+  - hipconfig
+  # cmake
+  - mkdir -p $DEPS_DIR/cmake
+  - wget --no-check-certificate --quiet -O - $CMAKE_URL | tar --strip-components=1 -xz -C $DEPS_DIR/cmake
+  - export PATH=$DEPS_DIR/cmake/bin:$PATH
+  # Combine global build options with local options
+  - export CXXFLAGS=$CXXFLAGS" "$LOCAL_CXXFLAGS
+  - export CMAKE_OPTIONS=$CXXFLAGS" "$LOCAL_CMAKE_OPTIONS
+  - echo -e "machine projects.streamhpc.com\nlogin gitlab-ci-token\npassword ${CI_JOB_TOKEN}" > ~/.netrc
+
+build:rocm:
+  stage: build
+  tags:
+    - rocm
+  variables:
+    SUDO_CMD: "sudo -E"
+  script:
+    - mkdir build
+    - cd build
+    # CXX=hcc cmake -DBUILD_TEST=ON -DBUILD_EXAMPLE=ON -DBUILD_BENCHMARK=ON ../.
+    - CXX=hcc cmake -DBUILD_TEST=ON ../.
+    - make -j16
+    # - make package
+  artifacts:
+    paths:
+    - build/library/
+    - build/test/test_*
+    - build/test/CTestTestfile.cmake
+    - build/gtest/
+    - build/CMakeCache.txt
+    - build/CTestTestfile.cmake
+    - build/hipthrust*.deb
+    - build/hipthrust*.zip
+    expire_in: 2 weeks
+
+.test:
+  stage: test
+  variables:
+    SUDO_CMD: "sudo -E"
+  dependencies:
+    - build:rocm
+  script:
+    - cd build
+    - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 2
+
+include: '.gitlab-ci-gputest.yml'
