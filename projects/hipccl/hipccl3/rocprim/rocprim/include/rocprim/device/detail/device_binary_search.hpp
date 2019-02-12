@@ -26,6 +26,19 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
+template<class Size>
+Size get_binary_search_middle(Size left, Size right)
+{
+    // Instead of `/ 2` we use `* 33 / 64`, i.e. the middle is slightly moved.
+    // This greatly reduces address aliasing and hence cache misses for (nearly-)power-of-two
+    // sizes of haystack (when addresses are mapped to the same cache line).
+    // For random needles and (nearly-)power-of-two sizes, this change increases performance
+    // 4-20 times making it equal to performance of arbitrary sizes of haystack.
+    // See https://www.pvk.ca/Blog/2012/07/30/binary-search-is-a-pathological-case-for-caches/
+    const Size d = right - left;
+    return left + d / 2 + d / 64;
+}
+
 template<class RandomAccessIterator, class Size, class T, class BinaryPredicate>
 ROCPRIM_DEVICE
 Size lower_bound_n(RandomAccessIterator first,
@@ -37,7 +50,7 @@ Size lower_bound_n(RandomAccessIterator first,
     Size right = size;
     while(left < right)
     {
-        const Size mid = (left + right) / 2;
+        const Size mid = get_binary_search_middle(left, right);
         if(compare_op(first[mid], value))
         {
             left = mid + 1;
@@ -61,7 +74,7 @@ Size upper_bound_n(RandomAccessIterator first,
     Size right = size;
     while(left < right)
     {
-        const Size mid = (left + right) / 2;
+        const Size mid = get_binary_search_middle(left, right);
         if(compare_op(value, first[mid]))
         {
             right = mid;
