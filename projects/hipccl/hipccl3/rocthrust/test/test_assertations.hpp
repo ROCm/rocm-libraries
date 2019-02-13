@@ -1,6 +1,7 @@
 // Google Test
 #include <gtest/gtest.h>
 
+// TODO: Fix the complex
 //#include <thrust/complex.h>
 
 template <typename T1, typename T2>
@@ -24,7 +25,7 @@ testing::AssertionResult CmpHelperEQQuite(const char* lhs_expression,
   ASSERT_PRED_FORMAT2(CmpHelperEQQuite, \
                       val1, val2)
 
-
+// TODO: Fix the complex
 /*template <typename T>
 testing::AssertionResult ComplexNearPredFormat(const char* expr1,
                                                const char* expr2,
