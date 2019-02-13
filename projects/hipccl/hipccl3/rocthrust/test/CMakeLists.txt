@@ -56,7 +56,9 @@ endfunction()
 # Tests
 # ****************************************************************************
 
+
 add_hipthrust_test("thrust.hip.allocator" test_allocator.cpp)
+add_hipthrust_test("thrust.hip.constant_iterator" test_constant_iterator.cpp)
 # add_hipthrust_test("thrust.hip.complex_transform" test_complex_transform.cpp)
 # add_hipthrust_test("thrust.hip.complex" test_complex.cpp)
 add_hipthrust_test("thrust.hip.copy_n" test_copy_n.cpp)
@@ -66,6 +68,7 @@ add_hipthrust_test("thrust.hip.counting_iterator" test_counting_iterator.cpp)
 add_hipthrust_test("thrust.hip.device_delete" test_device_delete.cpp)
 add_hipthrust_test("thrust.hip.device_ptr" test_device_ptr.cpp)
 add_hipthrust_test("thrust.hip.device_reference" test_device_reference.cpp)
+add_hipthrust_test("thrust.hip.discard_iterator" test_discard_iterator.cpp)
 add_hipthrust_test("thrust.hip.distance" test_distance.cpp)
 add_hipthrust_test("thrust.hip.equal" test_equal.cpp)
 add_hipthrust_test("thrust.hip.fill" test_fill.cpp)
