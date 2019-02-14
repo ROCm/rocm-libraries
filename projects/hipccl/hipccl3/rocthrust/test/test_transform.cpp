@@ -41,7 +41,7 @@
 #include <thrust/iterator/retag.h>
 
 #include "test_utils.hpp"
-#include "test_assertations.hpp"
+#include "test_assertions.hpp"
 
 template<
   class Input,

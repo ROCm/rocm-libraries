@@ -44,7 +44,7 @@
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
 #include "test_utils.hpp"
-#include "test_assertations.hpp"
+#include "test_assertions.hpp"
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
