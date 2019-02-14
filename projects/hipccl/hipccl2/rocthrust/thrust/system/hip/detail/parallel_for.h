@@ -61,7 +61,7 @@ namespace __parallel_for {
       Size tile_base     = blockIdx.x * items_per_block;
       Size num_remaining = num_items - tile_base;
       const unsigned int items_in_tile = static_cast<unsigned int>(
-        num_remaining < items_per_block ? num_remaining : items_per_block
+        num_remaining < (Size)items_per_block ? num_remaining : items_per_block
       );
 
       if(items_in_tile == items_per_block)

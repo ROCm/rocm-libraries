@@ -38,15 +38,6 @@ std::vector<size_t> get_sizes()
   return sizes;
 }
 
-std::vector<size_t> get_sizes_smaller()
-{
-  std::vector<size_t> sizes = {
-    0, 1, 2, 12, 63, 64, 211, 256, 344,
-    1024, 2048, 5096, 34567
-  };
-  return sizes;
-}
-
 template<class T>
 inline auto get_random_data(size_t size, T min, T max)
   -> typename std::enable_if<rocprim::is_integral<T>::value, thrust::host_vector<T>>::type
@@ -140,3 +131,56 @@ class my_system : public thrust::device_execution_policy<my_system>
 };
 
 struct my_tag : thrust::device_execution_policy<my_tag> {};
+
+template <typename T, unsigned int N>
+struct FixedVector
+{
+    T data[N];
+
+    __host__ __device__
+    FixedVector()
+    {
+        for(unsigned int i = 0; i < N; i++)
+            data[i] = T();
+    }
+
+    __host__ __device__
+    FixedVector(T init)
+    {
+        for(unsigned int i = 0; i < N; i++)
+            data[i] = init;
+    }
+
+    __host__ __device__
+    FixedVector operator+(const FixedVector& bs) const
+    {
+        FixedVector output;
+        for(unsigned int i = 0; i < N; i++)
+            output.data[i] = data[i] + bs.data[i];
+        return output;
+    }
+
+    __host__ __device__
+    bool operator<(const FixedVector& bs) const
+    {
+        for(unsigned int i = 0; i < N; i++)
+        {
+            if(data[i] < bs.data[i])
+                return true;
+            else if(bs.data[i] < data[i])
+                return false;
+        }
+        return false;
+    }
+
+    __host__ __device__
+    bool operator==(const FixedVector& bs) const
+    {
+        for(unsigned int i = 0; i < N; i++)
+        {
+            if(!(data[i] == bs.data[i]))
+                return false;
+        }
+        return true;
+    }
+};
