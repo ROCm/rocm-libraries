@@ -110,8 +110,8 @@ TYPED_TEST(TransformIteratorTests, TransformIterator)
     using Vector = typename TestFixture::input_type;
     using T = typename Vector::value_type;
 
-    typedef thrust::negate<T> UnaryFunction;
-    typedef typename Vector::iterator Iterator;
+    using UnaryFunction = thrust::negate<T>;
+    using Iterator = typename Vector::iterator;
 
     Vector input(4);
     Vector output(4);
@@ -136,8 +136,8 @@ TYPED_TEST(TransformIteratorTests, MakeTransformIterator)
     using Vector = typename TestFixture::input_type;
     using T = typename Vector::value_type;
 
-    typedef thrust::negate<T> UnaryFunction;
-    typedef typename Vector::iterator Iterator;
+    using UnaryFunction = thrust::negate<T>;
+    using Iterator = typename Vector::iterator;
 
     Vector input(4);
     Vector output(4);
