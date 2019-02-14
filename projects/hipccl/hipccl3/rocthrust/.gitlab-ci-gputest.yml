@@ -1,0 +1,24 @@
+test:vega20:
+  extends: .test
+  dependencies:
+    - build:rocm
+  tags:
+    - vega20
+    - rocm
+
+# TODO: Disable Fiji
+# test:s9300:
+#   extends: .test
+#   dependencies:
+#     - build:rocm
+#   tags:
+#     - s9300
+#     - rocm
+
+test:mi25:
+  extends: .test
+  dependencies:
+    - build:rocm
+  tags:
+    - mi25
+    - rocm

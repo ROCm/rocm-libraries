@@ -370,7 +370,7 @@ transform(execution_policy<Derived> &policy,
     (void) policy;
     while (first != last)
     {
-      *result++ = transform_op(*first++);
+      *result++ = transform_op(raw_reference_cast(*first++));
     }
     return result;
   }
@@ -453,7 +453,7 @@ transform(execution_policy<Derived> &policy,
     (void) policy;
     while (first1 != last1)
     {
-      *result++ = transform_op(*first1++, *first2++);
+      *result++ = transform_op(raw_reference_cast(*first1++), raw_reference_cast(*first2++));
     }
     return result;
   }

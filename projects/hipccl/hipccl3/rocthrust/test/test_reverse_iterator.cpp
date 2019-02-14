@@ -169,7 +169,7 @@ TYPED_TEST(ReverseIteratorTests, ReverseIteratorCopy)
     source[3] = (T)40;
 
     Vector destination(4,0);
-    
+
     thrust::copy(thrust::make_reverse_iterator(source.end()),
                 thrust::make_reverse_iterator(source.begin()),
                 destination.begin());
@@ -180,12 +180,12 @@ TYPED_TEST(ReverseIteratorTests, ReverseIteratorCopy)
     ASSERT_EQ(destination[3], (T)10);
 }
 
-//TODO: Un-comment these tests once the scan is implemented 
+//TODO: Un-comment these tests once the scan is implemented
 /*
 TYPED_TEST(PrimitiveReverseIteratorTests, ReverseIteratorExclusiveScanSimple)
 {
     using T = typename TestFixture::input_type;
-    
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
@@ -197,7 +197,7 @@ TYPED_TEST(PrimitiveReverseIteratorTests, ReverseIteratorExclusiveScanSimple)
 
         thrust::host_vector<T>   h_result(h_data.size());
         thrust::device_vector<T> d_result(d_data.size());
-        
+
         thrust::exclusive_scan(thrust::make_reverse_iterator(h_data.end()),
                                 thrust::make_reverse_iterator(h_data.begin()),
                                 h_result.begin());
@@ -205,9 +205,10 @@ TYPED_TEST(PrimitiveReverseIteratorTests, ReverseIteratorExclusiveScanSimple)
         thrust::exclusive_scan(thrust::make_reverse_iterator(d_data.end()),
                                 thrust::make_reverse_iterator(d_data.begin()),
                                 d_result.begin());
-        
+
+        thrust::host_vector<T> h_result_d(d_result);
         for (size_t i = 0; i < size; i++)
-            ASSERT_NEAR(h_result[i], d_result[i], error_margin);   
+            ASSERT_NEAR(h_result[i], h_result_d[i], error_margin);
     }
 }
 
@@ -215,8 +216,8 @@ TYPED_TEST(PrimitiveReverseIteratorTests, ReverseIteratorExclusiveScanSimple)
 TYPED_TEST(PrimitiveReverseIteratorTests, ReverseIteratorExclusiveScan)
 {
     using T = typename TestFixture::input_type;
-    
-    const std::vector<size_t> sizes = get_sizes_smaller();
+
+    const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
         T error_margin = (T) 0.01 * size;
@@ -235,8 +236,9 @@ TYPED_TEST(PrimitiveReverseIteratorTests, ReverseIteratorExclusiveScan)
                             thrust::make_reverse_iterator(d_data.begin()),
                             d_result.begin());
 
+        thrust::host_vector<T> h_result_d(d_result);
         for (size_t i = 0; i < size; i++)
-            ASSERT_NEAR(h_result[i], d_result[i], error_margin);
+            ASSERT_NEAR(h_result[i], h_result_d[i], error_margin);
     }
 };*/
 

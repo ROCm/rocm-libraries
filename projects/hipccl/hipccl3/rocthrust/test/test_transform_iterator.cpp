@@ -115,10 +115,10 @@ TYPED_TEST(TransformIteratorTests, TransformIterator)
 
     Vector input(4);
     Vector output(4);
-    
+
     // initialize input
     thrust::sequence(input.begin(), input.end(), 1);
-   
+
     // construct transform_iterator
     thrust::transform_iterator<UnaryFunction, Iterator> iter(input.begin(), UnaryFunction());
 
@@ -141,15 +141,15 @@ TYPED_TEST(TransformIteratorTests, MakeTransformIterator)
 
     Vector input(4);
     Vector output(4);
-    
+
     // initialize input
     thrust::sequence(input.begin(), input.end(), 1);
-   
+
     // construct transform_iterator
     thrust::transform_iterator<UnaryFunction, Iterator> iter(input.begin(), UnaryFunction());
 
-    thrust::copy(thrust::make_transform_iterator(input.begin(), UnaryFunction()), 
-                 thrust::make_transform_iterator(input.end(), UnaryFunction()), 
+    thrust::copy(thrust::make_transform_iterator(input.begin(), UnaryFunction()),
+                 thrust::make_transform_iterator(input.end(), UnaryFunction()),
                  output.begin());
 
     ASSERT_EQ(output[0], (T)-1);
@@ -163,7 +163,7 @@ TYPED_TEST(PrimitiveTransformIteratorTests, TransformIteratorReduce)
 {
     using T = typename TestFixture::input_type;
 
-    const std::vector<size_t> sizes = get_sizes_smaller();
+    const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
         T error_margin = (T) 0.01 * size;
@@ -179,7 +179,7 @@ TYPED_TEST(PrimitiveTransformIteratorTests, TransformIteratorReduce)
                                      thrust::make_transform_iterator(d_data.end(),   thrust::negate<T>()) );
 
         ASSERT_NEAR(h_result, d_result, error_margin);
-        
+
     }
 }
 
