@@ -168,7 +168,7 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceWithRandomDataAndDifferentSizes)
 {
     using T = typename TestFixture::input_type;
 
-    const std::vector<size_t> sizes = get_sizes_smaller();
+    const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
         thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10);
@@ -279,7 +279,7 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceCopyWithRandomData)
 {
     using T = typename TestFixture::input_type;
 
-    const std::vector<size_t> sizes = get_sizes_smaller();
+    const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
 
@@ -309,7 +309,7 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceCopyToDiscardIterator)
 {
     using T = typename TestFixture::input_type;
 
-    const std::vector<size_t> sizes = get_sizes_smaller();
+    const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
         thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10);
@@ -510,7 +510,7 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceIfWithRandomData)
 {
     using T = typename TestFixture::input_type;
 
-    const std::vector<size_t> sizes = get_sizes_smaller();
+    const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
         thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10);
@@ -712,7 +712,7 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceCopyIfWithRandomData)
 {
     using T = typename TestFixture::input_type;
 
-    const std::vector<size_t> sizes = get_sizes_smaller();
+    const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
 
@@ -739,7 +739,7 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceCopyIfToDiscardIteratorRandomData)
 {
     using T = typename TestFixture::input_type;
 
-    const std::vector<size_t> sizes = get_sizes_smaller();
+    const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
         thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10);
@@ -763,7 +763,7 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceCopyIfStencil)
 {
     using T = typename TestFixture::input_type;
 
-    const std::vector<size_t> sizes = get_sizes_smaller();
+    const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
         thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10);
@@ -793,7 +793,7 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceCopyIfStencilToDiscardIteratorRandomDat
 {
     using T = typename TestFixture::input_type;
 
-    const std::vector<size_t> sizes = get_sizes_smaller();
+    const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
 
