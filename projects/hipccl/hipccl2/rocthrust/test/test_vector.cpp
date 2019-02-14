@@ -20,18 +20,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <vector>
 #include <list>
-#include <limits>
-#include <utility>
 
 // Google Test
 #include <gtest/gtest.h>
 
 // Thrust
 #include <thrust/memory.h>
-#include <thrust/transform.h>
-// STREAMHPC TODO replace <thrust/detail/seq.h> with <thrust/execution_policy.h>
 #include <thrust/sequence.h>
 #include <thrust/device_malloc_allocator.h>
 #include <thrust/device_vector.h>
@@ -43,6 +38,9 @@
 
 #define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+
+#include "test_utils.hpp"
+#include "test_assertions.hpp"
 
 template<
     class InputType
@@ -681,8 +679,7 @@ TYPED_TEST(VectorTests, TestVectorShrinkToFit)
   ASSERT_EQ(   3, v.capacity());
 }
 
-// TODO: fix the LargeStruct test
-/*template <int N>
+template <int N>
 struct LargeStruct
 {
   int data[N];
@@ -705,12 +702,12 @@ TEST(VectorTests, TestVectorContainingLargeType)
   thrust::device_vector<T> dv1;
   thrust::host_vector<T>   hv1;
 
-  ASSERT_EQ(dv1, hv1);
+  ASSERT_EQ_QUIET(dv1, hv1);
 
   thrust::device_vector<T> dv2(20);
   thrust::host_vector<T>   hv2(20);
 
-  ASSERT_EQ(dv2, hv2);
+  ASSERT_EQ_QUIET(dv2, hv2);
 
   // initialize tofirst element to something nonzero
   T ls;
@@ -721,7 +718,7 @@ TEST(VectorTests, TestVectorContainingLargeType)
   thrust::device_vector<T> dv3(20, ls);
   thrust::host_vector<T>   hv3(20, ls);
 
-  ASSERT_EQ(dv3, hv3);
+  ASSERT_EQ_QUIET(dv3, hv3);
 
   // change first element
   ls.data[0] = -13;
@@ -729,8 +726,8 @@ TEST(VectorTests, TestVectorContainingLargeType)
   dv3[2] = ls;
   hv3[2] = ls;
 
-  ASSERT_EQ(dv3, hv3);
-}*/
+  ASSERT_EQ_QUIET(dv3, hv3);
+}
 
 TYPED_TEST(VectorTests, TestVectorReversed)
 {
