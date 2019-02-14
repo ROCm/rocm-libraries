@@ -38,8 +38,8 @@ BEGIN_NS_THRUST
 namespace hip_rocprim {
     
     template <class Derived,
-    class InputIt,
-    class UnaryPred>
+              class InputIt,
+              class UnaryPred>
     typename iterator_traits<InputIt>::difference_type __host__ __device__
     count_if(execution_policy<Derived> &policy,
              InputIt                    first,
