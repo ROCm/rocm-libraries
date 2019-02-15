@@ -104,4 +104,5 @@ add_hipthrust_test("thrust.hip.zip_iterator" test_zip_iterator.cpp)
 add_hipthrust_test("thrust.hip.zip_iterator_reduce" test_zip_iterator_reduce.cpp)
 add_hipthrust_test("thrust.hip.zip_iterator_sort" test_zip_iterator_sort.cpp)
 add_hipthrust_test("thrust.hip.zip_iterator_sort_by_key" test_zip_iterator_sort_by_key.cpp)
-
+#TODO Using as yet unimplemented scan, reenable when scan implemented (also in .cpp file)
+#add_hipthrust_test("thrust.hip.zip_iterator_reduce_by_key" test_zip_iterator_reduce_by_key.cpp)
