@@ -103,3 +103,5 @@ add_hipthrust_test("thrust.hip.vector_manipulation" test_vector_manipulation.cpp
 add_hipthrust_test("thrust.hip.zip_iterator" test_zip_iterator.cpp)
 add_hipthrust_test("thrust.hip.zip_iterator_reduce" test_zip_iterator_reduce.cpp)
 add_hipthrust_test("thrust.hip.zip_iterator_sort" test_zip_iterator_sort.cpp)
+add_hipthrust_test("thrust.hip.zip_iterator_sort_by_key" test_zip_iterator_sort_by_key.cpp)
+
