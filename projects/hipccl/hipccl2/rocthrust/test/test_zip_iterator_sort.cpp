@@ -31,9 +31,9 @@ public:
 };
 
 typedef ::testing::Types<
-        Params<int8_t>,
-        Params<int16_t>,
-        Params<int32_t>
+    Params<int8_t>,
+    Params<int16_t>,
+    Params<int32_t>
 > TestParams;
 
 TYPED_TEST_CASE(ZipIteratorStableSortTests, TestParams);
