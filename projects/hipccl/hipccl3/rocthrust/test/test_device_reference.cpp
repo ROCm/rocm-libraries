@@ -144,7 +144,7 @@ TYPED_TEST(DeviceReferenceTests, TestDeviceReferenceConstructorFromDevicePointer
 }
 
 // TODO: No device code available for function: _ZN7rocprim6detail16transform_kernelILj256ELj16ERKjN6thrust10device_ptrIjEES6_NS4_8identityIjEEEEvT2_mT3_T4_
-/*TEST(DeviceReferenceTests, TestDeviceReferenceAssignmentFromDeviceReference)
+TEST(DeviceReferenceTests, TestDeviceReferenceAssignmentFromDeviceReference)
 {
   // test same types
   using T0 = int;
@@ -171,7 +171,7 @@ TYPED_TEST(DeviceReferenceTests, TestDeviceReferenceConstructorFromDevicePointer
   ASSERT_EQ(13.0f, ref2);
   ASSERT_EQ(ref0, ref2);
   ASSERT_EQ(ref1, ref2);
-}*/
+}
 
 TYPED_TEST(DeviceReferenceTests,TestDeviceReferenceManipulation)
 {
@@ -308,8 +308,7 @@ TYPED_TEST(DeviceReferenceIntegerTests,TestDeviceReferenceIntegerManipulation)
   ASSERT_EQ(true, ref1 == ref);
 }
 
-// TODO: Implement swap_ranges
-/*TYPED_TEST(DeviceReferenceTests,TestDeviceReferenceSwap)
+TYPED_TEST(DeviceReferenceTests,TestDeviceReferenceSwap)
 {
     using T = typename TestFixture::input_type;
 
@@ -329,6 +328,6 @@ TYPED_TEST(DeviceReferenceIntegerTests,TestDeviceReferenceIntegerManipulation)
     ref1.swap(ref2);
     ASSERT_EQ(T(7), ref1);
     ASSERT_EQ(T(13), ref2);
-}*/
+}
 
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
