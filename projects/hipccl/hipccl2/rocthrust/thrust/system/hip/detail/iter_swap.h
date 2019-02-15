@@ -21,37 +21,35 @@
 #include <thrust/system/hip/config.h>
 
 #include <thrust/detail/raw_pointer_cast.h>
+#include <thrust/system/hip/detail/execution_policy.h>
 #include <thrust/swap.h>
 
 BEGIN_NS_THRUST
 namespace hip_rocprim {
 
 
-template<typename Pointer1, typename Pointer2>
+template<typename DerivedPolicy, typename Pointer1, typename Pointer2>
 inline __host__ __device__
-void iter_swap(tag, Pointer1 a, Pointer2 b)
+void iter_swap(thrust::hip::execution_policy<DerivedPolicy> &, Pointer1 a, Pointer2 b)
 {
-  // XXX war nvbugs/881631
-  struct war_nvbugs_881631
-  {
-    __host__ inline static void host_path(Pointer1 a, Pointer2 b)
-    {
-      hip_rocprim::swap_ranges(a, a + 1, b);
-    }
+#if defined(THRUST_HIP_DEVICE_CODE)
 
-    __device__ inline static void device_path(Pointer1 a, Pointer2 b)
-    {
-      using thrust::swap;
-      swap(*thrust::raw_pointer_cast(a),
-           *thrust::raw_pointer_cast(b));
-    }
-  };
+  /*THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((
+    thrust::swap<typename detail::pointer_element<Pointer1>::type, typename detail::pointer_element<Pointer2>::type>
+  ));*/
 
-#ifndef __HIP_DEVICE_COMPILE__
-  return war_nvbugs_881631::host_path(a,b);
+  using thrust::swap;
+  void (*fptr)(typename detail::pointer_element<Pointer1>::type&, typename detail::pointer_element<Pointer2>::type&) = swap;
+  (void) fptr;
+
+  swap(*thrust::raw_pointer_cast(a),
+       *thrust::raw_pointer_cast(b));
+
 #else
-  return war_nvbugs_881631::device_path(a,b);
-#endif // __HIP_DEVICE_COMPILE__
+
+  thrust::swap_ranges(a, a + 1, b);
+
+#endif
 } // end iter_swap()
 
 
