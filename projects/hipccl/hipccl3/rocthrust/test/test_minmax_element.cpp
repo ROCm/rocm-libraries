@@ -27,8 +27,6 @@
 #include <thrust/extrema.h>
 #include <thrust/iterator/retag.h>
 
-#include <unittest/unittest.h>
-
 // HIP API
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 #include <hip/hip_runtime_api.h>
@@ -117,7 +115,7 @@ TYPED_TEST(MinmaxElementTests, TestMinMaxElementWithTransform)
           thrust::make_transform_iterator(data.end(),   thrust::negate<T>())).second, -1);
 }
 
-TYPED_TEST(MinElementTests, TestMinMaxElement)
+TYPED_TEST(MinmaxElementTests, TestMinMaxElement)
 {
     using Vector = typename TestFixture::input_type;
     using T = typename Vector::value_type;
@@ -155,13 +153,12 @@ TYPED_TEST(MinElementTests, TestMinMaxElement)
 
 
 template<typename ForwardIterator>
-thrust::pair<ForwardIterator,ForwardIterator> minmax_element(my_tag, ForwardIterator first, ForwardIterator)
+thrust::pair<ForwardIterator,ForwardIterator> minmax_element(my_system &system, ForwardIterator first, ForwardIterator)
 {
     return thrust::make_pair(first,first);
 }
 
 TEST(MinmaxElementTests, TestMinMaxElementDispatchExplicit)
-void TestMinMaxElementDispatchExplicit()
 {
     thrust::device_vector<int> vec(1);
 
@@ -186,7 +183,7 @@ void TestMinMaxElementDispatchImplicit()
     thrust::minmax_element(thrust::retag<my_tag>(vec.begin()),
                            thrust::retag<my_tag>(vec.end()));
 
-    ASSERT_EQUAL(13, vec.front());
+    ASSERT_EQ(13, vec.front());
 }
 
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

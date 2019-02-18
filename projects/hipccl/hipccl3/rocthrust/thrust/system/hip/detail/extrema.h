@@ -36,391 +36,18 @@
 #include <thrust/distance.h>
 
 BEGIN_NS_THRUST
+
 namespace hip_rocprim {
-
-namespace __extrema {
-
-  template <class InputType, class IndexType, class Predicate>
-  struct arg_min_f
-  {
-    Predicate predicate;
-    typedef tuple<InputType, IndexType> pair_type;
-
-    __host__ __device__
-    arg_min_f(Predicate p) : predicate(p) {}
-
-    pair_type __device__
-    operator()(pair_type const &lhs, pair_type const &rhs)
-    {
-      InputType const &rhs_value = get<0>(rhs);
-      InputType const &lhs_value = get<0>(lhs);
-      IndexType const &rhs_key   = get<1>(rhs);
-      IndexType const &lhs_key   = get<1>(lhs);
-
-      // check values first
-      if (predicate(lhs_value, rhs_value))
-        return lhs;
-      else if (predicate(rhs_value, lhs_value))
-        return rhs;
-
-      // values are equivalent, prefer smaller index
-      if (lhs_key < rhs_key)
-        return lhs;
-      else
-        return rhs;
-    }
-  };    // struct arg_min_f
-
-  template <class InputType, class IndexType, class Predicate>
-  struct arg_max_f
-  {
-    Predicate predicate;
-    typedef tuple<InputType, IndexType> pair_type;
-
-    __host__ __device__
-    arg_max_f(Predicate p) : predicate(p) {}
-
-    pair_type __device__
-    operator()(pair_type const &lhs, pair_type const &rhs)
-    {
-      InputType const &rhs_value = get<0>(rhs);
-      InputType const &lhs_value = get<0>(lhs);
-      IndexType const &rhs_key   = get<1>(rhs);
-      IndexType const &lhs_key   = get<1>(lhs);
-
-      // check values first
-      if (predicate(lhs_value, rhs_value))
-        return rhs;
-      else if (predicate(rhs_value, lhs_value))
-        return lhs;
-
-      // values are equivalent, prefer smaller index
-      if (lhs_key < rhs_key)
-        return lhs;
-      else
-        return rhs;
-    }
-  };    // struct arg_max_f
-
-  template<class InputType, class IndexType, class Predicate>
-  struct arg_minmax_f
-  {
-    Predicate predicate;
-    
-    typedef tuple<InputType, IndexType> pair_type;
-    typedef tuple<pair_type, pair_type> two_pairs_type;
-
-    typedef arg_min_f<InputType, IndexType, Predicate> arg_min_t;
-    typedef arg_max_f<InputType, IndexType, Predicate> arg_max_t;
-
-    __host__ __device__
-    arg_minmax_f(Predicate p) : predicate(p)
-    {
-    }
-
-    two_pairs_type __device__
-    operator()(two_pairs_type const &lhs, two_pairs_type const &rhs)
-    {
-      pair_type const &rhs_min = get<0>(rhs);
-      pair_type const &lhs_min = get<0>(lhs);
-      pair_type const &rhs_max = get<1>(rhs);
-      pair_type const &lhs_max = get<1>(lhs);
-      return make_tuple(arg_min_t(predicate)(lhs_min, rhs_min),
-                        arg_max_t(predicate)(lhs_max, rhs_max));
-    }
-
-    struct duplicate_tuple
-    {
-      __device__ two_pairs_type
-      operator()(pair_type const &t)
-      {
-        return thrust::make_tuple(t, t);
-      }
-    };
-  }; // struct arg_minmax_f
-
-  template <class T,
-            class InputIt,
-            class OutputIt,
-            class Size,
-            class ReductionOp>
-  hipError_t THRUST_RUNTIME_FUNCTION
-  doit_step(void *       d_temp_storage,
-            size_t &     temp_storage_bytes,
-            InputIt      input_it,
-            Size         num_items,
-            ReductionOp  reduction_op,
-            OutputIt     output_it,
-            hipStream_t  stream,
-            bool         debug_sync)
-  {
-    using core::AgentPlan;
-    using core::AgentLauncher;
-    using core::get_agent_plan;
-    using core::cuda_optional;
-
-    if (num_items == 0)
-      return hipErrorUnknown;
-
-    typedef AgentLauncher<
-        __reduce::ReduceAgent<InputIt, OutputIt, T, Size, ReductionOp> >
-        reduce_agent;
-
-    typename reduce_agent::Plan reduce_plan = reduce_agent::get_plan(stream);
-
-    hipError_t status = hipSuccess;
-
-
-    if (num_items <= reduce_plan.items_per_tile)
-    {
-      size_t vshmem_size = core::vshmem_size(reduce_plan.shared_memory_size, 1);
-
-      // small, single tile size
-      if (d_temp_storage == NULL)
-      {
-        temp_storage_bytes = max<size_t>(1, vshmem_size);
-        return status;
-      }
-      char *vshmem_ptr = vshmem_size > 0 ? (char*)d_temp_storage : NULL;
-
-      reduce_agent ra(reduce_plan, num_items, stream, vshmem_ptr, "reduce_agent: single_tile only", debug_sync);
-      ra.launch(input_it, output_it, num_items, reduction_op);
-      auto error = hipPeekAtLastError();
-      if (error != hipSuccess) return error;
-    }
-    else
-    {
-      // regular size
-      cuda_optional<int> sm_count = core::get_sm_count();
-      CUDA_CUB_RET_IF_FAIL(sm_count.status());
-
-      typedef __reduce::GridSizeType GridSizeType;
-
-      // reduction will not use more cta counts than requested
-      cuda_optional<int> max_blocks_per_sm =
-          reduce_agent::
-              template get_max_blocks_per_sm<InputIt,
-                                             OutputIt,
-                                             Size,
-                                             cub::GridEvenShare<GridSizeType>,
-                                             cub::GridQueue<GridSizeType>,
-                                             ReductionOp>(reduce_plan);
-      CUDA_CUB_RET_IF_FAIL(max_blocks_per_sm.status());
-
-
-
-      int reduce_device_occupancy = (int)max_blocks_per_sm * sm_count;
-
-      int sm_oversubscription = 5;
-      int max_blocks          = reduce_device_occupancy * sm_oversubscription;
-
-      cub::GridEvenShare<GridSizeType> even_share;
-      even_share.DispatchInit(static_cast<int>(num_items), max_blocks,
-                              reduce_plan.items_per_tile);
-
-      // we will launch at most "max_blocks" blocks in a grid
-      // so preallocate virtual shared memory storage for this if required
-      //
-      size_t vshmem_size = core::vshmem_size(reduce_plan.shared_memory_size,
-                                             max_blocks);
-
-      // Temporary storage allocation requirements
-      void * allocations[3] = {NULL, NULL, NULL};
-      size_t allocation_sizes[3] =
-          {
-              max_blocks * sizeof(T),                            // bytes needed for privatized block reductions
-              cub::GridQueue<GridSizeType>::AllocationSize(),    // bytes needed for grid queue descriptor0
-              vshmem_size                                        // size of virtualized shared memory storage
-          };
-      status = cub::AliasTemporaries(d_temp_storage,
-                                     temp_storage_bytes,
-                                     allocations,
-                                     allocation_sizes);
-      CUDA_CUB_RET_IF_FAIL(status);
-      if (d_temp_storage == NULL)
-      {
-        return status;
-      }
-
-      T *d_block_reductions = (T*) allocations[0];
-      cub::GridQueue<GridSizeType> queue(allocations[1]);
-      char *vshmem_ptr = vshmem_size > 0 ? (char *)allocations[2] : NULL;
-
-
-      // Get grid size for device_reduce_sweep_kernel
-      int reduce_grid_size = 0;
-      if (reduce_plan.grid_mapping == cub::GRID_MAPPING_RAKE)
-      {
-        // Work is distributed evenly
-        reduce_grid_size = even_share.grid_size;
-      }
-      else if (reduce_plan.grid_mapping == cub::GRID_MAPPING_DYNAMIC)
-      {
-        // Work is distributed dynamically
-        size_t num_tiles = (num_items + reduce_plan.items_per_tile - 1) /
-          reduce_plan.items_per_tile;
-
-        // if not enough to fill the device with threadblocks
-        // then fill the device with threadblocks
-        reduce_grid_size = static_cast<int>(min(num_tiles, static_cast<size_t>(reduce_device_occupancy)));
-
-        typedef AgentLauncher<__reduce::DrainAgent<Size> > drain_agent;
-        AgentPlan drain_plan = drain_agent::get_plan();
-        drain_plan.grid_size = 1;
-        drain_agent da(drain_plan, stream, "__reduce::drain_agent", debug_sync);
-        da.launch(queue, num_items);
-        auto error = hipPeekAtLastError();
-        if (error != hipSuccess) return error;
-      }
-      else
-      {
-        CUDA_CUB_RET_IF_FAIL(cudaErrorNotSupported);
-      }
-
-      reduce_plan.grid_size = reduce_grid_size;
-      reduce_agent ra(reduce_plan, stream, vshmem_ptr, "reduce_agent: regular size reduce", debug_sync);
-      ra.launch(input_it,
-                d_block_reductions,
-                num_items,
-                even_share,
-                queue,
-                reduction_op);
-      auto error = hipPeekAtLastError();
-      if (error != hipSuccess) return error;
-
-
-      typedef AgentLauncher<
-        __reduce::ReduceAgent<T*, OutputIt, T, Size, ReductionOp> >
-        reduce_agent_single;
-
-      reduce_plan.grid_size = 1;
-      reduce_agent_single ra1(reduce_plan, stream, vshmem_ptr, "reduce_agent: single tile reduce", debug_sync);
-
-      ra1.launch(d_block_reductions, output_it, reduce_grid_size, reduction_op);
-      auto error = hipPeekAtLastError();
-      if (error != hipSuccess) return error;
-    }
-
-    return status;
-  }    // func doit_step
-
-  // this is an init-less reduce, needed for min/max-element functionality
-  // this will avoid copying the first value from device->host
-  template <class Derived,
-            class InputIt,
-            class Size,
-            class BinaryOp,
-            class T>
-  T CUB_RUNTIME_FUNCTION
-  extrema(execution_policy<Derived> &policy,
-          InputIt                    first,
-          Size                       num_items,
-          BinaryOp                   binary_op,
-          T *)
-
-  {
-    char *       d_temp_storage     = NULL;
-    size_t       temp_storage_bytes = 0;
-    hipStream_t  stream             = hip_rocprim::stream(policy);
-    T *          d_result           = NULL;
-    bool         debug_sync         = THRUST_DEBUG_SYNC_FLAG;
-
-    cudaError_t status;
-    status = doit_step<T>(d_temp_storage,
-                          temp_storage_bytes,
-                          first,
-                          num_items,
-                          binary_op,
-                          d_result,
-                          stream,
-                          debug_sync);
-    cuda_cub::throw_on_error(status, "extrema failed on 1st step");
-
-    size_t allocation_sizes[2] = {sizeof(T*), temp_storage_bytes};
-    void * allocations[2]      = {NULL, NULL};
-
-    size_t storage_size = 0;
-    status = core::alias_storage(NULL,
-                                 storage_size,
-                                 allocations,
-                                 allocation_sizes);
-
-    void *ptr = cuda_cub::get_memory_buffer(policy, storage_size);
-    cuda_cub::throw_on_error(cudaGetLastError(),
-                             "extrema failed to get memory buffer");
-    
-    status = core::alias_storage(ptr,
-                                 storage_size,
-                                 allocations,
-                                 allocation_sizes);
-
-    d_result           = (T *)allocations[0];
-    d_temp_storage     = (char *)allocations[1];
-
-    status = doit_step<T>(d_temp_storage,
-                          temp_storage_bytes,
-                          first,
-                          num_items,
-                          binary_op,
-                          d_result,
-                          stream,
-                          debug_sync);
-    cuda_cub::throw_on_error(status, "extrema failed on 2nd step");
-    
-    status = cuda_cub::synchronize(policy);
-    cuda_cub::throw_on_error(status, "extrema failed to synchronize");
-
-    T result = cuda_cub::get_value(policy, d_result);
-
-    cuda_cub::return_memory_buffer(policy, ptr);
-    hip_rocprim::throw_on_error(cudaGetLastError(),
-                             "extrema failed to return memory buffer");
-
-    return result;
-  }
-
-  template <template <class, class, class> class ArgFunctor,
-            class Derived,
-            class ItemsIt,
-            class BinaryPred>
-  ItemsIt CUB_RUNTIME_FUNCTION
-  element(execution_policy<Derived> &policy,
-          ItemsIt                    first,
-          ItemsIt                    last,
-          BinaryPred                 binary_pred)
-  {
-    if (first == last)
-      return last;
-
-    typedef typename iterator_traits<ItemsIt>::value_type      InputType;
-    typedef typename iterator_traits<ItemsIt>::difference_type IndexType;
-
-    IndexType num_items = static_cast<IndexType>(thrust::distance(first, last));
-
-    typedef tuple<ItemsIt, counting_iterator_t<IndexType> > iterator_tuple;
-    typedef zip_iterator<iterator_tuple> zip_iterator;
-
-    iterator_tuple iter_tuple = make_tuple(first, counting_iterator_t<IndexType>(0));
-
-
-    typedef ArgFunctor<InputType, IndexType, BinaryPred> arg_min_t;
-    typedef tuple<InputType, IndexType> T;
-
-    zip_iterator begin = make_zip_iterator(iter_tuple);
-
-    T result = extrema(policy,
-                       begin,
-                       num_items,
-                       arg_min_t(binary_pred),
-                       (T *)(NULL));
-    return first + thrust::get<1>(result);
-  }
-
-
-}    // namespace __extrema
 
 /// min element
 
+// custom reduce function
+/*auto min_op =
+    [] __host__ __device__ (int a, int b) -> int
+    {
+       return a < b ? a : b;
+    };*/
+    
 __thrust_exec_check_disable__
 template <class Derived,
           class ItemsIt,
@@ -433,10 +60,20 @@ min_element(execution_policy<Derived> &policy,
 {
   ItemsIt ret = first;
 #if __THRUST_HAS_HIPRT__
-    ret = __extrema::element<__extrema::arg_min_f>(policy,
-                                                   first,
-                                                   last,
-                                                   binary_pred);
+    ItemsIt* ret_ptr = NULL;
+    size_t tmp_size = 0;
+    const ItemsIt& start_value = first;
+    size_t count_values = last - first;
+/*    hip_rocprim::throw_on_error(
+      rocprim::reduce(nullptr,
+                      tmp_size,
+                      first,
+                      ret_ptr,
+                      start_value,
+                      count_values,
+                      binary_pred),
+      "min reduction");*/
+    
 #else // __THRUST_HAS_HIPRT__
     ret = thrust::min_element(cvt_to_seq(derived_cast(policy)),
                               first,
@@ -472,10 +109,10 @@ max_element(execution_policy<Derived> &policy,
 {
   ItemsIt ret = first;
 #if __THRUST_HAS_HIPRT__
-  ret = __extrema::element<__extrema::arg_max_f>(policy,
+/*  ret = __extrema::element<__extrema::arg_max_f>(policy,
                                                  first,
                                                  last,
-                                                 binary_pred);
+                                                 binary_pred);*/
 #else // __THRUST_HAS_HIPRT__
   ret = thrust::max_element(cvt_to_seq(derived_cast(policy)),
                             first,
@@ -511,7 +148,7 @@ minmax_element(execution_policy<Derived> &policy,
   pair<ItemsIt, ItemsIt> ret = thrust::make_pair(first, first);
 
 #if __THRUST_HAS_HIPRT__
-  if (first == last)
+/*  if (first == last)
     return thrust::make_pair(last, last);
 
   typedef typename iterator_traits<ItemsIt>::value_type      InputType;
@@ -539,7 +176,7 @@ minmax_element(execution_policy<Derived> &policy,
                                              arg_minmax_t(binary_pred),
                                              (two_pairs_type *)(NULL));
   ret = thrust::make_pair(first + get<1>(get<0>(result)),
-                          first + get<1>(get<1>(result)));
+                          first + get<1>(get<1>(result))); */
 #else // __THRUST_HAS_HIPRT__
   ret = thrust::minmax_element(cvt_to_seq(derived_cast(policy)),
                                first,
