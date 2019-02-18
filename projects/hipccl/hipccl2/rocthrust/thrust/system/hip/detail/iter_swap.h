@@ -34,14 +34,10 @@ void iter_swap(thrust::hip::execution_policy<DerivedPolicy> &, Pointer1 a, Point
 {
 #if defined(THRUST_HIP_DEVICE_CODE)
 
-  /*THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((
-    thrust::swap<typename detail::pointer_element<Pointer1>::type, typename detail::pointer_element<Pointer2>::type>
-  ));*/
-
-  using thrust::swap;
-  void (*fptr)(typename detail::pointer_element<Pointer1>::type&, typename detail::pointer_element<Pointer2>::type&) = swap;
+  Pointer2 (*fptr)(Pointer1, Pointer1, Pointer2) = thrust::swap_ranges;
   (void) fptr;
 
+  using thrust::swap;
   swap(*thrust::raw_pointer_cast(a),
        *thrust::raw_pointer_cast(b));
 
@@ -51,7 +47,6 @@ void iter_swap(thrust::hip::execution_policy<DerivedPolicy> &, Pointer1 a, Point
 
 #endif
 } // end iter_swap()
-
 
 } // end hip_rocprim
 END_NS_THRUST
