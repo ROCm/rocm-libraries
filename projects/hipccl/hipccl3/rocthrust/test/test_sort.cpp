@@ -31,6 +31,8 @@
 #include <thrust/detail/seq.h>
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
+#include <thrust/functional.h>
+#include <thrust/iterator/retag.h>
 
 #include "test_utils.hpp"
 
@@ -65,7 +67,39 @@ typedef ::testing::Types<
 
 TYPED_TEST_CASE(SortTests, SortTestsParams);
 
+template< class InputType >
+struct ParamsVector
+{
+    using input_type = InputType;
+};
 
+template<class ParamsVector>
+class SortVector : public ::testing::Test
+{
+public:
+    using input_type = typename ParamsVector::input_type;
+};
+
+typedef ::testing::Types<
+    ParamsVector<thrust::host_vector<short>>,
+    ParamsVector<thrust::host_vector<int>>,
+    ParamsVector<thrust::host_vector<long long>>,
+    ParamsVector<thrust::host_vector<unsigned short>>,
+    ParamsVector<thrust::host_vector<unsigned int>>,
+    ParamsVector<thrust::host_vector<unsigned long long>>,
+    ParamsVector<thrust::host_vector<float>>,
+    ParamsVector<thrust::host_vector<double>>,
+    ParamsVector<thrust::device_vector<short>>,
+    ParamsVector<thrust::device_vector<int>>,
+    ParamsVector<thrust::device_vector<long long>>,
+    ParamsVector<thrust::device_vector<unsigned short>>,
+    ParamsVector<thrust::device_vector<unsigned int>>,
+    ParamsVector<thrust::device_vector<unsigned long long>>,
+    ParamsVector<thrust::device_vector<float>>,
+    ParamsVector<thrust::device_vector<double>>
+> SortVectorParams;
+
+TYPED_TEST_CASE(SortVector, SortVectorParams);
 
 TYPED_TEST(SortTests, Sort)
 {
@@ -238,4 +272,140 @@ TYPED_TEST(SortTests, StableSortByKey)
       ASSERT_EQ(h_values[i], expected_values[i]) << "where index = " << i;
     }
   }
+}
+
+template<typename RandomAccessIterator>
+void sort(my_system &system, RandomAccessIterator, RandomAccessIterator)
+{
+  system.validate_dispatch();
+}
+
+TEST(SortTests, TestSortDispatchExplicit)
+{
+  thrust::device_vector<int> vec(1);
+
+  my_system sys(0);
+  thrust::sort(sys, vec.begin(), vec.begin());
+
+  ASSERT_EQ(true, sys.is_valid());
+}
+
+template<typename RandomAccessIterator>
+void sort(my_tag, RandomAccessIterator first, RandomAccessIterator)
+{
+  *first = 13;
+}
+
+TEST(SortTests, TestSortDispatchImplicit)
+{
+  thrust::device_vector<int> vec(1);
+
+  thrust::sort(thrust::retag<my_tag>(vec.begin()),
+               thrust::retag<my_tag>(vec.begin()));
+
+  ASSERT_EQ(13, vec.front());
+}
+
+template <class Vector>
+void InitializeSimpleKeySortTest(Vector& unsorted_keys, Vector& sorted_keys)
+{
+  using T = typename Vector::value_type;
+
+  unsorted_keys.resize(7);
+  unsorted_keys[0] = T(1);
+  unsorted_keys[1] = T(3);
+  unsorted_keys[2] = T(6);
+  unsorted_keys[3] = T(5);
+  unsorted_keys[4] = T(2);
+  unsorted_keys[5] = T(0);
+  unsorted_keys[6] = T(4);
+
+  sorted_keys.resize(7);
+  sorted_keys[0] = T(0);
+  sorted_keys[1] = T(1);
+  sorted_keys[2] = T(2);
+  sorted_keys[3] = T(3);
+  sorted_keys[4] = T(4);
+  sorted_keys[5] = T(5);
+  sorted_keys[6] = T(6);
+}
+
+TYPED_TEST(SortVector, TestSortSimple)
+{
+  using Vector = typename TestFixture::input_type;
+
+  Vector unsorted_keys;
+  Vector   sorted_keys;
+
+  InitializeSimpleKeySortTest(unsorted_keys, sorted_keys);
+
+  thrust::sort(unsorted_keys.begin(), unsorted_keys.end());
+
+  ASSERT_EQ(unsorted_keys, sorted_keys);
+}
+
+TYPED_TEST(SortVector, TestSortAscendingKey)
+{
+  using Vector = typename TestFixture::input_type;
+  using T = typename Vector::value_type;
+
+  for (auto size : get_sizes())
+  {
+    thrust::host_vector<T> h_data = get_random_data<T>(size,
+                                                       std::numeric_limits<T>::min(),
+                                                       std::numeric_limits<T>::max());
+    thrust::device_vector<T> d_data = h_data;
+
+    thrust::sort(h_data.begin(), h_data.end(), thrust::less<T>());
+    thrust::sort(d_data.begin(), d_data.end(), thrust::less<T>());
+
+    ASSERT_EQ(h_data, d_data);
+  }
+}
+
+TEST(SortTests, TestSortDescendingKey)
+{
+  const size_t size = 10027;
+
+  thrust::host_vector<int>   h_data = get_random_data<int>(size,
+                                                           std::numeric_limits<int>::min(),
+                                                           std::numeric_limits<int>::max());
+  thrust::device_vector<int> d_data = h_data;
+
+  thrust::sort(h_data.begin(), h_data.end(), thrust::greater<int>());
+  thrust::sort(d_data.begin(), d_data.end(), thrust::greater<int>());
+
+  ASSERT_EQ(h_data, d_data);
+}
+
+TEST(SortTests, TestSortBool)
+{
+  const size_t size = 10027;
+
+  thrust::host_vector<bool> h_data = get_random_data<bool>(size,
+                                                           std::numeric_limits<bool>::min(),
+                                                           std::numeric_limits<bool>::max());
+
+  thrust::device_vector<bool> d_data = h_data;
+
+  thrust::sort(h_data.begin(), h_data.end());
+  thrust::sort(d_data.begin(), d_data.end());
+
+  ASSERT_EQ(h_data, d_data);
+}
+
+TEST(SortTests, TestSortBoolDescending)
+{
+  const size_t size = 10027;
+
+  thrust::host_vector<bool>   h_data = get_random_data<bool>(size,
+                                                             std::numeric_limits<bool>::min(),
+                                                             std::numeric_limits<bool>::max());
+
+  thrust::device_vector<bool> d_data = h_data;
+
+  thrust::sort(h_data.begin(), h_data.end(), thrust::greater<bool>());
+  thrust::sort(d_data.begin(), d_data.end(), thrust::greater<bool>());
+
+  ASSERT_EQ(h_data, d_data);
 }
