@@ -27,8 +27,6 @@
 #include <thrust/extrema.h>
 #include <thrust/iterator/retag.h>
 
-#include <unittest/unittest.h>
-
 // HIP API
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 #include <hip/hip_runtime_api.h>
@@ -146,7 +144,7 @@ TYPED_TEST(MinElementTests, TestMinElement)
 }
 
 template<typename ForwardIterator>
-ForwardIterator min_element(my_tag, ForwardIterator first, ForwardIterator)
+ForwardIterator min_element(my_system &system, ForwardIterator first, ForwardIterator)
 {
     return first;
 }
