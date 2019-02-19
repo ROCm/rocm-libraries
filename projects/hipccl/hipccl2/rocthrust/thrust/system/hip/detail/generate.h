@@ -25,3 +25,55 @@
  *
  ******************************************************************************/
 #pragma once
+
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+
+#include <thrust/distance.h>
+#include <iterator>
+#include <thrust/system/hip/config.h>
+#include <thrust/system/hip/detail/for_each.h>
+
+BEGIN_NS_THRUST
+namespace hip_rocprim
+{
+
+    // for_each functor
+    template<class Generator> struct generate_f
+    {
+        Generator generator;
+
+        THRUST_HIP_FUNCTION generate_f(Generator generator_) :
+                generator(generator_)
+        {
+        }
+
+        template<class T> THRUST_HIP_DEVICE_FUNCTION void operator()(T const& value)
+        {
+            T& lvalue = const_cast<T&>(value);
+            lvalue = generator();
+        }
+    };
+
+    // for_each_n
+    template<class Derived, class OutputIt, class Size, class Generator>
+    OutputIt __host__ __device__
+    generate_n(execution_policy <Derived>& policy, OutputIt result, Size count,
+               Generator generator)
+    {
+        return hip_rocprim::for_each_n(
+                policy, result, count, generate_f<Generator>(generator));
+    }
+
+    // for_each
+    template<class Derived, class OutputIt, class Generator> void __host__ __device__
+    generate(execution_policy <Derived>& policy, OutputIt first, OutputIt last,
+             Generator generator)
+    {
+        hip_rocprim::generate_n(
+                policy, first, thrust::distance(first, last), generator);
+    }
+
+
+}    // namespace hip_rocprim
+END_NS_THRUST
+#endif //THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
