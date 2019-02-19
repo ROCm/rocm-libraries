@@ -87,19 +87,9 @@ TYPED_TEST(VectorManipulationTests, TestVectorManipulation)
   const std::vector<size_t> sizes = get_sizes();
   for(auto size : sizes)
   {
-    thrust::host_vector<T> src;
-    if (std::is_floating_point<T>::value)
-    {
-      src = get_random_data<T>(size, (T)-1000, (T)+1000);
-    }
-    else
-    {
-      src = get_random_data<T>(
-        size,
-        std::numeric_limits<T>::min(),
-        std::numeric_limits<T>::max()
-      );
-    }
+    thrust::host_vector<T> src = get_random_data<T>(size,
+                                                    std::numeric_limits<T>::min(),
+                                                    std::numeric_limits<T>::max());
 
     ASSERT_EQ(src.size(), size);
 
