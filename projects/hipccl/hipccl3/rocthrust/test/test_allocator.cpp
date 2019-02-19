@@ -91,7 +91,7 @@ TEST(AllocatorTests, TestAllocatorCustomCopyConstruct)
   ASSERT_EQ(ref, vec);
 }
 
-/*static int g_state;
+static int g_state;
 
 struct my_allocator_with_custom_destroy
 {
@@ -100,21 +100,23 @@ struct my_allocator_with_custom_destroy
   typedef const int & const_reference;
 
   __host__
-  my_allocator_with_custom_destroy(){}
+  my_allocator_with_custom_destroy() restrict(amp, cpu){}
 
   __host__
-  my_allocator_with_custom_destroy(const my_allocator_with_custom_destroy &other)
+  my_allocator_with_custom_destroy(const my_allocator_with_custom_destroy &other) restrict(amp, cpu)
     : use_me_to_alloc(other.use_me_to_alloc)
   {}
 
   __host__
-  ~my_allocator_with_custom_destroy(){}
+  ~my_allocator_with_custom_destroy() restrict(amp, cpu){}
 
   template<typename T>
   __host__ __device__
   void destroy(T*)
   {
+#if !defined(THRUST_HIP_DEVICE_CODE)
     g_state = 13;
+#endif
   }
 
   value_type *allocate(std::ptrdiff_t n)
@@ -153,15 +155,15 @@ struct my_minimal_allocator
   typedef const int & const_reference;
 
   __host__
-  my_minimal_allocator(){}
+  my_minimal_allocator() restrict(amp, cpu){}
 
   __host__
-  my_minimal_allocator(const my_minimal_allocator &other)
+  my_minimal_allocator(const my_minimal_allocator &other) restrict(amp, cpu)
     : use_me_to_alloc(other.use_me_to_alloc)
   {}
 
   __host__
-  ~my_minimal_allocator(){}
+  ~my_minimal_allocator() restrict(amp, cpu){}
 
   value_type *allocate(std::ptrdiff_t n)
   {
@@ -185,6 +187,6 @@ TEST(AllocatorTests, TestAllocatorMinimal)
   thrust::host_vector<int> ref(10, 13);
 
   ASSERT_EQ(ref, h_vec);
-}*/
+}
 
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
