@@ -29,12 +29,8 @@
 #include <gtest/gtest.h>
 
 // Thrust
-#include <thrust/memory.h>
-#include <thrust/transform.h>
-// STREAMHPC TODO replace <thrust/detail/seq.h> with <thrust/execution_policy.h>
-#include <thrust/detail/seq.h>
-#include <thrust/device_ptr.h>
 #include <thrust/device_vector.h>
+#include <thrust/device_reference.h>
 
 // HIP API
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
@@ -90,8 +86,6 @@ typedef ::testing::Types<
 
 TYPED_TEST_CASE(DeviceReferenceIntegerTests, DeviceReferenceIntegerTestsParams);
 
-
-
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
 TYPED_TEST(DeviceReferenceTests, TestDeviceReferenceConstructorFromDeviceReference)
@@ -143,8 +137,7 @@ TYPED_TEST(DeviceReferenceTests, TestDeviceReferenceConstructorFromDevicePointer
   ASSERT_EQ(v[0], ref);
 }
 
-// TODO: No device code available for function: _ZN7rocprim6detail16transform_kernelILj256ELj16ERKjN6thrust10device_ptrIjEES6_NS4_8identityIjEEEEvT2_mT3_T4_
-/*TEST(DeviceReferenceTests, TestDeviceReferenceAssignmentFromDeviceReference)
+TEST(DeviceReferenceTests, TestDeviceReferenceAssignmentFromDeviceReference)
 {
   // test same types
   using T0 = int;
@@ -171,7 +164,7 @@ TYPED_TEST(DeviceReferenceTests, TestDeviceReferenceConstructorFromDevicePointer
   ASSERT_EQ(13.0f, ref2);
   ASSERT_EQ(ref0, ref2);
   ASSERT_EQ(ref1, ref2);
-}*/
+}
 
 TYPED_TEST(DeviceReferenceTests,TestDeviceReferenceManipulation)
 {
@@ -308,27 +301,26 @@ TYPED_TEST(DeviceReferenceIntegerTests,TestDeviceReferenceIntegerManipulation)
   ASSERT_EQ(true, ref1 == ref);
 }
 
-// TODO: Implement swap_ranges
-/*TYPED_TEST(DeviceReferenceTests,TestDeviceReferenceSwap)
+TYPED_TEST(DeviceReferenceTests,TestDeviceReferenceSwap)
 {
-    using T = typename TestFixture::input_type;
+  using T = typename TestFixture::input_type;
 
-    thrust::device_vector<T> v(T(2));
-    thrust::device_reference<T> ref1 = v.front();
-    thrust::device_reference<T> ref2 = v.back();
+  thrust::device_vector<T> v(T(2));
+  thrust::device_reference<T> ref1 = v.front();
+  thrust::device_reference<T> ref2 = v.back();
 
-    ref1 = T(7);
-    ref2 = T(13);
+  ref1 = T(7);
+  ref2 = T(13);
 
-    // test thrust::swap()
-    thrust::swap(ref1, ref2);
-    ASSERT_EQ(T(13), ref1);
-    ASSERT_EQ(T(7), ref2);
+  // test thrust::swap()
+  thrust::swap(ref1, ref2);
+  ASSERT_EQ(T(13), ref1);
+  ASSERT_EQ(T(7), ref2);
 
-    // test .swap()
-    ref1.swap(ref2);
-    ASSERT_EQ(T(7), ref1);
-    ASSERT_EQ(T(13), ref2);
-}*/
+  // test .swap()
+  ref1.swap(ref2);
+  ASSERT_EQ(T(7), ref1);
+  ASSERT_EQ(T(13), ref2);
+}
 
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
