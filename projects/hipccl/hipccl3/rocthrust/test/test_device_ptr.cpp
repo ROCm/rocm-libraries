@@ -24,12 +24,8 @@
 #include <gtest/gtest.h>
 
 // Thrust
-#include <thrust/memory.h>
-#include <thrust/transform.h>
-// STREAMHPC TODO replace <thrust/detail/seq.h> with <thrust/execution_policy.h>
-#include <thrust/detail/seq.h>
-#include <thrust/device_ptr.h>
 #include <thrust/device_vector.h>
+#include <thrust/device_ptr.h>
 
 // HIP API
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
@@ -57,6 +53,34 @@ public:
 };
 
 typedef ::testing::Types<
+    Params<thrust::host_vector<short>>,
+    Params<thrust::host_vector<int>>,
+    Params<thrust::host_vector<long long>>,
+    Params<thrust::host_vector<unsigned short>>,
+    Params<thrust::host_vector<unsigned int>>,
+    Params<thrust::host_vector<unsigned long long>>,
+    Params<thrust::host_vector<float>>,
+    Params<thrust::host_vector<double>>,
+    Params<thrust::device_vector<short>>,
+    Params<thrust::device_vector<int>>,
+    Params<thrust::device_vector<long long>>,
+    Params<thrust::device_vector<unsigned short>>,
+    Params<thrust::device_vector<unsigned int>>,
+    Params<thrust::device_vector<unsigned long long>>,
+    Params<thrust::device_vector<float>>,
+    Params<thrust::device_vector<double>>
+> DevicePtrTestsParams;
+
+TYPED_TEST_CASE(DevicePtrTests, DevicePtrTestsParams);
+
+template<class Params>
+class DevicePtrPrimitiveTests : public ::testing::Test
+{
+public:
+    using input_type = typename Params::input_type;
+};
+
+typedef ::testing::Types<
     Params<short>,
     Params<int>,
     Params<long long>,
@@ -65,20 +89,65 @@ typedef ::testing::Types<
     Params<unsigned long long>,
     Params<float>,
     Params<double>
-> DevicePtrTestsParams;
+> DevicePtrPrimitiveTestsParams;
 
-TYPED_TEST_CASE(DevicePtrTests, DevicePtrTestsParams);
+TYPED_TEST_CASE(DevicePtrPrimitiveTests, DevicePtrPrimitiveTestsParams);
 
 template <typename T>
 struct mark_processed_functor
 {
-    thrust::device_ptr<T> ptr;
-    __host__ __device__ void operator()(size_t x){ ptr[x] = 1; }
+  thrust::device_ptr<T> ptr;
+  __host__ __device__ void operator()(size_t x){ ptr[x] = 1; }
 };
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
-TYPED_TEST(DevicePtrTests, MakeDevicePointer)
+TEST(DevicePtrTests,TestDevicePointerManipulation)
+{
+  thrust::device_vector<int> data(5);
+
+  thrust::device_ptr<int> begin(&data[0]);
+  thrust::device_ptr<int> end(&data[0] + 5);
+
+  ASSERT_EQ(end - begin, 5);
+
+  begin++;
+  begin--;
+
+  ASSERT_EQ(end - begin, 5);
+
+  begin += 1;
+  begin -= 1;
+
+  ASSERT_EQ(end - begin, 5);
+
+  begin = begin + (int) 1;
+  begin = begin - (int) 1;
+
+  ASSERT_EQ(end - begin, 5);
+
+  begin = begin + (unsigned int) 1;
+  begin = begin - (unsigned int) 1;
+
+  ASSERT_EQ(end - begin, 5);
+
+  begin = begin + (size_t) 1;
+  begin = begin - (size_t) 1;
+
+  ASSERT_EQ(end - begin, 5);
+
+  begin = begin + (ptrdiff_t) 1;
+  begin = begin - (ptrdiff_t) 1;
+
+  ASSERT_EQ(end - begin, 5);
+
+  begin = begin + (thrust::device_ptr<int>::difference_type) 1;
+  begin = begin - (thrust::device_ptr<int>::difference_type) 1;
+
+  ASSERT_EQ(end - begin, 5);
+}
+
+TYPED_TEST(DevicePtrPrimitiveTests, MakeDevicePointer)
 {
   using T = typename TestFixture::input_type;
 
@@ -90,69 +159,26 @@ TYPED_TEST(DevicePtrTests, MakeDevicePointer)
   ASSERT_EQ(p0, p1);
 }
 
-TEST(DevicePtrTests,TestDevicePointerManipulation)
-{
-    thrust::device_vector<int> data(5);
-
-    thrust::device_ptr<int> begin(&data[0]);
-    thrust::device_ptr<int> end(&data[0] + 5);
-
-    ASSERT_EQ(end - begin, 5);
-
-    begin++;
-    begin--;
-
-    ASSERT_EQ(end - begin, 5);
-
-    begin += 1;
-    begin -= 1;
-
-    ASSERT_EQ(end - begin, 5);
-
-    begin = begin + (int) 1;
-    begin = begin - (int) 1;
-
-    ASSERT_EQ(end - begin, 5);
-
-    begin = begin + (unsigned int) 1;
-    begin = begin - (unsigned int) 1;
-
-    ASSERT_EQ(end - begin, 5);
-
-    begin = begin + (size_t) 1;
-    begin = begin - (size_t) 1;
-
-    ASSERT_EQ(end - begin, 5);
-
-    begin = begin + (ptrdiff_t) 1;
-    begin = begin - (ptrdiff_t) 1;
-
-    ASSERT_EQ(end - begin, 5);
-
-    begin = begin + (thrust::device_ptr<int>::difference_type) 1;
-    begin = begin - (thrust::device_ptr<int>::difference_type) 1;
-
-    ASSERT_EQ(end - begin, 5);
-}
-
 TYPED_TEST(DevicePtrTests,TestRawPointerCast)
 {
-    using T = typename TestFixture::input_type;
-    thrust::device_vector<T> vec(3);
+  using Vector = typename TestFixture::input_type;
+  using T = typename Vector::value_type;
 
-    T * first;
-    T * last;
+  Vector vec(3);
 
-    first = thrust::raw_pointer_cast(&vec[0]);
-    last  = thrust::raw_pointer_cast(&vec[3]);
-    ASSERT_EQ(last - first, 3);
+  T * first;
+  T * last;
 
-    first = thrust::raw_pointer_cast(&vec.front());
-    last  = thrust::raw_pointer_cast(&vec.back());
-    ASSERT_EQ(last - first, 2);
+  first = thrust::raw_pointer_cast(&vec[0]);
+  last  = thrust::raw_pointer_cast(&vec[3]);
+  ASSERT_EQ(last - first, 3);
+
+  first = thrust::raw_pointer_cast(&vec.front());
+  last  = thrust::raw_pointer_cast(&vec.back());
+  ASSERT_EQ(last - first, 2);
 }
 
-TYPED_TEST(DevicePtrTests, TestDevicePointerValue)
+TYPED_TEST(DevicePtrPrimitiveTests, TestDevicePointerValue)
 {
   using T = typename TestFixture::input_type;
 

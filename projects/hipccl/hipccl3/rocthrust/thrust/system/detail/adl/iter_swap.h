@@ -30,6 +30,7 @@
 #if 0
 #include <thrust/system/cpp/detail/iter_swap.h>
 #include <thrust/system/cuda/detail/iter_swap.h>
+#include <thrust/system/hip/detail/iter_swap.h>
 #include <thrust/system/omp/detail/iter_swap.h>
 #include <thrust/system/tbb/detail/iter_swap.h>
 #endif
@@ -41,4 +42,3 @@
 #define __THRUST_DEVICE_SYSTEM_ITER_SWAP_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/detail/iter_swap.h>
 #include __THRUST_DEVICE_SYSTEM_ITER_SWAP_HEADER
 #undef __THRUST_DEVICE_SYSTEM_ITER_SWAP_HEADER
-

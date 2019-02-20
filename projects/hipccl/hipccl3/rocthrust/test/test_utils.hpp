@@ -39,12 +39,24 @@ std::vector<size_t> get_sizes()
 }
 
 template<class T>
-inline auto get_random_data(size_t size, T min, T max)
-  -> typename std::enable_if<rocprim::is_integral<T>::value, thrust::host_vector<T>>::type
+inline auto get_random_data(size_t size, T, T)
+  -> typename std::enable_if<std::is_same<T,bool>::value, thrust::host_vector<T>>::type
 {
   std::random_device rd;
   std::default_random_engine gen(rd());
-  std::uniform_int_distribution<T> distribution(min, max);
+  std::bernoulli_distribution distribution(0.5);
+  thrust::host_vector<T> data(size);
+  std::generate(data.begin(), data.end(), [&]() { return distribution(gen); });
+  return data;
+}
+
+template<class T>
+inline auto get_random_data(size_t size, T min, T max)
+  -> typename std::enable_if<rocprim::is_integral<T>::value && !std::is_same<T,bool>::value, thrust::host_vector<T>>::type
+{
+  std::random_device rd;
+  std::default_random_engine gen(rd());
+    std::uniform_int_distribution<T> distribution(min, max);
   thrust::host_vector<T> data(size);
   std::generate(data.begin(), data.end(), [&]() { return distribution(gen); });
   return data;

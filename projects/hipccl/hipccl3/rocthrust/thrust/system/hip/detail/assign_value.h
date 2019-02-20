@@ -32,9 +32,13 @@ template<typename DerivedPolicy, typename Pointer1, typename Pointer2>
 inline __host__ __device__
   void assign_value(thrust::hip::execution_policy<DerivedPolicy> &exec, Pointer1 dst, Pointer2 src)
 {
-  // STREAMHPC TODO add workaround?
-#ifdef __HIP_DEVICE_COMPILE__
-  (void) exec;
+  // STREAMHPC WORKAROUND
+#if defined(THRUST_HIP_DEVICE_CODE)
+
+  THRUST_UNUSED_VAR(exec);
+  Pointer1 (*fptr)(thrust::hip::execution_policy<DerivedPolicy>&, Pointer2, Pointer2, Pointer1) = hip_rocprim::copy;
+  (void) fptr;
+
   *thrust::raw_pointer_cast(dst) = *thrust::raw_pointer_cast(src);
 #else
   hip_rocprim::copy(exec, src, src + 1, dst);
@@ -52,10 +56,11 @@ inline __host__ __device__
   THRUST_UNUSED_VAR(systems);
   Pointer1 (*fptr)(cross_system<System2, System1>, Pointer2, Pointer2, Pointer1) = hip_rocprim::copy;
   (void) fptr;
-
-  thrust::hip::tag hip_tag;
-  thrust::hip_rocprim::assign_value(hip_tag, dst, src);
-
+  // STREAMHPC WORKAROUND build error fixed - start here
+  // thrust::hip::tag hip_tag;
+  // thrust::hip_rocprim::assign_value(hip_tag, dst, src);
+  *thrust::raw_pointer_cast(dst) = *thrust::raw_pointer_cast(src);
+  // STREAMHPC WORKAROUND - end here
 #else
 
   cross_system<System2, System1> rotated_systems = systems.rotate();
