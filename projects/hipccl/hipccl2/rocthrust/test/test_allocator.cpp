@@ -99,16 +99,16 @@ struct my_allocator_with_custom_destroy
   typedef int &       reference;
   typedef const int & const_reference;
 
-  __host__
-  my_allocator_with_custom_destroy() restrict(amp, cpu){}
+  __host__ __device__
+  my_allocator_with_custom_destroy(){}
 
-  __host__
-  my_allocator_with_custom_destroy(const my_allocator_with_custom_destroy &other) restrict(amp, cpu)
+  __host__ __device__
+  my_allocator_with_custom_destroy(const my_allocator_with_custom_destroy &other)
     : use_me_to_alloc(other.use_me_to_alloc)
   {}
 
-  __host__
-  ~my_allocator_with_custom_destroy() restrict(amp, cpu){}
+  __host__ __device__
+  ~my_allocator_with_custom_destroy(){}
 
   template<typename T>
   __host__ __device__
@@ -154,16 +154,16 @@ struct my_minimal_allocator
   typedef int &       reference;
   typedef const int & const_reference;
 
-  __host__
-  my_minimal_allocator() restrict(amp, cpu){}
+  __host__ __device__
+  my_minimal_allocator(){}
 
-  __host__
-  my_minimal_allocator(const my_minimal_allocator &other) restrict(amp, cpu)
+  __host__ __device__
+  my_minimal_allocator(const my_minimal_allocator &other)
     : use_me_to_alloc(other.use_me_to_alloc)
   {}
 
-  __host__
-  ~my_minimal_allocator() restrict(amp, cpu){}
+  __host__ __device__
+  ~my_minimal_allocator(){}
 
   value_type *allocate(std::ptrdiff_t n)
   {
