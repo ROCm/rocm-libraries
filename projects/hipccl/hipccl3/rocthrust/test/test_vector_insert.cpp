@@ -29,13 +29,8 @@
 #include <gtest/gtest.h>
 
 // Thrust
-#include <thrust/memory.h>
-#include <thrust/transform.h>
-// STREAMHPC TODO replace <thrust/detail/seq.h> with <thrust/execution_policy.h>
 #include <thrust/sequence.h>
 #include <thrust/device_malloc_allocator.h>
-#include <thrust/device_vector.h>
-#include <thrust/host_vector.h>
 
 // HIP API
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

@@ -20,18 +20,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <vector>
 #include <list>
-#include <limits>
-#include <utility>
 
 // Google Test
 #include <gtest/gtest.h>
 
 // Thrust
 #include <thrust/memory.h>
-#include <thrust/transform.h>
-// STREAMHPC TODO replace <thrust/detail/seq.h> with <thrust/execution_policy.h>
 #include <thrust/sequence.h>
 #include <thrust/device_malloc_allocator.h>
 #include <thrust/device_vector.h>
@@ -43,6 +38,9 @@
 
 #define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+
+#include "test_utils.hpp"
+#include "test_assertions.hpp"
 
 template<
     class InputType
@@ -150,10 +148,7 @@ TYPED_TEST(VectorTests, TestVectorElementAssignment)
   using Vector = typename TestFixture::input_type;
   using T = typename Vector::value_type;
 
-  // TODO: No device code available for function: _ZN7rocprim6detail16transform_kernelILj256ELj16ERKjN6thrust10device_ptrIjEES6_NS4_8identityIjEEEEvT2_mT3_T4_
-  // Vector v(3);
-  thrust::host_vector<T> v(3);
-
+  Vector v(3);
   v[0] = T(0); v[1] = T(1); v[2] = T(2);
 
   ASSERT_EQ(v[0], T(0));
@@ -166,9 +161,7 @@ TYPED_TEST(VectorTests, TestVectorElementAssignment)
   ASSERT_EQ(v[1], T(11));
   ASSERT_EQ(v[2], T(12));
 
-  // TODO: No device code available for function: _ZN7rocprim6detail16transform_kernelILj256ELj16ERKjN6thrust10device_ptrIjEES6_NS4_8identityIjEEEEvT2_mT3_T4_
-  // Vector w(3);
-  thrust::host_vector<T> w(3);
+  Vector w(3);
   w[0] = v[0];
   w[1] = v[1];
   w[2] = v[2];
@@ -262,9 +255,7 @@ TYPED_TEST(VectorTests, TestVectorAssignFromBiDirectionalIterator)
   stl_list.push_back(T(1));
   stl_list.push_back(T(2));
 
-  // TODO: No device code available for function: _ZN7rocprim6detail16transform_kernelILj256ELj16ERKjN6thrust10device_ptrIjEES6_NS4_8identityIjEEEEvT2_mT3_T4_
-  // Vector v;
-  thrust::host_vector<int> v;
+  Vector v;
   v.assign(stl_list.begin(), stl_list.end());
 
   ASSERT_EQ(v.size(), 3);
@@ -681,8 +672,7 @@ TYPED_TEST(VectorTests, TestVectorShrinkToFit)
   ASSERT_EQ(   3, v.capacity());
 }
 
-// TODO: fix the LargeStruct test
-/*template <int N>
+template <int N>
 struct LargeStruct
 {
   int data[N];
@@ -705,12 +695,12 @@ TEST(VectorTests, TestVectorContainingLargeType)
   thrust::device_vector<T> dv1;
   thrust::host_vector<T>   hv1;
 
-  ASSERT_EQ(dv1, hv1);
+  ASSERT_EQ_QUIET(dv1, hv1);
 
   thrust::device_vector<T> dv2(20);
   thrust::host_vector<T>   hv2(20);
 
-  ASSERT_EQ(dv2, hv2);
+  ASSERT_EQ_QUIET(dv2, hv2);
 
   // initialize tofirst element to something nonzero
   T ls;
@@ -721,7 +711,7 @@ TEST(VectorTests, TestVectorContainingLargeType)
   thrust::device_vector<T> dv3(20, ls);
   thrust::host_vector<T>   hv3(20, ls);
 
-  ASSERT_EQ(dv3, hv3);
+  ASSERT_EQ_QUIET(dv3, hv3);
 
   // change first element
   ls.data[0] = -13;
@@ -729,8 +719,8 @@ TEST(VectorTests, TestVectorContainingLargeType)
   dv3[2] = ls;
   hv3[2] = ls;
 
-  ASSERT_EQ(dv3, hv3);
-}*/
+  ASSERT_EQ_QUIET(dv3, hv3);
+}
 
 TYPED_TEST(VectorTests, TestVectorReversed)
 {
