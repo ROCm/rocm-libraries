@@ -6,14 +6,15 @@ test:vega20:
     - vega20
     - rocm
 
-# TODO: Disable Fiji
-# test:s9300:
-#   extends: .test
-#   dependencies:
-#     - build:rocm
-#   tags:
-#     - s9300
-#     - rocm
+# Allow Fiji to fail
+test:s9300:
+  extends: .test
+  dependencies:
+    - build:rocm
+  tags:
+    - s9300
+    - rocm
+  allow_failure: true
 
 test:mi25:
   extends: .test
