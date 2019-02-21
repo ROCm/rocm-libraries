@@ -59,13 +59,7 @@ namespace __uninitialized_copy {
       InputType const &in  = raw_reference_cast(input[idx]);
       OutputType &     out = raw_reference_cast(output[idx]);
 
-// STREAMHPC Check if this is a problem for HCC too
-#if defined(__HCC__) && defined(__clang__)
-      // XXX unsafe, but clang is seemngly unable to call in-place new
-      out = in;
-#else
       ::new (static_cast<void *>(&out)) OutputType(in);
-#endif
     }
   };    // struct functor
 

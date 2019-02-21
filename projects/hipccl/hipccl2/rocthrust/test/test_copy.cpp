@@ -20,19 +20,20 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <iostream>
-#include <type_traits>
-#include <cstdlib>
+#include <list>
+#include <iterator>
 
 // Google Test
 #include <gtest/gtest.h>
 
 // Thrust
 #include <thrust/memory.h>
-#include <thrust/for_each.h>
-#include <thrust/device_ptr.h>
+#include <thrust/sequence.h>
+#include <thrust/iterator/zip_iterator.h>
 #include <thrust/iterator/counting_iterator.h>
-#include <thrust/copy.h>
+#include <thrust/iterator/constant_iterator.h>
+#include <thrust/iterator/discard_iterator.h>
+#include <thrust/iterator/retag.h>
 
 // HIP API
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
@@ -42,7 +43,11 @@
 #define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
+#include "test_utils.hpp"
+#include "test_assertions.hpp"
+
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+
 TEST(HipThrustCopy, HostToDevice)
 {
   const size_t size = 256;
@@ -102,4 +107,594 @@ TEST(HipThrustCopy, DeviceToDevice)
   thrust::free(dev_tag, d_ptr1);
   thrust::free(dev_tag, d_ptr2);
 }
+
+template<
+    class InputType
+>
+struct Params
+{
+    using input_type = InputType;
+};
+
+template<class Params>
+class CopyTests : public ::testing::Test
+{
+public:
+    using input_type = typename Params::input_type;
+};
+
+typedef ::testing::Types<
+    Params<thrust::host_vector<short>>,
+    Params<thrust::host_vector<int>>,
+    Params<thrust::host_vector<long long>>,
+    Params<thrust::host_vector<unsigned short>>,
+    Params<thrust::host_vector<unsigned int>>,
+    Params<thrust::host_vector<unsigned long long>>,
+    Params<thrust::host_vector<float>>,
+    Params<thrust::host_vector<double>>,
+    Params<thrust::device_vector<short>>,
+    Params<thrust::device_vector<int>>,
+    Params<thrust::device_vector<long long>>,
+    Params<thrust::device_vector<unsigned short>>,
+    Params<thrust::device_vector<unsigned int>>,
+    Params<thrust::device_vector<unsigned long long>>,
+    Params<thrust::device_vector<float>>,
+    Params<thrust::device_vector<double>>
+> CopyTestsParams;
+
+TYPED_TEST_CASE(CopyTests, CopyTestsParams);
+
+template<class Params>
+class CopyIntegerTests : public ::testing::Test
+{
+public:
+    using input_type = typename Params::input_type;
+};
+
+typedef ::testing::Types<
+    Params<short>,
+    Params<int>,
+    Params<long long>,
+    Params<unsigned short>,
+    Params<unsigned int>,
+    Params<unsigned long long>
+> CopyIntegerTestsParams;
+
+TYPED_TEST_CASE(CopyIntegerTests, CopyIntegerTestsParams);
+
+TEST(CopyTests, TestCopyFromConstIterator)
+{
+  using T = int;
+
+  std::vector<T> v(5);
+  v[0] = T(0); v[1] = T(1); v[2] = T(2); v[3] = T(3); v[4] = T(4);
+
+  std::vector<int>::const_iterator begin = v.begin();
+  std::vector<int>::const_iterator end = v.end();
+
+  // copy to host_vector
+  thrust::host_vector<T> h(5, (T) 10);
+  thrust::host_vector<T>::iterator h_result = thrust::copy(begin, end, h.begin());
+  ASSERT_EQ(h[0], T(0));
+  ASSERT_EQ(h[1], T(1));
+  ASSERT_EQ(h[2], T(2));
+  ASSERT_EQ(h[3], T(3));
+  ASSERT_EQ(h[4], T(4));
+  ASSERT_EQ_QUIET(h_result, h.end());
+
+  // copy to device_vector
+  thrust::device_vector<T> d(5, (T) 10);
+  thrust::device_vector<T>::iterator d_result = thrust::copy(begin, end, d.begin());
+  ASSERT_EQ(d[0], T(0));
+  ASSERT_EQ(d[1], T(1));
+  ASSERT_EQ(d[2], T(2));
+  ASSERT_EQ(d[3], T(3));
+  ASSERT_EQ(d[4], T(4));
+  ASSERT_EQ_QUIET(d_result, d.end());
+}
+
+TEST(CopyTests, TestCopyToDiscardIterator)
+{
+  using T = int;
+
+  thrust::host_vector<T> h_input(5,1);
+  thrust::device_vector<T> d_input = h_input;
+
+  thrust::discard_iterator<> reference(5);
+
+  // copy from host_vector
+  thrust::discard_iterator<> h_result =
+    thrust::copy(h_input.begin(), h_input.end(), thrust::make_discard_iterator());
+
+  // copy from device_vector
+  thrust::discard_iterator<> d_result =
+    thrust::copy(d_input.begin(), d_input.end(), thrust::make_discard_iterator());
+
+  ASSERT_EQ_QUIET(reference, h_result);
+  ASSERT_EQ_QUIET(reference, d_result);
+}
+
+TEST(CopyTests, TestCopyToDiscardIteratorZipped)
+{
+  using T = int;
+
+  thrust::host_vector<T> h_input(5,1);
+  thrust::device_vector<T> d_input = h_input;
+
+  thrust::host_vector<T>     h_output(5);
+  thrust::device_vector<T>   d_output(5);
+  thrust::discard_iterator<> reference(5);
+
+  using  Tuple1 = thrust::tuple<thrust::discard_iterator<>,thrust::host_vector<T>::iterator>;
+  using  Tuple2 = thrust::tuple<thrust::discard_iterator<>,thrust::device_vector<T>::iterator>;
+
+  using ZipIterator1 = thrust::zip_iterator<Tuple1>;
+  using ZipIterator2 = thrust::zip_iterator<Tuple2>;
+
+  // copy from host_vector
+  ZipIterator1 h_result =
+    thrust::copy(thrust::make_zip_iterator(thrust::make_tuple(h_input.begin(),                 h_input.begin())),
+                 thrust::make_zip_iterator(thrust::make_tuple(h_input.end(),                   h_input.end())),
+                 thrust::make_zip_iterator(thrust::make_tuple(thrust::make_discard_iterator(), h_output.begin())));
+
+  // copy from device_vector
+  ZipIterator2 d_result =
+    thrust::copy(thrust::make_zip_iterator(thrust::make_tuple(d_input.begin(),                 d_input.begin())),
+                 thrust::make_zip_iterator(thrust::make_tuple(d_input.end(),                   d_input.end())),
+                 thrust::make_zip_iterator(thrust::make_tuple(thrust::make_discard_iterator(), d_output.begin())));
+
+  ASSERT_EQ(h_output, h_input);
+  ASSERT_EQ(d_output, d_input);
+  ASSERT_EQ_QUIET(reference, thrust::get<0>(h_result.get_iterator_tuple()));
+  ASSERT_EQ_QUIET(reference, thrust::get<0>(d_result.get_iterator_tuple()));
+}
+
+TYPED_TEST(CopyTests, TestCopyMatchingTypes)
+{
+  using Vector = typename TestFixture::input_type;
+  using T = typename Vector::value_type;
+
+  Vector v(5);
+  v[0] = T(0); v[1] = T(1); v[2] = T(2); v[3] = T(3); v[4] = T(4);
+
+  // copy to host_vector
+  thrust::host_vector<T> h(5, (T) 10);
+  typename thrust::host_vector<T>::iterator h_result = thrust::copy(v.begin(), v.end(), h.begin());
+  ASSERT_EQ(h[0], T(0));
+  ASSERT_EQ(h[1], T(1));
+  ASSERT_EQ(h[2], T(2));
+  ASSERT_EQ(h[3], T(3));
+  ASSERT_EQ(h[4], T(4));
+  ASSERT_EQ_QUIET(h_result, h.end());
+
+  // copy to device_vector
+  thrust::device_vector<T> d(5, (T) 10);
+  typename thrust::device_vector<T>::iterator d_result = thrust::copy(v.begin(), v.end(), d.begin());
+  ASSERT_EQ(d[0], T(0));
+  ASSERT_EQ(d[1], T(1));
+  ASSERT_EQ(d[2], T(2));
+  ASSERT_EQ(d[3], T(3));
+  ASSERT_EQ(d[4], T(4));
+  ASSERT_EQ_QUIET(d_result, d.end());
+}
+
+TYPED_TEST(CopyTests, TestCopyMixedTypes)
+{
+  using Vector = typename TestFixture::input_type;
+  using T = typename Vector::value_type;
+
+  Vector v(5);
+  v[0] = T(0); v[1] = T(1); v[2] = T(2); v[3] = T(3); v[4] = T(4);
+
+  // copy to host_vector with different type
+  thrust::host_vector<float> h(5, (float) 10);
+  typename thrust::host_vector<float>::iterator h_result = thrust::copy(v.begin(), v.end(), h.begin());
+
+  ASSERT_EQ(h[0], T(0));
+  ASSERT_EQ(h[1], T(1));
+  ASSERT_EQ(h[2], T(2));
+  ASSERT_EQ(h[3], T(3));
+  ASSERT_EQ(h[4], T(4));
+  ASSERT_EQ_QUIET(h_result, h.end());
+
+  // copy to device_vector with different type
+  thrust::device_vector<float> d(5, (float) 10);
+  typename thrust::device_vector<float>::iterator d_result = thrust::copy(v.begin(), v.end(), d.begin());
+  ASSERT_EQ(d[0], T(0));
+  ASSERT_EQ(d[1], T(1));
+  ASSERT_EQ(d[2], T(2));
+  ASSERT_EQ(d[3], T(3));
+  ASSERT_EQ(d[4], T(4));
+  ASSERT_EQ_QUIET(d_result, d.end());
+}
+
+TEST(CopyTests, TestCopyVectorBool)
+{
+  std::vector<bool> v(3);
+  v[0] = true; v[1] = false; v[2] = true;
+
+  thrust::host_vector<bool> h(3);
+  thrust::device_vector<bool> d(3);
+
+  thrust::copy(v.begin(), v.end(), h.begin());
+  thrust::copy(v.begin(), v.end(), d.begin());
+
+  ASSERT_EQ(h[0], true);
+  ASSERT_EQ(h[1], false);
+  ASSERT_EQ(h[2], true);
+
+  ASSERT_EQ(d[0], true);
+  ASSERT_EQ(d[1], false);
+  ASSERT_EQ(d[2], true);
+}
+
+/*#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+
+// Workaround: std::back_insert_iterator has void value_type.
+BEGIN_NS_THRUST
+template <> struct access_traits<void>
+{
+  typedef const int& const_type;
+  typedef int& non_const_type;
+
+  typedef const int& parameter_type;
+};
+END_NS_THRUST
+
+#endif*/
+
+TYPED_TEST(CopyTests, TestCopyListTo)
+{
+  using Vector = typename TestFixture::input_type;
+  using T = typename Vector::value_type;
+
+  // copy from list to Vector
+  std::list<T> l;
+  l.push_back(0);
+  l.push_back(1);
+  l.push_back(2);
+  l.push_back(3);
+  l.push_back(4);
+
+  Vector v(l.size());
+
+  typename Vector::iterator v_result = thrust::copy(l.begin(), l.end(), v.begin());
+
+  ASSERT_EQ(v[0], 0);
+  ASSERT_EQ(v[1], 1);
+  ASSERT_EQ(v[2], 2);
+  ASSERT_EQ(v[3], 3);
+  ASSERT_EQ(v[4], 4);
+  ASSERT_EQ_QUIET(v_result, v.end());
+
+  l.clear();
+
+  thrust::copy(v.begin(), v.end(), std::back_insert_iterator< std::list<T> >(l));
+
+  ASSERT_EQ(l.size(), 5);
+
+  typename std::list<T>::const_iterator iter = l.begin();
+  ASSERT_EQ(*iter, 0);  iter++;
+  ASSERT_EQ(*iter, 1);  iter++;
+  ASSERT_EQ(*iter, 2);  iter++;
+  ASSERT_EQ(*iter, 3);  iter++;
+  ASSERT_EQ(*iter, 4);  iter++;
+}
+
+template<typename T>
+struct is_even
+{
+    __host__ __device__
+    bool operator()(T x) { return (static_cast<unsigned int>(x) & 1) == 0; }
+};
+
+template<typename T>
+struct is_true
+{
+    __host__ __device__
+    bool operator()(T x) { return x ? true : false; }
+};
+
+template<typename T>
+struct mod_3
+{
+    __host__ __device__
+    unsigned int operator()(T x) { return static_cast<unsigned int>(x) % 3; }
+};
+
+TYPED_TEST(CopyTests, TestCopyIfSimple)
+{
+  using Vector = typename TestFixture::input_type;
+  using T = typename Vector::value_type;
+
+  Vector v(5);
+  v[0] = T(0); v[1] = T(1); v[2] = T(2); v[3] = T(3); v[4] = T(4);
+
+  Vector dest(3);
+
+  typename Vector::iterator dest_end = thrust::copy_if(v.begin(), v.end(), dest.begin(), is_even<T>());
+
+  ASSERT_EQ(T(0), dest[0]);
+  ASSERT_EQ(T(2), dest[1]);
+  ASSERT_EQ(T(4), dest[2]);
+  ASSERT_EQ_QUIET(dest.end(), dest_end);
+}
+
+TYPED_TEST(CopyIntegerTests, TestCopyIf)
+{
+  using T = typename TestFixture::input_type;
+
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+    thrust::host_vector<T> h_data =  get_random_data<T>(size,
+                                                        std::numeric_limits<T>::min(),
+                                                        std::numeric_limits<T>::max());
+    thrust::device_vector<T> d_data = h_data;
+
+    typename thrust::host_vector<T>::iterator   h_new_end;
+    typename thrust::device_vector<T>::iterator d_new_end;
+
+    // test with Predicate that returns a bool
+    {
+        thrust::host_vector<T>   h_result(size);
+        thrust::device_vector<T> d_result(size);
+
+        h_new_end = thrust::copy_if(h_data.begin(), h_data.end(), h_result.begin(), is_even<T>());
+        d_new_end = thrust::copy_if(d_data.begin(), d_data.end(), d_result.begin(), is_even<T>());
+
+        h_result.resize(h_new_end - h_result.begin());
+        d_result.resize(d_new_end - d_result.begin());
+
+        ASSERT_EQ(h_result, d_result);
+    }
+
+    // test with Predicate that returns a non-bool
+    {
+        thrust::host_vector<T>   h_result(size);
+        thrust::device_vector<T> d_result(size);
+
+        h_new_end = thrust::copy_if(h_data.begin(), h_data.end(), h_result.begin(), mod_3<T>());
+        d_new_end = thrust::copy_if(d_data.begin(), d_data.end(), d_result.begin(), mod_3<T>());
+
+        h_result.resize(h_new_end - h_result.begin());
+        d_result.resize(d_new_end - d_result.begin());
+
+        ASSERT_EQ(h_result, d_result);
+    }
+  }
+}
+
+TYPED_TEST(CopyIntegerTests, TestCopyIfStencil)
+{
+  using T = typename TestFixture::input_type;
+
+  for (auto size : get_sizes())
+  {
+    thrust::host_vector<T>   h_data(size); thrust::sequence(h_data.begin(), h_data.end());
+    thrust::device_vector<T> d_data(size); thrust::sequence(d_data.begin(), d_data.end());
+
+    thrust::host_vector<T>   h_stencil = get_random_data<T>(size,
+                                                            std::numeric_limits<T>::min(),
+                                                            std::numeric_limits<T>::max());
+    thrust::device_vector<T> d_stencil = get_random_data<T>(size,
+                                                            std::numeric_limits<T>::min(),
+                                                            std::numeric_limits<T>::max());
+
+    thrust::host_vector<T>   h_result(size);
+    thrust::device_vector<T> d_result(size);
+
+    typename thrust::host_vector<T>::iterator   h_new_end;
+    typename thrust::device_vector<T>::iterator d_new_end;
+
+    // test with Predicate that returns a bool
+    {
+        thrust::host_vector<T>   h_result(size);
+        thrust::device_vector<T> d_result(size);
+
+        h_new_end = thrust::copy_if(h_data.begin(), h_data.end(), h_result.begin(), is_even<T>());
+        d_new_end = thrust::copy_if(d_data.begin(), d_data.end(), d_result.begin(), is_even<T>());
+
+        h_result.resize(h_new_end - h_result.begin());
+        d_result.resize(d_new_end - d_result.begin());
+
+        ASSERT_EQ(h_result, d_result);
+    }
+
+    // test with Predicate that returns a non-bool
+    {
+        thrust::host_vector<T>   h_result(size);
+        thrust::device_vector<T> d_result(size);
+
+        h_new_end = thrust::copy_if(h_data.begin(), h_data.end(), h_result.begin(), mod_3<T>());
+        d_new_end = thrust::copy_if(d_data.begin(), d_data.end(), d_result.begin(), mod_3<T>());
+
+        h_result.resize(h_new_end - h_result.begin());
+        d_result.resize(d_new_end - d_result.begin());
+
+        ASSERT_EQ(h_result, d_result);
+    }
+  }
+}
+
+TYPED_TEST(CopyTests, TestCopyCountingIterator)
+{
+  using Vector = typename TestFixture::input_type;
+  using T = typename Vector::value_type;
+
+  thrust::counting_iterator<T> iter(1);
+
+  Vector vec(4);
+
+  thrust::copy(iter, iter + 4, vec.begin());
+
+  ASSERT_EQ(vec[0], T(1));
+  ASSERT_EQ(vec[1], T(2));
+  ASSERT_EQ(vec[2], T(3));
+  ASSERT_EQ(vec[3], T(4));
+}
+
+TYPED_TEST(CopyTests, TestCopyZipIterator)
+{
+  using Vector = typename TestFixture::input_type;
+  using T = typename Vector::value_type;
+
+  Vector v1(3); v1[0] = T(1); v1[1] = T(2); v1[2] = T(3);
+  Vector v2(3); v2[0] = T(4); v2[1] = T(5); v2[2] = T(6);
+  Vector v3(3, T(0));
+  Vector v4(3, T(0));
+
+  thrust::copy(thrust::make_zip_iterator(thrust::make_tuple(v1.begin(),v2.begin())),
+               thrust::make_zip_iterator(thrust::make_tuple(v1.end(),v2.end())),
+               thrust::make_zip_iterator(thrust::make_tuple(v3.begin(),v4.begin())));
+
+  ASSERT_EQ(v1, v3);
+  ASSERT_EQ(v2, v4);
+}
+
+TYPED_TEST(CopyTests, TestCopyConstantIteratorToZipIterator)
+{
+  using Vector = typename TestFixture::input_type;
+  using T = typename Vector::value_type;
+
+  Vector v1(3,T(0));
+  Vector v2(3,T(0));
+
+  thrust::copy(thrust::make_constant_iterator(thrust::tuple<T,T>(4,7)),
+               thrust::make_constant_iterator(thrust::tuple<T,T>(4,7)) + v1.size(),
+               thrust::make_zip_iterator(thrust::make_tuple(v1.begin(),v2.begin())));
+
+  ASSERT_EQ(v1[0], T(4));
+  ASSERT_EQ(v1[1], T(4));
+  ASSERT_EQ(v1[2], T(4));
+  ASSERT_EQ(v2[0], T(7));
+  ASSERT_EQ(v2[1], T(7));
+  ASSERT_EQ(v2[2], T(7));
+}
+
+template<typename InputIterator, typename OutputIterator>
+OutputIterator copy(my_system &system, InputIterator, InputIterator, OutputIterator result)
+{
+    system.validate_dispatch();
+    return result;
+}
+
+TEST(CopyTests, TestCopyDispatchExplicit)
+{
+  thrust::device_vector<int> vec(1);
+
+  my_system sys(0);
+  thrust::copy(sys,
+               vec.begin(),
+               vec.end(),
+               vec.begin());
+
+  ASSERT_EQ(true, sys.is_valid());
+}
+
+template<typename InputIterator, typename OutputIterator>
+OutputIterator copy(my_tag, InputIterator, InputIterator, OutputIterator result)
+{
+    *result = 13;
+    return result;
+}
+
+TEST(CopyTests, TestCopyDispatchImplicit)
+{
+  thrust::device_vector<int> vec(1);
+
+  thrust::copy(thrust::retag<my_tag>(vec.begin()),
+               thrust::retag<my_tag>(vec.end()),
+               thrust::retag<my_tag>(vec.begin()));
+
+  ASSERT_EQ(13, vec.front());
+}
+
+template<typename InputIterator, typename OutputIterator, typename Predicate>
+__host__ __device__
+OutputIterator copy_if(my_system &system, InputIterator, InputIterator, OutputIterator result, Predicate)
+{
+    system.validate_dispatch();
+    return result;
+}
+
+TEST(CopyTests, TestCopyIfDispatchExplicit)
+{
+  thrust::device_vector<int> vec(1);
+
+  my_system sys(0);
+  thrust::copy_if(sys,
+                  vec.begin(),
+                  vec.end(),
+                  vec.begin(),
+                  0);
+
+  ASSERT_EQ(true, sys.is_valid());
+}
+
+template<typename InputIterator, typename OutputIterator, typename Predicate>
+__host__ __device__
+OutputIterator copy_if(my_tag, InputIterator, InputIterator, OutputIterator result, Predicate)
+{
+    *result = 13;
+    return result;
+}
+
+TEST(CopyTests, TestCopyIfDispatchImplicit)
+{
+  thrust::device_vector<int> vec(1);
+
+  thrust::copy_if(thrust::retag<my_tag>(vec.begin()),
+                  thrust::retag<my_tag>(vec.end()),
+                  thrust::retag<my_tag>(vec.begin()),
+                  0);
+
+  ASSERT_EQ(13, vec.front());
+}
+
+template<typename InputIterator1, typename InputIterator2, typename OutputIterator, typename Predicate>
+__host__ __device__
+OutputIterator copy_if(my_system &system, InputIterator1, InputIterator1, InputIterator2, OutputIterator result, Predicate)
+{
+    system.validate_dispatch();
+    return result;
+}
+
+TEST(CopyTests, TestCopyIfStencilDispatchExplicit)
+{
+  thrust::device_vector<int> vec(1);
+
+  my_system sys(0);
+  thrust::copy_if(sys,
+                  vec.begin(),
+                  vec.end(),
+                  vec.begin(),
+                  vec.begin(),
+                  0);
+
+  ASSERT_EQ(true, sys.is_valid());
+}
+
+template<typename InputIterator1, typename InputIterator2, typename OutputIterator, typename Predicate>
+__host__ __device__
+OutputIterator copy_if(my_tag, InputIterator1, InputIterator1, InputIterator2, OutputIterator result, Predicate)
+{
+    *result = 13;
+    return result;
+}
+
+TEST(CopyTests, TestCopyIfStencilDispatchImplicit)
+{
+  thrust::device_vector<int> vec(1);
+
+  thrust::copy_if(thrust::retag<my_tag>(vec.begin()),
+                  thrust::retag<my_tag>(vec.end()),
+                  thrust::retag<my_tag>(vec.begin()),
+                  thrust::retag<my_tag>(vec.begin()),
+                  0);
+
+  ASSERT_EQ(13, vec.front());
+}
+
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

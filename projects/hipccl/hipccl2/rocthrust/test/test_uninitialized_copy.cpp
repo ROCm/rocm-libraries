@@ -245,7 +245,6 @@ TEST(UninitializedCopyTests, TestUninitializedCopyNonPODDevice)
   ASSERT_EQ(false, x.copy_constructed_on_host);
 
   x = v1[0];
-  // TODO: Check why it has te be true?
   ASSERT_EQ(true, x.copy_constructed_on_device);
   ASSERT_EQ(false, x.copy_constructed_on_host);
 
@@ -267,7 +266,6 @@ TEST(UninitializedCopyTests, TestUninitializedCopyNNonPODDevice)
   ASSERT_EQ(false, x.copy_constructed_on_host);
 
   x = v1[0];
-  // TODO: Check why it has te be true?
   ASSERT_EQ(true, x.copy_constructed_on_device);
   ASSERT_EQ(false, x.copy_constructed_on_host);
 
