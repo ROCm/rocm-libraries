@@ -56,7 +56,6 @@ endfunction()
 # Tests
 # ****************************************************************************
 
-
 add_hipthrust_test("thrust.hip.allocator" test_allocator.cpp)
 # add_hipthrust_test("thrust.hip.complex" test_complex.cpp)
 # add_hipthrust_test("thrust.hip.complex_transform" test_complex_transform.cpp)
@@ -76,6 +75,7 @@ add_hipthrust_test("thrust.hip.fill" test_fill.cpp)
 add_hipthrust_test("thrust.hip.find" test_find.cpp)
 add_hipthrust_test("thrust.hip.for_each" test_for_each.cpp)
 add_hipthrust_test("thrust.hip.generate" test_generate.cpp)
+add_hipthrust_test("thrust.hip.inner_product" test_inner_product.cpp)
 add_hipthrust_test("thrust.hip.memory" test_memory.cpp)
 add_hipthrust_test("thrust.hip.mismatch" test_mismatch.cpp)
 add_hipthrust_test("thrust.hip.pair" test_pair.cpp)
@@ -88,6 +88,7 @@ add_hipthrust_test("thrust.hip.remove" test_remove.cpp)
 add_hipthrust_test("thrust.hip.replace" test_replace.cpp)
 add_hipthrust_test("thrust.hip.reverse_iterator" test_reverse_iterator.cpp)
 add_hipthrust_test("thrust.hip.scatter" test_scatter.cpp)
+add_hipthrust_test("thrust.hip.sequence" test_sequence.cpp)
 add_hipthrust_test("thrust.hip.stable_sort" test_stable_sort.cpp)
 add_hipthrust_test("thrust.hip.stable_sort_by_key" test_stable_sort_by_key.cpp)
 add_hipthrust_test("thrust.hip.stable_sort_by_key_large" test_stable_sort_by_key_large.cpp)
