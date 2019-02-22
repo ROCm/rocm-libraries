@@ -150,7 +150,7 @@ ForwardIterator min_element(my_system &system, ForwardIterator first, ForwardIte
     return first;
 }
 
-TEST(MinElementTests, TestMinElementDispatchImplicit)
+TEST(MinElementTests, TestMinElementDispatchExplicit)
 {
     thrust::device_vector<int> vec(1);
 
@@ -167,7 +167,7 @@ ForwardIterator min_element(my_tag, ForwardIterator first, ForwardIterator)
     return first;
 }
 
-void TestMinElementDispatchImplicit()
+TEST(MinElementTests, TestMinElementDispatchImplicit)
 {
     thrust::device_vector<int> vec(1);
 

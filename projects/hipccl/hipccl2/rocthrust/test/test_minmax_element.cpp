@@ -75,10 +75,9 @@ TYPED_TEST_CASE(MinmaxElementTests, MinmaxElementTestsParams);
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
-TYPED_TEST(MinmaxElementTests, TestMinMaxElementSimple)
+TYPED_TEST(MinmaxElementTests, TestMinmaxElementSimple)
 {
     using Vector = typename TestFixture::input_type;
-    using T = typename Vector::value_type;
 
     Vector data(6);
     data[0] = 3;
@@ -94,7 +93,7 @@ TYPED_TEST(MinmaxElementTests, TestMinMaxElementSimple)
     ASSERT_EQ(  thrust::minmax_element(data.begin(), data.end()).second - data.begin(), 1);
 }
 
-TYPED_TEST(MinmaxElementTests, TestMinMaxElementWithTransform)
+TYPED_TEST(MinmaxElementTests, TestMinmaxElementWithTransform)
 {
     using Vector = typename TestFixture::input_type;
     using T = typename Vector::value_type;
@@ -115,7 +114,7 @@ TYPED_TEST(MinmaxElementTests, TestMinMaxElementWithTransform)
           thrust::make_transform_iterator(data.end(),   thrust::negate<T>())).second, -1);
 }
 
-TYPED_TEST(MinmaxElementTests, TestMinMaxElement)
+TYPED_TEST(MinmaxElementTests, TestMinmaxElement)
 {
     using Vector = typename TestFixture::input_type;
     using T = typename Vector::value_type;
@@ -155,10 +154,11 @@ TYPED_TEST(MinmaxElementTests, TestMinMaxElement)
 template<typename ForwardIterator>
 thrust::pair<ForwardIterator,ForwardIterator> minmax_element(my_system &system, ForwardIterator first, ForwardIterator)
 {
-    return thrust::make_pair(first,first);
+    system.validate_dispatch();
+    return thrust::make_pair(first, first);
 }
 
-TEST(MinmaxElementTests, TestMinMaxElementDispatchExplicit)
+TEST(MinmaxElementTests, TestMinmaxElementDispatchExplicit)
 {
     thrust::device_vector<int> vec(1);
 
@@ -173,10 +173,10 @@ template<typename ForwardIterator>
 thrust::pair<ForwardIterator,ForwardIterator> minmax_element(my_tag, ForwardIterator first, ForwardIterator)
 {
     *first = 13;
-    return thrust::make_pair(first,first);
+    return thrust::make_pair(first, first);
 }
 
-void TestMinMaxElementDispatchImplicit()
+TEST(MinmaxElementTests, TestMinmaxElementDispatchImplicit)
 {
     thrust::device_vector<int> vec(1);
 

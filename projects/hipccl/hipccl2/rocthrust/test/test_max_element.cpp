@@ -146,10 +146,11 @@ TYPED_TEST(MaxElementTests, TestMaxElement)
 template<typename ForwardIterator>
 ForwardIterator max_element(my_system &system, ForwardIterator first, ForwardIterator)
 {
+    system.validate_dispatch();
     return first;
 }
 
-TEST(MaxElementTests, TestMaxElementDispatchImplicit)
+TEST(MaxElementTests, TestMaxElementDispatchExplicit)
 {
     thrust::device_vector<int> vec(1);
 
@@ -166,7 +167,7 @@ ForwardIterator max_element(my_tag, ForwardIterator first, ForwardIterator)
     return first;
 }
 
-void TestMaxElementDispatchImplicit()
+TEST(MaxElementTests, TestMaxElementDispatchImplicit)
 {
     thrust::device_vector<int> vec(1);
 
