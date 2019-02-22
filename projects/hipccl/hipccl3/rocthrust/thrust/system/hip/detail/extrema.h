@@ -45,10 +45,10 @@ namespace __extrema {
         Predicate predicate;
         typedef tuple<InputType, IndexType> pair_type;
         
-        __host__ __device__
+        THRUST_HIP_FUNCTION
         arg_min_f(Predicate p) : predicate(p) {}
         
-        pair_type __device__
+        pair_type THRUST_HIP_DEVICE_FUNCTION
         operator()(pair_type const &lhs, pair_type const &rhs)
         {
             InputType const &rhs_value = get<0>(rhs);
@@ -76,10 +76,10 @@ namespace __extrema {
         Predicate predicate;
         typedef tuple<InputType, IndexType> pair_type;
         
-        __host__ __device__
+        THRUST_HIP_FUNCTION
         arg_max_f(Predicate p) : predicate(p) {}
         
-        pair_type __device__
+        pair_type THRUST_HIP_DEVICE_FUNCTION
         operator()(pair_type const &lhs, pair_type const &rhs)
         {
             InputType const &rhs_value = get<0>(rhs);
@@ -112,12 +112,12 @@ namespace __extrema {
         typedef arg_min_f<InputType, IndexType, Predicate> arg_min_t;
         typedef arg_max_f<InputType, IndexType, Predicate> arg_max_t;
         
-        __host__ __device__
+        THRUST_HIP_FUNCTION
         arg_minmax_f(Predicate p) : predicate(p)
         {
         }
         
-        two_pairs_type __device__
+        two_pairs_type THRUST_HIP_DEVICE_FUNCTION
         operator()(two_pairs_type const &lhs, two_pairs_type const &rhs)
         {
             pair_type const &rhs_min = get<0>(rhs);
@@ -130,7 +130,7 @@ namespace __extrema {
         
         struct duplicate_tuple
         {
-            __device__ two_pairs_type
+            two_pairs_type THRUST_HIP_DEVICE_FUNCTION
             operator()(pair_type const &t)
             {
                 return thrust::make_tuple(t, t);
@@ -209,7 +209,7 @@ __thrust_exec_check_disable__
 template <class Derived,
           class ItemsIt,
           class BinaryPred>
-ItemsIt __host__ __device__
+ItemsIt THRUST_HIP_FUNCTION
 min_element(execution_policy<Derived> &policy,
             ItemsIt                    first,
             ItemsIt                    last,
@@ -234,7 +234,7 @@ min_element(execution_policy<Derived> &policy,
 
 template <class Derived,
           class ItemsIt>
-ItemsIt __host__ __device__
+ItemsIt THRUST_HIP_FUNCTION
 min_element(execution_policy<Derived> &policy,
             ItemsIt                    first,
             ItemsIt                    last)
@@ -249,7 +249,7 @@ __thrust_exec_check_disable__
 template <class Derived,
           class ItemsIt,
           class BinaryPred>
-ItemsIt __host__ __device__
+ItemsIt THRUST_HIP_FUNCTION
 max_element(execution_policy<Derived> &policy,
             ItemsIt                    first,
             ItemsIt                    last,
@@ -272,7 +272,7 @@ max_element(execution_policy<Derived> &policy,
 
 template <class Derived,
           class ItemsIt>
-ItemsIt __host__ __device__
+ItemsIt THRUST_HIP_FUNCTION
 max_element(execution_policy<Derived> &policy,
             ItemsIt                    first,
             ItemsIt                    last)
@@ -287,7 +287,7 @@ __thrust_exec_check_disable__
 template <class Derived,
           class ItemsIt,
           class BinaryPred>
-pair<ItemsIt, ItemsIt> __host__ __device__
+pair<ItemsIt, ItemsIt> THRUST_HIP_FUNCTION
 minmax_element(execution_policy<Derived> &policy,
                ItemsIt                    first,
                ItemsIt                    last,
@@ -307,8 +307,9 @@ minmax_element(execution_policy<Derived> &policy,
   typedef tuple<ItemsIt, hip_rocprim::counting_iterator_t<IndexType> > iterator_tuple;
   typedef zip_iterator<iterator_tuple> zip_iterator;
 
-  iterator_tuple iter_tuple = make_tuple(first, hip_rocprim::counting_iterator_t<IndexType>(0));
-
+  iterator_tuple iter_tuple_begin = make_tuple(first, hip_rocprim::counting_iterator_t<IndexType>(0));
+  iterator_tuple iter_tuple_end = make_tuple(last, hip_rocprim::counting_iterator_t<IndexType>(num_items));
+    
   typedef __extrema::arg_minmax_f<InputType, IndexType, BinaryPred> arg_minmax_t;
   typedef typename arg_minmax_t::two_pairs_type  two_pairs_type;
   typedef typename arg_minmax_t::duplicate_tuple duplicate_t;
@@ -317,10 +318,11 @@ minmax_element(execution_policy<Derived> &policy,
                                      duplicate_t>
           transform_t;
 
-  zip_iterator   begin  = make_zip_iterator(iter_tuple);
+  zip_iterator   begin  = make_zip_iterator(iter_tuple_begin);
+  zip_iterator   end    = make_zip_iterator(iter_tuple_end);
   two_pairs_type result = __extrema::extrema(policy,
                                              transform_t(begin, duplicate_t()),
-                                             num_items,
+                                             transform_t(end, duplicate_t()),
                                              arg_minmax_t(binary_pred),
                                              (two_pairs_type *)(NULL));
   ret = thrust::make_pair(first + get<1>(get<0>(result)),
@@ -336,7 +338,7 @@ minmax_element(execution_policy<Derived> &policy,
 
 template <class Derived,
           class ItemsIt>
-pair<ItemsIt, ItemsIt> __host__ __device__
+pair<ItemsIt, ItemsIt> THRUST_HIP_FUNCTION
 minmax_element(execution_policy<Derived> &policy,
                ItemsIt                    first,
                ItemsIt                    last)
