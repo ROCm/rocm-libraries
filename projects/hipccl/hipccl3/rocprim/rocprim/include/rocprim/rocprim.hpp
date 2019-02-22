@@ -50,6 +50,7 @@
 #include "block/block_store.hpp"
 
 #ifdef ROCPRIM_HC_API
+    #include "device/device_binary_search_hc.hpp"
     #include "device/device_histogram_hc.hpp"
     #include "device/device_merge_hc.hpp"
     #include "device/device_merge_sort_hc.hpp"
@@ -66,6 +67,7 @@
     #include "device/device_select_hc.hpp"
     #include "device/device_transform_hc.hpp"
 #else
+    #include "device/device_binary_search_hip.hpp"
     #include "device/device_histogram_hip.hpp"
     #include "device/device_merge_hip.hpp"
     #include "device/device_merge_sort_hip.hpp"
