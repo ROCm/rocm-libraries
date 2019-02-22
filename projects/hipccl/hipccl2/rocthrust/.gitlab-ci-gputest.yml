@@ -9,6 +9,10 @@ test:vega20:
 # Allow Fiji to fail
 test:s9300:
   extends: .test
+  before_script:
+    - echo 'deb [arch=amd64] http://repo.radeon.com/rocm/apt/debian/ xenial main' | $SUDO_CMD tee /etc/apt/sources.list.d/rocm.list
+    - $SUDO_CMD apt-get update -qq
+    - $SUDO_CMD apt-get upgrade -qq
   dependencies:
     - build:rocm
   tags:
