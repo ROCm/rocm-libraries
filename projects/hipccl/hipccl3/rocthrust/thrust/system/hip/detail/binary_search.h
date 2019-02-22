@@ -40,7 +40,7 @@ template <class Policy,
           class NeedlesIt,
           class OutputIt,
           class CompareOp>
-OutputIt __host__
+OutputIt THRUST_HIP_RUNTIME_FUNCTION
 lower_bound(Policy&    policy,
             HaystackIt haystack_begin,
             HaystackIt haystack_end,
@@ -104,7 +104,7 @@ template <class Policy,
           class NeedlesIt,
           class OutputIt,
           class CompareOp>
-OutputIt __host__
+OutputIt THRUST_HIP_RUNTIME_FUNCTION
 upper_bound(Policy&    policy,
             HaystackIt haystack_begin,
             HaystackIt haystack_end,
@@ -168,7 +168,7 @@ template <class Policy,
           class NeedlesIt,
           class OutputIt,
           class CompareOp>
-OutputIt __host__
+OutputIt THRUST_HIP_RUNTIME_FUNCTION
 binary_search(Policy&    policy,
               HaystackIt haystack_begin,
               HaystackIt haystack_end,
@@ -238,7 +238,7 @@ template <class Derived,
           class NeedlesIt,
           class OutputIt,
           class CompareOp>
-OutputIt __host__ __device__
+OutputIt THRUST_HIP_FUNCTION
 lower_bound(execution_policy<Derived>& policy,
             HaystackIt                 first,
             HaystackIt                 last,
@@ -275,7 +275,7 @@ template <class Derived,
           class HaystackIt,
           class NeedlesIt,
           class OutputIt>
-OutputIt __host__ __device__
+OutputIt THRUST_HIP_FUNCTION
 lower_bound(execution_policy<Derived>& policy,
             HaystackIt                 first,
             HaystackIt                 last,
@@ -297,7 +297,7 @@ template <class Derived,
           class NeedlesIt,
           class OutputIt,
           class CompareOp>
-OutputIt __host__ __device__
+OutputIt THRUST_HIP_FUNCTION
 upper_bound(execution_policy<Derived>& policy,
             HaystackIt                 first,
             HaystackIt                 last,
@@ -334,7 +334,7 @@ template <class Derived,
           class HaystackIt,
           class NeedlesIt,
           class OutputIt>
-OutputIt __host__ __device__
+OutputIt THRUST_HIP_FUNCTION
 upper_bound(execution_policy<Derived>& policy,
             HaystackIt                 first,
             HaystackIt                 last,
@@ -356,7 +356,7 @@ template <class Derived,
           class NeedlesIt,
           class OutputIt,
           class CompareOp>
-OutputIt __host__ __device__
+OutputIt THRUST_HIP_FUNCTION
 binary_search(execution_policy<Derived>& policy,
               HaystackIt                 first,
               HaystackIt                 last,
@@ -393,7 +393,7 @@ template <class Derived,
           class HaystackIt,
           class NeedlesIt,
           class OutputIt>
-OutputIt __host__ __device__
+OutputIt THRUST_HIP_FUNCTION
 binary_search(execution_policy<Derived>& policy,
               HaystackIt                 first,
               HaystackIt                 last,
