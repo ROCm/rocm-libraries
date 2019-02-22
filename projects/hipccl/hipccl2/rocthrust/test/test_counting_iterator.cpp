@@ -31,8 +31,7 @@
 // Thrust
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/sort.h>
-// TODO: implement binary search
-//#include <thrust/binary_search.h>
+#include <thrust/binary_search.h>
 #include <thrust/distance.h>
 #include <thrust/detail/cstdint.h>
 
@@ -208,8 +207,7 @@ TEST(CountingIteratorTests, TestCountingIteratorUnsignedType)
   ASSERT_EQ(iter1 <  iter0, false);
 }
 
-// TODO: implement binary search
-/*TEST(CountingIteratorTests, TestCountingIteratorLowerBound)
+TEST(CountingIteratorTests, TestCountingIteratorLowerBound)
 {
   size_t n = 10000;
   const size_t M = 100;
@@ -235,7 +233,7 @@ TEST(CountingIteratorTests, TestCountingIteratorUnsignedType)
   thrust::lower_bound(d_data.begin(), d_data.end(), search_begin, search_end, d_result.begin());
 
   ASSERT_EQ(h_result, d_result);
-}*/
+}
 
 TEST(CountingIteratorTests, TestCountingIteratorDifference)
 {
