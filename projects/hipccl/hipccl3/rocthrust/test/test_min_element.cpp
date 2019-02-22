@@ -135,7 +135,7 @@ TYPED_TEST(MinElementTests, TestMinElement)
         typename thrust::device_vector<T>::iterator d_min = thrust::min_element(d_data.begin(), d_data.end());
 
         ASSERT_EQ(h_min - h_data.begin(), d_min - d_data.begin());
-    
+ 
         typename thrust::host_vector<T>::iterator   h_max = thrust::min_element(h_data.begin(), h_data.end(), thrust::greater<T>());
         typename thrust::device_vector<T>::iterator d_max = thrust::min_element(d_data.begin(), d_data.end(), thrust::greater<T>());
 
@@ -146,6 +146,7 @@ TYPED_TEST(MinElementTests, TestMinElement)
 template<typename ForwardIterator>
 ForwardIterator min_element(my_system &system, ForwardIterator first, ForwardIterator)
 {
+    system.validate_dispatch();
     return first;
 }
 
