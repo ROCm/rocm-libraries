@@ -43,6 +43,8 @@
 #define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
+#include "test_utils.hpp"
+
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
 TEST(CountingIteratorTests, TestCountingIteratorCopyConstructor)
@@ -212,7 +214,9 @@ TEST(CountingIteratorTests, TestCountingIteratorLowerBound)
   size_t n = 10000;
   const size_t M = 100;
 
-  thrust::host_vector<unsigned int> h_data = unittest::random_integers<unsigned int>(n);
+  thrust::host_vector<unsigned int> h_data = get_random_data<unsigned int>(n,
+                                                                           std::numeric_limits<unsigned int>::min(),
+                                                                           std::numeric_limits<unsigned int>::max());
   for(unsigned int i = 0; i < n; ++i)
     h_data[i] %= M;
 
