@@ -79,8 +79,6 @@ __THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_BEGIN
 TYPED_TEST(BinarySearchTests, TestScalarLowerBoundSimple)
 {
   using Vector = typename TestFixture::input_type;
-  using T = typename Vector::value_type;
-
   Vector vec(5);
 
   vec[0] = 0;

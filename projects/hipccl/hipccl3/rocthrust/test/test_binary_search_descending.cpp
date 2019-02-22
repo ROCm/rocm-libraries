@@ -103,7 +103,6 @@ TYPED_TEST(BinarySearchDescendingTests, TestScalarLowerBoundDescendingSimple)
 TYPED_TEST(BinarySearchDescendingTests, TestScalarUpperBoundDescendingSimple)
 {
     using Vector = typename TestFixture::input_type;
-    using T = typename Vector::value_type;
     Vector vec(5);
 
     vec[0] = 8;
@@ -127,7 +126,6 @@ TYPED_TEST(BinarySearchDescendingTests, TestScalarUpperBoundDescendingSimple)
 TYPED_TEST(BinarySearchDescendingTests, TestScalarBinarySearchDescendingSimple)
 {
     using Vector = typename TestFixture::input_type;
-    using T = typename Vector::value_type;
     Vector vec(5);
 
     vec[0] = 8;
@@ -151,7 +149,6 @@ TYPED_TEST(BinarySearchDescendingTests, TestScalarBinarySearchDescendingSimple)
 TYPED_TEST(BinarySearchDescendingTests, TestScalarEqualRangeDescendingSimple)
 {
     using Vector = typename TestFixture::input_type;
-    using T = typename Vector::value_type;
     Vector vec(5);
 
     vec[0] = 8;
