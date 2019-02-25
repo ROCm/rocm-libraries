@@ -56,7 +56,6 @@ endfunction()
 # Tests
 # ****************************************************************************
 
-
 add_hipthrust_test("thrust.hip.allocator" test_allocator.cpp)
 # add_hipthrust_test("thrust.hip.complex" test_complex.cpp)
 # add_hipthrust_test("thrust.hip.complex_transform" test_complex_transform.cpp)
@@ -84,6 +83,7 @@ add_hipthrust_test("thrust.hip.pair_sort" test_pair_sort.cpp)
 add_hipthrust_test("thrust.hip.pair_transform" test_pair_transform.cpp)
 add_hipthrust_test("thrust.hip.permutation_iterator" test_permutation_iterator.cpp)
 add_hipthrust_test("thrust.hip.reduce" test_reduce.cpp)
+add_hipthrust_test("thrust.hip.reduce_by_key" test_reduce_by_key.cpp)
 add_hipthrust_test("thrust.hip.remove" test_remove.cpp)
 add_hipthrust_test("thrust.hip.replace" test_replace.cpp)
 add_hipthrust_test("thrust.hip.reverse_iterator" test_reverse_iterator.cpp)
