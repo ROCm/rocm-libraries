@@ -89,10 +89,10 @@ TYPED_TEST(MaxElementTests, TestMaxElementSimple)
     data[5] = 1;
 
     ASSERT_EQ( *thrust::max_element(data.begin(), data.end()), 5);
-    ASSERT_EQ( thrust::max_element(data.begin(), data.end()) - data.begin(), 2);
-    
-    ASSERT_EQ( *thrust::max_element(data.begin(), data.end(), thrust::less<T>()), 1);
-    ASSERT_EQ( thrust::max_element(data.begin(), data.end(), thrust::less<T>()) - data.begin(), -2);
+    ASSERT_EQ( thrust::max_element(data.begin(), data.end()) - data.begin(), 1);
+
+    ASSERT_EQ( *thrust::max_element(data.begin(), data.end(), thrust::greater<T>()), 1);
+    ASSERT_EQ( thrust::max_element(data.begin(), data.end(), thrust::greater<T>()) - data.begin(), 2);
 }
 
 TYPED_TEST(MaxElementTests, TestMaxElementWithTransform)
@@ -114,15 +114,14 @@ TYPED_TEST(MaxElementTests, TestMaxElementWithTransform)
     ASSERT_EQ( *thrust::max_element(
           thrust::make_transform_iterator(data.begin(), thrust::negate<T>()),
           thrust::make_transform_iterator(data.end(),   thrust::negate<T>()),
-          thrust::less<T>()), -5);
-    
+          thrust::greater<T>()), -5);
 }
 
 TYPED_TEST(MaxElementTests, TestMaxElement)
 {
     using Vector = typename TestFixture::input_type;
     using T = typename Vector::value_type;
-    
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
@@ -135,7 +134,7 @@ TYPED_TEST(MaxElementTests, TestMaxElement)
         typename thrust::device_vector<T>::iterator d_max = thrust::max_element(d_data.begin(), d_data.end());
 
         ASSERT_EQ(h_max - h_data.begin(), d_max - d_data.begin());
-    
+
         typename thrust::host_vector<T>::iterator   h_min = thrust::max_element(h_data.begin(), h_data.end(), thrust::less<T>());
         typename thrust::device_vector<T>::iterator d_min = thrust::max_element(d_data.begin(), d_data.end(), thrust::less<T>());
 
