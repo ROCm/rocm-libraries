@@ -99,6 +99,10 @@ TYPED_TEST(MinElementTests, TestMinElementWithTransform)
 {
     using Vector = typename TestFixture::input_type;
     using T = typename Vector::value_type;
+    
+    // We cannot use unsigned types for this test case
+    if (std::is_unsigned<T>::value)
+        return;
 
     Vector data(6);
     data[0] = 3;
@@ -134,7 +138,7 @@ TYPED_TEST(MinElementTests, TestMinElement)
         typename thrust::host_vector<T>::iterator   h_min = thrust::min_element(h_data.begin(), h_data.end());
         typename thrust::device_vector<T>::iterator d_min = thrust::min_element(d_data.begin(), d_data.end());
 
-        ASSERT_EQ(h_min - h_data.begin(), d_min - d_data.begin());
+        ASSERT_EQ(h_data.begin() - h_min, d_data.begin() - d_min);
  
         typename thrust::host_vector<T>::iterator   h_max = thrust::min_element(h_data.begin(), h_data.end(), thrust::greater<T>());
         typename thrust::device_vector<T>::iterator d_max = thrust::min_element(d_data.begin(), d_data.end(), thrust::greater<T>());
