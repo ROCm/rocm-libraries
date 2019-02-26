@@ -6,13 +6,19 @@ test:vega20:
     - vega20
     - rocm
 
+# Allow Fiji to fail
 test:s9300:
   extends: .test
+  before_script:
+    - echo 'deb [arch=amd64] http://repo.radeon.com/rocm/apt/.apt_2.2/ xenial main' | $SUDO_CMD tee /etc/apt/sources.list.d/rocm.list
+    - $SUDO_CMD apt-get update -qq
+    - $SUDO_CMD apt-get upgrade -qq
   dependencies:
     - build:rocm
   tags:
     - s9300
     - rocm
+  allow_failure: true
 
 test:mi25:
   extends: .test
@@ -21,4 +27,3 @@ test:mi25:
   tags:
     - mi25
     - rocm
-    

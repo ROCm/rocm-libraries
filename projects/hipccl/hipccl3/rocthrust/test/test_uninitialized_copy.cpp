@@ -234,8 +234,7 @@ struct CopyConstructTest
   bool copy_constructed_on_device;
 };
 
-// TODO: Compare with cuda tests and find the cause of differences
-/*TEST(UninitializedCopyTests, TestUninitializedCopyNonPODDevice)
+TEST(UninitializedCopyTests, TestUninitializedCopyNonPODDevice)
 {
   using T = CopyConstructTest;
 
@@ -246,7 +245,6 @@ struct CopyConstructTest
   ASSERT_EQ(false, x.copy_constructed_on_host);
 
   x = v1[0];
-  // TODO: Check why it has te be true?
   ASSERT_EQ(true, x.copy_constructed_on_device);
   ASSERT_EQ(false, x.copy_constructed_on_host);
 
@@ -268,7 +266,6 @@ TEST(UninitializedCopyTests, TestUninitializedCopyNNonPODDevice)
   ASSERT_EQ(false, x.copy_constructed_on_host);
 
   x = v1[0];
-  // TODO: Check why it has te be true?
   ASSERT_EQ(true, x.copy_constructed_on_device);
   ASSERT_EQ(false, x.copy_constructed_on_host);
 
@@ -277,7 +274,7 @@ TEST(UninitializedCopyTests, TestUninitializedCopyNNonPODDevice)
   x = v2[0];
   ASSERT_EQ(true,  x.copy_constructed_on_device);
   ASSERT_EQ(false, x.copy_constructed_on_host);
-}*/
+}
 
 TEST(UninitializedCopyTests, TestUninitializedCopyNonPODHost)
 {

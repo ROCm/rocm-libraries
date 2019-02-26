@@ -45,7 +45,12 @@ template <class Policy>
 __host__ __device__ hipError_t
 synchronize(Policy &policy)
 {
+#if __THRUST_HAS_HIPRT__
   return synchronize_stream(derived_cast(policy));
+#else
+  THRUST_UNUSED_VAR(policy);
+  return hipSuccess;
+#endif
 }
 
 template <class Derived>
