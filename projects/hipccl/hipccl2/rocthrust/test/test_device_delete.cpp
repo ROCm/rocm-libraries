@@ -66,7 +66,7 @@ TEST(DeviceDelete, TestDeviceDeleteDestructorInvocation)
 
   ASSERT_EQ(false, destructor_flag[0]);
 
-  // TODO
+  // TODO: Known failure
   //thrust::device_delete(foo_ptr);
   //ASSERT_EQ(true, destructor_flag[0]);
 }
