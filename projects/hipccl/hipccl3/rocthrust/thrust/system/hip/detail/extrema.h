@@ -44,7 +44,9 @@ namespace hip_rocprim {
     
     namespace __extrema {
         
-        template <class InputType, class IndexType, class Predicate>
+        template <class InputType,
+                  class IndexType,
+                  class Predicate>
         struct arg_min_f
         {
             Predicate predicate;
@@ -75,7 +77,9 @@ namespace hip_rocprim {
             }
         };    // struct arg_min_f
         
-        template <class InputType, class IndexType, class Predicate>
+        template <class InputType,
+                  class IndexType,
+                  class Predicate>
         struct arg_max_f
         {
             Predicate predicate;
@@ -106,7 +110,9 @@ namespace hip_rocprim {
             }
         };    // struct arg_max_f
         
-        template<class InputType, class IndexType, class Predicate>
+        template<class InputType,
+                 class IndexType,
+                 class Predicate>
         struct arg_minmax_f
         {
             Predicate predicate;
@@ -164,10 +170,10 @@ namespace hip_rocprim {
             T* ret_ptr = NULL;
             size_t tmp_size = 0;
             hip_rocprim::throw_on_error(
-                                        rocprim::reduce(nullptr, tmp_size,
-                                                        first, ret_ptr, num_items, binary_op,
-                                                        stream, THRUST_HIP_DEBUG_SYNC_FLAG),
-                                        "after reduction step 1");
+                rocprim::reduce(nullptr, tmp_size,
+                                first, ret_ptr, num_items, binary_op,
+                                stream, THRUST_HIP_DEBUG_SYNC_FLAG),
+                "after reduction step 1");
             
             // Allocate temporary storage.
             
@@ -196,9 +202,9 @@ namespace hip_rocprim {
         }
         
         template <template <class, class, class> class ArgFunctor,
-        class Derived,
-        class ItemsIt,
-        class BinaryPred>
+                  class Derived,
+                  class ItemsIt,
+                  class BinaryPred>
         ItemsIt THRUST_HIP_RUNTIME_FUNCTION
         element(execution_policy<Derived> &policy,
                 ItemsIt                    first,
@@ -213,7 +219,7 @@ namespace hip_rocprim {
             
             IndexType num_items = static_cast<IndexType>(thrust::distance(first, last));
             
-            typedef tuple<ItemsIt, counting_iterator_t<IndexType> > iterator_tuple;
+            typedef tuple<ItemsIt, counting_iterator_t<IndexType>> iterator_tuple;
             typedef zip_iterator<iterator_tuple> zip_iterator;
             
             iterator_tuple iter_tuple = make_tuple(first, counting_iterator_t<IndexType>(0));
@@ -232,15 +238,14 @@ namespace hip_rocprim {
             return first + thrust::get<1>(result);
         }
         
-        
     }    // namespace __extrema
     
     
     /// min element
     __thrust_exec_check_disable__
     template <class Derived,
-    class ItemsIt,
-    class BinaryPred>
+              class ItemsIt,
+              class BinaryPred>
     ItemsIt THRUST_HIP_FUNCTION
     min_element(execution_policy<Derived> &policy,
                 ItemsIt                    first,
@@ -269,7 +274,7 @@ namespace hip_rocprim {
     }
     
     template <class Derived,
-    class ItemsIt>
+              class ItemsIt>
     ItemsIt THRUST_HIP_FUNCTION
     min_element(execution_policy<Derived> &policy,
                 ItemsIt                    first,
@@ -280,11 +285,10 @@ namespace hip_rocprim {
     }
     
     /// max element
-    
     __thrust_exec_check_disable__
     template <class Derived,
-    class ItemsIt,
-    class BinaryPred>
+              class ItemsIt,
+              class BinaryPred>
     ItemsIt THRUST_HIP_FUNCTION
     max_element(execution_policy<Derived> &policy,
                 ItemsIt                    first,
@@ -311,7 +315,7 @@ namespace hip_rocprim {
     }
     
     template <class Derived,
-    class ItemsIt>
+              class ItemsIt>
     ItemsIt THRUST_HIP_FUNCTION
     max_element(execution_policy<Derived> &policy,
                 ItemsIt                    first,
@@ -322,11 +326,10 @@ namespace hip_rocprim {
     }
     
     /// minmax element
-    
     __thrust_exec_check_disable__
     template <class Derived,
-    class ItemsIt,
-    class BinaryPred>
+              class ItemsIt,
+              class BinaryPred>
     pair<ItemsIt, ItemsIt> THRUST_HIP_FUNCTION
     minmax_element(execution_policy<Derived> &policy,
                    ItemsIt                    first,
@@ -338,17 +341,14 @@ namespace hip_rocprim {
         typedef typename iterator_traits<ItemsIt>::value_type      InputType;
         typedef typename iterator_traits<ItemsIt>::difference_type IndexType;
         
-        typedef tuple<ItemsIt, hip_rocprim::counting_iterator_t<IndexType> > iterator_tuple;
+        typedef tuple<ItemsIt, hip_rocprim::counting_iterator_t<IndexType>> iterator_tuple;
         typedef zip_iterator<iterator_tuple> zip_iterator;
         
         typedef __extrema::arg_minmax_f<InputType, IndexType, BinaryPred> arg_minmax_t;
         
         typedef typename arg_minmax_t::two_pairs_type  two_pairs_type;
         typedef typename arg_minmax_t::duplicate_tuple duplicate_t;
-        typedef transform_input_iterator_t<two_pairs_type,
-        zip_iterator,
-        duplicate_t>
-        transform_t;
+        typedef transform_input_iterator_t<two_pairs_type, zip_iterator, duplicate_t> transform_t;
         
         THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((
             __extrema::extrema<Derived, transform_t, IndexType, arg_minmax_t, two_pairs_type>
@@ -367,19 +367,22 @@ namespace hip_rocprim {
                                                    num_items,
                                                    arg_minmax_t(binary_pred),
                                                    (two_pairs_type *)(NULL));
+        
         ret = thrust::make_pair(first + get<1>(get<0>(result)),
                                 first + get<1>(get<1>(result)));
+        
 #else // __THRUST_HAS_HIPRT__
         ret = thrust::minmax_element(cvt_to_seq(derived_cast(policy)),
                                      first,
                                      last,
                                      binary_pred);
 #endif // __THRUST_HAS_HIPRT__
+        
         return ret;
     }
     
     template <class Derived,
-    class ItemsIt>
+              class ItemsIt>
     pair<ItemsIt, ItemsIt> THRUST_HIP_FUNCTION
     minmax_element(execution_policy<Derived> &policy,
                    ItemsIt                    first,

@@ -37,15 +37,13 @@
 
 #include "test_utils.hpp"
 
-template<
-class InputType
->
+template <class InputType>
 struct Params
 {
     using input_type = InputType;
 };
 
-template<class Params>
+template <class Params>
 class MinmaxElementTests : public ::testing::Test
 {
 public:
@@ -87,10 +85,10 @@ TYPED_TEST(MinmaxElementTests, TestMinmaxElementSimple)
     data[4] = 5;
     data[5] = 1;
 
-    ASSERT_EQ( *thrust::minmax_element(data.begin(), data.end()).first,  1);
-    ASSERT_EQ( *thrust::minmax_element(data.begin(), data.end()).second, 5);
-    ASSERT_EQ(  thrust::minmax_element(data.begin(), data.end()).first  - data.begin(), 2);
-    ASSERT_EQ(  thrust::minmax_element(data.begin(), data.end()).second - data.begin(), 1);
+    ASSERT_EQ(*thrust::minmax_element(data.begin(), data.end()).first,  1);
+    ASSERT_EQ(*thrust::minmax_element(data.begin(), data.end()).second, 5);
+    ASSERT_EQ(thrust::minmax_element(data.begin(), data.end()).first  - data.begin(), 2);
+    ASSERT_EQ(thrust::minmax_element(data.begin(), data.end()).second - data.begin(), 1);
 }
 
 TYPED_TEST(MinmaxElementTests, TestMinmaxElementWithTransform)
@@ -99,8 +97,7 @@ TYPED_TEST(MinmaxElementTests, TestMinmaxElementWithTransform)
     using T = typename Vector::value_type;
 
     // We cannot use unsigned types for this test case
-    if (std::is_unsigned<T>::value)
-        return;
+    if (std::is_unsigned<T>::value) return;
     
     Vector data(6);
     data[0] = 3;
@@ -110,12 +107,12 @@ TYPED_TEST(MinmaxElementTests, TestMinmaxElementWithTransform)
     data[4] = 5;
     data[5] = 1;
 
+    ASSERT_EQ(*thrust::minmax_element(
+        thrust::make_transform_iterator(data.begin(), thrust::negate<T>()),
+        thrust::make_transform_iterator(data.end(),   thrust::negate<T>())).first, -5);
     ASSERT_EQ( *thrust::minmax_element(
-          thrust::make_transform_iterator(data.begin(), thrust::negate<T>()),
-          thrust::make_transform_iterator(data.end(),   thrust::negate<T>())).first, -5);
-    ASSERT_EQ( *thrust::minmax_element(
-          thrust::make_transform_iterator(data.begin(), thrust::negate<T>()),
-          thrust::make_transform_iterator(data.end(),   thrust::negate<T>())).second, -1);
+        thrust::make_transform_iterator(data.begin(), thrust::negate<T>()),
+        thrust::make_transform_iterator(data.end(),   thrust::negate<T>())).second, -1);
 }
 
 TYPED_TEST(MinmaxElementTests, TestMinmaxElement)

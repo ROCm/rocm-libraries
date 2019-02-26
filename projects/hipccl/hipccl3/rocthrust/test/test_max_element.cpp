@@ -37,15 +37,13 @@
 
 #include "test_utils.hpp"
 
-template<
-class InputType
->
+template <class InputType>
 struct Params
 {
     using input_type = InputType;
 };
 
-template<class Params>
+template <class Params>
 class MaxElementTests : public ::testing::Test
 {
 public:
@@ -88,11 +86,11 @@ TYPED_TEST(MaxElementTests, TestMaxElementSimple)
     data[4] = 5;
     data[5] = 1;
 
-    ASSERT_EQ( *thrust::max_element(data.begin(), data.end()), 5);
-    ASSERT_EQ( thrust::max_element(data.begin(), data.end()) - data.begin(), 1);
+    ASSERT_EQ(*thrust::max_element(data.begin(), data.end()), 5);
+    ASSERT_EQ(thrust::max_element(data.begin(), data.end()) - data.begin(), 1);
 
-    ASSERT_EQ( *thrust::max_element(data.begin(), data.end(), thrust::greater<T>()), 1);
-    ASSERT_EQ( thrust::max_element(data.begin(), data.end(), thrust::greater<T>()) - data.begin(), 2);
+    ASSERT_EQ(*thrust::max_element(data.begin(), data.end(), thrust::greater<T>()), 1);
+    ASSERT_EQ(thrust::max_element(data.begin(), data.end(), thrust::greater<T>()) - data.begin(), 2);
 }
 
 TYPED_TEST(MaxElementTests, TestMaxElementWithTransform)
@@ -101,8 +99,7 @@ TYPED_TEST(MaxElementTests, TestMaxElementWithTransform)
     using T = typename Vector::value_type;
     
     // We cannot use unsigned types for this test case
-    if (std::is_unsigned<T>::value)
-        return;
+    if (std::is_unsigned<T>::value) return;
 
     Vector data(6);
     data[0] = 3;
@@ -112,13 +109,13 @@ TYPED_TEST(MaxElementTests, TestMaxElementWithTransform)
     data[4] = 5;
     data[5] = 1;
 
-    ASSERT_EQ( *thrust::max_element(
-          thrust::make_transform_iterator(data.begin(), thrust::negate<T>()),
-          thrust::make_transform_iterator(data.end(),   thrust::negate<T>())), -1);
-    ASSERT_EQ( *thrust::max_element(
-          thrust::make_transform_iterator(data.begin(), thrust::negate<T>()),
-          thrust::make_transform_iterator(data.end(),   thrust::negate<T>()),
-          thrust::greater<T>()), -5);
+    ASSERT_EQ(*thrust::max_element(
+        thrust::make_transform_iterator(data.begin(), thrust::negate<T>()),
+        thrust::make_transform_iterator(data.end(),   thrust::negate<T>())), -1);
+    ASSERT_EQ(*thrust::max_element(
+        thrust::make_transform_iterator(data.begin(), thrust::negate<T>()),
+        thrust::make_transform_iterator(data.end(),   thrust::negate<T>()),
+        thrust::greater<T>()), -5);
 }
 
 TYPED_TEST(MaxElementTests, TestMaxElement)
