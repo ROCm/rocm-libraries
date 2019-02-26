@@ -250,7 +250,7 @@ namespace hip_rocprim {
         ItemsIt ret = first;
         
         THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((
-            __extrema::element<__extrema::arg_min_f,Derived,ItemsIt,BinaryPred>
+            __extrema::element<__extrema::arg_min_f, Derived, ItemsIt, BinaryPred>
         ));
 #if __THRUST_HAS_HIPRT__
         ret = __extrema::element<__extrema::arg_min_f>(policy,
@@ -294,7 +294,7 @@ namespace hip_rocprim {
         ItemsIt ret = first;
         
         THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((
-            __extrema::element<__extrema::arg_max_f,Derived,ItemsIt,BinaryPred>
+            __extrema::element<__extrema::arg_max_f, Derived, ItemsIt, BinaryPred>
         ));
 #if __THRUST_HAS_HIPRT__
         ret = __extrema::element<__extrema::arg_max_f>(policy,
@@ -351,7 +351,7 @@ namespace hip_rocprim {
         transform_t;
         
         THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((
-            __extrema::element<Derived,transform_t,IndexType,arg_minmax_t,two_pairs_type>
+            __extrema::extrema<Derived, transform_t, IndexType, arg_minmax_t, two_pairs_type>
         ));
 #if __THRUST_HAS_HIPRT__
         if (first == last)
