@@ -98,6 +98,10 @@ TYPED_TEST(MinmaxElementTests, TestMinmaxElementWithTransform)
     using Vector = typename TestFixture::input_type;
     using T = typename Vector::value_type;
 
+    // We cannot use unsigned types for this test case
+    if (std::is_unsigned<T>::value)
+        return;
+    
     Vector data(6);
     data[0] = 3;
     data[1] = 5;
