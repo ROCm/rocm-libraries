@@ -93,10 +93,11 @@ TYPED_TEST_CASE(TransformReduceIntegerTests, TransformReduceIntegerTestsParams);
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
-/*template<typename InputIterator,
+template<typename InputIterator,
          typename UnaryFunction,
          typename OutputType,
          typename BinaryFunction>
+__host__ __device__
 OutputType transform_reduce(my_system &system,
                             InputIterator,
                             InputIterator,
@@ -127,6 +128,7 @@ template<typename InputIterator,
          typename UnaryFunction,
          typename OutputType,
          typename BinaryFunction>
+__host__ __device__
 OutputType transform_reduce(my_tag,
                             InputIterator first,
                             InputIterator,
@@ -149,7 +151,7 @@ TEST(TransformReduceTests, TestTransformReduceDispatchImplicit)
                            0);
 
   ASSERT_EQ(13, vec.front());
-}*/
+}
 
 TYPED_TEST(TransformReduceTests, TestTransformReduceSimple)
 {
