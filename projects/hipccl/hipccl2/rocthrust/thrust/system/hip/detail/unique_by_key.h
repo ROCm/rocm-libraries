@@ -16,15 +16,8 @@
 
 #pragma once
 
-#include <thrust/detail/config.h>
-
-// this system has no special version of this algorithm
-
-/*
-
-
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-#include <thrust/system/cuda/config.h>
+#include <thrust/system/hip/config.h>
 
 #include <thrust/system/hip/detail/util.h>
 #include <thrust/system/hip/detail/get_value.h>
@@ -35,13 +28,17 @@
 #include <thrust/detail/mpl/math.h>
 #include <thrust/detail/minmax.h>
 #include <thrust/distance.h>
+#include <thrust/detail/range/head_flags.h>
+
+// rocPRIM includes
+#include <rocprim/rocprim.hpp>
 
 BEGIN_NS_THRUST
 
 template <typename DerivedPolicy,
           typename ForwardIterator1,
           typename ForwardIterator2>
-__host__ __device__ thrust::pair<ForwardIterator1, ForwardIterator2>
+THRUST_HIP_FUNCTION thrust::pair<ForwardIterator1, ForwardIterator2>
 unique_by_key(
     const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
     ForwardIterator1                                            keys_first,
@@ -52,7 +49,7 @@ template <typename DerivedPolicy,
           typename InputIterator2,
           typename OutputIterator1,
           typename OutputIterator2>
-__host__ __device__ thrust::pair<OutputIterator1, OutputIterator2>
+THRUST_HIP_FUNCTION thrust::pair<OutputIterator1, OutputIterator2>
 unique_by_key_copy(
     const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
     InputIterator1                                              keys_first,
@@ -68,6 +65,24 @@ namespace hip_rocprim {
 //      with partition
 namespace __unique_by_key {
 
+  template <class KeyType,
+            class ValueType,
+            class Predicate>
+  struct predicate_wrapper
+  {
+      Predicate predicate;
+      typedef rocprim::tuple<KeyType, ValueType> pair_type;
+
+      THRUST_HIP_FUNCTION
+      predicate_wrapper(Predicate p) : predicate(p) {}
+
+      bool THRUST_HIP_DEVICE_FUNCTION
+      operator()(pair_type const &lhs, pair_type const &rhs) const
+      {
+          return predicate(rocprim::get<0>(lhs), rocprim::get<0>(rhs));
+      }
+  };    // struct unique_by_key_predicet_wrapper
+
 
   template <class Policy,
             class KeyInputIt,
@@ -75,7 +90,7 @@ namespace __unique_by_key {
             class KeyOutputIt,
             class ValOutputIt,
             class BinaryPred>
-  pair<KeyOutputIt, ValOutputIt> THRUST_RUNTIME_FUNCTION
+  pair<KeyOutputIt, ValOutputIt> THRUST_HIP_RUNTIME_FUNCTION
   unique_by_key(Policy &    policy,
                 KeyInputIt  keys_first,
                 KeyInputIt  keys_last,
@@ -84,74 +99,62 @@ namespace __unique_by_key {
                 ValOutputIt values_result,
                 BinaryPred  binary_pred)
   {
-
     //  typedef typename iterator_traits<KeyInputIt>::difference_type size_type;
     typedef int size_type;
 
+    typedef typename iterator_traits<KeyInputIt>::value_type KeyType;
+    typedef typename iterator_traits<ValInputIt>::value_type ValueType;
+
+    predicate_wrapper<KeyType, ValueType, BinaryPred> wrapped_binary_pred(binary_pred);
+
     size_type    num_items          = static_cast<size_type>(thrust::distance(keys_first, keys_last));
-    char *       d_temp_storage     = NULL;
+    void *       d_temp_storage     = NULL;
     size_t       temp_storage_bytes = 0;
-    cudaStream_t stream             = hip_rocprim::stream(policy);
+    hipStream_t  stream             = hip_rocprim::stream(policy);
     size_type *  d_num_selected_out = NULL;
-    bool         debug_sync         = THRUST_DEBUG_SYNC_FLAG;
+    bool         debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
 
-    cudaError_t status;
-    status = __unique_by_key::doit_step(d_temp_storage,
-                                        temp_storage_bytes,
-                                        keys_first,
-                                        values_first,
-                                        keys_result,
-                                        values_result,
-                                        binary_pred,
-                                        d_num_selected_out,
-                                        num_items,
-                                        stream,
-                                        debug_sync);
-    hip_rocprim::throw_on_error(status, "unique_by_key: failed on 1st step");
-
-    size_t allocation_sizes[2] = {sizeof(size_type), temp_storage_bytes};
-    void * allocations[2]      = {NULL, NULL};
-
-    size_t storage_size = 0;
-    status = core::alias_storage(NULL,
-                                 storage_size,
-                                 allocations,
-                                 allocation_sizes);
-
-    void *ptr = hip_rocprim::get_memory_buffer(policy, storage_size);
-    hip_rocprim::throw_on_error(cudaGetLastError(),
-                             "unique_by_key: failed to get memory buffer");
-
-    status = core::alias_storage(ptr,
-                                 storage_size,
-                                 allocations,
-                                 allocation_sizes);
-
-    d_num_selected_out = (size_type *)allocations[0];
-    d_temp_storage     = (char *)allocations[1];
-
-    status = __unique_by_key::doit_step(d_temp_storage,
-                                        temp_storage_bytes,
-                                        keys_first,
-                                        values_first,
-                                        keys_result,
-                                        values_result,
-                                        binary_pred,
-                                        d_num_selected_out,
-                                        num_items,
-                                        stream,
-                                        debug_sync);
-    hip_rocprim::throw_on_error(status, "unique_by_key: failed on 2nd step");
+    if (num_items == 0)
+      return thrust::make_pair(keys_result, values_result);
 
 
-    status = hip_rocprim::synchronize(policy);
-    hip_rocprim::throw_on_error(status, "unique_by_key: failed to synchronize");
+
+    hipError_t status;
+    status = rocprim::unique(d_temp_storage,
+                             temp_storage_bytes,
+                             rocprim::make_zip_iterator(rocprim::make_tuple(keys_first, values_first)),
+                             rocprim::make_zip_iterator(rocprim::make_tuple(keys_result, values_result)),
+                             d_num_selected_out,
+                             num_items,
+                             wrapped_binary_pred,
+                             stream,
+                             debug_sync);
+    hip_rocprim::throw_on_error(status, "copy_if failed on 1st step");
+
+    temp_storage_bytes = rocprim::detail::align_size(temp_storage_bytes);
+    d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes + sizeof(size_type));
+    hip_rocprim::throw_on_error(hipGetLastError(),
+                                "copy_if failed to get memory buffer");
+
+    d_num_selected_out = reinterpret_cast<size_type *>(
+      reinterpret_cast<char *>(d_temp_storage) + temp_storage_bytes);
+
+    status = rocprim::unique(d_temp_storage,
+                             temp_storage_bytes,
+                             rocprim::make_zip_iterator(rocprim::make_tuple(keys_first, values_first)),
+                             rocprim::make_zip_iterator(rocprim::make_tuple(keys_result, values_result)),
+                             d_num_selected_out,
+                             num_items,
+                             wrapped_binary_pred,
+                             stream,
+                             debug_sync);
+    hip_rocprim::throw_on_error(status, "copy_if failed on 2nd step");
 
     size_type num_selected = get_value(policy, d_num_selected_out);
 
-    hip_rocprim::return_memory_buffer(policy, ptr);
-    hip_rocprim::throw_on_error(cudaGetLastError(),
-                             "unique_by_key: failed to return memory buffer");
+    hip_rocprim::return_memory_buffer(policy, d_temp_storage);
+    hip_rocprim::throw_on_error(hipGetLastError(),
+                                "copy_if failed to return memory buffer");
 
     return thrust::make_pair(keys_result + num_selected, values_result + num_selected);
   }
@@ -169,7 +172,7 @@ template <class Derived,
           class KeyOutputIt,
           class ValOutputIt,
           class BinaryPred>
-pair<KeyOutputIt, ValOutputIt> __host__ __device__
+pair<KeyOutputIt, ValOutputIt> THRUST_HIP_FUNCTION
 unique_by_key_copy(execution_policy<Derived> &policy,
                    KeyInputIt                 keys_first,
                    KeyInputIt                 keys_last,
@@ -179,8 +182,10 @@ unique_by_key_copy(execution_policy<Derived> &policy,
                    BinaryPred                 binary_pred)
 {
   pair<KeyOutputIt, ValOutputIt> ret = thrust::make_pair(keys_result, values_result);
-  if (__THRUST_HAS_CUDART__)
-  {
+  THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((
+      __unique_by_key::unique_by_key<Derived, KeyInputIt, ValInputIt, KeyOutputIt, ValOutputIt, BinaryPred>
+  ));
+#if __THRUST_HAS_HIPRT__
     ret = __unique_by_key::unique_by_key(policy,
                                          keys_first,
                                          keys_last,
@@ -188,10 +193,7 @@ unique_by_key_copy(execution_policy<Derived> &policy,
                                          keys_result,
                                          values_result,
                                          binary_pred);
-  }
-  else
-  {
-#if !__THRUST_HAS_CUDART__
+#else
     ret = thrust::unique_by_key_copy(cvt_to_seq(derived_cast(policy)),
                                      keys_first,
                                      keys_last,
@@ -200,7 +202,6 @@ unique_by_key_copy(execution_policy<Derived> &policy,
                                      values_result,
                                      binary_pred);
 #endif
-  }
   return ret;
 }
 
@@ -209,7 +210,7 @@ template <class Derived,
           class ValInputIt,
           class KeyOutputIt,
           class ValOutputIt>
-pair<KeyOutputIt, ValOutputIt> __host__ __device__
+pair<KeyOutputIt, ValOutputIt> THRUST_HIP_FUNCTION
 unique_by_key_copy(execution_policy<Derived> &policy,
                    KeyInputIt                 keys_first,
                    KeyInputIt                 keys_last,
@@ -231,7 +232,7 @@ template <class Derived,
           class KeyInputIt,
           class ValInputIt,
           class BinaryPred>
-pair<KeyInputIt, ValInputIt> __host__ __device__
+pair<KeyInputIt, ValInputIt> THRUST_HIP_FUNCTION
 unique_by_key(execution_policy<Derived> &policy,
               KeyInputIt                 keys_first,
               KeyInputIt                 keys_last,
@@ -239,8 +240,10 @@ unique_by_key(execution_policy<Derived> &policy,
               BinaryPred                 binary_pred)
 {
   pair<KeyInputIt, ValInputIt> ret = thrust::make_pair(keys_first, values_first);
-  if (__THRUST_HAS_CUDART__)
-  {
+  THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((
+      hip_rocprim::unique_by_key_copy<Derived, KeyInputIt, ValInputIt, KeyInputIt, ValInputIt>
+  ));
+#if __THRUST_HAS_HIPRT__
     ret = hip_rocprim::unique_by_key_copy(policy,
                                           keys_first,
                                           keys_last,
@@ -248,24 +251,20 @@ unique_by_key(execution_policy<Derived> &policy,
                                           keys_first,
                                           values_first,
                                           binary_pred);
-  }
-  else
-  {
-#if !__THRUST_HAS_CUDART__
+#else
     ret = thrust::unique_by_key(cvt_to_seq(derived_cast(policy)),
                                 keys_first,
                                 keys_last,
                                 values_first,
                                 binary_pred);
 #endif
-  }
   return ret;
 }
 
 template <class Derived,
           class KeyInputIt,
           class ValInputIt>
-pair<KeyInputIt, ValInputIt> __host__ __device__
+pair<KeyInputIt, ValInputIt> THRUST_HIP_FUNCTION
 unique_by_key(execution_policy<Derived> &policy,
               KeyInputIt                 keys_first,
               KeyInputIt                 keys_last,
@@ -287,4 +286,4 @@ END_NS_THRUST
 #include <thrust/memory.h>
 #include <thrust/unique.h>
 
-#endif*/
+#endif
