@@ -60,8 +60,8 @@
 // #include <thrust/system/hip/detail/transform_scan.h>
 #include <thrust/system/hip/detail/uninitialized_copy.h>
 #include <thrust/system/hip/detail/uninitialized_fill.h>
-// #include <thrust/system/hip/detail/unique.h>
-// #include <thrust/system/hip/detail/unique_by_key.h>
+#include <thrust/system/hip/detail/unique.h>
+#include <thrust/system/hip/detail/unique_by_key.h>
 
 // // fail
 // // ----------------
@@ -73,7 +73,7 @@
 
 // // stubs passed
 // // ----------------
-// #include <thrust/system/hip/detail/binary_search.h>
+#include <thrust/system/hip/detail/binary_search.h>
 // #include <thrust/system/hip/detail/merge.h>
 // #include <thrust/system/hip/detail/scan_by_key.h>
 // #include <thrust/system/hip/detail/set_operations.h>
