@@ -81,7 +81,7 @@ namespace __unique_by_key {
       {
           return predicate(rocprim::get<0>(lhs), rocprim::get<0>(rhs));
       }
-  };    // struct unique_by_key_predicet_wrapper
+  };    // struct predicate_wrapper
 
 
   template <class Policy,
@@ -99,8 +99,7 @@ namespace __unique_by_key {
                 ValOutputIt values_result,
                 BinaryPred  binary_pred)
   {
-    //  typedef typename iterator_traits<KeyInputIt>::difference_type size_type;
-    typedef int size_type;
+    typedef size_t size_type;
 
     typedef typename iterator_traits<KeyInputIt>::value_type KeyType;
     typedef typename iterator_traits<ValInputIt>::value_type ValueType;
@@ -129,12 +128,12 @@ namespace __unique_by_key {
                              wrapped_binary_pred,
                              stream,
                              debug_sync);
-    hip_rocprim::throw_on_error(status, "copy_if failed on 1st step");
+    hip_rocprim::throw_on_error(status, "unique_by_key failed on 1st step");
 
     temp_storage_bytes = rocprim::detail::align_size(temp_storage_bytes);
     d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes + sizeof(size_type));
     hip_rocprim::throw_on_error(hipGetLastError(),
-                                "copy_if failed to get memory buffer");
+                                "unique_by_key failed to get memory buffer");
 
     d_num_selected_out = reinterpret_cast<size_type *>(
       reinterpret_cast<char *>(d_temp_storage) + temp_storage_bytes);
@@ -148,13 +147,13 @@ namespace __unique_by_key {
                              wrapped_binary_pred,
                              stream,
                              debug_sync);
-    hip_rocprim::throw_on_error(status, "copy_if failed on 2nd step");
+    hip_rocprim::throw_on_error(status, "unique_by_key failed on 2nd step");
 
     size_type num_selected = get_value(policy, d_num_selected_out);
 
     hip_rocprim::return_memory_buffer(policy, d_temp_storage);
     hip_rocprim::throw_on_error(hipGetLastError(),
-                                "copy_if failed to return memory buffer");
+                                "unique_by_key failed to return memory buffer");
 
     return thrust::make_pair(keys_result + num_selected, values_result + num_selected);
   }
