@@ -70,8 +70,7 @@ namespace __unique {
          ItemsOutputIt items_result,
          BinaryPred    binary_pred)
   {
-    //  typedef typename iterator_traits<ItemsInputIt>::difference_type size_type;
-    typedef int size_type;
+    typedef size_t size_type;
 
     size_type    num_items          = static_cast<size_type>(thrust::distance(items_first, items_last));
     void *       d_temp_storage     = NULL;
@@ -214,7 +213,6 @@ unique(execution_policy<Derived> &policy,
 }    // namespace hip_rocprim
 END_NS_THRUST
 
-//
 #include <thrust/memory.h>
 #include <thrust/unique.h>
 #endif
