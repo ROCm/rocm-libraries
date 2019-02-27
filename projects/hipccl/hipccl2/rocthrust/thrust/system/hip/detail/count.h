@@ -27,7 +27,7 @@
 #pragma once
 
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 #include <thrust/system/hip/config.h>
 
 #include <thrust/system/hip/detail/util.h>
@@ -38,8 +38,8 @@ BEGIN_NS_THRUST
 namespace hip_rocprim {
     
     template <class Derived,
-    class InputIt,
-    class UnaryPred>
+              class InputIt,
+              class UnaryPred>
     typename iterator_traits<InputIt>::difference_type __host__ __device__
     count_if(execution_policy<Derived> &policy,
              InputIt                    first,
@@ -74,6 +74,6 @@ namespace hip_rocprim {
                                   detail::equal_to_value<Value>(value));
     }
     
-} // namespace cuda_cub
+} // namespace hip_rocprim
 END_NS_THRUST
 #endif
