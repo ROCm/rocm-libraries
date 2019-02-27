@@ -52,7 +52,6 @@ gather(execution_policy<Derived>& policy,
                           identity());
 }
 
-
 template <class Derived,
           class MapIt,
           class StencilIt,
@@ -98,7 +97,6 @@ gather_if(execution_policy<Derived>& policy,
                           result,
                           identity());
 }
-
 
 } // namespace hip_rocprim
 END_NS_THRUST
