@@ -30,6 +30,7 @@
 #if 0
 #include <thrust/system/cpp/detail/unique_by_key.h>
 #include <thrust/system/cuda/detail/unique_by_key.h>
+#include <thrust/system/hip/detail/unique_by_key.h>
 #include <thrust/system/omp/detail/unique_by_key.h>
 #include <thrust/system/tbb/detail/unique_by_key.h>
 #endif
@@ -41,4 +42,3 @@
 #define __THRUST_DEVICE_SYSTEM_UNIQUE_BY_KEY_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/detail/unique_by_key.h>
 #include __THRUST_DEVICE_SYSTEM_UNIQUE_BY_KEY_HEADER
 #undef __THRUST_DEVICE_SYSTEM_UNIQUE_BY_KEY_HEADER
-
