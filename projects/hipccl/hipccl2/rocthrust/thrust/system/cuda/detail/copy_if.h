@@ -599,8 +599,7 @@ namespace __copy_if {
             class Size,
             class NumSelectedOutIt>
   static cudaError_t THRUST_RUNTIME_FUNCTION
-  
-    (void *           d_temp_storage,
+  doit_step(void *           d_temp_storage,
             size_t &         temp_storage_bytes,
             ItemsIt          items,
             StencilIt        stencil,
