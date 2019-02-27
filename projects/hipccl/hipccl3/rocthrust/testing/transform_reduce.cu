@@ -6,10 +6,11 @@
 #include <thrust/iterator/retag.h>
 
 
-template<typename InputIterator, 
-         typename UnaryFunction, 
+template<typename InputIterator,
+         typename UnaryFunction,
          typename OutputType,
          typename BinaryFunction>
+__host__ __device__
 OutputType transform_reduce(my_system &system,
                             InputIterator,
                             InputIterator,
@@ -31,16 +32,17 @@ void TestTransformReduceDispatchExplicit()
                              vec.begin(),
                              0,
                              0,
-                             0);
+                             thrust::plus<int>());
 
     ASSERT_EQUAL(true, sys.is_valid());
 }
 DECLARE_UNITTEST(TestTransformReduceDispatchExplicit);
 
-template<typename InputIterator, 
-         typename UnaryFunction, 
+template<typename InputIterator,
+         typename UnaryFunction,
          typename OutputType,
          typename BinaryFunction>
+__host__ __device__
 OutputType transform_reduce(my_tag,
                             InputIterator first,
                             InputIterator,
@@ -60,7 +62,7 @@ void TestTransformReduceDispatchImplicit()
                              thrust::retag<my_tag>(vec.begin()),
                              0,
                              0,
-                             0);
+                             thrust::plus<int>());
 
     ASSERT_EQUAL(13, vec.front());
 }
@@ -125,4 +127,3 @@ void TestTransformReduceCountingIterator(void)
     ASSERT_EQUAL(result, -6);
 }
 DECLARE_VECTOR_UNITTEST(TestTransformReduceCountingIterator);
-
