@@ -95,13 +95,13 @@ if ("TBB" STREQUAL "${THRUST_DEVICE_SYSTEM}")
     set (THRUST_ADDITIONAL_LIBRARIES "${TBB_LIBRARIES}")
   endif ()
 
-  # there's a ton of these in the TBB backend, even though the code is correct
+  # There's a ton of these in the TBB backend, even though the code is correct.
   # TODO: silence these warnings in code instead
   append_option_if_available("-Wno-unused-parameter" THRUST_CXX_WARNINGS)
 endif ()
 
 if ("MSVC" STREQUAL "${CMAKE_CXX_COMPILER_ID}")
-  if (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 1700)
+  if (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 1900)
     message(FATAL_ERROR "This version of MSVC no longer supported.")
   endif ()
 endif ()
