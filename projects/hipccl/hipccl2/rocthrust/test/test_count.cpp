@@ -186,7 +186,7 @@ int count(my_tag, InputIterator, InputIterator, EqualityComparable x)
     return x;
 }
 
-TEST(EqualTests, TestEqualDispatchImplicit)
+TEST(CountTests, TestCountDispatchImplicit)
 {
     thrust::device_vector<int> vec(1);
 
