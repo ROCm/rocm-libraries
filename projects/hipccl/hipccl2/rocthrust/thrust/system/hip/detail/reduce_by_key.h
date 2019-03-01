@@ -236,7 +236,4 @@ namespace hip_rocprim{
 
 END_NS_THRUST
 
-//#include <thrust/memory.h>
-//#include <thrust/reduce.h>
-
 #endif
