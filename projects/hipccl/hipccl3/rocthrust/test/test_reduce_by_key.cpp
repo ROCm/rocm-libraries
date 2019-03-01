@@ -22,7 +22,6 @@
 
 // Google Test
 #include <gtest/gtest.h>
-#include <iostream>
 
 // Thrust
 #include <thrust/reduce.h>
