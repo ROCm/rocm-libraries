@@ -30,6 +30,7 @@
 #if 0
 #include <thrust/system/cpp/detail/reduce_by_key.h>
 #include <thrust/system/cuda/detail/reduce_by_key.h>
+#include <thrust/system/hip/detail/reduce_by_key.h>
 #include <thrust/system/omp/detail/reduce_by_key.h>
 #include <thrust/system/tbb/detail/reduce_by_key.h>
 #endif
