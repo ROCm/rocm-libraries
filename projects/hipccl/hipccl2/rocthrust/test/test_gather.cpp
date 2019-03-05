@@ -272,12 +272,12 @@ template<typename InputIterator1,
          typename InputIterator2,
          typename RandomAccessIterator,
          typename OutputIterator>
-OutputIterator gather_if(my_system &system,
-                         InputIterator1       map_first,
-                         InputIterator1       map_last,
-                         InputIterator2       stencil,
-                         RandomAccessIterator input_first,
-                         OutputIterator       result)
+OutputIterator gather_if(my_system &           system,
+                         InputIterator1,
+                         InputIterator1,
+                         InputIterator2,
+                         RandomAccessIterator,
+                         OutputIterator        result)
 {
     system.validate_dispatch();
     return result;
@@ -303,10 +303,10 @@ template<typename InputIterator1,
          typename RandomAccessIterator,
          typename OutputIterator>
 OutputIterator gather_if(my_tag,
-                         InputIterator1       map_first,
-                         InputIterator1       map_last,
-                         InputIterator2       stencil,
-                         RandomAccessIterator input_first,
+                         InputIterator1,
+                         InputIterator1,
+                         InputIterator2,
+                         RandomAccessIterator,
                          OutputIterator       result)
 {
     *result = 13;

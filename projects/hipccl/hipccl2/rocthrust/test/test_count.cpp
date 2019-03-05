@@ -82,13 +82,14 @@ TYPED_TEST_CASE(CountTests, CountTestsParams);
 TYPED_TEST(CountTests, TestCountSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using T = typename Vector::value_type;
 
     Vector data(5);
-    data[0] = 1; data[1] = 1; data[2] = 0; data[3] = 0; data[4] = 1;
+    data[0] = T(1); data[1] = T(1); data[2] = T(0); data[3] = T(0); data[4] = T(1);
 
-    ASSERT_EQ(thrust::count(data.begin(), data.end(), 0), 2);
-    ASSERT_EQ(thrust::count(data.begin(), data.end(), 1), 3);
-    ASSERT_EQ(thrust::count(data.begin(), data.end(), 2), 0);
+    ASSERT_EQ(thrust::count(data.begin(), data.end(), T(0)), 2);
+    ASSERT_EQ(thrust::count(data.begin(), data.end(), T(1)), 3);
+    ASSERT_EQ(thrust::count(data.begin(), data.end(), T(2)), 0);
 }
 
 TYPED_TEST(CountTests, TestCount)
@@ -151,13 +152,14 @@ TYPED_TEST(CountTests, TestCountIf)
 TYPED_TEST(CountTests, TestCountFromConstIteratorSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using T = typename Vector::value_type;
 
     Vector data(5);
-    data[0] = 1; data[1] = 1; data[2] = 0; data[3] = 0; data[4] = 1;
+    data[0] = T(1); data[1] = T(1); data[2] = T(0); data[3] = T(0); data[4] = T(1);
 
-    ASSERT_EQ(thrust::count(data.cbegin(), data.cend(), 0), 2);
-    ASSERT_EQ(thrust::count(data.cbegin(), data.cend(), 1), 3);
-    ASSERT_EQ(thrust::count(data.cbegin(), data.cend(), 2), 0);
+    ASSERT_EQ(thrust::count(data.cbegin(), data.cend(), T(0)), 2);
+    ASSERT_EQ(thrust::count(data.cbegin(), data.cend(), T(1)), 3);
+    ASSERT_EQ(thrust::count(data.cbegin(), data.cend(), T(2)), 0);
 }
 
 template<typename InputIterator, typename EqualityComparable>
