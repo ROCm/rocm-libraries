@@ -172,7 +172,7 @@ TYPED_TEST(PrimitiveSwapRangesTests, SwapRanges)
     using T = typename TestFixture::input_type;
 
     const std::vector<size_t> sizes = get_sizes();
-    T error_margin = 0.01;
+    T error_margin = T(0.01);
     for(auto size : sizes)
     {
         thrust::host_vector<T> a1 = get_random_data<T>( size,
