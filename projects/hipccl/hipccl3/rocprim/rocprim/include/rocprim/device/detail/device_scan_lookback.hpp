@@ -241,6 +241,7 @@ void lookback_scan_kernel_impl(InputIterator input,
                 input + block_offset,
                 values,
                 valid_in_last_block,
+                *(input + block_offset),
                 storage.load
             );
     }
