@@ -41,20 +41,18 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<class Key, class Value>
+template<class Value>
 struct carry_out
 {
     ROCPRIM_DEVICE inline
     carry_out& operator=(carry_out rhs)
     {
-        key = rhs.key;
         value = rhs.value;
         destination = rhs.destination;
         next_has_carry_in = rhs.next_has_carry_in;
         return *this;
     }
 
-    Key key;
     Value value; // carry-out of the current batch
     unsigned int destination;
     bool next_has_carry_in; // the next batch has carry-in (i.e. it continues the last segment from the current batch)
@@ -311,7 +309,6 @@ template<
     unsigned int ItemsPerThread,
     class KeysInputIterator,
     class ValuesInputIterator,
-    class Key,
     class Result,
     class UniqueOutputIterator,
     class AggregatesOutputIterator,
@@ -323,7 +320,7 @@ void reduce_by_key(KeysInputIterator keys_input,
                    ValuesInputIterator values_input,
                    unsigned int size,
                    const unsigned int * unique_starts,
-                   carry_out<Key, Result> * carry_outs,
+                   carry_out<Result> * carry_outs,
                    Result * leading_aggregates,
                    UniqueOutputIterator unique_output,
                    AggregatesOutputIterator aggregates_output,
@@ -334,7 +331,7 @@ void reduce_by_key(KeysInputIterator keys_input,
 {
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
 
-    using key_type = Key;
+    using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
     using result_type = Result;
 
     using keys_load_type = ::rocprim::block_load<
@@ -498,7 +495,6 @@ void reduce_by_key(KeysInputIterator keys_input,
             if(bi == blocks_per_batch - 1)
             {
                 // Save carry-out of the last block of the current batch
-                carry_outs[batch_id].key = keys[ItemsPerThread - 1];
                 carry_outs[batch_id].value = values[ItemsPerThread - 1];
                 carry_outs[batch_id].destination = block_start + ranks[ItemsPerThread - 1];
                 carry_outs[batch_id].next_has_carry_in = !tail_flags[ItemsPerThread - 1];
@@ -549,24 +545,20 @@ void reduce_by_key(KeysInputIterator keys_input,
 template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
-    class Key,
     class Result,
     class AggregatesOutputIterator,
-    class KeyCompareFunction,
     class BinaryFunction
 >
 ROCPRIM_DEVICE inline
-void scan_and_scatter_carry_outs(const carry_out<Key, Result> * carry_outs,
+void scan_and_scatter_carry_outs(const carry_out<Result> * carry_outs,
                                  const Result * leading_aggregates,
                                  AggregatesOutputIterator aggregates_output,
-                                 KeyCompareFunction key_compare_op,
                                  BinaryFunction reduce_op,
                                  unsigned int batches)
 {
-    using key_type = Key;
     using result_type = Result;
 
-    using discontinuity_type = ::rocprim::block_discontinuity<key_type, BlockSize>;
+    using discontinuity_type = ::rocprim::block_discontinuity<unsigned int, BlockSize>;
     using scan_type = ::rocprim::block_scan<scan_by_key_pair<result_type>, BlockSize>;
 
     ROCPRIM_SHARED_MEMORY struct
@@ -577,25 +569,27 @@ void scan_and_scatter_carry_outs(const carry_out<Key, Result> * carry_outs,
 
     const unsigned int flat_id = ::rocprim::flat_block_thread_id();
 
-    carry_out<Key, Result> cs[ItemsPerThread];
+    carry_out<result_type> cs[ItemsPerThread];
     block_load_direct_blocked(flat_id, carry_outs, cs, batches - 1);
 
-    key_type keys[ItemsPerThread];
+    unsigned int destinations[ItemsPerThread];
     result_type values[ItemsPerThread];
     for(unsigned int i = 0; i < ItemsPerThread; i++)
     {
-        keys[i] = cs[i].key;
+        destinations[i] = cs[i].destination;
         values[i] = cs[i].value;
     }
 
     bool head_flags[ItemsPerThread];
     bool tail_flags[ItemsPerThread];
-    const key_type successor_key = keys[ItemsPerThread - 1]; // Do not always flag the last item in the block
-
+    ::rocprim::equal_to<unsigned int> compare_op;
+    // If a carry-out of the current batch has the same destination as previous batches,
+    // then we need to scan its value with values of those previous batches.
     discontinuity_type().flag_heads_and_tails(
         head_flags, tail_flags,
-        successor_key, keys,
-        guarded_key_flag_op<key_type, KeyCompareFunction>(key_compare_op, batches - 1),
+        destinations[ItemsPerThread - 1], // Do not always flag the last item in the block
+        destinations,
+        guarded_key_flag_op<unsigned int, decltype(compare_op)>(compare_op, batches - 1),
         storage.discontinuity
     );
 
@@ -614,7 +608,7 @@ void scan_and_scatter_carry_outs(const carry_out<Key, Result> * carry_outs,
     {
         if(tail_flags[i])
         {
-            const unsigned int dst = cs[i].destination;
+            const unsigned int dst = destinations[i];
             const result_type aggregate = pairs[i].value;
             if(cs[i].next_has_carry_in)
             {

@@ -81,7 +81,6 @@ template<
     unsigned int ItemsPerThread,
     class KeysInputIterator,
     class ValuesInputIterator,
-    class Key,
     class Result,
     class UniqueOutputIterator,
     class AggregatesOutputIterator,
@@ -93,7 +92,7 @@ void reduce_by_key_kernel(KeysInputIterator keys_input,
                           ValuesInputIterator values_input,
                           unsigned int size,
                           const unsigned int * unique_starts,
-                          carry_out<Key, Result> * carry_outs,
+                          carry_out<Result> * carry_outs,
                           Result * leading_aggregates,
                           UniqueOutputIterator unique_output,
                           AggregatesOutputIterator aggregates_output,
@@ -114,23 +113,20 @@ void reduce_by_key_kernel(KeysInputIterator keys_input,
 template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
-    class Key,
     class Result,
     class AggregatesOutputIterator,
-    class KeyCompareFunction,
     class BinaryFunction
 >
 __global__
-void scan_and_scatter_carry_outs_kernel(const carry_out<Key, Result> * carry_outs,
+void scan_and_scatter_carry_outs_kernel(const carry_out<Result> * carry_outs,
                                         const Result * leading_aggregates,
                                         AggregatesOutputIterator aggregates_output,
-                                        KeyCompareFunction key_compare_op,
                                         BinaryFunction reduce_op,
                                         unsigned int batches)
 {
     scan_and_scatter_carry_outs<BlockSize, ItemsPerThread>(
         carry_outs, leading_aggregates, aggregates_output,
-        key_compare_op, reduce_op,
+        reduce_op,
         batches
     );
 }
@@ -180,7 +176,7 @@ hipError_t reduce_by_key_impl(void * temporary_storage,
         typename std::iterator_traits<AggregatesOutputIterator>::value_type,
         BinaryFunction
     >::type;
-    using carry_out_type = carry_out<key_type, result_type>;
+    using carry_out_type = carry_out<result_type>;
 
     using config = default_or_custom_config<
         Config,
@@ -263,7 +259,7 @@ hipError_t reduce_by_key_impl(void * temporary_storage,
         dim3(1), dim3(config::scan::block_size), 0, stream,
         const_cast<const carry_out_type *>(carry_outs), const_cast<const result_type *>(leading_aggregates),
         aggregates_output,
-        key_compare_op, reduce_op,
+        reduce_op,
         batches
     );
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("scan_and_scatter_carry_outs", config::scan::block_size, start)
