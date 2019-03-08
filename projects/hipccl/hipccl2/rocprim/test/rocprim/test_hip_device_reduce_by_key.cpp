@@ -37,8 +37,7 @@
 
 #include "test_utils.hpp"
 
-#define HIP_CHECK(error)         \
-    ASSERT_EQ(static_cast<hipError_t>(error),hipSuccess)
+#define HIP_CHECK(error) ASSERT_EQ(error, hipSuccess)
 
 namespace rp = rocprim;
 
@@ -158,6 +157,8 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
 
         hipStream_t stream = 0; // default
 
+        const bool use_unique_keys = bool(test_utils::get_random_value<int>(0, 1));
+
         // Generate data and calculate expected results
         std::vector<key_type> unique_expected;
         std::vector<aggregate_type> aggregates_expected;
@@ -172,12 +173,11 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
         std::vector<value_type> values_input = test_utils::get_random_data<value_type>(size, 0, 100);
 
         size_t offset = 0;
-        key_type current_key = key_distribution_type(0, 100)(gen);
-        key_type prev_key = current_key;
+        key_type prev_key = key_distribution_type(0, 100)(gen);
+        key_type current_key = prev_key + key_delta_dis(gen);
         while(offset < size)
         {
             const size_t key_count = key_count_dis(gen);
-            current_key = current_key + key_delta_dis(gen);
 
             const size_t end = std::min(size, offset + key_count);
             for(size_t i = offset; i < end; i++)
@@ -203,7 +203,18 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
                 aggregates_expected.back() = reduce_op(aggregates_expected.back(), aggregate);
             }
 
-            prev_key = current_key;
+            if (use_unique_keys)
+            {
+                prev_key = current_key;
+                // e.g. 1,1,1,2,5,5,8,8,8
+                current_key = current_key + key_delta_dis(gen);
+            }
+            else
+            {
+                // e.g. 1,1,5,1,5,5,5,1
+                std::swap(current_key, prev_key);
+            }
+
             offset += key_count;
         }
 
