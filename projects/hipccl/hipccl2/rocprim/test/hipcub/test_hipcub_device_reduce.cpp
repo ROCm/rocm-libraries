@@ -64,6 +64,7 @@ typedef ::testing::Types<
     DeviceReduceParams<int, long>,
     DeviceReduceParams<unsigned long>,
     DeviceReduceParams<short>,
+    DeviceReduceParams<short, float>,
     DeviceReduceParams<int, double>
     #ifdef HIPCUB_ROCPRIM_API
     ,

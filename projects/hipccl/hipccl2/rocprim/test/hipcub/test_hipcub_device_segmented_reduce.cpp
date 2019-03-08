@@ -81,6 +81,7 @@ typedef ::testing::Types<
     params1<int, int, hipcub::Sum, -100, 0, 10000>,
     params1<double, double, hipcub::Min, 1000, 0, 10000>,
     params1<int, short, hipcub::Max, 10, 1000, 10000>,
+    params1<short, double, hipcub::Sum, 5, 1, 1000>,
     params1<float, double, hipcub::Max, 50, 2, 10>,
     params1<float, float, hipcub::Sum, 123, 100, 200>
 > Params1;
