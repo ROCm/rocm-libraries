@@ -90,7 +90,8 @@ public:
     {
         return ::rocprim::reduce(
             d_temp_storage, temp_storage_bytes,
-            d_in, d_out, init, num_items, reduction_op,
+            d_in, d_out, init, num_items,
+            ::hipcub::detail::convert_result_type<InputIteratorT, OutputIteratorT>(reduction_op),
             stream, debug_synchronous
         );
     }
@@ -109,9 +110,9 @@ public:
                    bool debug_synchronous = false)
     {
         using T = typename std::iterator_traits<InputIteratorT>::value_type;
-        return ::rocprim::reduce(
+        return Reduce(
             d_temp_storage, temp_storage_bytes,
-            d_in, d_out, T(0), num_items, ::hipcub::Sum(),
+            d_in, d_out, num_items, ::hipcub::Sum(), T(0),
             stream, debug_synchronous
         );
     }
@@ -130,9 +131,9 @@ public:
                    bool debug_synchronous = false)
     {
         using T = typename std::iterator_traits<InputIteratorT>::value_type;
-        return ::rocprim::reduce(
+        return Reduce(
             d_temp_storage, temp_storage_bytes,
-            d_in, d_out, detail::get_max_value<T>(), num_items, ::hipcub::Min(),
+            d_in, d_out, num_items, ::hipcub::Min(), detail::get_max_value<T>(),
             stream, debug_synchronous
         );
     }
@@ -166,9 +167,9 @@ public:
         IteratorT d_indexed_in(d_in);
         OutputTupleT init(1, detail::get_max_value<T>());
 
-        return ::rocprim::reduce(
+        return Reduce(
             d_temp_storage, temp_storage_bytes,
-            d_indexed_in, d_out, init, num_items, ::hipcub::ArgMin(),
+            d_indexed_in, d_out, num_items, ::hipcub::ArgMin(), init,
             stream, debug_synchronous
         );
     }
@@ -187,9 +188,9 @@ public:
                    bool debug_synchronous = false)
     {
         using T = typename std::iterator_traits<InputIteratorT>::value_type;
-        return ::rocprim::reduce(
+        return Reduce(
             d_temp_storage, temp_storage_bytes,
-            d_in, d_out, detail::get_lowest_value<T>(), num_items, ::hipcub::Max(),
+            d_in, d_out, num_items, ::hipcub::Max(), detail::get_lowest_value<T>(),
             stream, debug_synchronous
         );
     }
@@ -223,9 +224,9 @@ public:
         IteratorT d_indexed_in(d_in);
         OutputTupleT init(1, detail::get_lowest_value<T>());
 
-        return ::rocprim::reduce(
+        return Reduce(
             d_temp_storage, temp_storage_bytes,
-            d_indexed_in, d_out, init, num_items, ::hipcub::ArgMax(),
+            d_indexed_in, d_out, num_items, ::hipcub::ArgMax(), init,
             stream, debug_synchronous
         );
     }
@@ -257,7 +258,8 @@ public:
             d_temp_storage, temp_storage_bytes,
             d_keys_in, d_values_in, num_items,
             d_unique_out, d_aggregates_out, d_num_runs_out,
-            reduction_op, key_compare_op(),
+            ::hipcub::detail::convert_result_type<ValuesInputIteratorT, AggregatesOutputIteratorT>(reduction_op),
+            key_compare_op(),
             stream, debug_synchronous
         );
     }

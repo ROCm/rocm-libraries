@@ -121,6 +121,69 @@ struct ArgMin
     }
 };
 
+namespace detail
+{
+
+// CUB uses value_type of OutputIteratorT (if not void) as a type of intermediate results in scan and reduce,
+// for example:
+//
+// /// The output value type
+// typedef typename If<(Equals<typename std::iterator_traits<OutputIteratorT>::value_type, void>::VALUE),  // OutputT =  (if output iterator's value type is void) ?
+//     typename std::iterator_traits<InputIteratorT>::value_type,                                          // ... then the input iterator's value type,
+//     typename std::iterator_traits<OutputIteratorT>::value_type>::Type OutputT;                          // ... else the output iterator's value type
+//
+// rocPRIM (as well as Thrust) uses result type of BinaryFunction instead (if not void):
+//
+// using input_type = typename std::iterator_traits<InputIterator>::value_type;
+// using result_type = typename ::rocprim::detail::match_result_type<
+//     input_type, BinaryFunction
+// >::type;
+//
+// For short -> float using Sum()
+// CUB:     float Sum(float, float)
+// rocPRIM: short Sum(short, short)
+//
+// This wrapper allows to have compatibility with CUB in hipCUB.
+template<
+    class InputIteratorT,
+    class OutputIteratorT,
+    class BinaryFunction
+>
+struct convert_result_type_wrapper
+{
+    using input_type = typename std::iterator_traits<InputIteratorT>::value_type;
+    using output_type = typename std::iterator_traits<OutputIteratorT>::value_type;
+    using result_type =
+        typename std::conditional<
+            std::is_void<output_type>::value, input_type, output_type
+        >::type;
+
+    convert_result_type_wrapper(BinaryFunction op) : op(op) {}
+
+    template<class T>
+    HIPCUB_HOST_DEVICE inline
+    constexpr result_type operator()(const T &a, const T &b) const
+    {
+        return static_cast<result_type>(op(a, b));
+    }
+
+    BinaryFunction op;
+};
+
+template<
+    class InputIteratorT,
+    class OutputIteratorT,
+    class BinaryFunction
+>
+inline
+convert_result_type_wrapper<InputIteratorT, OutputIteratorT, BinaryFunction>
+convert_result_type(BinaryFunction op)
+{
+    return convert_result_type_wrapper<InputIteratorT, OutputIteratorT, BinaryFunction>(op);
+}
+
+} // end detail namespace
+
 END_HIPCUB_NAMESPACE
 
 #endif // HIBCUB_ROCPRIM_THREAD_THREAD_OPERATORS_HPP_
