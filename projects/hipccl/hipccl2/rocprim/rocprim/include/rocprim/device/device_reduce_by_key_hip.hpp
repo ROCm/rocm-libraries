@@ -177,7 +177,6 @@ hipError_t reduce_by_key_impl(void * temporary_storage,
     using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
     using result_type = typename ::rocprim::detail::match_result_type<
         typename std::iterator_traits<ValuesInputIterator>::value_type,
-        typename std::iterator_traits<AggregatesOutputIterator>::value_type,
         BinaryFunction
     >::type;
     using carry_out_type = carry_out<key_type, result_type>;
