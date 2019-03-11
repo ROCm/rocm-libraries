@@ -37,7 +37,7 @@
 
 #include "test_utils.hpp"
 
-#define HIP_CHECK(error) ASSERT_EQ(static_cast<hipError_t>(error),hipSuccess)
+#define HIP_CHECK(error) ASSERT_EQ(error, hipSuccess)
 
 namespace rp = rocprim;
 
@@ -370,7 +370,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScanUsingHeadFlags)
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
         // Generate data
-        std::vector<input_type> input = test_utils::get_random_data<input_type>(size, 1, 1);
+        std::vector<input_type> input = test_utils::get_random_data<input_type>(size, 1, 10);
         std::vector<flag_type> flags = test_utils::get_random_data<flag_type>(size, 0, 10);
         flags[0] = 1U;
         std::transform(
@@ -500,7 +500,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScanUsingHeadFlags)
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
         // Generate data
-        std::vector<input_type> input = test_utils::get_random_data<input_type>(size, 1, 1);
+        std::vector<input_type> input = test_utils::get_random_data<input_type>(size, 1, 10);
         std::vector<flag_type> flags = test_utils::get_random_data<flag_type>(size, 0, 10);
         flags[0] = 1U;
         std::transform(

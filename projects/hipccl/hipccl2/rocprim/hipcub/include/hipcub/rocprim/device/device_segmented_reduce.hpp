@@ -56,7 +56,8 @@ struct DeviceSegmentedReduce
             d_temp_storage, temp_storage_bytes,
             d_in, d_out,
             num_segments, d_begin_offsets, d_end_offsets,
-            reduction_op, initial_value,
+            ::hipcub::detail::convert_result_type<InputIteratorT, OutputIteratorT>(reduction_op),
+            initial_value,
             stream, debug_synchronous
         );
     }
@@ -79,7 +80,7 @@ struct DeviceSegmentedReduce
     {
         using input_type = typename std::iterator_traits<InputIteratorT>::value_type;
 
-        return ::rocprim::segmented_reduce(
+        return Reduce(
             d_temp_storage, temp_storage_bytes,
             d_in, d_out,
             num_segments, d_begin_offsets, d_end_offsets,
@@ -106,7 +107,7 @@ struct DeviceSegmentedReduce
     {
         using input_type = typename std::iterator_traits<InputIteratorT>::value_type;
 
-        return ::rocprim::segmented_reduce(
+        return Reduce(
             d_temp_storage, temp_storage_bytes,
             d_in, d_out,
             num_segments, d_begin_offsets, d_end_offsets,
@@ -139,14 +140,14 @@ struct DeviceSegmentedReduce
                                  KeyValuePair<OffsetT, T>,
                                  O
                              >::type;
-        
+
         using OutputValueT = typename OutputTupleT::Value;
         using IteratorT = ArgIndexInputIterator<InputIteratorT, OffsetT, OutputValueT>;
-        
+
         IteratorT d_indexed_in(d_in);
         const OutputTupleT init(1, std::numeric_limits<T>::max());
-        
-        return ::rocprim::segmented_reduce(
+
+        return Reduce(
             d_temp_storage, temp_storage_bytes,
             d_indexed_in, d_out,
             num_segments, d_begin_offsets, d_end_offsets,
@@ -173,7 +174,7 @@ struct DeviceSegmentedReduce
     {
         using input_type = typename std::iterator_traits<InputIteratorT>::value_type;
 
-        return ::rocprim::segmented_reduce(
+        return Reduce(
             d_temp_storage, temp_storage_bytes,
             d_in, d_out,
             num_segments, d_begin_offsets, d_end_offsets,
@@ -206,14 +207,14 @@ struct DeviceSegmentedReduce
                                  KeyValuePair<OffsetT, T>,
                                  O
                              >::type;
-        
+
         using OutputValueT = typename OutputTupleT::Value;
         using IteratorT = ArgIndexInputIterator<InputIteratorT, OffsetT, OutputValueT>;
-        
+
         IteratorT d_indexed_in(d_in);
         const OutputTupleT init(1, std::numeric_limits<T>::lowest());
-        
-        return ::rocprim::segmented_reduce(
+
+        return Reduce(
             d_temp_storage, temp_storage_bytes,
             d_indexed_in, d_out,
             num_segments, d_begin_offsets, d_end_offsets,

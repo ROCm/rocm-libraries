@@ -43,7 +43,7 @@ public:
                             hipStream_t stream = 0,
                             bool debug_synchronous = false)
     {
-        return ::rocprim::inclusive_scan(
+        return InclusiveScan(
             d_temp_storage, temp_storage_bytes,
             d_in, d_out, num_items, ::hipcub::Sum(),
             stream, debug_synchronous
@@ -67,7 +67,8 @@ public:
     {
         return ::rocprim::inclusive_scan(
             d_temp_storage, temp_storage_bytes,
-            d_in, d_out, num_items, scan_op,
+            d_in, d_out, num_items,
+            ::hipcub::detail::convert_result_type<InputIteratorT, OutputIteratorT>(scan_op),
             stream, debug_synchronous
         );
     }
@@ -86,7 +87,7 @@ public:
                             bool debug_synchronous = false)
     {
         using T = typename std::iterator_traits<InputIteratorT>::value_type;
-        return ::rocprim::exclusive_scan(
+        return ExclusiveScan(
             d_temp_storage, temp_storage_bytes,
             d_in, d_out, T(0), num_items, ::hipcub::Sum(),
             stream, debug_synchronous
@@ -112,7 +113,8 @@ public:
     {
         return ::rocprim::exclusive_scan(
             d_temp_storage, temp_storage_bytes,
-            d_in, d_out, init_value, num_items, scan_op,
+            d_in, d_out, init_value, num_items,
+            ::hipcub::detail::convert_result_type<InputIteratorT, OutputIteratorT>(scan_op),
             stream, debug_synchronous
         );
     }

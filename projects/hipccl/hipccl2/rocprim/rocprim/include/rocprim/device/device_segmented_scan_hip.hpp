@@ -26,6 +26,7 @@
 
 #include "../config.hpp"
 #include "../detail/various.hpp"
+#include "../detail/match_result_type.hpp"
 
 #include "../iterator/zip_iterator.hpp"
 #include "../iterator/discard_iterator.hpp"
@@ -106,9 +107,8 @@ hipError_t segmented_scan_impl(void * temporary_storage,
                                bool debug_synchronous)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    using output_type = typename std::iterator_traits<OutputIterator>::value_type;
     using result_type = typename ::rocprim::detail::match_result_type<
-        input_type, output_type, BinaryFunction
+        input_type, BinaryFunction
     >::type;
 
     // Get default config if Config is default_config
@@ -250,9 +250,8 @@ hipError_t segmented_inclusive_scan(void * temporary_storage,
                                     bool debug_synchronous = false)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    using output_type = typename std::iterator_traits<OutputIterator>::value_type;
     using result_type = typename ::rocprim::detail::match_result_type<
-        input_type, output_type, BinaryFunction
+        input_type, BinaryFunction
     >::type;
 
     return detail::segmented_scan_impl<false, Config>(
