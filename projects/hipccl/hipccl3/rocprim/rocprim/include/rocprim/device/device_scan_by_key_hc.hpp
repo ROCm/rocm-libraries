@@ -27,7 +27,6 @@
 #include "../config.hpp"
 #include "../iterator/zip_iterator.hpp"
 #include "../iterator/discard_iterator.hpp"
-#include "../iterator/detail/replace_first_iterator.hpp"
 #include "../types/tuple.hpp"
 
 #include "../detail/various.hpp"
@@ -148,21 +147,35 @@ void inclusive_scan_by_key(void * temporary_storage,
                            const bool debug_synchronous = false)
 {
     using input_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
-    using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
-    using scan_by_key_operator = detail::scan_by_key_op_wrapper<
-        input_type, key_type, BinaryFunction, KeyCompareFunction
-    >;
+    using result_type = typename ::rocprim::detail::match_result_type<
+        input_type, BinaryFunction
+    >::type;
+    using flag_type = bool;
+    using headflag_scan_op_wrapper_type =
+        detail::headflag_scan_op_wrapper<
+            result_type, flag_type, BinaryFunction
+        >;
 
-    return inclusive_scan<Config>(
+    // Flag the first item of each segment as its head,
+    // then run inclusive scan
+    inclusive_scan<Config>(
         temporary_storage, storage_size,
-        make_zip_iterator(
-            make_tuple(values_input, keys_input)
+        rocprim::make_transform_iterator(
+            rocprim::make_counting_iterator<size_t>(0),
+            [values_input, keys_input, key_compare_op]
+            ROCPRIM_DEVICE (const size_t i)
+            {
+                flag_type flag(true);
+                if(i > 0)
+                {
+                    flag = flag_type(!key_compare_op(keys_input[i - 1], keys_input[i]));
+                }
+                return rocprim::make_tuple(values_input[i], flag);
+            }
         ),
-        make_zip_iterator(
-            make_tuple(values_output, make_discard_iterator())
-        ),
+        rocprim::make_zip_iterator(rocprim::make_tuple(values_output, rocprim::make_discard_iterator())),
         size,
-        scan_by_key_operator(scan_op, key_compare_op),
+        headflag_scan_op_wrapper_type(scan_op),
         acc_view,
         debug_synchronous
     );
@@ -283,61 +296,47 @@ void exclusive_scan_by_key(void * temporary_storage,
                            const bool debug_synchronous = false)
 {
     using input_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
-    using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
-    using scan_by_key_operator = detail::scan_by_key_op_wrapper<
-        input_type, key_type, BinaryFunction, KeyCompareFunction
-    >;
+    using result_type = typename ::rocprim::detail::match_result_type<
+        input_type, BinaryFunction
+    >::type;
+    using flag_type = bool;
+    using headflag_scan_op_wrapper_type =
+        detail::headflag_scan_op_wrapper<
+            result_type, flag_type, BinaryFunction
+        >;
 
-    return inclusive_scan<Config>(
+    const result_type initial_value_converted = static_cast<result_type>(initial_value);
+
+    // Flag the last item of each segment as the next segment's head, use initial_value as its value,
+    // then run exclusive scan
+    exclusive_scan<Config>(
         temporary_storage, storage_size,
-        // Using replace_first_iterator shifts input one item to left and replaces
-        // first value with initial_value. Then transform_iterator replaces last
-        // elements of other segments to initial_value. That modified input data
-        // can be inclusively scanned and produce expected exclusive results.
-        //
-        // values_input:                         [1, 2, 3, 4, 5, 6, 7, 8]
-        // replace_first_iterator(values_input): [9, 1, 2, 3, 4, 5, 6, 7]
-        // keys_input:                           [1, 1, 1, 2, 2, 3, 3, 4]
-        // replace_first_iterator(keys_input):   [-, 1, 1, 1, 2, 2, 3, 3]
-        // initial_value:                         9
-        // transform_iterator:                   [9, 1, 2, 9, 4, 9, 6, 9]
-        //
-        // inclusive_scan result:                [9, 10, 12, 9, 13, 9, 15, 9]
-        make_transform_iterator(
-            make_zip_iterator(
-                make_tuple(
-                    detail::replace_first_iterator<ValuesInputIterator>(
-                        values_input - 1, initial_value
-                    ),
-                    keys_input,
-                    detail::replace_first_iterator<KeysInputIterator>(
-                        keys_input - 1, key_type()
-                    )
-                )
-            ),
-            [initial_value, key_compare_op](const ::rocprim::tuple<input_type, key_type, key_type>& t)
-                -> ::rocprim::tuple<input_type, key_type>
+        rocprim::make_transform_iterator(
+            rocprim::make_counting_iterator<size_t>(0),
+            [values_input, keys_input, key_compare_op, initial_value_converted, size]
+            ROCPRIM_DEVICE (const size_t i)
             {
-                if(!key_compare_op(::rocprim::get<1>(t), ::rocprim::get<2>(t)))
+                flag_type flag(false);
+                if(i + 1 < size)
                 {
-                    return ::rocprim::make_tuple(
-                        static_cast<input_type>(initial_value),
-                        ::rocprim::get<1>(t)
-                    );
+                    flag = flag_type(!key_compare_op(keys_input[i], keys_input[i + 1]));
                 }
-                return ::rocprim::make_tuple(
-                    ::rocprim::get<0>(t), ::rocprim::get<1>(t)
-                );
+                result_type value = initial_value_converted;
+                if(!flag)
+                {
+                    value = values_input[i];
+                }
+                return rocprim::make_tuple(value, flag);
             }
         ),
-        make_zip_iterator(make_tuple(values_output, make_discard_iterator())),
+        rocprim::make_zip_iterator(rocprim::make_tuple(values_output, rocprim::make_discard_iterator())),
+        rocprim::make_tuple(initial_value_converted, flag_type(true)), // init value is a head of the first segment
         size,
-        scan_by_key_operator(scan_op, key_compare_op),
+        headflag_scan_op_wrapper_type(scan_op),
         acc_view,
         debug_synchronous
     );
 }
-
 
 /// @}
 // end of group devicemodule_hc
