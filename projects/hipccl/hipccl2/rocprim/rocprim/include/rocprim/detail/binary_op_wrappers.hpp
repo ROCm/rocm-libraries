@@ -73,12 +73,7 @@ struct headflag_scan_op_wrapper
 {
     static_assert(std::is_convertible<F, bool>::value, "F must be convertible to bool");
 
-    #ifdef __cpp_lib_is_invocable
-    using value_type = typename std::invoke_result<BinaryFunction, V, V>::type;
-    #else
-    using value_type = typename std::result_of<BinaryFunction(V, V)>::type;
-    #endif
-    using result_type = rocprim::tuple<value_type, F>;
+    using result_type = rocprim::tuple<V, F>;
     using input_type  = result_type;
 
     ROCPRIM_HOST_DEVICE inline
@@ -110,52 +105,6 @@ private:
     BinaryFunction scan_op_;
 };
 
-// Wrapper for performing scan-by-key
-template<
-    class V,
-    class K,
-    class BinaryFunction,
-    class KCompare = ::rocprim::equal_to<K>
->
-struct scan_by_key_op_wrapper
-{
-    #ifdef __cpp_lib_is_invocable
-    using value_type = typename std::invoke_result<BinaryFunction, V, V>::type;
-    #else
-    using value_type = typename std::result_of<BinaryFunction(V, V)>::type;
-    #endif
-    using result_type = rocprim::tuple<value_type, K>;
-    using input_type  = result_type;
-
-    ROCPRIM_HOST_DEVICE inline
-    scan_by_key_op_wrapper() = default;
-
-    ROCPRIM_HOST_DEVICE inline
-    scan_by_key_op_wrapper(BinaryFunction scan_op, KCompare compare_keys_op = KCompare())
-        : scan_op_(scan_op), compare_keys_op_(compare_keys_op)
-    {
-    }
-
-    ROCPRIM_HOST_DEVICE inline
-    ~scan_by_key_op_wrapper() = default;
-
-    ROCPRIM_HOST_DEVICE inline
-    result_type operator()(const input_type& t1, const input_type& t2)
-    {
-        if(compare_keys_op_(rocprim::get<1>(t1), rocprim::get<1>(t2)))
-        {
-            return rocprim::make_tuple(
-                scan_op_(rocprim::get<0>(t1), rocprim::get<0>(t2)),
-                rocprim::get<1>(t2)
-            );
-        }
-        return t2;
-    }
-
-private:
-    BinaryFunction scan_op_;
-    KCompare compare_keys_op_;
-};
 
 template<class EqualityOp>
 struct inequality_wrapper

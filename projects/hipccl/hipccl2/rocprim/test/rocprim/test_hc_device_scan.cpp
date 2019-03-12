@@ -312,10 +312,20 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanByKey)
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
+        const bool use_unique_keys = bool(test_utils::get_random_value<int>(0, 1));
+
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, 1, 100);
-        std::vector<K> keys = test_utils::get_random_data<K>(size, 0, 16);
-        std::sort(keys.begin(), keys.end());
+        std::vector<T> input = test_utils::get_random_data<T>(size, 0, 9);
+        std::vector<K> keys;
+        if(use_unique_keys)
+        {
+            keys = test_utils::get_random_data<K>(size, 0, 16);
+            std::sort(keys.begin(), keys.end());
+        }
+        else
+        {
+            keys = test_utils::get_random_data<K>(size, 0, 3);
+        }
 
         hc::array<T> d_input(hc::extent<1>(size), input.begin(), acc_view);
         hc::array<K> d_keys(hc::extent<1>(size), keys.begin(), acc_view);
@@ -415,11 +425,21 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
+        const bool use_unique_keys = bool(test_utils::get_random_value<int>(0, 1));
+
         // Generate data
         T initial_value = test_utils::get_random_value<T>(1, 100);
-        std::vector<T> input = test_utils::get_random_data<T>(size, 1, 100);
-        std::vector<K> keys = test_utils::get_random_data<K>(size, 0, 16);
-        std::sort(keys.begin(), keys.end());
+        std::vector<T> input = test_utils::get_random_data<T>(size, 0, 9);
+        std::vector<K> keys;
+        if(use_unique_keys)
+        {
+            keys = test_utils::get_random_data<K>(size, 0, 16);
+            std::sort(keys.begin(), keys.end());
+        }
+        else
+        {
+            keys = test_utils::get_random_data<K>(size, 0, 3);
+        }
 
         hc::array<T> d_input(hc::extent<1>(size), input.begin(), acc_view);
         hc::array<K> d_keys(hc::extent<1>(size), keys.begin(), acc_view);

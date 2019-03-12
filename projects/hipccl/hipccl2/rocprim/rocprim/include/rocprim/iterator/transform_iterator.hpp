@@ -63,13 +63,6 @@ template<
 >
 class transform_iterator
 {
-private:
-    using input_category = typename std::iterator_traits<InputIterator>::iterator_category;
-    static_assert(
-        std::is_same<input_category, std::random_access_iterator_tag>::value,
-        "InputIterator must be a random-access iterator"
-    );
-
 public:
     /// The type of the value that can be obtained by dereferencing the iterator.
     using value_type = ValueType;
