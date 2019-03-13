@@ -61,20 +61,20 @@ struct my_allocator_with_custom_destroy
   typedef int &       reference;
   typedef const int & const_reference;
 
-  __host__
+  __host__ __device__
   my_allocator_with_custom_destroy(){}
 
-  __host__
+  __host__ __device__
   my_allocator_with_custom_destroy(const my_allocator_with_custom_destroy &other)
     : use_me_to_alloc(other.use_me_to_alloc)
   {}
 
-  __host__
+  __host__ __device__
   ~my_allocator_with_custom_destroy(){}
 
   template<typename T>
   __host__ __device__
-  void destroy(T *p)
+  void destroy(T*)
   {
 #if !__CUDA_ARCH__
     g_state = 13;
@@ -90,7 +90,7 @@ struct my_allocator_with_custom_destroy
   {
     use_me_to_alloc.deallocate(ptr,n);
   }
-  
+
   // use composition rather than inheritance
   // to avoid inheriting std::allocator's member
   // function construct
@@ -117,15 +117,15 @@ struct my_minimal_allocator
   typedef int &       reference;
   typedef const int & const_reference;
 
-  __host__
+  __host__ __device__
   my_minimal_allocator(){}
 
-  __host__
+  __host__ __device__
   my_minimal_allocator(const my_minimal_allocator &other)
     : use_me_to_alloc(other.use_me_to_alloc)
   {}
 
-  __host__
+  __host__ __device__
   ~my_minimal_allocator(){}
 
   value_type *allocate(std::ptrdiff_t n)
@@ -152,4 +152,3 @@ void TestAllocatorMinimal()
   ASSERT_EQUAL(ref, h_vec);
 }
 DECLARE_UNITTEST(TestAllocatorMinimal);
-
