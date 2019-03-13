@@ -95,8 +95,6 @@ TYPED_TEST(ZipIteratorReduceByKeyTests, TestZipIteratorReduceByKey)
 
         typedef tuple<T, T> Tuple;
 
-//TODO reenable when scan is implemented
-#if 0
         // integer key, tuple value
         {
             host_vector<T> h_data3(size, 0);
@@ -126,7 +124,6 @@ TYPED_TEST(ZipIteratorReduceByKeyTests, TestZipIteratorReduceByKey)
             ASSERT_EQ(h_data4, d_data4);
             ASSERT_EQ(h_data5, d_data5);
         }
-#endif
         // The tests below get miscompiled on Tesla hw for 8b types
 
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
@@ -139,8 +136,6 @@ TYPED_TEST(ZipIteratorReduceByKeyTests, TestZipIteratorReduceByKey)
         } // end if
 #endif
 
-//TODO reenable when scan is implemented
-#if 0
         // tuple key, tuple value
         {
             host_vector<T> h_data3(size, 0);
@@ -175,7 +170,6 @@ TYPED_TEST(ZipIteratorReduceByKeyTests, TestZipIteratorReduceByKey)
             ASSERT_EQ(h_data5, d_data5);
             ASSERT_EQ(h_data6, d_data6);
         }
-#endif
     }
 }
 

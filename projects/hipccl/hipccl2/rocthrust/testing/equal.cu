@@ -16,12 +16,12 @@ void TestEqualSimple(void)
     ASSERT_EQUAL(thrust::equal(v1.begin(), v1.end(), v1.begin()), true);
     ASSERT_EQUAL(thrust::equal(v1.begin(), v1.end(), v2.begin()), false);
     ASSERT_EQUAL(thrust::equal(v2.begin(), v2.end(), v2.begin()), true);
-    
+
     ASSERT_EQUAL(thrust::equal(v1.begin(), v1.begin() + 0, v1.begin()), true);
     ASSERT_EQUAL(thrust::equal(v1.begin(), v1.begin() + 1, v1.begin()), true);
     ASSERT_EQUAL(thrust::equal(v1.begin(), v1.begin() + 3, v2.begin()), true);
     ASSERT_EQUAL(thrust::equal(v1.begin(), v1.begin() + 4, v2.begin()), false);
-    
+
     ASSERT_EQUAL(thrust::equal(v1.begin(), v1.end(), v2.begin(), thrust::less_equal<T>()), true);
     ASSERT_EQUAL(thrust::equal(v1.begin(), v1.end(), v2.begin(), thrust::greater<T>()),    false);
 }
@@ -38,7 +38,7 @@ void TestEqual(const size_t n)
     //empty ranges
     ASSERT_EQUAL(thrust::equal(h_data1.begin(), h_data1.begin(), h_data1.begin()), true);
     ASSERT_EQUAL(thrust::equal(d_data1.begin(), d_data1.begin(), d_data1.begin()), true);
-    
+
     //symmetric cases
     ASSERT_EQUAL(thrust::equal(h_data1.begin(), h_data1.end(), h_data1.begin()), true);
     ASSERT_EQUAL(thrust::equal(d_data1.begin(), d_data1.end(), d_data1.begin()), true);
@@ -62,7 +62,7 @@ void TestEqual(const size_t n)
 DECLARE_VARIABLE_UNITTEST(TestEqual);
 
 template<typename InputIterator1, typename InputIterator2>
-bool equal(my_system &system, InputIterator1 first, InputIterator1, InputIterator2)
+bool equal(my_system &system, InputIterator1, InputIterator1, InputIterator2)
 {
     system.validate_dispatch();
     return false;
@@ -101,4 +101,3 @@ void TestEqualDispatchImplicit()
     ASSERT_EQUAL(13, vec.front());
 }
 DECLARE_UNITTEST(TestEqualDispatchImplicit);
-
