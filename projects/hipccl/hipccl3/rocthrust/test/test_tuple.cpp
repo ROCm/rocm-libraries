@@ -141,6 +141,7 @@ TYPED_TEST(TupleTests, TestTupleConstructor)
   ASSERT_EQ(data[7], thrust::get<7>(t9));
   ASSERT_EQ(data[8], thrust::get<8>(t9));
 
+  // TODO: tuple cannot handle 10 element
   /*thrust::tuple<T,T,T,T,T,T,T,T,T,T> t10(data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9]);
   ASSERT_EQ(data[0], thrust::get<0>(t10));
   ASSERT_EQ(data[1], thrust::get<1>(t10));
@@ -225,6 +226,7 @@ TYPED_TEST(TupleTests, TestMakeTuple)
   ASSERT_EQ(data[7], thrust::get<7>(t9));
   ASSERT_EQ(data[8], thrust::get<8>(t9));
 
+  // TODO: tuple cannot handle 10 element
   /*thrust::tuple<T,T,T,T,T,T,T,T,T,T> t10 = thrust::make_tuple(data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9]);
   ASSERT_EQ(data[0], thrust::get<0>(t10));
   ASSERT_EQ(data[1], thrust::get<1>(t10));
@@ -309,6 +311,7 @@ TYPED_TEST(TupleTests, TestTupleGet)
   ASSERT_EQ(data[7], thrust::get<7>(t9));
   ASSERT_EQ(data[8], thrust::get<8>(t9));
 
+  // TODO: tuple cannot handle 10 element
   /*thrust::tuple<T,T,T,T,T,T,T,T,T,T> t10 = thrust::make_tuple(data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9]);
   ASSERT_EQ(data[0], thrust::get<0>(t10));
   ASSERT_EQ(data[1], thrust::get<1>(t10));
@@ -463,6 +466,7 @@ struct TestTupleTieFunctor
     result &= data[8] == 8;
     clear(data);
 
+    // TODO: tuple cannot handle 10 element
     /*tie(data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9]) = thrust::make_tuple(0,1,2,3,4,5,6,7,8,9);
     result &= data[0] == 0;
     result &= data[1] == 1;
