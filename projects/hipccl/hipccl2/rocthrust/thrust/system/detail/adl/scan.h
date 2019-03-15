@@ -30,6 +30,7 @@
 #if 0
 #include <thrust/system/cpp/detail/scan.h>
 #include <thrust/system/cuda/detail/scan.h>
+#include <thrust/system/hip/detail/scan.h>
 #include <thrust/system/omp/detail/scan.h>
 #include <thrust/system/tbb/detail/scan.h>
 #endif
@@ -41,4 +42,3 @@
 #define __THRUST_DEVICE_SYSTEM_SCAN_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/detail/scan.h>
 #include __THRUST_DEVICE_SYSTEM_SCAN_HEADER
 #undef __THRUST_DEVICE_SYSTEM_SCAN_HEADER
-

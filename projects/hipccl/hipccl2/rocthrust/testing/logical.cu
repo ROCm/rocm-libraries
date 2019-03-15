@@ -14,7 +14,7 @@ void TestAllOf(void)
     ASSERT_EQUAL(thrust::all_of(v.begin(), v.end(), thrust::identity<T>()), true);
 
     v[1] = 0;
-    
+
     ASSERT_EQUAL(thrust::all_of(v.begin(), v.end(), thrust::identity<T>()), false);
 
     ASSERT_EQUAL(thrust::all_of(v.begin() + 0, v.begin() + 0, thrust::identity<T>()), true);
@@ -26,7 +26,8 @@ DECLARE_VECTOR_UNITTEST(TestAllOf);
 
 
 template <class InputIterator, class Predicate>
-bool all_of(my_system &system, InputIterator first, InputIterator last, Predicate pred)
+__host__ __device__
+bool all_of(my_system &system, InputIterator, InputIterator, Predicate)
 {
     system.validate_dispatch();
     return false;
@@ -45,7 +46,8 @@ DECLARE_UNITTEST(TestAllOfDispatchExplicit);
 
 
 template <class InputIterator, class Predicate>
-bool all_of(my_tag, InputIterator first, InputIterator last, Predicate pred)
+__host__ __device__
+bool all_of(my_tag, InputIterator first, InputIterator, Predicate)
 {
     *first = 13;
     return false;
@@ -74,7 +76,7 @@ void TestAnyOf(void)
     ASSERT_EQUAL(thrust::any_of(v.begin(), v.end(), thrust::identity<T>()), true);
 
     v[1] = 0;
-    
+
     ASSERT_EQUAL(thrust::any_of(v.begin(), v.end(), thrust::identity<T>()), true);
 
     ASSERT_EQUAL(thrust::any_of(v.begin() + 0, v.begin() + 0, thrust::identity<T>()), false);
@@ -86,7 +88,8 @@ DECLARE_VECTOR_UNITTEST(TestAnyOf);
 
 
 template <class InputIterator, class Predicate>
-bool any_of(my_system &system, InputIterator first, InputIterator last, Predicate pred)
+__host__ __device__
+bool any_of(my_system &system, InputIterator, InputIterator, Predicate)
 {
     system.validate_dispatch();
     return false;
@@ -105,7 +108,8 @@ DECLARE_UNITTEST(TestAnyOfDispatchExplicit);
 
 
 template <class InputIterator, class Predicate>
-bool any_of(my_tag, InputIterator first, InputIterator last, Predicate pred)
+__host__ __device__
+bool any_of(my_tag, InputIterator first, InputIterator, Predicate)
 {
     *first = 13;
     return false;
@@ -134,7 +138,7 @@ void TestNoneOf(void)
     ASSERT_EQUAL(thrust::none_of(v.begin(), v.end(), thrust::identity<T>()), false);
 
     v[1] = 0;
-    
+
     ASSERT_EQUAL(thrust::none_of(v.begin(), v.end(), thrust::identity<T>()), false);
 
     ASSERT_EQUAL(thrust::none_of(v.begin() + 0, v.begin() + 0, thrust::identity<T>()), true);
@@ -146,7 +150,8 @@ DECLARE_VECTOR_UNITTEST(TestNoneOf);
 
 
 template <class InputIterator, class Predicate>
-bool none_of(my_system &system, InputIterator first, InputIterator last, Predicate pred)
+__host__ __device__
+bool none_of(my_system &system, InputIterator, InputIterator, Predicate)
 {
     system.validate_dispatch();
     return false;
@@ -165,7 +170,8 @@ DECLARE_UNITTEST(TestNoneOfDispatchExplicit);
 
 
 template <class InputIterator, class Predicate>
-bool none_of(my_tag, InputIterator first, InputIterator last, Predicate pred)
+__host__ __device__
+bool none_of(my_tag, InputIterator first, InputIterator, Predicate)
 {
     *first = 13;
     return false;
@@ -182,4 +188,3 @@ void TestNoneOfDispatchImplicit()
     ASSERT_EQUAL(13, vec.front());
 }
 DECLARE_UNITTEST(TestNoneOfDispatchImplicit);
-

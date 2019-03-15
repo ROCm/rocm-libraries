@@ -37,6 +37,7 @@ __THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_BEGIN
 TYPED_TEST(BinarySearchTests, TestScalarLowerBoundSimple)
 {
   using Vector = typename TestFixture::input_type;
+  using T = typename Vector::value_type;
   Vector vec(5);
 
   vec[0] = 0;
@@ -45,16 +46,16 @@ TYPED_TEST(BinarySearchTests, TestScalarLowerBoundSimple)
   vec[3] = 7;
   vec[4] = 8;
 
-  ASSERT_EQ(thrust::lower_bound(vec.begin(), vec.end(), 0) - vec.begin(), 0);
-  ASSERT_EQ(thrust::lower_bound(vec.begin(), vec.end(), 1) - vec.begin(), 1);
-  ASSERT_EQ(thrust::lower_bound(vec.begin(), vec.end(), 2) - vec.begin(), 1);
-  ASSERT_EQ(thrust::lower_bound(vec.begin(), vec.end(), 3) - vec.begin(), 2);
-  ASSERT_EQ(thrust::lower_bound(vec.begin(), vec.end(), 4) - vec.begin(), 2);
-  ASSERT_EQ(thrust::lower_bound(vec.begin(), vec.end(), 5) - vec.begin(), 2);
-  ASSERT_EQ(thrust::lower_bound(vec.begin(), vec.end(), 6) - vec.begin(), 3);
-  ASSERT_EQ(thrust::lower_bound(vec.begin(), vec.end(), 7) - vec.begin(), 3);
-  ASSERT_EQ(thrust::lower_bound(vec.begin(), vec.end(), 8) - vec.begin(), 4);
-  ASSERT_EQ(thrust::lower_bound(vec.begin(), vec.end(), 9) - vec.begin(), 5);
+  ASSERT_EQ(thrust::lower_bound(vec.begin(), vec.end(), T(0)) - vec.begin(), 0);
+  ASSERT_EQ(thrust::lower_bound(vec.begin(), vec.end(), T(1)) - vec.begin(), 1);
+  ASSERT_EQ(thrust::lower_bound(vec.begin(), vec.end(), T(2)) - vec.begin(), 1);
+  ASSERT_EQ(thrust::lower_bound(vec.begin(), vec.end(), T(3)) - vec.begin(), 2);
+  ASSERT_EQ(thrust::lower_bound(vec.begin(), vec.end(), T(4)) - vec.begin(), 2);
+  ASSERT_EQ(thrust::lower_bound(vec.begin(), vec.end(), T(5)) - vec.begin(), 2);
+  ASSERT_EQ(thrust::lower_bound(vec.begin(), vec.end(), T(6)) - vec.begin(), 3);
+  ASSERT_EQ(thrust::lower_bound(vec.begin(), vec.end(), T(7)) - vec.begin(), 3);
+  ASSERT_EQ(thrust::lower_bound(vec.begin(), vec.end(), T(8)) - vec.begin(), 4);
+  ASSERT_EQ(thrust::lower_bound(vec.begin(), vec.end(), T(9)) - vec.begin(), 5);
 }
 
 template<typename ForwardIterator, typename LessThanComparable>
@@ -98,24 +99,25 @@ TEST(BinarySearchTests, TestScalarLowerBoundDispatchImplicit)
 TYPED_TEST(BinarySearchTests, TestScalarUpperBoundSimple)
 {
   using Vector = typename TestFixture::input_type;
+  using T = typename Vector::value_type;
   Vector vec(5);
 
-  vec[0] = 0;
-  vec[1] = 2;
-  vec[2] = 5;
-  vec[3] = 7;
-  vec[4] = 8;
+  vec[0] = T(0);
+  vec[1] = T(2);
+  vec[2] = T(5);
+  vec[3] = T(7);
+  vec[4] = T(8);
 
-  ASSERT_EQ(thrust::upper_bound(vec.begin(), vec.end(), 0) - vec.begin(), 1);
-  ASSERT_EQ(thrust::upper_bound(vec.begin(), vec.end(), 1) - vec.begin(), 1);
-  ASSERT_EQ(thrust::upper_bound(vec.begin(), vec.end(), 2) - vec.begin(), 2);
-  ASSERT_EQ(thrust::upper_bound(vec.begin(), vec.end(), 3) - vec.begin(), 2);
-  ASSERT_EQ(thrust::upper_bound(vec.begin(), vec.end(), 4) - vec.begin(), 2);
-  ASSERT_EQ(thrust::upper_bound(vec.begin(), vec.end(), 5) - vec.begin(), 3);
-  ASSERT_EQ(thrust::upper_bound(vec.begin(), vec.end(), 6) - vec.begin(), 3);
-  ASSERT_EQ(thrust::upper_bound(vec.begin(), vec.end(), 7) - vec.begin(), 4);
-  ASSERT_EQ(thrust::upper_bound(vec.begin(), vec.end(), 8) - vec.begin(), 5);
-  ASSERT_EQ(thrust::upper_bound(vec.begin(), vec.end(), 9) - vec.begin(), 5);
+  ASSERT_EQ(thrust::upper_bound(vec.begin(), vec.end(), T(0)) - vec.begin(), 1);
+  ASSERT_EQ(thrust::upper_bound(vec.begin(), vec.end(), T(1)) - vec.begin(), 1);
+  ASSERT_EQ(thrust::upper_bound(vec.begin(), vec.end(), T(2)) - vec.begin(), 2);
+  ASSERT_EQ(thrust::upper_bound(vec.begin(), vec.end(), T(3)) - vec.begin(), 2);
+  ASSERT_EQ(thrust::upper_bound(vec.begin(), vec.end(), T(4)) - vec.begin(), 2);
+  ASSERT_EQ(thrust::upper_bound(vec.begin(), vec.end(), T(5)) - vec.begin(), 3);
+  ASSERT_EQ(thrust::upper_bound(vec.begin(), vec.end(), T(6)) - vec.begin(), 3);
+  ASSERT_EQ(thrust::upper_bound(vec.begin(), vec.end(), T(7)) - vec.begin(), 4);
+  ASSERT_EQ(thrust::upper_bound(vec.begin(), vec.end(), T(8)) - vec.begin(), 5);
+  ASSERT_EQ(thrust::upper_bound(vec.begin(), vec.end(), T(9)) - vec.begin(), 5);
 }
 
 template<typename ForwardIterator, typename LessThanComparable>
@@ -159,6 +161,7 @@ TEST(BinarySearchTests, TestScalarUpperBoundDispatchImplicit)
 TYPED_TEST(BinarySearchTests, TestScalarBinarySearchSimple)
 {
   using Vector = typename TestFixture::input_type;
+  using T = typename Vector::value_type;
   Vector vec(5);
 
   vec[0] = 0;
@@ -167,16 +170,16 @@ TYPED_TEST(BinarySearchTests, TestScalarBinarySearchSimple)
   vec[3] = 7;
   vec[4] = 8;
 
-  ASSERT_EQ(thrust::binary_search(vec.begin(), vec.end(), 0),  true);
-  ASSERT_EQ(thrust::binary_search(vec.begin(), vec.end(), 1), false);
-  ASSERT_EQ(thrust::binary_search(vec.begin(), vec.end(), 2),  true);
-  ASSERT_EQ(thrust::binary_search(vec.begin(), vec.end(), 3), false);
-  ASSERT_EQ(thrust::binary_search(vec.begin(), vec.end(), 4), false);
-  ASSERT_EQ(thrust::binary_search(vec.begin(), vec.end(), 5),  true);
-  ASSERT_EQ(thrust::binary_search(vec.begin(), vec.end(), 6), false);
-  ASSERT_EQ(thrust::binary_search(vec.begin(), vec.end(), 7),  true);
-  ASSERT_EQ(thrust::binary_search(vec.begin(), vec.end(), 8),  true);
-  ASSERT_EQ(thrust::binary_search(vec.begin(), vec.end(), 9), false);
+  ASSERT_EQ(thrust::binary_search(vec.begin(), vec.end(), T(0)),  true);
+  ASSERT_EQ(thrust::binary_search(vec.begin(), vec.end(), T(1)), false);
+  ASSERT_EQ(thrust::binary_search(vec.begin(), vec.end(), T(2)),  true);
+  ASSERT_EQ(thrust::binary_search(vec.begin(), vec.end(), T(3)), false);
+  ASSERT_EQ(thrust::binary_search(vec.begin(), vec.end(), T(4)), false);
+  ASSERT_EQ(thrust::binary_search(vec.begin(), vec.end(), T(5)),  true);
+  ASSERT_EQ(thrust::binary_search(vec.begin(), vec.end(), T(6)), false);
+  ASSERT_EQ(thrust::binary_search(vec.begin(), vec.end(), T(7)),  true);
+  ASSERT_EQ(thrust::binary_search(vec.begin(), vec.end(), T(8)),  true);
+  ASSERT_EQ(thrust::binary_search(vec.begin(), vec.end(), T(9)), false);
 }
 
 template<typename ForwardIterator, typename LessThanComparable>
@@ -220,6 +223,7 @@ TEST(BinarySearchTests, TestScalarBinarySearchDispatchImplicit)
 TYPED_TEST(BinarySearchTests, TestScalarEqualRangeSimple)
 {
   using Vector = typename TestFixture::input_type;
+  using T = typename Vector::value_type;
   Vector vec(5);
 
   vec[0] = 0;
@@ -228,27 +232,27 @@ TYPED_TEST(BinarySearchTests, TestScalarEqualRangeSimple)
   vec[3] = 7;
   vec[4] = 8;
 
-  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), 0).first - vec.begin(), 0);
-  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), 1).first - vec.begin(), 1);
-  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), 2).first - vec.begin(), 1);
-  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), 3).first - vec.begin(), 2);
-  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), 4).first - vec.begin(), 2);
-  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), 5).first - vec.begin(), 2);
-  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), 6).first - vec.begin(), 3);
-  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), 7).first - vec.begin(), 3);
-  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), 8).first - vec.begin(), 4);
-  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), 9).first - vec.begin(), 5);
+  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), T(0)).first - vec.begin(), 0);
+  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), T(1)).first - vec.begin(), 1);
+  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), T(2)).first - vec.begin(), 1);
+  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), T(3)).first - vec.begin(), 2);
+  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), T(4)).first - vec.begin(), 2);
+  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), T(5)).first - vec.begin(), 2);
+  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), T(6)).first - vec.begin(), 3);
+  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), T(7)).first - vec.begin(), 3);
+  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), T(8)).first - vec.begin(), 4);
+  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), T(9)).first - vec.begin(), 5);
 
-  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), 0).second - vec.begin(), 1);
-  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), 1).second - vec.begin(), 1);
-  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), 2).second - vec.begin(), 2);
-  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), 3).second - vec.begin(), 2);
-  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), 4).second - vec.begin(), 2);
-  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), 5).second - vec.begin(), 3);
-  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), 6).second - vec.begin(), 3);
-  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), 7).second - vec.begin(), 4);
-  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), 8).second - vec.begin(), 5);
-  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), 9).second - vec.begin(), 5);
+  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), T(0)).second - vec.begin(), 1);
+  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), T(1)).second - vec.begin(), 1);
+  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), T(2)).second - vec.begin(), 2);
+  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), T(3)).second - vec.begin(), 2);
+  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), T(4)).second - vec.begin(), 2);
+  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), T(5)).second - vec.begin(), 3);
+  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), T(6)).second - vec.begin(), 3);
+  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), T(7)).second - vec.begin(), 4);
+  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), T(8)).second - vec.begin(), 5);
+  ASSERT_EQ(thrust::equal_range(vec.begin(), vec.end(), T(9)).second - vec.begin(), 5);
 }
 
 template<typename ForwardIterator, typename LessThanComparable>
