@@ -117,7 +117,7 @@ void TestVectorFromSTLVector(void)
     ASSERT_EQUAL(v[2], 2);
 
     v = stl_vector;
-    
+
     ASSERT_EQUAL(v.size(), 3);
     ASSERT_EQUAL(v[0], 0);
     ASSERT_EQUAL(v[1], 1);
@@ -167,7 +167,7 @@ template <class Vector>
 void TestVectorFromBiDirectionalIterator(void)
 {
     typedef typename Vector::value_type T;
-    
+
     std::list<T> stl_list;
     stl_list.push_back(0);
     stl_list.push_back(1);
@@ -187,7 +187,7 @@ template <class Vector>
 void TestVectorAssignFromBiDirectionalIterator(void)
 {
     typedef typename Vector::value_type T;
-    
+
     std::list<T> stl_list;
     stl_list.push_back(0);
     stl_list.push_back(1);
@@ -236,15 +236,11 @@ void TestVectorToAndFromHostVector(void)
 
     ASSERT_EQUAL(v, h);
 
-    v = v;
-
-    ASSERT_EQUAL(v, h);
-
     v[0] = 10;
     v[1] = 11;
     v[2] = 12;
 
-    ASSERT_EQUAL(h[0], 0);  ASSERT_EQUAL(v[0], 10); 
+    ASSERT_EQUAL(h[0], 0);  ASSERT_EQUAL(v[0], 10);
     ASSERT_EQUAL(h[1], 1);  ASSERT_EQUAL(v[1], 11);
     ASSERT_EQUAL(h[2], 2);  ASSERT_EQUAL(v[2], 12);
 
@@ -292,16 +288,12 @@ void TestVectorToAndFromDeviceVector(void)
     Vector v(h);
 
     ASSERT_EQUAL(v, h);
-    
-    v = v;
-
-    ASSERT_EQUAL(v, h);
 
     v[0] = 10;
     v[1] = 11;
     v[2] = 12;
 
-    ASSERT_EQUAL(h[0], 0);  ASSERT_EQUAL(v[0], 10); 
+    ASSERT_EQUAL(h[0], 0);  ASSERT_EQUAL(v[0], 10);
     ASSERT_EQUAL(h[1], 1);  ASSERT_EQUAL(v[1], 11);
     ASSERT_EQUAL(h[2], 2);  ASSERT_EQUAL(v[2], 12);
 
@@ -346,7 +338,7 @@ void TestVectorSwap(void)
 
     v.swap(u);
 
-    ASSERT_EQUAL(v[0], 10); ASSERT_EQUAL(u[0], 0);  
+    ASSERT_EQUAL(v[0], 10); ASSERT_EQUAL(u[0], 0);
     ASSERT_EQUAL(v[1], 11); ASSERT_EQUAL(u[1], 1);
     ASSERT_EQUAL(v[2], 12); ASSERT_EQUAL(u[2], 2);
 }
@@ -361,33 +353,33 @@ void TestVectorErasePosition(void)
 
     v.erase(v.begin() + 2);
 
-    ASSERT_EQUAL(v.size(), 4); 
-    ASSERT_EQUAL(v[0], 0); 
-    ASSERT_EQUAL(v[1], 1); 
-    ASSERT_EQUAL(v[2], 3); 
-    ASSERT_EQUAL(v[3], 4); 
-    
+    ASSERT_EQUAL(v.size(), 4);
+    ASSERT_EQUAL(v[0], 0);
+    ASSERT_EQUAL(v[1], 1);
+    ASSERT_EQUAL(v[2], 3);
+    ASSERT_EQUAL(v[3], 4);
+
     v.erase(v.begin() + 0);
 
-    ASSERT_EQUAL(v.size(), 3); 
-    ASSERT_EQUAL(v[0], 1); 
-    ASSERT_EQUAL(v[1], 3); 
-    ASSERT_EQUAL(v[2], 4); 
-    
+    ASSERT_EQUAL(v.size(), 3);
+    ASSERT_EQUAL(v[0], 1);
+    ASSERT_EQUAL(v[1], 3);
+    ASSERT_EQUAL(v[2], 4);
+
     v.erase(v.begin() + 2);
 
-    ASSERT_EQUAL(v.size(), 2); 
-    ASSERT_EQUAL(v[0], 1); 
-    ASSERT_EQUAL(v[1], 3); 
-    
+    ASSERT_EQUAL(v.size(), 2);
+    ASSERT_EQUAL(v[0], 1);
+    ASSERT_EQUAL(v[1], 3);
+
     v.erase(v.begin() + 1);
 
-    ASSERT_EQUAL(v.size(), 1); 
-    ASSERT_EQUAL(v[0], 1); 
+    ASSERT_EQUAL(v.size(), 1);
+    ASSERT_EQUAL(v[0], 1);
 
     v.erase(v.begin() + 0);
 
-    ASSERT_EQUAL(v.size(), 0); 
+    ASSERT_EQUAL(v.size(), 0);
 }
 DECLARE_VECTOR_UNITTEST(TestVectorErasePosition);
 
@@ -400,26 +392,26 @@ void TestVectorEraseRange(void)
 
     v.erase(v.begin() + 1, v.begin() + 3);
 
-    ASSERT_EQUAL(v.size(), 4); 
-    ASSERT_EQUAL(v[0], 0); 
-    ASSERT_EQUAL(v[1], 3); 
-    ASSERT_EQUAL(v[2], 4); 
-    ASSERT_EQUAL(v[3], 5); 
-    
+    ASSERT_EQUAL(v.size(), 4);
+    ASSERT_EQUAL(v[0], 0);
+    ASSERT_EQUAL(v[1], 3);
+    ASSERT_EQUAL(v[2], 4);
+    ASSERT_EQUAL(v[3], 5);
+
     v.erase(v.begin() + 2, v.end());
 
-    ASSERT_EQUAL(v.size(), 2); 
-    ASSERT_EQUAL(v[0], 0); 
-    ASSERT_EQUAL(v[1], 3); 
-    
+    ASSERT_EQUAL(v.size(), 2);
+    ASSERT_EQUAL(v[0], 0);
+    ASSERT_EQUAL(v[1], 3);
+
     v.erase(v.begin() + 0, v.begin() + 1);
 
-    ASSERT_EQUAL(v.size(), 1); 
-    ASSERT_EQUAL(v[0], 3); 
-    
+    ASSERT_EQUAL(v.size(), 1);
+    ASSERT_EQUAL(v[0], 3);
+
     v.erase(v.begin(), v.end());
 
-    ASSERT_EQUAL(v.size(), 0); 
+    ASSERT_EQUAL(v.size(), 0);
 }
 DECLARE_VECTOR_UNITTEST(TestVectorEraseRange);
 
@@ -447,21 +439,21 @@ void TestVectorEquality(void)
     s_b[0] = 0;    s_b[1] = 1;    s_b[2] = 3;
     s_b[0] = 0;    s_b[1] = 1;
 
-    ASSERT_EQUAL((h_a == h_a), true); ASSERT_EQUAL((h_a == d_a), true); ASSERT_EQUAL((d_a == h_a), true);  ASSERT_EQUAL((d_a == d_a), true); 
+    ASSERT_EQUAL((h_a == h_a), true); ASSERT_EQUAL((h_a == d_a), true); ASSERT_EQUAL((d_a == h_a), true);  ASSERT_EQUAL((d_a == d_a), true);
     ASSERT_EQUAL((h_b == h_b), true); ASSERT_EQUAL((h_b == d_b), true); ASSERT_EQUAL((d_b == h_b), true);  ASSERT_EQUAL((d_b == d_b), true);
     ASSERT_EQUAL((h_c == h_c), true); ASSERT_EQUAL((h_c == d_c), true); ASSERT_EQUAL((d_c == h_c), true);  ASSERT_EQUAL((d_c == d_c), true);
 
     // test vector vs device_vector
-    ASSERT_EQUAL((s_a == d_a), true); ASSERT_EQUAL((d_a == s_a), true); 
+    ASSERT_EQUAL((s_a == d_a), true); ASSERT_EQUAL((d_a == s_a), true);
     ASSERT_EQUAL((s_b == d_b), true); ASSERT_EQUAL((d_b == s_b), true);
     ASSERT_EQUAL((s_c == d_c), true); ASSERT_EQUAL((d_c == s_c), true);
 
     // test vector vs host_vector
-    ASSERT_EQUAL((s_a == h_a), true); ASSERT_EQUAL((h_a == s_a), true); 
+    ASSERT_EQUAL((s_a == h_a), true); ASSERT_EQUAL((h_a == s_a), true);
     ASSERT_EQUAL((s_b == h_b), true); ASSERT_EQUAL((h_b == s_b), true);
     ASSERT_EQUAL((s_c == h_c), true); ASSERT_EQUAL((h_c == s_c), true);
 
-    ASSERT_EQUAL((h_a == h_b), false); ASSERT_EQUAL((h_a == d_b), false); ASSERT_EQUAL((d_a == h_b), false); ASSERT_EQUAL((d_a == d_b), false); 
+    ASSERT_EQUAL((h_a == h_b), false); ASSERT_EQUAL((h_a == d_b), false); ASSERT_EQUAL((d_a == h_b), false); ASSERT_EQUAL((d_a == d_b), false);
     ASSERT_EQUAL((h_b == h_a), false); ASSERT_EQUAL((h_b == d_a), false); ASSERT_EQUAL((d_b == h_a), false); ASSERT_EQUAL((d_b == d_a), false);
     ASSERT_EQUAL((h_a == h_c), false); ASSERT_EQUAL((h_a == d_c), false); ASSERT_EQUAL((d_a == h_c), false); ASSERT_EQUAL((d_a == d_c), false);
     ASSERT_EQUAL((h_c == h_a), false); ASSERT_EQUAL((h_c == d_a), false); ASSERT_EQUAL((d_c == h_a), false); ASSERT_EQUAL((d_c == d_a), false);
@@ -469,7 +461,7 @@ void TestVectorEquality(void)
     ASSERT_EQUAL((h_c == h_b), false); ASSERT_EQUAL((h_c == d_b), false); ASSERT_EQUAL((d_c == h_b), false); ASSERT_EQUAL((d_c == d_b), false);
 
     // test vector vs device_vector
-    ASSERT_EQUAL((s_a == d_b), false); ASSERT_EQUAL((d_a == s_b), false); 
+    ASSERT_EQUAL((s_a == d_b), false); ASSERT_EQUAL((d_a == s_b), false);
     ASSERT_EQUAL((s_b == d_a), false); ASSERT_EQUAL((d_b == s_a), false);
     ASSERT_EQUAL((s_a == d_c), false); ASSERT_EQUAL((d_a == s_c), false);
     ASSERT_EQUAL((s_c == d_a), false); ASSERT_EQUAL((d_c == s_a), false);
@@ -477,7 +469,7 @@ void TestVectorEquality(void)
     ASSERT_EQUAL((s_c == d_b), false); ASSERT_EQUAL((d_c == s_b), false);
 
     // test vector vs host_vector
-    ASSERT_EQUAL((s_a == h_b), false); ASSERT_EQUAL((h_a == s_b), false); 
+    ASSERT_EQUAL((s_a == h_b), false); ASSERT_EQUAL((h_a == s_b), false);
     ASSERT_EQUAL((s_b == h_a), false); ASSERT_EQUAL((h_b == s_a), false);
     ASSERT_EQUAL((s_a == h_c), false); ASSERT_EQUAL((h_a == s_c), false);
     ASSERT_EQUAL((s_c == h_a), false); ASSERT_EQUAL((h_c == s_a), false);
@@ -509,21 +501,21 @@ void TestVectorInequality(void)
     s_b[0] = 0;    s_b[1] = 1;    s_b[2] = 3;
     s_b[0] = 0;    s_b[1] = 1;
 
-    ASSERT_EQUAL((h_a != h_a), false); ASSERT_EQUAL((h_a != d_a), false); ASSERT_EQUAL((d_a != h_a), false);  ASSERT_EQUAL((d_a != d_a), false); 
+    ASSERT_EQUAL((h_a != h_a), false); ASSERT_EQUAL((h_a != d_a), false); ASSERT_EQUAL((d_a != h_a), false);  ASSERT_EQUAL((d_a != d_a), false);
     ASSERT_EQUAL((h_b != h_b), false); ASSERT_EQUAL((h_b != d_b), false); ASSERT_EQUAL((d_b != h_b), false);  ASSERT_EQUAL((d_b != d_b), false);
     ASSERT_EQUAL((h_c != h_c), false); ASSERT_EQUAL((h_c != d_c), false); ASSERT_EQUAL((d_c != h_c), false);  ASSERT_EQUAL((d_c != d_c), false);
 
     // test vector vs device_vector
-    ASSERT_EQUAL((s_a != d_a), false); ASSERT_EQUAL((d_a != s_a), false); 
+    ASSERT_EQUAL((s_a != d_a), false); ASSERT_EQUAL((d_a != s_a), false);
     ASSERT_EQUAL((s_b != d_b), false); ASSERT_EQUAL((d_b != s_b), false);
     ASSERT_EQUAL((s_c != d_c), false); ASSERT_EQUAL((d_c != s_c), false);
 
     // test vector vs host_vector
-    ASSERT_EQUAL((s_a != h_a), false); ASSERT_EQUAL((h_a != s_a), false); 
+    ASSERT_EQUAL((s_a != h_a), false); ASSERT_EQUAL((h_a != s_a), false);
     ASSERT_EQUAL((s_b != h_b), false); ASSERT_EQUAL((h_b != s_b), false);
     ASSERT_EQUAL((s_c != h_c), false); ASSERT_EQUAL((h_c != s_c), false);
 
-    ASSERT_EQUAL((h_a != h_b), true); ASSERT_EQUAL((h_a != d_b), true); ASSERT_EQUAL((d_a != h_b), true); ASSERT_EQUAL((d_a != d_b), true); 
+    ASSERT_EQUAL((h_a != h_b), true); ASSERT_EQUAL((h_a != d_b), true); ASSERT_EQUAL((d_a != h_b), true); ASSERT_EQUAL((d_a != d_b), true);
     ASSERT_EQUAL((h_b != h_a), true); ASSERT_EQUAL((h_b != d_a), true); ASSERT_EQUAL((d_b != h_a), true); ASSERT_EQUAL((d_b != d_a), true);
     ASSERT_EQUAL((h_a != h_c), true); ASSERT_EQUAL((h_a != d_c), true); ASSERT_EQUAL((d_a != h_c), true); ASSERT_EQUAL((d_a != d_c), true);
     ASSERT_EQUAL((h_c != h_a), true); ASSERT_EQUAL((h_c != d_a), true); ASSERT_EQUAL((d_c != h_a), true); ASSERT_EQUAL((d_c != d_a), true);
@@ -531,7 +523,7 @@ void TestVectorInequality(void)
     ASSERT_EQUAL((h_c != h_b), true); ASSERT_EQUAL((h_c != d_b), true); ASSERT_EQUAL((d_c != h_b), true); ASSERT_EQUAL((d_c != d_b), true);
 
     // test vector vs device_vector
-    ASSERT_EQUAL((s_a != d_b), true); ASSERT_EQUAL((d_a != s_b), true); 
+    ASSERT_EQUAL((s_a != d_b), true); ASSERT_EQUAL((d_a != s_b), true);
     ASSERT_EQUAL((s_b != d_a), true); ASSERT_EQUAL((d_b != s_a), true);
     ASSERT_EQUAL((s_a != d_c), true); ASSERT_EQUAL((d_a != s_c), true);
     ASSERT_EQUAL((s_c != d_a), true); ASSERT_EQUAL((d_c != s_a), true);
@@ -539,7 +531,7 @@ void TestVectorInequality(void)
     ASSERT_EQUAL((s_c != d_b), true); ASSERT_EQUAL((d_c != s_b), true);
 
     // test vector vs host_vector
-    ASSERT_EQUAL((s_a != h_b), true); ASSERT_EQUAL((h_a != s_b), true); 
+    ASSERT_EQUAL((s_a != h_b), true); ASSERT_EQUAL((h_a != s_b), true);
     ASSERT_EQUAL((s_b != h_a), true); ASSERT_EQUAL((h_b != s_a), true);
     ASSERT_EQUAL((s_a != h_c), true); ASSERT_EQUAL((h_a != s_c), true);
     ASSERT_EQUAL((s_c != h_a), true); ASSERT_EQUAL((h_c != s_a), true);
@@ -583,7 +575,7 @@ void TestVectorResizing(void)
 
     ASSERT_EQUAL(v.size(), 0);
 
-// TODO remove this WAR      
+// TODO remove this WAR
 #if defined(__CUDACC__) && CUDA_VERSION==3000
     // depending on sizeof(T), we will receive one
     // of two possible exceptions
@@ -620,7 +612,7 @@ void TestVectorReserving(void)
 
     ASSERT_EQUAL(v.capacity(), old_capacity);
 
-// TODO remove this WAR      
+// TODO remove this WAR
 #if defined(__CUDACC__) && CUDA_VERSION==3000
     try
     {
@@ -676,7 +668,7 @@ struct LargeStruct
 
 void TestVectorContainingLargeType(void)
 {
-    // Thrust issue #5 
+    // Thrust issue #5
     // http://code.google.com/p/thrust/issues/detail?id=5
     const static int N = 100;
     typedef LargeStruct<N> T;
@@ -688,9 +680,9 @@ void TestVectorContainingLargeType(void)
 
     thrust::device_vector<T> dv2(20);
     thrust::host_vector<T>   hv2(20);
-    
+
     ASSERT_EQUAL_QUIET(dv2, hv2);
-    
+
     // initialize tofirst element to something nonzero
     T ls;
 
@@ -699,15 +691,15 @@ void TestVectorContainingLargeType(void)
 
     thrust::device_vector<T> dv3(20, ls);
     thrust::host_vector<T>   hv3(20, ls);
-    
+
     ASSERT_EQUAL_QUIET(dv3, hv3);
-    
+
     // change first element
     ls.data[0] = -13;
 
     dv3[2] = ls;
     hv3[2] = ls;
-    
+
     ASSERT_EQUAL_QUIET(dv3, hv3);
 }
 DECLARE_UNITTEST(TestVectorContainingLargeType);
@@ -787,4 +779,3 @@ DECLARE_VECTOR_UNITTEST(TestVectorReversed);
   }
   DECLARE_VECTOR_UNITTEST(TestVectorMove);
 #endif
-

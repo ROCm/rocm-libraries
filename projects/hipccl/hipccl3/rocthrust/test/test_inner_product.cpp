@@ -112,7 +112,6 @@ TYPED_TEST(InnerProductTests, InnerProductSimple)
 {
     using Vector = typename TestFixture::input_type;
     using T = typename Vector::value_type;
-    T error_margin = (T) 0.01;
 
     Vector v1(3);
     Vector v2(3);
