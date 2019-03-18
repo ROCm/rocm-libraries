@@ -31,6 +31,8 @@
 TESTS_DEFINE(ReplaceTests, FullTestsParams)
 TESTS_DEFINE(PrimitiveReplaceTests, NumericalTestsParams)
 
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC //Should the tests be compiled if the compiler is not the right one?
+
 TEST(ReplaceTests, UsingHip)
 {
   ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
@@ -754,4 +756,4 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceCopyIfStencilToDiscardIteratorRandomDat
     }
 }
 
-//#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
