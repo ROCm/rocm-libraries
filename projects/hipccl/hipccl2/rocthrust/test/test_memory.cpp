@@ -20,12 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <iostream>
-#include <type_traits>
-#include <cstdlib>
-
-// Google Test
-#include <gtest/gtest.h>
+#include "test_header.hpp"
 
 // Thrust
 #include <thrust/memory.h>
@@ -38,12 +33,9 @@
 #include <thrust/reverse.h>
 #include <thrust/execution_policy.h>
 
-// HIP API
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-#include <hip/hip_runtime_api.h>
-
-#define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+#include <iostream>
+#include <type_traits>
+#include <cstdlib>
 
 TEST(HipThrustMemory, VoidMalloc)
 {

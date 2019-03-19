@@ -25,9 +25,6 @@
 #include <cstdlib>
 #include <algorithm>
 
-// Google Test
-#include <gtest/gtest.h>
-
 // Thrust
 #include <thrust/device_malloc_allocator.h>
 #include <thrust/device_vector.h>
@@ -35,12 +32,7 @@
 #include <thrust/system/cpp/vector.h>
 #include <memory>
 
-// HIP API
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-#include <hip/hip_runtime_api.h>
-
-#define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+#include "test_header.hpp"
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 

@@ -20,16 +20,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <iostream>
-#include <type_traits>
-#include <cstdlib>
-
-// Google Test
-#include <gtest/gtest.h>
+#include "test_header.hpp"
 
 // Thrust
 #include <thrust/remove.h>
-
 #include <thrust/count.h>
 #include <thrust/functional.h>
 #include <stdexcept>
@@ -37,43 +31,11 @@
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/iterator/retag.h>
 
-#include "test_utils.hpp"
+#include <iostream>
+#include <type_traits>
+#include <cstdlib>
 
-template<
-  class Input
->
-struct Params
-{
-  using input_type = Input;
-};
-
-template<class Params>
-class RemoveTests : public ::testing::Test
-{
-public:
-  using input_type = typename Params::input_type;
-};
-
-typedef ::testing::Types<
-    Params<thrust::host_vector<short>>,
-    Params<thrust::host_vector<int>>,
-    Params<thrust::host_vector<long long>>,
-    Params<thrust::host_vector<unsigned short>>,
-    Params<thrust::host_vector<unsigned int>>,
-    Params<thrust::host_vector<unsigned long long>>,
-    Params<thrust::host_vector<float>>,
-    Params<thrust::host_vector<double>>,
-    Params<thrust::device_vector<short>>,
-    Params<thrust::device_vector<int>>,
-    Params<thrust::device_vector<long long>>,
-    Params<thrust::device_vector<unsigned short>>,
-    Params<thrust::device_vector<unsigned int>>,
-    Params<thrust::device_vector<unsigned long long>>,
-    Params<thrust::device_vector<float>>,
-    Params<thrust::device_vector<double>>
-> RemoveTestsParams;
-
-TYPED_TEST_CASE(RemoveTests, RemoveTestsParams);
+TESTS_DEFINE(RemoveTests, FullTestsParams)
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
