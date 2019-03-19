@@ -1,36 +1,20 @@
 #!/usr/bin/env groovy
-@Library('rocJENKINS.develop') _
+@Library('rocJenkins') _
 import com.amd.project.*
 import com.amd.docker.*
 
 ////////////////////////////////////////////////////////////////////////
-// Mostly generated from snippet generator 'properties; set job properties'
-// Time-based triggers added to execute nightly tests, eg '30 2 * * *' means 2:30 AM
-properties([
-    pipelineTriggers([cron('0 1 * * *'), [$class: 'PeriodicFolderTrigger', interval: '5m']]),
-    buildDiscarder(logRotator(
-      artifactDaysToKeepStr: '',
-      artifactNumToKeepStr: '',
-      daysToKeepStr: '',
-      numToKeepStr: '10')),
-    disableConcurrentBuilds(),
-    // parameters([booleanParam( name: 'push_image_to_docker_hub', defaultValue: false, description: 'Push rocprim image to rocl docker-hub' )]),
-    [$class: 'CopyArtifactPermissionProperty', projectNames: '*']
-   ])
-
-
-////////////////////////////////////////////////////////////////////////
 import java.nio.file.Path;
-
-
 
 rocprimCI:
 {
 
     def rocprim = new rocProject('rocprim')
 
-    def nodes = new dockerNodes(['gfx900', 'gfx906'], rocprim.paths)
+    def nodes = new dockerNodes(['gfx803', 'gfx900', 'gfx906'], rocprim)
 
+    boolean formatCheck = false
+     
     def compileCommand =
     {
         platform, project->
@@ -71,7 +55,7 @@ rocprimCI:
         platform.runCommand(this, command)
     }
 
-    buildProject(rocprim, nodes.dockerArray, compileCommand, testCommand, packageCommand)
+    buildProject(rocprim, formatCheck, nodes.dockerArray, compileCommand, testCommand, packageCommand)
 
 }
 
