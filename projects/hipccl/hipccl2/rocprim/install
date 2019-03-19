@@ -72,6 +72,9 @@ while true; do
     done
 
 
+# Instal the pre-commit hook
+bash ./githooks/install
+
 
 # Go to rocPRIM directory, create and go to the build directory.
 mkdir -p build; cd build
