@@ -20,13 +20,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "test_header.hpp"
+
 // Thrust
 #include <thrust/device_vector.h>
 #include <thrust/replace.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
-
-#include "test_header.hpp"
 
 TESTS_DEFINE(ReplaceTests, FullTestsParams)
 TESTS_DEFINE(PrimitiveReplaceTests, NumericalTestsParams)

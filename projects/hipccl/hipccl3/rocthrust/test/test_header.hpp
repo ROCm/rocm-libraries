@@ -141,6 +141,23 @@ Params<thrust::host_vector<unsigned int>>,
 Params<thrust::host_vector<unsigned long long>>
 > HostVectorIntegerTestsParams;
 
+//Host vectors of signed and unsigned types
+typedef ::testing::Types<
+        Params<thrust::host_vector<char>>,
+        Params<thrust::host_vector<unsigned char>>,
+        Params<thrust::host_vector<short>>,
+        Params<thrust::host_vector<unsigned short>>,
+        Params<thrust::host_vector<int>>,
+        Params<thrust::host_vector<unsigned int>>,
+        Params<thrust::host_vector<float>>
+> GenerateTestsVariableParams;
+
+//Host vector of short and int types
+typedef ::testing::Types<
+        Params<thrust::host_vector<short>>,
+        Params<thrust::host_vector<int>>
+> VectorParams;
+
 
 // Scalar numerical types
 typedef ::testing::Types<
@@ -204,3 +221,8 @@ typedef ::testing::Types<
     Params<double>
 > FloatTestsParams;
 
+//Tupple of hos and device vectors
+typedef ::testing::Types<
+        Params<std::tuple<thrust::host_vector<int>, thrust::host_vector<float>>>,
+        Params<std::tuple<thrust::device_vector<int>, thrust::device_vector<float>>>
+> MixedParams;

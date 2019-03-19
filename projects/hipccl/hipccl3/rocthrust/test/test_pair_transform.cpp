@@ -20,8 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// Google Test
-#include <gtest/gtest.h>
+#include "test_header.hpp"
 
 // Thrust
 #include <thrust/host_vector.h>
@@ -29,43 +28,7 @@
 #include <thrust/tuple.h>
 #include <thrust/transform.h>
 
-// HIP API
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-#include <hip/hip_runtime_api.h>
-
-#define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
-#include "test_utils.hpp"
-#include "test_assertions.hpp"
-
-template<
-    class InputType
->
-struct Params
-{
-    using input_type = InputType;
-};
-
-template<class Params>
-class PairTransformTests : public ::testing::Test
-{
-public:
-    using input_type = typename Params::input_type;
-};
-
-typedef ::testing::Types<
-  Params<short>,
-  Params<int>,
-  Params<long long>,
-  Params<unsigned short>,
-  Params<unsigned int>,
-  Params<unsigned long long>,
-  Params<float>,
-  Params<double>
-> PairTransformTestsParams;
-
-TYPED_TEST_CASE(PairTransformTests, PairTransformTestsParams);
+TESTS_DEFINE(PairTransformTests, NumericalTestsParams)
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
@@ -129,6 +92,5 @@ TYPED_TEST(PairTransformTests, TestPairTransform)
     ASSERT_EQ_QUIET(h_result, d_result);
   }
 }
-
 
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

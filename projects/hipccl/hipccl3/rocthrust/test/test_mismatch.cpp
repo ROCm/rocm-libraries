@@ -20,8 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// Google Test
-#include <gtest/gtest.h>
+#include "test_header.hpp"
 
 // Thrust
 #include <thrust/tabulate.h>
@@ -30,51 +29,7 @@
 #include <thrust/iterator/retag.h>
 #include <thrust/device_vector.h>
 
-// HIP API
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-#include <hip/hip_runtime_api.h>
-#include <hip/hip_runtime.h>
-
-#define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
-#include "test_utils.hpp"
-
-template<
-    class InputType
->
-struct Params
-{
-    using input_type = InputType;
-};
-
-template<class Params>
-class MismatchTests : public ::testing::Test
-{
-public:
-    using input_type = typename Params::input_type;
-};
-
-typedef ::testing::Types<
-    Params<thrust::host_vector<short>>,
-    Params<thrust::host_vector<int>>,
-    Params<thrust::host_vector<long long>>,
-    Params<thrust::host_vector<unsigned short>>,
-    Params<thrust::host_vector<unsigned int>>,
-    Params<thrust::host_vector<unsigned long long>>,
-    Params<thrust::host_vector<float>>,
-    Params<thrust::host_vector<double>>,
-    Params<thrust::device_vector<short>>,
-    Params<thrust::device_vector<int>>,
-    Params<thrust::device_vector<long long>>,
-    Params<thrust::device_vector<unsigned short>>,
-    Params<thrust::device_vector<unsigned int>>,
-    Params<thrust::device_vector<unsigned long long>>,
-    Params<thrust::device_vector<float>>,
-    Params<thrust::device_vector<double>>
-> MismatchTestsParams;
-
-TYPED_TEST_CASE(MismatchTests, MismatchTestsParams);
+TESTS_DEFINE(MismatchTests, FullTestsParams)
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 

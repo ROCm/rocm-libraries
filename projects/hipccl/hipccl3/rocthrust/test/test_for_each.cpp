@@ -20,8 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// Google Test
-#include <gtest/gtest.h>
+#include "test_header.hpp"
 
 // Thrust
 #include <thrust/memory.h>
@@ -33,38 +32,8 @@
 #include <thrust/iterator/retag.h>
 #include <algorithm>
 
-// HIP API
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-#include <hip/hip_runtime_api.h>
-#include <hip/hip_runtime.h>
-
-#define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
-#include "test_utils.hpp"
-#include "test_assertions.hpp"
-
-template<
-    class InputType
->
-struct Params
-{
-    using input_type = InputType;
-};
-
-template<class Params>
-class ForEachTests : public ::testing::Test
-{
-public:
-    using input_type = typename Params::input_type;
-};
-
-typedef ::testing::Types<
-    Params<int>,
-    Params<unsigned short>
-> ForEachTestsParams;
-
-TYPED_TEST_CASE(ForEachTests, ForEachTestsParams);
+TESTS_DEFINE(ForEachTests, SignedIntegerTestsParams)
+TESTS_DEFINE(ForEachVectorTests, FullTestsParams)
 
 template <typename T>
 struct mark_processed_functor
@@ -192,34 +161,6 @@ TYPED_TEST(ForEachTests, DevicePathSimpleTest)
   // Free
   thrust::free(tag, ptr);
 }
-
-template<class Params>
-class ForEachVectorTests : public ::testing::Test
-{
-public:
-    using input_type = typename Params::input_type;
-};
-
-typedef ::testing::Types<
-    Params<thrust::host_vector<short>>,
-    Params<thrust::host_vector<int>>,
-    Params<thrust::host_vector<long long>>,
-    Params<thrust::host_vector<unsigned short>>,
-    Params<thrust::host_vector<unsigned int>>,
-    Params<thrust::host_vector<unsigned long long>>,
-    Params<thrust::host_vector<float>>,
-    Params<thrust::host_vector<double>>,
-    Params<thrust::device_vector<short>>,
-    Params<thrust::device_vector<int>>,
-    Params<thrust::device_vector<long long>>,
-    Params<thrust::device_vector<unsigned short>>,
-    Params<thrust::device_vector<unsigned int>>,
-    Params<thrust::device_vector<unsigned long long>>,
-    Params<thrust::device_vector<float>>,
-    Params<thrust::device_vector<double>>
-> ForEachVectorTestsParams;
-
-TYPED_TEST_CASE(ForEachVectorTests, ForEachVectorTestsParams);
 
 template <typename T>
 class mark_present_for_each
