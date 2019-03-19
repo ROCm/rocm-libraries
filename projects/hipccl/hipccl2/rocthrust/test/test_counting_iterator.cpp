@@ -20,14 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <vector>
-#include <list>
-#include <limits>
-#include <utility>
-
-// Google Test
-#include <gtest/gtest.h>
-
 // Thrust
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/sort.h>
@@ -35,15 +27,7 @@
 #include <thrust/distance.h>
 #include <thrust/detail/cstdint.h>
 
-// HIP API
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-#include <hip/hip_runtime_api.h>
-#include <hip/hip_runtime.h>
-
-#define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
-#include "test_utils.hpp"
+#include "test_header.hpp"
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 

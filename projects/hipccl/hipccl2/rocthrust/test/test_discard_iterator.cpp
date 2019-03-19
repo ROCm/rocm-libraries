@@ -20,24 +20,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// Google Test
-#include <gtest/gtest.h>
-#include "test_utils.hpp"
-
 // Thrust
 #include <thrust/iterator/discard_iterator.h>
 
-// HIP API
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-#include <hip/hip_runtime_api.h>
-#include <hip/hip_runtime.h>
+#include "test_header.hpp"
 
-#define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
 using namespace thrust;
-
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
 TEST(DiscardIteratorTests, UsingHip)
 {

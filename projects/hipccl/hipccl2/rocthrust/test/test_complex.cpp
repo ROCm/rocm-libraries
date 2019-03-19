@@ -20,50 +20,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// Google Test
-#include <gtest/gtest.h>
-
 // Thrust
 #include <thrust/complex.h>
 
-
-#include <complex>
-#include <iostream>
-#include <sstream>
-
-// HIP API
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-#include <hip/hip_runtime_api.h>
-
-#define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
-#include "test_utils.hpp"
-#include "test_assertions.hpp"
-
-template<
-    class InputType
->
-struct Params
-{
-    using input_type = InputType;
-};
-
-template<class Params>
-class ComplexTests : public ::testing::Test
-{
-public:
-    using input_type = typename Params::input_type;
-};
-
-typedef ::testing::Types<
-    Params<float>,
-    Params<double>
-> ComplexTestsParams;
-
-TYPED_TEST_CASE(ComplexTests, ComplexTestsParams);
+#include "test_header.hpp"
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+
+TESTS_DEFINE(ComplexTests, FloatTestsParams);
 
 TYPED_TEST(ComplexTests, TestComplexConstructors)
 {

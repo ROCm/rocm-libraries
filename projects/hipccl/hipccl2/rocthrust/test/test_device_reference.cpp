@@ -20,73 +20,17 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <iostream>
-#include <type_traits>
-#include <cstdlib>
-#include <vector>
-
-// Google Test
-#include <gtest/gtest.h>
-
 // Thrust
 #include <thrust/device_vector.h>
 #include <thrust/device_reference.h>
 
-// HIP API
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-#include <hip/hip_runtime_api.h>
-#include <hip/hip_runtime.h>
-
-#define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
-template<
-    class InputType
->
-struct Params
-{
-    using input_type = InputType;
-};
-
-template<class Params>
-class DeviceReferenceTests : public ::testing::Test
-{
-public:
-    using input_type = typename Params::input_type;
-};
-
-typedef ::testing::Types<
-    Params<short>,
-    Params<int>,
-    Params<long long>,
-    Params<unsigned short>,
-    Params<unsigned int>,
-    Params<unsigned long long>,
-    Params<float>,
-    Params<double>
-> DeviceReferenceTestsParams;
-
-TYPED_TEST_CASE(DeviceReferenceTests, DeviceReferenceTestsParams);
-
-template<class Params>
-class DeviceReferenceIntegerTests : public ::testing::Test
-{
-public:
-    using input_type = typename Params::input_type;
-};
-
-typedef ::testing::Types<
-    Params<short>,
-    Params<int>,
-    Params<long long>,
-    Params<unsigned short>,
-    Params<unsigned int>,
-    Params<unsigned long long>
-> DeviceReferenceIntegerTestsParams;
-
-TYPED_TEST_CASE(DeviceReferenceIntegerTests, DeviceReferenceIntegerTestsParams);
+#include "test_header.hpp"
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+
+TESTS_DEFINE(DeviceReferenceTests, NumericalTestsParams);
+
+TESTS_DEFINE(DeviceReferenceIntegerTests, IntegerTestsParams);
 
 TYPED_TEST(DeviceReferenceTests, TestDeviceReferenceConstructorFromDeviceReference)
 {
