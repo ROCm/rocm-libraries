@@ -20,66 +20,21 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// Google Test
-#include <gtest/gtest.h>
-
+// Thrust
 #include <thrust/device_vector.h>
 #include <thrust/device_ptr.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/transform_iterator.h>
 #include <thrust/iterator/counting_iterator.h>
 
-// HIP API
+#include "test_header.hpp"
+
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-#include <hip/hip_runtime_api.h>
-#include <hip/hip_runtime.h>
 
-#define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
-#include "test_utils.hpp"
-
-template<
-  class Input
->
-struct Params
-{
-  using input_type = Input;
-};
-
-template<class Params>
-class DereferenceTests : public ::testing::Test
-{
-public:
-  using input_type = typename Params::input_type;
-};
-
-typedef ::testing::Types<
-    Params<thrust::host_vector<short>>,
-    Params<thrust::host_vector<int>>,
-    Params<thrust::host_vector<long long>>,
-    Params<thrust::host_vector<unsigned short>>,
-    Params<thrust::host_vector<unsigned int>>,
-    Params<thrust::host_vector<unsigned long long>>,
-    Params<thrust::host_vector<float>>,
-    Params<thrust::host_vector<double>>,
-    Params<thrust::device_vector<short>>,
-    Params<thrust::device_vector<int>>,
-    Params<thrust::device_vector<long long>>,
-    Params<thrust::device_vector<unsigned short>>,
-    Params<thrust::device_vector<unsigned int>>,
-    Params<thrust::device_vector<unsigned long long>>,
-    Params<thrust::device_vector<float>>,
-    Params<thrust::device_vector<double>>
-> DereferenceTestsParams;
-
-TYPED_TEST_CASE(DereferenceTests, DereferenceTestsParams);
-
+TESTS_DEFINE(DereferenceTests, FullTestsParams);
 
 template <typename Iterator1, typename Iterator2>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
 __global__
-#endif
 void simple_copy_on_device(Iterator1 first1, Iterator1 last1, Iterator2 first2)
 {
   while(first1 != last1)
@@ -89,15 +44,11 @@ void simple_copy_on_device(Iterator1 first1, Iterator1 last1, Iterator2 first2)
 template <typename Iterator1, typename Iterator2>
 void simple_copy(Iterator1 first1, Iterator1 last1, Iterator2 first2)
 {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
   hipLaunchKernelGGL(
     HIP_KERNEL_NAME(simple_copy_on_device<Iterator1, Iterator2>),
     dim3(1), dim3(1), 0, 0,
     first1, last1, first2
   );
-#else
-  simple_copy_on_device(first1, last1, first2);
-#endif
 }
 
 TEST(DereferenceTests, TestDeviceDereferenceDeviceVectorIterator)
@@ -175,3 +126,5 @@ TEST(DereferenceTests, TestDeviceDereferenceTransformedCountingIterator)
   ASSERT_EQ(output[3], -4);
   ASSERT_EQ(output[4], -5);
 }
+#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+

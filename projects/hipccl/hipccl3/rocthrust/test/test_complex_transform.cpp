@@ -20,47 +20,16 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// Google Test
-#include <gtest/gtest.h>
-
 // Thrust
 #include <thrust/host_vector.h>
 #include <thrust/complex.h>
 #include <thrust/transform.h>
 
-#include <iostream>
-
-// HIP API
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-#include <hip/hip_runtime_api.h>
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
-#include "test_utils.hpp"
-#include "test_assertions.hpp"
-
-template<
-    class InputType
->
-struct Params
-{
-    using input_type = InputType;
-};
-
-template<class Params>
-class ComplexTransformTests : public ::testing::Test
-{
-public:
-    using input_type = typename Params::input_type;
-};
-
-typedef ::testing::Types<
-    Params<float>,
-    Params<double>
-> ComplexTransformTestsParams;
-
-TYPED_TEST_CASE(ComplexTransformTests, ComplexTransformTestsParams);
+#include "test_header.hpp"
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+
+TESTS_DEFINE(ComplexTransformTests, FloatTestsParams);
 
 struct basic_arithmetic_functor
 {
