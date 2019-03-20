@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,13 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <iostream>
-#include <type_traits>
-#include <cstdlib>
-
-// Google Test
-#include <gtest/gtest.h>
-
 // Thrust
 #include <thrust/transform.h>
 // STREAMHPC TODO replace <thrust/detail/seq.h> with <thrust/execution_policy.h>
@@ -40,70 +33,13 @@
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/iterator/retag.h>
 
-#include "test_utils.hpp"
-#include "test_assertions.hpp"
+#include "test_header.hpp"
 
-template<
-  class Input,
-  class Output = Input
->
-struct Params
-{
-  using input_type = Input;
-  using output_type = Output;
-};
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
-template<class Params>
-class TransformTests : public ::testing::Test
-{
-public:
-  using input_type = typename Params::input_type;
-  using output_type = typename Params::output_type;
-};
+TESTS_INOUT_DEFINE(TransformTests, AllInOutTestsParams);
 
-typedef ::testing::Types<
-  Params<short>,
-  Params<int>,
-  Params<long long>,
-  Params<unsigned short>,
-  Params<unsigned int>,
-  Params<unsigned long long>,
-  Params<float>,
-  Params<double>,
-  Params<int, long long>,
-  Params<unsigned int, unsigned long long>,
-  Params<float, double>
-> TransformTestsParams;
-
-TYPED_TEST_CASE(TransformTests, TransformTestsParams);
-
-template<class Params>
-class TransformVectorTests : public ::testing::Test
-{
-public:
-    using input_type = typename Params::input_type;
-};
-
-typedef ::testing::Types<
-    Params<thrust::host_vector<short>>,
-    Params<thrust::host_vector<int>>,
-    Params<thrust::host_vector<long long>>,
-    Params<thrust::host_vector<unsigned short>>,
-    Params<thrust::host_vector<unsigned int>>,
-    Params<thrust::host_vector<unsigned long long>>,
-    Params<thrust::host_vector<float>>,
-    Params<thrust::host_vector<double>>,
-    Params<thrust::device_vector<short>>,
-    Params<thrust::device_vector<int>>,
-    Params<thrust::device_vector<long long>>,
-    Params<thrust::device_vector<unsigned short>>,
-    Params<thrust::device_vector<unsigned int>>,
-    Params<thrust::device_vector<unsigned long long>>,
-    Params<thrust::device_vector<float>>,
-    Params<thrust::device_vector<double>>
-> TransformVectorTestsParams;
-
-TYPED_TEST_CASE(TransformVectorTests, TransformVectorTestsParams);
+TESTS_DEFINE(TransformVectorTests, FullTestsParams);
 
 template<class T>
 struct unary_transform
@@ -1095,3 +1031,6 @@ TYPED_TEST(TransformVectorTests, TestTransformWithIndirection)
   ASSERT_EQ(output[5], T(1));
   ASSERT_EQ(output[6], T(1));
 }
+
+#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+
