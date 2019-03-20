@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,97 +20,21 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// Google Test
-#include <gtest/gtest.h>
-
-#include "test_utils.hpp"
-
+// Thrust
 #include <thrust/transform_scan.h>
-
 #include <thrust/functional.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/iterator/retag.h>
 
-// HIP API
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
-#include <hip/hip_runtime.h>
-#include <hip/hip_runtime_api.h>
-
-#include "test_assertions.hpp"
-#include "test_utils.hpp"
-
-#define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+#include "test_header.hpp"
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
-template<class InputType> struct Params
-{
-    using input_type = InputType;
-};
-
-template<class Params> class TransformScanTests : public ::testing::Test
-{
-public:
-    using input_type = typename Params::input_type;
-};
-
-typedef ::testing::Types<
-        Params<thrust::host_vector<short>>,
-        Params<thrust::host_vector<int>>,
-        Params<thrust::host_vector<long long>>,
-        Params<thrust::host_vector<unsigned short>>,
-        Params<thrust::host_vector<unsigned int>>,
-        Params<thrust::host_vector<unsigned long long>>,
-        Params<thrust::host_vector<float>>,
-        Params<thrust::host_vector<double>>,
-        Params<thrust::device_vector<short>>,
-        Params<thrust::device_vector<int>>,
-        Params<thrust::device_vector<long long>>,
-        Params<thrust::device_vector<unsigned short>>,
-        Params<thrust::device_vector<unsigned int>>,
-        Params<thrust::device_vector<unsigned long long>>,
-        Params<thrust::device_vector<float>>,
-        Params<thrust::device_vector<double>>
-> TestParams;
-
-TYPED_TEST_CASE(TransformScanTests, TestParams);
-
-template<class Params> class TransformScanVariablesTests : public ::testing::Test
-{
-public:
-    using input_type = typename Params::input_type;
-};
-
-typedef ::testing::Types<
-        Params<char>,
-        Params<unsigned char>,
-        Params<short>,
-        Params<unsigned short>,
-        Params<int>,
-        Params<unsigned int>,
-        Params<float>
-> TestVariableParams;
-
-TYPED_TEST_CASE(TransformScanVariablesTests, TestVariableParams);
-
-template<class Params> class TransformScanVectorTests : public ::testing::Test
-{
-public:
-    using input_type = typename Params::input_type;
-};
-
-typedef ::testing::Types<
-        Params<thrust::device_vector<short>>,
-        Params<thrust::device_vector<int>>,
-        Params<thrust::host_vector<short>>,
-        Params<thrust::host_vector<int>>
-> VectorParams;
-
-TYPED_TEST_CASE(TransformScanVectorTests, VectorParams);
+TESTS_DEFINE(TransformScanTests, FullTestsParams);
+TESTS_DEFINE(TransformScanVariablesTests, NumericalTestsParams);
+TESTS_DEFINE(TransformScanVectorTests, VectorSignedIntegerTestsParams);
 
 template<typename InputIterator,
          typename OutputIterator,

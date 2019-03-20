@@ -20,42 +20,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+// Thrust
 #include <thrust/sort.h>
 
-#include <algorithm>
+#include "test_header.hpp"
 
-#include "test_utils.hpp"
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
+TESTS_DEFINE(SortByKeyVariableTests, AllIntegerTestsParams);
 
-template<
-    class InputType
->
-struct Params
-{
-    using input_type = InputType;
-};
-
-template<class Params>
-class SortByKeyVariableTests : public ::testing::Test
-{
-public:
-  using input_type = typename Params::input_type;
-};
-
-typedef ::testing::Types<
-  Params<short>,
-  Params<int>,
-  Params<long long>,
-  Params<unsigned short>,
-  Params<unsigned int>,
-  Params<unsigned long long>,
-  Params<thrust::detail::uint8_t>,
-  Params<thrust::detail::uint16_t>,
-  Params<thrust::detail::uint32_t>,
-  Params<thrust::detail::uint64_t>
-> SortByKeyVariableTestsParams;
-
-TYPED_TEST_CASE(SortByKeyVariableTests, SortByKeyVariableTestsParams);
 
 TYPED_TEST(SortByKeyVariableTests, TestSortVariableBits)
 {
@@ -88,3 +61,6 @@ TYPED_TEST(SortByKeyVariableTests, TestSortVariableBits)
     }
   }
 }
+
+#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+

@@ -20,48 +20,16 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// Google Test
-#include <gtest/gtest.h>
-
+// Thrust
 #include <thrust/sort.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/retag.h>
 
-#include "test_utils.hpp"
+#include "test_header.hpp"
 
-template< class InputType >
-struct Params
-{
-    using input_type = InputType;
-};
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
-template<class Params>
-class SortByKeyTests : public ::testing::Test
-{
-public:
-    using input_type = typename Params::input_type;
-};
-
-typedef ::testing::Types<
-    Params<thrust::host_vector<short>>,
-    Params<thrust::host_vector<int>>,
-    Params<thrust::host_vector<long long>>,
-    Params<thrust::host_vector<unsigned short>>,
-    Params<thrust::host_vector<unsigned int>>,
-    Params<thrust::host_vector<unsigned long long>>,
-    Params<thrust::host_vector<float>>,
-    Params<thrust::host_vector<double>>,
-    Params<thrust::device_vector<short>>,
-    Params<thrust::device_vector<int>>,
-    Params<thrust::device_vector<long long>>,
-    Params<thrust::device_vector<unsigned short>>,
-    Params<thrust::device_vector<unsigned int>>,
-    Params<thrust::device_vector<unsigned long long>>,
-    Params<thrust::device_vector<float>>,
-    Params<thrust::device_vector<double>>
-> SortByKeyTestsParams;
-
-TYPED_TEST_CASE(SortByKeyTests, SortByKeyTestsParams);
+TESTS_DEFINE(SortByKeyTests, FullTestsParams);
 
 template<typename RandomAccessIterator1,
          typename RandomAccessIterator2>
@@ -233,3 +201,5 @@ TEST(SortByKeyTests, TestSortByKeyBoolDescending)
   ASSERT_EQ(h_keys, d_keys);
   ASSERT_EQ(h_values, d_values);
 }
+
+#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

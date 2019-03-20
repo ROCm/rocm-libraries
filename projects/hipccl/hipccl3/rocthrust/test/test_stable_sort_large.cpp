@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,11 +20,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+// Thrust
 #include <thrust/sort.h>
 #include <thrust/functional.h>
 
-#include "test_utils.hpp"
-#include "test_assertions.hpp"
+#include "test_header.hpp"
+
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
 template <typename T, unsigned int N>
 void _TestStableSortWithLargeKeys(void)
@@ -67,3 +69,5 @@ TEST(StableSortLargeTests, TestStableSortWithLargeKeys)
 //    _TestStableSortWithLargeKeys<int, 8192>();
 #endif
 }
+
+#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

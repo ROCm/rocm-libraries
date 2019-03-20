@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -204,3 +204,38 @@ typedef ::testing::Types<
     Params<double>
 > FloatTestsParams;
 
+
+// --------------------Input Output test parameters--------
+template<class Input,
+         class Output = Input>
+struct ParamsInOut
+{
+    using input_type = Input;
+    using output_type = Output;
+};
+
+// Definition of typed test cases with given parameter type
+#define TESTS_INOUT_DEFINE(x, y) \
+template<class ParamsInOut> \
+class x : public ::testing::Test \
+{ \
+public: \
+using input_type = typename ParamsInOut::input_type; \
+using output_type = typename ParamsInOut::output_type; \
+}; \
+\
+TYPED_TEST_CASE(x, y);
+
+typedef ::testing::Types<
+    ParamsInOut<short>,
+    ParamsInOut<int>,
+    ParamsInOut<long long>,
+    ParamsInOut<unsigned short>,
+    ParamsInOut<unsigned int>,
+    ParamsInOut<unsigned long long>,
+    ParamsInOut<float>,
+    ParamsInOut<double>,
+    ParamsInOut<int, long long>,
+    ParamsInOut<unsigned int, unsigned long long>,
+    ParamsInOut<float, double>
+> AllInOutTestsParams;

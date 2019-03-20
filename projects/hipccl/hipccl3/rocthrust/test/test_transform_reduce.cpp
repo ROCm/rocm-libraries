@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,78 +20,19 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <iostream>
-#include <type_traits>
-#include <cstdlib>
-
-// Google Test
-#include <gtest/gtest.h>
-
 // Thrust
 #include <thrust/transform_reduce.h>
-
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/iterator/retag.h>
 #include <thrust/device_vector.h>
 
-#include "test_utils.hpp"
-
-template<
-  class Input
->
-struct Params
-{
-  using input_type = Input;
-};
-
-template<class Params>
-class TransformReduceTests : public ::testing::Test
-{
-public:
-  using input_type = typename Params::input_type;
-};
-
-typedef ::testing::Types<
-    Params<thrust::host_vector<short>>,
-    Params<thrust::host_vector<int>>,
-    Params<thrust::host_vector<long long>>,
-    Params<thrust::host_vector<unsigned short>>,
-    Params<thrust::host_vector<unsigned int>>,
-    Params<thrust::host_vector<unsigned long long>>,
-    Params<thrust::host_vector<float>>,
-    Params<thrust::host_vector<double>>,
-    Params<thrust::device_vector<short>>,
-    Params<thrust::device_vector<int>>,
-    Params<thrust::device_vector<long long>>,
-    Params<thrust::device_vector<unsigned short>>,
-    Params<thrust::device_vector<unsigned int>>,
-    Params<thrust::device_vector<unsigned long long>>,
-    Params<thrust::device_vector<float>>,
-    Params<thrust::device_vector<double>>
-> TransformReduceTestsParams;
-
-TYPED_TEST_CASE(TransformReduceTests, TransformReduceTestsParams);
-
-template<class Params>
-class TransformReduceIntegerTests : public ::testing::Test
-{
-public:
-  using input_type = typename Params::input_type;
-};
-
-typedef ::testing::Types<
-    Params<thrust::host_vector<short>>,
-    Params<thrust::host_vector<int>>,
-    Params<thrust::host_vector<long long>>,
-    Params<thrust::device_vector<short>>,
-    Params<thrust::device_vector<int>>,
-    Params<thrust::device_vector<long long>>
-> TransformReduceIntegerTestsParams;
-
-TYPED_TEST_CASE(TransformReduceIntegerTests, TransformReduceIntegerTestsParams);
+#include "test_header.hpp"
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+
+TESTS_DEFINE(TransformReduceTests, FullTestsParams);
+TESTS_DEFINE(TransformReduceIntegerTests, VectorSignedIntegerTestsParams);
 
 template<typename InputIterator,
          typename UnaryFunction,
