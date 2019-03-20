@@ -20,53 +20,16 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// Google Test
-#include <gtest/gtest.h>
-
 // Thrust
 #include <thrust/pair.h>
 #include <thrust/sort.h>
 #include <thrust/sequence.h>
 
-// HIP API
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-#include <hip/hip_runtime_api.h>
-
-#define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
-#include "test_utils.hpp"
-#include "test_assertions.hpp"
-
-template<
-    class InputType
->
-struct Params
-{
-    using input_type = InputType;
-};
-
-template<class Params>
-class PairSortTests : public ::testing::Test
-{
-public:
-    using input_type = typename Params::input_type;
-};
-
-typedef ::testing::Types<
-  Params<short>,
-  Params<int>,
-  Params<long long>,
-  Params<unsigned short>,
-  Params<unsigned int>,
-  Params<unsigned long long>,
-  Params<float>,
-  Params<double>
-> PairSortTestsParams;
-
-TYPED_TEST_CASE(PairSortTests, PairSortTestsParams);
+#include "test_header.hpp"
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+
+TESTS_DEFINE(PairSortTests, NumericalTestsParams);
 
 struct make_pair_functor
 {
