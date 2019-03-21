@@ -171,7 +171,6 @@ InputIterator find_if(my_tag, InputIterator first, InputIterator, Predicate)
     return first;
 }
 
-
 TEST(FindTests, TestFindIfDispatchImplicit)
 {
   thrust::device_vector<int> vec(1);

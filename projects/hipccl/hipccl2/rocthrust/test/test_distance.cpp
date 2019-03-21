@@ -79,5 +79,4 @@ TYPED_TEST(DistanceTests, TestDistanceLarge)
   ASSERT_EQ(thrust::distance(i, i), 0);
 }
 
-
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

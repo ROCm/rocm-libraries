@@ -34,6 +34,12 @@
 
 #include "test_header.hpp"
 
+#include <list>
+#include <iterator>
+
+TESTS_DEFINE(CopyTests, FullTestsParams)
+TESTS_DEFINE(CopyIntegerTests, IntegerTestsParams)
+
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
 TEST(HipThrustCopy, HostToDevice)
@@ -95,11 +101,6 @@ TEST(HipThrustCopy, DeviceToDevice)
   thrust::free(dev_tag, d_ptr1);
   thrust::free(dev_tag, d_ptr2);
 }
-
-
-TESTS_DEFINE(CopyTests, FullTestsParams);
-
-TESTS_DEFINE(CopyIntegerTests, IntegerTestsParams);
 
 TEST(CopyTests, TestCopyFromConstIterator)
 {

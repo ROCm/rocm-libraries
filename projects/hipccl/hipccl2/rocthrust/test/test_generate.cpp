@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+// Thrust
 #include <thrust/generate.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
@@ -38,7 +39,6 @@ typedef ::testing::Types<
 TESTS_DEFINE(GenerateTests, FullTestsParams);
 TESTS_DEFINE(GenerateVectorTests, VectorParams);
 TESTS_DEFINE(GenerateVariablesTests, HostVectorTestsParams);
-
 
 TEST(ReplaceTests, UsingHip)
 {

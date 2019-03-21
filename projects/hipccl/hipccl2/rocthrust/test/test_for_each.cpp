@@ -33,15 +33,8 @@
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
-// Here specific test case parameters set
-// May be we can change it for 'SignedIntegerTestsParams'?
-
-typedef ::testing::Types<
-    Params<int>,
-    Params<unsigned short>
-> ForEachTestsParams;
-
-TESTS_DEFINE(ForEachTests, ForEachTestsParams);
+TESTS_DEFINE(ForEachTests, SignedIntegerTestsParams)
+TESTS_DEFINE(ForEachVectorTests, FullTestsParams)
 
 template <typename T>
 struct mark_processed_functor
@@ -168,8 +161,6 @@ TYPED_TEST(ForEachTests, DevicePathSimpleTest)
   // Free
   thrust::free(tag, ptr);
 }
-
-TESTS_DEFINE(ForEachVectorTests, FullTestsParams);
 
 template <typename T>
 class mark_present_for_each
