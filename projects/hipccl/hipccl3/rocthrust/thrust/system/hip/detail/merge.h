@@ -95,12 +95,12 @@ merge(execution_policy<Derived>& policy,
     bool         debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
 
     hipError_t status;
-    status = rocprim::merge(  d_temp_storage, 
+    status = rocprim::merge(  d_temp_storage,
                               temp_storage_bytes,
-                              keys1_first, 
-                              keys2_first, 
-                              result, 
-                              input1_size, 
+                              keys1_first,
+                              keys2_first,
+                              result,
+                              input1_size,
                               input2_size,
                               compare_op,
                               stream,
@@ -113,12 +113,12 @@ merge(execution_policy<Derived>& policy,
     hip_rocprim::throw_on_error(hipGetLastError(),
                                 "merge failed to get memory buffer");
 
-    status = rocprim::merge(  d_temp_storage, 
+    status = rocprim::merge(  d_temp_storage,
                               temp_storage_bytes,
-                              keys1_first, 
-                              keys2_first, 
-                              result, 
-                              input1_size, 
+                              keys1_first,
+                              keys2_first,
+                              result,
+                              input1_size,
                               input2_size,
                               compare_op,
                               stream,
@@ -170,12 +170,12 @@ merge(Policy&       policy,
   bool         debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
 
   hipError_t status;
-  status = rocprim::merge( d_temp_storage, 
+  status = rocprim::merge( d_temp_storage,
                           temp_storage_bytes,
-                          rocprim::make_zip_iterator(rocprim::make_tuple(keys1_first, items1_first)), 
-                          rocprim::make_zip_iterator(rocprim::make_tuple(keys2_first, items2_first)), 
-                          rocprim::make_zip_iterator(rocprim::make_tuple(keys_result, items_result)), 
-                          input1_size, 
+                          rocprim::make_zip_iterator(rocprim::make_tuple(keys1_first, items1_first)),
+                          rocprim::make_zip_iterator(rocprim::make_tuple(keys2_first, items2_first)),
+                          rocprim::make_zip_iterator(rocprim::make_tuple(keys_result, items_result)),
+                          input1_size,
                           input2_size,
                           wrapped_binary_pred,
                           stream,
@@ -188,12 +188,12 @@ merge(Policy&       policy,
   hip_rocprim::throw_on_error(hipGetLastError(),
                                 "merge_by_key failed to get memory buffer");
 
-  status = rocprim::merge( d_temp_storage, 
+  status = rocprim::merge( d_temp_storage,
                           temp_storage_bytes,
-                          rocprim::make_zip_iterator(rocprim::make_tuple(keys1_first, items1_first)), 
-                          rocprim::make_zip_iterator(rocprim::make_tuple(keys2_first, items2_first)), 
-                          rocprim::make_zip_iterator(rocprim::make_tuple(keys_result, items_result)), 
-                          input1_size, 
+                          rocprim::make_zip_iterator(rocprim::make_tuple(keys1_first, items1_first)),
+                          rocprim::make_zip_iterator(rocprim::make_tuple(keys2_first, items2_first)),
+                          rocprim::make_zip_iterator(rocprim::make_tuple(keys_result, items_result)),
+                          input1_size,
                           input2_size,
                           wrapped_binary_pred,
                           stream,
@@ -235,9 +235,6 @@ merge(execution_policy<Derived>& policy,
     __merge::merge<Derived, KeysIt1, KeysIt2, ResultIt, CompareOp>
   ));
 #if __THRUST_HAS_HIPRT__
-  typedef typename thrust::iterator_value<KeysIt1>::type keys_type;
-  keys_type* null_ = NULL;
-
   ret = __merge::merge(policy,
                       keys1_first,
                       keys1_last,
@@ -294,7 +291,7 @@ merge_by_key(execution_policy<Derived> &policy,
                             keys_result,
                             items_result,
                             compare_op);
-  
+
 #else
   ret = thrust::merge_by_key(cvt_to_seq(derived_cast(policy)),
                               keys1_first,
@@ -307,7 +304,7 @@ merge_by_key(execution_policy<Derived> &policy,
                               items_result,
                               compare_op);
 #endif
-  
+
   return ret;
 }
 
