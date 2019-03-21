@@ -29,10 +29,10 @@
 
 #include "test_header.hpp"
 
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+
 TESTS_DEFINE(BinarySearchVectorTests, FullTestsParams);
-
 TESTS_DEFINE(BinarySearchVectorIntegerTests, SignedIntegerTestsParams);
-
 
 // convert xxx_vector<T1> to xxx_vector<T2>
 template <class ExampleVector, typename NewType>
@@ -496,3 +496,5 @@ TYPED_TEST(BinarySearchVectorIntegerTests, TestVectorBinarySearchDiscardIterator
     ASSERT_EQ_QUIET(reference, d_result);
   }
 }
+
+#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

@@ -93,5 +93,4 @@ TYPED_TEST(PairTransformTests, TestPairTransform)
   }
 }
 
-
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
