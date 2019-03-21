@@ -52,7 +52,8 @@ public:
 
 typedef ::testing::Types<
     Params<int8_t>,
-    Params<int16_t>,
+    // TODO: enable when we solved: issue 122
+    //Params<int16_t>,
     Params<int32_t>
 > TestParams;
 
@@ -63,9 +64,9 @@ TYPED_TEST_CASE(ZipIteratorStableSortByKeyTests, TestParams);
 TYPED_TEST(ZipIteratorStableSortByKeyTests, TestZipIteratorStableSort)
 {
     using T = typename TestFixture::input_type;
-    
+
     const std::vector<size_t> sizes = get_sizes();
-    
+
     for(auto size : sizes)
     {
         using namespace thrust;
