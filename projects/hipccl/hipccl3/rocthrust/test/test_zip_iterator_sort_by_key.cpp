@@ -24,18 +24,45 @@
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/sort.h>
 
-#include "test_header.hpp"
-
+// HIP API
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
-TESTS_DEFINE(ZipIteratorStableSortByKeyTests, UnsignedIntegerTestsParams);
+#define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
+#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+
+#include "test_utils.hpp"
+#include "test_assertions.hpp"
+
+template<
+        class InputType
+>
+struct Params
+{
+    using input_type = InputType;
+};
+
+template<class Params>
+class ZipIteratorStableSortByKeyTests : public ::testing::Test
+{
+public:
+    using input_type = typename Params::input_type;
+};
+
+typedef ::testing::Types<
+    Params<int8_t>,
+    // TODO: enable when we solved: issue 122
+    //Params<int16_t>,
+    Params<int32_t>
+> TestParams;
+
+TYPED_TEST_CASE(ZipIteratorStableSortByKeyTests, TestParams);
 
 TYPED_TEST(ZipIteratorStableSortByKeyTests, TestZipIteratorStableSort)
 {
     using T = typename TestFixture::input_type;
-    
+
     const std::vector<size_t> sizes = get_sizes();
-    
+
     for(auto size : sizes)
     {
         using namespace thrust;
