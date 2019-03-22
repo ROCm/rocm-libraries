@@ -30,8 +30,6 @@
 
 #include "test_header.hpp"
 
-TESTS_DEFINE(RemoveTests, FullTestsParams)
-
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
 TESTS_DEFINE(RemoveTests, FullTestsParams);
