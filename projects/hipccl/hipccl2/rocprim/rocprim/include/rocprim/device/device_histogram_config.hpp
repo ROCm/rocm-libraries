@@ -55,6 +55,21 @@ struct histogram_config
 #endif
 };
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+template<
+    class HistogramConfig,
+    unsigned int MaxGridSize,
+    unsigned int SharedImplMaxBins
+> constexpr unsigned int
+histogram_config<HistogramConfig, MaxGridSize, SharedImplMaxBins>::max_grid_size;
+template<
+    class HistogramConfig,
+    unsigned int MaxGridSize,
+    unsigned int SharedImplMaxBins
+> constexpr unsigned int
+histogram_config<HistogramConfig, MaxGridSize, SharedImplMaxBins>::shared_impl_max_bins;
+#endif
+
 namespace detail
 {
 
