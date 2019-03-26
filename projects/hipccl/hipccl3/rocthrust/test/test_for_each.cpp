@@ -31,8 +31,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(ForEachTests, SignedIntegerTestsParams)
 TESTS_DEFINE(ForEachVectorTests, FullTestsParams)
 
@@ -493,5 +491,3 @@ TEST(ForEachVectorTests, TestForEachNWithLargeTypes)
   _TestForEachNWithLargeTypes<int,  512>();
   _TestForEachNWithLargeTypes<int, 1024>();  // fails on Vista 64 w/ VS2008
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

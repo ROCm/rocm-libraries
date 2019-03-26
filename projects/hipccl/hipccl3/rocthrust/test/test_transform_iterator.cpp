@@ -30,8 +30,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(TransformIteratorTests, FullTestsParams);
 TESTS_DEFINE(PrimitiveTransformIteratorTests, NumericalTestsParams);
 
@@ -117,5 +115,3 @@ TYPED_TEST(PrimitiveTransformIteratorTests, TransformIteratorReduce)
 
     }
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

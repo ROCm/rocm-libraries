@@ -27,8 +27,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(InnerProductTests, FullTestsParams);
 TESTS_DEFINE(PrimitiveInnerProductTests, NumericalTestsParams);
 
@@ -146,5 +144,3 @@ TYPED_TEST(PrimitiveInnerProductTests, InnerProductWithRandomData)
         ASSERT_NEAR(clip_infinity(expected), clip_infinity(result), error_margin);
     }
 };
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

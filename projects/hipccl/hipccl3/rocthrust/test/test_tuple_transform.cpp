@@ -26,8 +26,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(TupleTransformTests, SignedIntegerTestsParams);
 
 struct MakeTupleFunctor
@@ -92,5 +90,3 @@ TYPED_TEST(TupleTransformTests, TestTupleTransform)
     ASSERT_EQ_QUIET(h_tuples, d_tuples);
   }
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

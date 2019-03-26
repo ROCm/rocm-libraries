@@ -31,8 +31,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(ScatterTests, FullTestsParams);
 
 TYPED_TEST(ScatterTests, TestScatterSimple)
@@ -400,5 +398,3 @@ TYPED_TEST(ScatterTests, TestScatterIfCountingIterator)
 
   ASSERT_EQ(output, map);
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

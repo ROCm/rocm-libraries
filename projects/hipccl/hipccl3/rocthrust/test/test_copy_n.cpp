@@ -33,8 +33,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(CopyNTests, FullTestsParams);
 
 TYPED_TEST(CopyNTests, TestCopyNFromConstIterator)
@@ -299,5 +297,3 @@ TEST(CopyNTests, TestCopyNDispatchImplicit)
 
   ASSERT_EQ(13, vec.front());
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

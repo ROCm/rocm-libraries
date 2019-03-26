@@ -26,8 +26,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(DeviceReferenceTests, NumericalTestsParams);
 
 TESTS_DEFINE(DeviceReferenceIntegerTests, IntegerTestsParams);
@@ -266,5 +264,3 @@ TYPED_TEST(DeviceReferenceTests,TestDeviceReferenceSwap)
   ASSERT_EQ(T(7), ref1);
   ASSERT_EQ(T(13), ref2);
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

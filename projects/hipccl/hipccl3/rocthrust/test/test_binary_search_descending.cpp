@@ -28,8 +28,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(BinarySearchDescendingTests, FullTestsParams);
 
 TYPED_TEST(BinarySearchDescendingTests, TestScalarLowerBoundDescendingSimple)
@@ -135,5 +133,3 @@ TYPED_TEST(BinarySearchDescendingTests, TestScalarEqualRangeDescendingSimple)
     ASSERT_EQ_QUIET(vec.begin() + 1, thrust::equal_range(vec.begin(), vec.end(), 8, thrust::greater<int>()).second);
     ASSERT_EQ_QUIET(vec.begin() + 0, thrust::equal_range(vec.begin(), vec.end(), 9, thrust::greater<int>()).second);
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

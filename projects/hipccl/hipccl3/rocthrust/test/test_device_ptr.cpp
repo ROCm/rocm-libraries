@@ -26,8 +26,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(DevicePtrTests, FullTestsParams);
 TESTS_DEFINE(DevicePtrPrimitiveTests, NumericalTestsParams);
 
@@ -161,5 +159,3 @@ TYPED_TEST(DevicePtrPrimitiveTests, TestDevicePointerValue)
     }
   }
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

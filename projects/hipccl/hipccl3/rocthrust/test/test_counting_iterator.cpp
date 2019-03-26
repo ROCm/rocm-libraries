@@ -29,8 +29,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TEST(CountingIteratorTests, TestCountingIteratorCopyConstructor)
 {
   thrust::counting_iterator<int> iter0(100);
@@ -235,5 +233,3 @@ TEST(CountingIteratorTests, TestCountingIteratorDifference)
 
   ASSERT_EQ(diff, last - first);
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

@@ -28,8 +28,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(UniqueTests, FullTestsParams);
 
 TESTS_DEFINE(UniqueIntegralTests, IntegerTestsParams);
@@ -290,5 +288,3 @@ TYPED_TEST(UniqueIntegralTests, TestUniqueCopyToDiscardIterator)
     ASSERT_EQ_QUIET(reference, d_result);
   }
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

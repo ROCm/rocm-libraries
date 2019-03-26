@@ -26,8 +26,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 template <typename T, unsigned int N>
 void _TestStableSortWithLargeKeys(void)
 {
@@ -69,5 +67,3 @@ TEST(StableSortLargeTests, TestStableSortWithLargeKeys)
 //    _TestStableSortWithLargeKeys<int, 8192>();
 #endif
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

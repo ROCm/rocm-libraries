@@ -26,8 +26,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(ZipIteratorStableSortTests, UnsignedIntegerTestsParams);
 
 TYPED_TEST(ZipIteratorStableSortTests, TestZipIteratorStableSort)
@@ -61,5 +59,3 @@ TYPED_TEST(ZipIteratorStableSortTests, TestZipIteratorStableSort)
         ASSERT_EQ_QUIET(h2, d2);
     }
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

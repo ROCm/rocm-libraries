@@ -29,8 +29,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(DereferenceTests, FullTestsParams);
 
 template <typename Iterator1, typename Iterator2>
@@ -126,5 +124,3 @@ TEST(DereferenceTests, TestDeviceDereferenceTransformedCountingIterator)
   ASSERT_EQ(output[3], -4);
   ASSERT_EQ(output[4], -5);
 }
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-

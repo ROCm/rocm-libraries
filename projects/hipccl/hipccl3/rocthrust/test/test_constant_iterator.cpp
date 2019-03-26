@@ -29,8 +29,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 using namespace thrust;
 
 TESTS_DEFINE(ConstantIteratorTests, VectorSignedTestsParams);
@@ -176,5 +174,3 @@ TYPED_TEST(ConstantIteratorTests, ConstantIteratorReduce)
 
     ASSERT_EQ(sum, 4 * 7);
 };
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

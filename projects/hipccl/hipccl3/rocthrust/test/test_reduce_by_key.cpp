@@ -28,8 +28,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(ReduceByKeysIntegralTests, IntegerTestsParams);
 TESTS_DEFINE(ReduceByKeysTests, FullTestsParams);
 
@@ -295,5 +293,3 @@ TYPED_TEST(ReduceByKeysTests, TestReduceByKeyDispatchImplicit)
 
     ASSERT_EQ(13, vec.front());
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

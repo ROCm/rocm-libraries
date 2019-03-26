@@ -35,8 +35,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_INOUT_DEFINE(TransformTests, AllInOutTestsParams);
 
 TESTS_DEFINE(TransformVectorTests, FullTestsParams);
@@ -1031,6 +1029,4 @@ TYPED_TEST(TransformVectorTests, TestTransformWithIndirection)
   ASSERT_EQ(output[5], T(1));
   ASSERT_EQ(output[6], T(1));
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 

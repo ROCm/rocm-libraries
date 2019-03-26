@@ -29,8 +29,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(TabulateTests, FullTestsParams);
 
 template<typename ForwardIterator, typename UnaryOperation>
@@ -138,5 +136,3 @@ TEST(TabulateTests, TestTabulateToDiscardIterator)
   }
   // nothing to check -- just make sure it compiles
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

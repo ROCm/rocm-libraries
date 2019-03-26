@@ -26,8 +26,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(MinElementTests, FullTestsParams);
 
 TYPED_TEST(MinElementTests, TestMinElementSimple)
@@ -133,5 +131,3 @@ TEST(MinElementTests, TestMinElementDispatchImplicit)
 
     ASSERT_EQ(13, vec.front());
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

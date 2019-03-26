@@ -29,8 +29,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(TupleTests, NumericalTestsParams);
 
 TYPED_TEST(TupleTests, TestTupleConstructor)
@@ -499,5 +497,3 @@ TEST(TupleTests, TestTupleSwap)
   ASSERT_EQ(ref, (swappable_tuple)d_v1[0]);
   ASSERT_EQ(ref, (swappable_tuple)d_v1[0]);
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

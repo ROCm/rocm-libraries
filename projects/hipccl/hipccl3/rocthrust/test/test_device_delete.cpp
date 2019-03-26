@@ -28,8 +28,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 struct Foo
 {
   __host__ __device__
@@ -56,5 +54,3 @@ TEST(DeviceDelete, TestDeviceDeleteDestructorInvocation)
   //thrust::device_delete(foo_ptr);
   //ASSERT_EQ(true, destructor_flag[0]);
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

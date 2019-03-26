@@ -26,8 +26,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 template <typename T>
 struct less_div_10
 {
@@ -176,6 +174,3 @@ TEST(StableSortByKeyLargeTests, TestStableSortByKeyWithLargeKeysAndValues)
 //    _TestStableSortByKeyWithLargeKeysAndValues<int, 4096>();
 //    _TestStableSortByKeyWithLargeKeysAndValues<int, 8192>();
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-

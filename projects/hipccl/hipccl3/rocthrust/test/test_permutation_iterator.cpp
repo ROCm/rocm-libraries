@@ -29,8 +29,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(PermutationIteratorTests, FullTestsParams);
 
 TEST(PermutationIteratorTests, UsingHip)
@@ -338,5 +336,3 @@ TYPED_TEST(PermutationIteratorTests, PermutationIteratorWithCountingIterator)
         ASSERT_EQ(output[3], 3);
     }
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

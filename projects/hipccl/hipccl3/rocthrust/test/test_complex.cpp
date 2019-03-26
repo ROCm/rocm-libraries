@@ -25,8 +25,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(ComplexTests, FloatTestsParams);
 
 TYPED_TEST(ComplexTests, TestComplexConstructors)
@@ -287,5 +285,3 @@ TYPED_TEST(ComplexTests, TestComplexStreamOperators)
   out >> b;
   ASSERT_NEAR_COMPLEX(a,b);
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

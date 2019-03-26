@@ -27,8 +27,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(TupleSortTests, IntegerTestsParams);
 
 struct MakeTupleFunctor
@@ -102,5 +100,3 @@ TYPED_TEST(TupleSortTests, TestTupleStableSort)
     ASSERT_EQ(h_values, d_values);
   }
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

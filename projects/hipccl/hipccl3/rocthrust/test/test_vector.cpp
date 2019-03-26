@@ -31,8 +31,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(VectorTests, FullTestsParams);
 
 TYPED_TEST(VectorTests, TestVectorZeroSize)
@@ -751,5 +749,3 @@ TYPED_TEST(VectorTests, TestVectorMove)
   // ensure v2 received the pointer from before
   ASSERT_EQ(ptr3, ptr4);
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

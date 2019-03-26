@@ -26,8 +26,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(ZipIteratorReduceTests, IntegerTestsParams);
 
 template<typename Tuple>
@@ -78,6 +76,3 @@ TYPED_TEST(ZipIteratorReduceTests, TestZipIteratorReduce)
         ASSERT_EQ(get<1>(h_result), get<1>(d_result));
       }
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-

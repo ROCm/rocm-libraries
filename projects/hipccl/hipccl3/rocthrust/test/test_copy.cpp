@@ -40,8 +40,6 @@
 TESTS_DEFINE(CopyTests, FullTestsParams)
 TESTS_DEFINE(CopyIntegerTests, IntegerTestsParams)
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TEST(HipThrustCopy, HostToDevice)
 {
   const size_t size = 256;
@@ -636,5 +634,3 @@ TEST(CopyTests, TestCopyIfStencilDispatchImplicit)
 
   ASSERT_EQ(13, vec.front());
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

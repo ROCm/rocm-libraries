@@ -29,8 +29,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(SequenceTests, FullTestsParams);
 TESTS_DEFINE(PrimitiveSequenceTests, NumericalTestsParams);
 
@@ -163,5 +161,3 @@ TYPED_TEST(PrimitiveSequenceTests, SequenceToDiscardIterator)
     }
     // nothing to check -- just make sure it compiles
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

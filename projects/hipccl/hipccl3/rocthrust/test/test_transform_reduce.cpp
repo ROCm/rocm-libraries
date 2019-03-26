@@ -29,8 +29,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(TransformReduceTests, FullTestsParams);
 TESTS_DEFINE(TransformReduceIntegerTests, VectorSignedIntegerTestsParams);
 
@@ -168,5 +166,3 @@ TYPED_TEST(TransformReduceTests, TestTransformReduceCountingIterator)
     ASSERT_EQ(result, -6);
   }
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

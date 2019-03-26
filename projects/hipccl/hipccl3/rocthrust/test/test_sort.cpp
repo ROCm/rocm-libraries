@@ -31,8 +31,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 template<
   class Key,
   class Item,
@@ -374,6 +372,3 @@ TEST(SortTests, TestSortBoolDescending)
 
   ASSERT_EQ(h_data, d_data);
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-

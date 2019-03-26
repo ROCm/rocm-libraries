@@ -25,8 +25,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 using namespace thrust;
 
 TEST(DiscardIteratorTests, UsingHip)
@@ -126,5 +124,3 @@ TEST(DiscardIteratorTests, ZippedDiscardIterator)
 
     ASSERT_EQ(10, get<1>(z_iter_first.get_iterator_tuple()) - make_discard_iterator());
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

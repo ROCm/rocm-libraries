@@ -28,8 +28,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(ScanTests, FullTestsParams);
 TESTS_DEFINE(ScanVariablesTests, NumericalTestsParams);
 TESTS_DEFINE(ScanVectorTests, VectorSignedIntegerTestsParams);
@@ -597,5 +595,3 @@ TYPED_TEST(ScanVectorTests, TestInclusiveScanWithIndirection)
     ASSERT_EQ(data[5], T(0));
     ASSERT_EQ(data[6], T(1));
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
