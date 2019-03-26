@@ -27,8 +27,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(ComplexTransformTests, FloatTestsParams);
 
 struct basic_arithmetic_functor
@@ -419,5 +417,3 @@ TYPED_TEST(ComplexTransformTests, TestComplexTrigonometricTransform)
     ASSERT_NEAR_COMPLEX(h_result, d_result);
   }
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

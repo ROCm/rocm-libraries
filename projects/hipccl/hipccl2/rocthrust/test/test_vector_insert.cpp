@@ -26,8 +26,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(VectorInsertTests, FullTestsParams);
 
 TYPED_TEST(VectorInsertTests, TestVectorRangeInsertSimple)
@@ -353,5 +351,3 @@ TYPED_TEST(VectorInsertTests, TestVectorFillInsert)
     ASSERT_EQ(h_dst, d_dst);
   }
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

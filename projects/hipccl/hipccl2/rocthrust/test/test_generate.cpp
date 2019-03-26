@@ -29,8 +29,6 @@
 
 __THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_BEGIN
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 typedef ::testing::Types<
         Params<thrust::host_vector<short>>,
         Params<thrust::host_vector<int>>
@@ -268,7 +266,5 @@ TEST(GenerateTests, TestGenerateTuple)
 
     ASSERT_EQ_QUIET(h, d);
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
 __THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_END

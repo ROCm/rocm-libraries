@@ -26,8 +26,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 typedef ::testing::Types<
     Params<int8_t>,
     // TODO: enable when we solved: issue 122
@@ -95,6 +93,4 @@ TYPED_TEST(ZipIteratorStableSortByKeyTests, TestZipIteratorStableSort)
         ASSERT_EQ_QUIET(h3, d3);
         ASSERT_EQ_QUIET(h4, d4);
     }
-};
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+}

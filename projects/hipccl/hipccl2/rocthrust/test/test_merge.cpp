@@ -33,8 +33,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(MergeTests, FullTestsParams);
 TESTS_DEFINE(PrimitiveMergeTests, NumericalTestsParams);
 
@@ -250,5 +248,3 @@ TYPED_TEST(PrimitiveMergeTests, MergeDescending)
         ASSERT_EQ(h_result, d_result);
     }
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

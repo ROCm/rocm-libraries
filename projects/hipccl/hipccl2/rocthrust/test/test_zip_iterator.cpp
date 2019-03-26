@@ -29,8 +29,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 typedef ::testing::Types<
         Params<int>,
         Params<unsigned int>,
@@ -548,5 +546,3 @@ TEST(ZipIterator32BitTests, TestZipIteratorCopySoAToAoS)
     ASSERT_EQ_QUIET(7, get<0>(h_soa[0]));
     ASSERT_EQ_QUIET(13, get<1>(h_soa[0]));
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

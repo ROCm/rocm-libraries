@@ -29,8 +29,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(SwapRangesTests, FullTestsParams);
 TESTS_DEFINE(PrimitiveSwapRangesTests, NumericalTestsParams);
 
@@ -245,5 +243,3 @@ TEST(SwapRangesTests, SwapRangesUserSwap)
   careful_assert(ref, d_B[2]);
   
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

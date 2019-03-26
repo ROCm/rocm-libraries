@@ -33,8 +33,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TEST(HipThrustMemory, VoidMalloc)
 {
   const size_t size = 9001;
@@ -289,5 +287,3 @@ TEST(MemoryTests, TestGetTemporaryBufferDispatchExplicit)
     ASSERT_EQ(true, sys.is_valid());
   }
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

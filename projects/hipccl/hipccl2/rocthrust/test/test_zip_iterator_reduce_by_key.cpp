@@ -30,8 +30,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 typedef ::testing::Types<
         Params<unsigned short>,
         Params<unsigned int>,
@@ -153,5 +151,3 @@ TYPED_TEST(ZipIteratorReduceByKeyTests, TestZipIteratorReduceByKey)
         }
     }
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

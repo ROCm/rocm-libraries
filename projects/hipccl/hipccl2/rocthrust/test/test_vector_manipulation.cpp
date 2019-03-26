@@ -27,8 +27,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(VectorManipulationTests, FullTestsParams);
 
 TYPED_TEST(VectorManipulationTests, TestVectorManipulation)
@@ -114,5 +112,3 @@ TYPED_TEST(VectorManipulationTests, TestVectorManipulation)
     }
   }
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

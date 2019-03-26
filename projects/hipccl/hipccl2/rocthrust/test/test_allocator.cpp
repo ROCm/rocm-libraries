@@ -34,8 +34,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 struct my_allocator_with_custom_construct1
   : thrust::device_malloc_allocator<int>
 {
@@ -180,5 +178,3 @@ TEST(AllocatorTests, TestAllocatorMinimal)
 
   ASSERT_EQ(ref, h_vec);
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

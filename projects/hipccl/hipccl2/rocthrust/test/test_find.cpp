@@ -29,8 +29,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(FindTests, FullTestsParams);
 
 template <typename T>
@@ -338,5 +336,3 @@ TYPED_TEST(FindTests, TestFindIfNot)
     }
   }
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

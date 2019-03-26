@@ -27,8 +27,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(StableSortTests, UnsignedIntegerTestsParams);
 TESTS_DEFINE(StableSortVectorTests, VectorIntegerTestsParams);
 
@@ -175,6 +173,3 @@ TYPED_TEST(StableSortVectorTests, TestStableSortWithIndirection)
   ASSERT_EQ(data[5], T(5));
   ASSERT_EQ(data[6], T(2));
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-

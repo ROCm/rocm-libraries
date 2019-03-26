@@ -29,8 +29,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(SortPermutationIteratorsTests, FullTestsParams);
 
 template <typename Iterator>
@@ -240,5 +238,3 @@ TYPED_TEST(SortPermutationIteratorsTests, TestStableSortByKeyPermutationIterator
     ASSERT_EQ(B[8], ValueType(6));
     ASSERT_EQ(B[9], ValueType(9));
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

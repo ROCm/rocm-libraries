@@ -27,8 +27,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(PairTests, NumericalTestsParams);
 
 TYPED_TEST(PairTests, TestPairManipulation)
@@ -278,6 +276,3 @@ TEST(PairTests, TestPairSwap)
   ASSERT_EQ(ref, (swappable_pair)d_v1[0]);
   ASSERT_EQ(ref, (swappable_pair)d_v1[0]);
 }
-
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

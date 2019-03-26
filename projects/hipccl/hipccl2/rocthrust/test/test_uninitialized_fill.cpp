@@ -30,8 +30,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(UninitializedFillTests, FullTestsParams);
 
 template<typename ForwardIterator, typename T>
@@ -303,5 +301,3 @@ TEST(UninitializedFillTests, TestUninitializedFillNNonPOD)
 
   thrust::device_free(v);
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

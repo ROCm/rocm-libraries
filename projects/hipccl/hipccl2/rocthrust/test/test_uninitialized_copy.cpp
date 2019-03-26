@@ -29,8 +29,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(UninitializedCopyTests, FullTestsParams);
 
 template<typename InputIterator, typename ForwardIterator>
@@ -272,6 +270,3 @@ TEST(UninitializedCopyTests, TestUninitializedCopyNNonPODHost)
   ASSERT_EQ(false, x.copy_constructed_on_device);
   ASSERT_EQ(true,  x.copy_constructed_on_host);
 }
-
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

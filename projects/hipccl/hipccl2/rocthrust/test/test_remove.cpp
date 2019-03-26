@@ -30,8 +30,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(RemoveTests, FullTestsParams);
 
 template<typename T>
@@ -662,5 +660,3 @@ TYPED_TEST(RemoveTests, TestRemoveCopyToDiscardIterator)
     ASSERT_EQ(reference, d_result);
   }
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

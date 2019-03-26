@@ -28,8 +28,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(ReplaceTests, FullTestsParams);
 TESTS_DEFINE(PrimitiveReplaceTests, NumericalTestsParams);
 
@@ -755,5 +753,3 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceCopyIfStencilToDiscardIteratorRandomDat
         ASSERT_EQ(reference, d_result);
     }
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

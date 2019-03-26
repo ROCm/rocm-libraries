@@ -27,8 +27,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(ReverseIteratorTests, FullTestsParams);
 TESTS_DEFINE(PrimitiveReverseIteratorTests, NumericalTestsParams);
 
@@ -177,5 +175,3 @@ TYPED_TEST(PrimitiveReverseIteratorTests, ReverseIteratorExclusiveScan)
             ASSERT_NEAR(h_result[i], h_result_d[i], error_margin);
     }
 };*/
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

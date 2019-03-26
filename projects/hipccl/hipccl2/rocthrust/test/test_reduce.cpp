@@ -27,8 +27,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(ReduceTests, FullTestsParams);
 TESTS_DEFINE(ReduceIntegerTests, VectorIntegerTestsParams);
 
@@ -237,5 +235,3 @@ TYPED_TEST(ReduceTests, TestReduceCountingIterator)
 
   }
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

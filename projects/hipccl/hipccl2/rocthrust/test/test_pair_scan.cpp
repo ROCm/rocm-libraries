@@ -27,8 +27,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(PairScanVariablesTests, NumericalTestsParams);
 
 struct make_pair_functor
@@ -102,5 +100,3 @@ TYPED_TEST(PairScanVariablesTests, TestPairScan)
     ASSERT_EQ_QUIET(h_output, d_output);
   }
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

@@ -29,8 +29,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(BinarySearchVectorTests, FullTestsParams);
 TESTS_DEFINE(BinarySearchVectorIntegerTests, SignedIntegerTestsParams);
 
@@ -496,5 +494,3 @@ TYPED_TEST(BinarySearchVectorIntegerTests, TestVectorBinarySearchDiscardIterator
     ASSERT_EQ_QUIET(reference, d_result);
   }
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

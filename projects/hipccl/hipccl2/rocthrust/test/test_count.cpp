@@ -30,8 +30,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(CountTests, FullTestsParams);
 
 TYPED_TEST(CountTests, TestCountSimple)
@@ -153,5 +151,3 @@ TEST(CountTests, TestCountDispatchImplicit)
 
     ASSERT_EQ(13, result);
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

@@ -27,8 +27,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(TupleReduceTests, IntegerTestsParams);
 
 struct SumTupleFunctor
@@ -87,5 +85,3 @@ TYPED_TEST(TupleReduceTests, TestTupleReduce)
     ASSERT_EQ_QUIET(h_result, d_result);
   }
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

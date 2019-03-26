@@ -29,8 +29,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(ScanByKeyTests, FullTestsParams);
 TESTS_DEFINE(ScanByKeyVariablesTests, NumericalTestsParams);
 TESTS_DEFINE(ScanByKeyVectorTests, VectorSignedIntegerTestsParams);
@@ -656,5 +654,3 @@ TEST(ScanByKeyTests, TestScanByKeyWithLargeTypes)
     //_TestScanByKeyWithLargeTypes<int,  512>();
     //_TestScanByKeyWithLargeTypes<int, 1024>();
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

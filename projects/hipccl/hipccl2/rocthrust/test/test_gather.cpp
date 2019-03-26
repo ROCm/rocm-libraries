@@ -30,8 +30,6 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 TESTS_DEFINE(GatherTests, FullTestsParams);
 TESTS_DEFINE(PrimitiveGatherTests, NumericalTestsParams);
 
@@ -393,5 +391,3 @@ TYPED_TEST(GatherTests, TestGatherCountingIterator)
 
     ASSERT_EQ(output, map);
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
