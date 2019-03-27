@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,10 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// Google Test
-#include <gtest/gtest.h>
-#include "test_utils.hpp"
-
 // Thrust
 #include <thrust/device_vector.h>
 #include <thrust/iterator/constant_iterator.h>
@@ -31,45 +27,11 @@
 #include <thrust/transform.h>
 #include <thrust/reduce.h>
 
-// HIP API
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-#include <hip/hip_runtime_api.h>
-#include <hip/hip_runtime.h>
-
-#define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+#include "test_header.hpp"
 
 using namespace thrust;
 
-template< class InputType >
-struct Params
-{
-    using input_type = InputType;
-};
-
-template<class Params>
-class ConstantIteratorTests : public ::testing::Test
-{
-public:
-    using input_type = typename Params::input_type;
-};
-
-typedef ::testing::Types<
-    Params<host_vector<short>>,
-    Params<host_vector<int>>,
-    Params<host_vector<long long>>,
-    Params<host_vector<float>>,
-    Params<host_vector<double>>,
-    Params<device_vector<short>>,
-    Params<device_vector<int>>,
-    Params<device_vector<long long>>,
-    Params<device_vector<float>>,
-    Params<device_vector<double>>
-> ConstantIteratorTestsParams;
-
-TYPED_TEST_CASE(ConstantIteratorTests, ConstantIteratorTestsParams);
-
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+TESTS_DEFINE(ConstantIteratorTests, VectorSignedTestsParams);
 
 TEST(ConstantIteratorTests, UsingHip)
 {
@@ -212,5 +174,3 @@ TYPED_TEST(ConstantIteratorTests, ConstantIteratorReduce)
 
     ASSERT_EQ(sum, 4 * 7);
 };
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

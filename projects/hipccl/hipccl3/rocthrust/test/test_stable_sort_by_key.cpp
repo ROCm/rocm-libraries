@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,68 +20,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// Google Test
-#include <gtest/gtest.h>
-
 // Thrust
 #include <thrust/sort.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/retag.h>
 
-#include "test_utils.hpp"
+#include "test_header.hpp"
 
-template<
-  class Input,
-  class Output = Input
->
-struct Params
-{
-  using input_type = Input;
-  using output_type = Output;
-};
-
-template<class Params>
-class StableSortByKeyTests : public ::testing::Test
-{
-public:
-    using input_type = typename Params::input_type;
-};
-
-typedef ::testing::Types<
-    Params<short>,
-    Params<int>,
-    Params<long long>,
-    Params<thrust::detail::int8_t>,
-    Params<thrust::detail::int16_t>,
-    Params<thrust::detail::int32_t>,
-    Params<thrust::detail::int64_t>
-> StableSortByKeyTestsParams;
-
-TYPED_TEST_CASE(StableSortByKeyTests, StableSortByKeyTestsParams);
-
-template<class Params>
-class StableSortByKeyVectorTests : public ::testing::Test
-{
-public:
-    using input_type = typename Params::input_type;
-};
-
-typedef ::testing::Types<
-    Params<thrust::host_vector<short>>,
-    Params<thrust::host_vector<int>>,
-    Params<thrust::host_vector<long long>>,
-    Params<thrust::host_vector<unsigned short>>,
-    Params<thrust::host_vector<unsigned int>>,
-    Params<thrust::host_vector<unsigned long long>>,
-    Params<thrust::device_vector<short>>,
-    Params<thrust::device_vector<int>>,
-    Params<thrust::device_vector<long long>>,
-    Params<thrust::device_vector<unsigned short>>,
-    Params<thrust::device_vector<unsigned int>>,
-    Params<thrust::device_vector<unsigned long long>>
-> StableSortByKeyVectorTestsParams;
-
-TYPED_TEST_CASE(StableSortByKeyVectorTests, StableSortByKeyVectorTestsParams);
+TESTS_DEFINE(StableSortByKeyTests, UnsignedIntegerTestsParams);
+TESTS_DEFINE(StableSortByKeyVectorTests, VectorIntegerTestsParams);
 
 template<typename RandomAccessIterator1, typename RandomAccessIterator2>
 void stable_sort_by_key(my_system &system, RandomAccessIterator1, RandomAccessIterator1, RandomAccessIterator2)

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,48 +20,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// Google Test
-#include <gtest/gtest.h>
-
 // Thrust
 #include <thrust/tuple.h>
 #include <thrust/transform.h>
 
-// HIP API
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-#include <hip/hip_runtime_api.h>
-#include <hip/hip_runtime.h>
+#include "test_header.hpp"
 
-#define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
-#include "test_utils.hpp"
-#include "test_assertions.hpp"
-
-template<
-    class InputType
->
-struct Params
-{
-    using input_type = InputType;
-};
-
-template<class Params>
-class TupleTransformTests : public ::testing::Test
-{
-public:
-    using input_type = typename Params::input_type;
-};
-
-typedef ::testing::Types<
-    Params<short>,
-    Params<int>,
-    Params<long long>
-> TupleTransformTestsParams;
-
-TYPED_TEST_CASE(TupleTransformTests, TupleTransformTestsParams);
-
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+TESTS_DEFINE(TupleTransformTests, SignedIntegerTestsParams);
 
 struct MakeTupleFunctor
 {
@@ -125,5 +90,3 @@ TYPED_TEST(TupleTransformTests, TestTupleTransform)
     ASSERT_EQ_QUIET(h_tuples, d_tuples);
   }
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

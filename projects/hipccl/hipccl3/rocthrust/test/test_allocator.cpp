@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,29 +20,17 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <iostream>
-#include <type_traits>
-#include <cstdlib>
-#include <algorithm>
-
-// Google Test
-#include <gtest/gtest.h>
+// Standard library
+#include <cstddef>
+#include <memory>
 
 // Thrust
 #include <thrust/device_malloc_allocator.h>
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
 #include <thrust/system/cpp/vector.h>
-#include <memory>
 
-// HIP API
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-#include <hip/hip_runtime_api.h>
-
-#define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+#include "test_header.hpp"
 
 struct my_allocator_with_custom_construct1
   : thrust::device_malloc_allocator<int>
@@ -188,5 +176,3 @@ TEST(AllocatorTests, TestAllocatorMinimal)
 
   ASSERT_EQ(ref, h_vec);
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

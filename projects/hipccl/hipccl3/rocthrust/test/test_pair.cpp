@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,52 +20,17 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// Google Test
-#include <gtest/gtest.h>
+// Standard library
+#include  <utility>
 
 // Thrust
 #include <thrust/pair.h>
 #include <thrust/tuple.h>
 #include <thrust/swap.h>
 
-// HIP API
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-#include <hip/hip_runtime_api.h>
+#include "test_header.hpp"
 
-#define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
-#include "test_utils.hpp"
-
-template<
-    class InputType
->
-struct Params
-{
-    using input_type = InputType;
-};
-
-template<class Params>
-class PairTests : public ::testing::Test
-{
-public:
-    using input_type = typename Params::input_type;
-};
-
-typedef ::testing::Types<
-  Params<short>,
-  Params<int>,
-  Params<long long>,
-  Params<unsigned short>,
-  Params<unsigned int>,
-  Params<unsigned long long>,
-  Params<float>,
-  Params<double>
-> PairTestsParams;
-
-TYPED_TEST_CASE(PairTests, PairTestsParams);
-
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+TESTS_DEFINE(PairTests, NumericalTestsParams);
 
 TYPED_TEST(PairTests, TestPairManipulation)
 {
@@ -314,6 +279,3 @@ TEST(PairTests, TestPairSwap)
   ASSERT_EQ(ref, (swappable_pair)d_v1[0]);
   ASSERT_EQ(ref, (swappable_pair)d_v1[0]);
 }
-
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
