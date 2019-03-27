@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,62 +20,17 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <iostream>
-#include <type_traits>
-#include <cstdlib>
-
-// Google Test
-#include <gtest/gtest.h>
-
 // Thrust
 #include <thrust/remove.h>
-
 #include <thrust/count.h>
 #include <thrust/functional.h>
-#include <stdexcept>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/iterator/retag.h>
 
-#include "test_utils.hpp"
+#include "test_header.hpp"
 
-template<
-  class Input
->
-struct Params
-{
-  using input_type = Input;
-};
-
-template<class Params>
-class RemoveTests : public ::testing::Test
-{
-public:
-  using input_type = typename Params::input_type;
-};
-
-typedef ::testing::Types<
-    Params<thrust::host_vector<short>>,
-    Params<thrust::host_vector<int>>,
-    Params<thrust::host_vector<long long>>,
-    Params<thrust::host_vector<unsigned short>>,
-    Params<thrust::host_vector<unsigned int>>,
-    Params<thrust::host_vector<unsigned long long>>,
-    Params<thrust::host_vector<float>>,
-    Params<thrust::host_vector<double>>,
-    Params<thrust::device_vector<short>>,
-    Params<thrust::device_vector<int>>,
-    Params<thrust::device_vector<long long>>,
-    Params<thrust::device_vector<unsigned short>>,
-    Params<thrust::device_vector<unsigned int>>,
-    Params<thrust::device_vector<unsigned long long>>,
-    Params<thrust::device_vector<float>>,
-    Params<thrust::device_vector<double>>
-> RemoveTestsParams;
-
-TYPED_TEST_CASE(RemoveTests, RemoveTestsParams);
-
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+TESTS_DEFINE(RemoveTests, FullTestsParams);
 
 template<typename T>
 struct is_even
@@ -705,5 +660,3 @@ TYPED_TEST(RemoveTests, TestRemoveCopyToDiscardIterator)
     ASSERT_EQ(reference, d_result);
   }
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

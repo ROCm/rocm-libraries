@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,34 +20,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+// Thrust
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/reduce.h>
-
-// Google Test
-#include <gtest/gtest.h>
-
-// HIP API
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
-#define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
-#include "test_utils.hpp"
 
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #include <backend/cuda/testframework.h>
 #endif
 
-template<class InputType> struct Params
-{
-    using input_type = InputType;
-};
-
-template<class Params> class ZipIteratorReduceByKeyTests : public ::testing::Test
-{
-public:
-    using input_type = typename Params::input_type;
-};
+#include "test_header.hpp"
 
 typedef ::testing::Types<
         Params<unsigned short>,
@@ -56,9 +37,7 @@ typedef ::testing::Types<
         Params<unsigned long long>
 > UnsignedIntegralTypesParams;
 
-TYPED_TEST_CASE(ZipIteratorReduceByKeyTests, UnsignedIntegralTypesParams);
-
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+TESTS_DEFINE(ZipIteratorReduceByKeyTests, UnsignedIntegralTypesParams);
 
 template<typename Tuple> struct TuplePlus
 {
@@ -172,5 +151,3 @@ TYPED_TEST(ZipIteratorReduceByKeyTests, TestZipIteratorReduceByKey)
         }
     }
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
