@@ -103,53 +103,53 @@ typedef ::testing::Types<
 
 // Host and device vectors of integer types as a test parameter
 typedef ::testing::Types<
-Params<thrust::host_vector<short>>,
-Params<thrust::host_vector<int>>,
-Params<thrust::host_vector<long long>>,
-Params<thrust::host_vector<unsigned short>>,
-Params<thrust::host_vector<unsigned int>>,
-Params<thrust::host_vector<unsigned long long>>,
-Params<thrust::device_vector<short>>,
-Params<thrust::device_vector<int>>,
-Params<thrust::device_vector<long long>>,
-Params<thrust::device_vector<unsigned short>>,
-Params<thrust::device_vector<unsigned int>>,
-Params<thrust::device_vector<unsigned long long>>
+    Params<thrust::host_vector<short>>,
+    Params<thrust::host_vector<int>>,
+    Params<thrust::host_vector<long long>>,
+    Params<thrust::host_vector<unsigned short>>,
+    Params<thrust::host_vector<unsigned int>>,
+    Params<thrust::host_vector<unsigned long long>>,
+    Params<thrust::device_vector<short>>,
+    Params<thrust::device_vector<int>>,
+    Params<thrust::device_vector<long long>>,
+    Params<thrust::device_vector<unsigned short>>,
+    Params<thrust::device_vector<unsigned int>>,
+    Params<thrust::device_vector<unsigned long long>>
 > VectorIntegerTestsParams;
 
 
 // Host and device vectors of signed integer types as a test parameter
 typedef ::testing::Types<
-Params<thrust::host_vector<short>>,
-Params<thrust::host_vector<int>>,
-Params<thrust::host_vector<long long>>,
-Params<thrust::device_vector<short>>,
-Params<thrust::device_vector<int>>,
-Params<thrust::device_vector<long long>>
+    Params<thrust::host_vector<short>>,
+    Params<thrust::host_vector<int>>,
+    Params<thrust::host_vector<long long>>,
+    Params<thrust::device_vector<short>>,
+    Params<thrust::device_vector<int>>,
+    Params<thrust::device_vector<long long>>
 > VectorSignedIntegerTestsParams;
 
 
 // Host vectors of numerical types as a test parameter
 typedef ::testing::Types<
-Params<thrust::host_vector<short>>,
-Params<thrust::host_vector<int>>,
-Params<thrust::host_vector<long long>>,
-Params<thrust::host_vector<unsigned short>>,
-Params<thrust::host_vector<unsigned int>>,
-Params<thrust::host_vector<unsigned long long>>,
-Params<thrust::host_vector<float>>,
-Params<thrust::host_vector<double>>
+    Params<thrust::host_vector<short>>,
+    Params<thrust::host_vector<int>>,
+    Params<thrust::host_vector<long long>>,
+    Params<thrust::host_vector<unsigned short>>,
+    Params<thrust::host_vector<unsigned int>>,
+    Params<thrust::host_vector<unsigned long long>>,
+    Params<thrust::host_vector<float>>,
+    Params<thrust::host_vector<double>>
 > HostVectorTestsParams;
 
 
 // Host vectors of integer types as a test parameter
 typedef ::testing::Types<
-Params<thrust::host_vector<short>>,
-Params<thrust::host_vector<int>>,
-Params<thrust::host_vector<long long>>,
-Params<thrust::host_vector<unsigned short>>,
-Params<thrust::host_vector<unsigned int>>,
-Params<thrust::host_vector<unsigned long long>>
+    Params<thrust::host_vector<short>>,
+    Params<thrust::host_vector<int>>,
+    Params<thrust::host_vector<long long>>,
+    Params<thrust::host_vector<unsigned short>>,
+    Params<thrust::host_vector<unsigned int>>,
+    Params<thrust::host_vector<unsigned long long>>
 > HostVectorIntegerTestsParams;
 
 
