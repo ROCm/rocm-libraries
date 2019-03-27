@@ -20,6 +20,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+// Standard library
+#include  <utility>
+
 // Thrust
 #include <thrust/pair.h>
 #include <thrust/tuple.h>

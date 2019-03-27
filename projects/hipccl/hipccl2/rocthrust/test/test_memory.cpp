@@ -20,6 +20,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+// Standard library
+#include <cstddef>
+
 // Thrust
 #include <thrust/memory.h>
 #include <thrust/sort.h>

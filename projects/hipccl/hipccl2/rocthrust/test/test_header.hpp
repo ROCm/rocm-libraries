@@ -23,6 +23,17 @@
 // Google Test
 #include <gtest/gtest.h>
 
+// Standard library
+#include <algorithm>
+#include <cmath>
+#include <iterator>
+#include <limits>
+#include <list>
+#include <numeric>
+#include <random>
+#include <type_traits>
+#include <vector>
+
 // HIP API
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 #include <hip/hip_runtime.h>
