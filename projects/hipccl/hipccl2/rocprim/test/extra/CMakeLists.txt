@@ -35,42 +35,8 @@ list(APPEND CMAKE_MODULE_PATH
 # Verify that hcc compiler is used on ROCM platform
 include(VerifyCompiler)
 
-# Download CUB
-include(DownloadProject)
-if(HIP_PLATFORM STREQUAL "nvcc")
-  if(NOT DEFINED CUB_INCLUDE_DIR)
-    file(
-      DOWNLOAD https://github.com/NVlabs/cub/archive/1.8.0.zip
-      ${CMAKE_CURRENT_BINARY_DIR}/cub-1.8.0.zip
-      STATUS cub_download_status LOG cub_download_log
-    )
-    list(GET cub_download_status 0 cub_download_error_code)
-    if(cub_download_error_code)
-      message(FATAL_ERROR "Error: downloading "
-        "https://github.com/NVlabs/cub/archive/1.8.0.zip failed "
-        "error_code: ${cub_download_error_code} "
-        "log: ${cub_download_log} "
-      )
-    endif()
-
-    execute_process(
-      COMMAND ${CMAKE_COMMAND} -E tar xzf ${CMAKE_CURRENT_BINARY_DIR}/cub-1.8.0.zip
-      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-      RESULT_VARIABLE cub_unpack_error_code
-    )
-    if(cub_unpack_error_code)
-      message(FATAL_ERROR "Error: unpacking ${CMAKE_CURRENT_BINARY_DIR}/cub-1.8.0.zip failed")
-    endif()
-    set(CUB_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/cub-1.8.0/ CACHE PATH "")
-  endif()
-endif()
-
-if(HIP_PLATFORM STREQUAL "hcc")
-  # Find rocPRIM
-  find_package(rocprim REQUIRED CONFIG HINTS ${rocprim_DIR} PATHS "/opt/rocm/rocprim")
-endif()
-# Find hipCUB
-find_package(hipcub REQUIRED CONFIG HINTS ${hipcub_DIR} PATHS "/opt/rocm/hipcub")
+# Find rocPRIM
+find_package(rocprim REQUIRED CONFIG HINTS ${rocprim_DIR} PATHS "/opt/rocm/rocprim")
 
 # Build CXX flags
 set(CMAKE_CXX_STANDARD 11)
@@ -102,50 +68,5 @@ function(add_rocprim_test TEST_NAME TEST_SOURCES)
   add_test(${TEST_NAME} ${TEST_TARGET})
 endfunction()
 
-# Use CUDA_INCLUDE_DIRECTORIES to include required dirs
-# for nvcc if cmake version is less than 3.10
-if((HIP_PLATFORM STREQUAL "nvcc") AND (CMAKE_VERSION VERSION_LESS "3.10"))
-    CUDA_INCLUDE_DIRECTORIES(
-        ${hipcub_INCLUDE_DIR}
-        ${GTEST_INCLUDE_DIRS}
-        ${CUB_INCLUDE_DIR}
-    )
-endif()
 
-function(add_hipcub_test TEST_NAME TEST_SOURCES)
-  list(GET TEST_SOURCES 0 TEST_MAIN_SOURCE)
-  get_filename_component(TEST_TARGET ${TEST_MAIN_SOURCE} NAME_WE)
-  if(HIP_PLATFORM STREQUAL "hcc")
-    add_executable(${TEST_TARGET} ${TEST_SOURCES})
-    target_link_libraries(${TEST_TARGET}
-      PRIVATE
-        hip::hipcub
-    )
-    foreach(amdgpu_target ${AMDGPU_TARGETS})
-      target_link_libraries(${TEST_TARGET}
-        PRIVATE
-          --amdgpu-target=${amdgpu_target}
-      )
-    endforeach()
-  else() # CUDA/nvcc
-    set_source_files_properties(${TEST_SOURCES}
-      PROPERTIES
-        CUDA_SOURCE_PROPERTY_FORMAT OBJ
-      )
-      CUDA_ADD_EXECUTABLE(${TEST_TARGET}
-        ${TEST_SOURCES}
-        OPTIONS
-          --expt-extended-lambda
-    )
-    target_link_libraries(${TEST_TARGET} hip::hipcub)
-    target_include_directories(${TEST_TARGET} SYSTEM PRIVATE ${CUB_INCLUDE_DIR})
-  endif()
-  add_test(${TEST_NAME} ${TEST_TARGET})
-endfunction()
-
-# rocPRIM package test
-if(HIP_PLATFORM STREQUAL "hcc")
-  add_rocprim_test("test_rocprim_package" test_rocprim_package.cpp)
-endif()
-# hipCUB package test
-add_hipcub_test("test_hipcub_package" test_hipcub_package.cpp)
+add_rocprim_test("test_rocprim_package" test_rocprim_package.cpp)

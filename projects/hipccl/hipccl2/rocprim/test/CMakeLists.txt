@@ -92,17 +92,8 @@ endfunction()
 # ****************************************************************************
 
 # HC and HIP tests without using rocPRIM
-if(HIP_PLATFORM STREQUAL "hcc")
-  add_hip_test("hip.device_api"  test_hip_api.cpp)
-  if(HIP_COMPILER STREQUAL "hcc")
-    add_hc_test ("hc.device_api" test_hc_api.cpp)
-  endif()
-endif()
+add_hip_test("hip.device_api"  test_hip_api.cpp)
+add_hc_test ("hc.device_api" test_hc_api.cpp)
 
 # rocPRIM test (run only on ROCm/hcc)
-if(HIP_PLATFORM STREQUAL "hcc")
-  add_subdirectory(rocprim)
-endif()
-
-# hipCUB tests
-add_subdirectory(hipcub)
+add_subdirectory(rocprim)

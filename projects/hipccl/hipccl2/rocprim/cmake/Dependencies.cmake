@@ -42,36 +42,7 @@ find_package(Git REQUIRED)
 if (NOT Git_FOUND)
   message(FATAL_ERROR "Please ensure Git is installed on the system")
 endif()
-
-# CUB (only for CUDA platform)
-if(HIP_PLATFORM STREQUAL "nvcc")
-  if(NOT DEFINED CUB_INCLUDE_DIR)
-    file(
-      DOWNLOAD https://github.com/NVlabs/cub/archive/1.8.0.zip
-      ${CMAKE_CURRENT_BINARY_DIR}/cub-1.8.0.zip
-      STATUS cub_download_status LOG cub_download_log
-    )
-    list(GET cub_download_status 0 cub_download_error_code)
-    if(cub_download_error_code)
-      message(FATAL_ERROR "Error: downloading "
-        "https://github.com/NVlabs/cub/archive/1.8.0.zip failed "
-        "error_code: ${cub_download_error_code} "
-        "log: ${cub_download_log} "
-      )
-    endif()
-
-    execute_process(
-      COMMAND ${CMAKE_COMMAND} -E tar xzf ${CMAKE_CURRENT_BINARY_DIR}/cub-1.8.0.zip
-      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-      RESULT_VARIABLE cub_unpack_error_code
-    )
-    if(cub_unpack_error_code)
-      message(FATAL_ERROR "Error: unpacking ${CMAKE_CURRENT_BINARY_DIR}/cub-1.8.0.zip failed")
-    endif()
-    set(CUB_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/cub-1.8.0/ CACHE PATH "")
-  endif()
-endif()
-
+		
 # Test dependencies
 if(BUILD_TEST)
   # Google Test (https://github.com/google/googletest)
