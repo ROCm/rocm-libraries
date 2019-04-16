@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,40 +20,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// Google Test
-#include <gtest/gtest.h>
-#include "test_utils.hpp"
-#include "test_assertions.hpp"
-
+// Thrust
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/sequence.h>
 #include <thrust/copy.h>
 #include <thrust/transform.h>
 
-// HIP API
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
-#include <hip/hip_runtime_api.h>
-#include <hip/hip_runtime.h>
-
-#define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
-
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
-
-template<class InputType> struct Params
-{
-    using input_type = InputType;
-};
-
-template<class Params> class ZipIterator32BitTests : public ::testing::Test
-{
-public:
-    using input_type = typename Params::input_type;
-};
+#include "test_header.hpp"
 
 typedef ::testing::Types<
         Params<int>,
@@ -61,49 +35,12 @@ typedef ::testing::Types<
         Params<float>
 > ZipIteratorTests32BitParams;
 
-TYPED_TEST_CASE(ZipIterator32BitTests, ZipIteratorTests32BitParams);
+TESTS_DEFINE(ZipIterator32BitTests, ZipIteratorTests32BitParams);
 
-template<class Params> class ZipIteratorVectorTests : public ::testing::Test
-{
-public:
-    using input_type = typename Params::input_type;
-};
+TESTS_DEFINE(ZipIteratorVectorTests, NumericalTestsParams);
 
-typedef ::testing::Types<
-        Params<short>,
-        Params<int>,
-        Params<long long>,
-        Params<unsigned short>,
-        Params<unsigned int>,
-        Params<unsigned long long>,
-        Params<float>,
-        Params<double>
-> ZipIteratorTestsVectorParams;
+TESTS_DEFINE(ZipIteratorNumericTests, NumericalTestsParams);
 
-TYPED_TEST_CASE(ZipIteratorVectorTests, ZipIteratorTestsVectorParams);
-
-template<class Params> class ZipIteratorNumericTests : public ::testing::Test
-{
-public:
-    using input_type = typename Params::input_type;
-};
-
-typedef ::testing::Types<
-    Params<char>,
-    Params<signed char>,
-    Params<unsigned char>,
-    Params<short>,
-    Params<unsigned short>,
-    Params<int>,
-    Params<unsigned int>,
-    Params<long>,
-    Params<unsigned long>,
-    Params<long long>,
-    Params<unsigned long long>,
-    Params<float>
-> ZipIteratorTestsNumericParams;
-
-TYPED_TEST_CASE(ZipIteratorNumericTests, ZipIteratorTestsNumericParams);
 
 TEST(ZipIterator32BitTests, UsingHip)
 {
@@ -609,5 +546,3 @@ TEST(ZipIterator32BitTests, TestZipIteratorCopySoAToAoS)
     ASSERT_EQ_QUIET(7, get<0>(h_soa[0]));
     ASSERT_EQ_QUIET(13, get<1>(h_soa[0]));
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

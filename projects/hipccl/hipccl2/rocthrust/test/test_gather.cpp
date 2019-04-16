@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,10 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// Google Test
-#include <gtest/gtest.h>
-#include "test_utils.hpp"
-
 // Thrust
 #include <thrust/gather.h>
 #include <thrust/fill.h>
@@ -31,70 +27,11 @@
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
 #include <thrust/sequence.h>
-#include <algorithm>
 
-// HIP API
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-#include <hip/hip_runtime_api.h>
-#include <hip/hip_runtime.h>
+#include "test_header.hpp"
 
-#define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
-template< class InputType >
-struct Params
-{
-    using input_type = InputType;
-};
-
-template<class Params>
-class GatherTests : public ::testing::Test
-{
-public:
-    using input_type = typename Params::input_type;
-};
-
-template<class Params>
-class PrimitiveGatherTests : public ::testing::Test
-{
-public:
-    using input_type = typename Params::input_type;
-};
-
-typedef ::testing::Types<
-    Params<thrust::host_vector<short>>,
-    Params<thrust::host_vector<int>>,
-    Params<thrust::host_vector<long long>>,
-    Params<thrust::host_vector<unsigned short>>,
-    Params<thrust::host_vector<unsigned int>>,
-    Params<thrust::host_vector<unsigned long long>>,
-    Params<thrust::host_vector<float>>,
-    Params<thrust::host_vector<double>>,
-    Params<thrust::device_vector<short>>,
-    Params<thrust::device_vector<int>>,
-    Params<thrust::device_vector<long long>>,
-    Params<thrust::device_vector<unsigned short>>,
-    Params<thrust::device_vector<unsigned int>>,
-    Params<thrust::device_vector<unsigned long long>>,
-    Params<thrust::device_vector<float>>,
-    Params<thrust::device_vector<double>>
-> GatherTestsParams;
-
-typedef ::testing::Types<
-    Params<short>,
-    Params<int>,
-    Params<long long>,
-    Params<unsigned short>,
-    Params<unsigned int>,
-    Params<unsigned long long>,
-    Params<float>,
-    Params<double>
-> GatherTestsPrimitiveParams;
-
-TYPED_TEST_CASE(GatherTests, GatherTestsParams);
-TYPED_TEST_CASE(PrimitiveGatherTests, GatherTestsPrimitiveParams);
-
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+TESTS_DEFINE(GatherTests, FullTestsParams);
+TESTS_DEFINE(PrimitiveGatherTests, NumericalTestsParams);
 
 TEST(GatherTests, UsingHip)
 {
@@ -454,5 +391,3 @@ TYPED_TEST(GatherTests, TestGatherCountingIterator)
 
     ASSERT_EQ(output, map);
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
