@@ -47,6 +47,8 @@ before_script:
 
 build:rocm:
   stage: build
+  tags:
+    - rocm
   variables:
     SUDO_CMD: "sudo -E"
   script:
@@ -111,6 +113,8 @@ include: '.gitlab-ci-gputest.yml'
 
 test:rocm_install:
   stage: test
+  tags:
+    - rocm
   variables:
     SUDO_CMD: "sudo -E"
   script:
