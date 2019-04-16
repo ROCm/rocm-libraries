@@ -161,7 +161,6 @@ private:
         if (flat_tid < warp_size_)
         {
             T thread_reduction = storage_.threads[flat_tid];
-            #pragma unroll
             for(unsigned int i = warp_size_ + flat_tid; i < BlockSize; i += warp_size_)
             {
                 thread_reduction = reduce_op(
@@ -217,7 +216,6 @@ private:
         if (flat_tid < warp_size_)
         {
             T thread_reduction = storage_.threads[flat_tid];
-            #pragma unroll
             for(unsigned int i = warp_size_ + flat_tid; i < BlockSize; i += warp_size_)
             {
                 if(i < valid_items)
