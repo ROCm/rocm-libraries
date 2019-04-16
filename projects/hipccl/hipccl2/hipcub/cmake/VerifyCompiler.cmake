@@ -26,7 +26,7 @@
 # by nvcc compiler (CMake's CUDA package handles this).
 
 # Find HIP package
-find_package(HIP REQUIRED)
+find_package(HIP 1.5.18263 REQUIRED) # 1.5.18263 is HIP version in ROCm 1.8.2
 
 if(HIP_PLATFORM STREQUAL "nvcc")
   include(cmake/SetupNVCC.cmake)

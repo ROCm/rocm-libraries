@@ -190,13 +190,13 @@ public:
     HIPCUB_DEVICE inline
     void ExclusiveSum(T input, T& output)
     {
-        base_type::exclusive_scan(input, output, temp_storage_);
+        base_type::exclusive_scan(input, output, T(0), temp_storage_);
     }
 
     HIPCUB_DEVICE inline
     void ExclusiveSum(T input, T& output, T& block_aggregate)
     {
-        base_type::exclusive_scan(input, output, block_aggregate, temp_storage_);
+        base_type::exclusive_scan(input, output, T(0), block_aggregate, temp_storage_);
     }
 
     template<typename BlockPrefixCallbackOp>
@@ -212,7 +212,7 @@ public:
     HIPCUB_DEVICE inline
     void ExclusiveSum(T(&input)[ITEMS_PER_THREAD], T(&output)[ITEMS_PER_THREAD])
     {
-        base_type::exclusive_scan(input, output, temp_storage_);
+        base_type::exclusive_scan(input, output, T(0), temp_storage_);
     }
 
     template<int ITEMS_PER_THREAD>
@@ -220,7 +220,7 @@ public:
     void ExclusiveSum(T(&input)[ITEMS_PER_THREAD], T(&output)[ITEMS_PER_THREAD],
                       T& block_aggregate)
     {
-        base_type::exclusive_scan(input, output, block_aggregate, temp_storage_);
+        base_type::exclusive_scan(input, output, T(0), block_aggregate, temp_storage_);
     }
 
     template<int ITEMS_PER_THREAD, typename BlockPrefixCallbackOp>
