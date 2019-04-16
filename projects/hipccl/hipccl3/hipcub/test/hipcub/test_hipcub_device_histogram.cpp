@@ -47,7 +47,12 @@
 std::vector<std::tuple<size_t, size_t, size_t>> get_dims()
 {
     std::vector<std::tuple<size_t, size_t, size_t>> sizes = {
+        // Empty
+        std::make_tuple(0, 0, 0),
+        std::make_tuple(1, 0, 0),
+        std::make_tuple(0, 1, 0),
         // Linear
+        std::make_tuple(1, 1, 0),
         std::make_tuple(1, 53, 0),
         std::make_tuple(1, 5096, 0),
         std::make_tuple(1, 34567, 0),
@@ -171,7 +176,7 @@ TYPED_TEST(HipcubDeviceHistogramEven, Even)
         const size_t row_stride = columns + std::get<2>(dim);
 
         const size_t row_stride_bytes = row_stride * sizeof(sample_type);
-        const size_t size = rows * row_stride;
+        const size_t size = std::max<size_t>(1, rows * row_stride);
 
         // Generate data
         std::vector<sample_type> input = get_random_samples<sample_type>(size, lower_level, upper_level);
@@ -351,7 +356,7 @@ TYPED_TEST(HipcubDeviceHistogramRange, Range)
         const size_t row_stride = columns + std::get<2>(dim);
 
         const size_t row_stride_bytes = row_stride * sizeof(sample_type);
-        const size_t size = rows * row_stride;
+        const size_t size = std::max<size_t>(1, rows * row_stride);
 
         // Generate data
         std::vector<level_type> levels;
@@ -563,7 +568,7 @@ TYPED_TEST(HipcubDeviceHistogramMultiEven, MultiEven)
         const size_t row_stride = columns * channels + std::get<2>(dim);
 
         const size_t row_stride_bytes = row_stride * sizeof(sample_type);
-        const size_t size = rows * row_stride;
+        const size_t size = std::max<size_t>(1, rows * row_stride);
 
         // Generate data
         std::vector<sample_type> input(size);
@@ -810,7 +815,7 @@ TYPED_TEST(HipcubDeviceHistogramMultiRange, MultiRange)
         const size_t row_stride = columns * channels + std::get<2>(dim);
 
         const size_t row_stride_bytes = row_stride * sizeof(sample_type);
-        const size_t size = rows * row_stride;
+        const size_t size = std::max<size_t>(1, rows * row_stride);
 
         // Generate data
         std::vector<level_type> levels[active_channels];
