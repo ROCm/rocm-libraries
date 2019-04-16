@@ -20,11 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <cstdlib>
-
-// Google Test
-#include <gtest/gtest.h>
-
 // Thrust
 #include <thrust/sort.h>
 // STREAMHPC TODO replace <thrust/detail/seq.h> with <thrust/execution_policy.h>
@@ -34,72 +29,40 @@
 #include <thrust/functional.h>
 #include <thrust/iterator/retag.h>
 
-#include "test_utils.hpp"
+#include "test_header.hpp"
 
 template<
   class Key,
   class Item,
   class CompareFunction = thrust::less<Key>
 >
-struct Params
+struct ParamsSort
 {
   using key_type = Key;
   using value_type = Item;
   using compare_function = CompareFunction;
 };
 
-template<class Params>
+template<class ParamsSort>
 class SortTests : public ::testing::Test
 {
 public:
-  using key_type = typename Params::key_type;
-  using value_type = typename Params::value_type;
-  using compare_function = typename Params::compare_function;
+  using key_type = typename ParamsSort::key_type;
+  using value_type = typename ParamsSort::value_type;
+  using compare_function = typename ParamsSort::compare_function;
 };
 
 typedef ::testing::Types<
-  Params<unsigned short, int, thrust::less<unsigned short> >,
-  Params<unsigned short, int, thrust::greater<unsigned short> >,
-  Params<unsigned short, int, custom_compare_less<unsigned short> >,
-  Params<unsigned short, double>,
-  Params<int, long long>
+  ParamsSort<unsigned short, int, thrust::less<unsigned short> >,
+  ParamsSort<unsigned short, int, thrust::greater<unsigned short> >,
+  ParamsSort<unsigned short, int, custom_compare_less<unsigned short> >,
+  ParamsSort<unsigned short, double>,
+  ParamsSort<int, long long>
 > SortTestsParams;
 
 TYPED_TEST_CASE(SortTests, SortTestsParams);
 
-template< class InputType >
-struct ParamsVector
-{
-    using input_type = InputType;
-};
-
-template<class ParamsVector>
-class SortVector : public ::testing::Test
-{
-public:
-    using input_type = typename ParamsVector::input_type;
-};
-
-typedef ::testing::Types<
-    ParamsVector<thrust::host_vector<short>>,
-    ParamsVector<thrust::host_vector<int>>,
-    ParamsVector<thrust::host_vector<long long>>,
-    ParamsVector<thrust::host_vector<unsigned short>>,
-    ParamsVector<thrust::host_vector<unsigned int>>,
-    ParamsVector<thrust::host_vector<unsigned long long>>,
-    ParamsVector<thrust::host_vector<float>>,
-    ParamsVector<thrust::host_vector<double>>,
-    ParamsVector<thrust::device_vector<short>>,
-    ParamsVector<thrust::device_vector<int>>,
-    ParamsVector<thrust::device_vector<long long>>,
-    ParamsVector<thrust::device_vector<unsigned short>>,
-    ParamsVector<thrust::device_vector<unsigned int>>,
-    ParamsVector<thrust::device_vector<unsigned long long>>,
-    ParamsVector<thrust::device_vector<float>>,
-    ParamsVector<thrust::device_vector<double>>
-> SortVectorParams;
-
-TYPED_TEST_CASE(SortVector, SortVectorParams);
+TESTS_DEFINE(SortVector, FullTestsParams);
 
 TYPED_TEST(SortTests, Sort)
 {

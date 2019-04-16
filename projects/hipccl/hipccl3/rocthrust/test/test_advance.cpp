@@ -21,58 +21,36 @@
 // SOFTWARE.
 
 // Thrust
-#include <thrust/distance.h>
-#include <thrust/host_vector.h>
-#include <thrust/device_vector.h>
+#include <thrust/advance.h>
+#include <thrust/sequence.h>
 
 #include "test_header.hpp"
 
-TESTS_DEFINE(DistanceTests, FullTestsParams);
+TESTS_DEFINE(AdvanceVectorTests, VectorSignedIntegerTestsParams);
 
-TYPED_TEST(DistanceTests, TestDistance)
+// TODO expand this with other iterator types (forward, bidirectional, etc.)
+
+TYPED_TEST(AdvanceVectorTests, TestAdvance)
 {
-  using Vector = typename TestFixture::input_type;
-  using Iterator = typename Vector::iterator;
+    using Vector = typename TestFixture::input_type;
+    using T = typename Vector::value_type;
 
-  Vector v(100);
+    typedef typename Vector::iterator Iterator;
 
-  Iterator i = v.begin();
+    Vector v(100);
+    thrust::sequence(v.begin(), v.end());
 
-  ASSERT_EQ(thrust::distance(i, v.end()), 100);
+    Iterator i = v.begin();
 
-  i++;
+    thrust::advance(i, 7);
 
-  ASSERT_EQ(thrust::distance(i, v.end()), 99);
+    ASSERT_EQ(*i, T(7));
+    
+    thrust::advance(i, 13);
 
-  i += 49;
+    ASSERT_EQ(*i, T(20));
+    
+    thrust::advance(i, -10);
 
-  ASSERT_EQ(thrust::distance(i, v.end()), 50);
-
-  ASSERT_EQ(thrust::distance(i, i), 0);
-}
-
-TYPED_TEST(DistanceTests, TestDistanceLarge)
-{
-  using Vector = typename TestFixture::input_type;
-  using Iterator = typename Vector::iterator;
-
-  Vector v(1000);
-
-  Iterator i = v.begin();
-
-  ASSERT_EQ(thrust::distance(i, v.end()), 1000);
-
-  i++;
-
-  ASSERT_EQ(thrust::distance(i, v.end()), 999);
-
-  i += 49;
-
-  ASSERT_EQ(thrust::distance(i, v.end()), 950);
-
-  i += 950;
-
-  ASSERT_EQ(thrust::distance(i, v.end()), 0);
-
-  ASSERT_EQ(thrust::distance(i, i), 0);
+    ASSERT_EQ(*i, T(10));
 }

@@ -1,45 +1,32 @@
-// Google Test
-#include <gtest/gtest.h>
+// MIT License
+//
+// Copyright (c) 2019 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
 
-#include "test_utils.hpp"
-
+// Thrust
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/scan.h>
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-#include <hip/hip_runtime.h>
-#include <hip/hip_runtime_api.h>
+#include "test_header.hpp"
 
-#include "test_assertions.hpp"
-#include "test_utils.hpp"
-
-#define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
-template<class InputType> struct Params
-{
-    using input_type = InputType;
-};
-
-template<class Params> class ZipIteratorScanVariablesTests : public ::testing::Test
-{
-public:
-    using input_type = typename Params::input_type;
-};
-
-typedef ::testing::Types<
-        Params<char>,
-        Params<unsigned char>,
-        Params<short>,
-        Params<unsigned short>,
-        Params<int>,
-        Params<unsigned int>,
-        Params<float>
-> TestVariableParams;
-
-TYPED_TEST_CASE(ZipIteratorScanVariablesTests, TestVariableParams);
+TESTS_DEFINE(ZipIteratorScanVariablesTests, NumericalTestsParams);
 
 template<typename Tuple>
 struct TuplePlus
@@ -134,5 +121,3 @@ TYPED_TEST(ZipIteratorScanVariablesTests, TestZipIteratorScan)
     ASSERT_EQ_QUIET(h_result1, d_result1);
   }
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

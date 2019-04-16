@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,27 +20,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <iostream>
-#include <type_traits>
-#include <cstdlib>
-#include <algorithm>
-
-// Google Test
-#include <gtest/gtest.h>
-
 // Thrust
 #include <thrust/device_vector.h>
 #include <thrust/device_ptr.h>
 #include <thrust/device_new.h>
 #include <thrust/device_delete.h>
 
-
-// HIP API
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-#include <hip/hip_runtime_api.h>
-
-#define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+#include "test_header.hpp"
 
 struct Foo
 {
@@ -51,8 +37,6 @@ struct Foo
 
   bool *set_me_upon_destruction;
 };
-
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
 TEST(DeviceDelete, TestDeviceDeleteDestructorInvocation)
 {
@@ -70,5 +54,3 @@ TEST(DeviceDelete, TestDeviceDeleteDestructorInvocation)
   //thrust::device_delete(foo_ptr);
   //ASSERT_EQ(true, destructor_flag[0]);
 }
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC

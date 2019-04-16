@@ -29,6 +29,11 @@
 #include <limits>
 #include <cmath>
 
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+  #include <thrust/random/detail/erfcinv.h>
+#endif
+
+
 namespace thrust
 {
 namespace random
