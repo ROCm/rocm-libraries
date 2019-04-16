@@ -76,14 +76,8 @@ set(AMDGPU_TARGETS gfx803;gfx900;gfx906 CACHE STRING "List of specific machine t
 include(cmake/Summary.cmake)
 print_configuration_summary()
 
-# rocPRIM works only on hcc
-if(HIP_PLATFORM STREQUAL "hcc")
-  # rocPRIM library
-  add_subdirectory(rocprim)
-endif()
-
-# hipCUB library
-add_subdirectory(hipcub)
+# rocPRIM library
+add_subdirectory(rocprim)
 
 # Tests
 if(BUILD_TEST AND NOT ONLY_INSTALL)
@@ -91,28 +85,20 @@ if(BUILD_TEST AND NOT ONLY_INSTALL)
   add_subdirectory(test)
 endif()
 
-# Benchmarks and examples are only for rocPRIM
-if(HIP_PLATFORM STREQUAL "hcc")
-  # Benchmarks
-  if(BUILD_BENCHMARK AND NOT ONLY_INSTALL)
-    add_subdirectory(benchmark)
-  endif()
+# Benchmarks
+if(BUILD_BENCHMARK AND NOT ONLY_INSTALL)
+  add_subdirectory(benchmark)
+endif()
 
-  # Examples
-  if(BUILD_EXAMPLE AND NOT ONLY_INSTALL)
-    add_subdirectory(example)
-  endif()
+# Examples
+if(BUILD_EXAMPLE AND NOT ONLY_INSTALL)
+  add_subdirectory(example)
 endif()
 
 # Package
 
-if(HIP_PLATFORM STREQUAL "hcc")
-  set(CPACK_DEBIAN_PACKAGE_DEPENDS "hip_hcc (>= 1.5.18263)") # 1.5.18263 is HIP version in ROCm 1.8.2
-  set(CPACK_RPM_PACKAGE_REQUIRES "hip_hcc >= 1.5.18263")
-else()
-  set(CPACK_DEBIAN_PACKAGE_DEPENDS "hip_nvcc (>= 1.5.18263)")
-  set(CPACK_RPM_PACKAGE_REQUIRES "hip_nvcc >= 1.5.18263")
-endif()
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "hip_hcc (>= 1.5.18263)") # 1.5.18263 is HIP version in ROCm 1.8.2
+set(CPACK_RPM_PACKAGE_REQUIRES "hip_hcc >= 1.5.18263")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt")
 if(NOT CPACK_PACKAGING_INSTALL_PREFIX)
   set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
@@ -120,17 +106,8 @@ endif()
 
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" "\${CPACK_PACKAGING_INSTALL_PREFIX}/include" )
 
-# For CUDA backend the package contains only hipcub
-if(HIP_PLATFORM STREQUAL "hcc")
-  rocm_create_package(
-    NAME rocprim
-    DESCRIPTION "Radeon Open Compute Parallel Primitives Library"
-    MAINTAINER "Stream HPC Maintainers <maintainer@streamhpc.com>"
-  )
-else()
-  rocm_create_package(
-    NAME rocprim-hipcub
-    DESCRIPTION "Radeon Open Compute Parallel Primitives Library (hipCUB only)"
-    MAINTAINER "Stream HPC Maintainers <maintainer@streamhpc.com>"
-  )
-endif()
+rocm_create_package(
+  NAME rocprim
+  DESCRIPTION "Radeon Open Compute Parallel Primitives Library"
+  MAINTAINER "Stream HPC Maintainers <maintainer@streamhpc.com>"
+)

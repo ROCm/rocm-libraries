@@ -21,17 +21,12 @@
 # SOFTWARE.
 
 # Find HIP package and verify that correct C++ compiler was selected for available
-# platfrom. On ROCm platform host and device code is compiled by the same compiler:
-# hcc. On CUDA host can be compiled by any C++ compiler while device code is compiled
-# by nvcc compiler (CMake's CUDA package handles this).
+# platfrom. On ROCm platform host and device code is compiled by the same compiler: hcc.
 
 # Find HIP package
 find_package(HIP 1.5.18263 REQUIRED) # 1.5.18263 is HIP version in ROCm 1.8.2
 
-if(HIP_PLATFORM STREQUAL "nvcc")
-  include(cmake/SetupNVCC.cmake)
-  message(STATUS "rocPRIM does not support NVCC. Only hipCUB will be available.")
-elseif(HIP_PLATFORM STREQUAL "hcc")
+if(HIP_PLATFORM STREQUAL "hcc")
   if(NOT (CMAKE_CXX_COMPILER MATCHES ".*/hcc$" OR CMAKE_CXX_COMPILER MATCHES ".*/hipcc$"))
     message(FATAL_ERROR "On ROCm platform 'hcc' or 'clang' must be used as C++ compiler.")
   else()
@@ -63,5 +58,5 @@ elseif(HIP_PLATFORM STREQUAL "hcc")
     find_package(hip REQUIRED CONFIG PATHS /opt/rocm)
   endif()
 else()
-  message(FATAL_ERROR "HIP_PLATFORM must be 'hcc' or 'clang' (AMD ROCm platform) or `nvcc` (NVIDIA CUDA platform).")
+  message(FATAL_ERROR "HIP_PLATFORM must be 'hcc' or 'clang' (AMD ROCm platform)")
 endif()
