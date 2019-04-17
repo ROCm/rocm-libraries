@@ -1,5 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
+ * Modifications Copyright (c) 2019, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -36,7 +37,7 @@
 
 BEGIN_NS_THRUST
 namespace hip_rocprim {
-    
+
     template <class Derived,
               class InputIt,
               class UnaryPred>
@@ -51,14 +52,14 @@ namespace hip_rocprim {
         InputIt,
         UnaryPred>
         flag_iterator_t;
-        
+
         return hip_rocprim::reduce_n(policy,
                                   flag_iterator_t(first, unary_pred),
                                   thrust::distance(first, last),
                                   size_type(0),
                                   plus<size_type>());
     }
-    
+
     template <class Derived,
     class InputIt,
     class Value>
@@ -73,7 +74,7 @@ namespace hip_rocprim {
                                   last,
                                   detail::equal_to_value<Value>(value));
     }
-    
+
 } // namespace hip_rocprim
 END_NS_THRUST
 #endif
