@@ -1,3 +1,21 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+ 
+
 /*! \file meta.h
  *  \brief Defines template classes
  *         for metaprogramming in the
@@ -10,7 +28,7 @@ namespace unittest
 {
 
 // mark the absence of a type
-struct null_type {}; 
+struct null_type {};
 
 // this type encapsulates a list of
 // up to 10 types
@@ -251,7 +269,7 @@ template<typename TypeList1,
   typedef typename ApplyTemplate2<Template, typename get_type<TypeList1,17>::type, typename get_type<TypeList2,17>::type>::type type_17;
   typedef typename ApplyTemplate2<Template, typename get_type<TypeList1,18>::type, typename get_type<TypeList2,18>::type>::type type_18;
   typedef typename ApplyTemplate2<Template, typename get_type<TypeList1,19>::type, typename get_type<TypeList2,19>::type>::type type_19;
-  
+
 
   typedef type_list<type_0, type_1, type_2, type_3, type_4, type_5, type_6, type_7, type_8, type_9,
                     type_10, type_11, type_12, type_13, type_14, type_15, type_16, type_17, type_18, type_19> type;
