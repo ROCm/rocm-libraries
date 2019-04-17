@@ -1,24 +1,19 @@
-// MIT License
-//
-// Copyright (c) 2019 Advanced Micro Devices, Inc. All rights reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
 
 // Thrust
 #include <thrust/gather.h>
@@ -110,17 +105,17 @@ TYPED_TEST(PrimitiveGatherTests, Gather)
     for(auto size : sizes)
     {
         const size_t source_size = std::min((size_t) 10, 2 * size);
-        
+
         // source vectors to gather from
         thrust::host_vector<T>   h_source = get_random_data<T>(source_size, min, max);
         thrust::device_vector<T> d_source = h_source;
-    
+
         // gather indices
         thrust::host_vector<unsigned int> h_map = get_random_data<unsigned int>(size, min, max);
 
         for(size_t i = 0; i < size; i++)
             h_map[i] =  h_map[i] % source_size;
-        
+
         thrust::device_vector<unsigned int> d_map = h_map;
 
         // gather destination
@@ -150,16 +145,16 @@ TYPED_TEST(PrimitiveGatherTests, GatherToDiscardIterator)
         // source vectors to gather from
         thrust::host_vector<T>   h_source = get_random_data<T>(source_size, min, max);
         thrust::device_vector<T> d_source = h_source;
-    
+
         // gather indices
         thrust::host_vector<unsigned int> h_map = get_random_data<unsigned int>(size, min, max);
 
         for(size_t i = 0; i < size; i++)
             h_map[i] =  h_map[i] % source_size;
-        
+
         thrust::device_vector<unsigned int> d_map = h_map;
 
-        thrust::discard_iterator<> h_result = 
+        thrust::discard_iterator<> h_result =
         thrust::gather(h_map.begin(), h_map.end(), h_source.begin(), thrust::make_discard_iterator());
 
         thrust::discard_iterator<> d_result =
@@ -200,7 +195,7 @@ struct is_even_gather_if
 {
     __host__ __device__
     bool operator()(const T i) const
-    { 
+    {
         return (i % 2) == 0;
     }
 };
@@ -278,21 +273,21 @@ TYPED_TEST(PrimitiveGatherTests, GatherIf)
         // source vectors to gather from
         thrust::host_vector<T>   h_source = get_random_data<T>(source_size, min, max);
         thrust::device_vector<T> d_source = h_source;
-    
+
         // gather indices
         thrust::host_vector<unsigned int> h_map = get_random_data<unsigned int>(size, min, max);
 
         for(size_t i = 0; i < size; i++)
             h_map[i] = h_map[i] % source_size;
-        
+
         thrust::device_vector<unsigned int> d_map = h_map;
-        
+
         // gather stencil
         thrust::host_vector<unsigned int> h_stencil = get_random_data<unsigned int>(size, min, max);
 
         for(size_t i = 0; i < size; i++)
             h_stencil[i] = h_stencil[i] % 2;
-        
+
         thrust::device_vector<unsigned int> d_stencil = h_stencil;
 
         // gather destination
@@ -322,21 +317,21 @@ TYPED_TEST(PrimitiveGatherTests, GatherIfToDiscardIterator)
         // source vectors to gather from
         thrust::host_vector<T>   h_source = get_random_data<T>(source_size, min, max);
         thrust::device_vector<T> d_source = h_source;
-    
+
         // gather indices
         thrust::host_vector<unsigned int> h_map = get_random_data<unsigned int>(size, min, max);
 
         for(size_t i = 0; i < size; i++)
             h_map[i] = h_map[i] % source_size;
-        
+
         thrust::device_vector<unsigned int> d_map = h_map;
-        
+
         // gather stencil
         thrust::host_vector<unsigned int> h_stencil = get_random_data<unsigned int>(size, min, max);
 
         for(size_t i = 0; i < size; i++)
             h_stencil[i] = h_stencil[i] % 2;
-        
+
         thrust::device_vector<unsigned int> d_stencil = h_stencil;
 
         thrust::discard_iterator<> h_result =
@@ -372,7 +367,7 @@ TYPED_TEST(GatherTests, TestGatherCountingIterator)
                    output.begin());
 
     ASSERT_EQ(output, map);
-    
+
     // map has any_system_tag
     thrust::fill(output.begin(), output.end(), 0);
     thrust::gather(thrust::make_counting_iterator(0),
@@ -381,7 +376,7 @@ TYPED_TEST(GatherTests, TestGatherCountingIterator)
                    output.begin());
 
     ASSERT_EQ(output, map);
-    
+
     // source and map have any_system_tag
     thrust::fill(output.begin(), output.end(), 0);
     thrust::gather(thrust::make_counting_iterator(0),

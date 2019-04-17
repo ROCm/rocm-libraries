@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+ 
 #include <unittest/unittest.h>
 #include <thrust/sequence.h>
 #include <thrust/iterator/discard_iterator.h>
@@ -60,7 +77,7 @@ void TestSequenceSimple(void)
     ASSERT_EQUAL(v[2], 12);
     ASSERT_EQUAL(v[3], 13);
     ASSERT_EQUAL(v[4], 14);
-    
+
     thrust::sequence(v.begin(), v.end(), 10, 2);
 
     ASSERT_EQUAL(v[0], 10);
@@ -92,7 +109,7 @@ void TestSequence(size_t n)
     thrust::sequence(d_data.begin(), d_data.end(), T(10), T(2));
 
     ASSERT_EQUAL(h_data, d_data);
-    
+
     thrust::sequence(h_data.begin(), h_data.end(), size_t(10), size_t(2));
     thrust::sequence(d_data.begin(), d_data.end(), size_t(10), size_t(2));
 
