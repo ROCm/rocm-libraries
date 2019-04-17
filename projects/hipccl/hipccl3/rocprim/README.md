@@ -63,13 +63,12 @@ define `ROCPRIM_HC_API` before the `#include` statement. Alternatively, user can
 #include <rocprim/rocprim_hc.hpp>  // HC API
 ```
 
-Recommended way of including rocPRIM or hipCUB into a CMake project is by using their package
-configuration files. hipCUB package name is `hipcub`, rocPRIM package name is `rocprim`.
+Recommended way of including rocPRIM into a CMake project is by using its package
+configuration files. rocPRIM package name is `rocprim`.
 
 ```cmake
 # "/opt/rocm" - default install prefix
 find_package(rocprim REQUIRED CONFIG PATHS "/opt/rocm/rocprim")
-find_package(hipcub REQUIRED CONFIG PATHS "/opt/rocm/hipcub")
 
 ...
 
@@ -80,12 +79,8 @@ target_link_libraries(<your_target> roc::rocprim)
 # Includes rocPRIM headers and required HC dependencies
 target_link_libraries(<your_target> roc::rocprim_hc)
 
-# Includes rocPRIM headers and required  HIP dependencies
+# Includes rocPRIM headers and required HIP dependencies
 target_link_libraries(<your_target> roc::rocprim_hip)
-
-# On ROCm: includes hipCUB headers and roc::rocprim_hip target
-# On CUDA: includes only hipCUB headers, user has to include CUB directory
-target_link_libraries(<your_target> hip::hipcub)
 ```
 
 ## Running Unit Tests
@@ -96,9 +91,6 @@ cd rocPRIM; cd build
 
 # To run all tests
 ctest
-
-# To run unit tests for hipCUB
-./test/hipcub/<unit-test-name>
 
 # To run unit tests for rocPRIM
 ./test/rocprim/<unit-test-name>
@@ -150,8 +142,15 @@ cd rocPRIM; cd doc
 doxygen Doxyfile
 
 # open html/index.html
-
 ```
+
+## hipCUB
+
+hipCUB is a thin wrapper library on top of [rocPRIM](https://github.com/ROCmSoftwarePlatform/rocPRIM) or
+[CUB](https://github.com/NVlabs/cub). It enables developers to port project that uses CUB library to the
+[HIP](https://github.com/ROCm-Developer-Tools/HIP) layer and to run them on AMD hardware. In [ROCm](https://rocm.github.io/)
+environment hipCUB uses rocPRIM library as the backend, however, on CUDA platforms it uses CUB instead.
+
 
 ## Support
 
