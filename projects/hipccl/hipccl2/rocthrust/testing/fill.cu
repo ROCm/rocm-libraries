@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+ 
 #include <unittest/unittest.h>
 #include <thrust/fill.h>
 #include <thrust/iterator/zip_iterator.h>
@@ -22,17 +39,17 @@ void TestFillSimple(void)
     ASSERT_EQUAL(v[2], 7);
     ASSERT_EQUAL(v[3], 7);
     ASSERT_EQUAL(v[4], 4);
-    
+
     thrust::fill(v.begin() + 0, v.begin() + 3, (T) 8);
-    
+
     ASSERT_EQUAL(v[0], 8);
     ASSERT_EQUAL(v[1], 8);
     ASSERT_EQUAL(v[2], 8);
     ASSERT_EQUAL(v[3], 7);
     ASSERT_EQUAL(v[4], 4);
-    
+
     thrust::fill(v.begin() + 2, v.end(), (T) 9);
-    
+
     ASSERT_EQUAL(v[0], 8);
     ASSERT_EQUAL(v[1], 8);
     ASSERT_EQUAL(v[2], 9);
@@ -40,7 +57,7 @@ void TestFillSimple(void)
     ASSERT_EQUAL(v[4], 9);
 
     thrust::fill(v.begin(), v.end(), (T) 1);
-    
+
     ASSERT_EQUAL(v[0], 1);
     ASSERT_EQUAL(v[1], 1);
     ASSERT_EQUAL(v[2], 1);
@@ -70,14 +87,14 @@ void TestFillMixedTypes(void)
     Vector v(4);
 
     thrust::fill(v.begin(), v.end(), (long) 10);
-    
+
     ASSERT_EQUAL(v[0], 10);
     ASSERT_EQUAL(v[1], 10);
     ASSERT_EQUAL(v[2], 10);
     ASSERT_EQUAL(v[3], 10);
-    
+
     thrust::fill(v.begin(), v.end(), (float) 20);
-    
+
     ASSERT_EQUAL(v[0], 20);
     ASSERT_EQUAL(v[1], 20);
     ASSERT_EQUAL(v[2], 20);
@@ -101,17 +118,17 @@ void TestFill(size_t n)
     thrust::fill(d_data.begin() + std::min((size_t)117, n), d_data.begin() + std::min((size_t)367, n), (T) 1);
 
     ASSERT_EQUAL(h_data, d_data);
-    
+
     thrust::fill(h_data.begin() + std::min((size_t)8, n), h_data.begin() + std::min((size_t)259, n), (T) 2);
     thrust::fill(d_data.begin() + std::min((size_t)8, n), d_data.begin() + std::min((size_t)259, n), (T) 2);
 
     ASSERT_EQUAL(h_data, d_data);
-    
+
     thrust::fill(h_data.begin() + std::min((size_t)3, n), h_data.end(), (T) 3);
     thrust::fill(d_data.begin() + std::min((size_t)3, n), d_data.end(), (T) 3);
 
     ASSERT_EQUAL(h_data, d_data);
-    
+
     thrust::fill(h_data.begin(), h_data.end(), (T) 4);
     thrust::fill(d_data.begin(), d_data.end(), (T) 4);
 
@@ -135,18 +152,18 @@ void TestFillNSimple(void)
     ASSERT_EQUAL(v[3], 7);
     ASSERT_EQUAL(v[4], 4);
     ASSERT_EQUAL_QUIET(v.begin() + 4, iter);
-    
+
     iter = thrust::fill_n(v.begin() + 0, 3, (T) 8);
-    
+
     ASSERT_EQUAL(v[0], 8);
     ASSERT_EQUAL(v[1], 8);
     ASSERT_EQUAL(v[2], 8);
     ASSERT_EQUAL(v[3], 7);
     ASSERT_EQUAL(v[4], 4);
     ASSERT_EQUAL_QUIET(v.begin() + 3, iter);
-    
+
     iter = thrust::fill_n(v.begin() + 2, 3, (T) 9);
-    
+
     ASSERT_EQUAL(v[0], 8);
     ASSERT_EQUAL(v[1], 8);
     ASSERT_EQUAL(v[2], 9);
@@ -155,7 +172,7 @@ void TestFillNSimple(void)
     ASSERT_EQUAL_QUIET(v.end(), iter);
 
     iter = thrust::fill_n(v.begin(), v.size(), (T) 1);
-    
+
     ASSERT_EQUAL(v[0], 1);
     ASSERT_EQUAL(v[1], 1);
     ASSERT_EQUAL(v[2], 1);
@@ -192,15 +209,15 @@ void TestFillNMixedTypes(void)
     Vector v(4);
 
     typename Vector::iterator iter = thrust::fill_n(v.begin(), v.size(), (long) 10);
-    
+
     ASSERT_EQUAL(v[0], 10);
     ASSERT_EQUAL(v[1], 10);
     ASSERT_EQUAL(v[2], 10);
     ASSERT_EQUAL(v[3], 10);
     ASSERT_EQUAL_QUIET(v.end(), iter);
-    
+
     iter = thrust::fill_n(v.begin(), v.size(), (float) 20);
-    
+
     ASSERT_EQUAL(v[0], 20);
     ASSERT_EQUAL(v[1], 20);
     ASSERT_EQUAL(v[2], 20);
@@ -227,19 +244,19 @@ void TestFillN(size_t n)
     thrust::fill_n(d_data.begin() + begin_offset, std::min((size_t)367, n) - begin_offset, (T) 1);
 
     ASSERT_EQUAL(h_data, d_data);
-    
+
     begin_offset = std::min<size_t>(8, n);
     thrust::fill_n(h_data.begin() + begin_offset, std::min((size_t)259, n) - begin_offset, (T) 2);
     thrust::fill_n(d_data.begin() + begin_offset, std::min((size_t)259, n) - begin_offset, (T) 2);
 
     ASSERT_EQUAL(h_data, d_data);
-    
+
     begin_offset = std::min<size_t>(3, n);
     thrust::fill_n(h_data.begin() + begin_offset, h_data.size() - begin_offset, (T) 3);
     thrust::fill_n(d_data.begin() + begin_offset, d_data.size() - begin_offset, (T) 3);
 
     ASSERT_EQUAL(h_data, d_data);
-    
+
     thrust::fill_n(h_data.begin(), h_data.size(), (T) 4);
     thrust::fill_n(d_data.begin(), d_data.size(), (T) 4);
 
@@ -301,7 +318,7 @@ void TestFillWithTrivialAssignment(void)
 
     thrust::host_vector<T>   h(1);
     thrust::device_vector<T> d(1);
-    
+
     ASSERT_EQUAL(h[0].x, 0);
     ASSERT_EQUAL(h[0].y, 0);
     ASSERT_EQUAL(h[0].z, 0);
@@ -342,7 +359,7 @@ struct TypeWithNonTrivialAssigment
     z = t.x + t.y;
     return *this;
   }
-  
+
   __host__ __device__
   bool operator==(const TypeWithNonTrivialAssigment& t) const
   {
@@ -356,7 +373,7 @@ void TestFillWithNonTrivialAssignment(void)
 
     thrust::host_vector<T>   h(1);
     thrust::device_vector<T> d(1);
-    
+
     ASSERT_EQUAL(h[0].x, 0);
     ASSERT_EQUAL(h[0].y, 0);
     ASSERT_EQUAL(h[0].z, 0);
