@@ -1,24 +1,19 @@
-// MIT License
-//
-// Copyright (c) 2019 Advanced Micro Devices, Inc. All rights reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
 
 // Thrust
 #include <thrust/device_vector.h>
@@ -70,7 +65,7 @@ TYPED_TEST(MergeByKeyTests, MergeByKeySimple)
                          a_val.begin(), b_val.begin(),
                          result_key.begin(),
                          result_val.begin());
-  
+
   EXPECT_EQ(result_key.end(), ends.first);
   EXPECT_EQ(result_val.end(), ends.second);
   ASSERT_EQ(ref_key, result_key);
@@ -239,18 +234,18 @@ TYPED_TEST(PrimitiveMergeByKeyTests, MergeByKeyToDiscardIterator)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-		thrust::host_vector<T> h_a_keys = get_random_data<T>( size, 
-															  std::numeric_limits<T>::min(), 
+		thrust::host_vector<T> h_a_keys = get_random_data<T>( size,
+															  std::numeric_limits<T>::min(),
 															  std::numeric_limits<T>::max());
-        thrust::host_vector<T> h_b_keys = get_random_data<T>( size, 
-															  std::numeric_limits<T>::min(), 
+        thrust::host_vector<T> h_b_keys = get_random_data<T>( size,
+															  std::numeric_limits<T>::min(),
 															  std::numeric_limits<T>::max());
 
-        thrust::host_vector<T> h_a_vals = get_random_data<T>( size, 
-															  std::numeric_limits<T>::min(), 
+        thrust::host_vector<T> h_a_vals = get_random_data<T>( size,
+															  std::numeric_limits<T>::min(),
 															  std::numeric_limits<T>::max());
-        thrust::host_vector<T> h_b_vals = get_random_data<T>( size, 
-															  std::numeric_limits<T>::min(), 
+        thrust::host_vector<T> h_b_vals = get_random_data<T>( size,
+															  std::numeric_limits<T>::min(),
 															  std::numeric_limits<T>::max());
 
         thrust::stable_sort(h_a_keys.begin(), h_a_keys.end());
@@ -267,7 +262,7 @@ TYPED_TEST(PrimitiveMergeByKeyTests, MergeByKeyToDiscardIterator)
           thrust::discard_iterator<>
         > discard_pair;
 
-        discard_pair h_result = 
+        discard_pair h_result =
           thrust::merge_by_key(h_a_keys.begin(), h_a_keys.end(),
                               h_b_keys.begin(), h_b_keys.end(),
                               h_a_vals.begin(),
@@ -275,7 +270,7 @@ TYPED_TEST(PrimitiveMergeByKeyTests, MergeByKeyToDiscardIterator)
                               thrust::make_discard_iterator(),
                               thrust::make_discard_iterator());
 
-        discard_pair d_result = 
+        discard_pair d_result =
           thrust::merge_by_key(d_a_keys.begin(), d_a_keys.end(),
                               d_b_keys.begin(), d_b_keys.end(),
                               d_a_vals.begin(),
