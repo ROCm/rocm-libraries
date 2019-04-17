@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 #include <thrust/sort.h>
 #include <thrust/functional.h>
@@ -31,7 +48,7 @@ void _TestStableSortByKeyWithLargeKeys(void)
 
     thrust::device_vector< FixedVector<T,N> > d_keys = h_keys;
     thrust::device_vector<   unsigned int   > d_vals = h_vals;
-    
+
     thrust::stable_sort_by_key(h_keys.begin(), h_keys.end(), h_vals.begin());
     thrust::stable_sort_by_key(d_keys.begin(), d_keys.end(), d_vals.begin());
 
@@ -75,7 +92,7 @@ void _TestStableSortByKeyWithLargeValues(void)
 
     thrust::device_vector<   unsigned int   > d_keys = h_keys;
     thrust::device_vector< FixedVector<T,N> > d_vals = h_vals;
-    
+
     thrust::stable_sort_by_key(h_keys.begin(), h_keys.end(), h_vals.begin());
     thrust::stable_sort_by_key(d_keys.begin(), d_keys.end(), d_vals.begin());
 
@@ -96,7 +113,7 @@ void TestStableSortByKeyWithLargeValues(void)
     _TestStableSortByKeyWithLargeValues<int,    8>();
 // TODO anything larger than 8 gives loop unroll failure warnings during build.
 //    _TestStableSortByKeyWithLargeValues<int,   16>();
-    
+
 // XXX these take too long to compile
 //    _TestStableSortByKeyWithLargeValues<int,   32>();
 //    _TestStableSortByKeyWithLargeValues<int,   64>();
@@ -127,7 +144,7 @@ void _TestStableSortByKeyWithLargeKeysAndValues(void)
 
     thrust::device_vector< FixedVector<T,N> > d_keys = h_keys;
     thrust::device_vector< FixedVector<T,N> > d_vals = h_vals;
-    
+
     thrust::stable_sort_by_key(h_keys.begin(), h_keys.end(), h_vals.begin());
     thrust::stable_sort_by_key(d_keys.begin(), d_keys.end(), d_vals.begin());
 
@@ -154,4 +171,3 @@ void TestStableSortByKeyWithLargeKeysAndValues(void)
 //    _TestStableSortByKeyWithLargeKeysAndValues<int, 8192>();
 }
 DECLARE_UNITTEST(TestStableSortByKeyWithLargeKeysAndValues);
-

@@ -1,28 +1,23 @@
-// MIT License
-//
-// Copyright (c) 2019 Advanced Micro Devices, Inc. All rights reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
 
 // Thrust
 #include <thrust/swap.h>
-#include <thrust/iterator/iterator_traits.h> 
+#include <thrust/iterator/iterator_traits.h>
 #include <thrust/iterator/retag.h>
 #include <thrust/system/cpp/memory.h>
 #include <thrust/device_vector.h>
@@ -97,7 +92,7 @@ TYPED_TEST(SwapRangesTests, SwapRangesSimple)
     ASSERT_EQ(v1[2], 7);
     ASSERT_EQ(v1[3], 8);
     ASSERT_EQ(v1[4], 9);
-    
+
     ASSERT_EQ(v2[0], 0);
     ASSERT_EQ(v2[1], 1);
     ASSERT_EQ(v2[2], 2);
@@ -124,7 +119,7 @@ TYPED_TEST(PrimitiveSwapRangesTests, SwapRanges)
         thrust::host_vector<T>    h2 = a2;
         thrust::device_vector<T>  d1 = a1;
         thrust::device_vector<T>  d2 = a2;
-    
+
         thrust::swap_ranges(h1.begin(), h1.end(), h2.begin());
         thrust::swap_ranges(d1.begin(), d1.end(), d2.begin());
 
@@ -132,7 +127,7 @@ TYPED_TEST(PrimitiveSwapRangesTests, SwapRanges)
         thrust::host_vector<T> d2_h = d2;
 
         for (size_t i = 0; i < size; i++){
-            ASSERT_NEAR(h1[i], a2[i], error_margin);  
+            ASSERT_NEAR(h1[i], a2[i], error_margin);
             ASSERT_NEAR(d1_h[i], a2[i], error_margin);
             ASSERT_NEAR(h2[i], a1[i], error_margin);
             ASSERT_NEAR(d2_h[i], a1[i], error_margin);
@@ -196,18 +191,18 @@ TEST(SwapRangesTests, SwapRangesUserSwap)
 
   // check that nothing is yet swapped
   type_with_swap ref = type_with_swap(0, false);
-    
+
   ASSERT_EQ(ref, h_A[0]);
   ASSERT_EQ(ref, h_A[1]);
   ASSERT_EQ(ref, h_A[2]);
 
-  
+
   careful_assert(ref, d_A[0]);
   careful_assert(ref, d_A[1]);
   careful_assert(ref, d_A[2]);
 
   ref = type_with_swap(1, false);
-    
+
   ASSERT_EQ(ref, h_B[0]);
   ASSERT_EQ(ref, h_B[1]);
   ASSERT_EQ(ref, h_B[2]);
@@ -241,5 +236,5 @@ TEST(SwapRangesTests, SwapRangesUserSwap)
   careful_assert(ref, d_B[0]);
   careful_assert(ref, d_B[1]);
   careful_assert(ref, d_B[2]);
-  
+
 }
