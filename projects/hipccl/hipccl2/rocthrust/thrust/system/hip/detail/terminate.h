@@ -1,5 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
+ * Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -60,4 +61,3 @@ void terminate_with_message(const char* message)
 } // end hip
 } // end system
 } // end thrust
-
