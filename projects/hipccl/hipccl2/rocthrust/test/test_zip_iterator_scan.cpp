@@ -1,24 +1,19 @@
-// MIT License
-//
-// Copyright (c) 2019 Advanced Micro Devices, Inc. All rights reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
 
 // Thrust
 #include <thrust/iterator/zip_iterator.h>
@@ -75,7 +70,7 @@ TYPED_TEST(ZipIteratorScanVariablesTests, TestZipIteratorScan)
                     d_result.begin(),
                     TuplePlus<Tuple>());
     ASSERT_EQ_QUIET(h_result, d_result);
-   
+
     // exclusive_scan (tuple output)
     exclusive_scan( make_zip_iterator(make_tuple(h_data0.begin(), h_data1.begin())),
                     make_zip_iterator(make_tuple(h_data0.end(),   h_data1.end())),
@@ -93,7 +88,7 @@ TYPED_TEST(ZipIteratorScanVariablesTests, TestZipIteratorScan)
     host_vector<T>   h_result1(size);
     device_vector<T> d_result0(size);
     device_vector<T> d_result1(size);
-    
+
     // inclusive_scan (zip_iterator output)
     inclusive_scan( make_zip_iterator(make_tuple(h_data0.begin(), h_data1.begin())),
                     make_zip_iterator(make_tuple(h_data0.end(),   h_data1.end())),
@@ -105,7 +100,7 @@ TYPED_TEST(ZipIteratorScanVariablesTests, TestZipIteratorScan)
                     TuplePlus<Tuple>());
     ASSERT_EQ_QUIET(h_result0, d_result0);
     ASSERT_EQ_QUIET(h_result1, d_result1);
-    
+
     // exclusive_scan (zip_iterator output)
     exclusive_scan( make_zip_iterator(make_tuple(h_data0.begin(), h_data1.begin())),
                     make_zip_iterator(make_tuple(h_data0.end(),   h_data1.end())),

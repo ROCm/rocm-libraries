@@ -1,5 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
+ * Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -54,7 +55,7 @@ transform_inclusive_scan(execution_policy<Derived> &policy,
                          ScanOp                     scan_op)
 {
   // the pseudocode for deducing the type of the temporary used below:
-  // 
+  //
   // if UnaryFunction is AdaptableUnaryFunction
   //   TemporaryType = AdaptableUnaryFunction::result_type
   // else if OutputIterator is a "pure" output iterator
@@ -104,7 +105,7 @@ transform_exclusive_scan(execution_policy<Derived> &policy,
                          ScanOp                     scan_op)
 {
   // the pseudocode for deducing the type of the temporary used below:
-  // 
+  //
   // if UnaryFunction is AdaptableUnaryFunction
   //   TemporaryType = AdaptableUnaryFunction::result_type
   // else if OutputIterator is a "pure" output iterator

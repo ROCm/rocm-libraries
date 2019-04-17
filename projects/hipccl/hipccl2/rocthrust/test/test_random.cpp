@@ -1,24 +1,19 @@
-// MIT License
-//
-// Copyright (c) 2019 Advanced Micro Devices, Inc. All rights reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
 
 // Thrust
 #include <thrust/device_vector.h>
@@ -27,7 +22,7 @@
 
 #include <thrust/random/detail/normal_distribution_base.h>
 
-#include <limits> 
+#include <limits>
 #include <sstream>
 
 #include "test_header.hpp"
@@ -684,15 +679,15 @@ template<typename Distribution, typename Validator>
 void ValidateDistributionCharacteristic(void)
 {
   typedef typename Validator::random_engine Engine;
-    
+
   // test default-constructed Distribution
-  
+
   // test host
   thrust::host_vector<bool> h(1);
   thrust::generate(h.begin(), h.end(), Validator(Distribution()));
 
   ASSERT_EQ(true, h[0]);
-  
+
   // test device
   thrust::device_vector<bool> d(1);
   thrust::generate(d.begin(), d.end(), Validator(Distribution()));
@@ -764,7 +759,7 @@ TEST(RandomTests, TestUniformIntDistributionMin)
 {
   typedef thrust::random::uniform_int_distribution<int>          int_dist;
   typedef thrust::random::uniform_int_distribution<unsigned int> uint_dist;
-  
+
   ValidateDistributionCharacteristic<int_dist,  ValidateDistributionMin<int_dist,  thrust::minstd_rand> >();
   ValidateDistributionCharacteristic<uint_dist, ValidateDistributionMin<uint_dist, thrust::minstd_rand> >();
 }
@@ -773,7 +768,7 @@ TEST(RandomTests, TestUniformIntDistributionMax)
 {
   typedef thrust::random::uniform_int_distribution<int>          int_dist;
   typedef thrust::random::uniform_int_distribution<unsigned int> uint_dist;
-  
+
   ValidateDistributionCharacteristic<int_dist,  ValidateDistributionMax<int_dist,  thrust::minstd_rand> >();
   ValidateDistributionCharacteristic<uint_dist, ValidateDistributionMax<uint_dist, thrust::minstd_rand> >();
 }
@@ -791,7 +786,7 @@ TEST(RandomTests, TestUniformRealDistributionMin)
 {
   typedef thrust::random::uniform_real_distribution<float>  float_dist;
   typedef thrust::random::uniform_real_distribution<double> double_dist;
-  
+
   ValidateDistributionCharacteristic<float_dist,  ValidateDistributionMin<float_dist,  thrust::minstd_rand> >();
   ValidateDistributionCharacteristic<double_dist, ValidateDistributionMin<double_dist, thrust::minstd_rand> >();
 }
@@ -800,7 +795,7 @@ TEST(RandomTests, TestUniformRealDistributionMax)
 {
   typedef thrust::random::uniform_real_distribution<float>  float_dist;
   typedef thrust::random::uniform_real_distribution<double> double_dist;
-  
+
   ValidateDistributionCharacteristic<float_dist,  ValidateDistributionMax<float_dist,  thrust::minstd_rand> >();
   ValidateDistributionCharacteristic<double_dist, ValidateDistributionMax<double_dist, thrust::minstd_rand> >();
 }
@@ -818,7 +813,7 @@ TEST(RandomTests, TestNormalDistributionMin)
 {
   typedef thrust::random::normal_distribution<float>  float_dist;
   typedef thrust::random::normal_distribution<double> double_dist;
-  
+
   ValidateDistributionCharacteristic<float_dist,  ValidateDistributionMin<float_dist,  thrust::minstd_rand> >();
   ValidateDistributionCharacteristic<double_dist, ValidateDistributionMin<double_dist, thrust::minstd_rand> >();
 }
@@ -827,7 +822,7 @@ TEST(RandomTests, TestNormalDistributionMax)
 {
   typedef thrust::random::normal_distribution<float>  float_dist;
   typedef thrust::random::normal_distribution<double> double_dist;
-  
+
   ValidateDistributionCharacteristic<float_dist,  ValidateDistributionMax<float_dist,  thrust::minstd_rand> >();
   ValidateDistributionCharacteristic<double_dist, ValidateDistributionMax<double_dist, thrust::minstd_rand> >();
 }
@@ -862,7 +857,7 @@ TEST(RandomTests, erfcinvFunction)
 		  EXPECT_NEAR(double_expected_outputs[i], output, 0.01);
     }
 	}
-  
+
   float inf_f = std::numeric_limits<float>::infinity();
   float nan_f = std::nan("undefined");
 

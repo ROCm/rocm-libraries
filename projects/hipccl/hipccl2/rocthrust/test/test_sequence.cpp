@@ -1,25 +1,20 @@
-// MIT License
-//
-// Copyright (c) 2019 Advanced Micro Devices, Inc. All rights reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
-
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+ 
 // Thrust
 #include <thrust/host_vector.h>
 #include <thrust/device_vector.h>
@@ -91,7 +86,7 @@ TYPED_TEST(SequenceTests, SequenceSimple)
     ASSERT_EQ(v[2], 12);
     ASSERT_EQ(v[3], 13);
     ASSERT_EQ(v[4], 14);
-    
+
     thrust::sequence(v.begin(), v.end(), (T)10, (T)2);
 
     ASSERT_EQ(v[0], 10);
@@ -116,28 +111,28 @@ TYPED_TEST(PrimitiveSequenceTests, SequencesWithVariableLength)
 
       thrust::sequence(h_data.begin(), h_data.end());
       thrust::sequence(d_data.begin(), d_data.end());
-      
+
       thrust::host_vector<T>   h_data_d = d_data;
       for (size_t i = 0; i < size; i += step_size)
         ASSERT_NEAR(h_data[i], h_data_d[i], error_margin);
-	
+
       thrust::sequence(h_data.begin(), h_data.end(), T(10));
       thrust::sequence(d_data.begin(), d_data.end(), T(10));
-      
+
       h_data_d = d_data;
       for (size_t i = 0; i < size; i += step_size)
         ASSERT_NEAR(h_data[i], h_data_d[i], error_margin);
 
       thrust::sequence(h_data.begin(), h_data.end(), T(10), T(2));
       thrust::sequence(d_data.begin(), d_data.end(), T(10), T(2));
-      
+
       h_data_d = d_data;
       for (size_t i = 0; i < size; i += step_size)
         ASSERT_NEAR(h_data[i], h_data_d[i], error_margin);
-      
+
       thrust::sequence(h_data.begin(), h_data.end(), size_t(10), size_t(2));
       thrust::sequence(d_data.begin(), d_data.end(), size_t(10), size_t(2));
-      
+
       h_data_d = d_data;
       for (size_t i = 0; i < size; i += step_size)
         ASSERT_NEAR(h_data[i], h_data_d[i], error_margin);
