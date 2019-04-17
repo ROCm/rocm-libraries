@@ -1,24 +1,19 @@
-// MIT License
-//
-// Copyright (c) 2019 Advanced Micro Devices, Inc. All rights reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
 
 // Thrust
 #include <thrust/extrema.h>
@@ -43,7 +38,7 @@ TYPED_TEST(MinElementTests, TestMinElementSimple)
 
     ASSERT_EQ(*thrust::min_element(data.begin(), data.end()), 1);
     ASSERT_EQ(thrust::min_element(data.begin(), data.end()) - data.begin(), 2);
-    
+
     ASSERT_EQ(*thrust::min_element(data.begin(), data.end(), thrust::greater<T>()), 5);
     ASSERT_EQ(thrust::min_element(data.begin(), data.end(), thrust::greater<T>()) - data.begin(), 1);
 }
@@ -52,7 +47,7 @@ TYPED_TEST(MinElementTests, TestMinElementWithTransform)
 {
     using Vector = typename TestFixture::input_type;
     using T = typename Vector::value_type;
-    
+
     // We cannot use unsigned types for this test case
     if (std::is_unsigned<T>::value) return;
 
@@ -77,7 +72,7 @@ TYPED_TEST(MinElementTests, TestMinElement)
 {
     using Vector = typename TestFixture::input_type;
     using T = typename Vector::value_type;
-    
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
@@ -90,7 +85,7 @@ TYPED_TEST(MinElementTests, TestMinElement)
         typename thrust::device_vector<T>::iterator d_min = thrust::min_element(d_data.begin(), d_data.end());
 
         ASSERT_EQ(h_data.begin() - h_min, d_data.begin() - d_min);
- 
+
         typename thrust::host_vector<T>::iterator   h_max = thrust::min_element(h_data.begin(), h_data.end(), thrust::greater<T>());
         typename thrust::device_vector<T>::iterator d_max = thrust::min_element(d_data.begin(), d_data.end(), thrust::greater<T>());
 
