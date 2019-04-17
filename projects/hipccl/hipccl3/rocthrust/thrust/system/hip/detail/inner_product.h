@@ -1,5 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
+ * Modifications Copyright (c) 2019, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -60,7 +61,7 @@ inner_product(execution_policy<Derived> &policy,
   typedef transform_pair_of_input_iterators_t<T,
                                               InputIt1,
                                               InputIt2,
-                                              ProductOp> 
+                                              ProductOp>
                                                           binop_iterator_t;
 
   return hip_rocprim::reduce_n(policy,

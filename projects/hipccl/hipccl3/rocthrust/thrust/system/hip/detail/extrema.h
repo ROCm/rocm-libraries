@@ -1,5 +1,6 @@
 /*******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
+ * Modifications Copyright (c) 2019, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -41,9 +42,9 @@
 
 BEGIN_NS_THRUST
 namespace hip_rocprim {
-    
+
     namespace __extrema {
-        
+
         template <class InputType,
                   class IndexType,
                   class Predicate>
@@ -51,10 +52,10 @@ namespace hip_rocprim {
         {
             Predicate predicate;
             typedef tuple<InputType, IndexType> pair_type;
-            
+
             THRUST_HIP_FUNCTION
             arg_min_f(Predicate p) : predicate(p) {}
-            
+
             pair_type THRUST_HIP_DEVICE_FUNCTION
             operator()(pair_type const &lhs, pair_type const &rhs)
             {
@@ -62,13 +63,13 @@ namespace hip_rocprim {
                 InputType const &lhs_value = get<0>(lhs);
                 IndexType const &rhs_key   = get<1>(rhs);
                 IndexType const &lhs_key   = get<1>(lhs);
-                
+
                 // check values first
                 if (predicate(lhs_value, rhs_value))
                     return lhs;
                 else if (predicate(rhs_value, lhs_value))
                     return rhs;
-                
+
                 // values are equivalent, prefer smaller index
                 if (lhs_key < rhs_key)
                     return lhs;
@@ -76,7 +77,7 @@ namespace hip_rocprim {
                     return rhs;
             }
         };    // struct arg_min_f
-        
+
         template <class InputType,
                   class IndexType,
                   class Predicate>
@@ -84,10 +85,10 @@ namespace hip_rocprim {
         {
             Predicate predicate;
             typedef tuple<InputType, IndexType> pair_type;
-            
+
             THRUST_HIP_FUNCTION
             arg_max_f(Predicate p) : predicate(p) {}
-            
+
             pair_type THRUST_HIP_DEVICE_FUNCTION
             operator()(pair_type const &lhs, pair_type const &rhs)
             {
@@ -95,13 +96,13 @@ namespace hip_rocprim {
                 InputType const &lhs_value = get<0>(lhs);
                 IndexType const &rhs_key   = get<1>(rhs);
                 IndexType const &lhs_key   = get<1>(lhs);
-                
+
                 // check values first
                 if (predicate(lhs_value, rhs_value))
                     return rhs;
                 else if (predicate(rhs_value, lhs_value))
                     return lhs;
-                
+
                 // values are equivalent, prefer smaller index
                 if (lhs_key < rhs_key)
                     return lhs;
@@ -109,25 +110,25 @@ namespace hip_rocprim {
                     return rhs;
             }
         };    // struct arg_max_f
-        
+
         template<class InputType,
                  class IndexType,
                  class Predicate>
         struct arg_minmax_f
         {
             Predicate predicate;
-            
+
             typedef tuple<InputType, IndexType> pair_type;
             typedef tuple<pair_type, pair_type> two_pairs_type;
-            
+
             typedef arg_min_f<InputType, IndexType, Predicate> arg_min_t;
             typedef arg_max_f<InputType, IndexType, Predicate> arg_max_t;
-            
+
             THRUST_HIP_FUNCTION
             arg_minmax_f(Predicate p) : predicate(p)
             {
             }
-            
+
             two_pairs_type THRUST_HIP_DEVICE_FUNCTION
             operator()(two_pairs_type const &lhs, two_pairs_type const &rhs)
             {
@@ -138,7 +139,7 @@ namespace hip_rocprim {
                 return make_tuple(arg_min_t(predicate)(lhs_min, rhs_min),
                                   arg_max_t(predicate)(lhs_max, rhs_max));
             }
-            
+
             struct duplicate_tuple
             {
                 two_pairs_type THRUST_HIP_DEVICE_FUNCTION
@@ -148,8 +149,8 @@ namespace hip_rocprim {
                 }
             };
         }; // struct arg_minmax_f
-        
-        
+
+
         template <class Derived,
                   class InputIt,
                   class Size,
@@ -161,11 +162,11 @@ namespace hip_rocprim {
                 Size                       num_items,
                 BinaryOp                   binary_op,
                 T *)
-        
+
         {
             hipStream_t stream = hip_rocprim::stream(policy);
-            
-            
+
+
             // Determine temporary device storage requirements.
             T* ret_ptr = NULL;
             size_t tmp_size = 0;
@@ -174,14 +175,14 @@ namespace hip_rocprim {
                                 first, ret_ptr, num_items, binary_op,
                                 stream, THRUST_HIP_DEBUG_SYNC_FLAG),
                 "after reduction step 1");
-            
+
             // Allocate temporary storage.
-            
+
             detail::temporary_array<detail::uint8_t, Derived>
             tmp(policy, sizeof(T) + tmp_size);
-            
+
             // Run reduction.
-            
+
             // `tmp.begin()` yields a `normal_iterator`, which dereferences to a
             // `reference`, which has an `operator&` that returns a `pointer`, which
             // has a `.get` method that returns a raw pointer, which we can (finally)
@@ -197,10 +198,10 @@ namespace hip_rocprim {
                                 first, ret_ptr, num_items, binary_op,
                                 stream, THRUST_HIP_DEBUG_SYNC_FLAG),
                                 "after reduction step 2");
-            
+
             return hip_rocprim::get_value(policy,ret_ptr);
         }
-        
+
         template <template <class, class, class> class ArgFunctor,
                   class Derived,
                   class ItemsIt,
@@ -213,23 +214,23 @@ namespace hip_rocprim {
         {
             if (first == last)
                 return last;
-            
+
             typedef typename iterator_traits<ItemsIt>::value_type      InputType;
             typedef typename iterator_traits<ItemsIt>::difference_type IndexType;
-            
+
             IndexType num_items = static_cast<IndexType>(thrust::distance(first, last));
-            
+
             typedef tuple<ItemsIt, counting_iterator_t<IndexType>> iterator_tuple;
             typedef zip_iterator<iterator_tuple> zip_iterator;
-            
+
             iterator_tuple iter_tuple = make_tuple(first, counting_iterator_t<IndexType>(0));
-            
-            
+
+
             typedef ArgFunctor<InputType, IndexType, BinaryPred> arg_min_t;
             typedef tuple<InputType, IndexType> T;
-            
+
             zip_iterator begin = make_zip_iterator(iter_tuple);
-            
+
             T result = extrema(policy,
                                begin,
                                num_items,
@@ -237,10 +238,10 @@ namespace hip_rocprim {
                                (T *)(NULL));
             return first + thrust::get<1>(result);
         }
-        
+
     }    // namespace __extrema
-    
-    
+
+
     /// min element
     __thrust_exec_check_disable__
     template <class Derived,
@@ -253,7 +254,7 @@ namespace hip_rocprim {
                 BinaryPred                 binary_pred)
     {
         ItemsIt ret = first;
-        
+
         THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((
             __extrema::element<__extrema::arg_min_f, Derived, ItemsIt, BinaryPred>
         ));
@@ -262,17 +263,17 @@ namespace hip_rocprim {
                                                        first,
                                                        last,
                                                        binary_pred);
-        
+
 #else // __THRUST_HAS_HIPRT__
         ret = thrust::min_element(cvt_to_seq(derived_cast(policy)),
                                   first,
                                   last,
                                   binary_pred);
 #endif // __THRUST_HAS_HIPRT__
-        
+
         return ret;
     }
-    
+
     template <class Derived,
               class ItemsIt>
     ItemsIt THRUST_HIP_FUNCTION
@@ -283,7 +284,7 @@ namespace hip_rocprim {
         typedef typename iterator_value<ItemsIt>::type value_type;
         return hip_rocprim::min_element(policy, first, last, less<value_type>());
     }
-    
+
     /// max element
     __thrust_exec_check_disable__
     template <class Derived,
@@ -296,7 +297,7 @@ namespace hip_rocprim {
                 BinaryPred                 binary_pred)
     {
         ItemsIt ret = first;
-        
+
         THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((
             __extrema::element<__extrema::arg_max_f, Derived, ItemsIt, BinaryPred>
         ));
@@ -313,7 +314,7 @@ namespace hip_rocprim {
 #endif // __THRUST_HAS_HIPRT__
         return ret;
     }
-    
+
     template <class Derived,
               class ItemsIt>
     ItemsIt THRUST_HIP_FUNCTION
@@ -324,7 +325,7 @@ namespace hip_rocprim {
         typedef typename iterator_value<ItemsIt>::type value_type;
         return hip_rocprim::max_element(policy, first, last, less<value_type>());
     }
-    
+
     /// minmax element
     __thrust_exec_check_disable__
     template <class Derived,
@@ -337,50 +338,50 @@ namespace hip_rocprim {
                    BinaryPred                 binary_pred)
     {
         pair<ItemsIt, ItemsIt> ret = thrust::make_pair(first, first);
-        
+
         typedef typename iterator_traits<ItemsIt>::value_type      InputType;
         typedef typename iterator_traits<ItemsIt>::difference_type IndexType;
-        
+
         typedef tuple<ItemsIt, hip_rocprim::counting_iterator_t<IndexType>> iterator_tuple;
         typedef zip_iterator<iterator_tuple> zip_iterator;
-        
+
         typedef __extrema::arg_minmax_f<InputType, IndexType, BinaryPred> arg_minmax_t;
-        
+
         typedef typename arg_minmax_t::two_pairs_type  two_pairs_type;
         typedef typename arg_minmax_t::duplicate_tuple duplicate_t;
         typedef transform_input_iterator_t<two_pairs_type, zip_iterator, duplicate_t> transform_t;
-        
+
         THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((
             __extrema::extrema<Derived, transform_t, IndexType, arg_minmax_t, two_pairs_type>
         ));
 #if __THRUST_HAS_HIPRT__
         if (first == last)
             return thrust::make_pair(last, last);
-        
+
         IndexType num_items = static_cast<IndexType>(thrust::distance(first, last));
-        
+
         iterator_tuple iter_tuple = make_tuple(first, counting_iterator_t<IndexType>(0));
-        
+
         zip_iterator   begin  = make_zip_iterator(iter_tuple);
         two_pairs_type result = __extrema::extrema(policy,
                                                    transform_t(begin, duplicate_t()),
                                                    num_items,
                                                    arg_minmax_t(binary_pred),
                                                    (two_pairs_type *)(NULL));
-        
+
         ret = thrust::make_pair(first + get<1>(get<0>(result)),
                                 first + get<1>(get<1>(result)));
-        
+
 #else // __THRUST_HAS_HIPRT__
         ret = thrust::minmax_element(cvt_to_seq(derived_cast(policy)),
                                      first,
                                      last,
                                      binary_pred);
 #endif // __THRUST_HAS_HIPRT__
-        
+
         return ret;
     }
-    
+
     template <class Derived,
               class ItemsIt>
     pair<ItemsIt, ItemsIt> THRUST_HIP_FUNCTION
@@ -391,8 +392,8 @@ namespace hip_rocprim {
         typedef typename iterator_value<ItemsIt>::type value_type;
         return hip_rocprim::minmax_element(policy, first, last, less<value_type>());
     }
-    
-    
+
+
 } // namespace hip_rocprim
 END_NS_THRUST
 #endif

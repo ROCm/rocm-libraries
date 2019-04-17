@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+ 
 #include <unittest/unittest.h>
 #include <thrust/copy.h>
 
@@ -167,7 +184,7 @@ void TestCopyVectorBool(void)
 
     thrust::host_vector<bool> h(3);
     thrust::device_vector<bool> d(3);
-    
+
     thrust::copy(v.begin(), v.end(), h.begin());
     thrust::copy(v.begin(), v.end(), d.begin());
 
@@ -209,7 +226,7 @@ void TestCopyListTo(void)
     l.push_back(2);
     l.push_back(3);
     l.push_back(4);
-   
+
     Vector v(l.size());
 
     typename Vector::iterator v_result = thrust::copy(l.begin(), l.end(), v.begin());
@@ -257,8 +274,8 @@ struct mod_3
     __host__ __device__
     unsigned int operator()(T x) { return static_cast<unsigned int>(x) % 3; }
 };
-    
-    
+
+
 
 template <class Vector>
 void TestCopyIfSimple(void)
@@ -302,7 +319,7 @@ void TestCopyIf(const size_t n)
 
         ASSERT_EQUAL(h_result, d_result);
     }
-    
+
     // test with Predicate that returns a non-bool
     {
         thrust::host_vector<T>   h_result(n);
@@ -347,7 +364,7 @@ template <typename T>
 void TestCopyIfStencil(const size_t n)
 {
     thrust::host_vector<T>   h_data(n); thrust::sequence(h_data.begin(), h_data.end());
-    thrust::device_vector<T> d_data(n); thrust::sequence(d_data.begin(), d_data.end()); 
+    thrust::device_vector<T> d_data(n); thrust::sequence(d_data.begin(), d_data.end());
 
     thrust::host_vector<T>   h_stencil = unittest::random_integers<T>(n);
     thrust::device_vector<T> d_stencil = unittest::random_integers<T>(n);
@@ -371,7 +388,7 @@ void TestCopyIfStencil(const size_t n)
 
         ASSERT_EQUAL(h_result, d_result);
     }
-    
+
     // test with Predicate that returns a non-bool
     {
         thrust::host_vector<T>   h_result(n);
@@ -412,7 +429,7 @@ void TestCopyZipIterator(void)
     typedef typename Vector::value_type T;
 
     Vector v1(3); v1[0] = 1; v1[1] = 2; v1[2] = 3;
-    Vector v2(3); v2[0] = 4; v2[1] = 5; v2[2] = 6; 
+    Vector v2(3); v2[0] = 4; v2[1] = 5; v2[2] = 6;
     Vector v3(3, T(0));
     Vector v4(3, T(0));
 
