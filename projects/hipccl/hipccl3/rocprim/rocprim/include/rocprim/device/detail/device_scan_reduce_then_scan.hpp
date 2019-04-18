@@ -141,6 +141,7 @@ void single_scan_kernel_impl(InputIterator input,
             input,
             values,
             input_size,
+            *(input),
             storage.load
         );
     ::rocprim::syncthreads(); // sync threads to reuse shared memory
@@ -373,6 +374,7 @@ void final_scan_kernel_impl(InputIterator input,
                 input + block_offset,
                 values,
                 valid_in_last_block,
+                *(input + block_offset),
                 storage.load
             );
     }

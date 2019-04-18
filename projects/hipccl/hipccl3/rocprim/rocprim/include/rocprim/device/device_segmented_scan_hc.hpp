@@ -26,11 +26,11 @@
 
 #include "../config.hpp"
 #include "../detail/various.hpp"
+#include "../detail/match_result_type.hpp"
 
 #include "../iterator/zip_iterator.hpp"
 #include "../iterator/discard_iterator.hpp"
 #include "../iterator/transform_iterator.hpp"
-#include "../iterator/detail/replace_first_iterator.hpp"
 #include "../types/tuple.hpp"
 
 #include "device_scan_hc.hpp"
@@ -79,9 +79,8 @@ void segmented_scan_impl(void * temporary_storage,
                          const bool debug_synchronous)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    using output_type = typename std::iterator_traits<OutputIterator>::value_type;
     using result_type = typename ::rocprim::detail::match_result_type<
-        input_type, output_type, BinaryFunction
+        input_type, BinaryFunction
     >::type;
 
     // Get default config if Config is default_config
@@ -230,9 +229,8 @@ void segmented_inclusive_scan(void * temporary_storage,
                               const bool debug_synchronous = false)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    using output_type = typename std::iterator_traits<OutputIterator>::value_type;
     using result_type = typename ::rocprim::detail::match_result_type<
-        input_type, output_type, BinaryFunction
+        input_type, BinaryFunction
     >::type;
 
     return detail::segmented_scan_impl<false, Config>(
@@ -460,16 +458,19 @@ void segmented_inclusive_scan(void * temporary_storage,
                               const bool debug_synchronous = false)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
+    using result_type = typename ::rocprim::detail::match_result_type<
+        input_type, BinaryFunction
+    >::type;
     using flag_type = typename std::iterator_traits<HeadFlagIterator>::value_type;
     using headflag_scan_op_wrapper_type =
         detail::headflag_scan_op_wrapper<
-            input_type, flag_type, BinaryFunction
+            result_type, flag_type, BinaryFunction
         >;
 
-    return inclusive_scan<Config>(
+    inclusive_scan<Config>(
         temporary_storage, storage_size,
-        make_zip_iterator(make_tuple(input, head_flags)),
-        make_zip_iterator(make_tuple(output, make_discard_iterator())),
+        rocprim::make_zip_iterator(rocprim::make_tuple(input, head_flags)),
+        rocprim::make_zip_iterator(rocprim::make_tuple(output, rocprim::make_discard_iterator())),
         size, headflag_scan_op_wrapper_type(scan_op),
         acc_view, debug_synchronous
     );
@@ -578,49 +579,45 @@ void segmented_exclusive_scan(void * temporary_storage,
                               const bool debug_synchronous = false)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
+    using result_type = typename ::rocprim::detail::match_result_type<
+        input_type, BinaryFunction
+    >::type;
     using flag_type = typename std::iterator_traits<HeadFlagIterator>::value_type;
     using headflag_scan_op_wrapper_type =
         detail::headflag_scan_op_wrapper<
-            input_type, flag_type, BinaryFunction
+            result_type, flag_type, BinaryFunction
         >;
 
-    return inclusive_scan<Config>(
+    const result_type initial_value_converted = static_cast<result_type>(initial_value);
+
+    // Flag the last item of each segment as the next segment's head, use initial_value as its value,
+    // then run exclusive scan
+    exclusive_scan<Config>(
         temporary_storage, storage_size,
-        // Using replace_first_iterator shifts input one item to left and replaces
-        // first value with initial_value. Then transform_iterator replaces last
-        // elements of other segments to initial_value. That modified input data
-        // can be inclusively scanned and produce expected exclusive results.
-        //
-        // input:                         [1, 2, 3, 4, 5, 6, 7, 8]
-        // replace_first_iterator(input): [9, 1, 2, 3, 4, 5, 6, 7]
-        // head_flags:                    [1, 0, 0, 1, 0, 1, 0, 0]
-        // initial_value:                  9
-        // transform_iterator:            [9, 1, 2, 9, 4, 9, 6, 7]
-        //
-        // inclusive_scan result:         [9, 10, 12, 9, 13, 9, 15, 22]
-        make_transform_iterator(
-            make_zip_iterator(
-                make_tuple(
-                    detail::replace_first_iterator<InputIterator>(input - 1, initial_value),
-                    head_flags
-                )
-            ),
-            [initial_value](const ::rocprim::tuple<input_type, flag_type>& t)
-                -> ::rocprim::tuple<input_type, flag_type>
+        rocprim::make_transform_iterator(
+            rocprim::make_counting_iterator<size_t>(0),
+            [input, head_flags, initial_value_converted, size]
+            ROCPRIM_DEVICE (const size_t i)
             {
-                if(::rocprim::get<1>(t))
+                flag_type flag(false);
+                if(i + 1 < size)
                 {
-                    return ::rocprim::make_tuple(
-                        static_cast<input_type>(initial_value),
-                        ::rocprim::get<1>(t)
-                    );
+                    flag = head_flags[i + 1];
                 }
-                return t;
+                result_type value = initial_value_converted;
+                if(!flag)
+                {
+                    value = input[i];
+                }
+                return rocprim::make_tuple(value, flag);
             }
         ),
-        make_zip_iterator(make_tuple(output, make_discard_iterator())),
-        size, headflag_scan_op_wrapper_type(scan_op),
-        acc_view, debug_synchronous
+        rocprim::make_zip_iterator(rocprim::make_tuple(output, rocprim::make_discard_iterator())),
+        rocprim::make_tuple(initial_value_converted, flag_type(true)), // init value is a head of the first segment
+        size,
+        headflag_scan_op_wrapper_type(scan_op),
+        acc_view,
+        debug_synchronous
     );
 }
 

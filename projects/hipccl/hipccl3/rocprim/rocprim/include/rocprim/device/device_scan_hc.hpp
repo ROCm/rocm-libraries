@@ -75,9 +75,8 @@ auto scan_impl(void * temporary_storage,
     -> typename std::enable_if<!Config::use_lookback>::type
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    using output_type = typename std::iterator_traits<OutputIterator>::value_type;
     using result_type = typename ::rocprim::detail::match_result_type<
-        input_type, output_type, BinaryFunction
+        input_type, BinaryFunction
     >::type;
 
     // Get default config if Config is default_config
@@ -205,9 +204,8 @@ auto scan_impl(void * temporary_storage,
     -> typename std::enable_if<Config::use_lookback>::type
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    using output_type = typename std::iterator_traits<OutputIterator>::value_type;
     using result_type = typename ::rocprim::detail::match_result_type<
-        input_type, output_type, BinaryFunction
+        input_type, BinaryFunction
     >::type;
 
     // Get default config if Config is default_config
@@ -394,9 +392,8 @@ void inclusive_scan(void * temporary_storage,
                     const bool debug_synchronous = false)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    using output_type = typename std::iterator_traits<OutputIterator>::value_type;
     using result_type = typename ::rocprim::detail::match_result_type<
-        input_type, output_type, BinaryFunction
+        input_type, BinaryFunction
     >::type;
 
     // Get default config if Config is default_config
@@ -516,9 +513,8 @@ void exclusive_scan(void * temporary_storage,
                     const bool debug_synchronous = false)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    using output_type = typename std::iterator_traits<OutputIterator>::value_type;
     using result_type = typename ::rocprim::detail::match_result_type<
-        input_type, output_type, BinaryFunction
+        input_type, BinaryFunction
     >::type;
 
     // Get default config if Config is default_config
