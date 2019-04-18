@@ -54,11 +54,22 @@ void swap(T& a, T& b)
     b = c;
 }
 
-template<class T>
+template<class T = void>
 struct less
 {
     ROCPRIM_HOST_DEVICE inline
     constexpr bool operator()(const T& a, const T& b) const
+    {
+        return a < b;
+    }
+};
+
+template<>
+struct less<void>
+{
+    template<class T, class U>
+    ROCPRIM_HOST_DEVICE inline
+    constexpr bool operator()(const T& a, const U& b) const
     {
         return a < b;
     }
