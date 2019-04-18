@@ -93,12 +93,12 @@ if(HIP_PLATFORM STREQUAL "hcc")
   rocm_create_package(
     NAME hipcub
     DESCRIPTION "Radeon Open Compute Parallel Primitives Libary"
-    MAINTAINER "Jakub Szuppe <jakub@streamhpc.com>"
+    MAINTAINER "Stream HPC Maintainers <maintainer@streamhpc.com>"
   )
 else()
   rocm_create_package(
     NAME hipcub_nvcc
     DESCRIPTION "Radeon Open Compute Parallel Primitives Libary (hipCUB only)"
-    MAINTAINER "Jakub Szuppe <jakub@streamhpc.com>"
+    MAINTAINER "Stream HPC Maintainers <maintainer@streamhpc.com>"
   )
 endif()
