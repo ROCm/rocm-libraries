@@ -28,20 +28,37 @@
 # Find HIP package
 find_package(HIP REQUIRED)
 
-if(HIP_PLATFORM STREQUAL "nvcc")
-  message(FATAL_ERROR "`nvcc` is not supported.")
-elseif(HIP_PLATFORM STREQUAL "hcc")
-  if(NOT (CMAKE_CXX_COMPILER MATCHES ".*/hcc$"))
-    message(FATAL_ERROR "On ROCm platform 'hcc' must be used as C++ compiler.")
+if(HIP_PLATFORM STREQUAL "hcc")
+  if(NOT (CMAKE_CXX_COMPILER MATCHES ".*/hcc$" OR CMAKE_CXX_COMPILER MATCHES ".*/hipcc$"))
+    message(FATAL_ERROR "On ROCm platform 'hcc' or 'clang' must be used as C++ compiler.")
   else()
+    # Determine if CXX Compiler is hcc, hip-clang or other
+    execute_process(COMMAND ${CMAKE_CXX_COMPILER} "--version" OUTPUT_VARIABLE CXX_OUTPUT
+                    OUTPUT_STRIP_TRAILING_WHITESPACE
+                    ERROR_STRIP_TRAILING_WHITESPACE)
+    string(REGEX MATCH "[A-Za-z]* ?clang version" TMP_CXX_VERSION ${CXX_OUTPUT})
+    string(REGEX MATCH "[A-Za-z]+" CXX_VERSION_STRING ${TMP_CXX_VERSION})
+    if(CXX_VERSION_STRING MATCHES "HCC")
+        set(HIP_COMPILER "hcc" CACHE STRING "HIP Compiler")
+    elseif(CXX_VERSION_STRING MATCHES "clang")
+        set(HIP_COMPILER "clang" CACHE STRING "HIP Compiler")
+    else()
+        message(FATAL_ERROR "CXX Compiler version ${CXX_VERSION_STRING} unsupported.")
+    endif()
+    message(STATUS "HIP Compiler: " ${HIP_COMPILER})
+
     # Workaround until hcc & hip cmake modules fixes symlink logic in their config files.
     # (Thanks to rocBLAS devs for finding workaround for this problem.)
     list(APPEND CMAKE_PREFIX_PATH /opt/rocm/hcc /opt/rocm/hip)
     # Ignore hcc warning: argument unused during compilation: '-isystem /opt/rocm/hip/include'
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-command-line-argument")
-    find_package(hcc REQUIRED CONFIG PATHS /opt/rocm)
+    if(HIP_COMPILER STREQUAL "hcc")
+      find_package(hcc REQUIRED CONFIG PATHS /opt/rocm)
+    else()
+      find_package(hcc QUIET CONFIG PATHS /opt/rocm)
+    endif()
     find_package(hip REQUIRED CONFIG PATHS /opt/rocm)
   endif()
 else()
-  message(FATAL_ERROR "HIP_PLATFORM must be 'hcc' (AMD ROCm platform).")
+  message(FATAL_ERROR "HIP_PLATFORM must be 'hcc' or 'clang' (AMD ROCm platform)")
 endif()

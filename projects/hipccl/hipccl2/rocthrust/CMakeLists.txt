@@ -70,3 +70,25 @@ if(BUILD_TEST)
   add_subdirectory(test)
   add_subdirectory(testing)
 endif()
+
+# Package
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "hip_hcc (>= 1.5.18263)") # 1.5.18263 is HIP version in ROCm 1.8.2
+set(CPACK_RPM_PACKAGE_REQUIRES "hip_hcc >= 1.5.18263")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+if(NOT CPACK_PACKAGING_INSTALL_PREFIX)
+  set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
+endif()
+
+set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" "\${CPACK_PACKAGING_INSTALL_PREFIX}/include" )
+
+rocm_create_package(
+  NAME thrust
+  DESCRIPTION "Radeon Open Compute Thrust library"
+  MAINTAINER "Stream HPC Maintainers <maintainer@streamhpc.com>"
+)
+
+rocm_install_targets(
+  INCLUDE
+  ${CMAKE_SOURCE_DIR}/thrust/
+  PREFIX thrust
+)
