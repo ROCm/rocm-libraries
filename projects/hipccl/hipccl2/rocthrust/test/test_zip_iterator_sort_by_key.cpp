@@ -23,8 +23,7 @@
 
 typedef ::testing::Types<
     Params<int8_t>,
-    // TODO: enable when we solved: issue 122
-    //Params<int16_t>,
+    Params<int16_t>,
     Params<int32_t>
 > TestParams;
 
