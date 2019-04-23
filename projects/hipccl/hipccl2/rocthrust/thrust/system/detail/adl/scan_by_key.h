@@ -31,6 +31,7 @@
 #if 0
 #include <thrust/system/cpp/detail/scan_by_key.h>
 #include <thrust/system/cuda/detail/scan_by_key.h>
+#include <thrust/system/hip/detail/scan_by_key.h>
 #include <thrust/system/omp/detail/scan_by_key.h>
 #include <thrust/system/tbb/detail/scan_by_key.h>
 #endif
@@ -42,4 +43,3 @@
 #define __THRUST_DEVICE_SYSTEM_SCAN_BY_KEY_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/detail/scan_by_key.h>
 #include __THRUST_DEVICE_SYSTEM_SCAN_BY_KEY_HEADER
 #undef __THRUST_DEVICE_SYSTEM_SCAN_BY_KEY_HEADER
-

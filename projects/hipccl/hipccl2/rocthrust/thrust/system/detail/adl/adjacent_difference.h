@@ -31,6 +31,7 @@
 #if 0
 #include <thrust/system/cpp/detail/adjacent_difference.h>
 #include <thrust/system/cuda/detail/adjacent_difference.h>
+//#include <thrust/system/hip/detail/adjacent_difference.h>
 #include <thrust/system/omp/detail/adjacent_difference.h>
 #include <thrust/system/tbb/detail/adjacent_difference.h>
 #endif
@@ -42,4 +43,3 @@
 #define __THRUST_DEVICE_SYSTEM_ADJACENT_DIFFERENCE_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/detail/adjacent_difference.h>
 #include __THRUST_DEVICE_SYSTEM_ADJACENT_DIFFERENCE_HEADER
 #undef __THRUST_DEVICE_SYSTEM_ADJACENT_DIFFERENCE_HEADER
-
