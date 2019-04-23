@@ -34,8 +34,6 @@
 #include <thrust/system/hip/detail/util.h>
 #include <thrust/detail/type_traits/result_of_adaptable_function.h>
 #include <thrust/system/hip/detail/par_to_seq.h>
-// #include <thrust/system/cuda/detail/core/agent_launcher.h>
-#include <thrust/system/hip/detail/par_to_seq.h>
 
 BEGIN_NS_THRUST
 

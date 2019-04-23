@@ -31,6 +31,7 @@
 #if 0
 #include <thrust/system/cpp/detail/sort.h>
 #include <thrust/system/cuda/detail/sort.h>
+#include <thrust/system/hip/detail/sort.h>
 #include <thrust/system/omp/detail/sort.h>
 #include <thrust/system/tbb/detail/sort.h>
 #endif
@@ -42,4 +43,3 @@
 #define __THRUST_DEVICE_SYSTEM_SORT_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/detail/sort.h>
 #include __THRUST_DEVICE_SYSTEM_SORT_HEADER
 #undef __THRUST_DEVICE_SYSTEM_SORT_HEADER
-
