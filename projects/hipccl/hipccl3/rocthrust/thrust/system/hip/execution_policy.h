@@ -33,50 +33,50 @@
 #include <thrust/system/hip/detail/execution_policy.h>
 #include <thrust/system/hip/detail/par.h>
 
-// // pass
-// // ----------------
-// #include <thrust/system/hip/detail/adjacent_difference.h>
+// pass
+// ----------------
+//#include <thrust/system/hip/detail/adjacent_difference.h>
 #include <thrust/system/hip/detail/copy.h>
 #include <thrust/system/hip/detail/copy_if.h>
-// #include <thrust/system/hip/detail/count.h>
+#include <thrust/system/hip/detail/count.h>
 #include <thrust/system/hip/detail/equal.h>
-// #include <thrust/system/hip/detail/extrema.h>
+#include <thrust/system/hip/detail/extrema.h>
 #include <thrust/system/hip/detail/fill.h>
 #include <thrust/system/hip/detail/find.h>
 #include <thrust/system/hip/detail/for_each.h>
-// #include <thrust/system/hip/detail/gather.h>
+#include <thrust/system/hip/detail/gather.h>
 #include <thrust/system/hip/detail/generate.h>
-// #include <thrust/system/hip/detail/inner_product.h>
+#include <thrust/system/hip/detail/inner_product.h>
 #include <thrust/system/hip/detail/mismatch.h>
-// #include <thrust/system/hip/detail/partition.h>
-// #include <thrust/system/hip/detail/reduce_by_key.h>
+#include <thrust/system/hip/detail/partition.h>
+#include <thrust/system/hip/detail/reduce_by_key.h>
 #include <thrust/system/hip/detail/remove.h>
 #include <thrust/system/hip/detail/replace.h>
-// #include <thrust/system/hip/detail/reverse.h>
+#include <thrust/system/hip/detail/reverse.h>
 #include <thrust/system/hip/detail/scatter.h>
 #include <thrust/system/hip/detail/swap_ranges.h>
 #include <thrust/system/hip/detail/tabulate.h>
 #include <thrust/system/hip/detail/transform.h>
 #include <thrust/system/hip/detail/transform_reduce.h>
-// #include <thrust/system/hip/detail/transform_scan.h>
+#include <thrust/system/hip/detail/transform_scan.h>
 #include <thrust/system/hip/detail/uninitialized_copy.h>
 #include <thrust/system/hip/detail/uninitialized_fill.h>
 #include <thrust/system/hip/detail/unique.h>
 #include <thrust/system/hip/detail/unique_by_key.h>
 
-// // fail
-// // ----------------
-// // fails with mixed types
+// fail
+// ----------------
+// fails with mixed types
 #include <thrust/system/hip/detail/reduce.h>
 
-// // mixed types are not compiling, commented in testing/scan.cu
-// #include <thrust/system/hip/detail/scan.h>
+// mixed types are not compiling, commented in testing/scan.cu
+#include <thrust/system/hip/detail/scan.h>
 
 // // stubs passed
 // // ----------------
 #include <thrust/system/hip/detail/binary_search.h>
-// #include <thrust/system/hip/detail/merge.h>
-// #include <thrust/system/hip/detail/scan_by_key.h>
+#include <thrust/system/hip/detail/merge.h>
+#include <thrust/system/hip/detail/scan_by_key.h>
 // #include <thrust/system/hip/detail/set_operations.h>
 #include <thrust/system/hip/detail/sort.h>
 

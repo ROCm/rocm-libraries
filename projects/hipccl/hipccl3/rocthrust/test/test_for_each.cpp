@@ -18,8 +18,7 @@
 // Thrust
 #include <thrust/memory.h>
 #include <thrust/for_each.h>
-// STREAMHPC TODO replace <thrust/detail/seq.h> with <thrust/execution_policy.h>
-#include <thrust/detail/seq.h>
+#include <thrust/execution_policy.h>
 #include <thrust/device_ptr.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/retag.h>
