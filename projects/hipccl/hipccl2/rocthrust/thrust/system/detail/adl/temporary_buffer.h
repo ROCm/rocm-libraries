@@ -31,6 +31,7 @@
 #if 0
 #include <thrust/system/cpp/detail/temporary_buffer.h>
 #include <thrust/system/cuda/detail/temporary_buffer.h>
+#include <thrust/system/hip/detail/temporary_buffer.h>
 #include <thrust/system/omp/detail/temporary_buffer.h>
 #include <thrust/system/tbb/detail/temporary_buffer.h>
 #endif
@@ -42,4 +43,3 @@
 #define __THRUST_DEVICE_SYSTEM_TEMPORARY_BUFFER_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/detail/temporary_buffer.h>
 #include __THRUST_DEVICE_SYSTEM_TEMPORARY_BUFFER_HEADER
 #undef __THRUST_DEVICE_SYSTEM_TEMPORARY_BUFFER_HEADER
-

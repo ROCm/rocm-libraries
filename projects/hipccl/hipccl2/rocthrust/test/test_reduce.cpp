@@ -23,7 +23,7 @@
 #include "test_header.hpp"
 
 TESTS_DEFINE(ReduceTests, FullTestsParams);
-TESTS_DEFINE(ReduceIntegerTests, VectorIntegerTestsParams);
+TESTS_DEFINE(ReduceIntegerTests, UnsignedIntegerTestsParams);
 
 template<typename T>
   struct plus_mod_10
@@ -134,11 +134,9 @@ TYPED_TEST(ReduceTests, TestReduceMixedTypes)
   }
 }
 
-// TODO: Check the plus_mod_10 test failer
-/*TYPED_TEST(ReduceIntegerTests, TestReduceWithOperator)
+TYPED_TEST(ReduceIntegerTests, TestReduceWithOperator)
 {
-  using Vector = typename TestFixture::input_type;
-  using T = typename Vector::value_type;
+  using T = typename TestFixture::input_type;
 
   const std::vector<size_t> sizes = get_sizes();
   for(auto size : sizes)
@@ -156,7 +154,7 @@ TYPED_TEST(ReduceTests, TestReduceMixedTypes)
 
     ASSERT_EQ(cpu_result, gpu_result);
   }
-}*/
+}
 
 template <typename T>
 struct plus_mod3

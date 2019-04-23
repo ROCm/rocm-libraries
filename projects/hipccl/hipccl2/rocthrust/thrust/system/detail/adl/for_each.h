@@ -31,6 +31,7 @@
 #if 0
 #include <thrust/system/cpp/detail/for_each.h>
 #include <thrust/system/cuda/detail/for_each.h>
+#include <thrust/system/hip/detail/for_each.h>
 #include <thrust/system/omp/detail/for_each.h>
 #include <thrust/system/tbb/detail/for_each.h>
 #endif
@@ -42,4 +43,3 @@
 #define __THRUST_DEVICE_SYSTEM_FOR_EACH_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/detail/for_each.h>
 #include __THRUST_DEVICE_SYSTEM_FOR_EACH_HEADER
 #undef __THRUST_DEVICE_SYSTEM_FOR_EACH_HEADER
-

@@ -280,7 +280,6 @@ void TestScanMixedTypes(void)
 
     // float -> float with plus<int> operator (int accumulator)
     thrust::inclusive_scan(float_input.begin(), float_input.end(), float_output.begin(), thrust::plus<int>());
-    // TODO: Something wrong
     ASSERT_FLOAT_EQ(float_output[0],  1.0);
     ASSERT_FLOAT_EQ(float_output[1],  3.0);
     ASSERT_FLOAT_EQ(float_output[2],  6.0);
@@ -315,8 +314,6 @@ void TestScanMixedTypes(void)
     ASSERT_EQ(float_output[3], 11.5);
 }
 
-// TODO: Mixed type problem
-/*
 TEST(ScanTests, TestScanMixedTypesHost)
 {
     TestScanMixedTypes< thrust::host_vector<int>, thrust::host_vector<float> >();
@@ -326,9 +323,7 @@ TEST(ScanTests, TestScanMixedTypesDevice)
 {
     TestScanMixedTypes< thrust::device_vector<int>, thrust::device_vector<float> >();
 }
-*/
 
-//TODO really slow (~2 min per type), re-enable when quicker.
 TYPED_TEST(ScanVariablesTests, TestScanWithOperator)
 {
     using T = typename TestFixture::input_type;
