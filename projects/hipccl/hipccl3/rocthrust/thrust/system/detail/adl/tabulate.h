@@ -31,6 +31,7 @@
 #if 0
 #include <thrust/system/cpp/detail/tabulate.h>
 #include <thrust/system/cuda/detail/tabulate.h>
+#include <thrust/system/hip/detail/tabulate.h>
 #include <thrust/system/omp/detail/tabulate.h>
 #include <thrust/system/tbb/detail/tabulate.h>
 #endif
@@ -42,4 +43,3 @@
 #define __THRUST_DEVICE_SYSTEM_TABULATE_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/detail/tabulate.h>
 #include __THRUST_DEVICE_SYSTEM_TABULATE_HEADER
 #undef __THRUST_DEVICE_SYSTEM_TABULATE_HEADER
-

@@ -76,7 +76,7 @@ DECLARE_VECTOR_UNITTEST(TestIsSorted);
 
 
 template<typename InputIterator>
-bool is_sorted(my_system &system, InputIterator first, InputIterator)
+bool is_sorted(my_system &system, InputIterator, InputIterator)
 {
   system.validate_dispatch();
   return false;
@@ -113,4 +113,3 @@ void TestIsSortedDispatchImplicit()
   ASSERT_EQUAL(13, vec.front());
 }
 DECLARE_UNITTEST(TestIsSortedDispatchImplicit);
-
