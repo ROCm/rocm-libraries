@@ -31,6 +31,7 @@
 #if 0
 #include <thrust/system/cpp/detail/transform.h>
 #include <thrust/system/cuda/detail/transform.h>
+#include <thrust/system/hip/detail/transform.h>
 #include <thrust/system/omp/detail/transform.h>
 #include <thrust/system/tbb/detail/transform.h>
 #endif
@@ -42,4 +43,3 @@
 #define __THRUST_DEVICE_SYSTEM_TRANSFORM_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/detail/transform.h>
 #include __THRUST_DEVICE_SYSTEM_TRANSFORM_HEADER
 #undef __THRUST_DEVICE_SYSTEM_TRANSFORM_HEADER
-

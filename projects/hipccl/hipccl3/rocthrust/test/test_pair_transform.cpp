@@ -75,7 +75,6 @@ TYPED_TEST(PairTransformTests, TestPairTransform)
 
     ASSERT_EQ_QUIET(h_result, d_result);
 
-    // TODO: add_pairs operator problem.
     // add pairs on the host
     thrust::transform(h_result.begin(), h_result.end(), h_result.begin(), h_result.begin(), add_pairs());
 

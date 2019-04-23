@@ -62,7 +62,8 @@ DECLARE_VECTOR_UNITTEST(TestIsPartitioned);
 
 
 template<typename InputIterator, typename Predicate>
-bool is_partitioned(my_system &system, InputIterator first, InputIterator, Predicate)
+__host__ __device__
+bool is_partitioned(my_system &system, InputIterator, InputIterator, Predicate)
 {
   system.validate_dispatch();
   return false;
@@ -81,6 +82,7 @@ DECLARE_UNITTEST(TestIsPartitionedDispatchExplicit);
 
 
 template<typename InputIterator, typename Predicate>
+__host__ __device__
 bool is_partitioned(my_tag, InputIterator first, InputIterator, Predicate)
 {
   *first = 13;
@@ -98,4 +100,3 @@ void TestIsPartitionedDispatchImplicit()
   ASSERT_EQUAL(13, vec.front());
 }
 DECLARE_UNITTEST(TestIsPartitionedDispatchImplicit);
-

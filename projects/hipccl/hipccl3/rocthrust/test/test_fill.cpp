@@ -161,7 +161,7 @@ TYPED_TEST(FillTests, TestFillNSimple)
   ASSERT_EQ(v[2], T(7));
   ASSERT_EQ(v[3], T(7));
   ASSERT_EQ(v[4], T(4));
-  ASSERT_EQ(v.begin() + 4, iter);
+  ASSERT_EQ_QUIET(v.begin() + 4, iter);
 
   iter = thrust::fill_n(v.begin() + 0, 3, T(8));
 
@@ -170,7 +170,7 @@ TYPED_TEST(FillTests, TestFillNSimple)
   ASSERT_EQ(v[2], T(8));
   ASSERT_EQ(v[3], T(7));
   ASSERT_EQ(v[4], T(4));
-  ASSERT_EQ(v.begin() + 3, iter);
+  ASSERT_EQ_QUIET(v.begin() + 3, iter);
 
   iter = thrust::fill_n(v.begin() + 2, 3, T(9));
 
@@ -179,7 +179,7 @@ TYPED_TEST(FillTests, TestFillNSimple)
   ASSERT_EQ(v[2], T(9));
   ASSERT_EQ(v[3], T(9));
   ASSERT_EQ(v[4], T(9));
-  ASSERT_EQ(v.end(), iter);
+  ASSERT_EQ_QUIET(v.end(), iter);
 
   iter = thrust::fill_n(v.begin(), v.size(), T(1));
 
@@ -188,7 +188,7 @@ TYPED_TEST(FillTests, TestFillNSimple)
   ASSERT_EQ(v[2], T(1));
   ASSERT_EQ(v[3], T(1));
   ASSERT_EQ(v[4], T(1));
-  ASSERT_EQ(v.end(), iter);
+  ASSERT_EQ_QUIET(v.end(), iter);
 
 }
 
@@ -206,8 +206,8 @@ TEST(FillTests, TestFillNDiscardIterator)
 
   thrust::discard_iterator<> reference(10);
 
-  ASSERT_EQ(reference, h_result);
-  ASSERT_EQ(reference, d_result);
+  ASSERT_EQ_QUIET(reference, h_result);
+  ASSERT_EQ_QUIET(reference, d_result);
 }
 
 TYPED_TEST(FillTests, TestFillNMixedTypes)
@@ -224,7 +224,7 @@ TYPED_TEST(FillTests, TestFillNMixedTypes)
   ASSERT_EQ(v[1], T(10));
   ASSERT_EQ(v[2], T(10));
   ASSERT_EQ(v[3], T(10));
-  ASSERT_EQ(v.end(), iter);
+  ASSERT_EQ_QUIET(v.end(), iter);
 
   iter = thrust::fill_n(v.begin(), v.size(), (float) 20);
 
@@ -232,7 +232,7 @@ TYPED_TEST(FillTests, TestFillNMixedTypes)
   ASSERT_EQ(v[1], T(20));
   ASSERT_EQ(v[2], T(20));
   ASSERT_EQ(v[3], T(20));
-  ASSERT_EQ(v.end(), iter);
+  ASSERT_EQ_QUIET(v.end(), iter);
 }
 
 
@@ -305,8 +305,7 @@ TYPED_TEST(FillTests, TestFillZipIterator)
   ASSERT_EQ(T(13), v3[2]);
 }
 
-// TODO: Implement tuple.
-/*TYPED_TEST(FillTests, TestFillTuple)
+TYPED_TEST(FillTests, TestFillTuple)
 {
   using Vector = typename TestFixture::input_type;
   using T = typename Vector::value_type;
@@ -318,8 +317,8 @@ TYPED_TEST(FillTests, TestFillZipIterator)
   thrust::fill(h.begin(), h.end(), Tuple(4,7));
   thrust::fill(d.begin(), d.end(), Tuple(4,7));
 
-  ASSERT_EQ(h, d);
-};*/
+  ASSERT_EQ_QUIET(h, d);
+};
 
 struct TypeWithTrivialAssigment
 {
