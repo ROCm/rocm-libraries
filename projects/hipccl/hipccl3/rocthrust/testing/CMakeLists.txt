@@ -58,7 +58,7 @@ endfunction()
 # ****************************************************************************
 
 # add_thrust_test("adjacent_difference")
-# add_thrust_test("advance")
+add_thrust_test("advance")
 add_thrust_test("allocator")
 add_thrust_test("binary_search")
 add_thrust_test("binary_search_descending")
