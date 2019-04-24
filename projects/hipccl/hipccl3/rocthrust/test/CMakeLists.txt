@@ -55,6 +55,7 @@ endfunction()
 # ****************************************************************************
 # Tests
 # ****************************************************************************
+add_hipthrust_test("thrust.hip.adjacent_difference" test_adjacent_difference.cpp)
 add_hipthrust_test("thrust.hip.advance" test_advance.cpp)
 add_hipthrust_test("thrust.hip.allocator" test_allocator.cpp)
 add_hipthrust_test("thrust.hip.binary_search" test_binary_search.cpp)
