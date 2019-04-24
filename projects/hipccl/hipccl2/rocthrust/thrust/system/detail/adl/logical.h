@@ -31,6 +31,7 @@
 #if 0
 #include <thrust/system/cpp/detail/logical.h>
 #include <thrust/system/cuda/detail/logical.h>
+#include <thrust/system/hip/detail/logical.h>
 #include <thrust/system/omp/detail/logical.h>
 #include <thrust/system/tbb/detail/logical.h>
 #endif
@@ -42,4 +43,3 @@
 #define __THRUST_DEVICE_SYSTEM_LOGICAL_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/detail/logical.h>
 #include __THRUST_DEVICE_SYSTEM_LOGICAL_HEADER
 #undef __THRUST_DEVICE_SYSTEM_LOGICAL_HEADER
-
