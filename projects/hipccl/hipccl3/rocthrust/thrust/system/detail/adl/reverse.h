@@ -31,6 +31,7 @@
 #if 0
 #include <thrust/system/cpp/detail/reverse.h>
 #include <thrust/system/cuda/detail/reverse.h>
+#include <thrust/system/hip/detail/reverse.h>
 #include <thrust/system/omp/detail/reverse.h>
 #include <thrust/system/tbb/detail/reverse.h>
 #endif
@@ -42,4 +43,3 @@
 #define __THRUST_DEVICE_SYSTEM_REVERSE_HEADER <__THRUST_DEVICE_SYSTEM_ROOT/detail/reverse.h>
 #include __THRUST_DEVICE_SYSTEM_REVERSE_HEADER
 #undef __THRUST_DEVICE_SYSTEM_REVERSE_HEADER
-

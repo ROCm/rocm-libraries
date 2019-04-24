@@ -514,7 +514,6 @@ TYPED_TEST(ScanByKeyVariablesTests, TestExclusiveScanByKeyInPlace)
     }
 }
 
-// TODO: Mixed type problem
 TEST(ScanByKeyTests, TestScanByKeyMixedTypes)
 {
     const unsigned int size = 113;
