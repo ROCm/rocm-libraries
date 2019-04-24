@@ -46,6 +46,21 @@ struct add_pairs
 }; // end add_pairs
 
 
+// TODO: Workaround, for issue:
+// issue 127
+struct maximum_pairs
+{
+  template <typename Pair1, typename Pair2>
+  __host__ __device__
+    Pair1 operator()(const Pair1 &x, const Pair2 &y)
+  {
+      //bool b = x.first < y.first || (!(y.first < x.first) && x.second < y.second);
+      //return b ? y : x;
+       return x.first < y.first || (!(y.first < x.first) && x.second < y.second) ? y : x;
+  } // end operator()
+}; // end maximum_pairs
+
+
 TYPED_TEST(PairScanVariablesTests, TestPairScan)
 {
   using T = typename TestFixture::input_type;
@@ -79,9 +94,10 @@ TYPED_TEST(PairScanVariablesTests, TestPairScan)
     thrust::inclusive_scan(d_pairs.begin(), d_pairs.end(), d_output.begin(), add_pairs());
     ASSERT_EQ_QUIET(h_output, d_output);
 
-    // scan with maximum (thrust issue #69)
-    thrust::inclusive_scan(h_pairs.begin(), h_pairs.end(), h_output.begin(), thrust::maximum<P>());
-    thrust::inclusive_scan(d_pairs.begin(), d_pairs.end(), d_output.begin(), thrust::maximum<P>());
+    // scan with maximum
+    // TODO: Workaround
+    thrust::inclusive_scan(h_pairs.begin(), h_pairs.end(), h_output.begin(), maximum_pairs()/*thrust::maximum<P>()*/);
+    thrust::inclusive_scan(d_pairs.begin(), d_pairs.end(), d_output.begin(), maximum_pairs()/*thrust::maximum<P>()*/);
     ASSERT_EQ_QUIET(h_output, d_output);
 
     // scan with plus
@@ -89,9 +105,10 @@ TYPED_TEST(PairScanVariablesTests, TestPairScan)
     thrust::exclusive_scan(d_pairs.begin(), d_pairs.end(), d_output.begin(), init, add_pairs());
     ASSERT_EQ_QUIET(h_output, d_output);
 
-    // scan with maximum (thrust issue #69)
-    thrust::exclusive_scan(h_pairs.begin(), h_pairs.end(), h_output.begin(), init, thrust::maximum<P>());
-    thrust::exclusive_scan(d_pairs.begin(), d_pairs.end(), d_output.begin(), init, thrust::maximum<P>());
+    // scan with maximum
+    // TODO: Workaround
+    thrust::exclusive_scan(h_pairs.begin(), h_pairs.end(), h_output.begin(), init, maximum_pairs()/*thrust::maximum<P>()*/);
+    thrust::exclusive_scan(d_pairs.begin(), d_pairs.end(), d_output.begin(), init, maximum_pairs()/*thrust::maximum<P>()*/);
     ASSERT_EQ_QUIET(h_output, d_output);
   }
 }
