@@ -108,10 +108,7 @@ inclusive_scan(Policy                 &policy,
                                     debug_sync),
             "scan failed on 1st step");
 
-    hipDeviceSynchronize();
-
     // Allocate temporary storage.
-    temp_storage_bytes = rocprim::detail::align_size(temp_storage_bytes);
     d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes);
     hip_rocprim::throw_on_error(hipGetLastError(),
                                 "scan failed to get memory buffer");
@@ -170,10 +167,7 @@ exclusive_scan(Policy                 &policy,
                                     debug_sync),
             "scan failed on 1st step");
 
-    hipDeviceSynchronize();
-
     // Allocate temporary storage.
-    temp_storage_bytes = rocprim::detail::align_size(temp_storage_bytes);
     d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes);
     hip_rocprim::throw_on_error(hipGetLastError(),
                                 "scan failed to get memory buffer");
