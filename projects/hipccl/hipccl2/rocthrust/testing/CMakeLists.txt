@@ -31,7 +31,7 @@ function(add_thrust_test TEST_TARGET)
     )
     target_link_libraries(${TEST_TARGET}
         PRIVATE
-            hipthrust
+            rocthrust
             roc::rocprim_hip
             ${GTEST_BOTH_LIBRARIES}
     )

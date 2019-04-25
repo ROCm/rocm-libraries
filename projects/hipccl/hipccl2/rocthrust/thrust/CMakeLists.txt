@@ -27,8 +27,8 @@ target_include_directories(thrust_headers
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
 )
 
-add_library(hipthrust INTERFACE)
-target_link_libraries(hipthrust
+add_library(rocthrust INTERFACE)
+target_link_libraries(rocthrust
   INTERFACE
     thrust_headers
     hcc::hccrt
@@ -36,13 +36,13 @@ target_link_libraries(hipthrust
 )
 # Remove this check when we no longer build with older rocm stack(ie < 1.8.2)
 if(TARGET hip::device)
-  target_link_libraries(hipthrust INTERFACE hip::device)
+  target_link_libraries(rocthrust INTERFACE hip::device)
 else()
-  target_link_libraries(hipthrust INTERFACE hip::hip_hcc hip::hip_device)
+  target_link_libraries(rocthrust INTERFACE hip::hip_hcc hip::hip_device)
 endif()
 
 # We will use rocPRIM HIP API
-target_compile_definitions(hipthrust
+target_compile_definitions(rocthrust
   INTERFACE
     ROCPRIM_HIP_API=1
 )
