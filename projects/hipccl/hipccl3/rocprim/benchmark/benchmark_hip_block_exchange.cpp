@@ -56,6 +56,19 @@ const size_t DEFAULT_N = 1024 * 1024 * 128;
 
 namespace rp = rocprim;
 
+template<
+    class Runner,
+    class T,
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    unsigned int Trials
+>
+__global__
+void kernel(const T * d_input, T * d_output)
+{
+    Runner::template run<T, BlockSize, ItemsPerThread, Trials>(d_input, d_output);
+}
+
 struct blocked_to_striped
 {
     template<
@@ -64,8 +77,8 @@ struct blocked_to_striped
         unsigned int ItemsPerThread,
         unsigned int Trials
     >
-    __global__
-    static void kernel(const T * d_input, T * d_output)
+    __device__
+    static void run(const T * d_input, T * d_output)
     {
         const unsigned int lid = hipThreadIdx_x;
         const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
@@ -92,8 +105,8 @@ struct striped_to_blocked
         unsigned int ItemsPerThread,
         unsigned int Trials
     >
-    __global__
-    static void kernel(const T * d_input, T * d_output)
+    __device__
+    static void run(const T * d_input, T * d_output)
     {
         const unsigned int lid = hipThreadIdx_x;
         const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
@@ -120,8 +133,8 @@ struct blocked_to_warp_striped
         unsigned int ItemsPerThread,
         unsigned int Trials
     >
-    __global__
-    static void kernel(const T * d_input, T * d_output)
+    __device__
+    static void run(const T * d_input, T * d_output)
     {
         const unsigned int lid = hipThreadIdx_x;
         const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
@@ -148,8 +161,8 @@ struct warp_striped_to_blocked
         unsigned int ItemsPerThread,
         unsigned int Trials
     >
-    __global__
-    static void kernel(const T * d_input, T * d_output)
+    __device__
+    static void run(const T * d_input, T * d_output)
     {
         const unsigned int lid = hipThreadIdx_x;
         const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
@@ -176,8 +189,8 @@ struct scatter_to_blocked
         unsigned int ItemsPerThread,
         unsigned int Trials
     >
-    __global__
-    static void kernel(const T * d_input, T * d_output)
+    __device__
+    static void run(const T * d_input, T * d_output)
     {
         const unsigned int lid = hipThreadIdx_x;
         const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
@@ -206,8 +219,8 @@ struct scatter_to_striped
         unsigned int ItemsPerThread,
         unsigned int Trials
     >
-    __global__
-    static void kernel(const T * d_input, T * d_output)
+    __device__
+    static void run(const T * d_input, T * d_output)
     {
         const unsigned int lid = hipThreadIdx_x;
         const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
@@ -267,7 +280,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
         auto start = std::chrono::high_resolution_clock::now();
 
         hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(Benchmark::template kernel<T, BlockSize, ItemsPerThread, Trials>),
+            HIP_KERNEL_NAME(kernel<Benchmark, T, BlockSize, ItemsPerThread, Trials>),
             dim3(size/items_per_block), dim3(BlockSize), 0, stream,
             d_input, d_output
         );
