@@ -67,8 +67,8 @@ build:rocm:
     - build/gtest/
     - build/CMakeCache.txt
     - build/CTestTestfile.cmake
-    - build/hipthrust*.deb
-    - build/hipthrust*.zip
+    - build/rocthrust*.deb
+    - build/rocthrust*.zip
     expire_in: 2 weeks
 
 .test:

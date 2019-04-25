@@ -70,7 +70,7 @@ configuration files.
 find_package(rocprim REQUIRED CONFIG PATHS "/opt/rocm/rocprim")
 
 # "/opt/rocm" - default install prefix
-find_package(hipcub REQUIRED CONFIG PATHS "/opt/rocm/rocThrust")
+find_package(rocthrust REQUIRED CONFIG PATHS "/opt/rocm/rocThrust")
 
 ...
 includes rocThrust headers and roc::rocprim_hip target
@@ -80,7 +80,7 @@ target_link_libraries(<your_target> rocthrust)
 ## Running Unit Tests
 
 ```
-# Go to hipCUB build directory
+# Go to rocThrust build directory
 cd rocThrust; cd build
 
 # To run all tests
