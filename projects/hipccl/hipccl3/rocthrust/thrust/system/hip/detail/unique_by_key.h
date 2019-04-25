@@ -61,103 +61,100 @@ unique_by_key_copy(
 
 namespace hip_rocprim {
 
-// XXX  it should be possible to unify unique & unique_by_key into a single
-//      agent with various specializations, similar to what is done
-//      with partition
 namespace __unique_by_key {
 
-  template <class KeyType,
-            class ValueType,
-            class Predicate>
-  struct predicate_wrapper
-  {
-      Predicate predicate;
-      typedef rocprim::tuple<KeyType, ValueType> pair_type;
+    template <class KeyType,
+              class ValueType,
+              class Predicate>
+    struct predicate_wrapper
+    {
+        Predicate predicate;
+        typedef rocprim::tuple<KeyType, ValueType> pair_type;
 
-      THRUST_HIP_FUNCTION
-      predicate_wrapper(Predicate p) : predicate(p) {}
+        THRUST_HIP_FUNCTION
+        predicate_wrapper(Predicate p) : predicate(p) {}
 
-      bool THRUST_HIP_DEVICE_FUNCTION
-      operator()(pair_type const &lhs, pair_type const &rhs) const
-      {
-          return predicate(rocprim::get<0>(lhs), rocprim::get<0>(rhs));
-      }
-  };    // struct predicate_wrapper
-
-
-  template <class Policy,
-            class KeyInputIt,
-            class ValInputIt,
-            class KeyOutputIt,
-            class ValOutputIt,
-            class BinaryPred>
-  pair<KeyOutputIt, ValOutputIt> THRUST_HIP_RUNTIME_FUNCTION
-  unique_by_key(Policy &    policy,
-                KeyInputIt  keys_first,
-                KeyInputIt  keys_last,
-                ValInputIt  values_first,
-                KeyOutputIt keys_result,
-                ValOutputIt values_result,
-                BinaryPred  binary_pred)
-  {
-    typedef size_t size_type;
-
-    typedef typename iterator_traits<KeyInputIt>::value_type KeyType;
-    typedef typename iterator_traits<ValInputIt>::value_type ValueType;
-
-    predicate_wrapper<KeyType, ValueType, BinaryPred> wrapped_binary_pred(binary_pred);
-
-    size_type    num_items          = static_cast<size_type>(thrust::distance(keys_first, keys_last));
-    void *       d_temp_storage     = NULL;
-    size_t       temp_storage_bytes = 0;
-    hipStream_t  stream             = hip_rocprim::stream(policy);
-    size_type *  d_num_selected_out = NULL;
-    bool         debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
-
-    if (num_items == 0)
-      return thrust::make_pair(keys_result, values_result);
+        bool THRUST_HIP_DEVICE_FUNCTION
+        operator()(pair_type const &lhs, pair_type const &rhs) const
+        {
+            return predicate(rocprim::get<0>(lhs), rocprim::get<0>(rhs));
+        }
+    };    // struct predicate_wrapper
 
 
+    template <class Policy,
+              class KeyInputIt,
+              class ValInputIt,
+              class KeyOutputIt,
+              class ValOutputIt,
+              class BinaryPred>
+    pair<KeyOutputIt, ValOutputIt> THRUST_HIP_RUNTIME_FUNCTION
+    unique_by_key(Policy &    policy,
+                  KeyInputIt  keys_first,
+                  KeyInputIt  keys_last,
+                  ValInputIt  values_first,
+                  KeyOutputIt keys_result,
+                  ValOutputIt values_result,
+                  BinaryPred  binary_pred)
+    {
+        typedef size_t size_type;
 
-    hipError_t status;
-    status = rocprim::unique(d_temp_storage,
-                             temp_storage_bytes,
-                             rocprim::make_zip_iterator(rocprim::make_tuple(keys_first, values_first)),
-                             rocprim::make_zip_iterator(rocprim::make_tuple(keys_result, values_result)),
-                             d_num_selected_out,
-                             num_items,
-                             wrapped_binary_pred,
-                             stream,
-                             debug_sync);
-    hip_rocprim::throw_on_error(status, "unique_by_key failed on 1st step");
+        typedef typename iterator_traits<KeyInputIt>::value_type KeyType;
+        typedef typename iterator_traits<ValInputIt>::value_type ValueType;
 
-    temp_storage_bytes = rocprim::detail::align_size(temp_storage_bytes);
-    d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes + sizeof(size_type));
-    hip_rocprim::throw_on_error(hipGetLastError(),
-                                "unique_by_key failed to get memory buffer");
+        predicate_wrapper<KeyType, ValueType, BinaryPred> wrapped_binary_pred(binary_pred);
 
-    d_num_selected_out = reinterpret_cast<size_type *>(
-      reinterpret_cast<char *>(d_temp_storage) + temp_storage_bytes);
+        size_type    num_items          = static_cast<size_type>(thrust::distance(keys_first, keys_last));
+        void *       d_temp_storage     = NULL;
+        size_t       temp_storage_bytes = 0;
+        hipStream_t  stream             = hip_rocprim::stream(policy);
+        size_type *  d_num_selected_out = NULL;
+        bool         debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
 
-    status = rocprim::unique(d_temp_storage,
-                             temp_storage_bytes,
-                             rocprim::make_zip_iterator(rocprim::make_tuple(keys_first, values_first)),
-                             rocprim::make_zip_iterator(rocprim::make_tuple(keys_result, values_result)),
-                             d_num_selected_out,
-                             num_items,
-                             wrapped_binary_pred,
-                             stream,
-                             debug_sync);
-    hip_rocprim::throw_on_error(status, "unique_by_key failed on 2nd step");
+        if (num_items == 0)
+            return thrust::make_pair(keys_result, values_result);
 
-    size_type num_selected = get_value(policy, d_num_selected_out);
+        // Determine temporary device storage requirements.
+        hip_rocprim::throw_on_error(
+            rocprim::unique(d_temp_storage,
+                            temp_storage_bytes,
+                            rocprim::make_zip_iterator(rocprim::make_tuple(keys_first, values_first)),
+                            rocprim::make_zip_iterator(rocprim::make_tuple(keys_result, values_result)),
+                            d_num_selected_out,
+                            num_items,
+                            wrapped_binary_pred,
+                            stream,
+                            debug_sync),
+            "unique_by_key failed on 1st step");
 
-    hip_rocprim::return_memory_buffer(policy, d_temp_storage);
-    hip_rocprim::throw_on_error(hipGetLastError(),
-                                "unique_by_key failed to return memory buffer");
+        // Allocate temporary storage.
+        d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes + sizeof(size_type));
+        hip_rocprim::throw_on_error(hipGetLastError(),
+                                    "unique_by_key failed to get memory buffer");
 
-    return thrust::make_pair(keys_result + num_selected, values_result + num_selected);
-  }
+        d_num_selected_out = reinterpret_cast<size_type *>(
+          reinterpret_cast<char *>(d_temp_storage) + temp_storage_bytes);
+
+        hip_rocprim::throw_on_error(
+            rocprim::unique(d_temp_storage,
+                            temp_storage_bytes,
+                            rocprim::make_zip_iterator(rocprim::make_tuple(keys_first, values_first)),
+                            rocprim::make_zip_iterator(rocprim::make_tuple(keys_result, values_result)),
+                            d_num_selected_out,
+                            num_items,
+                            wrapped_binary_pred,
+                            stream,
+                            debug_sync),
+            "unique_by_key failed on 2nd step");
+
+        size_type num_selected = get_value(policy, d_num_selected_out);
+
+        hip_rocprim::return_memory_buffer(policy, d_temp_storage);
+        hip_rocprim::throw_on_error(hipGetLastError(),
+                                    "unique_by_key failed to return memory buffer");
+
+        return thrust::make_pair(keys_result + num_selected, values_result + num_selected);
+    }
 } // namespace __unique_by_key
 
 //-------------------------

@@ -104,7 +104,7 @@ namespace __reduce {
         // Allocate temporary storage.
         d_temp_storage = hip_rocprim::get_memory_buffer(policy, sizeof(T) + temp_storage_bytes);
         hip_rocprim::throw_on_error(hipGetLastError(),
-                                    "reduce_by_key failed to get memory buffer");
+                                    "reduce failed to get memory buffer");
 
         d_ret_ptr = reinterpret_cast<T*>(
             reinterpret_cast<char *>(d_temp_storage) + temp_storage_bytes);
@@ -144,12 +144,6 @@ reduce_n(execution_policy<Derived> &policy,
          T                          init,
          BinaryOp                   binary_op)
 {
-  /*THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((
-    rocprim::reduce<rocprim::default_config, InputIt, T*, T, BinaryOp>
-  ));
-  THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((
-    hip_rocprim::get_value<Derived, T*>
-  ));*/
   THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((
     __reduce::reduce<Derived, InputIt, Size, T, BinaryOp>
   ));
