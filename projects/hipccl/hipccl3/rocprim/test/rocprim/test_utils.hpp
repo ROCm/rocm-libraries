@@ -241,9 +241,8 @@ OutputIt host_inclusive_scan(InputIt first, InputIt last,
                              OutputIt d_first, BinaryOperation op)
 {
     using input_type = typename std::iterator_traits<InputIt>::value_type;
-    using output_type = typename std::iterator_traits<OutputIt>::value_type;
     using result_type = typename ::rocprim::detail::match_result_type<
-        input_type, output_type, BinaryOperation
+        input_type, BinaryOperation
     >::type;
 
     if (first == last) return d_first;
@@ -264,9 +263,8 @@ OutputIt host_exclusive_scan(InputIt first, InputIt last,
                              BinaryOperation op)
 {
     using input_type = typename std::iterator_traits<InputIt>::value_type;
-    using output_type = typename std::iterator_traits<OutputIt>::value_type;
     using result_type = typename ::rocprim::detail::match_result_type<
-        input_type, output_type, BinaryOperation
+        input_type, BinaryOperation
     >::type;
 
     if (first == last) return d_first;
@@ -289,9 +287,8 @@ OutputIt host_exclusive_scan_by_key(InputIt first, InputIt last, KeyIt k_first,
                                     BinaryOperation op, KeyCompare key_compare_op)
 {
     using input_type = typename std::iterator_traits<InputIt>::value_type;
-    using output_type = typename std::iterator_traits<OutputIt>::value_type;
     using result_type = typename ::rocprim::detail::match_result_type<
-        input_type, output_type, BinaryOperation
+        input_type, BinaryOperation
     >::type;
 
     if (first == last) return d_first;
