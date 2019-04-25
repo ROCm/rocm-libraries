@@ -60,68 +60,70 @@ namespace hip_rocprim {
 
 namespace __unique {
 
-  template <class Policy,
-            class ItemsInputIt,
-            class ItemsOutputIt,
-            class BinaryPred>
-  ItemsOutputIt THRUST_HIP_RUNTIME_FUNCTION
-  unique(Policy &      policy,
-         ItemsInputIt  items_first,
-         ItemsInputIt  items_last,
-         ItemsOutputIt items_result,
-         BinaryPred    binary_pred)
-  {
-    typedef size_t size_type;
+    template <class Policy,
+              class ItemsInputIt,
+              class ItemsOutputIt,
+              class BinaryPred>
+    ItemsOutputIt THRUST_HIP_RUNTIME_FUNCTION
+    unique(Policy &      policy,
+           ItemsInputIt  items_first,
+           ItemsInputIt  items_last,
+           ItemsOutputIt items_result,
+           BinaryPred    binary_pred)
+    {
+        typedef size_t size_type;
 
-    size_type    num_items          = static_cast<size_type>(thrust::distance(items_first, items_last));
-    void *       d_temp_storage     = NULL;
-    size_t       temp_storage_bytes = 0;
-    hipStream_t  stream             = hip_rocprim::stream(policy);
-    size_type *  d_num_selected_out = NULL;
-    bool         debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
+        size_type    num_items          = static_cast<size_type>(thrust::distance(items_first, items_last));
+        void *       d_temp_storage     = NULL;
+        size_t       temp_storage_bytes = 0;
+        hipStream_t  stream             = hip_rocprim::stream(policy);
+        size_type *  d_num_selected_out = NULL;
+        bool         debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
 
-    if (num_items == 0)
-     return items_result;
+        if (num_items == 0)
+           return items_result;
 
-    hipError_t status;
-    status = rocprim::unique(d_temp_storage,
-                             temp_storage_bytes,
-                             items_first,
-                             items_result,
-                             d_num_selected_out,
-                             num_items,
-                             binary_pred,
-                             stream,
-                             debug_sync);
-    hip_rocprim::throw_on_error(status, "unique failed on 1st step");
+        // Determine temporary device storage requirements.
+        hip_rocprim::throw_on_error(
+            rocprim::unique(d_temp_storage,
+                            temp_storage_bytes,
+                            items_first,
+                            items_result,
+                            d_num_selected_out,
+                            num_items,
+                            binary_pred,
+                            stream,
+                            debug_sync),
+            "unique failed on 1st step");
 
-    temp_storage_bytes = rocprim::detail::align_size(temp_storage_bytes);
-    d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes + sizeof(size_type));
-    hip_rocprim::throw_on_error(hipGetLastError(),
-                               "unique failed to get memory buffer");
+        // Allocate temporary storage.
+        d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes + sizeof(size_type));
+        hip_rocprim::throw_on_error(hipGetLastError(),
+                                   "unique failed to get memory buffer");
 
-    d_num_selected_out = reinterpret_cast<size_type *>(
-     reinterpret_cast<char *>(d_temp_storage) + temp_storage_bytes);
+        d_num_selected_out = reinterpret_cast<size_type *>(
+         reinterpret_cast<char *>(d_temp_storage) + temp_storage_bytes);
 
-    status = rocprim::unique(d_temp_storage,
-                             temp_storage_bytes,
-                             items_first,
-                             items_result,
-                             d_num_selected_out,
-                             num_items,
-                             binary_pred,
-                             stream,
-                             debug_sync);
-    hip_rocprim::throw_on_error(status, "unique failed on 2nd step");
+        hip_rocprim::throw_on_error(
+            rocprim::unique(d_temp_storage,
+                            temp_storage_bytes,
+                            items_first,
+                            items_result,
+                            d_num_selected_out,
+                            num_items,
+                            binary_pred,
+                            stream,
+                            debug_sync),
+            "unique failed on 2nd step");
 
-    size_type num_selected = get_value(policy, d_num_selected_out);
+        size_type num_selected = get_value(policy, d_num_selected_out);
 
-    hip_rocprim::return_memory_buffer(policy, d_temp_storage);
-    hip_rocprim::throw_on_error(hipGetLastError(),
-                               "unique failed to return memory buffer");
+        hip_rocprim::return_memory_buffer(policy, d_temp_storage);
+        hip_rocprim::throw_on_error(hipGetLastError(),
+                                   "unique failed to return memory buffer");
 
-    return items_result + num_selected;
-  }
+        return items_result + num_selected;
+    }
 }    // namespace __unique
 
 //-------------------------
