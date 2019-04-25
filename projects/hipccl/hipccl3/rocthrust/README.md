@@ -94,10 +94,10 @@ ctest
 
 ```
 # go to rocThrust doc directory
-cd rocThrust; cd doc
+cd rocThrust;
 
 # run doxygen
-doxygen Doxyfile
+doxygen doc/thrust.dox
 
 # open html/index.html
 
