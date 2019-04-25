@@ -91,7 +91,7 @@ struct flag_heads
                 rp::block_store_direct_striped<BlockSize>(lid, d_output.data() + block_offset, input);
             }
         );
-    } 
+    }
 };
 
 struct flag_tails
@@ -114,7 +114,7 @@ struct flag_tails
             {
                 const unsigned int lid = idx.local[0];
                 const unsigned int block_offset = idx.tile[0] * ItemsPerThread * BlockSize;
-                
+
                 T input[ItemsPerThread];
                 rp::block_load_direct_striped<BlockSize>(lid, d_input.data() + block_offset, input);
 
@@ -154,7 +154,7 @@ struct flag_heads_and_tails
         bool WithTile,
         unsigned int Trials
     >
-static void run(const hc::array<T> & d_input, const hc::array<T> & d_output,
+    static void run(const hc::array<T> & d_input, const hc::array<T> & d_output,
                     hc::accelerator_view acc_view, size_t size)
     {
         const size_t grid_size = size / ItemsPerThread;
@@ -304,7 +304,7 @@ int main(int argc, char *argv[])
     benchmark::Initialize(&argc, argv);
     const size_t size = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
-    
+
     // HC
     hc::accelerator acc;
     auto acc_view = acc.get_default_view();
