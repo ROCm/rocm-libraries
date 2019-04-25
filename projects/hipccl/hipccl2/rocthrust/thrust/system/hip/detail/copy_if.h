@@ -77,56 +77,58 @@ copy_if(Policy   &policy,
         OutputIt  output,
         Predicate predicate)
 {
-  typedef typename iterator_traits<InputIt>::difference_type size_type;
+    typedef typename iterator_traits<InputIt>::difference_type size_type;
 
-  size_type   num_items          = thrust::distance(first, last);
-  void *      d_temp_storage     = NULL;
-  size_t      temp_storage_bytes = 0;
-  hipStream_t stream             = hip_rocprim::stream(policy);
-  size_type * d_num_selected_out = NULL;
-  bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
+    size_type   num_items          = thrust::distance(first, last);
+    void *      d_temp_storage     = NULL;
+    size_t      temp_storage_bytes = 0;
+    hipStream_t stream             = hip_rocprim::stream(policy);
+    size_type * d_num_selected_out = NULL;
+    bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
 
-  if (num_items == 0)
-    return output;
+    if (num_items == 0)
+        return output;
 
-  hipError_t status;
-  status = rocprim::select(d_temp_storage,
-                           temp_storage_bytes,
-                           first,
-                           output,
-                           d_num_selected_out,
-                           num_items,
-                           predicate,
-                           stream,
-                           debug_sync);
-  hip_rocprim::throw_on_error(status, "copy_if failed on 1st step");
+    // Determine temporary device storage requirements.
+    hip_rocprim::throw_on_error(
+        rocprim::select(d_temp_storage,
+                        temp_storage_bytes,
+                        first,
+                        output,
+                        d_num_selected_out,
+                        num_items,
+                        predicate,
+                        stream,
+                        debug_sync),
+        "copy_if failed on 1st step");
 
-  temp_storage_bytes = rocprim::detail::align_size(temp_storage_bytes);
-  d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes + sizeof(size_type));
-  hip_rocprim::throw_on_error(hipGetLastError(),
-                              "copy_if failed to get memory buffer");
+    // Allocate temporary storage.
+    d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes + sizeof(size_type));
+    hip_rocprim::throw_on_error(hipGetLastError(),
+                                "copy_if failed to get memory buffer");
 
-  d_num_selected_out = reinterpret_cast<size_type *>(
-    reinterpret_cast<char *>(d_temp_storage) + temp_storage_bytes);
+    d_num_selected_out = reinterpret_cast<size_type *>(
+      reinterpret_cast<char *>(d_temp_storage) + temp_storage_bytes);
 
-  status = rocprim::select(d_temp_storage,
-                           temp_storage_bytes,
-                           first,
-                           output,
-                           d_num_selected_out,
-                           num_items,
-                           predicate,
-                           stream,
-                           debug_sync);
-  hip_rocprim::throw_on_error(status, "copy_if failed on 2nd step");
+    hip_rocprim::throw_on_error(
+        rocprim::select(d_temp_storage,
+                             temp_storage_bytes,
+                             first,
+                             output,
+                             d_num_selected_out,
+                             num_items,
+                             predicate,
+                             stream,
+                             debug_sync),
+        "copy_if failed on 2nd step");
 
-  size_type num_selected = get_value(policy, d_num_selected_out);
+    size_type num_selected = get_value(policy, d_num_selected_out);
 
-  hip_rocprim::return_memory_buffer(policy, d_temp_storage);
-  hip_rocprim::throw_on_error(hipGetLastError(),
-                              "copy_if failed to return memory buffer");
+    hip_rocprim::return_memory_buffer(policy, d_temp_storage);
+    hip_rocprim::throw_on_error(hipGetLastError(),
+                                "copy_if failed to return memory buffer");
 
-  return output + num_selected;
+    return output + num_selected;
 }
 
 template <class Policy,
@@ -142,58 +144,60 @@ copy_if(Policy   &policy,
         OutputIt  output,
         Predicate predicate)
 {
-  typedef typename iterator_traits<InputIt>::difference_type size_type;
+    typedef typename iterator_traits<InputIt>::difference_type size_type;
 
-  size_type   num_items          = thrust::distance(first, last);
-  void *      d_temp_storage     = NULL;
-  size_t      temp_storage_bytes = 0;
-  hipStream_t stream             = hip_rocprim::stream(policy);
-  size_type * d_num_selected_out = NULL;
-  bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
+    size_type   num_items          = thrust::distance(first, last);
+    void *      d_temp_storage     = NULL;
+    size_t      temp_storage_bytes = 0;
+    hipStream_t stream             = hip_rocprim::stream(policy);
+    size_type * d_num_selected_out = NULL;
+    bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
 
-  if (num_items == 0)
-    return output;
+    if (num_items == 0)
+      return output;
 
-  auto flags = thrust::make_transform_iterator(stencil, predicate);
+    auto flags = thrust::make_transform_iterator(stencil, predicate);
 
-  hipError_t status;
-  status = rocprim::select(d_temp_storage,
-                           temp_storage_bytes,
-                           first,
-                           flags,
-                           output,
-                           d_num_selected_out,
-                           num_items,
-                           stream,
-                           debug_sync);
-  hip_rocprim::throw_on_error(status, "copy_if failed on 1st step");
+    // Determine temporary device storage requirements.
+    hip_rocprim::throw_on_error(
+        rocprim::select(d_temp_storage,
+                        temp_storage_bytes,
+                        first,
+                        flags,
+                        output,
+                        d_num_selected_out,
+                        num_items,
+                        stream,
+                        debug_sync),
+        "copy_if failed on 1st step");
 
-  temp_storage_bytes = rocprim::detail::align_size(temp_storage_bytes);
-  d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes + sizeof(size_type));
-  hip_rocprim::throw_on_error(hipGetLastError(),
-                              "copy_if failed to get memory buffer");
+    // Allocate temporary storage.
+    d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes + sizeof(size_type));
+    hip_rocprim::throw_on_error(hipGetLastError(),
+                                "copy_if failed to get memory buffer");
 
-  d_num_selected_out = reinterpret_cast<size_type *>(
-    reinterpret_cast<char *>(d_temp_storage) + temp_storage_bytes);
+    d_num_selected_out = reinterpret_cast<size_type *>(
+      reinterpret_cast<char *>(d_temp_storage) + temp_storage_bytes);
 
-  status = rocprim::select(d_temp_storage,
-                           temp_storage_bytes,
-                           first,
-                           flags,
-                           output,
-                           d_num_selected_out,
-                           num_items,
-                           stream,
-                           debug_sync);
-  hip_rocprim::throw_on_error(status, "copy_if failed on 2nd step");
+    hip_rocprim::throw_on_error(
+        rocprim::select(d_temp_storage,
+                        temp_storage_bytes,
+                        first,
+                        flags,
+                        output,
+                        d_num_selected_out,
+                        num_items,
+                        stream,
+                        debug_sync),
+        "copy_if failed on 2nd step");
 
-  size_type num_selected = get_value(policy, d_num_selected_out);
+    size_type num_selected = get_value(policy, d_num_selected_out);
 
-  hip_rocprim::return_memory_buffer(policy, d_temp_storage);
-  hip_rocprim::throw_on_error(hipGetLastError(),
-                              "copy_if failed to return memory buffer");
+    hip_rocprim::return_memory_buffer(policy, d_temp_storage);
+    hip_rocprim::throw_on_error(hipGetLastError(),
+                                "copy_if failed to return memory buffer");
 
-  return output + num_selected;
+    return output + num_selected;
 }
 
 } // namespace __copy_if

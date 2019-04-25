@@ -65,6 +65,73 @@ reduce(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
 
 namespace hip_rocprim {
 
+namespace __reduce {
+
+    template <class Policy,
+              class InputIt,
+              class Size,
+              class T,
+              class BinaryOp>
+    T THRUST_HIP_RUNTIME_FUNCTION
+    reduce(Policy & policy,
+           InputIt  first,
+           Size     num_items,
+           T        init,
+           BinaryOp binary_op)
+    {
+        if (num_items == 0)
+            return init;
+
+        void *       d_temp_storage     = NULL;
+        size_t       temp_storage_bytes = 0;
+        hipStream_t  stream             = hip_rocprim::stream(policy);
+        T *          d_ret_ptr          = NULL;
+        bool         debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
+
+        // Determine temporary device storage requirements.
+        hip_rocprim::throw_on_error(
+            rocprim::reduce(d_temp_storage,
+                            temp_storage_bytes,
+                            first,
+                            d_ret_ptr,
+                            init,
+                            num_items,
+                            binary_op,
+                            stream,
+                            debug_sync),
+            "reduce failed on 1st step");
+
+        // Allocate temporary storage.
+        d_temp_storage = hip_rocprim::get_memory_buffer(policy, sizeof(T) + temp_storage_bytes);
+        hip_rocprim::throw_on_error(hipGetLastError(),
+                                    "reduce failed to get memory buffer");
+
+        d_ret_ptr = reinterpret_cast<T*>(
+            reinterpret_cast<char *>(d_temp_storage) + temp_storage_bytes);
+
+        hip_rocprim::throw_on_error(
+            rocprim::reduce(d_temp_storage,
+                            temp_storage_bytes,
+                            first,
+                            d_ret_ptr,
+                            init,
+                            num_items,
+                            binary_op,
+                            stream,
+                            debug_sync),
+            "reduce failed on 2nd step");
+
+        T return_value = hip_rocprim::get_value(policy, d_ret_ptr);
+
+        hip_rocprim::return_memory_buffer(policy, d_temp_storage);
+        hip_rocprim::throw_on_error(hipGetLastError(),
+                                    "reduce failed to return memory buffer");
+
+        return return_value;
+    }
+}
+
+
 //-------------------------
 // Thrust API entry points
 //-------------------------
@@ -78,51 +145,20 @@ reduce_n(execution_policy<Derived> &policy,
          BinaryOp                   binary_op)
 {
   THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((
-    rocprim::reduce<rocprim::default_config, InputIt, T*, T, BinaryOp>
-  ));
-  THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((
-    hip_rocprim::get_value<Derived, T*>
+    __reduce::reduce<Derived, InputIt, Size, T, BinaryOp>
   ));
 #if __THRUST_HAS_HIPRT__
-  hipStream_t stream = hip_rocprim::stream(policy);
-
-
-  // Determine temporary device storage requirements.
-  T* ret_ptr = NULL;
-  size_t tmp_size = 0;
-  hip_rocprim::throw_on_error(
-    rocprim::reduce(nullptr, tmp_size,
-                    first, ret_ptr, init, num_items, binary_op,
-                    stream, THRUST_HIP_DEBUG_SYNC_FLAG),
-    "after reduction step 1");
-
-    // Allocate temporary storage.
-
-    detail::temporary_array<detail::uint8_t, Derived>
-      tmp(policy, sizeof(T) + tmp_size);
-
-  // Run reduction.
-
-  // `tmp.begin()` yields a `normal_iterator`, which dereferences to a
-  // `reference`, which has an `operator&` that returns a `pointer`, which
-  // has a `.get` method that returns a raw pointer, which we can (finally)
-  // `static_cast` to `void*`.
-  //
-  // The array was dynamically allocated, so we assume that it's suitably
-  // aligned for any type of data. `malloc`/`cudaMalloc`/`new`/`std::allocator`
-  // make this guarantee.
-  ret_ptr = detail::aligned_reinterpret_cast<T*>((&*tmp.begin()).get());
-  void* tmp_ptr = static_cast<void*>((&*(tmp.begin() + sizeof(T))).get());
-  hip_rocprim::throw_on_error(
-    rocprim::reduce(tmp_ptr, tmp_size,
-                    first, ret_ptr, init, num_items, binary_op,
-                    stream, THRUST_HIP_DEBUG_SYNC_FLAG),
-    "after reduction step 2");
-
-  return hip_rocprim::get_value(policy,ret_ptr);
+  return __reduce::reduce(policy,
+                          first,
+                          num_items,
+                          init,
+                          binary_op);
 #else // __THRUST_HAS_HIPRT__
-  return thrust::reduce(
-    cvt_to_seq(derived_cast(policy)), first, first + num_items, init, binary_op);
+  return thrust::reduce(cvt_to_seq(derived_cast(policy)),
+                        first,
+                        first + num_items,
+                        init,
+                        binary_op);
 #endif // __THRUST_HAS_HIPRT__
 }
 

@@ -328,7 +328,7 @@ doit_step(void *       temporary_storage,
             InputIt, input_type*, size_t
         >),
         dim3(number_of_blocks_heads), dim3(block_size_heads), 0, stream,
-        first, block_heads, num_items 
+        first, block_heads, num_items
     );
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("block_heads_fill", heads, start)
 
@@ -366,34 +366,41 @@ adjacent_difference(Policy    &policy,
     hipStream_t  stream             = hip_rocprim::stream(policy);
     bool         debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
 
-    hipError_t status;
-    status = doit_step(d_temp_storage,
-                       temp_storage_bytes,
-                       first,
-                       result,
-                       binary_op,
-                       num_items,
-                       stream,
-                       debug_sync);
-    hip_rocprim::throw_on_error(status, "adjacent_difference failed on 1st step");
+    if (num_items == 0)
+        return result;
 
+    // Determine temporary device storage requirements.
+    hip_rocprim::throw_on_error(
+        doit_step(d_temp_storage,
+                  temp_storage_bytes,
+                  first,
+                  result,
+                  binary_op,
+                  num_items,
+                  stream,
+                  debug_sync),
+        "adjacent_difference failed on 1st step");
+
+    // Allocate temporary storage.
     d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes);
     hip_rocprim::throw_on_error(hipGetLastError(),
-                             "adjacent_difference failed to get memory buffer");
+                                "adjacent_difference failed to get memory buffer");
 
-    status = doit_step(d_temp_storage,
-                       temp_storage_bytes,
-                       first,
-                       result,
-                       binary_op,
-                       num_items,
-                       stream,
-                       debug_sync);
-    hip_rocprim::throw_on_error(status, "adjacent_difference failed on 2nd step");
+    hip_rocprim::throw_on_error(
+        doit_step(d_temp_storage,
+                  temp_storage_bytes,
+                  first,
+                  result,
+                  binary_op,
+                  num_items,
+                  stream,
+                  debug_sync),
+        "adjacent_difference failed on 2nd step");
 
     hip_rocprim::return_memory_buffer(policy, d_temp_storage);
     hip_rocprim::throw_on_error(hipGetLastError(),
-                             "adjacent_difference failed to return memory buffer");
+                                "adjacent_difference failed to return memory buffer");
+
     return result + num_items;
 }
 

@@ -53,274 +53,241 @@ namespace hip_rocprim {
 namespace __partition
 {
 
-  template <class SINGLE_OUTPUT,
-            class SelectedOutIt,
-            class RejectedOutIt,
-            class Size,
-            class Value>
-  struct partition_fill;
+    template <class SINGLE_OUTPUT,
+              class SelectedOutIt,
+              class RejectedOutIt,
+              class Size,
+              class Value>
+    struct partition_fill;
 
-  template <class SelectedOutIt,
-            class RejectedOutIt,
-            class Size,
-            class Value>
-  struct partition_fill<detail::true_type,
-                        SelectedOutIt,
-                        RejectedOutIt,
-                        Size,
-                        Value>
-  {
-    SelectedOutIt selected_out_first;
-    RejectedOutIt rejected_out_first;
-
-    Value*  ptr;
-    Size num_selected;
-    Size num_items;
-
-    THRUST_HIP_FUNCTION
-    partition_fill(SelectedOutIt selected_out_first_,
-                   RejectedOutIt rejected_out_first_,
-                   Value* ptr_,
-                   Size num_selected_,
-                   Size num_items_)
-        : selected_out_first(selected_out_first_),
-          rejected_out_first(rejected_out_first_),
-          ptr(ptr_),
-          num_selected(num_selected_),
-          num_items(num_items_) {}
-
-    void THRUST_HIP_DEVICE_FUNCTION operator()(Size idx)
+    template <class SelectedOutIt,
+              class RejectedOutIt,
+              class Size,
+              class Value>
+    struct partition_fill<detail::true_type,
+                          SelectedOutIt,
+                          RejectedOutIt,
+                          Size,
+                          Value>
     {
-      selected_out_first[idx] = ptr[idx];
-    }
-  };
+        SelectedOutIt selected_out_first;
+        RejectedOutIt rejected_out_first;
 
-  template <class SelectedOutIt,
-            class RejectedOutIt,
-            class Size,
-            class Value>
-  struct partition_fill<detail::false_type,
-                        SelectedOutIt,
-                        RejectedOutIt,
-                        Size,
-                        Value>
-  {
-    SelectedOutIt selected_out_first;
-    RejectedOutIt rejected_out_first;
+        Value*  ptr;
+        Size num_selected;
+        Size num_items;
 
-    Value*  ptr;
-    Size num_selected;
-    Size num_items;
+        THRUST_HIP_FUNCTION
+        partition_fill(SelectedOutIt selected_out_first_,
+                       RejectedOutIt rejected_out_first_,
+                       Value* ptr_,
+                       Size num_selected_,
+                       Size num_items_)
+            : selected_out_first(selected_out_first_),
+              rejected_out_first(rejected_out_first_),
+              ptr(ptr_),
+              num_selected(num_selected_),
+              num_items(num_items_) {}
 
-    THRUST_HIP_FUNCTION
-    partition_fill(SelectedOutIt selected_out_first_,
-                   RejectedOutIt rejected_out_first_,
-                   Value* ptr_,
-                   Size num_selected_,
-                   Size num_items_)
-        : selected_out_first(selected_out_first_),
-          rejected_out_first(rejected_out_first_),
-          ptr(ptr_),
-          num_selected(num_selected_),
-          num_items(num_items_) {}
+        void THRUST_HIP_DEVICE_FUNCTION operator()(Size idx)
+        {
+            selected_out_first[idx] = ptr[idx];
+        }
+    };
 
-    void THRUST_HIP_DEVICE_FUNCTION operator()(Size idx)
+    template <class SelectedOutIt,
+              class RejectedOutIt,
+              class Size,
+              class Value>
+    struct partition_fill<detail::false_type,
+                          SelectedOutIt,
+                          RejectedOutIt,
+                          Size,
+                          Value>
     {
-      if( num_selected > idx)
-      {
-        selected_out_first[idx] = ptr[idx];
-      }
-      else
-      {
-        rejected_out_first[num_items - idx - 1] = ptr[idx];
-      }
-    }
-  };
+        SelectedOutIt selected_out_first;
+        RejectedOutIt rejected_out_first;
 
-  template <class SINGLE_OUTPUT>
-  struct rejected_last;
+        Value*  ptr;
+        Size num_selected;
+        Size num_items;
 
-  template <>
-  struct rejected_last<detail::true_type>
-  {
-    template <class RejectedOutIt,
-              class Size>
-    THRUST_HIP_RUNTIME_FUNCTION static
-    RejectedOutIt rejected(RejectedOutIt rejected_result, Size)
+        THRUST_HIP_FUNCTION
+        partition_fill(SelectedOutIt selected_out_first_,
+                       RejectedOutIt rejected_out_first_,
+                       Value* ptr_,
+                       Size num_selected_,
+                       Size num_items_)
+            : selected_out_first(selected_out_first_),
+              rejected_out_first(rejected_out_first_),
+              ptr(ptr_),
+              num_selected(num_selected_),
+              num_items(num_items_) {}
+
+        void THRUST_HIP_DEVICE_FUNCTION operator()(Size idx)
+        {
+            if( num_selected > idx)
+            {
+                selected_out_first[idx] = ptr[idx];
+            }
+            else
+            {
+                rejected_out_first[num_items - idx - 1] = ptr[idx];
+            }
+        }
+    };
+
+    template <class SINGLE_OUTPUT>
+    struct rejected_last;
+
+    template <>
+    struct rejected_last<detail::true_type>
     {
-        return rejected_result;
-    }
-  };
+        template <class RejectedOutIt,
+                  class Size>
+        THRUST_HIP_RUNTIME_FUNCTION static
+        RejectedOutIt rejected(RejectedOutIt rejected_result, Size)
+        {
+            return rejected_result;
+        }
+    };
 
-  template <>
-  struct rejected_last<detail::false_type>
-  {
-    template <class RejectedOutIt,
-              class Size>
-    THRUST_HIP_RUNTIME_FUNCTION static
-    RejectedOutIt rejected(RejectedOutIt rejected_result, Size num_unselected)
+    template <>
+    struct rejected_last<detail::false_type>
     {
-        return rejected_result + num_unselected;
-    }
-  };
+        template <class RejectedOutIt,
+                  class Size>
+        THRUST_HIP_RUNTIME_FUNCTION static
+        RejectedOutIt rejected(RejectedOutIt rejected_result, Size num_unselected)
+        {
+            return rejected_result + num_unselected;
+        }
+    };
 
-  template <class SINGLE_OUTPUT,
-            class Derived,
-            class InputIt,
-            class SelectedOutIt,
-            class RejectedOutIt,
-            class Predicate>
-  pair<SelectedOutIt, RejectedOutIt> THRUST_HIP_RUNTIME_FUNCTION
-  partition(execution_policy<Derived> &policy,
-            InputIt                    first,
-            InputIt                    last,
-            SelectedOutIt              selected_result,
-            RejectedOutIt              rejected_result,
-            Predicate                  predicate)
-  {
-    typedef typename iterator_traits<InputIt>::difference_type size_type;
-    typedef typename iterator_traits<InputIt>::value_type value_type;
-
-    size_type    num_items          = static_cast<size_type>(thrust::distance(first, last));
-    void *       d_temp_storage     = NULL;
-    size_t       temp_storage_bytes = 0;
-    hipStream_t  stream             = hip_rocprim::stream(policy);
-    size_type *  d_num_selected_out = NULL;
-    bool         debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
-    value_type*  d_partition_out    = NULL;
-
-
-    hip_rocprim::throw_on_error(
-            rocprim::partition(d_temp_storage,
-                               temp_storage_bytes,
-                               first,
-                               d_partition_out,
-                               d_num_selected_out,
-                               num_items,
-                               predicate,
-                               stream,
-                               debug_sync),
-            "partition failed on 1st step");
-
-    // Allocate temporary storage.
-    temp_storage_bytes = rocprim::detail::align_size(temp_storage_bytes);
-    d_temp_storage = hip_rocprim::get_memory_buffer(policy, sizeof(size_type) +
-                                                            temp_storage_bytes +
-                                                            sizeof(value_type) * num_items );
-    hip_rocprim::throw_on_error(hipGetLastError(),
-                                "partition failed to get memory buffer");
-
-    d_num_selected_out = reinterpret_cast<size_type *>(
-            reinterpret_cast<char *>(d_temp_storage) + temp_storage_bytes);
-
-    d_partition_out = reinterpret_cast<value_type *>(
-                    reinterpret_cast<char *>(d_num_selected_out) + sizeof(size_type));
-
-    hip_rocprim::throw_on_error(
-            rocprim::partition(d_temp_storage,
-                               temp_storage_bytes,
-                               first,
-                               d_partition_out,
-                               d_num_selected_out,
-                               num_items,
-                               predicate,
-                               stream,
-                               debug_sync),
-            "partition failed on 2nd step");
-
-    size_type num_selected = 0;
-    if (num_items > 0)
+    template <class SINGLE_OUTPUT,
+              class Derived,
+              class InputIt,
+              class SelectedOutIt,
+              class RejectedOutIt,
+              class Predicate>
+    pair<SelectedOutIt, RejectedOutIt> THRUST_HIP_RUNTIME_FUNCTION
+    partition(execution_policy<Derived> &policy,
+              InputIt                    first,
+              InputIt                    last,
+              SelectedOutIt              selected_result,
+              RejectedOutIt              rejected_result,
+              Predicate                  predicate)
     {
-      num_selected = get_value(policy, d_num_selected_out);
+        typedef typename iterator_traits<InputIt>::difference_type size_type;
+        typedef typename iterator_traits<InputIt>::value_type value_type;
+
+        size_type    num_items          = static_cast<size_type>(thrust::distance(first, last));
+        void *       d_temp_storage     = NULL;
+        size_t       temp_storage_bytes = 0;
+        hipStream_t  stream             = hip_rocprim::stream(policy);
+        size_type *  d_num_selected_out = NULL;
+        bool         debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
+        value_type*  d_partition_out    = NULL;
+
+        // Determine temporary device storage requirements.
+        hip_rocprim::throw_on_error(
+                rocprim::partition(d_temp_storage,
+                                   temp_storage_bytes,
+                                   first,
+                                   d_partition_out,
+                                   d_num_selected_out,
+                                   num_items,
+                                   predicate,
+                                   stream,
+                                   debug_sync),
+                "partition failed on 1st step");
+
+        // Allocate temporary storage.
+        d_temp_storage = hip_rocprim::get_memory_buffer(policy, sizeof(size_type) +
+                                                                temp_storage_bytes +
+                                                                sizeof(value_type) * num_items );
+        hip_rocprim::throw_on_error(hipGetLastError(),
+                                    "partition failed to get memory buffer");
+
+        d_num_selected_out = reinterpret_cast<size_type *>(
+                reinterpret_cast<char *>(d_temp_storage) + temp_storage_bytes);
+
+        d_partition_out = reinterpret_cast<value_type *>(
+                        reinterpret_cast<char *>(d_num_selected_out) + sizeof(size_type));
+
+        hip_rocprim::throw_on_error(
+                rocprim::partition(d_temp_storage,
+                                   temp_storage_bytes,
+                                   first,
+                                   d_partition_out,
+                                   d_num_selected_out,
+                                   num_items,
+                                   predicate,
+                                   stream,
+                                   debug_sync),
+                "partition failed on 2nd step");
+
+        size_type num_selected = 0;
+        if (num_items > 0)
+        {
+          num_selected = get_value(policy, d_num_selected_out);
+        }
+
+        // fill the values
+        hip_rocprim::parallel_for(
+            policy,
+            partition_fill<SINGLE_OUTPUT,
+                           SelectedOutIt,
+                           RejectedOutIt,
+                           size_type,
+                           value_type>(selected_result,
+                                       rejected_result,
+                                       d_partition_out,
+                                       num_selected,
+                                       num_items),
+            num_items
+        );
+
+        hip_rocprim::return_memory_buffer(policy, d_temp_storage);
+        hip_rocprim::throw_on_error(hipGetLastError(),
+                                    "partition failed to return memory buffer");
+
+        return thrust::make_pair(selected_result + num_selected,
+                                 rejected_last<SINGLE_OUTPUT>::rejected(rejected_result,
+                                                                        num_items - num_selected));
     }
 
-    hip_rocprim::parallel_for(
-      policy,
-      partition_fill<SINGLE_OUTPUT, SelectedOutIt, RejectedOutIt, size_type, value_type>(selected_result,
-                                                                                         rejected_result,
-                                                                                         d_partition_out,
-                                                                                         num_selected,
-                                                                                         num_items),
-      num_items
-    );
+    template <class SINGLE_OUTPUT,
+              class Derived,
+              class InputIt,
+              class StencilIt,
+              class SelectedOutIt,
+              class RejectedOutIt,
+              class Predicate>
+    pair<SelectedOutIt, RejectedOutIt> THRUST_HIP_RUNTIME_FUNCTION
+    partition(execution_policy<Derived> &policy,
+              InputIt                    first,
+              InputIt                    last,
+              StencilIt                  stencil,
+              SelectedOutIt              selected_result,
+              RejectedOutIt              rejected_result,
+              Predicate                  predicate
+              )
+    {
+        typedef typename iterator_traits<InputIt>::difference_type  size_type;
+        typedef typename iterator_traits<InputIt>::value_type value_type;
 
-    hip_rocprim::return_memory_buffer(policy, d_temp_storage);
-    hip_rocprim::throw_on_error(hipGetLastError(),
-                                "partition failed to return memory buffer");
+        size_type    num_items          = static_cast<size_type>(thrust::distance(first, last));
+        void *       d_temp_storage     = NULL;
+        size_t       temp_storage_bytes = 0;
+        hipStream_t  stream             = hip_rocprim::stream(policy);
+        size_type *  d_num_selected_out = NULL;
+        bool         debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
+        value_type*  d_partition_out    = NULL;
+        bool*        d_flags            = NULL;
 
-    return thrust::make_pair(selected_result + num_selected,
-                             rejected_last<SINGLE_OUTPUT>::rejected(rejected_result,
-                                                                    num_items - num_selected));
-  }
-
-  template <class SINGLE_OUTPUT,
-            class Derived,
-            class InputIt,
-            class StencilIt,
-            class SelectedOutIt,
-            class RejectedOutIt,
-            class Predicate>
-  pair<SelectedOutIt, RejectedOutIt> THRUST_HIP_RUNTIME_FUNCTION
-  partition(execution_policy<Derived> &policy,
-            InputIt                    first,
-            InputIt                    last,
-            StencilIt                  stencil,
-            SelectedOutIt              selected_result,
-            RejectedOutIt              rejected_result,
-            Predicate                  predicate
-            )
-  {
-    typedef typename iterator_traits<InputIt>::difference_type  size_type;
-    typedef typename iterator_traits<InputIt>::value_type value_type;
-
-    size_type    num_items          = static_cast<size_type>(thrust::distance(first, last));
-    void *       d_temp_storage     = NULL;
-    size_t       temp_storage_bytes = 0;
-    hipStream_t  stream             = hip_rocprim::stream(policy);
-    size_type *  d_num_selected_out = NULL;
-    bool         debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
-    value_type*  d_partition_out    = NULL;
-    bool*        d_flags            = NULL;
-
-    hip_rocprim::throw_on_error(
-            rocprim::partition(d_temp_storage,
-                               temp_storage_bytes,
-                               first,
-                               d_flags,
-                               d_partition_out,
-                               d_num_selected_out,
-                               num_items,
-                               stream,
-                               debug_sync),
-            "partition failed on 1st step");
-
-    // Allocate temporary storage.
-    temp_storage_bytes = rocprim::detail::align_size(temp_storage_bytes);
-    d_temp_storage = hip_rocprim::get_memory_buffer(policy, sizeof(size_type) +
-                                                            temp_storage_bytes +
-                                                            sizeof(value_type) * num_items +
-                                                            sizeof(bool) * num_items );
-    hip_rocprim::throw_on_error(hipGetLastError(),
-                                "partition failed to get memory buffer");
-
-    d_num_selected_out = reinterpret_cast<size_type *>(
-            reinterpret_cast<char *>(d_temp_storage) + temp_storage_bytes);
-
-    d_partition_out = reinterpret_cast<value_type *>(
-                    reinterpret_cast<char *>(d_num_selected_out) + sizeof(size_type));
-
-    d_flags = reinterpret_cast<bool *>(
-                    reinterpret_cast<char *>(d_partition_out) + sizeof(value_type) * num_items);
-
-    hip_rocprim::transform(
-      policy,
-      stencil,
-      stencil + num_items,
-      d_flags,
-      predicate
-    );
-
-    hip_rocprim::throw_on_error(
+        // Determine temporary device storage requirements.
+        hip_rocprim::throw_on_error(
             rocprim::partition(d_temp_storage,
                                temp_storage_bytes,
                                first,
@@ -330,107 +297,146 @@ namespace __partition
                                num_items,
                                stream,
                                debug_sync),
+            "partition failed on 1st step");
+
+        // Allocate temporary storage.
+        d_temp_storage = hip_rocprim::get_memory_buffer(policy, sizeof(size_type) +
+                                                                temp_storage_bytes +
+                                                                sizeof(value_type) * num_items +
+                                                                sizeof(bool) * num_items );
+        hip_rocprim::throw_on_error(hipGetLastError(),
+                                    "partition failed to get memory buffer");
+
+        d_num_selected_out = reinterpret_cast<size_type *>(
+                reinterpret_cast<char *>(d_temp_storage) + temp_storage_bytes);
+
+        d_partition_out = reinterpret_cast<value_type *>(
+                        reinterpret_cast<char *>(d_num_selected_out) + sizeof(size_type));
+
+        d_flags = reinterpret_cast<bool *>(
+                        reinterpret_cast<char *>(d_partition_out) + sizeof(value_type) * num_items);
+
+        hip_rocprim::transform(policy,
+                               stencil,
+                               stencil + num_items,
+                               d_flags,
+                               predicate);
+
+        hip_rocprim::throw_on_error(
+            rocprim::partition(d_temp_storage,
+                               temp_storage_bytes,
+                               first,
+                               d_flags,
+                               d_partition_out,
+                               d_num_selected_out,
+                               num_items,
+                               stream,
+                               debug_sync),
             "partition failed on 2nd step");
 
-    size_type num_selected = 0;
-    if (num_items > 0)
-    {
-      num_selected = get_value(policy, d_num_selected_out);
+        size_type num_selected = 0;
+        if (num_items > 0)
+        {
+            num_selected = get_value(policy, d_num_selected_out);
+        }
+
+        hip_rocprim::parallel_for(
+            policy,
+            partition_fill<SINGLE_OUTPUT,
+                           SelectedOutIt,
+                           RejectedOutIt,
+                           size_type,
+                           value_type>(selected_result,
+                                       rejected_result,
+                                       d_partition_out,
+                                       num_selected,
+                                       num_items),
+            num_items
+        );
+
+        hip_rocprim::return_memory_buffer(policy, d_temp_storage);
+        hip_rocprim::throw_on_error(hipGetLastError(),
+                                    "partition failed to return memory buffer");
+
+        return thrust::make_pair(selected_result + num_selected,
+                                 rejected_last<SINGLE_OUTPUT>::rejected(rejected_result,
+                                                                        num_items - num_selected));
     }
 
-    hip_rocprim::parallel_for(
-      policy,
-      partition_fill<SINGLE_OUTPUT, SelectedOutIt, RejectedOutIt, size_type, value_type>(selected_result,
-                                                                                         rejected_result,
-                                                                                         d_partition_out,
-                                                                                         num_selected,
-                                                                                         num_items),
-      num_items
-    );
+    template <class Derived,
+              class Iterator,
+              class Predicate>
+    Iterator THRUST_HIP_RUNTIME_FUNCTION
+    partition_inplace(execution_policy<Derived> &policy,
+                      Iterator                   first,
+                      Iterator                   last,
+                      Predicate                  predicate)
+    {
+        typedef typename iterator_traits<Iterator>::difference_type size_type;
+        typedef typename iterator_traits<Iterator>::value_type      value_type;
 
-    hip_rocprim::return_memory_buffer(policy, d_temp_storage);
-    hip_rocprim::throw_on_error(hipGetLastError(),
-                                "partition failed to return memory buffer");
+        size_type num_items = thrust::distance(first, last);
+        value_type *src_copy_ptr =
+            (value_type *)hip_rocprim::get_memory_buffer(policy,
+                                                         sizeof(value_type) * num_items);
 
-    return thrust::make_pair(selected_result + num_selected,
-                             rejected_last<SINGLE_OUTPUT>::rejected(rejected_result,
-                                                                    num_items - num_selected));
-  }
+        hip_rocprim::uninitialized_copy(policy, first, last, src_copy_ptr);
 
-  template <class Derived,
-            class Iterator,
-            class Predicate>
-  Iterator THRUST_HIP_RUNTIME_FUNCTION
-  partition_inplace(execution_policy<Derived> &policy,
-                    Iterator                   first,
-                    Iterator                   last,
-                    Predicate                  predicate)
-  {
-    typedef typename iterator_traits<Iterator>::difference_type size_type;
-    typedef typename iterator_traits<Iterator>::value_type      value_type;
+        pair<Iterator, Iterator> result =
+                partition<detail::true_type>(policy,
+                                             src_copy_ptr,
+                                             src_copy_ptr + num_items,
+                                             first,
+                                             first,
+                                             predicate);
 
-    size_type num_items = thrust::distance(first, last);
-    value_type *src_copy_ptr =
-        (value_type *)hip_rocprim::get_memory_buffer(policy,
-                                                     sizeof(value_type) * num_items);
+        hip_rocprim::return_memory_buffer(policy, src_copy_ptr);
+        hip_rocprim::throw_on_error(hipGetLastError(),
+                                    "partition failed to return memory buffer");
 
-    hip_rocprim::uninitialized_copy(policy, first, last, src_copy_ptr);
+        size_type num_selected = result.first - first;
 
-    pair<Iterator, Iterator> result =
-            partition<detail::true_type>(policy,
-                                         src_copy_ptr,
-                                         src_copy_ptr + num_items,
-                                         first,
-                                         first,
-                                         predicate);
+        return first + num_selected;
+    }
 
-    hip_rocprim::return_memory_buffer(policy, src_copy_ptr);
-    hip_rocprim::throw_on_error(hipGetLastError(),
-                                "partition failed to return memory buffer");
+    template <class Derived,
+              class Iterator,
+              class StencilIt,
+              class Predicate>
+    Iterator THRUST_HIP_RUNTIME_FUNCTION
+    partition_inplace(execution_policy<Derived> &policy,
+                      Iterator                   first,
+                      Iterator                   last,
+                      StencilIt                  stencil,
+                      Predicate                  predicate)
+    {
+        typedef typename iterator_traits<Iterator>::difference_type size_type;
+        typedef typename iterator_traits<Iterator>::value_type      value_type;
 
-    size_type num_selected = result.first - first;
+        size_type num_items = thrust::distance(first, last);
+        value_type *src_copy_ptr =
+            (value_type *)hip_rocprim::get_memory_buffer(policy,
+                                                         sizeof(value_type) * num_items);
 
-    return first + num_selected;
-  }
+        hip_rocprim::uninitialized_copy(policy, first, last, src_copy_ptr);
 
-  template <class Derived,
-            class Iterator,
-            class StencilIt,
-            class Predicate>
-  Iterator THRUST_HIP_RUNTIME_FUNCTION
-  partition_inplace(execution_policy<Derived> &policy,
-                    Iterator                   first,
-                    Iterator                   last,
-                    StencilIt                  stencil,
-                    Predicate                  predicate)
-  {
-    typedef typename iterator_traits<Iterator>::difference_type size_type;
-    typedef typename iterator_traits<Iterator>::value_type      value_type;
+        pair<Iterator, Iterator> result =
+                partition<detail::true_type>(policy,
+                                             src_copy_ptr,
+                                             src_copy_ptr + num_items,
+                                             stencil,
+                                             first,
+                                             first,
+                                             predicate);
 
-    size_type num_items = thrust::distance(first, last);
-    value_type *src_copy_ptr =
-        (value_type *)hip_rocprim::get_memory_buffer(policy,
-                                                     sizeof(value_type) * num_items);
+        hip_rocprim::return_memory_buffer(policy, src_copy_ptr);
+        hip_rocprim::throw_on_error(hipGetLastError(),
+                                    "partition failed to return memory buffer");
 
-    hip_rocprim::uninitialized_copy(policy, first, last, src_copy_ptr);
+        size_type num_selected = result.first - first;
 
-    pair<Iterator, Iterator> result =
-            partition<detail::true_type>(policy,
-                                         src_copy_ptr,
-                                         src_copy_ptr + num_items,
-                                         stencil,
-                                         first,
-                                         first,
-                                         predicate);
-
-    hip_rocprim::return_memory_buffer(policy, src_copy_ptr);
-    hip_rocprim::throw_on_error(hipGetLastError(),
-                                "partition failed to return memory buffer");
-
-    size_type num_selected = result.first - first;
-
-    return first + num_selected;
-  }
+        return first + num_selected;
+    }
 }    // namespace __partition
 
 ///// copy
