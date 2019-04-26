@@ -56,6 +56,20 @@ const size_t DEFAULT_N = 1024 * 1024 * 128;
 
 namespace rp = rocprim;
 
+template<
+    class Runner,
+    class T,
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    unsigned int BinSize,
+    unsigned int Trials
+>
+__global__
+void kernel(const T* input, T* output)
+{
+    Runner::template run<T, BlockSize, ItemsPerThread, BinSize, Trials>(input, output);
+}
+
 template<rocprim::block_histogram_algorithm algorithm>
 struct histogram
 {
@@ -66,8 +80,8 @@ struct histogram
         unsigned int BinSize,
         unsigned int Trials
     >
-    __global__
-    static void kernel(const T* input, T* output)
+    __device__
+    static void run(const T* input, T* output)
     {
         const unsigned int index = ((hipBlockIdx_x * BlockSize) + hipThreadIdx_x) * ItemsPerThread;
         unsigned int global_offset = hipBlockIdx_x * BinSize;
@@ -95,7 +109,7 @@ struct histogram
             {
                 output[global_offset + hipThreadIdx_x] = histogram[offset + hipThreadIdx_x];
                 global_offset += BlockSize;
-            }    
+            }
         }
     }
 };
@@ -133,7 +147,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     {
         auto start = std::chrono::high_resolution_clock::now();
         hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(Benchmark::template kernel<T, BlockSize, ItemsPerThread, BinSize, Trials>),
+            HIP_KERNEL_NAME(kernel<Benchmark, T, BlockSize, ItemsPerThread, BinSize, Trials>),
             dim3(size/items_per_block), dim3(BlockSize), 0, stream,
             d_input, d_output
         );

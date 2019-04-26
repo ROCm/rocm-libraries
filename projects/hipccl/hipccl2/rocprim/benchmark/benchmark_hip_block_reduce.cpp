@@ -56,6 +56,19 @@ const size_t DEFAULT_N = 1024 * 1024 * 128;
 
 namespace rp = rocprim;
 
+template<
+    class Runner,
+    class T,
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    unsigned int Trials
+>
+__global__
+void kernel(const T* input, T* output)
+{
+    Runner::template run<T, BlockSize, ItemsPerThread, Trials>(input, output);
+}
+
 template<rocprim::block_reduce_algorithm algorithm>
 struct reduce
 {
@@ -65,8 +78,8 @@ struct reduce
         unsigned int ItemsPerThread,
         unsigned int Trials
     >
-    __global__
-    static void kernel(const T* input, T* output)
+    __device__
+    static void run(const T* input, T* output)
     {
         const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
 
@@ -125,7 +138,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     {
         auto start = std::chrono::high_resolution_clock::now();
         hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(Benchmark::template kernel<T, BlockSize, ItemsPerThread, Trials>),
+            HIP_KERNEL_NAME(kernel<Benchmark, T, BlockSize, ItemsPerThread, Trials>),
             dim3(size/items_per_block), dim3(BlockSize), 0, stream,
             d_input, d_output
         );
