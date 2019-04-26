@@ -14,7 +14,7 @@
  *  See the License for the specific language governing permissions and
  *  limitations under the License.
  */
- 
+
 #include <unittest/unittest.h>
 #include <thrust/remove.h>
 #include <thrust/count.h>
@@ -652,9 +652,6 @@ void TestRemoveCopyToDiscardIterator(const size_t n)
 }
 DECLARE_VARIABLE_UNITTEST(TestRemoveCopyToDiscardIterator);
 
-// STREAMHPC TODO fix rocPRIM select/partition for zip with discard_iterator
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_HIP
-
 template<typename T>
 void TestRemoveCopyToDiscardIteratorZipped(const size_t n)
 {
@@ -692,9 +689,6 @@ void TestRemoveCopyToDiscardIteratorZipped(const size_t n)
     ASSERT_EQUAL_QUIET(reference, thrust::get<1>(d_result.get_iterator_tuple()));
 }
 DECLARE_VARIABLE_UNITTEST(TestRemoveCopyToDiscardIteratorZipped);
-
-#endif
-
 
 template<typename T>
 void TestRemoveCopyIf(const size_t n)
