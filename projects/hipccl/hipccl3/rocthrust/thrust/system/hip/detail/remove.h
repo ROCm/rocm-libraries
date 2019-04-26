@@ -36,9 +36,6 @@ namespace hip_rocprim {
 
 // in-place
 
-// STREAMHPC TODO check if loopback implementation of select in rocPRIM really can work
-// in-place (input == output)
-
 template <class Derived,
           class InputIt,
           class StencilIt,
