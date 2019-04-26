@@ -4,7 +4,7 @@ HIP back-end for Thrust (alpha release).
 
 ## Introduction
 
-Thrust is a parallel algorithm library. This library has been ported to [HIP](https://github.com/ROCm-Developer-Tools/HIP)/[ROCm](https://rocm.github.io/) platform, which is uses the [rocPRIM](https://github.com/ROCmSoftwarePlatform/rocPRIM) library. The HIP ported library works on both HIP/CUDA and HIP/ROCm platforms.
+Thrust is a parallel algorithm library. This library has been ported to [HIP](https://github.com/ROCm-Developer-Tools/HIP)/[ROCm](https://rocm.github.io/) platform, which uses the [rocPRIM](https://github.com/ROCmSoftwarePlatform/rocPRIM) library. The HIP ported library works on both HIP/CUDA and HIP/ROCm platforms.
 
 ## Requirements
 
@@ -43,7 +43,7 @@ cd rocThrust; mkdir build; cd build
 #
 # ! IMPORTANT !
 # On ROCm platform set C++ compiler to HCC. You can do it by adding 'CXX=<path-to-hcc>'
-# before 'cmake' or setting cmake option 'CMAKE_CXX_COMPILER' to path to the HCC compiler.
+# before 'cmake' or setting cmake option 'CMAKE_CXX_COMPILER' with the path to the HCC compiler.
 #
 [CXX=hcc] cmake ../. # or cmake-gui ../.
 
@@ -70,7 +70,7 @@ configuration files.
 find_package(rocprim REQUIRED CONFIG PATHS "/opt/rocm/rocprim")
 
 # "/opt/rocm" - default install prefix
-find_package(rocthrust REQUIRED CONFIG PATHS "/opt/rocm/rocThrust")
+find_package(rocthrust REQUIRED CONFIG PATHS "/opt/rocm/rocthrust")
 
 ...
 includes rocThrust headers and roc::rocprim_hip target
@@ -94,7 +94,7 @@ ctest
 
 ```
 # go to rocThrust doc directory
-cd rocThrust;
+cd rocThrust
 
 # run doxygen
 doxygen doc/thrust.dox
