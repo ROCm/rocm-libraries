@@ -26,6 +26,7 @@
 #include "test_header.hpp"
 
 TESTS_DEFINE(RemoveTests, FullTestsParams);
+TESTS_DEFINE(RemoveVariableTests, NumericalTestsParams);
 
 template<typename T>
 struct is_even
@@ -514,10 +515,9 @@ TEST(RemoveTests, TestRemoveCopyIfStencilDispatchImplicit)
   ASSERT_EQ(13, vec.front());
 }
 
-TYPED_TEST(RemoveTests, TestRemove)
+TYPED_TEST(RemoveVariableTests, TestRemove)
 {
-  using Vector = typename TestFixture::input_type;
-  using T = typename Vector::value_type;
+  using T = typename TestFixture::input_type;
 
   const std::vector<size_t> sizes = get_sizes();
   for(auto size : sizes)
@@ -540,10 +540,9 @@ TYPED_TEST(RemoveTests, TestRemove)
   }
 }
 
-TYPED_TEST(RemoveTests, TestRemoveIf)
+TYPED_TEST(RemoveVariableTests, TestRemoveIf)
 {
-  using Vector = typename TestFixture::input_type;
-  using T = typename Vector::value_type;
+  using T = typename TestFixture::input_type;
 
   const std::vector<size_t> sizes = get_sizes();
   for(auto size : sizes)
@@ -566,10 +565,9 @@ TYPED_TEST(RemoveTests, TestRemoveIf)
   }
 }
 
-TYPED_TEST(RemoveTests, TestRemoveIfStencil)
+TYPED_TEST(RemoveVariableTests, TestRemoveIfStencil)
 {
-  using Vector = typename TestFixture::input_type;
-  using T = typename Vector::value_type;
+  using T = typename TestFixture::input_type;
 
   const std::vector<size_t> sizes = get_sizes();
   for(auto size : sizes)
@@ -580,9 +578,9 @@ TYPED_TEST(RemoveTests, TestRemoveIfStencil)
 
     thrust::device_vector<T> d_data = h_data;
 
-    thrust::host_vector<T> h_stencil = get_random_data<T>(size,
-                                                          std::numeric_limits<T>::min(),
-                                                          std::numeric_limits<T>::max());
+    thrust::host_vector<bool> h_stencil = get_random_data<bool>(size,
+                                                                std::numeric_limits<bool>::min(),
+                                                                std::numeric_limits<bool>::max());
     thrust::device_vector<T> d_stencil = h_stencil;
 
     size_t h_size = thrust::remove_if(h_data.begin(), h_data.end(), h_stencil.begin(), is_true<T>()) - h_data.begin();
@@ -597,10 +595,9 @@ TYPED_TEST(RemoveTests, TestRemoveIfStencil)
   }
 }
 
-TYPED_TEST(RemoveTests, TestRemoveCopy)
+TYPED_TEST(RemoveVariableTests, TestRemoveCopy)
 {
-  using Vector = typename TestFixture::input_type;
-  using T = typename Vector::value_type;
+  using T = typename TestFixture::input_type;
 
   const std::vector<size_t> sizes = get_sizes();
   for(auto size : sizes)
@@ -626,10 +623,9 @@ TYPED_TEST(RemoveTests, TestRemoveCopy)
   }
 }
 
-TYPED_TEST(RemoveTests, TestRemoveCopyToDiscardIterator)
+TYPED_TEST(RemoveVariableTests, TestRemoveCopyToDiscardIterator)
 {
-  using Vector = typename TestFixture::input_type;
-  using T = typename Vector::value_type;
+  using T = typename TestFixture::input_type;
 
   const std::vector<size_t> sizes = get_sizes();
   for(auto size : sizes)
@@ -654,4 +650,167 @@ TYPED_TEST(RemoveTests, TestRemoveCopyToDiscardIterator)
     ASSERT_EQ(reference, h_result);
     ASSERT_EQ(reference, d_result);
   }
+}
+
+
+TYPED_TEST(RemoveVariableTests, TestRemoveCopyToDiscardIteratorZipped)
+{
+    using T = typename TestFixture::input_type;
+
+    const std::vector<size_t> sizes = get_sizes();
+    for(auto size : sizes)
+    {
+        thrust::host_vector<T> h_data = get_random_data<T>(size,
+                                                           std::numeric_limits<T>::min(),
+                                                           std::numeric_limits<T>::max());
+        thrust::device_vector<T> d_data = h_data;
+
+        thrust::host_vector<T> h_output(size);
+        thrust::device_vector<T> d_output(size);
+
+        size_t num_zeros = thrust::count(h_data.begin(), h_data.end(), T(0));
+        size_t num_nonzeros = h_data.size() - num_zeros;
+
+        typedef thrust::tuple<typename thrust::host_vector<T>::iterator, thrust::discard_iterator<> >   Tuple1;
+        typedef thrust::tuple<typename thrust::device_vector<T>::iterator, thrust::discard_iterator<> > Tuple2;
+
+        typedef thrust::zip_iterator<Tuple1> ZipIterator1;
+        typedef thrust::zip_iterator<Tuple2> ZipIterator2;
+
+        ZipIterator1 h_result =
+        thrust::remove_copy(thrust::make_zip_iterator(thrust::make_tuple(h_data.begin(), h_data.begin())),
+                            thrust::make_zip_iterator(thrust::make_tuple(h_data.end(), h_data.end())),
+                            thrust::make_zip_iterator(thrust::make_tuple(h_output.begin(),thrust::make_discard_iterator())),
+                            thrust::make_tuple(T(0),T(0)));
+
+        ZipIterator2 d_result =
+        thrust::remove_copy(thrust::make_zip_iterator(thrust::make_tuple(d_data.begin(), d_data.begin())),
+                            thrust::make_zip_iterator(thrust::make_tuple(d_data.end(), d_data.end())),
+                            thrust::make_zip_iterator(thrust::make_tuple(d_output.begin(),thrust::make_discard_iterator())),
+                            thrust::make_tuple(T(0),T(0)));
+
+        thrust::discard_iterator<> reference(num_nonzeros);
+
+        ASSERT_EQ(h_output, d_output);
+        ASSERT_EQ_QUIET(reference, thrust::get<1>(h_result.get_iterator_tuple()));
+        ASSERT_EQ_QUIET(reference, thrust::get<1>(d_result.get_iterator_tuple()));
+    }
+}
+
+TYPED_TEST(RemoveVariableTests, TestRemoveCopyIf)
+{
+    using T = typename TestFixture::input_type;
+
+    const std::vector<size_t> sizes = get_sizes();
+    for(auto size : sizes)
+    {
+        thrust::host_vector<T> h_data = get_random_data<T>(size,
+                                                           std::numeric_limits<T>::min(),
+                                                           std::numeric_limits<T>::max());
+        thrust::device_vector<T> d_data = h_data;
+
+        thrust::host_vector<T>   h_result(size);
+        thrust::device_vector<T> d_result(size);
+
+        size_t h_size = thrust::remove_copy_if(h_data.begin(), h_data.end(), h_result.begin(), is_true<T>()) - h_result.begin();
+        size_t d_size = thrust::remove_copy_if(d_data.begin(), d_data.end(), d_result.begin(), is_true<T>()) - d_result.begin();
+
+        ASSERT_EQ(h_size, d_size);
+
+        h_result.resize(h_size);
+        d_result.resize(d_size);
+
+        ASSERT_EQ(h_result, d_result);
+    }
+}
+
+TYPED_TEST(RemoveVariableTests, TestRemoveCopyIfToDiscardIterator)
+{
+    using T = typename TestFixture::input_type;
+
+    const std::vector<size_t> sizes = get_sizes();
+    for(auto size : sizes)
+    {
+        thrust::host_vector<T> h_data = get_random_data<T>(size,
+                                                         std::numeric_limits<T>::min(),
+                                                         std::numeric_limits<T>::max());
+        thrust::device_vector<T> d_data = h_data;
+
+        size_t num_false = thrust::count_if(h_data.begin(), h_data.end(), thrust::not1(is_true<T>()));
+
+        thrust::discard_iterator<> h_result =
+          thrust::remove_copy_if(h_data.begin(), h_data.end(), thrust::make_discard_iterator(), is_true<T>());
+
+        thrust::discard_iterator<> d_result =
+          thrust::remove_copy_if(d_data.begin(), d_data.end(), thrust::make_discard_iterator(), is_true<T>());
+
+        thrust::discard_iterator<> reference(num_false);
+
+        ASSERT_EQ_QUIET(reference, h_result);
+        ASSERT_EQ_QUIET(reference, d_result);
+    }
+}
+
+TYPED_TEST(RemoveVariableTests, TestRemoveCopyIfStencil)
+{
+    using T = typename TestFixture::input_type;
+
+    const std::vector<size_t> sizes = get_sizes();
+    for(auto size : sizes)
+    {
+        thrust::host_vector<T> h_data = get_random_data<T>(size,
+                                                         std::numeric_limits<T>::min(),
+                                                         std::numeric_limits<T>::max());
+        thrust::device_vector<T> d_data = h_data;
+
+        thrust::host_vector<bool> h_stencil = get_random_data<bool>(size,
+                                                                    std::numeric_limits<bool>::min(),
+                                                                    std::numeric_limits<bool>::max());
+        thrust::device_vector<bool> d_stencil = h_stencil;
+
+        thrust::host_vector<T>   h_result(size);
+        thrust::device_vector<T> d_result(size);
+
+        size_t h_size = thrust::remove_copy_if(h_data.begin(), h_data.end(), h_stencil.begin(), h_result.begin(), is_true<T>()) - h_result.begin();
+        size_t d_size = thrust::remove_copy_if(d_data.begin(), d_data.end(), d_stencil.begin(), d_result.begin(), is_true<T>()) - d_result.begin();
+
+        ASSERT_EQ(h_size, d_size);
+
+        h_result.resize(h_size);
+        d_result.resize(d_size);
+
+        ASSERT_EQ(h_result, d_result);
+    }
+}
+
+TYPED_TEST(RemoveVariableTests, TestRemoveCopyIfStencilToDiscardIterator)
+{
+    using T = typename TestFixture::input_type;
+
+    const std::vector<size_t> sizes = get_sizes();
+    for(auto size : sizes)
+    {
+        thrust::host_vector<T> h_data = get_random_data<T>(size,
+                                                         std::numeric_limits<T>::min(),
+                                                         std::numeric_limits<T>::max());
+        thrust::device_vector<T> d_data = h_data;
+
+        thrust::host_vector<bool> h_stencil = get_random_data<bool>(size,
+                                                                    std::numeric_limits<bool>::min(),
+                                                                    std::numeric_limits<bool>::max());
+        thrust::device_vector<bool> d_stencil = h_stencil;
+
+        size_t num_false = thrust::count_if(h_stencil.begin(), h_stencil.end(), thrust::not1(is_true<T>()));
+
+        thrust::discard_iterator<> h_result =
+          thrust::remove_copy_if(h_data.begin(), h_data.end(), h_stencil.begin(), thrust::make_discard_iterator(), is_true<T>());
+
+        thrust::discard_iterator<> d_result =
+          thrust::remove_copy_if(d_data.begin(), d_data.end(), d_stencil.begin(), thrust::make_discard_iterator(), is_true<T>());
+
+        thrust::discard_iterator<> reference(num_false);
+
+        ASSERT_EQ_QUIET(reference, h_result);
+        ASSERT_EQ_QUIET(reference, d_result);
+    }
 }

@@ -54,54 +54,56 @@ lower_bound(Policy&    policy,
             OutputIt   result,
             CompareOp  compare_op)
 {
-  using size_type = typename iterator_traits<NeedlesIt>::difference_type;
+    using size_type = typename iterator_traits<NeedlesIt>::difference_type;
 
-  const size_type needles_size  = thrust::distance(needles_begin, needles_end);
-  const size_type haystack_size = thrust::distance(haystack_begin, haystack_end);
+    const size_type needles_size  = thrust::distance(needles_begin, needles_end);
+    const size_type haystack_size = thrust::distance(haystack_begin, haystack_end);
 
-  if (needles_size == 0)
-    return result;
+    if (needles_size == 0)
+        return result;
 
-  void*       d_temp_storage     = nullptr;
-  size_t      temp_storage_bytes = 0;
-  hipStream_t stream             = hip_rocprim::stream(policy);
-  bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
+    void*       d_temp_storage     = nullptr;
+    size_t      temp_storage_bytes = 0;
+    hipStream_t stream             = hip_rocprim::stream(policy);
+    bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
 
-  hipError_t status;
-  status = rocprim::lower_bound(d_temp_storage,
-                                temp_storage_bytes,
-                                haystack_begin,
-                                needles_begin,
-                                result,
-                                haystack_size,
-                                needles_size,
-                                compare_op,
-                                stream,
-                                debug_sync);
-  hip_rocprim::throw_on_error(status, "lower_bound: failed on 1st call");
+    // Determine temporary device storage requirements.
+    hip_rocprim::throw_on_error(
+        rocprim::lower_bound(d_temp_storage,
+                             temp_storage_bytes,
+                             haystack_begin,
+                             needles_begin,
+                             result,
+                             haystack_size,
+                             needles_size,
+                             compare_op,
+                             stream,
+                             debug_sync),
+        "lower_bound: failed on 1st call");
 
-  d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes);
-  hip_rocprim::throw_on_error(hipGetLastError(), "lower_bound: failed to get memory buffer");
+    // Allocate temporary storage.
+    d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes);
+    hip_rocprim::throw_on_error(hipGetLastError(),
+                                "lower_bound: failed to get memory buffer");
 
-  status = rocprim::lower_bound(d_temp_storage,
-                                temp_storage_bytes,
-                                haystack_begin,
-                                needles_begin,
-                                result,
-                                haystack_size,
-                                needles_size,
-                                compare_op,
-                                stream,
-                                debug_sync);
-  hip_rocprim::throw_on_error(status, "lower_bound: failed on 2nt call");
+    hip_rocprim::throw_on_error(
+        rocprim::lower_bound(d_temp_storage,
+                             temp_storage_bytes,
+                             haystack_begin,
+                             needles_begin,
+                             result,
+                             haystack_size,
+                             needles_size,
+                             compare_op,
+                             stream,
+                             debug_sync),
+        "lower_bound: failed on 2nt call");
 
-  status = hip_rocprim::synchronize(policy);
-  hip_rocprim::throw_on_error(status, "lower_bound: failed to synchronize");
+    hip_rocprim::return_memory_buffer(policy, d_temp_storage);
+    hip_rocprim::throw_on_error(hipGetLastError(),
+                                "lower_bound: failed to return memory buffer");
 
-  hip_rocprim::return_memory_buffer(policy, d_temp_storage);
-  hip_rocprim::throw_on_error(hipGetLastError(), "lower_bound: failed to return memory buffer");
-
-  return result + needles_size;
+    return result + needles_size;
 }
 
 template <class Policy,
@@ -118,54 +120,56 @@ upper_bound(Policy&    policy,
             OutputIt   result,
             CompareOp  compare_op)
 {
-  using size_type = typename iterator_traits<NeedlesIt>::difference_type;
+    using size_type = typename iterator_traits<NeedlesIt>::difference_type;
 
-  const size_type needles_size  = thrust::distance(needles_begin, needles_end);
-  const size_type haystack_size = thrust::distance(haystack_begin, haystack_end);
+    const size_type needles_size  = thrust::distance(needles_begin, needles_end);
+    const size_type haystack_size = thrust::distance(haystack_begin, haystack_end);
 
-  if (needles_size == 0)
-    return result;
+    if (needles_size == 0)
+        return result;
 
-  void*       d_temp_storage     = nullptr;
-  size_t      temp_storage_bytes = 0;
-  hipStream_t stream             = hip_rocprim::stream(policy);
-  bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
+    void*       d_temp_storage     = nullptr;
+    size_t      temp_storage_bytes = 0;
+    hipStream_t stream             = hip_rocprim::stream(policy);
+    bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
 
-  hipError_t status;
-  status = rocprim::upper_bound(d_temp_storage,
-                                temp_storage_bytes,
-                                haystack_begin,
-                                needles_begin,
-                                result,
-                                haystack_size,
-                                needles_size,
-                                compare_op,
-                                stream,
-                                debug_sync);
-  hip_rocprim::throw_on_error(status, "upper_bound: failed on 1st call");
+    // Determine temporary device storage requirements.
+    hip_rocprim::throw_on_error(
+        rocprim::upper_bound(d_temp_storage,
+                             temp_storage_bytes,
+                             haystack_begin,
+                             needles_begin,
+                             result,
+                             haystack_size,
+                             needles_size,
+                             compare_op,
+                             stream,
+                             debug_sync),
+        "upper_bound: failed on 1st call");
 
-  d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes);
-  hip_rocprim::throw_on_error(hipGetLastError(), "upper_bound: failed to get memory buffer");
+    // Allocate temporary storage.
+    d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes);
+    hip_rocprim::throw_on_error(hipGetLastError(),
+                                "upper_bound: failed to get memory buffer");
 
-  status = rocprim::upper_bound(d_temp_storage,
-                                temp_storage_bytes,
-                                haystack_begin,
-                                needles_begin,
-                                result,
-                                haystack_size,
-                                needles_size,
-                                compare_op,
-                                stream,
-                                debug_sync);
-  hip_rocprim::throw_on_error(status, "upper_bound: failed on 2nt call");
+    hip_rocprim::throw_on_error(
+        rocprim::upper_bound(d_temp_storage,
+                             temp_storage_bytes,
+                             haystack_begin,
+                             needles_begin,
+                             result,
+                             haystack_size,
+                             needles_size,
+                             compare_op,
+                             stream,
+                             debug_sync),
+        "upper_bound: failed on 2nt call");
 
-  status = hip_rocprim::synchronize(policy);
-  hip_rocprim::throw_on_error(status, "upper_bound: failed to synchronize");
+    hip_rocprim::return_memory_buffer(policy, d_temp_storage);
+    hip_rocprim::throw_on_error(hipGetLastError(),
+                                "upper_bound: failed to return memory buffer");
 
-  hip_rocprim::return_memory_buffer(policy, d_temp_storage);
-  hip_rocprim::throw_on_error(hipGetLastError(), "upper_bound: failed to return memory buffer");
-
-  return result + needles_size;
+    return result + needles_size;
 }
 
 template <class Policy,
@@ -182,54 +186,56 @@ binary_search(Policy&    policy,
               OutputIt   result,
               CompareOp  compare_op)
 {
-  using size_type = typename iterator_traits<NeedlesIt>::difference_type;
+    using size_type = typename iterator_traits<NeedlesIt>::difference_type;
 
-  const size_type needles_size  = thrust::distance(needles_begin, needles_end);
-  const size_type haystack_size = thrust::distance(haystack_begin, haystack_end);
+    const size_type needles_size  = thrust::distance(needles_begin, needles_end);
+    const size_type haystack_size = thrust::distance(haystack_begin, haystack_end);
 
-  if (needles_size == 0)
-    return result;
+    if (needles_size == 0)
+        return result;
 
-  void*       d_temp_storage     = nullptr;
-  size_t      temp_storage_bytes = 0;
-  hipStream_t stream             = hip_rocprim::stream(policy);
-  bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
+    void*       d_temp_storage     = nullptr;
+    size_t      temp_storage_bytes = 0;
+    hipStream_t stream             = hip_rocprim::stream(policy);
+    bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
 
-  hipError_t status;
-  status = rocprim::binary_search(d_temp_storage,
-                                  temp_storage_bytes,
-                                  haystack_begin,
-                                  needles_begin,
-                                  result,
-                                  haystack_size,
-                                  needles_size,
-                                  compare_op,
-                                  stream,
-                                  debug_sync);
-  hip_rocprim::throw_on_error(status, "binary_search: failed on 1st call");
+    // Determine temporary device storage requirements.
+    hip_rocprim::throw_on_error(
+        rocprim::binary_search(d_temp_storage,
+                               temp_storage_bytes,
+                               haystack_begin,
+                               needles_begin,
+                               result,
+                               haystack_size,
+                               needles_size,
+                               compare_op,
+                               stream,
+                               debug_sync),
+        "binary_search: failed on 1st call");
 
-  d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes);
-  hip_rocprim::throw_on_error(hipGetLastError(), "binary_search: failed to get memory buffer");
+    // Allocate temporary storage.
+    d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes);
+    hip_rocprim::throw_on_error(hipGetLastError(),
+                                "binary_search: failed to get memory buffer");
 
-  status = rocprim::binary_search(d_temp_storage,
-                                  temp_storage_bytes,
-                                  haystack_begin,
-                                  needles_begin,
-                                  result,
-                                  haystack_size,
-                                  needles_size,
-                                  compare_op,
-                                  stream,
-                                  debug_sync);
-  hip_rocprim::throw_on_error(status, "binary_search: failed on 2nt call");
+    hip_rocprim::throw_on_error(
+        rocprim::binary_search(d_temp_storage,
+                               temp_storage_bytes,
+                               haystack_begin,
+                               needles_begin,
+                               result,
+                               haystack_size,
+                               needles_size,
+                               compare_op,
+                               stream,
+                               debug_sync),
+        "binary_search: failed on 2nt call");
 
-  status = hip_rocprim::synchronize(policy);
-  hip_rocprim::throw_on_error(status, "binary_search: failed to synchronize");
+    hip_rocprim::return_memory_buffer(policy, d_temp_storage);
+    hip_rocprim::throw_on_error(hipGetLastError(),
+                                "binary_search: failed to return memory buffer");
 
-  hip_rocprim::return_memory_buffer(policy, d_temp_storage);
-  hip_rocprim::throw_on_error(hipGetLastError(), "binary_search: failed to return memory buffer");
-
-  return result + needles_size;
+    return result + needles_size;
 }
 
 } // namespace __binary_search

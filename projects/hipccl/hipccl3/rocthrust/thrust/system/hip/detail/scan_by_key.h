@@ -85,7 +85,6 @@ inclusive_scan_by_key(Policy                    &policy,
             "scan_by_key failed on 1st step");
 
     // Allocate temporary storage.
-    temp_storage_bytes = rocprim::detail::align_size(temp_storage_bytes);
     d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes);
     hip_rocprim::throw_on_error(hipGetLastError(),
                                 "scan_by_key failed to get memory buffer");
@@ -155,7 +154,6 @@ exclusive_scan_by_key(Policy                    &policy,
             "scan_by_key failed on 1st step");
 
     // Allocate temporary storage.
-    temp_storage_bytes = rocprim::detail::align_size(temp_storage_bytes);
     d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes);
     hip_rocprim::throw_on_error(hipGetLastError(),
                                 "scan_by_key failed to get memory buffer");

@@ -95,8 +95,9 @@ merge(execution_policy<Derived>& policy,
     hipStream_t  stream             = hip_rocprim::stream(policy);
     bool         debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
 
-    hipError_t status;
-    status = rocprim::merge(  d_temp_storage,
+    // Determine temporary device storage requirements.
+    hip_rocprim::throw_on_error(
+        rocprim::merge(d_temp_storage,
                               temp_storage_bytes,
                               keys1_first,
                               keys2_first,
@@ -105,27 +106,26 @@ merge(execution_policy<Derived>& policy,
                               input2_size,
                               compare_op,
                               stream,
-                              debug_sync
-                              );
-    hip_rocprim::throw_on_error(status, "merge failed on 1st step");
+                              debug_sync),
+        "merge failed on 1st step");
 
-    temp_storage_bytes = rocprim::detail::align_size(temp_storage_bytes);
+    // Allocate temporary storage.
     d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes);
     hip_rocprim::throw_on_error(hipGetLastError(),
                                 "merge failed to get memory buffer");
 
-    status = rocprim::merge(  d_temp_storage,
-                              temp_storage_bytes,
-                              keys1_first,
-                              keys2_first,
-                              result,
-                              input1_size,
-                              input2_size,
-                              compare_op,
-                              stream,
-                              debug_sync
-                              );
-    hip_rocprim::throw_on_error(status, "merge failed on 2nd step");
+    hip_rocprim::throw_on_error(
+        rocprim::merge(d_temp_storage,
+                       temp_storage_bytes,
+                       keys1_first,
+                       keys2_first,
+                       result,
+                       input1_size,
+                       input2_size,
+                       compare_op,
+                       stream,
+                       debug_sync),
+        "merge failed on 2nd step");
 
     hip_rocprim::return_memory_buffer(policy, d_temp_storage);
     hip_rocprim::throw_on_error(hipGetLastError(),
@@ -155,59 +155,59 @@ merge(Policy&       policy,
       ItemsOutputIt items_result,
       CompareOp     compare_op)
 {
-  typedef size_t size_type;
+    typedef size_t size_type;
 
-  typedef typename iterator_traits<KeysIt1>::value_type KeyType;
-  typedef typename iterator_traits<ItemsIt1>::value_type ValueType;
+    typedef typename iterator_traits<KeysIt1>::value_type KeyType;
+    typedef typename iterator_traits<ItemsIt1>::value_type ValueType;
 
-  predicate_wrapper<KeyType, ValueType, CompareOp> wrapped_binary_pred(compare_op);
+    predicate_wrapper<KeyType, ValueType, CompareOp> wrapped_binary_pred(compare_op);
 
-  size_type    input1_size         = static_cast<size_type>(thrust::distance(keys1_first, keys1_last));
-  size_type    input2_size         = static_cast<size_type>(thrust::distance(keys2_first, keys2_last));
+    size_type    input1_size         = static_cast<size_type>(thrust::distance(keys1_first, keys1_last));
+    size_type    input2_size         = static_cast<size_type>(thrust::distance(keys2_first, keys2_last));
 
-  void *       d_temp_storage     = NULL;
-  size_t       temp_storage_bytes = 0;
-  hipStream_t  stream             = hip_rocprim::stream(policy);
-  bool         debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
+    void *       d_temp_storage     = NULL;
+    size_t       temp_storage_bytes = 0;
+    hipStream_t  stream             = hip_rocprim::stream(policy);
+    bool         debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
 
-  hipError_t status;
-  status = rocprim::merge( d_temp_storage,
-                          temp_storage_bytes,
-                          rocprim::make_zip_iterator(rocprim::make_tuple(keys1_first, items1_first)),
-                          rocprim::make_zip_iterator(rocprim::make_tuple(keys2_first, items2_first)),
-                          rocprim::make_zip_iterator(rocprim::make_tuple(keys_result, items_result)),
-                          input1_size,
-                          input2_size,
-                          wrapped_binary_pred,
-                          stream,
-                          debug_sync
-                          );
-  hip_rocprim::throw_on_error(status, "merge_by_key failed on 1st step");
+    // Determine temporary device storage requirements.
+    hip_rocprim::throw_on_error(
+        rocprim::merge(d_temp_storage,
+                       temp_storage_bytes,
+                       rocprim::make_zip_iterator(rocprim::make_tuple(keys1_first, items1_first)),
+                       rocprim::make_zip_iterator(rocprim::make_tuple(keys2_first, items2_first)),
+                       rocprim::make_zip_iterator(rocprim::make_tuple(keys_result, items_result)),
+                       input1_size,
+                       input2_size,
+                       wrapped_binary_pred,
+                       stream,
+                       debug_sync),
+        "merge_by_key failed on 1st step");
 
-  temp_storage_bytes = rocprim::detail::align_size(temp_storage_bytes);
-  d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes);
-  hip_rocprim::throw_on_error(hipGetLastError(),
+    // Allocate temporary storage.
+    d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes);
+    hip_rocprim::throw_on_error(hipGetLastError(),
                                 "merge_by_key failed to get memory buffer");
 
-  status = rocprim::merge( d_temp_storage,
-                          temp_storage_bytes,
-                          rocprim::make_zip_iterator(rocprim::make_tuple(keys1_first, items1_first)),
-                          rocprim::make_zip_iterator(rocprim::make_tuple(keys2_first, items2_first)),
-                          rocprim::make_zip_iterator(rocprim::make_tuple(keys_result, items_result)),
-                          input1_size,
-                          input2_size,
-                          wrapped_binary_pred,
-                          stream,
-                          debug_sync
-                          );
-  hip_rocprim::throw_on_error(status, "merge_by_key failed on 2nd step");
+    hip_rocprim::throw_on_error(
+        rocprim::merge(d_temp_storage,
+                       temp_storage_bytes,
+                       rocprim::make_zip_iterator(rocprim::make_tuple(keys1_first, items1_first)),
+                       rocprim::make_zip_iterator(rocprim::make_tuple(keys2_first, items2_first)),
+                       rocprim::make_zip_iterator(rocprim::make_tuple(keys_result, items_result)),
+                       input1_size,
+                       input2_size,
+                       wrapped_binary_pred,
+                       stream,
+                       debug_sync),
+        "merge_by_key failed on 2nd step");
 
-  hip_rocprim::return_memory_buffer(policy, d_temp_storage);
-  hip_rocprim::throw_on_error(hipGetLastError(),
-                              "merge_by_key failed to return memory buffer");
+    hip_rocprim::return_memory_buffer(policy, d_temp_storage);
+    hip_rocprim::throw_on_error(hipGetLastError(),
+                                "merge_by_key failed to return memory buffer");
 
-  size_t count = input1_size + input2_size;
-  return thrust::make_pair(keys_result + count, items_result + count);
+    size_t count = input1_size + input2_size;
+    return thrust::make_pair(keys_result + count, items_result + count);
 }
 
 } //namespace __merge
