@@ -80,10 +80,9 @@ void reduce_by_key_impl(void * temporary_storage,
     using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
     using result_type = typename ::rocprim::detail::match_result_type<
         typename std::iterator_traits<ValuesInputIterator>::value_type,
-        typename std::iterator_traits<AggregatesOutputIterator>::value_type,
         BinaryFunction
     >::type;
-    using carry_out_type = carry_out<key_type, result_type>;
+    using carry_out_type = carry_out<result_type>;
 
     using config = default_or_custom_config<
         Config,
@@ -183,7 +182,7 @@ void reduce_by_key_impl(void * temporary_storage,
             scan_and_scatter_carry_outs<config::scan::block_size, config::scan::items_per_thread>(
                 carry_outs, leading_aggregates,
                 aggregates_output,
-                key_compare_op, reduce_op,
+                reduce_op,
                 batches
             );
         }

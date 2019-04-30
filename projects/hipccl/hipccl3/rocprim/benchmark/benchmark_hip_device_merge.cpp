@@ -67,29 +67,13 @@ void run_merge_keys_benchmark(benchmark::State& state, hipStream_t stream, size_
     const size_t size1 = size / 2;
     const size_t size2 = size - size1;
 
+    ::rocprim::less<key_type> compare_op;
+
     // Generate data
-    std::vector<key_type> keys_input1;
-    std::vector<key_type> keys_input2;
-    if(std::is_floating_point<key_type>::value)
-    {
-        keys_input1 = get_random_data<key_type>(size1, (key_type)-1000, (key_type)+1000);
-        keys_input2 = get_random_data<key_type>(size2, (key_type)-1000, (key_type)+1000);
-    }
-    else
-    {
-        keys_input1 = get_random_data<key_type>(
-            size1,
-            std::numeric_limits<key_type>::min(),
-            std::numeric_limits<key_type>::max()
-        );
-        keys_input2 = get_random_data<key_type>(
-            size2,
-            std::numeric_limits<key_type>::min(),
-            std::numeric_limits<key_type>::max()
-        );
-    }
-    std::sort(keys_input1.begin(), keys_input1.end());
-    std::sort(keys_input2.begin(), keys_input2.end());
+    std::vector<key_type> keys_input1 = get_random_data<key_type>(size1, 0, size);
+    std::vector<key_type> keys_input2 = get_random_data<key_type>(size2, 0, size);
+    std::sort(keys_input1.begin(), keys_input1.end(), compare_op);
+    std::sort(keys_input2.begin(), keys_input2.end(), compare_op);
 
     key_type * d_keys_input1;
     key_type * d_keys_input2;
@@ -111,9 +95,6 @@ void run_merge_keys_benchmark(benchmark::State& state, hipStream_t stream, size_
             hipMemcpyHostToDevice
         )
     );
-    HIP_CHECK(hipDeviceSynchronize());
-
-    ::rocprim::less<key_type> lesser_op;
 
     void * d_temporary_storage = nullptr;
     size_t temporary_storage_bytes = 0;
@@ -121,12 +102,11 @@ void run_merge_keys_benchmark(benchmark::State& state, hipStream_t stream, size_
         rp::merge(
             d_temporary_storage, temporary_storage_bytes,
             d_keys_input1, d_keys_input2, d_keys_output, size1, size2,
-            lesser_op, stream, false
+            compare_op, stream, false
         )
     );
 
     HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
-    HIP_CHECK(hipDeviceSynchronize());
 
     // Warm-up
     for(size_t i = 0; i < warmup_size; i++)
@@ -135,7 +115,7 @@ void run_merge_keys_benchmark(benchmark::State& state, hipStream_t stream, size_
             rp::merge(
                 d_temporary_storage, temporary_storage_bytes,
                 d_keys_input1, d_keys_input2, d_keys_output, size1, size2,
-                lesser_op, stream, false
+                compare_op, stream, false
             )
         );
     }
@@ -151,7 +131,7 @@ void run_merge_keys_benchmark(benchmark::State& state, hipStream_t stream, size_
                 rp::merge(
                     d_temporary_storage, temporary_storage_bytes,
                     d_keys_input1, d_keys_input2, d_keys_output, size1, size2,
-                    lesser_op, stream, false
+                    compare_op, stream, false
                 )
             );
         }
@@ -171,26 +151,130 @@ void run_merge_keys_benchmark(benchmark::State& state, hipStream_t stream, size_
     HIP_CHECK(hipFree(d_keys_output));
 }
 
+template<class Key, class Value>
+void run_merge_pairs_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
+{
+    using key_type = Key;
+    using value_type = Value;
+
+    const size_t size1 = size / 2;
+    const size_t size2 = size - size1;
+
+    ::rocprim::less<key_type> compare_op;
+
+    // Generate data
+    std::vector<key_type> keys_input1 = get_random_data<key_type>(size1, 0, size);
+    std::vector<key_type> keys_input2 = get_random_data<key_type>(size2, 0, size);
+    std::sort(keys_input1.begin(), keys_input1.end(), compare_op);
+    std::sort(keys_input2.begin(), keys_input2.end(), compare_op);
+    std::vector<value_type> values_input1(size1);
+    std::vector<value_type> values_input2(size2);
+    std::iota(values_input1.begin(), values_input1.end(), 0);
+    std::iota(values_input2.begin(), values_input2.end(), size1);
+
+    key_type * d_keys_input1;
+    key_type * d_keys_input2;
+    key_type * d_keys_output;
+    value_type * d_values_input1;
+    value_type * d_values_input2;
+    value_type * d_values_output;
+    HIP_CHECK(hipMalloc(&d_keys_input1, size1 * sizeof(key_type)));
+    HIP_CHECK(hipMalloc(&d_keys_input2, size2 * sizeof(key_type)));
+    HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
+    HIP_CHECK(hipMalloc(&d_values_input1, size1 * sizeof(value_type)));
+    HIP_CHECK(hipMalloc(&d_values_input2, size2 * sizeof(value_type)));
+    HIP_CHECK(hipMalloc(&d_values_output, size * sizeof(value_type)));
+    HIP_CHECK(
+        hipMemcpy(
+            d_keys_input1, keys_input1.data(),
+            size1 * sizeof(key_type),
+            hipMemcpyHostToDevice
+        )
+    );
+    HIP_CHECK(
+        hipMemcpy(
+            d_keys_input2, keys_input2.data(),
+            size2 * sizeof(key_type),
+            hipMemcpyHostToDevice
+        )
+    );
+
+    void * d_temporary_storage = nullptr;
+    size_t temporary_storage_bytes = 0;
+    HIP_CHECK(
+        rp::merge(
+            d_temporary_storage, temporary_storage_bytes,
+            d_keys_input1, d_keys_input2, d_keys_output,
+            d_values_input1, d_values_input2, d_values_output,
+            size1, size2,
+            compare_op, stream, false
+        )
+    );
+
+    HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+    HIP_CHECK(hipDeviceSynchronize());
+
+    // Warm-up
+    for(size_t i = 0; i < warmup_size; i++)
+    {
+        HIP_CHECK(
+            rp::merge(
+                d_temporary_storage, temporary_storage_bytes,
+                d_keys_input1, d_keys_input2, d_keys_output,
+                d_values_input1, d_values_input2, d_values_output,
+                size1, size2,
+                compare_op, stream, false
+            )
+        );
+    }
+    HIP_CHECK(hipDeviceSynchronize());
+
+    for (auto _ : state)
+    {
+        auto start = std::chrono::high_resolution_clock::now();
+
+        for(size_t i = 0; i < batch_size; i++)
+        {
+            HIP_CHECK(
+                rp::merge(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_keys_input1, d_keys_input2, d_keys_output,
+                    d_values_input1, d_values_input2, d_values_output,
+                    size1, size2,
+                    compare_op, stream, false
+                )
+            );
+        }
+        HIP_CHECK(hipDeviceSynchronize());
+
+        auto end = std::chrono::high_resolution_clock::now();
+        auto elapsed_seconds =
+            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+        state.SetIterationTime(elapsed_seconds.count());
+    }
+    state.SetBytesProcessed(state.iterations() * batch_size * size * (sizeof(key_type) + sizeof(value_type)));
+    state.SetItemsProcessed(state.iterations() * batch_size * size);
+
+    HIP_CHECK(hipFree(d_temporary_storage));
+    HIP_CHECK(hipFree(d_keys_input1));
+    HIP_CHECK(hipFree(d_keys_input2));
+    HIP_CHECK(hipFree(d_keys_output));
+    HIP_CHECK(hipFree(d_values_input1));
+    HIP_CHECK(hipFree(d_values_input2));
+    HIP_CHECK(hipFree(d_values_output));
+}
+
 #define CREATE_MERGE_KEYS_BENCHMARK(Key) \
 benchmark::RegisterBenchmark( \
-    (std::string("merge_keys") + "<" #Key ">").c_str(), \
+    (std::string("merge") + "<" #Key ">").c_str(), \
     [=](benchmark::State& state) { run_merge_keys_benchmark<Key>(state, stream, size); } \
 )
 
-void add_merge_keys_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                              hipStream_t stream,
-                              size_t size)
-{
-    std::vector<benchmark::internal::Benchmark*> bs =
-    {
-        CREATE_MERGE_KEYS_BENCHMARK(int),
-        CREATE_MERGE_KEYS_BENCHMARK(long long),
-
-        CREATE_MERGE_KEYS_BENCHMARK(char),
-        CREATE_MERGE_KEYS_BENCHMARK(short),
-    };
-    benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
-}
+#define CREATE_MERGE_PAIRS_BENCHMARK(Key, Value) \
+benchmark::RegisterBenchmark( \
+    (std::string("merge") + "<" #Key ", " #Value ">").c_str(), \
+    [=](benchmark::State& state) { run_merge_pairs_benchmark<Key, Value>(state, stream, size); } \
+)
 
 int main(int argc, char *argv[])
 {
@@ -212,9 +296,26 @@ int main(int argc, char *argv[])
     HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
     std::cout << "[HIP] Device name: " << devProp.name << std::endl;
 
+    using custom_int2 = custom_type<int, int>;
+    using custom_double2 = custom_type<double, double>;
+
     // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_merge_keys_benchmarks(benchmarks, stream, size);
+    std::vector<benchmark::internal::Benchmark*> benchmarks =
+    {
+        CREATE_MERGE_KEYS_BENCHMARK(int),
+        CREATE_MERGE_KEYS_BENCHMARK(long long),
+        CREATE_MERGE_KEYS_BENCHMARK(char),
+        CREATE_MERGE_KEYS_BENCHMARK(short),
+        CREATE_MERGE_KEYS_BENCHMARK(custom_int2),
+        CREATE_MERGE_KEYS_BENCHMARK(custom_double2),
+
+        CREATE_MERGE_PAIRS_BENCHMARK(int, int),
+        CREATE_MERGE_PAIRS_BENCHMARK(long long, long long),
+        CREATE_MERGE_PAIRS_BENCHMARK(char, char),
+        CREATE_MERGE_PAIRS_BENCHMARK(short, short),
+        CREATE_MERGE_PAIRS_BENCHMARK(custom_int2, custom_int2),
+        CREATE_MERGE_PAIRS_BENCHMARK(custom_double2, custom_double2),
+    };
 
     // Use manual timing
     for(auto& b : benchmarks)
