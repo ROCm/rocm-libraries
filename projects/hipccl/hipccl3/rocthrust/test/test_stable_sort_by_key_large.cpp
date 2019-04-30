@@ -64,10 +64,9 @@ TEST(StableSortByKeyLargeTests, TestStableSortByKeyWithLargeKeys)
   _TestStableSortByKeyWithLargeKeys<int,    4>();
   _TestStableSortByKeyWithLargeKeys<int,    8>();
 // XXX these take too long to compile
-// also anything larger than 8 causes the compiler to not unroll the loops.
-//    _TestStableSortByKeyWithLargeKeys<int,   16>();
-//    _TestStableSortByKeyWithLargeKeys<int,   32>();
-//    _TestStableSortByKeyWithLargeKeys<int,   64>();
+  _TestStableSortByKeyWithLargeKeys<int,   16>();
+  _TestStableSortByKeyWithLargeKeys<int,   32>();
+  _TestStableSortByKeyWithLargeKeys<int,   64>();
 //    _TestStableSortByKeyWithLargeKeys<int,  128>();
 //    _TestStableSortByKeyWithLargeKeys<int,  256>();
 //    _TestStableSortByKeyWithLargeKeys<int,  512>();
@@ -113,10 +112,9 @@ TEST(StableSortByKeyLargeTests, TestStableSortByKeyWithLargeValues)
   _TestStableSortByKeyWithLargeValues<int,    4>();
   _TestStableSortByKeyWithLargeValues<int,    8>();
 // XXX these take too long to compile
-// also anything larger than 8 causes the compiler to not unroll the loops.
-//    _TestStableSortByKeyWithLargeValues<int,   16>();
-//    _TestStableSortByKeyWithLargeValues<int,   32>();
-//    _TestStableSortByKeyWithLargeValues<int,   64>();
+  _TestStableSortByKeyWithLargeValues<int,   16>();
+  _TestStableSortByKeyWithLargeValues<int,   32>();
+  _TestStableSortByKeyWithLargeValues<int,   64>();
 //    _TestStableSortByKeyWithLargeValues<int,  128>();
 //    _TestStableSortByKeyWithLargeValues<int,  256>();
 //    _TestStableSortByKeyWithLargeValues<int,  512>();
@@ -157,10 +155,9 @@ TEST(StableSortByKeyLargeTests, TestStableSortByKeyWithLargeKeysAndValues)
   _TestStableSortByKeyWithLargeKeysAndValues<int,    4>();
   _TestStableSortByKeyWithLargeKeysAndValues<int,    8>();
 // XXX these take too long to compile,
-// also anything larger than 8 causes the compiler to not unroll the loops.
-//    _TestStableSortByKeyWithLargeKeysAndValues<int,   16>();
-//    _TestStableSortByKeyWithLargeKeysAndValues<int,   32>();
-//    _TestStableSortByKeyWithLargeKeysAndValues<int,   64>();
+  _TestStableSortByKeyWithLargeKeysAndValues<int,   16>();
+  _TestStableSortByKeyWithLargeKeysAndValues<int,   32>();
+  _TestStableSortByKeyWithLargeKeysAndValues<int,   64>();
 //    _TestStableSortByKeyWithLargeKeysAndValues<int,  128>();
 //    _TestStableSortByKeyWithLargeKeysAndValues<int,  256>();
 //    _TestStableSortByKeyWithLargeKeysAndValues<int,  512>();
