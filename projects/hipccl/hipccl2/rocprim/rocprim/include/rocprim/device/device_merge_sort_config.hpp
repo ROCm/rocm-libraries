@@ -42,47 +42,28 @@ using merge_sort_config = kernel_config<BlockSize, 1>;
 namespace detail
 {
 
-// TODO investigate why some tests fail with block size > 256
 template<class Key, class Value>
 struct merge_sort_config_803
 {
-    // static constexpr size_t key_value_size = sizeof(Key) + sizeof(Value);
-    // static constexpr unsigned int item_scale =
-    //     ::rocprim::detail::ceiling_div<unsigned int>(key_value_size, 8);
-
-    // using type = merge_sort_config<::rocprim::max(256U, 1024U / item_scale)>;
-    using type = merge_sort_config<256U>;
+    using type = merge_sort_config<limit_block_size<256U, sizeof(Key) + sizeof(Value)>::value>;
 };
 
 template<class Key>
 struct merge_sort_config_803<Key, empty_type>
 {
-    // static constexpr unsigned int item_scale =
-    //     ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Key), 8);
-
-    // using type = merge_sort_config<::rocprim::max(256U, 1024U / item_scale)>;
-    using type = merge_sort_config<256U>;
+    using type = merge_sort_config<limit_block_size<256U, sizeof(Key)>::value>;
 };
 
 template<class Key, class Value>
 struct merge_sort_config_900
 {
-    // static constexpr size_t key_value_size = sizeof(Key) + sizeof(Value);
-    // static constexpr unsigned int item_scale =
-    //     ::rocprim::detail::ceiling_div<unsigned int>(key_value_size, 16);
-
-    // using type = merge_sort_config<::rocprim::max(256U, 1024U / item_scale)>;
-    using type = merge_sort_config<256U>;
+    using type = merge_sort_config<limit_block_size<256U, sizeof(Key) + sizeof(Value)>::value>;
 };
 
 template<class Key>
 struct merge_sort_config_900<Key, empty_type>
 {
-    // static constexpr unsigned int item_scale =
-    //     ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Key), 16);
-
-    // using type = merge_sort_config<::rocprim::max(256U, 1024U / item_scale)>;
-    using type = merge_sort_config<256U>;
+    using type = merge_sort_config<limit_block_size<256U, sizeof(Key)>::value>;
 };
 
 template<unsigned int TargetArch, class Key, class Value>

@@ -235,11 +235,12 @@ private:
                 return !r;
             };
         wsort.sort(kv..., compare_function2);
- 
+
         #pragma unroll
         for(unsigned int length = ::rocprim::warp_size(); length < Size; length *= 2)
         {
             bool dir = (flat_tid & (length * 2)) != 0;
+            #pragma unroll
             for(unsigned int k = length; k > 0; k /= 2)
             {
                 copy_to_shared(kv..., flat_tid, storage);
