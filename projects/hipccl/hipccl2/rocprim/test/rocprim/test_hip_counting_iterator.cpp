@@ -36,8 +36,7 @@
 
 #include "test_utils.hpp"
 
-#define HIP_CHECK(error)         \
-    ASSERT_EQ(static_cast<hipError_t>(error),hipSuccess)
+#define HIP_CHECK(error) ASSERT_EQ(error, hipSuccess)
 
 namespace rp = rocprim;
 
@@ -60,7 +59,7 @@ typedef ::testing::Types<
     RocprimCountingIteratorParams<int>,
     RocprimCountingIteratorParams<unsigned int>,
     RocprimCountingIteratorParams<unsigned long>,
-    RocprimCountingIteratorParams<float>
+    RocprimCountingIteratorParams<size_t>
 > RocprimCountingIteratorTestsParams;
 
 TYPED_TEST_CASE(RocprimCountingIteratorTests, RocprimCountingIteratorTestsParams);
@@ -125,15 +124,7 @@ TYPED_TEST(RocprimCountingIteratorTests, Transform)
     // Validating results
     for(size_t i = 0; i < output.size(); i++)
     {
-        if(std::is_integral<T>::value)
-        {
-            ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
-        }
-        else if(std::is_floating_point<T>::value)
-        {
-            auto tolerance = std::max<T>(std::abs(0.1f * expected[i]), T(0.01f));
-            ASSERT_NEAR(output[i], expected[i], tolerance) << "where index = " << i;
-        }
+        ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
     }
 
     hipFree(d_output);

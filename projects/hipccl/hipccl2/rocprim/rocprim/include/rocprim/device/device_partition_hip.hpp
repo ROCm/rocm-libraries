@@ -28,7 +28,6 @@
 #include "../functional.hpp"
 #include "../type_traits.hpp"
 #include "../detail/various.hpp"
-#include "../detail/match_result_type.hpp"
 
 #include "device_select_config.hpp"
 #include "detail/device_partition.hpp"
@@ -45,7 +44,6 @@ template<
     select_method SelectMethod,
     bool OnlySelected,
     class Config,
-    class ResultType,
     class InputIterator,
     class FlagIterator,
     class OutputIterator,
@@ -66,7 +64,7 @@ void partition_kernel(InputIterator input,
                       const unsigned int number_of_blocks,
                       ordered_block_id<unsigned int> ordered_bid)
 {
-    partition_kernel_impl<SelectMethod, OnlySelected, Config, ResultType>(
+    partition_kernel_impl<SelectMethod, OnlySelected, Config>(
         input, flags, output, selected_count_output, size, predicate,
         inequality_op, offset_scan_state, number_of_blocks, ordered_bid
     );
@@ -137,31 +135,11 @@ hipError_t partition_impl(void * temporary_storage,
 {
     using offset_type = unsigned int;
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    using output_type = typename std::iterator_traits<OutputIterator>::value_type;
-    // Fix for cases when output_type is void (there's no sizeof(void)), it's
-    // a tuple which contains an item of type void, or is not convertible to
-    // input_type which is used in InequalityOp
-    static constexpr bool is_output_type_voidlike =
-        std::is_same<void, output_type>::value || tuple_contains_type<void, output_type>::value;
-    // If output_type is voidlike we don't want std::is_convertible<output_type, input_type> to
-    // be evaluated, it leads to errors if input_type is a tuple
-    using is_output_type_convertible = typename std::conditional<
-        is_output_type_voidlike, std::false_type, std::is_convertible<output_type, input_type>
-    >::type;
-    static constexpr bool is_output_type_invalid =
-        is_output_type_voidlike || !(is_output_type_convertible::value);
-    using value_type = typename std::conditional<
-        is_output_type_invalid, input_type, output_type
-    >::type;
-    // Use smaller type for private storage
-    using result_type = typename std::conditional<
-        (sizeof(value_type) > sizeof(input_type)), input_type, value_type
-    >::type;
 
     // Get default config if Config is default_config
     using config = default_or_custom_config<
         Config,
-        default_select_config<ROCPRIM_TARGET_ARCH, result_type>
+        default_select_config<ROCPRIM_TARGET_ARCH, input_type>
     >;
 
     using offset_scan_state_type = detail::lookback_scan_state<offset_type>;
@@ -218,7 +196,7 @@ hipError_t partition_impl(void * temporary_storage,
     grid_size = number_of_blocks;
     hipLaunchKernelGGL(
         HIP_KERNEL_NAME(partition_kernel<
-            SelectMethod, OnlySelected, config, result_type,
+            SelectMethod, OnlySelected, config,
             InputIterator, FlagIterator, OutputIterator, SelectedCountOutputIterator,
             UnaryPredicate, decltype(inequality_op), offset_scan_state_type
         >),

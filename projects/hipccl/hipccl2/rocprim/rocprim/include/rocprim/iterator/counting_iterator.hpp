@@ -35,7 +35,7 @@
 BEGIN_ROCPRIM_NAMESPACE
 
 /// \class counting_iterator
-/// \brief A random-access input (read-only) iterator over a sequence of consecutive values.
+/// \brief A random-access input (read-only) iterator over a sequence of consecutive integer values.
 ///
 /// \par Overview
 /// * A counting_iterator represents a pointer into a range of sequentially increasing values.
@@ -64,6 +64,8 @@ public:
     using difference_type = Difference;
     /// The category of the iterator.
     using iterator_category = std::random_access_iterator_tag;
+
+    static_assert(std::is_integral<value_type>::value, "Incrementable must be integral type");
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
     using self_type = counting_iterator;
@@ -213,16 +215,7 @@ public:
 private:
     template<class T>
     inline
-    auto equal_value(const T& x, const T& y) const
-        -> typename std::enable_if<::rocprim::is_floating_point<T>::value, bool>::type
-    {
-        return difference_type(y) - difference_type(x) == 0;
-    }
-
-    template<class T>
-    inline
-    auto equal_value(const T& x, const T& y) const
-        -> typename std::enable_if<!::rocprim::is_floating_point<T>::value, bool>::type
+    bool equal_value(const T& x, const T& y) const
     {
         return (x == y);
     }

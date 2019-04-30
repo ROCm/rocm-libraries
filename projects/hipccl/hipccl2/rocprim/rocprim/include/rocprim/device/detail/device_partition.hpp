@@ -402,7 +402,6 @@ template<
     select_method SelectMethod,
     bool OnlySelected,
     class Config,
-    class ResultType,
     class InputIterator,
     class FlagIterator,
     class OutputIterator,
@@ -428,7 +427,7 @@ void partition_kernel_impl(InputIterator input,
     constexpr unsigned int items_per_block = block_size * items_per_thread;
 
     using offset_type = typename OffsetLookbackScanState::value_type;
-    using value_type = ResultType;
+    using value_type = typename std::iterator_traits<InputIterator>::value_type;
 
     // Block primitives
     using block_load_value_type = ::rocprim::block_load<

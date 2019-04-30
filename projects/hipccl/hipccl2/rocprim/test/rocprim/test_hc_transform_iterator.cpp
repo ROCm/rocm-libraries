@@ -79,7 +79,7 @@ typedef ::testing::Types<
     RocprimTransformIteratorParams<int, plus_ten<long>>,
     RocprimTransformIteratorParams<unsigned int>,
     RocprimTransformIteratorParams<unsigned long>,
-    RocprimTransformIteratorParams<float, plus_ten<double>, double>
+    RocprimTransformIteratorParams<unsigned int, plus_ten<size_t>, size_t>
 > RocprimTransformIteratorTestsParams;
 
 TYPED_TEST_CASE(RocprimTransformIteratorTests, RocprimTransformIteratorTestsParams);
@@ -272,4 +272,3 @@ TYPED_TEST(RocprimTransformIteratorTests, TransformReduceCountingIterator)
         ASSERT_NEAR(output[0], expected, tolerance);
     }
 }
-
