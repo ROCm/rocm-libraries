@@ -49,7 +49,7 @@ set(ROCPRIM_ROOT ${CMAKE_CURRENT_BINARY_DIR}/rocPRIM CACHE PATH "")
 download_project(
   PROJ           rocPRIM
   GIT_REPOSITORY https://projects.streamhpc.com/amd/rocPRIM.git
-  GIT_TAG        thrust
+  GIT_TAG        develop_thrust_stream
   INSTALL_DIR    ${ROCPRIM_ROOT}
   CMAKE_ARGS     -DBUILD_TEST=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
   LOG_DOWNLOAD   TRUE
