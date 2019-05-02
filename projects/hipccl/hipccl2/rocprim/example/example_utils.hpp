@@ -28,16 +28,14 @@
 
 #include <rocprim/rocprim.hpp>
 
-#ifdef ROCPRIM_HIP_API
-    #define HIP_CHECK(condition)         \
-    {                                  \
-        hipError_t error = condition;    \
-        if(error != hipSuccess){         \
-            std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
-            exit(error); \
-        } \
-    }
-#endif // ROCPRIM_HIP_API
+#define HIP_CHECK(condition)         \
+{                                    \
+    hipError_t error = condition;    \
+    if(error != hipSuccess){         \
+        std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
+        exit(error); \
+    } \
+}
 
 #define OUTPUT_VALIDATION_CHECK(validation_result)               \
   {                                                              \
@@ -60,7 +58,6 @@ inline auto get_random_data(size_t size, T min, T max)
     return data;
 }
 
-#ifdef ROCPRIM_HIP_API
 template<class T>
 inline void hip_read_device_memory(std::vector<T> &host_destination, T *device_source)
 {
@@ -84,7 +81,6 @@ inline void hip_write_device_memory(T *device_destination, std::vector<T>& host_
         )
     );
 }
-#endif // ROCPRIM_HIP_API
 
 template<class T>
 inline bool validate_device_output(const std::vector<T> &host_output, const std::vector<T> &expected_output)

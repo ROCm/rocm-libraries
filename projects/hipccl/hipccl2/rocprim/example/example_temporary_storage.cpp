@@ -21,7 +21,7 @@
 #include <vector>
 #include <random>
 
-// rocPRIM HIP API
+// rocPRIM API
 #include <rocprim/rocprim_hip.hpp>
 
 #include "example_utils.hpp"
@@ -392,8 +392,8 @@ int main()
     printf("Max threads per block:   %d  \n", device_properties.maxThreadsPerBlock);
 
     // Running kernels
+    run_example_global_memory_storage<int>(1024);
     run_example_shared_memory<int>(1024);
     run_example_union_storage_types<int>(1024);
     run_example_dynamic_shared_memory<int>(1024);
-    run_example_global_memory_storage<int>(1024);
 }
