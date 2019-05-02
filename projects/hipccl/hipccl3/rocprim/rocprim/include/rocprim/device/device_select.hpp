@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_DEVICE_DEVICE_SELECT_HIP_HPP_
-#define ROCPRIM_DEVICE_DEVICE_SELECT_HIP_HPP_
+#ifndef ROCPRIM_DEVICE_DEVICE_SELECT_HPP_
+#define ROCPRIM_DEVICE_DEVICE_SELECT_HPP_
 
 #include <type_traits>
 #include <iterator>
@@ -30,8 +30,8 @@
 
 #include "../iterator/transform_iterator.hpp"
 
-#include "device_scan_hip.hpp"
-#include "device_partition_hip.hpp"
+#include "device_scan.hpp"
+#include "device_partition.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -392,4 +392,4 @@ hipError_t unique(void * temporary_storage,
 
 END_ROCPRIM_NAMESPACE
 
-#endif // ROCPRIM_DEVICE_DEVICE_SELECT_HIP_HPP_
+#endif // ROCPRIM_DEVICE_DEVICE_SELECT_HPP_

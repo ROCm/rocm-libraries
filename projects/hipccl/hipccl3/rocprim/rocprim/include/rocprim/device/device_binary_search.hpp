@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_DEVICE_DEVICE_BINARY_SEARCH_HIP_HPP_
-#define ROCPRIM_DEVICE_DEVICE_BINARY_SEARCH_HIP_HPP_
+#ifndef ROCPRIM_DEVICE_DEVICE_BINARY_SEARCH_HPP_
+#define ROCPRIM_DEVICE_DEVICE_BINARY_SEARCH_HPP_
 
 #include <type_traits>
 #include <iterator>
@@ -29,7 +29,7 @@
 
 #include "detail/device_binary_search.hpp"
 
-#include "device_transform_hip.hpp"
+#include "device_transform.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -172,4 +172,4 @@ hipError_t binary_search(void * temporary_storage,
 
 END_ROCPRIM_NAMESPACE
 
-#endif // ROCPRIM_DEVICE_DEVICE_BINARY_SEARCH_HIP_HPP_
+#endif // ROCPRIM_DEVICE_DEVICE_BINARY_SEARCH_HPP_
