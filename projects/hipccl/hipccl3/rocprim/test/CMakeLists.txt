@@ -53,47 +53,12 @@ function(add_hip_test TEST_NAME TEST_SOURCES)
   add_test(${TEST_NAME} ${TEST_TARGET})
 endfunction()
 
-function(add_hc_test TEST_NAME TEST_SOURCES)
-  list(GET TEST_SOURCES 0 TEST_MAIN_SOURCE)
-  get_filename_component(TEST_TARGET ${TEST_MAIN_SOURCE} NAME_WE)
-  add_executable(${TEST_TARGET} ${TEST_SOURCES})
-  target_include_directories(${TEST_TARGET} SYSTEM BEFORE
-    PUBLIC
-      ${GTEST_INCLUDE_DIRS}
-  )
-  if(HIP_COMPILER STREQUAL "hcc")
-    target_link_libraries(${TEST_TARGET}
-      PRIVATE
-        hcc::hccrt
-        hcc::hc_am
-        ${GTEST_BOTH_LIBRARIES}
-    )
-  elseif(HIP_COMPILER STREQUAL "clang")
-    target_link_libraries(${TEST_TARGET}
-      PRIVATE
-        ${GTEST_BOTH_LIBRARIES}
-    )
-  endif()
-  foreach(amdgpu_target ${AMDGPU_TARGETS})
-    target_link_libraries(${TEST_TARGET}
-      PRIVATE
-        --amdgpu-target=${amdgpu_target}
-    )
-  endforeach()
-  set_target_properties(${TEST_TARGET}
-    PROPERTIES
-      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test"
-  )
-  add_test(${TEST_NAME} ${TEST_TARGET})
-endfunction()
-
 # ****************************************************************************
 # Tests
 # ****************************************************************************
 
-# HC and HIP tests without using rocPRIM
-add_hip_test("hip.device_api"  test_hip_api.cpp)
-add_hc_test ("hc.device_api" test_hc_api.cpp)
+# HIP tests without using rocPRIM
+add_hip_test("hip.device_api" test_hip_api.cpp)
 
-# rocPRIM test (run only on ROCm/hcc)
+# rocPRIM test
 add_subdirectory(rocprim)
