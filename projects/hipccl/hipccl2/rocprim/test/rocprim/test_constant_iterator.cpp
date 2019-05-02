@@ -30,25 +30,24 @@
 
 // HIP API
 #include <hip/hip_runtime.h>
-#include <hip/hip_hcc.h>
 // rocPRIM API
 #include <rocprim/rocprim.hpp>
 
 #include "test_utils.hpp"
 
-#define HIP_CHECK(error) ASSERT_EQ(error, hipSuccess)
+#define HIP_CHECK(error) ASSERT_EQ(error,hipSuccess)
 
 namespace rp = rocprim;
 
 // Params for tests
 template<class InputType>
-struct RocprimCountingIteratorParams
+struct RocprimConstantIteratorParams
 {
     using input_type = InputType;
 };
 
 template<class Params>
-class RocprimCountingIteratorTests : public ::testing::Test
+class RocprimConstantIteratorTests : public ::testing::Test
 {
 public:
     using input_type = typename Params::input_type;
@@ -56,13 +55,13 @@ public:
 };
 
 typedef ::testing::Types<
-    RocprimCountingIteratorParams<int>,
-    RocprimCountingIteratorParams<unsigned int>,
-    RocprimCountingIteratorParams<unsigned long>,
-    RocprimCountingIteratorParams<size_t>
-> RocprimCountingIteratorTestsParams;
+    RocprimConstantIteratorParams<int>,
+    RocprimConstantIteratorParams<unsigned int>,
+    RocprimConstantIteratorParams<unsigned long>,
+    RocprimConstantIteratorParams<float>
+> RocprimConstantIteratorTestsParams;
 
-TYPED_TEST_CASE(RocprimCountingIteratorTests, RocprimCountingIteratorTestsParams);
+TYPED_TEST_CASE(RocprimConstantIteratorTests, RocprimConstantIteratorTestsParams);
 
 template<class T>
 struct transform
@@ -74,18 +73,19 @@ struct transform
     }
 };
 
-TYPED_TEST(RocprimCountingIteratorTests, Transform)
+TYPED_TEST(RocprimConstantIteratorTests, Transform)
 {
     using T = typename TestFixture::input_type;
-    using Iterator = typename rocprim::counting_iterator<T>;
+    using Iterator = typename rocprim::constant_iterator<T>;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
     const size_t size = 1024;
 
     hipStream_t stream = 0; // default
 
-    // Create counting_iterator<U> with random starting point
-    Iterator input_begin(test_utils::get_random_value<T>(0, 200));
+    // Create constant_iterator<U> with random starting point
+    const auto value = test_utils::get_random_value<T>(0, 200);
+    Iterator input_begin(value);
 
     std::vector<T> output(size);
     T * d_output;
@@ -93,13 +93,7 @@ TYPED_TEST(RocprimCountingIteratorTests, Transform)
     HIP_CHECK(hipDeviceSynchronize());
 
     // Calculate expected results on host
-    std::vector<T> expected(size);
-    std::transform(
-        input_begin,
-        input_begin + size,
-        expected.begin(),
-        transform<T>()
-    );
+    std::vector<T> expected(size, transform<T>()(value));
 
     // Run
     HIP_CHECK(
@@ -124,7 +118,15 @@ TYPED_TEST(RocprimCountingIteratorTests, Transform)
     // Validating results
     for(size_t i = 0; i < output.size(); i++)
     {
-        ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
+        if(std::is_integral<T>::value)
+        {
+            ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
+        }
+        else if(std::is_floating_point<T>::value)
+        {
+            auto tolerance = std::max<T>(std::abs(0.1f * expected[i]), T(0.01f));
+            ASSERT_NEAR(output[i], expected[i], tolerance) << "where index = " << i;
+        }
     }
 
     hipFree(d_output);

@@ -51,7 +51,7 @@ namespace test_utils
 
 // Support half operators on host side
 
-#if defined(__HCC_ACCELERATOR__) || defined(__HIP_DEVICE_COMPILE__)
+#if defined(__HIP_DEVICE_COMPILE__)
 
 ROCPRIM_DEVICE inline
 rocprim::half half_to_native(const rocprim::half& x)
@@ -312,15 +312,6 @@ OutputIt host_exclusive_scan_by_key(InputIt first, InputIt last, KeyIt k_first,
     return ++d_first;
 }
 
-#ifdef ROCPRIM_HC_API
-inline
-size_t get_max_tile_size(hc::accelerator acc = hc::accelerator())
-{
-    return acc.get_max_tile_static_size();
-}
-#endif
-
-#ifdef ROCPRIM_HIP_API
 inline
 size_t get_max_block_size()
 {
@@ -336,7 +327,6 @@ size_t get_max_block_size()
     }
     return device_properties.maxThreadsPerBlock;
 }
-#endif
 
 template<class T>
 struct is_custom_test_type : std::false_type
@@ -354,7 +344,6 @@ struct inner_type
     using type = T;
 };
 
-#if defined(ROCPRIM_HC_API) || defined(ROCPRIM_HIP_API)
 // Custom type used in tests
 template<class T>
 struct custom_test_type
@@ -677,7 +666,6 @@ inline auto get_random_value(typename T::value_type min, typename T::value_type 
 {
     return get_random_data(1, min, max)[0];
 }
-#endif
 
 template<class T>
 auto assert_near(const std::vector<T>& result, const std::vector<T>& expected, const float percent)

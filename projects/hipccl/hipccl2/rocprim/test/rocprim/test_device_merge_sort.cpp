@@ -29,7 +29,6 @@
 
 // HIP API
 #include <hip/hip_runtime.h>
-#include <hip/hip_hcc.h>
 // rocPRIM API
 #include <rocprim/rocprim.hpp>
 

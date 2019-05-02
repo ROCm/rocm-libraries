@@ -27,19 +27,20 @@
 #include <tuple>
 #include <vector>
 #include <utility>
-#include <stdexcept>
 
 // Google Test
 #include <gtest/gtest.h>
 
-// HC API
-#include <hcc/hc.hpp>
+// HIP API
+#include <hip/hip_runtime.h>
 // rocPRIM API
 #include <rocprim/rocprim.hpp>
 
 #include "test_utils.hpp"
 
 namespace rp = rocprim;
+
+#define HIP_CHECK(error) ASSERT_EQ(error, hipSuccess)
 
 // rows, columns, (row_stride - columns * Channels)
 std::vector<std::tuple<size_t, size_t, size_t>> get_dims()
@@ -103,8 +104,8 @@ inline auto get_random_samples(size_t size, U min, U max)
 template<class T>
 struct transform_op
 {
-    inline
-    T operator()(T x) const [[cpu]] [[hc]]
+    __host__ __device__ inline
+    T operator()(T x) const
     {
         return x * 1;
     }
@@ -154,14 +155,14 @@ TEST(RocprimDeviceHistogramEven, IncorrectInput)
     size_t temporary_storage_bytes = 0;
     int * d_input = nullptr;
     int * d_histogram = nullptr;
-    ASSERT_THROW(
+    ASSERT_EQ(
         rp::histogram_even(
             nullptr, temporary_storage_bytes,
             d_input, 123,
             d_histogram,
             1, 1, 2
         ),
-        std::invalid_argument
+        hipErrorInvalidValue
     );
 }
 
@@ -174,8 +175,7 @@ TYPED_TEST(RocprimDeviceHistogramEven, Even)
     constexpr level_type lower_level = TestFixture::params::lower_level;
     constexpr level_type upper_level = TestFixture::params::upper_level;
 
-    hc::accelerator acc;
-    hc::accelerator_view acc_view = acc.create_view();
+    hipStream_t stream = 0;
 
     const bool debug_synchronous = false;
 
@@ -196,8 +196,17 @@ TYPED_TEST(RocprimDeviceHistogramEven, Even)
         // Generate data
         std::vector<sample_type> input = get_random_samples<sample_type>(size, lower_level, upper_level);
 
-        hc::array<sample_type> d_input(hc::extent<1>(size), input.begin(), acc_view);
-        hc::array<counter_type> d_histogram(bins, acc_view);
+        sample_type * d_input;
+        counter_type * d_histogram;
+        HIP_CHECK(hipMalloc(&d_input, size * sizeof(sample_type)));
+        HIP_CHECK(hipMalloc(&d_histogram, bins * sizeof(counter_type)));
+        HIP_CHECK(
+            hipMemcpy(
+                d_input, input.data(),
+                size * sizeof(sample_type),
+                hipMemcpyHostToDevice
+            )
+        );
 
         // Calculate expected results on host
         std::vector<counter_type> histogram_expected(bins, 0);
@@ -216,60 +225,76 @@ TYPED_TEST(RocprimDeviceHistogramEven, Even)
             }
         }
 
-        rp::transform_iterator<sample_type *, transform_op<sample_type>, sample_type> d_input2(
-            d_input.accelerator_pointer(),
-            transform_op<sample_type>()
-        );
+        using config = rp::histogram_config<rp::kernel_config<128, 5>>;
 
         size_t temporary_storage_bytes = 0;
         if(rows == 1)
         {
-            rp::histogram_even(
-                nullptr, temporary_storage_bytes,
-                d_input2, columns,
-                d_histogram.accelerator_pointer(),
-                bins + 1, lower_level, upper_level,
-                acc_view, debug_synchronous
+            HIP_CHECK(
+                rp::histogram_even<config>(
+                    nullptr, temporary_storage_bytes,
+                    d_input, columns,
+                    d_histogram,
+                    bins + 1, lower_level, upper_level,
+                    stream, debug_synchronous
+                )
             );
         }
         else
         {
-            rp::histogram_even(
-                nullptr, temporary_storage_bytes,
-                d_input2, columns, rows, row_stride_bytes,
-                d_histogram.accelerator_pointer(),
-                bins + 1, lower_level, upper_level,
-                acc_view, debug_synchronous
+            HIP_CHECK(
+                rp::histogram_even<config>(
+                    nullptr, temporary_storage_bytes,
+                    d_input, columns, rows, row_stride_bytes,
+                    d_histogram,
+                    bins + 1, lower_level, upper_level,
+                    stream, debug_synchronous
+                )
             );
         }
 
         ASSERT_GT(temporary_storage_bytes, 0U);
 
-        hc::array<char> d_temporary_storage(temporary_storage_bytes, acc_view);
+        void * d_temporary_storage;
+        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
         if(rows == 1)
         {
-            rp::histogram_even(
-                d_temporary_storage.accelerator_pointer(), temporary_storage_bytes,
-                d_input2, columns,
-                d_histogram.accelerator_pointer(),
-                bins + 1, lower_level, upper_level,
-                acc_view, debug_synchronous
+            HIP_CHECK(
+                rp::histogram_even<config>(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_input, columns,
+                    d_histogram,
+                    bins + 1, lower_level, upper_level,
+                    stream, debug_synchronous
+                )
             );
         }
         else
         {
-            rp::histogram_even(
-                d_temporary_storage.accelerator_pointer(), temporary_storage_bytes,
-                d_input2, columns, rows, row_stride_bytes,
-                d_histogram.accelerator_pointer(),
-                bins + 1, lower_level, upper_level,
-                acc_view, debug_synchronous
+            HIP_CHECK(
+                rp::histogram_even<config>(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_input, columns, rows, row_stride_bytes,
+                    d_histogram,
+                    bins + 1, lower_level, upper_level,
+                    stream, debug_synchronous
+                )
             );
         }
-        acc_view.wait();
 
-        std::vector<counter_type> histogram = d_histogram;
+        std::vector<counter_type> histogram(bins);
+        HIP_CHECK(
+            hipMemcpy(
+                histogram.data(), d_histogram,
+                bins * sizeof(counter_type),
+                hipMemcpyDeviceToHost
+            )
+        );
+
+        HIP_CHECK(hipFree(d_temporary_storage));
+        HIP_CHECK(hipFree(d_input));
+        HIP_CHECK(hipFree(d_histogram));
 
         for(size_t i = 0; i < bins; i++)
         {
@@ -323,14 +348,14 @@ TEST(RocprimDeviceHistogramRange, IncorrectInput)
     int * d_input = nullptr;
     int * d_histogram = nullptr;
     int * d_levels = nullptr;
-    ASSERT_THROW(
+    ASSERT_EQ(
         rp::histogram_range(
             nullptr, temporary_storage_bytes,
             d_input, 123,
             d_histogram,
             1, d_levels
         ),
-        std::invalid_argument
+        hipErrorInvalidValue
     );
 }
 
@@ -341,8 +366,7 @@ TYPED_TEST(RocprimDeviceHistogramRange, Range)
     using level_type = typename TestFixture::params::level_type;
     constexpr unsigned int bins = TestFixture::params::bins;
 
-    hc::accelerator acc;
-    hc::accelerator_view acc_view = acc.create_view();
+    hipStream_t stream = 0;
 
     const bool debug_synchronous = false;
 
@@ -380,9 +404,26 @@ TYPED_TEST(RocprimDeviceHistogramRange, Range)
 
         std::vector<sample_type> input = get_random_samples<sample_type>(size, levels[0], levels[bins]);
 
-        hc::array<sample_type> d_input(hc::extent<1>(size), input.begin(), acc_view);
-        hc::array<level_type> d_levels(hc::extent<1>(bins + 1), levels.begin(), acc_view);
-        hc::array<counter_type> d_histogram(bins, acc_view);
+        sample_type * d_input;
+        level_type * d_levels;
+        counter_type * d_histogram;
+        HIP_CHECK(hipMalloc(&d_input, size * sizeof(sample_type)));
+        HIP_CHECK(hipMalloc(&d_levels, (bins + 1) * sizeof(level_type)));
+        HIP_CHECK(hipMalloc(&d_histogram, bins * sizeof(counter_type)));
+        HIP_CHECK(
+            hipMemcpy(
+                d_input, input.data(),
+                size * sizeof(sample_type),
+                hipMemcpyHostToDevice
+            )
+        );
+        HIP_CHECK(
+            hipMemcpy(
+                d_levels, levels.data(),
+                (bins + 1) * sizeof(level_type),
+                hipMemcpyHostToDevice
+            )
+        );
 
         // Calculate expected results on host
         std::vector<counter_type> histogram_expected(bins, 0);
@@ -400,55 +441,80 @@ TYPED_TEST(RocprimDeviceHistogramRange, Range)
             }
         }
 
+        rp::transform_iterator<sample_type *, transform_op<sample_type>, sample_type> d_input2(
+            d_input,
+            transform_op<sample_type>()
+        );
+
         size_t temporary_storage_bytes = 0;
         if(rows == 1)
         {
-            rp::histogram_range(
-                nullptr, temporary_storage_bytes,
-                d_input.accelerator_pointer(), columns,
-                d_histogram.accelerator_pointer(),
-                bins + 1, d_levels.accelerator_pointer(),
-                acc_view, debug_synchronous
+            HIP_CHECK(
+                rp::histogram_range(
+                    nullptr, temporary_storage_bytes,
+                    d_input2, columns,
+                    d_histogram,
+                    bins + 1, d_levels,
+                    stream, debug_synchronous
+                )
             );
         }
         else
         {
-            rp::histogram_range(
-                nullptr, temporary_storage_bytes,
-                d_input.accelerator_pointer(), columns, rows, row_stride_bytes,
-                d_histogram.accelerator_pointer(),
-                bins + 1, d_levels.accelerator_pointer(),
-                acc_view, debug_synchronous
+            HIP_CHECK(
+                rp::histogram_range(
+                    nullptr, temporary_storage_bytes,
+                    d_input2, columns, rows, row_stride_bytes,
+                    d_histogram,
+                    bins + 1, d_levels,
+                    stream, debug_synchronous
+                )
             );
         }
 
         ASSERT_GT(temporary_storage_bytes, 0U);
 
-        hc::array<char> d_temporary_storage(temporary_storage_bytes, acc_view);
+        void * d_temporary_storage;
+        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
         if(rows == 1)
         {
-            rp::histogram_range(
-                d_temporary_storage.accelerator_pointer(), temporary_storage_bytes,
-                d_input.accelerator_pointer(), columns,
-                d_histogram.accelerator_pointer(),
-                bins + 1, d_levels.accelerator_pointer(),
-                acc_view, debug_synchronous
+            HIP_CHECK(
+                rp::histogram_range(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_input2, columns,
+                    d_histogram,
+                    bins + 1, d_levels,
+                    stream, debug_synchronous
+                )
             );
         }
         else
         {
-            rp::histogram_range(
-                d_temporary_storage.accelerator_pointer(), temporary_storage_bytes,
-                d_input.accelerator_pointer(), columns, rows, row_stride_bytes,
-                d_histogram.accelerator_pointer(),
-                bins + 1, d_levels.accelerator_pointer(),
-                acc_view, debug_synchronous
+            HIP_CHECK(
+                rp::histogram_range(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_input2, columns, rows, row_stride_bytes,
+                    d_histogram,
+                    bins + 1, d_levels,
+                    stream, debug_synchronous
+                )
             );
         }
-        acc_view.wait();
 
-        std::vector<counter_type> histogram = d_histogram;
+        std::vector<counter_type> histogram(bins);
+        HIP_CHECK(
+            hipMemcpy(
+                histogram.data(), d_histogram,
+                bins * sizeof(counter_type),
+                hipMemcpyDeviceToHost
+            )
+        );
+
+        HIP_CHECK(hipFree(d_temporary_storage));
+        HIP_CHECK(hipFree(d_input));
+        HIP_CHECK(hipFree(d_levels));
+        HIP_CHECK(hipFree(d_histogram));
 
         for(size_t i = 0; i < bins; i++)
         {
@@ -525,8 +591,7 @@ TYPED_TEST(RocprimDeviceHistogramMultiEven, MultiEven)
         num_levels[channel] = bins[channel] + 1;
     }
 
-    hc::accelerator acc;
-    hc::accelerator_view acc_view = acc.create_view();
+    hipStream_t stream = 0;
 
     const bool debug_synchronous = false;
 
@@ -574,12 +639,20 @@ TYPED_TEST(RocprimDeviceHistogramMultiEven, MultiEven)
             }
         }
 
-        std::vector<hc::array<counter_type>> d_histogram(active_channels, hc::array<counter_type>(1));
-        hc::array<sample_type> d_input(hc::extent<1>(size), input.begin(), acc_view);
+        sample_type * d_input;
+        counter_type * d_histogram[active_channels];
+        HIP_CHECK(hipMalloc(&d_input, size * sizeof(sample_type)));
         for(unsigned int channel = 0; channel < active_channels; channel++)
         {
-            d_histogram[channel] = hc::array<counter_type>(bins[channel], acc_view);
+            HIP_CHECK(hipMalloc(&d_histogram[channel], bins[channel] * sizeof(counter_type)));
         }
+        HIP_CHECK(
+            hipMemcpy(
+                d_input, input.data(),
+                size * sizeof(sample_type),
+                hipMemcpyHostToDevice
+            )
+        );
 
         // Calculate expected results on host
         std::vector<counter_type> histogram_expected[active_channels];
@@ -603,65 +676,83 @@ TYPED_TEST(RocprimDeviceHistogramMultiEven, MultiEven)
             }
         }
 
-        counter_type * d_histogram_ptr[active_channels];
-        for(unsigned int channel = 0; channel < active_channels; channel++)
-        {
-            d_histogram_ptr[channel] = d_histogram[channel].accelerator_pointer();
-        }
+        rp::transform_iterator<sample_type *, transform_op<sample_type>, sample_type> d_input2(
+            d_input,
+            transform_op<sample_type>()
+        );
 
         size_t temporary_storage_bytes = 0;
         if(rows == 1)
         {
-            rp::multi_histogram_even<channels, active_channels>(
-                nullptr, temporary_storage_bytes,
-                d_input.accelerator_pointer(), columns,
-                d_histogram_ptr,
-                num_levels, lower_level, upper_level,
-                acc_view, debug_synchronous
-            );
+            HIP_CHECK((
+                rp::multi_histogram_even<channels, active_channels>(
+                    nullptr, temporary_storage_bytes,
+                    d_input2, columns,
+                    d_histogram,
+                    num_levels, lower_level, upper_level,
+                    stream, debug_synchronous
+                )
+            ));
         }
         else
         {
-            rp::multi_histogram_even<channels, active_channels>(
-                nullptr, temporary_storage_bytes,
-                d_input.accelerator_pointer(), columns, rows, row_stride_bytes,
-                d_histogram_ptr,
-                num_levels, lower_level, upper_level,
-                acc_view, debug_synchronous
-            );
+            HIP_CHECK((
+                rp::multi_histogram_even<channels, active_channels>(
+                    nullptr, temporary_storage_bytes,
+                    d_input2, columns, rows, row_stride_bytes,
+                    d_histogram,
+                    num_levels, lower_level, upper_level,
+                    stream, debug_synchronous
+                )
+            ));
         }
 
         ASSERT_GT(temporary_storage_bytes, 0U);
 
-        hc::array<char> d_temporary_storage(temporary_storage_bytes, acc_view);
+        void * d_temporary_storage;
+        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
         if(rows == 1)
         {
-            rp::multi_histogram_even<channels, active_channels>(
-                d_temporary_storage.accelerator_pointer(), temporary_storage_bytes,
-                d_input.accelerator_pointer(), columns,
-                d_histogram_ptr,
-                num_levels, lower_level, upper_level,
-                acc_view, debug_synchronous
-            );
+            HIP_CHECK((
+                rp::multi_histogram_even<channels, active_channels>(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_input2, columns,
+                    d_histogram,
+                    num_levels, lower_level, upper_level,
+                    stream, debug_synchronous
+                )
+            ));
         }
         else
         {
-            rp::multi_histogram_even<channels, active_channels>(
-                d_temporary_storage.accelerator_pointer(), temporary_storage_bytes,
-                d_input.accelerator_pointer(), columns, rows, row_stride_bytes,
-                d_histogram_ptr,
-                num_levels, lower_level, upper_level,
-                acc_view, debug_synchronous
-            );
+            HIP_CHECK((
+                rp::multi_histogram_even<channels, active_channels>(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_input2, columns, rows, row_stride_bytes,
+                    d_histogram,
+                    num_levels, lower_level, upper_level,
+                    stream, debug_synchronous
+                )
+            ));
         }
-        acc_view.wait();
 
         std::vector<counter_type> histogram[active_channels];
         for(unsigned int channel = 0; channel < active_channels; channel++)
         {
-            histogram[channel] = d_histogram[channel];
+            histogram[channel] = std::vector<counter_type>(bins[channel]);
+            HIP_CHECK(
+                hipMemcpy(
+                    histogram[channel].data(), d_histogram[channel],
+                    bins[channel] * sizeof(counter_type),
+                    hipMemcpyDeviceToHost
+                )
+            );
+            HIP_CHECK(hipFree(d_histogram[channel]));
         }
+
+        HIP_CHECK(hipFree(d_temporary_storage));
+        HIP_CHECK(hipFree(d_input));
 
         for(unsigned int channel = 0; channel < active_channels; channel++)
         {
@@ -726,8 +817,7 @@ TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
     constexpr unsigned int channels = TestFixture::params::channels;
     constexpr unsigned int active_channels = TestFixture::params::active_channels;
 
-    hc::accelerator acc;
-    hc::accelerator_view acc_view = acc.create_view();
+    hipStream_t stream = 0;
 
     const bool debug_synchronous = false;
 
@@ -806,15 +896,30 @@ TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
             }
         }
 
-        std::vector<hc::array<counter_type>> d_histogram(active_channels, hc::array<counter_type>(1));
-        std::vector<hc::array<level_type>> d_levels(active_channels, hc::array<level_type>(1));
-        hc::array<sample_type> d_input(hc::extent<1>(size), input.begin(), acc_view);
+        sample_type * d_input;
+        level_type * d_levels[active_channels];
+        counter_type * d_histogram[active_channels];
+        HIP_CHECK(hipMalloc(&d_input, size * sizeof(sample_type)));
         for(unsigned int channel = 0; channel < active_channels; channel++)
         {
-            d_histogram[channel] = hc::array<counter_type>(bins[channel], acc_view);
-            d_levels[channel] = hc::array<level_type>(
-                hc::extent<1>(num_levels[channel]),
-                levels[channel].begin(), acc_view
+            HIP_CHECK(hipMalloc(&d_levels[channel], num_levels[channel] * sizeof(level_type)));
+            HIP_CHECK(hipMalloc(&d_histogram[channel], bins[channel] * sizeof(counter_type)));
+        }
+        HIP_CHECK(
+            hipMemcpy(
+                d_input, input.data(),
+                size * sizeof(sample_type),
+                hipMemcpyHostToDevice
+            )
+        );
+        for(unsigned int channel = 0; channel < active_channels; channel++)
+        {
+            HIP_CHECK(
+                hipMemcpy(
+                    d_levels[channel], levels[channel].data(),
+                    num_levels[channel] * sizeof(level_type),
+                    hipMemcpyHostToDevice
+                )
             );
         }
 
@@ -840,72 +945,81 @@ TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
             }
         }
 
-        rp::transform_iterator<sample_type *, transform_op<sample_type>, sample_type> d_input2(
-            d_input.accelerator_pointer(),
-            transform_op<sample_type>()
-        );
-
-        counter_type * d_histogram_ptr[active_channels];
-        level_type * d_levels_ptr[active_channels];
-        for(unsigned int channel = 0; channel < active_channels; channel++)
-        {
-            d_histogram_ptr[channel] = d_histogram[channel].accelerator_pointer();
-            d_levels_ptr[channel] = d_levels[channel].accelerator_pointer();
-        }
+        using config = rp::histogram_config<rp::kernel_config<192, 3>>;
 
         size_t temporary_storage_bytes = 0;
         if(rows == 1)
         {
-            rp::multi_histogram_range<channels, active_channels>(
-                nullptr, temporary_storage_bytes,
-                d_input2, columns,
-                d_histogram_ptr,
-                num_levels, d_levels_ptr,
-                acc_view, debug_synchronous
-            );
+            HIP_CHECK((
+                rp::multi_histogram_range<channels, active_channels, config>(
+                    nullptr, temporary_storage_bytes,
+                    d_input, columns,
+                    d_histogram,
+                    num_levels, d_levels,
+                    stream, debug_synchronous
+                )
+            ));
         }
         else
         {
-            rp::multi_histogram_range<channels, active_channels>(
-                nullptr, temporary_storage_bytes,
-                d_input2, columns, rows, row_stride_bytes,
-                d_histogram_ptr,
-                num_levels, d_levels_ptr,
-                acc_view, debug_synchronous
-            );
+            HIP_CHECK((
+                rp::multi_histogram_range<channels, active_channels, config>(
+                    nullptr, temporary_storage_bytes,
+                    d_input, columns, rows, row_stride_bytes,
+                    d_histogram,
+                    num_levels, d_levels,
+                    stream, debug_synchronous
+                )
+            ));
         }
 
         ASSERT_GT(temporary_storage_bytes, 0U);
 
-        hc::array<char> d_temporary_storage(temporary_storage_bytes, acc_view);
+        void * d_temporary_storage;
+        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
         if(rows == 1)
         {
-            rp::multi_histogram_range<channels, active_channels>(
-                d_temporary_storage.accelerator_pointer(), temporary_storage_bytes,
-                d_input2, columns,
-                d_histogram_ptr,
-                num_levels, d_levels_ptr,
-                acc_view, debug_synchronous
-            );
+            HIP_CHECK((
+                rp::multi_histogram_range<channels, active_channels, config>(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_input, columns,
+                    d_histogram,
+                    num_levels, d_levels,
+                    stream, debug_synchronous
+                )
+            ));
         }
         else
         {
-            rp::multi_histogram_range<channels, active_channels>(
-                d_temporary_storage.accelerator_pointer(), temporary_storage_bytes,
-                d_input2, columns, rows, row_stride_bytes,
-                d_histogram_ptr,
-                num_levels, d_levels_ptr,
-                acc_view, debug_synchronous
-            );
+            HIP_CHECK((
+                rp::multi_histogram_range<channels, active_channels, config>(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_input, columns, rows, row_stride_bytes,
+                    d_histogram,
+                    num_levels, d_levels,
+                    stream, debug_synchronous
+                )
+            ));
         }
-        acc_view.wait();
 
         std::vector<counter_type> histogram[active_channels];
         for(unsigned int channel = 0; channel < active_channels; channel++)
         {
-            histogram[channel] = d_histogram[channel];
+            histogram[channel] = std::vector<counter_type>(bins[channel]);
+            HIP_CHECK(
+                hipMemcpy(
+                    histogram[channel].data(), d_histogram[channel],
+                    bins[channel] * sizeof(counter_type),
+                    hipMemcpyDeviceToHost
+                )
+            );
+            HIP_CHECK(hipFree(d_levels[channel]));
+            HIP_CHECK(hipFree(d_histogram[channel]));
         }
+
+        HIP_CHECK(hipFree(d_temporary_storage));
+        HIP_CHECK(hipFree(d_input));
 
         for(unsigned int channel = 0; channel < active_channels; channel++)
         {

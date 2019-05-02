@@ -31,14 +31,16 @@
 // Google Test
 #include <gtest/gtest.h>
 
-// HC API
-#include <hcc/hc.hpp>
+// HIP API
+#include <hip/hip_runtime.h>
 // rocPRIM API
 #include <rocprim/rocprim.hpp>
 
 #include "test_utils.hpp"
 
 namespace rp = rocprim;
+
+#define HIP_CHECK(error) ASSERT_EQ(static_cast<hipError_t>(error), hipSuccess)
 
 template<
     class Key,
@@ -90,39 +92,33 @@ TYPED_TEST_CASE(RocprimDeviceSegmentedRadixSort, Params);
 template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
 struct key_comparator
 {
-private:
-    template<unsigned int CStartBit, unsigned int CEndBit>
-    constexpr static bool all_bits()
-    {
-        return (CStartBit == 0 && CEndBit == sizeof(Key) * 8);
-    }
+    static_assert(rp::is_unsigned<Key>::value, "Test supports start and end bits only for unsigned integers");
 
-    template<unsigned int CStartBit, unsigned int CEndBit>
-    auto compare(const Key& lhs, const Key& rhs) const
-        -> typename std::enable_if<all_bits<CStartBit, CEndBit>(), bool>::type
-    {
-        return Descending ? (rhs < lhs) : (lhs < rhs);
-    }
-
-    template<unsigned int CStartBit, unsigned int CEndBit>
-    auto compare(const Key& lhs, const Key& rhs) const
-        -> typename std::enable_if<!all_bits<CStartBit, CEndBit>(), bool>::type
+    bool operator()(const Key& lhs, const Key& rhs)
     {
         auto mask = (1ull << (EndBit - StartBit)) - 1;
         auto l = (static_cast<unsigned long long>(lhs) >> StartBit) & mask;
         auto r = (static_cast<unsigned long long>(rhs) >> StartBit) & mask;
         return Descending ? (r < l) : (l < r);
     }
+};
 
-public:
-    static_assert(
-        key_comparator::all_bits<StartBit, EndBit>() || rp::is_unsigned<Key>::value,
-        "Test supports start and end bits only for unsigned integers"
-    );
-
+template<class Key, bool Descending>
+struct key_comparator<Key, Descending, 0, sizeof(Key) * 8>
+{
     bool operator()(const Key& lhs, const Key& rhs)
     {
-        return this->compare<StartBit, EndBit>(lhs, rhs);
+        return Descending ? (rhs < lhs) : (lhs < rhs);
+    }
+};
+
+template<bool Descending>
+struct key_comparator<rp::half, Descending, 0, sizeof(rp::half) * 8>
+{
+    bool operator()(const rp::half& lhs, const rp::half& rhs)
+    {
+        // HIP's half doesn't have __host__ comparison operators, use floats instead
+        return key_comparator<float, Descending, 0, sizeof(float) * 8>()(lhs, rhs);
     }
 };
 
@@ -158,8 +154,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeys)
 
     using offset_type = unsigned int;
 
-    hc::accelerator acc;
-    hc::accelerator_view acc_view = acc.create_view();
+    hipStream_t stream = 0;
 
     const bool debug_synchronous = false;
 
@@ -203,10 +198,27 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeys)
         }
         offsets.push_back(size);
 
-        hc::array<key_type> d_keys_input(hc::extent<1>(size), keys_input.begin(), acc_view);
-        hc::array<key_type> d_keys_output(size, acc_view);
+        key_type * d_keys_input;
+        key_type * d_keys_output;
+        HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
+        HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
+        HIP_CHECK(
+            hipMemcpy(
+                d_keys_input, keys_input.data(),
+                size * sizeof(key_type),
+                hipMemcpyHostToDevice
+            )
+        );
 
-        hc::array<offset_type> d_offsets(hc::extent<1>(segments_count + 1), offsets.begin(), acc_view);
+        offset_type * d_offsets;
+        HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
+        HIP_CHECK(
+            hipMemcpy(
+                d_offsets, offsets.data(),
+                (segments_count + 1) * sizeof(offset_type),
+                hipMemcpyHostToDevice
+            )
+        );
 
         // Calculate expected results on host
         std::vector<key_type> expected(keys_input);
@@ -220,45 +232,60 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeys)
         }
 
         size_t temporary_storage_bytes = 0;
-        rp::segmented_radix_sort_keys(
-            nullptr, temporary_storage_bytes,
-            d_keys_input.accelerator_pointer(), d_keys_output.accelerator_pointer(), size,
-            segments_count, d_offsets.accelerator_pointer(), d_offsets.accelerator_pointer() + 1,
-            start_bit, end_bit
+        HIP_CHECK(
+            rp::segmented_radix_sort_keys(
+                nullptr, temporary_storage_bytes,
+                d_keys_input, d_keys_output, size,
+                segments_count, d_offsets, d_offsets + 1,
+                start_bit, end_bit
+            )
         );
 
         ASSERT_GT(temporary_storage_bytes, 0U);
 
-        hc::array<char> d_temporary_storage(temporary_storage_bytes, acc_view);
+        void * d_temporary_storage;
+        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
         if(descending)
         {
-            rp::segmented_radix_sort_keys_desc(
-                d_temporary_storage.accelerator_pointer(), temporary_storage_bytes,
-                d_keys_input.accelerator_pointer(), d_keys_output.accelerator_pointer(), size,
-                segments_count, d_offsets.accelerator_pointer(), d_offsets.accelerator_pointer() + 1,
-                start_bit, end_bit,
-                acc_view, debug_synchronous
+            HIP_CHECK(
+                rp::segmented_radix_sort_keys_desc(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_keys_input, d_keys_output, size,
+                    segments_count, d_offsets, d_offsets + 1,
+                    start_bit, end_bit,
+                    stream, debug_synchronous
+                )
             );
         }
         else
         {
-            rp::segmented_radix_sort_keys(
-                d_temporary_storage.accelerator_pointer(), temporary_storage_bytes,
-                d_keys_input.accelerator_pointer(), d_keys_output.accelerator_pointer(), size,
-                segments_count, d_offsets.accelerator_pointer(), d_offsets.accelerator_pointer() + 1,
-                start_bit, end_bit,
-                acc_view, debug_synchronous
+            HIP_CHECK(
+                rp::segmented_radix_sort_keys(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_keys_input, d_keys_output, size,
+                    segments_count, d_offsets, d_offsets + 1,
+                    start_bit, end_bit,
+                    stream, debug_synchronous
+                )
             );
         }
-        acc_view.wait();
 
-        std::vector<key_type> keys_output = d_keys_output;
+        std::vector<key_type> keys_output(size);
+        HIP_CHECK(
+            hipMemcpy(
+                keys_output.data(), d_keys_output,
+                size * sizeof(key_type),
+                hipMemcpyDeviceToHost
+            )
+        );
 
-        for(size_t i = 0; i < size; i++)
-        {
-            ASSERT_EQ(keys_output[i], expected[i]);
-        }
+        HIP_CHECK(hipFree(d_temporary_storage));
+        HIP_CHECK(hipFree(d_keys_input));
+        HIP_CHECK(hipFree(d_keys_output));
+        HIP_CHECK(hipFree(d_offsets));
+
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
     }
 }
 
@@ -272,8 +299,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairs)
 
     using offset_type = unsigned int;
 
-    hc::accelerator acc;
-    hc::accelerator_view acc_view = acc.create_view();
+    hipStream_t stream = 0;
 
     const bool debug_synchronous = false;
 
@@ -320,13 +346,39 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairs)
         std::vector<value_type> values_input(size);
         std::iota(values_input.begin(), values_input.end(), 0);
 
-        hc::array<key_type> d_keys_input(hc::extent<1>(size), keys_input.begin(), acc_view);
-        hc::array<key_type> d_keys_output(size, acc_view);
+        key_type * d_keys_input;
+        key_type * d_keys_output;
+        HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
+        HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
+        HIP_CHECK(
+            hipMemcpy(
+                d_keys_input, keys_input.data(),
+                size * sizeof(key_type),
+                hipMemcpyHostToDevice
+            )
+        );
 
-        hc::array<value_type> d_values_input(hc::extent<1>(size), values_input.begin(), acc_view);
-        hc::array<value_type> d_values_output(size, acc_view);
+        value_type * d_values_input;
+        value_type * d_values_output;
+        HIP_CHECK(hipMalloc(&d_values_input, size * sizeof(value_type)));
+        HIP_CHECK(hipMalloc(&d_values_output, size * sizeof(value_type)));
+        HIP_CHECK(
+            hipMemcpy(
+                d_values_input, values_input.data(),
+                size * sizeof(value_type),
+                hipMemcpyHostToDevice
+            )
+        );
 
-        hc::array<offset_type> d_offsets(hc::extent<1>(segments_count + 1), offsets.begin(), acc_view);
+        offset_type * d_offsets;
+        HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
+        HIP_CHECK(
+            hipMemcpy(
+                d_offsets, offsets.data(),
+                (segments_count + 1) * sizeof(offset_type),
+                hipMemcpyHostToDevice
+            )
+        );
 
         using key_value = std::pair<key_type, value_type>;
 
@@ -344,58 +396,81 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairs)
                 key_value_comparator<key_type, value_type, descending, start_bit, end_bit>()
             );
         }
+        std::vector<key_type> keys_expected(size);
+        std::vector<value_type> values_expected(size);
+        for(size_t i = 0; i < size; i++)
+        {
+            keys_expected[i] = expected[i].first;
+            values_expected[i] = expected[i].second;
+        }
 
-        // Use custom config
-        using config = rp::segmented_radix_sort_config<6, 4, rp::kernel_config<128, 9>>;
-
+        void * d_temporary_storage = nullptr;
         size_t temporary_storage_bytes = 0;
-        rp::segmented_radix_sort_pairs<config>(
-            nullptr, temporary_storage_bytes,
-            d_keys_input.accelerator_pointer(), d_keys_output.accelerator_pointer(),
-            d_values_input.accelerator_pointer(), d_values_output.accelerator_pointer(),
-            size,
-            segments_count, d_offsets.accelerator_pointer(), d_offsets.accelerator_pointer() + 1,
-            start_bit, end_bit
+        HIP_CHECK(
+            rp::segmented_radix_sort_pairs(
+                d_temporary_storage, temporary_storage_bytes,
+                d_keys_input, d_keys_output, d_values_input, d_values_output, size,
+                segments_count, d_offsets, d_offsets + 1,
+                start_bit, end_bit
+            )
         );
 
         ASSERT_GT(temporary_storage_bytes, 0U);
 
-        hc::array<char> d_temporary_storage(temporary_storage_bytes, acc_view);
+        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
         if(descending)
         {
-            rp::segmented_radix_sort_pairs_desc<config>(
-                d_temporary_storage.accelerator_pointer(), temporary_storage_bytes,
-                d_keys_input.accelerator_pointer(), d_keys_output.accelerator_pointer(),
-                d_values_input.accelerator_pointer(), d_values_output.accelerator_pointer(),
-                size,
-                segments_count, d_offsets.accelerator_pointer(), d_offsets.accelerator_pointer() + 1,
-                start_bit, end_bit,
-                acc_view, debug_synchronous
+            HIP_CHECK(
+                rp::segmented_radix_sort_pairs_desc(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_keys_input, d_keys_output, d_values_input, d_values_output, size,
+                    segments_count, d_offsets, d_offsets + 1,
+                    start_bit, end_bit,
+                    stream, debug_synchronous
+                )
             );
         }
         else
         {
-            rp::segmented_radix_sort_pairs<config>(
-                d_temporary_storage.accelerator_pointer(), temporary_storage_bytes,
-                d_keys_input.accelerator_pointer(), d_keys_output.accelerator_pointer(),
-                d_values_input.accelerator_pointer(), d_values_output.accelerator_pointer(),
-                size,
-                segments_count, d_offsets.accelerator_pointer(), d_offsets.accelerator_pointer() + 1,
-                start_bit, end_bit,
-                acc_view, debug_synchronous
+            HIP_CHECK(
+                rp::segmented_radix_sort_pairs(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_keys_input, d_keys_output, d_values_input, d_values_output, size,
+                    segments_count, d_offsets, d_offsets + 1,
+                    start_bit, end_bit,
+                    stream, debug_synchronous
+                )
             );
         }
-        acc_view.wait();
 
-        std::vector<key_type> keys_output = d_keys_output;
-        std::vector<value_type> values_output = d_values_output;
+        std::vector<key_type> keys_output(size);
+        HIP_CHECK(
+            hipMemcpy(
+                keys_output.data(), d_keys_output,
+                size * sizeof(key_type),
+                hipMemcpyDeviceToHost
+            )
+        );
 
-        for(size_t i = 0; i < size; i++)
-        {
-            ASSERT_EQ(keys_output[i], expected[i].first);
-            ASSERT_EQ(values_output[i], expected[i].second);
-        }
+        std::vector<value_type> values_output(size);
+        HIP_CHECK(
+            hipMemcpy(
+                values_output.data(), d_values_output,
+                size * sizeof(value_type),
+                hipMemcpyDeviceToHost
+            )
+        );
+
+        HIP_CHECK(hipFree(d_temporary_storage));
+        HIP_CHECK(hipFree(d_keys_input));
+        HIP_CHECK(hipFree(d_values_input));
+        HIP_CHECK(hipFree(d_keys_output));
+        HIP_CHECK(hipFree(d_values_output));
+        HIP_CHECK(hipFree(d_offsets));
+
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, keys_expected));
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, values_expected));
     }
 }
 
@@ -408,8 +483,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
 
     using offset_type = unsigned int;
 
-    hc::accelerator acc;
-    hc::accelerator_view acc_view = acc.create_view();
+    hipStream_t stream = 0;
 
     const bool debug_synchronous = false;
 
@@ -453,10 +527,27 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
         }
         offsets.push_back(size);
 
-        hc::array<key_type> d_keys0(hc::extent<1>(size), keys_input.begin(), acc_view);
-        hc::array<key_type> d_keys1(size, acc_view);
+        key_type * d_keys_input;
+        key_type * d_keys_output;
+        HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
+        HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
+        HIP_CHECK(
+            hipMemcpy(
+                d_keys_input, keys_input.data(),
+                size * sizeof(key_type),
+                hipMemcpyHostToDevice
+            )
+        );
 
-        hc::array<offset_type> d_offsets(hc::extent<1>(segments_count + 1), offsets.begin(), acc_view);
+        offset_type * d_offsets;
+        HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
+        HIP_CHECK(
+            hipMemcpy(
+                d_offsets, offsets.data(),
+                (segments_count + 1) * sizeof(offset_type),
+                hipMemcpyHostToDevice
+            )
+        );
 
         // Calculate expected results on host
         std::vector<key_type> expected(keys_input);
@@ -469,49 +560,66 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
             );
         }
 
-        rp::double_buffer<key_type> d_keys(d_keys0.accelerator_pointer(), d_keys1.accelerator_pointer());
+        rp::double_buffer<key_type> d_keys(d_keys_input, d_keys_output);
+
+        // Use custom config
+        using config = rp::segmented_radix_sort_config<7, 4, rp::kernel_config<192, 5>>;
 
         size_t temporary_storage_bytes = 0;
-        rp::segmented_radix_sort_keys(
-            nullptr, temporary_storage_bytes,
-            d_keys, size,
-            segments_count, d_offsets.accelerator_pointer(), d_offsets.accelerator_pointer() + 1,
-            start_bit, end_bit
+        HIP_CHECK(
+            rp::segmented_radix_sort_keys<config>(
+                nullptr, temporary_storage_bytes,
+                d_keys, size,
+                segments_count, d_offsets, d_offsets + 1,
+                start_bit, end_bit
+            )
         );
 
         ASSERT_GT(temporary_storage_bytes, 0U);
 
-        hc::array<char> d_temporary_storage(temporary_storage_bytes, acc_view);
+        void * d_temporary_storage;
+        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
         if(descending)
         {
-            rp::segmented_radix_sort_keys_desc(
-                d_temporary_storage.accelerator_pointer(), temporary_storage_bytes,
-                d_keys, size,
-                segments_count, d_offsets.accelerator_pointer(), d_offsets.accelerator_pointer() + 1,
-                start_bit, end_bit,
-                acc_view, debug_synchronous
+            HIP_CHECK(
+                rp::segmented_radix_sort_keys_desc<config>(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_keys, size,
+                    segments_count, d_offsets, d_offsets + 1,
+                    start_bit, end_bit,
+                    stream, debug_synchronous
+                )
             );
         }
         else
         {
-            rp::segmented_radix_sort_keys(
-                d_temporary_storage.accelerator_pointer(), temporary_storage_bytes,
-                d_keys, size,
-                segments_count, d_offsets.accelerator_pointer(), d_offsets.accelerator_pointer() + 1,
-                start_bit, end_bit,
-                acc_view, debug_synchronous
+            HIP_CHECK(
+                rp::segmented_radix_sort_keys<config>(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_keys, size,
+                    segments_count, d_offsets, d_offsets + 1,
+                    start_bit, end_bit,
+                    stream, debug_synchronous
+                )
             );
         }
-        acc_view.wait();
 
-        hc::array<key_type> d_keys_output(hc::extent<1>(size), acc_view, d_keys.current());
-        std::vector<key_type> keys_output = d_keys_output;
+        std::vector<key_type> keys_output(size);
+        HIP_CHECK(
+            hipMemcpy(
+                keys_output.data(), d_keys.current(),
+                size * sizeof(key_type),
+                hipMemcpyDeviceToHost
+            )
+        );
 
-        for(size_t i = 0; i < size; i++)
-        {
-            ASSERT_EQ(keys_output[i], expected[i]);
-        }
+        HIP_CHECK(hipFree(d_temporary_storage));
+        HIP_CHECK(hipFree(d_keys_input));
+        HIP_CHECK(hipFree(d_keys_output));
+        HIP_CHECK(hipFree(d_offsets));
+
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
     }
 }
 
@@ -525,8 +633,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
 
     using offset_type = unsigned int;
 
-    hc::accelerator acc;
-    hc::accelerator_view acc_view = acc.create_view();
+    hipStream_t stream = 0;
 
     const bool debug_synchronous = false;
 
@@ -573,13 +680,39 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
         std::vector<value_type> values_input(size);
         std::iota(values_input.begin(), values_input.end(), 0);
 
-        hc::array<key_type> d_keys0(hc::extent<1>(size), keys_input.begin(), acc_view);
-        hc::array<key_type> d_keys1(size, acc_view);
+        key_type * d_keys_input;
+        key_type * d_keys_output;
+        HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
+        HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
+        HIP_CHECK(
+            hipMemcpy(
+                d_keys_input, keys_input.data(),
+                size * sizeof(key_type),
+                hipMemcpyHostToDevice
+            )
+        );
 
-        hc::array<value_type> d_values0(hc::extent<1>(size), values_input.begin(), acc_view);
-        hc::array<value_type> d_values1(size, acc_view);
+        value_type * d_values_input;
+        value_type * d_values_output;
+        HIP_CHECK(hipMalloc(&d_values_input, size * sizeof(value_type)));
+        HIP_CHECK(hipMalloc(&d_values_output, size * sizeof(value_type)));
+        HIP_CHECK(
+            hipMemcpy(
+                d_values_input, values_input.data(),
+                size * sizeof(value_type),
+                hipMemcpyHostToDevice
+            )
+        );
 
-        hc::array<offset_type> d_offsets(hc::extent<1>(segments_count + 1), offsets.begin(), acc_view);
+        offset_type * d_offsets;
+        HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
+        HIP_CHECK(
+            hipMemcpy(
+                d_offsets, offsets.data(),
+                (segments_count + 1) * sizeof(offset_type),
+                hipMemcpyHostToDevice
+            )
+        );
 
         using key_value = std::pair<key_type, value_type>;
 
@@ -597,53 +730,83 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
                 key_value_comparator<key_type, value_type, descending, start_bit, end_bit>()
             );
         }
+        std::vector<key_type> keys_expected(size);
+        std::vector<value_type> values_expected(size);
+        for(size_t i = 0; i < size; i++)
+        {
+            keys_expected[i] = expected[i].first;
+            values_expected[i] = expected[i].second;
+        }
 
-        rp::double_buffer<key_type> d_keys(d_keys0.accelerator_pointer(), d_keys1.accelerator_pointer());
-        rp::double_buffer<value_type> d_values(d_values0.accelerator_pointer(), d_values1.accelerator_pointer());
+        rp::double_buffer<key_type> d_keys(d_keys_input, d_keys_output);
+        rp::double_buffer<value_type> d_values(d_values_input, d_values_output);
 
+        void * d_temporary_storage = nullptr;
         size_t temporary_storage_bytes = 0;
-        rp::segmented_radix_sort_pairs(
-            nullptr, temporary_storage_bytes,
-            d_keys, d_values, size,
-            segments_count, d_offsets.accelerator_pointer(), d_offsets.accelerator_pointer() + 1,
-            start_bit, end_bit
+        HIP_CHECK(
+            rp::segmented_radix_sort_pairs(
+                d_temporary_storage, temporary_storage_bytes,
+                d_keys, d_values, size,
+                segments_count, d_offsets, d_offsets + 1,
+                start_bit, end_bit
+            )
         );
 
         ASSERT_GT(temporary_storage_bytes, 0U);
 
-        hc::array<char> d_temporary_storage(temporary_storage_bytes, acc_view);
+        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
         if(descending)
         {
-            rp::segmented_radix_sort_pairs_desc(
-                d_temporary_storage.accelerator_pointer(), temporary_storage_bytes,
-                d_keys, d_values, size,
-                segments_count, d_offsets.accelerator_pointer(), d_offsets.accelerator_pointer() + 1,
-                start_bit, end_bit,
-                acc_view, debug_synchronous
+            HIP_CHECK(
+                rp::segmented_radix_sort_pairs_desc(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_keys, d_values, size,
+                    segments_count, d_offsets, d_offsets + 1,
+                    start_bit, end_bit,
+                    stream, debug_synchronous
+                )
             );
         }
         else
         {
-            rp::segmented_radix_sort_pairs(
-                d_temporary_storage.accelerator_pointer(), temporary_storage_bytes,
-                d_keys, d_values, size,
-                segments_count, d_offsets.accelerator_pointer(), d_offsets.accelerator_pointer() + 1,
-                start_bit, end_bit,
-                acc_view, debug_synchronous
+            HIP_CHECK(
+                rp::segmented_radix_sort_pairs(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_keys, d_values, size,
+                    segments_count, d_offsets, d_offsets + 1,
+                    start_bit, end_bit,
+                    stream, debug_synchronous
+                )
             );
         }
-        acc_view.wait();
 
-        hc::array<key_type> d_keys_output(hc::extent<1>(size), acc_view, d_keys.current());
-        hc::array<value_type> d_values_output(hc::extent<1>(size), acc_view, d_values.current());
-        std::vector<key_type> keys_output = d_keys_output;
-        std::vector<value_type> values_output = d_values_output;
+        std::vector<key_type> keys_output(size);
+        HIP_CHECK(
+            hipMemcpy(
+                keys_output.data(), d_keys.current(),
+                size * sizeof(key_type),
+                hipMemcpyDeviceToHost
+            )
+        );
 
-        for(size_t i = 0; i < size; i++)
-        {
-            ASSERT_EQ(keys_output[i], expected[i].first);
-            ASSERT_EQ(values_output[i], expected[i].second);
-        }
+        std::vector<value_type> values_output(size);
+        HIP_CHECK(
+            hipMemcpy(
+                values_output.data(), d_values.current(),
+                size * sizeof(value_type),
+                hipMemcpyDeviceToHost
+            )
+        );
+
+        HIP_CHECK(hipFree(d_temporary_storage));
+        HIP_CHECK(hipFree(d_keys_input));
+        HIP_CHECK(hipFree(d_keys_output));
+        HIP_CHECK(hipFree(d_values_input));
+        HIP_CHECK(hipFree(d_values_output));
+        HIP_CHECK(hipFree(d_offsets));
+
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, keys_expected));
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, values_expected));
     }
 }
