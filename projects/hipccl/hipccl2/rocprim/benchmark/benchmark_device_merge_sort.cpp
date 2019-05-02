@@ -23,9 +23,10 @@
 #include <iostream>
 #include <chrono>
 #include <vector>
-#include <locale>
-#include <string>
 #include <limits>
+#include <string>
+#include <cstdio>
+#include <cstdlib>
 
 // Google Benchmark
 #include "benchmark/benchmark.h"
@@ -35,13 +36,12 @@
 
 // HIP API
 #include <hip/hip_runtime.h>
-#include <hip/hip_hcc.h>
 
 // rocPRIM
 #include <rocprim/rocprim.hpp>
 
 #define HIP_CHECK(condition)         \
-  {                                   \
+  {                                  \
     hipError_t error = condition;    \
     if(error != hipSuccess){         \
         std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
@@ -55,38 +55,15 @@ const size_t DEFAULT_N = 1024 * 1024 * 32;
 
 namespace rp = rocprim;
 
-const unsigned int batch_size = 4;
-const unsigned int warmup_size = 2;
+const unsigned int batch_size = 10;
+const unsigned int warmup_size = 5;
 
 template<class Key>
-void run_sort_keys_benchmark(benchmark::State& state,
-                             size_t desired_segments,
-                             hipStream_t stream, size_t size)
+void run_sort_keys_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
 {
-    using offset_type = int;
     using key_type = Key;
 
     // Generate data
-    std::vector<offset_type> offsets;
-
-    const double avg_segment_length = static_cast<double>(size) / desired_segments;
-
-    const unsigned int seed = 123;
-    std::default_random_engine gen(seed);
-
-    std::uniform_real_distribution<double> segment_length_dis(0, avg_segment_length * 2);
-
-    unsigned int segments_count = 0;
-    size_t offset = 0;
-    while(offset < size)
-    {
-        const size_t segment_length = std::round(segment_length_dis(gen));
-        offsets.push_back(offset);
-        segments_count++;
-        offset += segment_length;
-    }
-    offsets.push_back(size);
-
     std::vector<key_type> keys_input;
     if(std::is_floating_point<key_type>::value)
     {
@@ -101,16 +78,6 @@ void run_sort_keys_benchmark(benchmark::State& state,
         );
     }
 
-    offset_type * d_offsets;
-    HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
-    HIP_CHECK(
-        hipMemcpy(
-            d_offsets, offsets.data(),
-            (segments_count + 1) * sizeof(offset_type),
-            hipMemcpyHostToDevice
-        )
-    );
-
     key_type * d_keys_input;
     key_type * d_keys_output;
     HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
@@ -123,15 +90,15 @@ void run_sort_keys_benchmark(benchmark::State& state,
         )
     );
 
+    ::rocprim::less<key_type> lesser_op;
+
     void * d_temporary_storage = nullptr;
     size_t temporary_storage_bytes = 0;
     HIP_CHECK(
-        rp::segmented_radix_sort_keys(
+        rp::merge_sort(
             d_temporary_storage, temporary_storage_bytes,
             d_keys_input, d_keys_output, size,
-            segments_count, d_offsets, d_offsets + 1,
-            0, sizeof(key_type) * 8,
-            stream, false
+            lesser_op, stream, false
         )
     );
 
@@ -142,12 +109,10 @@ void run_sort_keys_benchmark(benchmark::State& state,
     for(size_t i = 0; i < warmup_size; i++)
     {
         HIP_CHECK(
-            rp::segmented_radix_sort_keys(
+            rp::merge_sort(
                 d_temporary_storage, temporary_storage_bytes,
                 d_keys_input, d_keys_output, size,
-                segments_count, d_offsets, d_offsets + 1,
-                0, sizeof(key_type) * 8,
-                stream, false
+                lesser_op, stream, false
             )
         );
     }
@@ -160,12 +125,10 @@ void run_sort_keys_benchmark(benchmark::State& state,
         for(size_t i = 0; i < batch_size; i++)
         {
             HIP_CHECK(
-                rp::segmented_radix_sort_keys(
+                rp::merge_sort(
                     d_temporary_storage, temporary_storage_bytes,
                     d_keys_input, d_keys_output, size,
-                    segments_count, d_offsets, d_offsets + 1,
-                    0, sizeof(key_type) * 8,
-                    stream, false
+                    lesser_op, stream, false
                 )
             );
         }
@@ -180,41 +143,17 @@ void run_sort_keys_benchmark(benchmark::State& state,
     state.SetItemsProcessed(state.iterations() * batch_size * size);
 
     HIP_CHECK(hipFree(d_temporary_storage));
-    HIP_CHECK(hipFree(d_offsets));
     HIP_CHECK(hipFree(d_keys_input));
     HIP_CHECK(hipFree(d_keys_output));
 }
 
 template<class Key, class Value>
-void run_sort_pairs_benchmark(benchmark::State& state,
-                              size_t desired_segments,
-                              hipStream_t stream, size_t size)
+void run_sort_pairs_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
 {
-    using offset_type = int;
     using key_type = Key;
     using value_type = Value;
 
     // Generate data
-    std::vector<offset_type> offsets;
-
-    const double avg_segment_length = static_cast<double>(size) / desired_segments;
-
-    const unsigned int seed = 123;
-    std::default_random_engine gen(seed);
-
-    std::uniform_real_distribution<double> segment_length_dis(0, avg_segment_length * 2);
-
-    unsigned int segments_count = 0;
-    size_t offset = 0;
-    while(offset < size)
-    {
-        const size_t segment_length = std::round(segment_length_dis(gen));
-        offsets.push_back(offset);
-        segments_count++;
-        offset += segment_length;
-    }
-    offsets.push_back(size);
-
     std::vector<key_type> keys_input;
     if(std::is_floating_point<key_type>::value)
     {
@@ -231,16 +170,6 @@ void run_sort_pairs_benchmark(benchmark::State& state,
 
     std::vector<value_type> values_input(size);
     std::iota(values_input.begin(), values_input.end(), 0);
-
-    offset_type * d_offsets;
-    HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
-    HIP_CHECK(
-        hipMemcpy(
-            d_offsets, offsets.data(),
-            (segments_count + 1) * sizeof(offset_type),
-            hipMemcpyHostToDevice
-        )
-    );
 
     key_type * d_keys_input;
     key_type * d_keys_output;
@@ -266,15 +195,15 @@ void run_sort_pairs_benchmark(benchmark::State& state,
         )
     );
 
+    ::rocprim::less<key_type> lesser_op;
+
     void * d_temporary_storage = nullptr;
     size_t temporary_storage_bytes = 0;
     HIP_CHECK(
-        rp::segmented_radix_sort_pairs(
+        rp::merge_sort(
             d_temporary_storage, temporary_storage_bytes,
             d_keys_input, d_keys_output, d_values_input, d_values_output, size,
-            segments_count, d_offsets, d_offsets + 1,
-            0, sizeof(key_type) * 8,
-            stream, false
+            lesser_op, stream, false
         )
     );
 
@@ -285,12 +214,10 @@ void run_sort_pairs_benchmark(benchmark::State& state,
     for(size_t i = 0; i < warmup_size; i++)
     {
         HIP_CHECK(
-            rp::segmented_radix_sort_pairs(
+            rp::merge_sort(
                 d_temporary_storage, temporary_storage_bytes,
                 d_keys_input, d_keys_output, d_values_input, d_values_output, size,
-                segments_count, d_offsets, d_offsets + 1,
-                0, sizeof(key_type) * 8,
-                stream, false
+                lesser_op, stream, false
             )
         );
     }
@@ -303,12 +230,10 @@ void run_sort_pairs_benchmark(benchmark::State& state,
         for(size_t i = 0; i < batch_size; i++)
         {
             HIP_CHECK(
-                rp::segmented_radix_sort_pairs(
+                rp::merge_sort(
                     d_temporary_storage, temporary_storage_bytes,
                     d_keys_input, d_keys_output, d_values_input, d_values_output, size,
-                    segments_count, d_offsets, d_offsets + 1,
-                    0, sizeof(key_type) * 8,
-                    stream, false
+                    lesser_op, stream, false
                 )
             );
         }
@@ -325,19 +250,16 @@ void run_sort_pairs_benchmark(benchmark::State& state,
     state.SetItemsProcessed(state.iterations() * batch_size * size);
 
     HIP_CHECK(hipFree(d_temporary_storage));
-    HIP_CHECK(hipFree(d_offsets));
     HIP_CHECK(hipFree(d_keys_input));
     HIP_CHECK(hipFree(d_keys_output));
     HIP_CHECK(hipFree(d_values_input));
     HIP_CHECK(hipFree(d_values_output));
 }
 
-#define CREATE_SORT_KEYS_BENCHMARK(Key, SEGMENTS) \
+#define CREATE_SORT_KEYS_BENCHMARK(Key) \
 benchmark::RegisterBenchmark( \
-    (std::string("sort_keys") + "<" #Key ">" + \
-        "(~" + std::to_string(SEGMENTS) + " segments)" \
-    ).c_str(), \
-    [=](benchmark::State& state) { run_sort_keys_benchmark<Key>(state, SEGMENTS, stream, size); } \
+    (std::string("sort_keys") + "<" #Key ">").c_str(), \
+    [=](benchmark::State& state) { run_sort_keys_benchmark<Key>(state, stream, size); } \
 )
 
 void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
@@ -346,31 +268,19 @@ void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark*>& benc
 {
     std::vector<benchmark::internal::Benchmark*> bs =
     {
-        CREATE_SORT_KEYS_BENCHMARK(int, 1),
-        CREATE_SORT_KEYS_BENCHMARK(int, 10),
-        CREATE_SORT_KEYS_BENCHMARK(int, 100),
-        CREATE_SORT_KEYS_BENCHMARK(int, 1000),
-        CREATE_SORT_KEYS_BENCHMARK(int, 10000),
-        CREATE_SORT_KEYS_BENCHMARK(int, 100000),
-        CREATE_SORT_KEYS_BENCHMARK(int, 1000000),
+        CREATE_SORT_KEYS_BENCHMARK(int),
+        CREATE_SORT_KEYS_BENCHMARK(long long),
 
-        CREATE_SORT_KEYS_BENCHMARK(long long, 1),
-        CREATE_SORT_KEYS_BENCHMARK(long long, 10),
-        CREATE_SORT_KEYS_BENCHMARK(long long, 100),
-        CREATE_SORT_KEYS_BENCHMARK(long long, 1000),
-        CREATE_SORT_KEYS_BENCHMARK(long long, 10000),
-        CREATE_SORT_KEYS_BENCHMARK(long long, 100000),
-        CREATE_SORT_KEYS_BENCHMARK(long long, 1000000),
+        CREATE_SORT_KEYS_BENCHMARK(char),
+        CREATE_SORT_KEYS_BENCHMARK(short),
     };
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
 
-#define CREATE_SORT_PAIRS_BENCHMARK(Key, Value, SEGMENTS) \
+#define CREATE_SORT_PAIRS_BENCHMARK(Key, Value) \
 benchmark::RegisterBenchmark( \
-    (std::string("sort_pairs") + "<" #Key ", " #Value ">" + \
-        "(~" + std::to_string(SEGMENTS) + " segments)" \
-    ).c_str(), \
-    [=](benchmark::State& state) { run_sort_pairs_benchmark<Key, Value>(state, SEGMENTS, stream, size); } \
+    (std::string("sort_pairs") + "<" #Key ", " #Value ">").c_str(), \
+    [=](benchmark::State& state) { run_sort_pairs_benchmark<Key, Value>(state, stream, size); } \
 )
 
 void add_sort_pairs_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
@@ -382,37 +292,15 @@ void add_sort_pairs_benchmarks(std::vector<benchmark::internal::Benchmark*>& ben
 
     std::vector<benchmark::internal::Benchmark*> bs =
     {
-        CREATE_SORT_PAIRS_BENCHMARK(int, float, 1),
-        CREATE_SORT_PAIRS_BENCHMARK(int, float, 10),
-        CREATE_SORT_PAIRS_BENCHMARK(int, float, 100),
-        CREATE_SORT_PAIRS_BENCHMARK(int, float, 1000),
-        CREATE_SORT_PAIRS_BENCHMARK(int, float, 10000),
-        CREATE_SORT_PAIRS_BENCHMARK(int, float, 100000),
-        CREATE_SORT_PAIRS_BENCHMARK(int, float, 1000000),
+        CREATE_SORT_PAIRS_BENCHMARK(int, float),
+        CREATE_SORT_PAIRS_BENCHMARK(long long, double),
 
-        CREATE_SORT_PAIRS_BENCHMARK(long long, double, 1),
-        CREATE_SORT_PAIRS_BENCHMARK(long long, double, 10),
-        CREATE_SORT_PAIRS_BENCHMARK(long long, double, 100),
-        CREATE_SORT_PAIRS_BENCHMARK(long long, double, 1000),
-        CREATE_SORT_PAIRS_BENCHMARK(long long, double, 10000),
-        CREATE_SORT_PAIRS_BENCHMARK(long long, double, 100000),
-        CREATE_SORT_PAIRS_BENCHMARK(long long, double, 1000000),
+        CREATE_SORT_PAIRS_BENCHMARK(char, char),
+        CREATE_SORT_PAIRS_BENCHMARK(short, short),
 
-        CREATE_SORT_PAIRS_BENCHMARK(int, custom_float2, 1),
-        CREATE_SORT_PAIRS_BENCHMARK(int, custom_float2, 10),
-        CREATE_SORT_PAIRS_BENCHMARK(int, custom_float2, 100),
-        CREATE_SORT_PAIRS_BENCHMARK(int, custom_float2, 1000),
-        CREATE_SORT_PAIRS_BENCHMARK(int, custom_float2, 10000),
-        CREATE_SORT_PAIRS_BENCHMARK(int, custom_float2, 100000),
-        CREATE_SORT_PAIRS_BENCHMARK(int, custom_float2, 1000000),
-
-        CREATE_SORT_PAIRS_BENCHMARK(long long, custom_double2, 1),
-        CREATE_SORT_PAIRS_BENCHMARK(long long, custom_double2, 10),
-        CREATE_SORT_PAIRS_BENCHMARK(long long, custom_double2, 100),
-        CREATE_SORT_PAIRS_BENCHMARK(long long, custom_double2, 1000),
-        CREATE_SORT_PAIRS_BENCHMARK(long long, custom_double2, 10000),
-        CREATE_SORT_PAIRS_BENCHMARK(long long, custom_double2, 100000),
-        CREATE_SORT_PAIRS_BENCHMARK(long long, custom_double2, 1000000),
+        CREATE_SORT_PAIRS_BENCHMARK(int, custom_float2),
+        CREATE_SORT_PAIRS_BENCHMARK(long long, custom_double2),
+        CREATE_SORT_PAIRS_BENCHMARK(custom_double2, custom_double2),
     };
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }

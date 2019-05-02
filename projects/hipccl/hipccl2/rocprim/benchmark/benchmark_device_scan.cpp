@@ -23,8 +23,7 @@
 #include <iostream>
 #include <chrono>
 #include <vector>
-#include <locale>
-#include <codecvt>
+#include <limits>
 #include <string>
 #include <cstdio>
 #include <cstdlib>
@@ -33,12 +32,22 @@
 #include "benchmark/benchmark.h"
 // CmdParser
 #include "cmdparser.hpp"
-// HC API
-#include <hcc/hc.hpp>
+// HIP API
+#include <hip/hip_runtime.h>
+
 // rocPRIM
 #include <rocprim/rocprim.hpp>
 
 #include "benchmark_utils.hpp"
+
+#define HIP_CHECK(condition)         \
+  {                                  \
+    hipError_t error = condition;    \
+    if(error != hipSuccess){         \
+        std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
+        exit(error); \
+    } \
+  }
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 128;
@@ -49,21 +58,21 @@ template<
     class T,
     class BinaryFunction
 >
-auto run_scan(void * temporary_storage,
-             size_t& storage_size,
-             T * input,
-             T * output,
-             const T initial_value,
-             const size_t input_size,
-             BinaryFunction scan_op,
-             hc::accelerator_view acc_view,
-             const bool debug = false)
-    -> typename std::enable_if<Exclusive, void>::type
+auto run_device_scan(void * temporary_storage,
+                     size_t& storage_size,
+                     T * input,
+                     T * output,
+                     const T initial_value,
+                     const size_t input_size,
+                     BinaryFunction scan_op,
+                     const hipStream_t stream,
+                     const bool debug = false)
+    -> typename std::enable_if<Exclusive, hipError_t>::type
 {
     return rocprim::exclusive_scan(
         temporary_storage, storage_size,
         input, output, initial_value, input_size,
-        scan_op, acc_view, debug
+        scan_op, stream, debug
     );
 }
 
@@ -72,22 +81,22 @@ template<
     class T,
     class BinaryFunction
 >
-auto run_scan(void * temporary_storage,
-             size_t& storage_size,
-             T * input,
-             T * output,
-             const T initial_value,
-             const size_t input_size,
-             BinaryFunction scan_op,
-             hc::accelerator_view acc_view,
-             const bool debug = false)
-    -> typename std::enable_if<!Exclusive, void>::type
+auto run_device_scan(void * temporary_storage,
+                     size_t& storage_size,
+                     T * input,
+                     T * output,
+                     const T initial_value,
+                     const size_t input_size,
+                     BinaryFunction scan_op,
+                     const hipStream_t stream,
+                     const bool debug = false)
+    -> typename std::enable_if<!Exclusive, hipError_t>::type
 {
     (void) initial_value;
     return rocprim::inclusive_scan(
         temporary_storage, storage_size,
         input, output, input_size,
-        scan_op, acc_view, debug
+        scan_op, stream, debug
     );
 }
 
@@ -98,11 +107,10 @@ template<
 >
 void run_benchmark(benchmark::State& state,
                    size_t size,
-                   hc::accelerator_view acc_view,
+                   const hipStream_t stream,
                    BinaryFunction scan_op)
 {
     std::vector<T> input;
-    std::vector<T> output(size);
     if(std::is_floating_point<T>::value)
     {
         input = get_random_data<T>(size, (T)-1000, (T)+1000);
@@ -116,45 +124,45 @@ void run_benchmark(benchmark::State& state,
         );
     }
     T initial_value = get_random_value<T>((T)-1000, (T)+1000);
-    hc::array<T> d_input(hc::extent<1>(size), input.begin(), acc_view);
-    hc::array<T> d_output(size, acc_view);
-    acc_view.wait();
+    T * d_input;
+    T * d_output;
+    HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
+    HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
+    HIP_CHECK(
+        hipMemcpy(
+            d_input, input.data(),
+            size * sizeof(T),
+            hipMemcpyHostToDevice
+        )
+    );
+    HIP_CHECK(hipDeviceSynchronize());
 
     // Allocate temporary storage memory
     size_t temp_storage_size_bytes;
-
+    void * d_temp_storage = nullptr;
     // Get size of d_temp_storage
-    run_scan<Exclusive>(
-        nullptr,
-        temp_storage_size_bytes,
-        d_input.accelerator_pointer(),
-        d_output.accelerator_pointer(),
-        initial_value,
-        input.size(),
-        scan_op,
-        acc_view
+    HIP_CHECK(
+        run_device_scan<Exclusive>(
+            d_temp_storage, temp_storage_size_bytes,
+            d_input, d_output, initial_value, size,
+            scan_op, stream
+        )
     );
-    acc_view.wait();
-
-    // allocate temporary storage
-    hc::array<char> d_temp_storage(temp_storage_size_bytes, acc_view);
-    acc_view.wait();
+    HIP_CHECK(hipMalloc(&d_temp_storage,temp_storage_size_bytes));
+    HIP_CHECK(hipDeviceSynchronize());
 
     // Warm-up
     for(size_t i = 0; i < 10; i++)
     {
-        run_scan<Exclusive>(
-            d_temp_storage.accelerator_pointer(),
-            temp_storage_size_bytes,
-            d_input.accelerator_pointer(),
-            d_output.accelerator_pointer(),
-            initial_value,
-            input.size(),
-            scan_op,
-            acc_view
+        HIP_CHECK(
+            run_device_scan<Exclusive>(
+                d_temp_storage, temp_storage_size_bytes,
+                d_input, d_output, initial_value, size,
+                scan_op, stream
+            )
         );
     }
-    acc_view.wait();
+    HIP_CHECK(hipDeviceSynchronize());
 
     const unsigned int batch_size = 10;
     for(auto _ : state)
@@ -162,18 +170,15 @@ void run_benchmark(benchmark::State& state,
         auto start = std::chrono::high_resolution_clock::now();
         for(size_t i = 0; i < batch_size; i++)
         {
-            run_scan<Exclusive>(
-                d_temp_storage.accelerator_pointer(),
-                temp_storage_size_bytes,
-                d_input.accelerator_pointer(),
-                d_output.accelerator_pointer(),
-                initial_value,
-                input.size(),
-                scan_op,
-                acc_view
+            HIP_CHECK(
+                run_device_scan<Exclusive>(
+                    d_temp_storage, temp_storage_size_bytes,
+                    d_input, d_output, initial_value, size,
+                    scan_op, stream
+                )
             );
         }
-        acc_view.wait();
+        HIP_CHECK(hipStreamSynchronize(stream));
 
         auto end = std::chrono::high_resolution_clock::now();
         auto elapsed_seconds =
@@ -182,18 +187,22 @@ void run_benchmark(benchmark::State& state,
     }
     state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
     state.SetItemsProcessed(state.iterations() * batch_size * size);
+
+    HIP_CHECK(hipFree(d_input));
+    HIP_CHECK(hipFree(d_output));
+    HIP_CHECK(hipFree(d_temp_storage));
 }
 
 #define CREATE_INCLUSIVE_BENCHMARK(T, SCAN_OP) \
 benchmark::RegisterBenchmark( \
     ("inclusive_scan<" #T "," #SCAN_OP ">"), \
-    run_benchmark<false, T, SCAN_OP>, size, acc_view, SCAN_OP() \
+    run_benchmark<false, T, SCAN_OP>, size, stream, SCAN_OP() \
 )
 
 #define CREATE_EXCLUSIVE_BENCHMARK(T, SCAN_OP) \
 benchmark::RegisterBenchmark( \
     ("exclusive_scan<" #T "," #SCAN_OP ">"), \
-    run_benchmark<true, T, SCAN_OP>, size, acc_view, SCAN_OP() \
+    run_benchmark<true, T, SCAN_OP>, size, stream, SCAN_OP() \
 )
 
 int main(int argc, char *argv[])
@@ -208,14 +217,16 @@ int main(int argc, char *argv[])
     const size_t size = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
 
-    // HC
-    hc::accelerator acc;
-    auto acc_view = acc.get_default_view();
-    std::wstring_convert<std::codecvt_utf8<wchar_t>> conv;
-    std::cout << "[HC]  Device name: " << conv.to_bytes(acc.get_description()) << std::endl;
+    // HIP
+    hipStream_t stream = 0; // default
+    hipDeviceProp_t devProp;
+    int device_id = 0;
+    HIP_CHECK(hipGetDevice(&device_id));
+    HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
+    std::cout << "[HIP] Device name: " << devProp.name << std::endl;
 
     using custom_double2 = custom_type<double, double>;
-    using custom_int_double = custom_type<int, double>;
+    using custom_int2 = custom_type<int, int>;
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks =
@@ -229,10 +240,13 @@ int main(int argc, char *argv[])
         CREATE_INCLUSIVE_BENCHMARK(double, rocprim::plus<double>),
         CREATE_EXCLUSIVE_BENCHMARK(double, rocprim::plus<double>),
 
+        CREATE_INCLUSIVE_BENCHMARK(long long, rocprim::plus<long long>),
+        CREATE_EXCLUSIVE_BENCHMARK(long long, rocprim::plus<long long>),
+
         CREATE_INCLUSIVE_BENCHMARK(custom_double2, rocprim::plus<custom_double2>),
         CREATE_EXCLUSIVE_BENCHMARK(custom_double2, rocprim::plus<custom_double2>),
-        CREATE_INCLUSIVE_BENCHMARK(custom_int_double, rocprim::plus<custom_int_double>),
-        CREATE_EXCLUSIVE_BENCHMARK(custom_int_double, rocprim::plus<custom_int_double>)
+        CREATE_INCLUSIVE_BENCHMARK(custom_int2, rocprim::plus<custom_int2>),
+        CREATE_EXCLUSIVE_BENCHMARK(custom_int2, rocprim::plus<custom_int2>)
     };
 
     // Use manual timing

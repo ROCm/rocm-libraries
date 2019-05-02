@@ -36,7 +36,6 @@
 
 // HIP API
 #include <hip/hip_runtime.h>
-#include <hip/hip_hcc.h>
 
 // rocPRIM
 #include <rocprim/rocprim.hpp>
@@ -61,22 +60,20 @@ template<
     class T,
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
-    bool WithTile,
     unsigned int Trials
 >
 __global__
 void kernel(const T * d_input, T * d_output)
 {
-    Runner::template run<T, BlockSize, ItemsPerThread, WithTile, Trials>(d_input, d_output);
+    Runner::template run<T, BlockSize, ItemsPerThread, Trials>(d_input, d_output);
 }
 
-struct flag_heads
+struct blocked_to_striped
 {
     template<
         class T,
         unsigned int BlockSize,
         unsigned int ItemsPerThread,
-        bool WithTile,
         unsigned int Trials
     >
     __device__
@@ -91,35 +88,20 @@ struct flag_heads
         #pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
-            rp::block_discontinuity<T, BlockSize> bdiscontinuity;
-            bool head_flags[ItemsPerThread];
-            if(WithTile)
-            {
-                bdiscontinuity.flag_heads(head_flags, T(123), input, rp::equal_to<T>());
-            }
-            else
-            {
-                bdiscontinuity.flag_heads(head_flags, input, rp::equal_to<T>());
-            }
-
-            for(unsigned int i = 0; i < ItemsPerThread; i++)
-            {
-                input[i] += head_flags[i];
-            }
-            rp::syncthreads();
+            rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
+            exchange.blocked_to_striped(input, input);
         }
 
         rp::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, input);
     }
 };
 
-struct flag_tails
+struct striped_to_blocked
 {
     template<
         class T,
         unsigned int BlockSize,
         unsigned int ItemsPerThread,
-        bool WithTile,
         unsigned int Trials
     >
     __device__
@@ -134,35 +116,20 @@ struct flag_tails
         #pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
-            rp::block_discontinuity<T, BlockSize> bdiscontinuity;
-            bool tail_flags[ItemsPerThread];
-            if(WithTile)
-            {
-                bdiscontinuity.flag_tails(tail_flags, T(123), input, rp::equal_to<T>());
-            }
-            else
-            {
-                bdiscontinuity.flag_tails(tail_flags, input, rp::equal_to<T>());
-            }
-
-            for(unsigned int i = 0; i < ItemsPerThread; i++)
-            {
-                input[i] += tail_flags[i];
-            }
-            rp::syncthreads();
+            rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
+            exchange.striped_to_blocked(input, input);
         }
 
         rp::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, input);
     }
 };
 
-struct flag_heads_and_tails
+struct blocked_to_warp_striped
 {
     template<
         class T,
         unsigned int BlockSize,
         unsigned int ItemsPerThread,
-        bool WithTile,
         unsigned int Trials
     >
     __device__
@@ -177,24 +144,96 @@ struct flag_heads_and_tails
         #pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
-            rp::block_discontinuity<T, BlockSize> bdiscontinuity;
-            bool head_flags[ItemsPerThread];
-            bool tail_flags[ItemsPerThread];
-            if(WithTile)
-            {
-                bdiscontinuity.flag_heads_and_tails(head_flags, T(123), tail_flags, T(234), input, rp::equal_to<T>());
-            }
-            else
-            {
-                bdiscontinuity.flag_heads_and_tails(head_flags, tail_flags, input, rp::equal_to<T>());
-            }
+            rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
+            exchange.blocked_to_warp_striped(input, input);
+        }
 
-            for(unsigned int i = 0; i < ItemsPerThread; i++)
-            {
-                input[i] += head_flags[i];
-                input[i] += tail_flags[i];
-            }
-            rp::syncthreads();
+        rp::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, input);
+    }
+};
+
+struct warp_striped_to_blocked
+{
+    template<
+        class T,
+        unsigned int BlockSize,
+        unsigned int ItemsPerThread,
+        unsigned int Trials
+    >
+    __device__
+    static void run(const T * d_input, T * d_output)
+    {
+        const unsigned int lid = hipThreadIdx_x;
+        const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
+
+        T input[ItemsPerThread];
+        rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
+
+        #pragma nounroll
+        for(unsigned int trial = 0; trial < Trials; trial++)
+        {
+            rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
+            exchange.warp_striped_to_blocked(input, input);
+        }
+
+        rp::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, input);
+    }
+};
+
+struct scatter_to_blocked
+{
+    template<
+        class T,
+        unsigned int BlockSize,
+        unsigned int ItemsPerThread,
+        unsigned int Trials
+    >
+    __device__
+    static void run(const T * d_input, T * d_output)
+    {
+        const unsigned int lid = hipThreadIdx_x;
+        const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
+
+        T input[ItemsPerThread];
+        unsigned int ranks[ItemsPerThread];
+        rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
+        rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, ranks);
+
+        #pragma nounroll
+        for(unsigned int trial = 0; trial < Trials; trial++)
+        {
+            rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
+            exchange.scatter_to_blocked(input, input, ranks);
+        }
+
+        rp::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, input);
+    }
+};
+
+struct scatter_to_striped
+{
+    template<
+        class T,
+        unsigned int BlockSize,
+        unsigned int ItemsPerThread,
+        unsigned int Trials
+    >
+    __device__
+    static void run(const T * d_input, T * d_output)
+    {
+        const unsigned int lid = hipThreadIdx_x;
+        const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
+
+        T input[ItemsPerThread];
+        unsigned int ranks[ItemsPerThread];
+        rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
+        rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, ranks);
+
+        #pragma nounroll
+        for(unsigned int trial = 0; trial < Trials; trial++)
+        {
+            rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
+            exchange.scatter_to_striped(input, input, ranks);
         }
 
         rp::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, input);
@@ -206,7 +245,6 @@ template<
     class T,
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
-    bool WithTile,
     unsigned int Trials = 100
 >
 void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
@@ -214,7 +252,15 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     constexpr auto items_per_block = BlockSize * ItemsPerThread;
     const auto size = items_per_block * ((N + items_per_block - 1)/items_per_block);
 
-    std::vector<T> input = get_random_data<T>(size, T(0), T(10));
+    std::vector<T> input(size);
+    // Fill input with ranks (for scatter operations)
+    std::mt19937 gen;
+    for(size_t bi = 0; bi < size / items_per_block; bi++)
+    {
+        auto block_ranks = input.begin() + bi * items_per_block;
+        std::iota(block_ranks, block_ranks + items_per_block, 0);
+        std::shuffle(block_ranks, block_ranks + items_per_block, gen);
+    }
     T * d_input;
     T * d_output;
     HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
@@ -233,7 +279,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
         auto start = std::chrono::high_resolution_clock::now();
 
         hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(kernel<Benchmark, T, BlockSize, ItemsPerThread, WithTile, Trials>),
+            HIP_KERNEL_NAME(kernel<Benchmark, T, BlockSize, ItemsPerThread, Trials>),
             dim3(size/items_per_block), dim3(BlockSize), 0, stream,
             d_input, d_output
         );
@@ -252,10 +298,10 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     HIP_CHECK(hipFree(d_output));
 }
 
-#define CREATE_BENCHMARK(T, BS, IPT, WITH_TILE) \
+#define CREATE_BENCHMARK(T, BS, IPT) \
 benchmark::RegisterBenchmark( \
-    (std::string("block_discontinuity<" #T ", " #BS ">.") + name + ("<" #IPT ", " #WITH_TILE ">")).c_str(), \
-    run_benchmark<Benchmark, T, BS, IPT, WITH_TILE>, \
+    (std::string("block_exchange<" #T ", " #BS ", " #IPT ">.") + name).c_str(), \
+    run_benchmark<Benchmark, T, BS, IPT>, \
     stream, size \
 )
 
@@ -267,34 +313,20 @@ void add_benchmarks(const std::string& name,
 {
     std::vector<benchmark::internal::Benchmark*> bs =
     {
-        CREATE_BENCHMARK(int, 256, 1, false),
-        CREATE_BENCHMARK(int, 256, 2, false),
-        CREATE_BENCHMARK(int, 256, 3, false),
-        CREATE_BENCHMARK(int, 256, 4, false),
-        CREATE_BENCHMARK(int, 256, 6, false),
-        CREATE_BENCHMARK(int, 256, 7, false),
-        CREATE_BENCHMARK(int, 256, 8, false),
-        CREATE_BENCHMARK(int, 256, 1, true),
-        CREATE_BENCHMARK(int, 256, 2, true),
-        CREATE_BENCHMARK(int, 256, 3, true),
-        CREATE_BENCHMARK(int, 256, 4, true),
-        CREATE_BENCHMARK(int, 256, 6, true),
-        CREATE_BENCHMARK(int, 256, 7, true),
-        CREATE_BENCHMARK(int, 256, 8, true),
-        CREATE_BENCHMARK(long long, 256, 1, false),
-        CREATE_BENCHMARK(long long, 256, 2, false),
-        CREATE_BENCHMARK(long long, 256, 3, false),
-        CREATE_BENCHMARK(long long, 256, 4, false),
-        CREATE_BENCHMARK(long long, 256, 6, false),
-        CREATE_BENCHMARK(long long, 256, 7, false),
-        CREATE_BENCHMARK(long long, 256, 8, false),
-        CREATE_BENCHMARK(long long, 256, 1, true),
-        CREATE_BENCHMARK(long long, 256, 2, true),
-        CREATE_BENCHMARK(long long, 256, 3, true),
-        CREATE_BENCHMARK(long long, 256, 4, true),
-        CREATE_BENCHMARK(long long, 256, 6, true),
-        CREATE_BENCHMARK(long long, 256, 7, true),
-        CREATE_BENCHMARK(long long, 256, 8, true),
+        CREATE_BENCHMARK(int, 256, 1),
+        CREATE_BENCHMARK(int, 256, 2),
+        CREATE_BENCHMARK(int, 256, 3),
+        CREATE_BENCHMARK(int, 256, 4),
+        CREATE_BENCHMARK(int, 256, 6),
+        CREATE_BENCHMARK(int, 256, 7),
+        CREATE_BENCHMARK(int, 256, 8),
+        CREATE_BENCHMARK(long long, 256, 1),
+        CREATE_BENCHMARK(long long, 256, 2),
+        CREATE_BENCHMARK(long long, 256, 3),
+        CREATE_BENCHMARK(long long, 256, 4),
+        CREATE_BENCHMARK(long long, 256, 6),
+        CREATE_BENCHMARK(long long, 256, 7),
+        CREATE_BENCHMARK(long long, 256, 8),
     };
 
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
@@ -322,9 +354,12 @@ int main(int argc, char *argv[])
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_benchmarks<flag_heads>("flag_heads", benchmarks, stream, size);
-    add_benchmarks<flag_tails>("flag_tails", benchmarks, stream, size);
-    add_benchmarks<flag_heads_and_tails>("flag_heads_and_tails", benchmarks, stream, size);
+    add_benchmarks<blocked_to_striped>("blocked_to_striped", benchmarks, stream, size);
+    add_benchmarks<striped_to_blocked>("striped_to_blocked", benchmarks, stream, size);
+    add_benchmarks<blocked_to_warp_striped>("blocked_to_warp_striped", benchmarks, stream, size);
+    add_benchmarks<warp_striped_to_blocked>("warp_striped_to_blocked", benchmarks, stream, size);
+    add_benchmarks<scatter_to_blocked>("scatter_to_blocked", benchmarks, stream, size);
+    add_benchmarks<scatter_to_striped>("scatter_to_striped", benchmarks, stream, size);
 
     // Use manual timing
     for(auto& b : benchmarks)

@@ -32,14 +32,12 @@
 #include "benchmark/benchmark.h"
 // CmdParser
 #include "cmdparser.hpp"
-#include "benchmark_utils.hpp"
-
 // HIP API
 #include <hip/hip_runtime.h>
-#include <hip/hip_hcc.h>
-
 // rocPRIM
 #include <rocprim/rocprim.hpp>
+
+#include "benchmark_utils.hpp"
 
 #define HIP_CHECK(condition)         \
   {                                  \
@@ -51,74 +49,58 @@
   }
 
 #ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 128;
+const size_t DEFAULT_N = 1024 * 1024 * 32;
 #endif
 
 namespace rp = rocprim;
 
-template<
-    class Runner,
-    class T,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    unsigned int Trials
->
+template<class T, unsigned int WarpSize, unsigned int Trials>
 __global__
-void kernel(const T* input, T* output)
+void warp_inclusive_scan_kernel(const T* input, T* output)
 {
-    Runner::template run<T, BlockSize, ItemsPerThread, Trials>(input, output);
+    const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+    auto value = input[i];
+
+    using wscan_t = rp::warp_scan<T, WarpSize>;
+    __shared__ typename wscan_t::storage_type storage;
+    #pragma nounroll
+    for(unsigned int trial = 0; trial < Trials; trial++)
+    {
+        wscan_t().inclusive_scan(value, value, storage);
+    }
+
+    output[i] = value;
 }
 
-template<rocprim::block_reduce_algorithm algorithm>
-struct reduce
+template<class T, unsigned int WarpSize, unsigned int Trials>
+__global__
+void warp_exclusive_scan_kernel(const T* input, T* output, const T init)
 {
-    template<
-        class T,
-        unsigned int BlockSize,
-        unsigned int ItemsPerThread,
-        unsigned int Trials
-    >
-    __device__
-    static void run(const T* input, T* output)
+    const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+    auto value = input[i];
+
+    using wscan_t = rp::warp_scan<T, WarpSize>;
+    __shared__ typename wscan_t::storage_type storage;
+    #pragma nounroll
+    for(unsigned int trial = 0; trial < Trials; trial++)
     {
-        const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
-
-        T values[ItemsPerThread];
-        T reduced_value;
-        for(unsigned int k = 0; k < ItemsPerThread; k++)
-        {
-            values[k] = input[i * ItemsPerThread + k];
-        }
-
-        using breduce_t = rp::block_reduce<T, BlockSize, algorithm>;
-        __shared__ typename breduce_t::storage_type storage;
-
-        #pragma nounroll
-        for(unsigned int trial = 0; trial < Trials; trial++)
-        {
-            breduce_t().reduce(values, reduced_value, storage);
-            values[0] = reduced_value;
-        }
-
-        if(hipThreadIdx_x == 0)
-        {
-            output[hipBlockIdx_x] = reduced_value;
-        }
+        wscan_t().exclusive_scan(value, value, init, storage);
     }
-};
+
+    output[i] = value;
+}
 
 template<
-    class Benchmark,
     class T,
     unsigned int BlockSize,
-    unsigned int ItemsPerThread,
+    unsigned int WarpSize,
+    bool Inclusive = true,
     unsigned int Trials = 100
 >
-void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
+void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
 {
     // Make sure size is a multiple of BlockSize
-    constexpr auto items_per_block = BlockSize * ItemsPerThread;
-    const auto size = items_per_block * ((N + items_per_block - 1)/items_per_block);
+    size = BlockSize * ((size + BlockSize - 1)/BlockSize);
     // Allocate and fill memory
     std::vector<T> input(size, 1.0f);
     T * d_input;
@@ -137,11 +119,22 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     for (auto _ : state)
     {
         auto start = std::chrono::high_resolution_clock::now();
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(kernel<Benchmark, T, BlockSize, ItemsPerThread, Trials>),
-            dim3(size/items_per_block), dim3(BlockSize), 0, stream,
-            d_input, d_output
-        );
+        if(Inclusive)
+        {
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(warp_inclusive_scan_kernel<T, WarpSize, Trials>),
+                dim3(size/BlockSize), dim3(BlockSize), 0, stream,
+                d_input, d_output
+            );
+        }
+        else
+        {
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(warp_exclusive_scan_kernel<T, WarpSize, Trials>),
+                dim3(size/BlockSize), dim3(BlockSize), 0, stream,
+                d_input, d_output, input[0]
+            );
+        }
         HIP_CHECK(hipPeekAtLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
@@ -158,18 +151,16 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     HIP_CHECK(hipFree(d_output));
 }
 
-// IPT - items per thread
-#define CREATE_BENCHMARK(T, BS, IPT) \
+#define CREATE_BENCHMARK(T, BS, WS, INCLUSIVE) \
     benchmark::RegisterBenchmark( \
-        (std::string("block_reduce<"#T", "#BS", "#IPT", " + algorithm_name + ">.") + method_name).c_str(), \
-        run_benchmark<Benchmark, T, BS, IPT>, \
+        (std::string("warp_scan<"#T", "#BS", "#WS">.") + method_name).c_str(), \
+        run_benchmark<T, BS, WS, INCLUSIVE>, \
         stream, size \
     )
 
-template<class Benchmark>
+template<bool Inclusive>
 void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                     const std::string& method_name,
-                    const std::string& algorithm_name,
                     hipStream_t stream,
                     size_t size)
 {
@@ -178,45 +169,26 @@ void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
 
     std::vector<benchmark::internal::Benchmark*> new_benchmarks =
     {
-        CREATE_BENCHMARK(float, 256, 1),
-        CREATE_BENCHMARK(float, 256, 2),
-        CREATE_BENCHMARK(float, 256, 3),
-        CREATE_BENCHMARK(float, 256, 4),
-        CREATE_BENCHMARK(float, 256, 8),
-        CREATE_BENCHMARK(float, 256, 11),
-        CREATE_BENCHMARK(float, 256, 16),
+        CREATE_BENCHMARK(float, 64, 64, Inclusive),
+        CREATE_BENCHMARK(float, 128, 64, Inclusive),
+        CREATE_BENCHMARK(float, 256, 64, Inclusive),
+        CREATE_BENCHMARK(float, 256, 32, Inclusive),
+        CREATE_BENCHMARK(float, 256, 16, Inclusive),
+        // force using shared memory version
+        CREATE_BENCHMARK(float, 63, 63, Inclusive),
+        CREATE_BENCHMARK(float, 62, 31, Inclusive),
+        CREATE_BENCHMARK(float, 60, 15, Inclusive),
 
-        CREATE_BENCHMARK(int, 256, 1),
-        CREATE_BENCHMARK(int, 256, 2),
-        CREATE_BENCHMARK(int, 256, 3),
-        CREATE_BENCHMARK(int, 256, 4),
-        CREATE_BENCHMARK(int, 256, 8),
-        CREATE_BENCHMARK(int, 256, 11),
-        CREATE_BENCHMARK(int, 256, 16),
+        CREATE_BENCHMARK(int, 64, 64, Inclusive),
+        CREATE_BENCHMARK(int, 128, 64, Inclusive),
+        CREATE_BENCHMARK(int, 256, 64, Inclusive),
 
-        CREATE_BENCHMARK(int, 320, 1),
-        CREATE_BENCHMARK(int, 320, 2),
-        CREATE_BENCHMARK(int, 320, 3),
-        CREATE_BENCHMARK(int, 320, 4),
-        CREATE_BENCHMARK(int, 320, 8),
-        CREATE_BENCHMARK(int, 320, 11),
-        CREATE_BENCHMARK(int, 320, 16),
+        CREATE_BENCHMARK(double, 64, 64, Inclusive),
+        CREATE_BENCHMARK(double, 128, 64, Inclusive),
+        CREATE_BENCHMARK(double, 256, 64, Inclusive),
 
-        CREATE_BENCHMARK(double, 256, 1),
-        CREATE_BENCHMARK(double, 256, 2),
-        CREATE_BENCHMARK(double, 256, 3),
-        CREATE_BENCHMARK(double, 256, 4),
-        CREATE_BENCHMARK(double, 256, 8),
-        CREATE_BENCHMARK(double, 256, 11),
-        CREATE_BENCHMARK(double, 256, 16),
-
-        CREATE_BENCHMARK(custom_double2, 256, 1),
-        CREATE_BENCHMARK(custom_double2, 256, 4),
-        CREATE_BENCHMARK(custom_double2, 256, 8),
-
-        CREATE_BENCHMARK(custom_int_double, 256, 1),
-        CREATE_BENCHMARK(custom_int_double, 256, 4),
-        CREATE_BENCHMARK(custom_int_double, 256, 8)
+        CREATE_BENCHMARK(custom_double2, 64, 64, Inclusive),
+        CREATE_BENCHMARK(custom_int_double, 64, 64, Inclusive)
     };
     benchmarks.insert(benchmarks.end(), new_benchmarks.begin(), new_benchmarks.end());
 }
@@ -243,16 +215,8 @@ int main(int argc, char *argv[])
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
-    // using_warp_scan
-    using reduce_uwr_t = reduce<rocprim::block_reduce_algorithm::using_warp_reduce>;
-    add_benchmarks<reduce_uwr_t>(
-        benchmarks, "reduce", "using_warp_reduce", stream, size
-    );
-    // reduce then scan
-    using reduce_rr_t = reduce<rocprim::block_reduce_algorithm::raking_reduce>;
-    add_benchmarks<reduce_rr_t>(
-        benchmarks, "reduce", "raking_reduce", stream, size
-    );
+    add_benchmarks<true>(benchmarks, "inclusive_scan", stream, size);
+    add_benchmarks<false>(benchmarks, "exclusive_scan", stream, size);
 
     // Use manual timing
     for(auto& b : benchmarks)
