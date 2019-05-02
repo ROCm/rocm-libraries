@@ -323,21 +323,28 @@ public:
     T get_prefix()
     {
         flag_type flag;
-        T partial_prefix;
         unsigned int previous_block_id = block_id_ - ::rocprim::lane_id() - 1;
+        bool is_prefix_initialized = false;
+        T prefix;
 
-        // reduce last warp_size() number of prefixes to
-        // get the complete prefix for this block.
-        reduce_partial_prefixes(previous_block_id, flag, partial_prefix);
-        T prefix = partial_prefix;
-
-        // while we don't load a complete prefix, reduce partial prefixes
-        while(::rocprim::detail::warp_all(flag != PREFIX_COMPLETE))
+        do
         {
-            previous_block_id -= ::rocprim::warp_size();
+            // reduce last warp_size() number of prefixes to
+            // get the complete prefix for this block.
+            T partial_prefix;
             reduce_partial_prefixes(previous_block_id, flag, partial_prefix);
-            prefix = scan_op_(partial_prefix, prefix);
-        }
+            if(!is_prefix_initialized)
+            {
+                prefix = partial_prefix;
+                is_prefix_initialized = true;
+            }
+            else
+            {
+                prefix = scan_op_(partial_prefix, prefix);
+            }
+            previous_block_id -= ::rocprim::warp_size();
+            // while we don't load a complete prefix, reduce partial prefixes
+        } while(::rocprim::detail::warp_all(flag != PREFIX_COMPLETE));
         return prefix;
     }
 
