@@ -24,11 +24,9 @@
 #include <chrono>
 #include <vector>
 #include <limits>
-#include <codecvt>
 #include <string>
 #include <cstdio>
 #include <cstdlib>
-#include <locale>
 
 // Google Benchmark
 #include "benchmark/benchmark.h"
@@ -36,8 +34,20 @@
 #include "cmdparser.hpp"
 #include "benchmark_utils.hpp"
 
+// HIP API
+#include <hip/hip_runtime.h>
+
 // rocPRIM
 #include <rocprim/rocprim.hpp>
+
+#define HIP_CHECK(condition)         \
+  {                                  \
+    hipError_t error = condition;    \
+    if(error != hipSuccess){         \
+        std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
+        exit(error); \
+    } \
+  }
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 128;
@@ -57,31 +67,23 @@ template<
     unsigned int ItemsPerThread,
     unsigned int Trials
 >
-void sort_keys(const hc::array<T>& input, hc::array<T>& output,
-               hc::accelerator_view acc_view, size_t size)
+__global__
+void sort_keys_kernel(const T * input, T * output)
 {
-    const size_t grid_size = size / ItemsPerThread;
-    hc::parallel_for_each(
-        acc_view,
-        hc::extent<1>(grid_size).tile(BlockSize),
-        [&](hc::tiled_index<1> idx) [[hc]]
-        {
-            const unsigned int lid = idx.local[0];
-            const unsigned int block_offset = idx.tile[0] * ItemsPerThread * BlockSize;
+    const unsigned int lid = hipThreadIdx_x;
+    const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
 
-            T keys[ItemsPerThread];
-            rp::block_load_direct_striped<BlockSize>(lid, input.data() + block_offset, keys);
+    T keys[ItemsPerThread];
+    rp::block_load_direct_striped<BlockSize>(lid, input + block_offset, keys);
 
-            #pragma nounroll
-            for(unsigned int trial = 0; trial < Trials; trial++)
-            {
-                rp::block_radix_sort<T, BlockSize, ItemsPerThread> sort;
-                sort.sort(keys);
-            }
+    #pragma nounroll
+    for(unsigned int trial = 0; trial < Trials; trial++)
+    {
+        rp::block_radix_sort<T, BlockSize, ItemsPerThread> sort;
+        sort.sort(keys);
+    }
 
-            rp::block_store_direct_striped<BlockSize>(lid, output.data() + block_offset, keys);
-        }
-    );
+    rp::block_store_direct_striped<BlockSize>(lid, output + block_offset, keys);
 }
 
 template<
@@ -90,40 +92,32 @@ template<
     unsigned int ItemsPerThread,
     unsigned int Trials
 >
-void sort_pairs(const hc::array<T>& input, hc::array<T>& output,
-                hc::accelerator_view acc_view, size_t size)
+__global__
+void sort_pairs_kernel(const T * input, T * output)
 {
-    const size_t grid_size = size / ItemsPerThread;
-    hc::parallel_for_each(
-        acc_view,
-        hc::extent<1>(grid_size).tile(BlockSize),
-        [&](hc::tiled_index<1> idx) [[hc]]
-        {
-            const unsigned int lid = idx.local[0];
-            const unsigned int block_offset = idx.tile[0] * ItemsPerThread * BlockSize;
+    const unsigned int lid = hipThreadIdx_x;
+    const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
 
-            T keys[ItemsPerThread];
-            T values[ItemsPerThread];
-            rp::block_load_direct_striped<BlockSize>(lid, input.data() + block_offset, keys);
-            for(unsigned int i = 0; i < ItemsPerThread; i++)
-            {
-                values[i] = keys[i] + 1;
-            }
+    T keys[ItemsPerThread];
+    T values[ItemsPerThread];
+    rp::block_load_direct_striped<BlockSize>(lid, input + block_offset, keys);
+    for(unsigned int i = 0; i < ItemsPerThread; i++)
+    {
+        values[i] = keys[i] + 1;
+    }
 
-            #pragma nounroll
-            for(unsigned int trial = 0; trial < Trials; trial++)
-            {
-                rp::block_radix_sort<T, BlockSize, ItemsPerThread, T> sort;
-                sort.sort(keys, values);
-            }
+    #pragma nounroll
+    for(unsigned int trial = 0; trial < Trials; trial++)
+    {
+        rp::block_radix_sort<T, BlockSize, ItemsPerThread, T> sort;
+        sort.sort(keys, values);
+    }
 
-            for(unsigned int i = 0; i < ItemsPerThread; i++)
-            {
-                keys[i] += values[i];
-            }
-            rp::block_store_direct_striped<BlockSize>(lid, output.data() + block_offset, keys);
-        }
-    );
+    for(unsigned int i = 0; i < ItemsPerThread; i++)
+    {
+        keys[i] += values[i];
+    }
+    rp::block_store_direct_striped<BlockSize>(lid, output + block_offset, keys);
 }
 
 template<
@@ -132,10 +126,7 @@ template<
     unsigned int ItemsPerThread,
     unsigned int Trials = 10
 >
-void run_benchmark(
-    benchmark::State& state,
-    benchmark_kinds benchmark_kind,
-    hc::accelerator_view acc_view, size_t N)
+void run_benchmark(benchmark::State& state, benchmark_kinds benchmark_kind, hipStream_t stream, size_t N)
 {
     constexpr auto items_per_block = BlockSize * ItemsPerThread;
     const auto size = items_per_block * ((N + items_per_block - 1)/items_per_block);
@@ -153,10 +144,18 @@ void run_benchmark(
             std::numeric_limits<T>::max()
         );
     }
-
-    hc::array<T> d_input(hc::extent<1>(input.size()), input.begin(), acc_view);
-    hc::array<T> d_output(hc::extent<1>(input.size()),  acc_view);
-    acc_view.wait();
+    T * d_input;
+    T * d_output;
+    HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
+    HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
+    HIP_CHECK(
+        hipMemcpy(
+            d_input, input.data(),
+            size * sizeof(T),
+            hipMemcpyHostToDevice
+        )
+    );
+    HIP_CHECK(hipDeviceSynchronize());
 
     for(auto _ : state)
     {
@@ -164,13 +163,22 @@ void run_benchmark(
 
         if(benchmark_kind == benchmark_kinds::sort_keys)
         {
-            sort_keys<T, BlockSize, ItemsPerThread, Trials>(d_input, d_output, acc_view, size);
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(sort_keys_kernel<T, BlockSize, ItemsPerThread, Trials>),
+                dim3(size/items_per_block), dim3(BlockSize), 0, stream,
+                d_input, d_output
+            );
         }
         else if(benchmark_kind == benchmark_kinds::sort_pairs)
         {
-            sort_pairs<T, BlockSize, ItemsPerThread, Trials>(d_input, d_output, acc_view, size);
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(sort_pairs_kernel<T, BlockSize, ItemsPerThread, Trials>),
+                dim3(size/items_per_block), dim3(BlockSize), 0, stream,
+                d_input, d_output
+            );
         }
-        acc_view.wait();
+        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipDeviceSynchronize());
 
         auto end = std::chrono::high_resolution_clock::now();
         auto elapsed_seconds =
@@ -179,19 +187,22 @@ void run_benchmark(
     }
     state.SetBytesProcessed(state.iterations() * Trials * size * sizeof(T));
     state.SetItemsProcessed(state.iterations() * Trials * size);
+
+    HIP_CHECK(hipFree(d_input));
+    HIP_CHECK(hipFree(d_output));
 }
 
 #define CREATE_BENCHMARK(T, BS, IPT) \
 benchmark::RegisterBenchmark( \
     (std::string("block_radix_sort<" #T ", " #BS ", " #IPT ">.") + name).c_str(), \
     run_benchmark<T, BS, IPT>, \
-    benchmark_kind, acc_view, size \
+    benchmark_kind, stream, size \
 )
 
 void add_benchmarks(benchmark_kinds benchmark_kind,
                     const std::string& name,
                     std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                    hc::accelerator_view acc_view,
+                    hipStream_t stream,
                     size_t size)
 {
     std::vector<benchmark::internal::Benchmark*> bs =
@@ -291,14 +302,18 @@ int main(int argc, char *argv[])
     const size_t size = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
 
-    // HC
-    hc::accelerator acc;
-    auto acc_view = acc.get_default_view();
+    // HIP
+    hipStream_t stream = 0; // default
+    hipDeviceProp_t devProp;
+    int device_id = 0;
+    HIP_CHECK(hipGetDevice(&device_id));
+    HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
+    std::cout << "[HIP] Device name: " << devProp.name << std::endl;
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_benchmarks(benchmark_kinds::sort_keys, "sort(keys)", benchmarks, acc_view, size);
-    add_benchmarks(benchmark_kinds::sort_pairs, "sort(keys, values)", benchmarks, acc_view, size);
+    add_benchmarks(benchmark_kinds::sort_keys, "sort(keys)", benchmarks, stream, size);
+    add_benchmarks(benchmark_kinds::sort_pairs, "sort(keys, values)", benchmarks, stream, size);
 
     // Use manual timing
     for(auto& b : benchmarks)

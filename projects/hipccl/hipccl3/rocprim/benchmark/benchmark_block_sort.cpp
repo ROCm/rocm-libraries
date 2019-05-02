@@ -36,7 +36,6 @@
 
 // HIP API
 #include <hip/hip_runtime.h>
-#include <hip/hip_hcc.h>
 
 // rocPRIM
 #include <rocprim/rocprim.hpp>
@@ -71,16 +70,16 @@ __global__
 void sort_keys_kernel(const T * input, T * output)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
-    
+
     T key = input[index];
-    
+
     #pragma nounroll
     for(unsigned int trial = 0; trial < Trials; trial++)
     {
         rp::block_sort<T, BlockSize> bsort;
         bsort.sort(key);
     }
-    
+
     output[index] = key;
 }
 
@@ -93,17 +92,17 @@ __global__
 void sort_pairs_kernel(const T * input, T * output)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
-    
+
     T key = input[index];
     T value = key + 1;
-    
+
     #pragma nounroll
     for(unsigned int trial = 0; trial < Trials; trial++)
     {
         rp::block_sort<T, BlockSize, T> bsort;
         bsort.sort(key, value);
     }
-    
+
     output[index] = key + value;
 }
 

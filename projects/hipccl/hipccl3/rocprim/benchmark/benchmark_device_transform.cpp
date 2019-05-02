@@ -32,13 +32,13 @@
 #include "benchmark/benchmark.h"
 // CmdParser
 #include "cmdparser.hpp"
+#include "benchmark_utils.hpp"
+
 // HIP API
 #include <hip/hip_runtime.h>
-#include <hip/hip_hcc.h>
+
 // rocPRIM
 #include <rocprim/rocprim.hpp>
-
-#include "benchmark_utils.hpp"
 
 #define HIP_CHECK(condition)         \
   {                                  \
@@ -53,77 +53,30 @@
 const size_t DEFAULT_N = 1024 * 1024 * 128;
 #endif
 
-template<
-    bool Exclusive,
-    class T,
-    class BinaryFunction
->
-auto run_device_scan(void * temporary_storage,
-                     size_t& storage_size,
-                     T * input,
-                     T * output,
-                     const T initial_value,
-                     const size_t input_size,
-                     BinaryFunction scan_op,
-                     const hipStream_t stream,
-                     const bool debug = false)
-    -> typename std::enable_if<Exclusive, hipError_t>::type
+const unsigned int batch_size = 10;
+const unsigned int warmup_size = 5;
+
+template<class T>
+struct transform
 {
-    return rocprim::exclusive_scan(
-        temporary_storage, storage_size,
-        input, output, initial_value, input_size,
-        scan_op, stream, debug
-    );
-}
+    __device__ __host__
+    constexpr T operator()(const T& a) const
+    {
+        return a + T(5);
+    }
+};
 
 template<
-    bool Exclusive,
-    class T,
-    class BinaryFunction
->
-auto run_device_scan(void * temporary_storage,
-                     size_t& storage_size,
-                     T * input,
-                     T * output,
-                     const T initial_value,
-                     const size_t input_size,
-                     BinaryFunction scan_op,
-                     const hipStream_t stream,
-                     const bool debug = false)
-    -> typename std::enable_if<!Exclusive, hipError_t>::type
-{
-    (void) initial_value;
-    return rocprim::inclusive_scan(
-        temporary_storage, storage_size,
-        input, output, input_size,
-        scan_op, stream, debug
-    );
-}
-
-template<
-    bool Exclusive,
     class T,
     class BinaryFunction
 >
 void run_benchmark(benchmark::State& state,
                    size_t size,
                    const hipStream_t stream,
-                   BinaryFunction scan_op)
+                   BinaryFunction transform_op)
 {
-    std::vector<T> input;
-    if(std::is_floating_point<T>::value)
-    {
-        input = get_random_data<T>(size, (T)-1000, (T)+1000);
-    }
-    else
-    {
-        input = get_random_data<T>(
-            size,
-            std::numeric_limits<T>::min(),
-            std::numeric_limits<T>::max()
-        );
-    }
-    T initial_value = get_random_value<T>((T)-1000, (T)+1000);
+    std::vector<T> input = get_random_data<T>(size, T(0), T(1000));
+
     T * d_input;
     T * d_output;
     HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
@@ -137,44 +90,28 @@ void run_benchmark(benchmark::State& state,
     );
     HIP_CHECK(hipDeviceSynchronize());
 
-    // Allocate temporary storage memory
-    size_t temp_storage_size_bytes;
-    void * d_temp_storage = nullptr;
-    // Get size of d_temp_storage
-    HIP_CHECK(
-        run_device_scan<Exclusive>(
-            d_temp_storage, temp_storage_size_bytes,
-            d_input, d_output, initial_value, size,
-            scan_op, stream
-        )
-    );
-    HIP_CHECK(hipMalloc(&d_temp_storage,temp_storage_size_bytes));
-    HIP_CHECK(hipDeviceSynchronize());
-
     // Warm-up
-    for(size_t i = 0; i < 10; i++)
+    for(size_t i = 0; i < warmup_size; i++)
     {
         HIP_CHECK(
-            run_device_scan<Exclusive>(
-                d_temp_storage, temp_storage_size_bytes,
-                d_input, d_output, initial_value, size,
-                scan_op, stream
+            rocprim::transform(
+                d_input, d_output, size,
+                transform_op, stream
             )
         );
     }
     HIP_CHECK(hipDeviceSynchronize());
 
-    const unsigned int batch_size = 10;
     for(auto _ : state)
     {
         auto start = std::chrono::high_resolution_clock::now();
+
         for(size_t i = 0; i < batch_size; i++)
         {
             HIP_CHECK(
-                run_device_scan<Exclusive>(
-                    d_temp_storage, temp_storage_size_bytes,
-                    d_input, d_output, initial_value, size,
-                    scan_op, stream
+                rocprim::transform(
+                    d_input, d_output, size,
+                    transform_op, stream
                 )
             );
         }
@@ -190,19 +127,12 @@ void run_benchmark(benchmark::State& state,
 
     HIP_CHECK(hipFree(d_input));
     HIP_CHECK(hipFree(d_output));
-    HIP_CHECK(hipFree(d_temp_storage));
 }
 
-#define CREATE_INCLUSIVE_BENCHMARK(T, SCAN_OP) \
+#define CREATE_BENCHMARK(T, TRANSFORM_OP) \
 benchmark::RegisterBenchmark( \
-    ("inclusive_scan<" #T "," #SCAN_OP ">"), \
-    run_benchmark<false, T, SCAN_OP>, size, stream, SCAN_OP() \
-)
-
-#define CREATE_EXCLUSIVE_BENCHMARK(T, SCAN_OP) \
-benchmark::RegisterBenchmark( \
-    ("exclusive_scan<" #T "," #SCAN_OP ">"), \
-    run_benchmark<true, T, SCAN_OP>, size, stream, SCAN_OP() \
+    ("transform<" #T ", " #TRANSFORM_OP ">"), \
+    run_benchmark<T, TRANSFORM_OP>, size, stream, TRANSFORM_OP() \
 )
 
 int main(int argc, char *argv[])
@@ -225,28 +155,20 @@ int main(int argc, char *argv[])
     HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
     std::cout << "[HIP] Device name: " << devProp.name << std::endl;
 
+    using custom_float2 = custom_type<float, float>;
     using custom_double2 = custom_type<double, double>;
-    using custom_int2 = custom_type<int, int>;
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks =
     {
-        CREATE_INCLUSIVE_BENCHMARK(int, rocprim::plus<int>),
-        CREATE_EXCLUSIVE_BENCHMARK(int, rocprim::plus<int>),
+        CREATE_BENCHMARK(int, transform<int>),
+        CREATE_BENCHMARK(long long, transform<long long>),
 
-        CREATE_INCLUSIVE_BENCHMARK(float, rocprim::plus<float>),
-        CREATE_EXCLUSIVE_BENCHMARK(float, rocprim::plus<float>),
+        CREATE_BENCHMARK(float, transform<float>),
+        CREATE_BENCHMARK(double, transform<double>),
 
-        CREATE_INCLUSIVE_BENCHMARK(double, rocprim::plus<double>),
-        CREATE_EXCLUSIVE_BENCHMARK(double, rocprim::plus<double>),
-
-        CREATE_INCLUSIVE_BENCHMARK(long long, rocprim::plus<long long>),
-        CREATE_EXCLUSIVE_BENCHMARK(long long, rocprim::plus<long long>),
-
-        CREATE_INCLUSIVE_BENCHMARK(custom_double2, rocprim::plus<custom_double2>),
-        CREATE_EXCLUSIVE_BENCHMARK(custom_double2, rocprim::plus<custom_double2>),
-        CREATE_INCLUSIVE_BENCHMARK(custom_int2, rocprim::plus<custom_int2>),
-        CREATE_EXCLUSIVE_BENCHMARK(custom_int2, rocprim::plus<custom_int2>)
+        CREATE_BENCHMARK(custom_float2, transform<custom_float2>),
+        CREATE_BENCHMARK(custom_double2, transform<custom_double2>),
     };
 
     // Use manual timing

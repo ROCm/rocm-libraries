@@ -23,8 +23,7 @@
 #include <iostream>
 #include <chrono>
 #include <vector>
-#include <locale>
-#include <codecvt>
+#include <limits>
 #include <string>
 #include <cstdio>
 #include <cstdlib>
@@ -33,18 +32,61 @@
 #include "benchmark/benchmark.h"
 // CmdParser
 #include "cmdparser.hpp"
-// HC API
-#include <hcc/hc.hpp>
+// HIP API
+#include <hip/hip_runtime.h>
 // rocPRIM
 #include <rocprim/rocprim.hpp>
 
 #include "benchmark_utils.hpp"
+
+#define HIP_CHECK(condition)         \
+  {                                  \
+    hipError_t error = condition;    \
+    if(error != hipSuccess){         \
+        std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
+        exit(error); \
+    } \
+  }
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 32;
 #endif
 
 namespace rp = rocprim;
+
+template<class K, unsigned int WarpSize, unsigned int Trials>
+__global__
+void warp_sort_kernel(K* input_key)
+{
+    const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+
+    auto key = input_key[i];
+    rp::warp_sort<K, WarpSize> wsort;
+    #pragma nounroll
+    for(unsigned int trial = 0; trial < Trials; trial++)
+    {
+        wsort.sort(key);
+    }
+    input_key[i] = key;
+}
+
+template<class K, class V, unsigned int WarpSize, unsigned int Trials>
+__global__
+void warp_sort_by_key_kernel(K* input_key, V* input_value)
+{
+    const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+
+    auto key = input_key[i];
+    auto value = input_value[i];
+    rp::warp_sort<K, WarpSize, V> wsort;
+     #pragma nounroll
+    for(unsigned int trial = 0; trial < Trials; trial++)
+    {
+        wsort.sort(key, value);
+    }
+    input_key[i] = key;
+    input_value[i] = value;
+}
 
 template<
     class Key,
@@ -54,56 +96,55 @@ template<
     bool SortByKey = false,
     unsigned int Trials = 100
 >
-void run_benchmark(benchmark::State& state, hc::accelerator_view acc_view, size_t size)
+void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
 {
     // Make sure size is a multiple of BlockSize
     size = BlockSize * ((size + BlockSize - 1)/BlockSize);
-
-    // Create data on host
+    // Allocate and fill memory
     std::vector<Key> input_key = get_random_data(size, Key(0), Key(10000));
     std::vector<Value> input_value(size_t(1));
     if(SortByKey) input_value = get_random_data(size, Value(0), Value(10000));
+    Key * d_input_key = nullptr;
+    Value * d_input_value = nullptr;
+    HIP_CHECK(hipMalloc(&d_input_key, size * sizeof(Key)));
+    if(SortByKey) HIP_CHECK(hipMalloc(&d_input_value, size * sizeof(Value)));
+    HIP_CHECK(
+        hipMemcpy(
+            d_input_key, input_key.data(),
+            size * sizeof(Key),
+            hipMemcpyHostToDevice
+        )
+    );
+    if(SortByKey) HIP_CHECK(
+        hipMemcpy(
+            d_input_value, input_value.data(),
+            size * sizeof(Value),
+            hipMemcpyHostToDevice
+        )
+    );
+    HIP_CHECK(hipDeviceSynchronize());
 
-    // Transfer to device
-    hc::array_view<Key, 1> av_input_key(input_key.size(), input_key.data());
-    hc::array_view<Value, 1> av_input_value(input_value.size(), input_value.data());
-    av_input_key.synchronize_to(acc_view);
-    av_input_value.synchronize_to(acc_view);
-    acc_view.wait();
-
-    for (auto _ : state)
+    for(auto _ : state)
     {
         auto start = std::chrono::high_resolution_clock::now();
-        auto event = hc::parallel_for_each(
-            acc_view,
-            hc::extent<1>(size).tile(BlockSize),
-            [=](hc::tiled_index<1> i) [[hc]]
-            {
-                auto key = av_input_key[i];
-                if(SortByKey)
-                {
-                    auto value = av_input_value[i];
-                    rp::warp_sort<Key, WarpSize, Value> wsort;
-                    #pragma nounroll
-                    for(unsigned int trial = 0; trial < Trials; trial++)
-                    {
-                        wsort.sort(key, value);
-                    }
-                    av_input_value[i] = value;
-                }
-                else
-                {
-                    rp::warp_sort<Key, WarpSize> wsort;
-                    #pragma nounroll
-                    for(unsigned int trial = 0; trial < Trials; trial++)
-                    {
-                        wsort.sort(key);
-                    }
-                }
-                av_input_key[i] = key;
-            }
-        );
-        event.wait();
+        if(SortByKey)
+        {
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(warp_sort_by_key_kernel<Key, Value, WarpSize, Trials>),
+                dim3(size/BlockSize), dim3(BlockSize), 0, stream,
+                d_input_key, d_input_value
+            );
+        }
+        else
+        {
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(warp_sort_kernel<Key, WarpSize, Trials>),
+                dim3(size/BlockSize), dim3(BlockSize), 0, stream,
+                d_input_key
+            );
+        }
+        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipDeviceSynchronize());
 
         auto end = std::chrono::high_resolution_clock::now();
         auto elapsed_seconds =
@@ -115,20 +156,23 @@ void run_benchmark(benchmark::State& state, hc::accelerator_view acc_view, size_
     if(SortByKey) sorted_type_size += sizeof(Value);
     state.SetBytesProcessed(state.iterations() * size * sorted_type_size * Trials);
     state.SetItemsProcessed(state.iterations() * size * Trials);
+
+    HIP_CHECK(hipFree(d_input_key));
+    HIP_CHECK(hipFree(d_input_value));
 }
 
 #define CREATE_SORT_BENCHMARK(K, BS, WS) \
     benchmark::RegisterBenchmark( \
         "warp_sort<"#K", "#BS", "#WS">.sort(only keys)", \
         run_benchmark<K, BS, WS>, \
-        acc_view, size \
+        stream, size \
     )
 
 #define CREATE_SORTBYKEY_BENCHMARK(K, V, BS, WS) \
     benchmark::RegisterBenchmark( \
         "warp_sort<"#K", "#BS", "#WS", "#V">.sort", \
         run_benchmark<K, BS, WS, V, true>, \
-        acc_view, size \
+        stream, size \
     )
 
 int main(int argc, char *argv[])
@@ -143,11 +187,13 @@ int main(int argc, char *argv[])
     const size_t size = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
 
-    // HC
-    hc::accelerator acc;
-    auto acc_view = acc.get_default_view();
-    std::wstring_convert<std::codecvt_utf8<wchar_t>> conv;
-    std::cout << "[HC]  Device name: " << conv.to_bytes(acc.get_description()) << std::endl;
+    // HIP
+    hipStream_t stream = 0; // default
+    hipDeviceProp_t devProp;
+    int device_id = 0;
+    HIP_CHECK(hipGetDevice(&device_id));
+    HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
+    std::cout << "[HIP] Device name: " << devProp.name << std::endl;
 
     using custom_double2 = custom_type<double, double>;
     using custom_int_double = custom_type<int, double>;

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -36,7 +36,6 @@
 
 // HIP API
 #include <hip/hip_runtime.h>
-#include <hip/hip_hcc.h>
 
 // rocPRIM
 #include <rocprim/rocprim.hpp>
@@ -51,53 +50,78 @@
   }
 
 #ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 128;
+const size_t DEFAULT_N = 1024 * 1024 * 32;
 #endif
 
 const unsigned int batch_size = 10;
 const unsigned int warmup_size = 5;
 
 template<class T>
-struct transform
+void run_lower_bound_benchmark(benchmark::State& state, hipStream_t stream,
+                               size_t haystack_size, size_t needles_size,
+                               bool sorted_needles)
 {
-    __device__ __host__
-    constexpr T operator()(const T& a) const
+    using haystack_type = T;
+    using needle_type = T;
+    using output_type = size_t;
+
+    // Generate data
+    std::vector<haystack_type> haystack(haystack_size);
+    std::iota(haystack.begin(), haystack.end(), 0);
+
+    std::vector<needle_type> needles = get_random_data<needle_type>(
+        needles_size, needle_type(0), needle_type(haystack_size)
+    );
+    if(sorted_needles)
     {
-        return a + T(5);
+        std::sort(needles.begin(), needles.end());
     }
-};
 
-template<
-    class T,
-    class BinaryFunction
->
-void run_benchmark(benchmark::State& state,
-                   size_t size,
-                   const hipStream_t stream,
-                   BinaryFunction transform_op)
-{
-    std::vector<T> input = get_random_data<T>(size, T(0), T(1000));
-
-    T * d_input;
-    T * d_output;
-    HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
-    HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
+    haystack_type * d_haystack;
+    needle_type * d_needles;
+    output_type * d_output;
+    HIP_CHECK(hipMalloc(&d_haystack, haystack_size * sizeof(haystack_type)));
+    HIP_CHECK(hipMalloc(&d_needles, needles_size * sizeof(needle_type)));
+    HIP_CHECK(hipMalloc(&d_output, needles_size * sizeof(output_type)));
     HIP_CHECK(
         hipMemcpy(
-            d_input, input.data(),
-            size * sizeof(T),
+            d_haystack, haystack.data(),
+            haystack_size * sizeof(haystack_type),
             hipMemcpyHostToDevice
         )
     );
-    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(
+        hipMemcpy(
+            d_needles, needles.data(),
+            needles_size * sizeof(needle_type),
+            hipMemcpyHostToDevice
+        )
+    );
+
+    void * d_temporary_storage = nullptr;
+    size_t temporary_storage_bytes;
+    HIP_CHECK(
+        rocprim::lower_bound(
+            d_temporary_storage, temporary_storage_bytes,
+            d_haystack, d_needles, d_output,
+            haystack_size, needles_size,
+            rocprim::less<>(),
+            stream
+        )
+    );
+
+    HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
     // Warm-up
     for(size_t i = 0; i < warmup_size; i++)
     {
         HIP_CHECK(
-            rocprim::transform(
-                d_input, d_output, size,
-                transform_op, stream
+            rocprim::lower_bound(
+                d_temporary_storage, temporary_storage_bytes,
+                d_haystack, d_needles, d_output,
+                haystack_size, needles_size,
+                rocprim::less<>(),
+                stream
             )
         );
     }
@@ -110,30 +134,38 @@ void run_benchmark(benchmark::State& state,
         for(size_t i = 0; i < batch_size; i++)
         {
             HIP_CHECK(
-                rocprim::transform(
-                    d_input, d_output, size,
-                    transform_op, stream
+                rocprim::lower_bound(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_haystack, d_needles, d_output,
+                    haystack_size, needles_size,
+                    rocprim::less<>(),
+                    stream
                 )
             );
         }
-        HIP_CHECK(hipStreamSynchronize(stream));
+        HIP_CHECK(hipDeviceSynchronize());
 
         auto end = std::chrono::high_resolution_clock::now();
         auto elapsed_seconds =
             std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
         state.SetIterationTime(elapsed_seconds.count());
     }
-    state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
-    state.SetItemsProcessed(state.iterations() * batch_size * size);
+    state.SetBytesProcessed(state.iterations() * batch_size * needles_size * sizeof(needle_type));
+    state.SetItemsProcessed(state.iterations() * batch_size * needles_size);
 
-    HIP_CHECK(hipFree(d_input));
+    HIP_CHECK(hipFree(d_temporary_storage));
+    HIP_CHECK(hipFree(d_haystack));
+    HIP_CHECK(hipFree(d_needles));
     HIP_CHECK(hipFree(d_output));
 }
 
-#define CREATE_BENCHMARK(T, TRANSFORM_OP) \
+#define CREATE_LOWER_BOUND_BENCHMARK(T, K, SORTED) \
 benchmark::RegisterBenchmark( \
-    ("transform<" #T ", " #TRANSFORM_OP ">"), \
-    run_benchmark<T, TRANSFORM_OP>, size, stream, TRANSFORM_OP() \
+    ( \
+        std::string("lower_bound") + "<" #T ">(" #K "\% " + \
+        (SORTED ? "sorted" : "random") + " needles)" \
+    ).c_str(), \
+    [=](benchmark::State& state) { run_lower_bound_benchmark<T>(state, stream, size, size * K / 100, SORTED); } \
 )
 
 int main(int argc, char *argv[])
@@ -162,14 +194,15 @@ int main(int argc, char *argv[])
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks =
     {
-        CREATE_BENCHMARK(int, transform<int>),
-        CREATE_BENCHMARK(long long, transform<long long>),
+        CREATE_LOWER_BOUND_BENCHMARK(float, 10, false),
+        CREATE_LOWER_BOUND_BENCHMARK(double, 10, false),
+        CREATE_LOWER_BOUND_BENCHMARK(custom_float2, 10, false),
+        CREATE_LOWER_BOUND_BENCHMARK(custom_double2, 10, false),
 
-        CREATE_BENCHMARK(float, transform<float>),
-        CREATE_BENCHMARK(double, transform<double>),
-
-        CREATE_BENCHMARK(custom_float2, transform<custom_float2>),
-        CREATE_BENCHMARK(custom_double2, transform<custom_double2>),
+        CREATE_LOWER_BOUND_BENCHMARK(float, 10, true),
+        CREATE_LOWER_BOUND_BENCHMARK(double, 10, true),
+        CREATE_LOWER_BOUND_BENCHMARK(custom_float2, 10, true),
+        CREATE_LOWER_BOUND_BENCHMARK(custom_double2, 10, true),
     };
 
     // Use manual timing
@@ -190,6 +223,5 @@ int main(int argc, char *argv[])
 
     // Run benchmarks
     benchmark::RunSpecifiedBenchmarks();
-
     return 0;
 }

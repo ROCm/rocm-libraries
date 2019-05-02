@@ -36,7 +36,6 @@
 
 // HIP API
 #include <hip/hip_runtime.h>
-#include <hip/hip_hcc.h>
 
 // rocPRIM
 #include <rocprim/rocprim.hpp>
@@ -61,89 +60,57 @@ template<
     class T,
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
+    unsigned int BinSize,
     unsigned int Trials
 >
 __global__
 void kernel(const T* input, T* output)
 {
-    Runner::template run<T, BlockSize, ItemsPerThread, Trials>(input, output);
+    Runner::template run<T, BlockSize, ItemsPerThread, BinSize, Trials>(input, output);
 }
 
-template<rocprim::block_scan_algorithm algorithm>
-struct inclusive_scan
+template<rocprim::block_histogram_algorithm algorithm>
+struct histogram
 {
     template<
         class T,
         unsigned int BlockSize,
         unsigned int ItemsPerThread,
+        unsigned int BinSize,
         unsigned int Trials
     >
     __device__
     static void run(const T* input, T* output)
     {
-        const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+        const unsigned int index = ((hipBlockIdx_x * BlockSize) + hipThreadIdx_x) * ItemsPerThread;
+        unsigned int global_offset = hipBlockIdx_x * BinSize;
 
         T values[ItemsPerThread];
         for(unsigned int k = 0; k < ItemsPerThread; k++)
         {
-            values[k] = input[i * ItemsPerThread + k];
+            values[k] = input[index + k];
         }
 
-        using bscan_t = rp::block_scan<T, BlockSize, algorithm>;
-        __shared__ typename bscan_t::storage_type storage;
+        using bhistogram_t =  rp::block_histogram<T, BlockSize, ItemsPerThread, BinSize, algorithm>;
+        __shared__ T histogram[BinSize];
+        __shared__ typename bhistogram_t::storage_type storage;
 
         #pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
-            bscan_t().inclusive_scan(values, values, storage);
+            bhistogram_t().histogram(values, histogram, storage);
         }
 
-        for(unsigned int k = 0; k < ItemsPerThread; k++)
+        #pragma unroll
+        for (unsigned int offset = 0; offset < BinSize; offset += BlockSize)
         {
-            output[i * ItemsPerThread + k] = values[k];
+            if(offset + hipThreadIdx_x < BinSize)
+            {
+                output[global_offset + hipThreadIdx_x] = histogram[offset + hipThreadIdx_x];
+                global_offset += BlockSize;
+            }
         }
     }
-
-};
-
-template<rocprim::block_scan_algorithm algorithm>
-struct exclusive_scan
-{
-    template<
-        class T,
-        unsigned int BlockSize,
-        unsigned int ItemsPerThread,
-        unsigned int Trials
-    >
-    __device__
-    static void run(const T* input, T* output)
-    {
-        const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
-        using U = typename std::remove_reference<T>::type;
-
-        T values[ItemsPerThread];
-        U init = 100;
-
-        for(unsigned int k = 0; k < ItemsPerThread; k++)
-        {
-            values[k] = input[i * ItemsPerThread + k];
-        }
-
-        using bscan_t = rp::block_scan<T, BlockSize, algorithm>;
-        __shared__ typename bscan_t::storage_type storage;
-
-        #pragma nounroll
-        for(unsigned int trial = 0; trial < Trials; trial++)
-        {
-            bscan_t().exclusive_scan(values, values, init, storage);
-        }
-
-        for(unsigned int k = 0; k < ItemsPerThread; k++)
-        {
-            output[i * ItemsPerThread + k] = values[k];
-        }
-    }
-
 };
 
 template<
@@ -151,6 +118,7 @@ template<
     class T,
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
+    unsigned int BinSize = BlockSize,
     unsigned int Trials = 100
 >
 void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
@@ -158,12 +126,13 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     // Make sure size is a multiple of BlockSize
     constexpr auto items_per_block = BlockSize * ItemsPerThread;
     const auto size = items_per_block * ((N + items_per_block - 1)/items_per_block);
+    const auto bin_size = BinSize * ((N + items_per_block - 1)/items_per_block);
     // Allocate and fill memory
-    std::vector<T> input(size, 1.0f);
+    std::vector<T> input(size, 0.0f);
     T * d_input;
     T * d_output;
     HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
-    HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
+    HIP_CHECK(hipMalloc(&d_output, bin_size * sizeof(T)));
     HIP_CHECK(
         hipMemcpy(
             d_input, input.data(),
@@ -177,7 +146,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     {
         auto start = std::chrono::high_resolution_clock::now();
         hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(kernel<Benchmark, T, BlockSize, ItemsPerThread, Trials>),
+            HIP_KERNEL_NAME(kernel<Benchmark, T, BlockSize, ItemsPerThread, BinSize, Trials>),
             dim3(size/items_per_block), dim3(BlockSize), 0, stream,
             d_input, d_output
         );
@@ -200,7 +169,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
 // IPT - items per thread
 #define CREATE_BENCHMARK(T, BS, IPT) \
     benchmark::RegisterBenchmark( \
-        (std::string("block_scan<"#T", "#BS", "#IPT", " + algorithm_name + ">.") + method_name).c_str(), \
+        (std::string("block_histogram<"#T", "#BS", "#IPT", " + algorithm_name + ">.") + method_name).c_str(), \
         run_benchmark<Benchmark, T, BS, IPT>, \
         stream, size \
     )
@@ -212,36 +181,8 @@ void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                     hipStream_t stream,
                     size_t size)
 {
-    using custom_double2 = custom_type<double, double>;
-    using custom_int_double = custom_type<int, double>;
-
     std::vector<benchmark::internal::Benchmark*> new_benchmarks =
     {
-        // When block size is less than or equal to warp size
-        CREATE_BENCHMARK(int, 64, 1),
-        CREATE_BENCHMARK(int, 64, 2),
-        CREATE_BENCHMARK(int, 64, 4),
-        CREATE_BENCHMARK(int, 64, 8),
-        CREATE_BENCHMARK(int, 64, 16),
-        CREATE_BENCHMARK(float, 64, 1),
-        CREATE_BENCHMARK(float, 64, 2),
-        CREATE_BENCHMARK(float, 64, 4),
-        CREATE_BENCHMARK(float, 64, 8),
-        CREATE_BENCHMARK(float, 64, 16),
-        CREATE_BENCHMARK(double, 64, 1),
-        CREATE_BENCHMARK(double, 64, 2),
-        CREATE_BENCHMARK(double, 64, 4),
-        CREATE_BENCHMARK(double, 64, 8),
-        CREATE_BENCHMARK(double, 64, 16),
-
-        CREATE_BENCHMARK(float, 256, 1),
-        CREATE_BENCHMARK(float, 256, 2),
-        CREATE_BENCHMARK(float, 256, 3),
-        CREATE_BENCHMARK(float, 256, 4),
-        CREATE_BENCHMARK(float, 256, 8),
-        CREATE_BENCHMARK(float, 256, 11),
-        CREATE_BENCHMARK(float, 256, 16),
-
         CREATE_BENCHMARK(int, 256, 1),
         CREATE_BENCHMARK(int, 256, 2),
         CREATE_BENCHMARK(int, 256, 3),
@@ -256,24 +197,7 @@ void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
         CREATE_BENCHMARK(int, 320, 4),
         CREATE_BENCHMARK(int, 320, 8),
         CREATE_BENCHMARK(int, 320, 11),
-        CREATE_BENCHMARK(int, 320, 16),
-
-        CREATE_BENCHMARK(double, 256, 1),
-        CREATE_BENCHMARK(double, 256, 2),
-        CREATE_BENCHMARK(double, 256, 3),
-        CREATE_BENCHMARK(double, 256, 4),
-        CREATE_BENCHMARK(double, 256, 8),
-        CREATE_BENCHMARK(double, 256, 11),
-        CREATE_BENCHMARK(double, 256, 16),
-
-        CREATE_BENCHMARK(custom_double2, 256, 1),
-        CREATE_BENCHMARK(custom_double2, 256, 4),
-        CREATE_BENCHMARK(custom_double2, 256, 8),
-
-        CREATE_BENCHMARK(custom_int_double, 256, 1),
-        CREATE_BENCHMARK(custom_int_double, 256, 4),
-        CREATE_BENCHMARK(custom_int_double, 256, 8)
-
+        CREATE_BENCHMARK(int, 320, 16)
     };
     benchmarks.insert(benchmarks.end(), new_benchmarks.begin(), new_benchmarks.end());
 }
@@ -300,25 +224,15 @@ int main(int argc, char *argv[])
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
-    // inclusive_scan using_warp_scan
-    using inclusive_scan_uws_t = inclusive_scan<rocprim::block_scan_algorithm::using_warp_scan>;
-    add_benchmarks<inclusive_scan_uws_t>(
-        benchmarks, "inclusive_scan", "using_warp_scan", stream, size
+    // using_atomic
+    using histogram_a_t = histogram<rocprim::block_histogram_algorithm::using_atomic>;
+    add_benchmarks<histogram_a_t>(
+        benchmarks, "histogram", "using_atomic", stream, size
     );
-    // exclusive_scan using_warp_scan
-    using exclusive_scan_uws_t = exclusive_scan<rocprim::block_scan_algorithm::using_warp_scan>;
-    add_benchmarks<exclusive_scan_uws_t>(
-        benchmarks, "exclusive_scan", "using_warp_scan", stream, size
-    );
-    // inclusive_scan reduce then scan
-    using inclusive_scan_rts_t = inclusive_scan<rocprim::block_scan_algorithm::reduce_then_scan>;
-    add_benchmarks<inclusive_scan_rts_t>(
-        benchmarks, "inclusive_scan", "reduce_then_scan", stream, size
-    );
-    // exclusive_scan reduce then scan
-    using exclusive_scan_rts_t = exclusive_scan<rocprim::block_scan_algorithm::reduce_then_scan>;
-    add_benchmarks<exclusive_scan_rts_t>(
-        benchmarks, "exclusive_scan", "reduce_then_scan", stream, size
+    // using_sort
+    using histogram_s_t = histogram<rocprim::block_histogram_algorithm::using_sort>;
+    add_benchmarks<histogram_s_t>(
+        benchmarks, "histogram", "using_sort", stream, size
     );
 
     // Use manual timing

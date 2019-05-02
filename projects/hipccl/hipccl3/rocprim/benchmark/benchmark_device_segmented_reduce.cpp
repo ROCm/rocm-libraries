@@ -35,7 +35,6 @@
 
 // HIP API
 #include <hip/hip_runtime.h>
-#include <hip/hip_hcc.h>
 
 // rocPRIM
 #include <rocprim/rocprim.hpp>
@@ -58,40 +57,40 @@ namespace rp = rocprim;
 const unsigned int batch_size = 10;
 const unsigned int warmup_size = 5;
 
-template<class Key, class Value>
-void run_benchmark(benchmark::State& state, size_t max_length, hipStream_t stream, size_t size)
+template<class T>
+void run_benchmark(benchmark::State& state, size_t desired_segments, hipStream_t stream, size_t size)
 {
-    using key_type = Key;
-    using value_type = Value;
+    using offset_type = int;
+    using value_type = T;
 
     // Generate data
-    std::vector<key_type> keys_input(size);
+    const unsigned int seed = 123;
+    std::default_random_engine gen(seed);
 
-    unsigned int unique_count = 0;
-    std::vector<size_t> key_counts = get_random_data<size_t>(100000, 1, max_length);
+    const double avg_segment_length = static_cast<double>(size) / desired_segments;
+    std::uniform_real_distribution<double> segment_length_dis(0, avg_segment_length * 2);
+
+    std::vector<offset_type> offsets;
+    unsigned int segments_count = 0;
     size_t offset = 0;
     while(offset < size)
     {
-        const size_t key_count = key_counts[unique_count % key_counts.size()];
-        const size_t end = std::min(size, offset + key_count);
-        for(size_t i = offset; i < end; i++)
-        {
-            keys_input[i] = unique_count;
-        }
-
-        unique_count++;
-        offset += key_count;
+        const size_t segment_length = std::round(segment_length_dis(gen));
+        offsets.push_back(offset);
+        segments_count++;
+        offset += segment_length;
     }
+    offsets.push_back(size);
 
     std::vector<value_type> values_input(size);
     std::iota(values_input.begin(), values_input.end(), 0);
 
-    key_type * d_keys_input;
-    HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
+    offset_type * d_offsets;
+    HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
     HIP_CHECK(
         hipMemcpy(
-            d_keys_input, keys_input.data(),
-            size * sizeof(key_type),
+            d_offsets, offsets.data(),
+            (segments_count + 1) * sizeof(offset_type),
             hipMemcpyHostToDevice
         )
     );
@@ -106,26 +105,22 @@ void run_benchmark(benchmark::State& state, size_t max_length, hipStream_t strea
         )
     );
 
-    key_type * d_unique_output;
     value_type * d_aggregates_output;
-    unsigned int * d_unique_count_output;
-    HIP_CHECK(hipMalloc(&d_unique_output, unique_count * sizeof(key_type)));
-    HIP_CHECK(hipMalloc(&d_aggregates_output, unique_count * sizeof(value_type)));
-    HIP_CHECK(hipMalloc(&d_unique_count_output, sizeof(unsigned int)));
+    HIP_CHECK(hipMalloc(&d_aggregates_output, segments_count * sizeof(value_type)));
+
+    rocprim::plus<value_type> reduce_op;
+    value_type init(0);
 
     void * d_temporary_storage = nullptr;
     size_t temporary_storage_bytes = 0;
 
-    rp::plus<value_type> reduce_op;
-    rp::equal_to<key_type> key_compare_op;
-
     HIP_CHECK(
-        rp::reduce_by_key(
-            nullptr, temporary_storage_bytes,
-            d_keys_input, d_values_input, size,
-            d_unique_output, d_aggregates_output,
-            d_unique_count_output,
-            reduce_op, key_compare_op,
+        rp::segmented_reduce(
+            d_temporary_storage, temporary_storage_bytes,
+            d_values_input, d_aggregates_output,
+            segments_count,
+            d_offsets, d_offsets + 1,
+            reduce_op, init,
             stream
         )
     );
@@ -137,12 +132,12 @@ void run_benchmark(benchmark::State& state, size_t max_length, hipStream_t strea
     for(size_t i = 0; i < warmup_size; i++)
     {
         HIP_CHECK(
-            rp::reduce_by_key(
+            rp::segmented_reduce(
                 d_temporary_storage, temporary_storage_bytes,
-                d_keys_input, d_values_input, size,
-                d_unique_output, d_aggregates_output,
-                d_unique_count_output,
-                reduce_op, key_compare_op,
+                d_values_input, d_aggregates_output,
+                segments_count,
+                d_offsets, d_offsets + 1,
+                reduce_op, init,
                 stream
             )
         );
@@ -156,12 +151,12 @@ void run_benchmark(benchmark::State& state, size_t max_length, hipStream_t strea
         for(size_t i = 0; i < batch_size; i++)
         {
             HIP_CHECK(
-                rp::reduce_by_key(
+                rp::segmented_reduce(
                     d_temporary_storage, temporary_storage_bytes,
-                    d_keys_input, d_values_input, size,
-                    d_unique_output, d_aggregates_output,
-                    d_unique_count_output,
-                    reduce_op, key_compare_op,
+                    d_values_input, d_aggregates_output,
+                    segments_count,
+                    d_offsets, d_offsets + 1,
+                    reduce_op, init,
                     stream
                 )
             );
@@ -173,28 +168,25 @@ void run_benchmark(benchmark::State& state, size_t max_length, hipStream_t strea
             std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
         state.SetIterationTime(elapsed_seconds.count());
     }
-    state.SetBytesProcessed(state.iterations() * batch_size * size * (sizeof(key_type) + sizeof(value_type)));
+    state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(value_type));
     state.SetItemsProcessed(state.iterations() * batch_size * size);
 
     HIP_CHECK(hipFree(d_temporary_storage));
-    HIP_CHECK(hipFree(d_keys_input));
+    HIP_CHECK(hipFree(d_offsets));
     HIP_CHECK(hipFree(d_values_input));
-    HIP_CHECK(hipFree(d_unique_output));
     HIP_CHECK(hipFree(d_aggregates_output));
-    HIP_CHECK(hipFree(d_unique_count_output));
 }
 
-#define CREATE_BENCHMARK(Key, Value) \
+#define CREATE_BENCHMARK(T, SEGMENTS) \
 benchmark::RegisterBenchmark( \
-    (std::string("reduce_by_key") + "<" #Key ", " #Value ">" + \
-        "([1, " + std::to_string(max_length) + "])" \
+    (std::string("segmented_reduce") + "<" #T ">" + \
+        "(~" + std::to_string(SEGMENTS) + " segments)" \
     ).c_str(), \
-    run_benchmark<Key, Value>, \
-    max_length, stream, size \
+    run_benchmark<T>, \
+    SEGMENTS, stream, size \
 )
 
-void add_benchmarks(size_t max_length,
-                    std::vector<benchmark::internal::Benchmark*>& benchmarks,
+void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                     hipStream_t stream,
                     size_t size)
 {
@@ -203,15 +195,33 @@ void add_benchmarks(size_t max_length,
 
     std::vector<benchmark::internal::Benchmark*> bs =
     {
-        CREATE_BENCHMARK(int, float),
-        CREATE_BENCHMARK(int, double),
-        CREATE_BENCHMARK(int, custom_float2),
-        CREATE_BENCHMARK(int, custom_double2),
+        CREATE_BENCHMARK(float, 1),
+        CREATE_BENCHMARK(float, 10),
+        CREATE_BENCHMARK(float, 100),
+        CREATE_BENCHMARK(float, 1000),
+        CREATE_BENCHMARK(float, 10000),
+        CREATE_BENCHMARK(float, 100000),
 
-        CREATE_BENCHMARK(long long, float),
-        CREATE_BENCHMARK(long long, double),
-        CREATE_BENCHMARK(long long, custom_float2),
-        CREATE_BENCHMARK(long long, custom_double2),
+        CREATE_BENCHMARK(double, 1),
+        CREATE_BENCHMARK(double, 10),
+        CREATE_BENCHMARK(double, 100),
+        CREATE_BENCHMARK(double, 1000),
+        CREATE_BENCHMARK(double, 10000),
+        CREATE_BENCHMARK(double, 100000),
+
+        CREATE_BENCHMARK(custom_float2, 1),
+        CREATE_BENCHMARK(custom_float2, 10),
+        CREATE_BENCHMARK(custom_float2, 100),
+        CREATE_BENCHMARK(custom_float2, 1000),
+        CREATE_BENCHMARK(custom_float2, 10000),
+        CREATE_BENCHMARK(custom_float2, 100000),
+
+        CREATE_BENCHMARK(custom_double2, 1),
+        CREATE_BENCHMARK(custom_double2, 10),
+        CREATE_BENCHMARK(custom_double2, 100),
+        CREATE_BENCHMARK(custom_double2, 1000),
+        CREATE_BENCHMARK(custom_double2, 10000),
+        CREATE_BENCHMARK(custom_double2, 100000),
     };
 
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
@@ -239,8 +249,7 @@ int main(int argc, char *argv[])
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_benchmarks(1000, benchmarks, stream, size);
-    add_benchmarks(10, benchmarks, stream, size);
+    add_benchmarks(benchmarks, stream, size);
 
     // Use manual timing
     for(auto& b : benchmarks)
