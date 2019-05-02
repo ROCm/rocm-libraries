@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_DEVICE_DEVICE_MERGE_HC_HPP_
-#define ROCPRIM_DEVICE_DEVICE_MERGE_HC_HPP_
+#ifndef ROCPRIM_DEVICE_DEVICE_MERGE_HPP_
+#define ROCPRIM_DEVICE_DEVICE_MERGE_HPP_
 
 #include <type_traits>
 #include <iterator>
@@ -32,18 +32,73 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// \addtogroup devicemodule_hc
+/// \addtogroup devicemodule_hip
 /// @{
 
 namespace detail
 {
 
-#define ROCPRIM_DETAIL_HC_SYNC(name, size, start) \
+template<
+    class IndexIterator,
+    class KeysInputIterator1,
+    class KeysInputIterator2,
+    class BinaryFunction
+>
+__global__
+void partition_kernel(IndexIterator index,
+                      KeysInputIterator1 keys_input1,
+                      KeysInputIterator2 keys_input2,
+                      const size_t input1_size,
+                      const size_t input2_size,
+                      const unsigned int spacing,
+                      BinaryFunction compare_function)
+{
+    partition_kernel_impl(
+        index, keys_input1, keys_input2, input1_size, input2_size,
+        spacing, compare_function
+    );
+}
+
+template<
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    class IndexIterator,
+    class KeysInputIterator1,
+    class KeysInputIterator2,
+    class KeysOutputIterator,
+    class ValuesInputIterator1,
+    class ValuesInputIterator2,
+    class ValuesOutputIterator,
+    class BinaryFunction
+>
+__global__
+void merge_kernel(IndexIterator index,
+                  KeysInputIterator1 keys_input1,
+                  KeysInputIterator2 keys_input2,
+                  KeysOutputIterator keys_output,
+                  ValuesInputIterator1 values_input1,
+                  ValuesInputIterator2 values_input2,
+                  ValuesOutputIterator values_output,
+                  const size_t input1_size,
+                  const size_t input2_size,
+                  BinaryFunction compare_function)
+{
+    merge_kernel_impl<BlockSize, ItemsPerThread>(
+        index, keys_input1, keys_input2, keys_output,
+        values_input1, values_input2, values_output,
+        input1_size, input2_size, compare_function
+    );
+}
+
+#define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start) \
     { \
+        auto error = hipPeekAtLastError(); \
+        if(error != hipSuccess) return error; \
         if(debug_synchronous) \
         { \
             std::cout << name << "(" << size << ")"; \
-            acc_view.wait(); \
+            auto error = hipStreamSynchronize(stream); \
+            if(error != hipSuccess) return error; \
             auto end = std::chrono::high_resolution_clock::now(); \
             auto d = std::chrono::duration_cast<std::chrono::duration<double>>(end - start); \
             std::cout << " " << d.count() * 1000 << " ms" << '\n'; \
@@ -61,19 +116,19 @@ template<
     class BinaryFunction
 >
 inline
-void merge_impl(void * temporary_storage,
-                size_t& storage_size,
-                KeysInputIterator1 keys_input1,
-                KeysInputIterator2 keys_input2,
-                KeysOutputIterator keys_output,
-                ValuesInputIterator1 values_input1,
-                ValuesInputIterator2 values_input2,
-                ValuesOutputIterator values_output,
-                const size_t input1_size,
-                const size_t input2_size,
-                BinaryFunction compare_function,
-                hc::accelerator_view acc_view,
-                bool debug_synchronous)
+hipError_t merge_impl(void * temporary_storage,
+                      size_t& storage_size,
+                      KeysInputIterator1 keys_input1,
+                      KeysInputIterator2 keys_input2,
+                      KeysOutputIterator keys_output,
+                      ValuesInputIterator1 values_input1,
+                      ValuesInputIterator2 values_input2,
+                      ValuesOutputIterator values_output,
+                      const size_t input1_size,
+                      const size_t input2_size,
+                      BinaryFunction compare_function,
+                      const hipStream_t stream,
+                      bool debug_synchronous)
 
 {
     using key_type = typename std::iterator_traits<KeysInputIterator1>::value_type;
@@ -97,7 +152,7 @@ void merge_impl(void * temporary_storage,
     {
         // storage_size is never zero
         storage_size = partition_bytes;
-        return;
+        return hipSuccess;
     }
 
     // Start point for time measurements
@@ -114,43 +169,34 @@ void merge_impl(void * temporary_storage,
     unsigned int * index = reinterpret_cast<unsigned int *>(temporary_storage);
 
     const unsigned partition_blocks = ((partitions + 1) + half_block - 1) / half_block;
-    const unsigned int grid_size = number_of_blocks * block_size;
 
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    hc::parallel_for_each(
-        acc_view,
-        hc::tiled_extent<1>(partition_blocks * half_block, half_block),
-        [=](hc::tiled_index<1>) [[hc]]
-        {
-            partition_kernel_impl(
-                index, keys_input1, keys_input2, input1_size, input2_size,
-                items_per_block, compare_function
-            );
-        }
+    hipLaunchKernelGGL(
+        HIP_KERNEL_NAME(detail::partition_kernel),
+        dim3(partition_blocks), dim3(half_block), 0, stream,
+        index, keys_input1, keys_input2, input1_size, input2_size,
+        items_per_block, compare_function
     );
-    ROCPRIM_DETAIL_HC_SYNC("partition_kernel", input1_size, start);
+    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("partition_kernel", input1_size, start);
 
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    hc::parallel_for_each(
-        acc_view,
-        hc::tiled_extent<1>(grid_size, block_size),
-        [=](hc::tiled_index<1>) [[hc]]
-        {
-            merge_kernel_impl<block_size, items_per_thread>(
-                index, keys_input1, keys_input2, keys_output,
-                values_input1, values_input2, values_output,
-                input1_size, input2_size, compare_function
-            );
-        }
+    hipLaunchKernelGGL(
+        HIP_KERNEL_NAME(detail::merge_kernel<block_size, items_per_thread>),
+        dim3(number_of_blocks), dim3(block_size), 0, stream,
+        index, keys_input1, keys_input2, keys_output,
+        values_input1, values_input2, values_output,
+        input1_size, input2_size, compare_function
     );
-    ROCPRIM_DETAIL_HC_SYNC("merge_kernel", input1_size, start);
+    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("merge_kernel", input1_size, start);
+
+    return hipSuccess;
 }
 
-#undef ROCPRIM_DETAIL_HC_SYNC
+#undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
 
 } // end of detail namespace
 
-/// \brief HC parallel merge primitive for device level.
+/// \brief HIP parallel merge primitive for device level.
 ///
 /// \p merge function performs a device-wide merge.
 /// Function merges two ordered sets of input values based on comparison function.
@@ -184,10 +230,12 @@ void merge_impl(void * temporary_storage,
 /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
 /// <tt>const &</tt>, but function object must not modify the objects passed to it.
 /// The default value is \p BinaryFunction().
-/// \param [in] acc_view - [optional] \p hc::accelerator_view object. The default value
-/// is \p hc::accelerator().get_default_view() (default view of the default accelerator).
+/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
 /// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
+/// type \p hipError_t.
 ///
 /// \par Example
 /// \parblock
@@ -197,32 +245,28 @@ void merge_impl(void * temporary_storage,
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>
 ///
-/// hc::accelerator_view acc_view = ...;
-///
 /// // Prepare input and output (declare pointers, allocate device memory etc.)
-/// size_t input_size1;              // e.g., 4
-/// size_t input_size2;              // e.g., 4
-/// hc::array<int> input1;           // e.g., [0, 1, 2, 3]
-/// hc::array<int> input2;           // e.g., [0, 1, 2, 3]
-/// hc::array<int> output;           // empty array of 8 elements
+/// size_t input_size1;     // e.g., 4
+/// size_t input_size2;     // e.g., 4
+/// int * input1;           // e.g., [0, 1, 2, 3]
+/// int * input2;           // e.g., [0, 1, 2, 3]
+/// int * output;           // empty array of 8 elements
 ///
 /// size_t temporary_storage_size_bytes;
 /// void * temporary_storage_ptr = nullptr;
 /// // Get required size of the temporary storage
 /// rocprim::merge(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
-///     input1.accelerator_pointer(), input2.accelerator_pointer(),
-///     output.accelerator_pointer(), input_size1, input_size2
+///     input1, input2, output, input_size1, input_size2
 /// );
 ///
 /// // allocate temporary storage
-/// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
 ///
 /// // perform merge
 /// rocprim::merge(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
-///     input1.accelerator_pointer(), input2.accelerator_pointer(),
-///     output.accelerator_pointer(), input_size1, input_size2
+///     input1, input2, output, input_size1, input_size2
 /// );
 /// // output: [0, 0, 1, 1, 2, 2, 3, 3]
 /// \endcode
@@ -235,28 +279,28 @@ template<
     class BinaryFunction = ::rocprim::less<typename std::iterator_traits<InputIterator1>::value_type>
 >
 inline
-void merge(void * temporary_storage,
-           size_t& storage_size,
-           InputIterator1 input1,
-           InputIterator2 input2,
-           OutputIterator output,
-           const size_t input1_size,
-           const size_t input2_size,
-           BinaryFunction compare_function = BinaryFunction(),
-           hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
-           bool debug_synchronous = false)
+hipError_t merge(void * temporary_storage,
+                 size_t& storage_size,
+                 InputIterator1 input1,
+                 InputIterator2 input2,
+                 OutputIterator output,
+                 const size_t input1_size,
+                 const size_t input2_size,
+                 BinaryFunction compare_function = BinaryFunction(),
+                 const hipStream_t stream = 0,
+                 bool debug_synchronous = false)
 {
     empty_type * values = nullptr;
-    detail::merge_impl<Config>(
+    return detail::merge_impl<Config>(
         temporary_storage, storage_size,
         input1, input2, output,
         values, values, values,
         input1_size, input2_size, compare_function,
-        acc_view, debug_synchronous
+        stream, debug_synchronous
     );
 }
 
-/// \brief HC parallel merge primitive for device level.
+/// \brief HIP parallel merge primitive for device level.
 ///
 /// \p merge function performs a device-wide merge of (key, value) pairs.
 /// Function merges two ordered sets of input keys and corresponding values
@@ -300,10 +344,12 @@ void merge(void * temporary_storage,
 /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
 /// <tt>const &</tt>, but function object must not modify the objects passed to it.
 /// The default value is \p BinaryFunction().
-/// \param [in] acc_view - [optional] \p hc::accelerator_view object. The default value
-/// is \p hc::accelerator().get_default_view() (default view of the default accelerator).
+/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
 /// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
+/// type \p hipError_t.
 ///
 /// \par Example
 /// \parblock
@@ -313,41 +359,35 @@ void merge(void * temporary_storage,
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>
 ///
-/// hc::accelerator_view acc_view = ...;
-///
 /// // Prepare input and output (declare pointers, allocate device memory etc.)
-/// size_t input_size1;              // e.g., 4
-/// size_t input_size2;              // e.g., 4
-/// hc::array<int> keys_input1;      // e.g., [0, 1, 2, 3]
-/// hc::array<int> keys_input2;      // e.g., [0, 1, 2, 3]
-/// hc::array<int> keys_output;      // empty array of 8 elements
-/// hc::array<int> values_input1;    // e.g., [10, 11, 12, 13]
-/// hc::array<int> values_input2;    // e.g., [20, 21, 22, 23]
-/// hc::array<int> values_output;    // empty array of 8 elements
+/// size_t input_size1;     // e.g., 4
+/// size_t input_size2;     // e.g., 4
+/// int * keys_input1;      // e.g., [0, 1, 2, 3]
+/// int * keys_input2;      // e.g., [0, 1, 2, 3]
+/// int * keys_output;      // empty array of 8 elements
+/// int * values_input1;    // e.g., [10, 11, 12, 13]
+/// int * values_input2;    // e.g., [20, 21, 22, 23]
+/// int * values_output;    // empty array of 8 elements
 ///
 /// size_t temporary_storage_size_bytes;
 /// void * temporary_storage_ptr = nullptr;
 /// // Get required size of the temporary storage
 /// rocprim::merge(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
-///     keys_input1.accelerator_pointer(), keys_input2.accelerator_pointer(),
-///     keys_output.accelerator_pointer(),
-///     values_input1.accelerator_pointer(), values_input2.accelerator_pointer(),
-///     values_output.accelerator_pointer(),
-///     input_size1, input_size2
+///     keys_input1, keys_input2, keys_output,
+///     values_input1, values_input2, values_output,
+//      input_size1, input_size2
 /// );
 ///
 /// // allocate temporary storage
-/// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
 ///
 /// // perform merge
 /// rocprim::merge(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
-///     keys_input1.accelerator_pointer(), keys_input2.accelerator_pointer(),
-///     keys_output.accelerator_pointer(),
-///     values_input1.accelerator_pointer(), values_input2.accelerator_pointer(),
-///     values_output.accelerator_pointer(),
-///     input_size1, input_size2
+///     keys_input1, keys_input2, keys_output,
+///     values_input1, values_input2, values_output,
+//      input_size1, input_size2
 /// );
 /// // keys_output: [0, 0, 1, 1, 2, 2, 3, 3]
 /// // values_output: [10, 20, 11, 21, 12, 22, 13, 23]
@@ -364,32 +404,32 @@ template<
     class BinaryFunction = ::rocprim::less<typename std::iterator_traits<KeysInputIterator1>::value_type>
 >
 inline
-void merge(void * temporary_storage,
-           size_t& storage_size,
-           KeysInputIterator1 keys_input1,
-           KeysInputIterator2 keys_input2,
-           KeysOutputIterator keys_output,
-           ValuesInputIterator1 values_input1,
-           ValuesInputIterator2 values_input2,
-           ValuesOutputIterator values_output,
-           const size_t input1_size,
-           const size_t input2_size,
-           BinaryFunction compare_function = BinaryFunction(),
-           hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
-           bool debug_synchronous = false)
+hipError_t merge(void * temporary_storage,
+                 size_t& storage_size,
+                 KeysInputIterator1 keys_input1,
+                 KeysInputIterator2 keys_input2,
+                 KeysOutputIterator keys_output,
+                 ValuesInputIterator1 values_input1,
+                 ValuesInputIterator2 values_input2,
+                 ValuesOutputIterator values_output,
+                 const size_t input1_size,
+                 const size_t input2_size,
+                 BinaryFunction compare_function = BinaryFunction(),
+                 const hipStream_t stream = 0,
+                 bool debug_synchronous = false)
 {
-    detail::merge_impl<Config>(
+    return detail::merge_impl<Config>(
         temporary_storage, storage_size,
         keys_input1, keys_input2, keys_output,
         values_input1, values_input2, values_output,
         input1_size, input2_size, compare_function,
-        acc_view, debug_synchronous
+        stream, debug_synchronous
     );
 }
 
 /// @}
-// end of group devicemodule_hc
+// end of group devicemodule_hip
 
 END_ROCPRIM_NAMESPACE
 
-#endif // ROCPRIM_DEVICE_DEVICE_MERGE_HC_HPP_
+#endif // ROCPRIM_DEVICE_DEVICE_MERGE_HPP_

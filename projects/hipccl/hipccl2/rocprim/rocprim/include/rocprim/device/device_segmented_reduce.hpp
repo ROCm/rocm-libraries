@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_DEVICE_DEVICE_SEGMENTED_REDUCE_HC_HPP_
-#define ROCPRIM_DEVICE_DEVICE_SEGMENTED_REDUCE_HC_HPP_
+#ifndef ROCPRIM_DEVICE_DEVICE_SEGMENTED_REDUCE_HPP_
+#define ROCPRIM_DEVICE_DEVICE_SEGMENTED_REDUCE_HPP_
 
 #include <type_traits>
 #include <iterator>
@@ -33,18 +33,44 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// \addtogroup devicemodule_hc
+/// \addtogroup devicemodule_hip
 /// @{
 
 namespace detail
 {
 
-#define ROCPRIM_DETAIL_HC_SYNC(name, size, start) \
+template<
+    class Config,
+    class InputIterator,
+    class OutputIterator,
+    class OffsetIterator,
+    class ResultType,
+    class BinaryFunction
+>
+__global__
+void segmented_reduce_kernel(InputIterator input,
+                             OutputIterator output,
+                             OffsetIterator begin_offsets,
+                             OffsetIterator end_offsets,
+                             BinaryFunction reduce_op,
+                             ResultType initial_value)
+{
+    segmented_reduce<Config>(
+        input, output,
+        begin_offsets, end_offsets,
+        reduce_op, initial_value
+    );
+}
+
+#define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start) \
     { \
+        auto error = hipPeekAtLastError(); \
+        if(error != hipSuccess) return error; \
         if(debug_synchronous) \
         { \
             std::cout << name << "(" << size << ")"; \
-            acc_view.wait(); \
+            auto error = hipStreamSynchronize(stream); \
+            if(error != hipSuccess) return error; \
             auto end = std::chrono::high_resolution_clock::now(); \
             auto d = std::chrono::duration_cast<std::chrono::duration<double>>(end - start); \
             std::cout << " " << d.count() * 1000 << " ms" << '\n'; \
@@ -60,17 +86,17 @@ template<
     class BinaryFunction
 >
 inline
-void segmented_reduce_impl(void * temporary_storage,
-                           size_t& storage_size,
-                           InputIterator input,
-                           OutputIterator output,
-                           unsigned int segments,
-                           OffsetIterator begin_offsets,
-                           OffsetIterator end_offsets,
-                           BinaryFunction reduce_op,
-                           InitValueType initial_value,
-                           hc::accelerator_view acc_view,
-                           bool debug_synchronous)
+hipError_t segmented_reduce_impl(void * temporary_storage,
+                                 size_t& storage_size,
+                                 InputIterator input,
+                                 OutputIterator output,
+                                 unsigned int segments,
+                                 OffsetIterator begin_offsets,
+                                 OffsetIterator end_offsets,
+                                 BinaryFunction reduce_op,
+                                 InitValueType initial_value,
+                                 hipStream_t stream,
+                                 bool debug_synchronous)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     using result_type = typename ::rocprim::detail::match_result_type<
@@ -90,32 +116,29 @@ void segmented_reduce_impl(void * temporary_storage,
         // Make sure user won't try to allocate 0 bytes memory, because
         // hipMalloc will return nullptr when size is zero.
         storage_size = 4;
-        return;
+        return hipSuccess;
     }
 
     std::chrono::high_resolution_clock::time_point start;
 
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    hc::parallel_for_each(
-        acc_view,
-        hc::tiled_extent<1>(segments * block_size, block_size),
-        [=](hc::tiled_index<1>) [[hc]]
-        {
-            segmented_reduce<config>(
-                input, output,
-                begin_offsets, end_offsets,
-                reduce_op, static_cast<result_type>(initial_value)
-            );
-        }
+    hipLaunchKernelGGL(
+        HIP_KERNEL_NAME(segmented_reduce_kernel<config>),
+        dim3(segments), dim3(block_size), 0, stream,
+        input, output,
+        begin_offsets, end_offsets,
+        reduce_op, static_cast<result_type>(initial_value)
     );
-    ROCPRIM_DETAIL_HC_SYNC("segmented_reduce", segments, start);
+    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_reduce", segments, start);
+
+    return hipSuccess;
 }
 
-#undef ROCPRIM_DETAIL_HC_SYNC
+#undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
 
 } // end of detail namespace
 
-/// \brief HC parallel segmented reduction primitive for device level.
+/// \brief HIP parallel segmented reduction primitive for device level.
 ///
 /// segmented_reduce function performs a device-wide reduction operation across multiple sequences
 /// using binary \p reduce_op operator.
@@ -157,10 +180,9 @@ void segmented_reduce_impl(void * temporary_storage,
 /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
 /// <tt>const &</tt>, but function object must not modify the objects passed to it.
 /// The default value is \p BinaryFunction().
-/// \param [in] acc_view - [optional] \p hc::accelerator_view object. The default value
-/// is \p hc::accelerator().get_default_view() (default view of the default accelerator).
+/// \param [in] stream - [optional] HIP stream object. The default is \p 0 (default stream).
 /// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
-/// launch is forced. The default value is \p false.
+/// launch is forced in order to check for errors. The default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful reduction; otherwise a HIP runtime error of
 /// type \p hipError_t.
@@ -175,40 +197,37 @@ void segmented_reduce_impl(void * temporary_storage,
 ///
 /// // custom reduce function
 /// auto min_op =
-///     [] __device__ (int a, int b) [[hc]]
+///     [] __device__ (int a, int b) -> int
 ///     {
 ///         return a < b ? a : b;
 ///     };
 ///
-/// hc::accelerator_view acc_view = ...;
-///
 /// // Prepare input and output (declare pointers, allocate device memory etc.)
-/// int segments;                                              // e.g., 3
-/// hc::array<short> input(hc::extent<1>(8), ...);             // e.g., [4, 7, 6, 2, 5, 1, 3, 8]
-/// hc::array<int> output(hc::extent<1>(segments), ...);       // empty array of 3 elements
-/// hc::array<int> offsets(hc::extent<1>(segments + 1), ...);  // e.g. [0, 2, 3, 8]
-/// int init_value;                                            // e.g., 9
+/// unsigned int segments;   // e.g., 3
+/// short * input;           // e.g., [4, 7, 6, 2, 5, 1, 3, 8]
+/// int * output;            // empty array of 3 elements
+/// int * offsets;           // e.g. [0, 2, 3, 8]
+/// int init_value;          // e.g., 9
 ///
 /// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
 /// // Get required size of the temporary storage
 /// rocprim::segmented_reduce(
-///     nullptr, temporary_storage_size_bytes,
-///     input.accelerator_pointer(), output.accelerator_pointer(),
-///     segments, offsets.accelerator_pointer(), offsets.accelerator_pointer() + 1,
-///     min_op, init_value,
-///     acc_view
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, output,
+///     segments, offsets, offsets + 1,
+///     min_op, init_value
 /// );
 ///
 /// // allocate temporary storage
-/// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
 ///
 /// // perform segmented reduction
 /// rocprim::segmented_reduce(
-///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
-///     input.accelerator_pointer(), output.accelerator_pointer(),
-///     segments, offsets.accelerator_pointer(), offsets.accelerator_pointer() + 1,
-///     min_op, init_value,
-///     acc_view
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, output,
+///     segments, offsets, offsets + 1,
+///     min_op, init_value
 /// );
 /// // output: [4, 6, 1]
 /// \endcode
@@ -222,30 +241,30 @@ template<
     class InitValueType = typename std::iterator_traits<InputIterator>::value_type
 >
 inline
-void segmented_reduce(void * temporary_storage,
-                      size_t& storage_size,
-                      InputIterator input,
-                      OutputIterator output,
-                      unsigned int segments,
-                      OffsetIterator begin_offsets,
-                      OffsetIterator end_offsets,
-                      BinaryFunction reduce_op = BinaryFunction(),
-                      InitValueType initial_value = InitValueType(),
-                      hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
-                      bool debug_synchronous = false)
+hipError_t segmented_reduce(void * temporary_storage,
+                            size_t& storage_size,
+                            InputIterator input,
+                            OutputIterator output,
+                            unsigned int segments,
+                            OffsetIterator begin_offsets,
+                            OffsetIterator end_offsets,
+                            BinaryFunction reduce_op = BinaryFunction(),
+                            InitValueType initial_value = InitValueType(),
+                            hipStream_t stream = 0,
+                            bool debug_synchronous = false)
 {
-    detail::segmented_reduce_impl<Config>(
+    return detail::segmented_reduce_impl<Config>(
         temporary_storage, storage_size,
         input, output,
         segments, begin_offsets, end_offsets,
         reduce_op, initial_value,
-        acc_view, debug_synchronous
+        stream, debug_synchronous
     );
 }
 
 /// @}
-// end of group devicemodule_hc
+// end of group devicemodule_hip
 
 END_ROCPRIM_NAMESPACE
 
-#endif // ROCPRIM_DEVICE_DEVICE_SEGMENTED_REDUCE_HC_HPP_
+#endif // ROCPRIM_DEVICE_DEVICE_SEGMENTED_REDUCE_HPP_

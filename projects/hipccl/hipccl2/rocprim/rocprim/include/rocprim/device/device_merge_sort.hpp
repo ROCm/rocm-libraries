@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_DEVICE_DEVICE_SORT_HIP_HPP_
-#define ROCPRIM_DEVICE_DEVICE_SORT_HIP_HPP_
+#ifndef ROCPRIM_DEVICE_DEVICE_SORT_HPP_
+#define ROCPRIM_DEVICE_DEVICE_SORT_HPP_
 
 #include <type_traits>
 #include <iterator>
@@ -28,7 +28,7 @@
 #include "../detail/various.hpp"
 
 #include "detail/device_merge_sort.hpp"
-#include "device_transform_hip.hpp"
+#include "device_transform.hpp"
 #include "device_merge_sort_config.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -438,4 +438,4 @@ hipError_t merge_sort(void * temporary_storage,
 
 END_ROCPRIM_NAMESPACE
 
-#endif // ROCPRIM_DEVICE_DEVICE_SORT_HIP_HPP_
+#endif // ROCPRIM_DEVICE_DEVICE_SORT_HPP_

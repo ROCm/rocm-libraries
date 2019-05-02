@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_DEVICE_DEVICE_PARTITION_HC_HPP_
-#define ROCPRIM_DEVICE_DEVICE_PARTITION_HC_HPP_
+#ifndef ROCPRIM_DEVICE_DEVICE_PARTITION_HPP_
+#define ROCPRIM_DEVICE_DEVICE_PARTITION_HPP_
 
 #include <type_traits>
 #include <iterator>
@@ -34,18 +34,73 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// \addtogroup devicemodule_hc
+/// \addtogroup devicemodule_hip
 /// @{
 
 namespace detail
 {
 
-#define ROCPRIM_DETAIL_HC_SYNC(name, size, start) \
+template<
+    select_method SelectMethod,
+    bool OnlySelected,
+    class Config,
+    class InputIterator,
+    class FlagIterator,
+    class OutputIterator,
+    class SelectedCountOutputIterator,
+    class UnaryPredicate,
+    class InequalityOp,
+    class OffsetLookbackScanState
+>
+__global__
+void partition_kernel(InputIterator input,
+                      FlagIterator flags,
+                      OutputIterator output,
+                      SelectedCountOutputIterator selected_count_output,
+                      const size_t size,
+                      UnaryPredicate predicate,
+                      InequalityOp inequality_op,
+                      OffsetLookbackScanState offset_scan_state,
+                      const unsigned int number_of_blocks,
+                      ordered_block_id<unsigned int> ordered_bid)
+{
+    partition_kernel_impl<SelectMethod, OnlySelected, Config>(
+        input, flags, output, selected_count_output, size, predicate,
+        inequality_op, offset_scan_state, number_of_blocks, ordered_bid
+    );
+}
+
+template<class OffsetLookBackScanState>
+__global__
+void init_offset_scan_state_kernel(OffsetLookBackScanState offset_scan_state,
+                                   const unsigned int number_of_blocks,
+                                   ordered_block_id<unsigned int> ordered_bid)
+{
+    init_lookback_scan_state_kernel_impl(
+        offset_scan_state, number_of_blocks, ordered_bid
+    );
+}
+
+#define ROCPRIM_DETAIL_HIP_SYNC(name, size, start) \
+    if(debug_synchronous) \
     { \
+        std::cout << name << "(" << size << ")"; \
+        auto error = hipStreamSynchronize(stream); \
+        if(error != hipSuccess) return error; \
+        auto end = std::chrono::high_resolution_clock::now(); \
+        auto d = std::chrono::duration_cast<std::chrono::duration<double>>(end - start); \
+        std::cout << " " << d.count() * 1000 << " ms" << '\n'; \
+    }
+
+#define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start) \
+    { \
+        auto error = hipPeekAtLastError(); \
+        if(error != hipSuccess) return error; \
         if(debug_synchronous) \
         { \
             std::cout << name << "(" << size << ")"; \
-            acc_view.wait(); \
+            auto error = hipStreamSynchronize(stream); \
+            if(error != hipSuccess) return error; \
             auto end = std::chrono::high_resolution_clock::now(); \
             auto d = std::chrono::duration_cast<std::chrono::duration<double>>(end - start); \
             std::cout << " " << d.count() * 1000 << " ms" << '\n'; \
@@ -66,17 +121,17 @@ template<
     class SelectedCountOutputIterator
 >
 inline
-void partition_impl(void * temporary_storage,
-                    size_t& storage_size,
-                    InputIterator input,
-                    FlagIterator flags,
-                    OutputIterator output,
-                    SelectedCountOutputIterator selected_count_output,
-                    const size_t size,
-                    UnaryPredicate predicate,
-                    InequalityOp inequality_op,
-                    hc::accelerator_view acc_view,
-                    bool debug_synchronous)
+hipError_t partition_impl(void * temporary_storage,
+                          size_t& storage_size,
+                          InputIterator input,
+                          FlagIterator flags,
+                          OutputIterator output,
+                          SelectedCountOutputIterator selected_count_output,
+                          const size_t size,
+                          UnaryPredicate predicate,
+                          InequalityOp inequality_op,
+                          const hipStream_t stream,
+                          bool debug_synchronous)
 {
     using offset_type = unsigned int;
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
@@ -105,7 +160,7 @@ void partition_impl(void * temporary_storage,
     {
         // storage_size is never zero
         storage_size = offset_scan_state_bytes + ordered_block_id_bytes;
-        return;
+        return hipSuccess;
     }
 
     // Start point for time measurements
@@ -129,40 +184,37 @@ void partition_impl(void * temporary_storage,
     );
 
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    auto grid_size = ((number_of_blocks + block_size - 1)/block_size) * block_size;
-    hc::parallel_for_each(
-        acc_view,
-        hc::tiled_extent<1>(grid_size, block_size),
-        [=](hc::tiled_index<1>) [[hc]]
-        {
-            init_lookback_scan_state_kernel_impl(
-                offset_scan_state, number_of_blocks, ordered_bid
-            );
-        }
+    auto grid_size = (number_of_blocks + block_size - 1)/block_size;
+    hipLaunchKernelGGL(
+        HIP_KERNEL_NAME(init_offset_scan_state_kernel<offset_scan_state_type>),
+        dim3(grid_size), dim3(block_size), 0, stream,
+        offset_scan_state, number_of_blocks, ordered_bid
     );
-    ROCPRIM_DETAIL_HC_SYNC("init_offset_scan_state_kernel", size, start)
+    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_offset_scan_state_kernel", size, start)
 
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    grid_size = number_of_blocks * block_size;
-    hc::parallel_for_each(
-        acc_view,
-        hc::tiled_extent<1>(grid_size, block_size),
-        [=](hc::tiled_index<1>) [[hc]]
-        {
-            partition_kernel_impl<SelectMethod, OnlySelected, config>(
-                input, flags, output, selected_count_output, size, predicate,
-                inequality_op, offset_scan_state, number_of_blocks, ordered_bid
-            );
-        }
+    grid_size = number_of_blocks;
+    hipLaunchKernelGGL(
+        HIP_KERNEL_NAME(partition_kernel<
+            SelectMethod, OnlySelected, config,
+            InputIterator, FlagIterator, OutputIterator, SelectedCountOutputIterator,
+            UnaryPredicate, decltype(inequality_op), offset_scan_state_type
+        >),
+        dim3(grid_size), dim3(block_size), 0, stream,
+        input, flags, output, selected_count_output, size, predicate,
+        inequality_op, offset_scan_state, number_of_blocks, ordered_bid
     );
-    ROCPRIM_DETAIL_HC_SYNC("partition_kernel", size, start)
+    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("partition_kernel", size, start)
+
+    return hipSuccess;
 }
 
-#undef ROCPRIM_DETAIL_HC_SYNC
+#undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
+#undef ROCPRIM_DETAIL_HIP_SYNC
 
 } // end of detail namespace
 
-/// \brief HC parallel partition primitive for device level using range of flags.
+/// \brief HIP parallel select primitive for device level using range of flags.
 ///
 /// Performs a device-wide partition based on input \p flags. Partition copies
 /// the values from \p input to \p output in such a way that all values for which the corresponding
@@ -198,8 +250,7 @@ void partition_impl(void * temporary_storage,
 /// \param [out] output - iterator to the first element in the output range.
 /// \param [out] selected_count_output - iterator to the total number of selected values (length of \p output).
 /// \param [in] size - number of element in the input range.
-/// \param [in] acc_view - [optional] \p hc::accelerator_view object. The default value
-/// is \p hc::accelerator().get_default_view() (default view of the default accelerator).
+/// \param [in] stream - [optional] HIP stream object. The default is \p 0 (default stream).
 /// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. The default value is \p false.
 ///
@@ -211,33 +262,32 @@ void partition_impl(void * temporary_storage,
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>
 ///
-/// hc::accelerator_view acc_view = ...;
-///
-/// // Prepare input and output (declare arrays, allocate device memory etc.)
-/// size_t size;                                           // e.g., 8
-/// hc::array<int> input(hc::extent<1>(size), ...);        // e.g., [1, 2, 3, 4, 5, 6, 7, 8]
-/// hc::array<char> flags(hc::extent<1>(size), ...);       // e.g., [0, 1, 1, 0, 0, 1, 0, 1]
-/// hc::array<int> output(hc::extent<1>(size), ...);       // empty array of 8 elements
-/// hc::array<size_t> output_count(hc::extent<1>(1), ...); // empty array of 1 element
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t input_size;     // e.g., 8
+/// int * input;           // e.g., [1, 2, 3, 4, 5, 6, 7, 8]
+/// char * flags;          // e.g., [0, 1, 1, 0, 0, 1, 0, 1]
+/// int * output;          // empty array of 8 elements
+/// size_t * output_count; // empty array of 1 element
 ///
 /// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
 /// // Get required size of the temporary storage
 /// rocprim::partition(
-///     nullptr, temporary_storage_size_bytes,
-///     input.accelerator_pointer(), flags.accelerator_pointer(),
-///     output.accelerator_pointer(), output_count.accelerator_pointer(),
-///     size, acc_view, false
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, flags,
+///     output, output_count,
+///     input_size
 /// );
 ///
 /// // allocate temporary storage
-/// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
 ///
 /// // perform partition
 /// rocprim::partition(
-///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
-///     input.accelerator_pointer(), flags.accelerator_pointer(),
-///     output.accelerator_pointer(), output_count.accelerator_pointer(),
-///     size, acc_view, false
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, flags,
+///     output, output_count,
+///     input_size
 /// );
 /// // output: [2, 3, 6, 8, 7, 5, 4, 1]
 /// // output_count: 4
@@ -251,28 +301,28 @@ template<
     class SelectedCountOutputIterator
 >
 inline
-void partition(void * temporary_storage,
-               size_t& storage_size,
-               InputIterator input,
-               FlagIterator flags,
-               OutputIterator output,
-               SelectedCountOutputIterator selected_count_output,
-               const size_t size,
-               hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
-               const bool debug_synchronous = false)
+hipError_t partition(void * temporary_storage,
+                     size_t& storage_size,
+                     InputIterator input,
+                     FlagIterator flags,
+                     OutputIterator output,
+                     SelectedCountOutputIterator selected_count_output,
+                     const size_t size,
+                     const hipStream_t stream = 0,
+                     const bool debug_synchronous = false)
 {
     // Dummy unary predicate
     using unary_predicate_type = ::rocprim::empty_type;
     // Dummy inequality operation
     using inequality_op_type = ::rocprim::empty_type;
 
-    detail::partition_impl<detail::select_method::flag, false, Config>(
+    return detail::partition_impl<detail::select_method::flag, false, Config>(
         temporary_storage, storage_size, input, flags, output, selected_count_output,
-        size, unary_predicate_type(), inequality_op_type(), acc_view, debug_synchronous
+        size, unary_predicate_type(), inequality_op_type(), stream, debug_synchronous
     );
 }
 
-/// \brief HC parallel select primitive for device level using selection predicate.
+/// \brief HIP parallel select primitive for device level using selection predicate.
 ///
 /// Performs a device-wide partition using selection predicate. Partition copies
 /// the values from \p input to \p output  in such a way that all values for which
@@ -281,7 +331,7 @@ void partition(void * temporary_storage,
 /// \par Overview
 /// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
-/// * Ranges specified by \p input and \p output must have at least \p size elements.
+/// * Ranges specified by \p input, \p flags and \p output must have at least \p size elements.
 /// * Range specified by \p selected_count_output must have at least 1 element.
 /// * Relative order is preserved for the elements for which the \p predicate returns \p true. Other
 /// elements are copied in reverse order.
@@ -309,8 +359,7 @@ void partition(void * temporary_storage,
 /// The signature of the function should be equivalent to the following:
 /// <tt>bool f(const T &a);</tt>. The signature does not need to have
 /// <tt>const &</tt>, but function object must not modify the object passed to it.
-/// \param [in] acc_view - [optional] \p hc::accelerator_view object. The default value
-/// is \p hc::accelerator().get_default_view() (default view of the default accelerator).
+/// \param [in] stream - [optional] HIP stream object. The default is \p 0 (default stream).
 /// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. The default value is \p false.
 ///
@@ -323,37 +372,38 @@ void partition(void * temporary_storage,
 /// #include <rocprim/rocprim.hpp>///
 ///
 /// auto predicate =
-///     [](int a) [[hcc]] -> bool
+///     [] __device__ (int a) -> bool
 ///     {
 ///         return (a%2) == 0;
 ///     };
 ///
-/// hc::accelerator_view acc_view = ...;
-///
-/// // Prepare input and output (declare arrays, allocate device memory etc.)
-/// size_t size;                                           // e.g., 8
-/// hc::array<int> input(hc::extent<1>(size), ...);        // e.g., [1, 2, 3, 4, 5, 6, 7, 8]
-/// hc::array<int> output(hc::extent<1>(size), ...);       // empty array of 8 elements
-/// hc::array<size_t> output_count(hc::extent<1>(1), ...); // empty array of 1 element
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t input_size;     // e.g., 8
+/// int * input;           // e.g., [1, 2, 3, 4, 5, 6, 7, 8]
+/// int * output;          // empty array of 8 elements
+/// size_t * output_count; // empty array of 1 element
 ///
 /// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
 /// // Get required size of the temporary storage
 /// rocprim::partition(
-///     nullptr, temporary_storage_size_bytes,
-///     input.accelerator_pointer(), output.accelerator_pointer(),
-//      output_count.accelerator_pointer(),
-///     predicate, size, acc_view, false
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input,
+///     output, output_count,
+///     input_size,
+///     predicate
 /// );
 ///
 /// // allocate temporary storage
-/// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
 ///
 /// // perform partition
 /// rocprim::partition(
-///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
-///     input.accelerator_pointer(), output.accelerator_pointer(),
-//      output_count.accelerator_pointer(),
-///     predicate, size, acc_view, false
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input,
+///     output, output_count,
+///     input_size,
+///     predicate
 /// );
 /// // output: [2, 4, 6, 8, 7, 5, 3, 1]
 /// // output_count: 4
@@ -367,15 +417,15 @@ template<
     class UnaryPredicate
 >
 inline
-void partition(void * temporary_storage,
-               size_t& storage_size,
-               InputIterator input,
-               OutputIterator output,
-               SelectedCountOutputIterator selected_count_output,
-               const size_t size,
-               UnaryPredicate predicate,
-               hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
-               const bool debug_synchronous = false)
+hipError_t partition(void * temporary_storage,
+                     size_t& storage_size,
+                     InputIterator input,
+                     OutputIterator output,
+                     SelectedCountOutputIterator selected_count_output,
+                     const size_t size,
+                     UnaryPredicate predicate,
+                     const hipStream_t stream = 0,
+                     const bool debug_synchronous = false)
 {
     // Dummy flag type
     using flag_type = ::rocprim::empty_type;
@@ -383,15 +433,15 @@ void partition(void * temporary_storage,
     // Dummy inequality operation
     using inequality_op_type = ::rocprim::empty_type;
 
-    detail::partition_impl<detail::select_method::predicate, false, Config>(
+    return detail::partition_impl<detail::select_method::predicate, false, Config>(
         temporary_storage, storage_size, input, flags, output, selected_count_output,
-        size, predicate, inequality_op_type(), acc_view, debug_synchronous
+        size, predicate, inequality_op_type(), stream, debug_synchronous
     );
 }
 
 /// @}
-// end of group devicemodule_hc
+// end of group devicemodule_hip
 
 END_ROCPRIM_NAMESPACE
 
-#endif // ROCPRIM_DEVICE_DEVICE_PARTITION_HC_HPP_
+#endif // ROCPRIM_DEVICE_DEVICE_PARTITION_HPP_

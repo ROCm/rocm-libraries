@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_DEVICE_DEVICE_RUN_LENGTH_ENCODE_HC_HPP_
-#define ROCPRIM_DEVICE_DEVICE_RUN_LENGTH_ENCODE_HC_HPP_
+#ifndef ROCPRIM_DEVICE_DEVICE_RUN_LENGTH_ENCODE_HPP_
+#define ROCPRIM_DEVICE_DEVICE_RUN_LENGTH_ENCODE_HPP_
 
 #include <type_traits>
 #include <iterator>
@@ -33,23 +33,25 @@
 #include "../iterator/zip_iterator.hpp"
 
 #include "device_run_length_encode_config.hpp"
-#include "device_reduce_by_key_hc.hpp"
-#include "device_select_hc.hpp"
+#include "device_reduce_by_key.hpp"
+#include "device_select.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// \addtogroup devicemodule_hc
+/// \addtogroup devicemodule_hip
 /// @{
 
 namespace detail
 {
 
-#define ROCPRIM_DETAIL_HC_SYNC(name, size, start) \
+#define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start) \
     { \
+        if(error != hipSuccess) return error; \
         if(debug_synchronous) \
         { \
             std::cout << name << "(" << size << ")"; \
-            acc_view.wait(); \
+            auto error = hipStreamSynchronize(stream); \
+            if(error != hipSuccess) return error; \
             auto end = std::chrono::high_resolution_clock::now(); \
             auto d = std::chrono::duration_cast<std::chrono::duration<double>>(end - start); \
             std::cout << " " << d.count() * 1000 << " ms" << '\n'; \
@@ -58,7 +60,7 @@ namespace detail
 
 } // end detail namespace
 
-/// \brief HC parallel run-length encoding for device level.
+/// \brief HIP parallel run-length encoding for device level.
 ///
 /// run_length_encode function performs a device-wide run-length encoding of runs (groups)
 /// of consecutive values. The first value of each run is copied to \p unique_output and
@@ -93,10 +95,12 @@ namespace detail
 /// \param [out] unique_output - iterator to the first element in the output range of unique values.
 /// \param [out] counts_output - iterator to the first element in the output range of lenghts.
 /// \param [out] runs_count_output - iterator to total number of runs.
-/// \param [in] acc_view - [optional] \p hc::accelerator_view object. The default value
-/// is \p hc::accelerator().get_default_view() (default view of the default accelerator).
+/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
 /// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \returns \p hipSuccess (\p 0) after successful operation; otherwise a HIP runtime error of
+/// type \p hipError_t.
 ///
 /// \par Example
 /// \parblock
@@ -106,35 +110,30 @@ namespace detail
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>
 ///
-/// hc::accelerator_view acc_view = ...;
-///
 /// // Prepare input and output (declare pointers, allocate device memory etc.)
-/// size_t input_size;                      // e.g., 8
-/// hc::array<int> input(...);              // e.g., [1, 1, 1, 2, 10, 10, 10, 88]
-/// hc::array<int> unique_output(...);      // empty array of at least 4 elements
-/// hc::array<int> counts_output(...);      // empty array of at least 4 elements
-/// hc::array<int> runs_count_output(...);  // empty array of 1 element
+/// size_t input_size;          // e.g., 8
+/// int * input;                // e.g., [1, 1, 1, 2, 10, 10, 10, 88]
+/// int * unique_output;        // empty array of at least 4 elements
+/// int * counts_output;        // empty array of at least 4 elements
+/// int * runs_count_output;    // empty array of 1 element
 ///
 /// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
 /// // Get required size of the temporary storage
 /// rocprim::run_length_encode(
-///     nullptr, temporary_storage_size_bytes,
-///     input.accelerator_pointer(), input_size,
-///     unique_output.accelerator_pointer(), counts_output.accelerator_pointer(),
-///     runs_count_output.accelerator_pointer(),
-///     acc_view
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, input_size,
+///     unique_output, counts_output, runs_count_output
 /// );
 ///
 /// // allocate temporary storage
-/// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
 ///
 /// // perform encoding
 /// rocprim::run_length_encode(
-///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
-///     input.accelerator_pointer(), input_size,
-///     unique_output.accelerator_pointer(), counts_output.accelerator_pointer(),
-///     runs_count_output.accelerator_pointer(),
-///     acc_view
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, input_size,
+///     unique_output, counts_output, runs_count_output
 /// );
 /// // unique_output:     [1, 2, 10, 88]
 /// // counts_output:     [3, 1,  3,  1]
@@ -149,15 +148,15 @@ template<
     class RunsCountOutputIterator
 >
 inline
-void run_length_encode(void * temporary_storage,
-                       size_t& storage_size,
-                       InputIterator input,
-                       unsigned int size,
-                       UniqueOutputIterator unique_output,
-                       CountsOutputIterator counts_output,
-                       RunsCountOutputIterator runs_count_output,
-                       hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
-                       bool debug_synchronous = false)
+hipError_t run_length_encode(void * temporary_storage,
+                             size_t& storage_size,
+                             InputIterator input,
+                             unsigned int size,
+                             UniqueOutputIterator unique_output,
+                             CountsOutputIterator counts_output,
+                             RunsCountOutputIterator runs_count_output,
+                             hipStream_t stream = 0,
+                             bool debug_synchronous = false)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     using count_type = unsigned int;
@@ -167,16 +166,16 @@ void run_length_encode(void * temporary_storage,
         detail::default_run_length_encode_config
     >;
 
-    ::rocprim::reduce_by_key<typename config::reduce_by_key>(
+    return ::rocprim::reduce_by_key<typename config::reduce_by_key>(
         temporary_storage, storage_size,
         input, make_constant_iterator<count_type>(1), size,
         unique_output, counts_output, runs_count_output,
         ::rocprim::plus<count_type>(), ::rocprim::equal_to<input_type>(),
-        acc_view, debug_synchronous
+        stream, debug_synchronous
     );
 }
 
-/// \brief HC parallel run-length encoding of non-trivial runs for device level.
+/// \brief HIP parallel run-length encoding of non-trivial runs for device level.
 ///
 /// run_length_encode_non_trivial_runs function performs a device-wide run-length encoding of
 /// non-trivial runs (groups) of consecutive values (groups of more than one element).
@@ -212,10 +211,12 @@ void run_length_encode(void * temporary_storage,
 /// \param [out] offsets_output - iterator to the first element in the output range of offsets.
 /// \param [out] counts_output - iterator to the first element in the output range of lenghts.
 /// \param [out] runs_count_output - iterator to total number of runs.
-/// \param [in] acc_view - [optional] \p hc::accelerator_view object. The default value
-/// is \p hc::accelerator().get_default_view() (default view of the default accelerator).
+/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
 /// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \returns \p hipSuccess (\p 0) after successful operation; otherwise a HIP runtime error of
+/// type \p hipError_t.
 ///
 /// \par Example
 /// \parblock
@@ -225,35 +226,30 @@ void run_length_encode(void * temporary_storage,
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>
 ///
-/// hc::accelerator_view acc_view = ...;
-///
 /// // Prepare input and output (declare pointers, allocate device memory etc.)
-/// size_t input_size;                      // e.g., 8
-/// hc::array<int> input(...);              // e.g., [1, 1, 1, 2, 10, 10, 10, 88]
-/// hc::array<int> offsets_output(...);     // empty array of at least 2 elements
-/// hc::array<int> counts_output(...);      // empty array of at least 2 elements
-/// hc::array<int> runs_count_output(...);  // empty array of 1 element
+/// size_t input_size;          // e.g., 8
+/// int * input;                // e.g., [1, 1, 1, 2, 10, 10, 10, 88]
+/// int * offsets_output;       // empty array of at least 2 elements
+/// int * counts_output;        // empty array of at least 2 elements
+/// int * runs_count_output;    // empty array of 1 element
 ///
 /// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
 /// // Get required size of the temporary storage
 /// rocprim::run_length_encode_non_trivial_runs(
-///     nullptr, temporary_storage_size_bytes,
-///     input.accelerator_pointer(), input_size,
-///     offsets_output.accelerator_pointer(), counts_output.accelerator_pointer(),
-///     runs_count_output.accelerator_pointer(),
-///     acc_view
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, input_size,
+///     offsets_output, counts_output, runs_count_output
 /// );
 ///
 /// // allocate temporary storage
-/// hc::array<char> temporary_storage(temporary_storage_size_bytes, acc_view);
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
 ///
 /// // perform encoding
 /// rocprim::run_length_encode_non_trivial_runs(
-///     temporary_storage.accelerator_pointer(), temporary_storage_size_bytes,
-///     input.accelerator_pointer(), input_size,
-///     offsets_output.accelerator_pointer(), counts_output.accelerator_pointer(),
-///     runs_count_output.accelerator_pointer(),
-///     acc_view
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, input_size,
+///     offsets_output, counts_output, runs_count_output
 /// );
 /// // offsets_output:    [0, 4]
 /// // counts_output:     [3, 3]
@@ -268,15 +264,15 @@ template<
     class RunsCountOutputIterator
 >
 inline
-void run_length_encode_non_trivial_runs(void * temporary_storage,
-                                        size_t& storage_size,
-                                        InputIterator input,
-                                        unsigned int size,
-                                        OffsetsOutputIterator offsets_output,
-                                        CountsOutputIterator counts_output,
-                                        RunsCountOutputIterator runs_count_output,
-                                        hc::accelerator_view acc_view = hc::accelerator().get_default_view(),
-                                        bool debug_synchronous = false)
+hipError_t run_length_encode_non_trivial_runs(void * temporary_storage,
+                                              size_t& storage_size,
+                                              InputIterator input,
+                                              unsigned int size,
+                                              OffsetsOutputIterator offsets_output,
+                                              CountsOutputIterator counts_output,
+                                              RunsCountOutputIterator runs_count_output,
+                                              hipStream_t stream = 0,
+                                              bool debug_synchronous = false)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     using offset_type = unsigned int;
@@ -288,14 +284,16 @@ void run_length_encode_non_trivial_runs(void * temporary_storage,
         detail::default_run_length_encode_config
     >;
 
-    auto reduce_op = [](const offset_count_pair& a, const offset_count_pair& b) [[hc]]
+    hipError_t error;
+
+    auto reduce_op = [] __device__ (const offset_count_pair& a, const offset_count_pair& b)
     {
         return offset_count_pair(
             ::rocprim::get<0>(a), // Always use offset of the first item of the run
             ::rocprim::get<1>(a) + ::rocprim::get<1>(b) // Number of items in the run
         );
     };
-    auto non_trivial_runs_select_op = [](const offset_count_pair& a) [[hc]]
+    auto non_trivial_runs_select_op = [] __device__ (const offset_count_pair& a)
     {
         return ::rocprim::get<1>(a) > 1;
     };
@@ -306,7 +304,7 @@ void run_length_encode_non_trivial_runs(void * temporary_storage,
 
     // Calculate size of temporary storage for reduce_by_key operation
     size_t reduce_by_key_bytes;
-    ::rocprim::reduce_by_key<typename config::reduce_by_key>(
+    error = ::rocprim::reduce_by_key<typename config::reduce_by_key>(
         nullptr, reduce_by_key_bytes,
         input,
         ::rocprim::make_zip_iterator(
@@ -320,21 +318,23 @@ void run_length_encode_non_trivial_runs(void * temporary_storage,
         ::rocprim::make_zip_iterator(::rocprim::make_tuple(offsets_tmp, counts_tmp)),
         all_runs_count_tmp,
         reduce_op, ::rocprim::equal_to<input_type>(),
-        acc_view, debug_synchronous
+        stream, debug_synchronous
     );
+    if(error != hipSuccess) return error;
     reduce_by_key_bytes = ::rocprim::detail::align_size(reduce_by_key_bytes);
 
     // Calculate size of temporary storage for select operation
     size_t select_bytes;
-    ::rocprim::select<typename config::select>(
+    error = ::rocprim::select<typename config::select>(
         nullptr, select_bytes,
         ::rocprim::make_zip_iterator(::rocprim::make_tuple(offsets_tmp, counts_tmp)),
         ::rocprim::make_zip_iterator(::rocprim::make_tuple(offsets_output, counts_output)),
         runs_count_output,
         size,
         non_trivial_runs_select_op,
-        acc_view, debug_synchronous
+        stream, debug_synchronous
     );
+    if(error != hipSuccess) return error;
     select_bytes = ::rocprim::detail::align_size(select_bytes);
 
     const size_t offsets_tmp_bytes = ::rocprim::detail::align_size(size * sizeof(offset_type));
@@ -344,7 +344,7 @@ void run_length_encode_non_trivial_runs(void * temporary_storage,
     {
         storage_size = ::rocprim::max(reduce_by_key_bytes, select_bytes) +
             offsets_tmp_bytes + counts_tmp_bytes + all_runs_count_tmp_bytes;
-        return;
+        return hipSuccess;
     }
 
     char * ptr = reinterpret_cast<char *>(temporary_storage);
@@ -358,7 +358,7 @@ void run_length_encode_non_trivial_runs(void * temporary_storage,
     std::chrono::high_resolution_clock::time_point start;
 
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    ::rocprim::reduce_by_key<typename config::reduce_by_key>(
+    error = ::rocprim::reduce_by_key<typename config::reduce_by_key>(
         temporary_storage, reduce_by_key_bytes,
         input,
         ::rocprim::make_zip_iterator(
@@ -372,34 +372,38 @@ void run_length_encode_non_trivial_runs(void * temporary_storage,
         ::rocprim::make_zip_iterator(rocprim::make_tuple(offsets_tmp, counts_tmp)),
         all_runs_count_tmp,
         reduce_op, ::rocprim::equal_to<input_type>(),
-        acc_view, debug_synchronous
+        stream, debug_synchronous
     );
-    ROCPRIM_DETAIL_HC_SYNC("rocprim::reduce_by_key", size, start)
+    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("rocprim::reduce_by_key", size, start)
 
     // Read count of all runs (including trivial runs)
     count_type all_runs_count;
-    acc_view.wait();
-    hc::copy(hc::array<count_type>(hc::extent<1>(1), acc_view, all_runs_count_tmp), &all_runs_count);
+    error = hipMemcpyAsync(&all_runs_count, all_runs_count_tmp, sizeof(count_type), hipMemcpyDeviceToHost, stream);
+    if(error != hipSuccess) return error;
+    error = hipStreamSynchronize(stream);
+    if(error != hipSuccess) return error;
 
     // Select non-trivial runs
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    ::rocprim::select<typename config::select>(
+    error = ::rocprim::select<typename config::select>(
         temporary_storage, select_bytes,
         ::rocprim::make_zip_iterator(::rocprim::make_tuple(offsets_tmp, counts_tmp)),
         ::rocprim::make_zip_iterator(::rocprim::make_tuple(offsets_output, counts_output)),
         runs_count_output,
         all_runs_count,
         non_trivial_runs_select_op,
-        acc_view, debug_synchronous
+        stream, debug_synchronous
     );
-    ROCPRIM_DETAIL_HC_SYNC("rocprim::select", all_runs_count, start)
+    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("rocprim::select", all_runs_count, start)
+
+    return hipSuccess;
 }
 
-#undef ROCPRIM_DETAIL_HC_SYNC
+#undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
 
 /// @}
-// end of group devicemodule_hc
+// end of group devicemodule_hip
 
 END_ROCPRIM_NAMESPACE
 
-#endif // ROCPRIM_DEVICE_DEVICE_RUN_LENGTH_ENCODE_HC_HPP_
+#endif // ROCPRIM_DEVICE_DEVICE_RUN_LENGTH_ENCODE_HPP_
