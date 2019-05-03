@@ -29,12 +29,7 @@ function(add_hip_test TEST_NAME TEST_SOURCES)
       ${GTEST_INCLUDE_DIRS}
   )
 
-  # Remove this check when we no longer build with older rocm stack(ie < 1.8.2)
-  if(TARGET hip::device)
-    target_link_libraries(${TEST_TARGET} PRIVATE hip::device)
-  else()
-    target_link_libraries(${TEST_TARGET} PRIVATE hip::hip_hcc hip::hip_device)
-  endif()
+  target_link_libraries(${TEST_TARGET} PRIVATE hip::device)
 
   target_link_libraries(${TEST_TARGET}
     PRIVATE
