@@ -55,7 +55,6 @@ BEGIN_ROCPRIM_NAMESPACE
 /// In the examples exchange operation is performed on block of 128 threads, using type
 /// \p int with 8 items per thread.
 ///
-/// \b HIP: \n
 /// \code{.cpp}
 /// __global__ void example_kernel(...)
 /// {
@@ -70,26 +69,6 @@ BEGIN_ROCPRIM_NAMESPACE
 ///     b_exchange.blocked_to_striped(items, items, storage);
 ///     ...
 /// }
-/// \endcode
-///
-/// \b HC: \n
-/// \code{.cpp}
-/// hc::parallel_for_each(
-///     hc::extent<1>(...).tile(128),
-///     [=](hc::tiled_index<1> i) [[hc]]
-///     {
-///         // specialize block_exchange for int, block of 128 threads and 8 items per thread
-///         using block_exchange_int = rocprim::block_exchange<int, 128, 8>;
-///         // allocate storage in shared memory
-///         tile_static block_exchange_int::storage_type storage;
-///
-///         int items[8];
-///         ...
-///         block_exchange_int b_exchange;
-///         b_exchange.blocked_to_striped(items, items, storage);
-///         ...
-///     }
-/// );
 /// \endcode
 /// \endparblock
 template<
@@ -127,7 +106,7 @@ public:
     ///
     /// Depending on the implemention the operations exposed by parallel primitive may
     /// require a temporary storage for thread communication. The storage should be allocated
-    /// using keywords <tt>__shared__</tt> in HIP or \p tile_static in HC. It can be aliased to
+    /// using keywords <tt>__shared__</tt>. It can be aliased to
     /// an externally allocated memory, or be a part of a union type with other storage types
     /// to increase shared memory reusability.
     #ifndef DOXYGEN_SHOULD_SKIP_THIS // hides storage_type implementation for Doxygen
@@ -163,27 +142,23 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Example.
     /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(128),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize block_exchange for int, block of 128 threads and 8 items per thread
-    ///         using block_exchange_int = rocprim::block_exchange<int, 128, 8>;
-    ///         // allocate storage in shared memory
-    ///         tile_static block_exchange_int::storage_type storage;
+    /// __global__ void example_kernel(...)
+    /// {
+    ///     // specialize block_exchange for int, block of 128 threads and 8 items per thread
+    ///     using block_exchange_int = rocprim::block_exchange<int, 128, 8>;
+    ///     // allocate storage in shared memory
+    ///     __shared__ block_exchange_int::storage_type storage;
     ///
-    ///         int items[8];
-    ///         ...
-    ///         block_exchange_int b_exchange;
-    ///         b_exchange.blocked_to_striped(items, items, storage);
-    ///         ...
-    ///     }
-    /// );
+    ///     int items[8];
+    ///     ...
+    ///     block_exchange_int b_exchange;
+    ///     b_exchange.blocked_to_striped(items, items, storage);
+    ///     ...
+    /// }
     /// \endcode
     template<class U>
     ROCPRIM_DEVICE inline
@@ -233,27 +208,23 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Example.
     /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(128),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize block_exchange for int, block of 128 threads and 8 items per thread
-    ///         using block_exchange_int = rocprim::block_exchange<int, 128, 8>;
-    ///         // allocate storage in shared memory
-    ///         tile_static block_exchange_int::storage_type storage;
+    /// __global__ void example_kernel(...)
+    /// {
+    ///     // specialize block_exchange for int, block of 128 threads and 8 items per thread
+    ///     using block_exchange_int = rocprim::block_exchange<int, 128, 8>;
+    ///     // allocate storage in shared memory
+    ///     __shared__ block_exchange_int::storage_type storage;
     ///
-    ///         int items[8];
-    ///         ...
-    ///         block_exchange_int b_exchange;
-    ///         b_exchange.striped_to_blocked(items, items, storage);
-    ///         ...
-    ///     }
-    /// );
+    ///     int items[8];
+    ///     ...
+    ///     block_exchange_int b_exchange;
+    ///     b_exchange.striped_to_blocked(items, items, storage);
+    ///     ...
+    /// }
     /// \endcode
     template<class U>
     ROCPRIM_DEVICE inline
@@ -303,27 +274,23 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Example.
     /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(128),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize block_exchange for int, block of 128 threads and 8 items per thread
-    ///         using block_exchange_int = rocprim::block_exchange<int, 128, 8>;
-    ///         // allocate storage in shared memory
-    ///         tile_static block_exchange_int::storage_type storage;
+    /// __global__ void example_kernel(...)
+    /// {
+    ///     // specialize block_exchange for int, block of 128 threads and 8 items per thread
+    ///     using block_exchange_int = rocprim::block_exchange<int, 128, 8>;
+    ///     // allocate storage in shared memory
+    ///     __shared__ block_exchange_int::storage_type storage;
     ///
-    ///         int items[8];
-    ///         ...
-    ///         block_exchange_int b_exchange;
-    ///         b_exchange.blocked_to_warp_striped(items, items, storage);
-    ///         ...
-    ///     }
-    /// );
+    ///     int items[8];
+    ///     ...
+    ///     block_exchange_int b_exchange;
+    ///     b_exchange.blocked_to_warp_striped(items, items, storage);
+    ///     ...
+    /// }
     /// \endcode
     template<class U>
     ROCPRIM_DEVICE inline
@@ -376,27 +343,23 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Example.
     /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(128),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize block_exchange for int, block of 128 threads and 8 items per thread
-    ///         using block_exchange_int = rocprim::block_exchange<int, 128, 8>;
-    ///         // allocate storage in shared memory
-    ///         tile_static block_exchange_int::storage_type storage;
+    /// __global__ void example_kernel(...)
+    /// {
+    ///     // specialize block_exchange for int, block of 128 threads and 8 items per thread
+    ///     using block_exchange_int = rocprim::block_exchange<int, 128, 8>;
+    ///     // allocate storage in shared memory
+    ///     __shared__ block_exchange_int::storage_type storage;
     ///
-    ///         int items[8];
-    ///         ...
-    ///         block_exchange_int b_exchange;
-    ///         b_exchange.warp_striped_to_blocked(items, items, storage);
-    ///         ...
-    ///     }
-    /// );
+    ///     int items[8];
+    ///     ...
+    ///     block_exchange_int b_exchange;
+    ///     b_exchange.warp_striped_to_blocked(items, items, storage);
+    ///     ...
+    /// }
     /// \endcode
     template<class U>
     ROCPRIM_DEVICE inline
@@ -454,28 +417,24 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Example.
     /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(128),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize block_exchange for int, block of 128 threads and 8 items per thread
-    ///         using block_exchange_int = rocprim::block_exchange<int, 128, 8>;
-    ///         // allocate storage in shared memory
-    ///         tile_static block_exchange_int::storage_type storage;
+    /// __global__ void example_kernel(...)
+    /// {
+    ///     // specialize block_exchange for int, block of 128 threads and 8 items per thread
+    ///     using block_exchange_int = rocprim::block_exchange<int, 128, 8>;
+    ///     // allocate storage in shared memory
+    ///     __shared__ block_exchange_int::storage_type storage;
     ///
-    ///         int items[8];
-    ///         int ranks[8];
-    ///         ...
-    ///         block_exchange_int b_exchange;
-    ///         b_exchange.scatter_to_blocked(items, items, ranks, storage);
-    ///         ...
-    ///     }
-    /// );
+    ///     int items[8];
+    ///     int ranks[8];
+    ///     ...
+    ///     block_exchange_int b_exchange;
+    ///     b_exchange.scatter_to_blocked(items, items, ranks, storage);
+    ///     ...
+    /// }
     /// \endcode
     template<class U, class Offset>
     ROCPRIM_DEVICE inline
@@ -532,28 +491,24 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Example.
     /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(128),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize block_exchange for int, block of 128 threads and 8 items per thread
-    ///         using block_exchange_int = rocprim::block_exchange<int, 128, 8>;
-    ///         // allocate storage in shared memory
-    ///         tile_static block_exchange_int::storage_type storage;
+    /// __global__ void example_kernel(...)
+    /// {
+    ///     // specialize block_exchange for int, block of 128 threads and 8 items per thread
+    ///     using block_exchange_int = rocprim::block_exchange<int, 128, 8>;
+    ///     // allocate storage in shared memory
+    ///     __shared__ block_exchange_int::storage_type storage;
     ///
-    ///         int items[8];
-    ///         int ranks[8];
-    ///         ...
-    ///         block_exchange_int b_exchange;
-    ///         b_exchange.scatter_to_striped(items, items, ranks, storage);
-    ///         ...
-    ///     }
-    /// );
+    ///     int items[8];
+    ///     int ranks[8];
+    ///     ...
+    ///     block_exchange_int b_exchange;
+    ///     b_exchange.scatter_to_striped(items, items, ranks, storage);
+    ///     ...
+    /// }
     /// \endcode
     template<class U, class Offset>
     ROCPRIM_DEVICE inline
@@ -616,28 +571,24 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Example.
     /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(128),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize block_exchange for int, block of 128 threads and 8 items per thread
-    ///         using block_exchange_int = rocprim::block_exchange<int, 128, 8>;
-    ///         // allocate storage in shared memory
-    ///         tile_static block_exchange_int::storage_type storage;
+    /// __global__ void example_kernel(...)
+    /// {
+    ///     // specialize block_exchange for int, block of 128 threads and 8 items per thread
+    ///     using block_exchange_int = rocprim::block_exchange<int, 128, 8>;
+    ///     // allocate storage in shared memory
+    ///     __shared__ block_exchange_int::storage_type storage;
     ///
-    ///         int items[8];
-    ///         int ranks[8];
-    ///         ...
-    ///         block_exchange_int b_exchange;
-    ///         b_exchange.scatter_to_striped_guarded(items, items, ranks, storage);
-    ///         ...
-    ///     }
-    /// );
+    ///     int items[8];
+    ///     int ranks[8];
+    ///     ...
+    ///     block_exchange_int b_exchange;
+    ///     b_exchange.scatter_to_striped_guarded(items, items, ranks, storage);
+    ///     ...
+    /// }
     /// \endcode
     template<class U, class Offset>
     ROCPRIM_DEVICE inline
@@ -703,29 +654,25 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Example.
     /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(128),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize block_exchange for int, block of 128 threads and 8 items per thread
-    ///         using block_exchange_int = rocprim::block_exchange<int, 128, 8>;
-    ///         // allocate storage in shared memory
-    ///         tile_static block_exchange_int::storage_type storage;
+    /// __global__ void example_kernel(...)
+    /// {
+    ///     // specialize block_exchange for int, block of 128 threads and 8 items per thread
+    ///     using block_exchange_int = rocprim::block_exchange<int, 128, 8>;
+    ///     // allocate storage in shared memory
+    ///     __shared__ block_exchange_int::storage_type storage;
     ///
-    ///         int items[8];
-    ///         int ranks[8];
-    ///         int flags[8];
-    ///         ...
-    ///         block_exchange_int b_exchange;
-    ///         b_exchange.scatter_to_striped_flagged(items, items, ranks, flags, storage);
-    ///         ...
-    ///     }
-    /// );
+    ///     int items[8];
+    ///     int ranks[8];
+    ///     int flags[8];
+    ///     ...
+    ///     block_exchange_int b_exchange;
+    ///     b_exchange.scatter_to_striped_flagged(items, items, ranks, flags, storage);
+    ///     ...
+    /// }
     /// \endcode
     template<class U, class Offset, class ValidFlag>
     ROCPRIM_DEVICE inline

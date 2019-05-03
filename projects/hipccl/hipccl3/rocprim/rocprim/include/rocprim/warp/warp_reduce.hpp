@@ -86,7 +86,6 @@ struct select_warp_reduce_impl
 /// one \p int value, result is returned using the same variable as for input. Hardware
 /// warp size is 64. Block (tile) size is 64.
 ///
-/// \b HIP: \n
 /// \code{.cpp}
 /// __global__ void example_kernel(...)
 /// {
@@ -105,30 +104,6 @@ struct select_warp_reduce_impl
 ///     );
 ///     ...
 /// }
-/// \endcode
-///
-/// \b HC: \n
-/// \code{.cpp}
-/// hc::parallel_for_each(
-///     hc::extent<1>(...).tile(64),
-///     [=](hc::tiled_index<1> i) [[hc]]
-///     {
-///         // specialize warp_reduce for int and logical warp of 16 threads
-///         using warp_reduce_int = rocprim::warp_reduce<int, 16>;
-///
-///         // allocate storage in shared memory
-///         tile_static warp_reduce_int::storage_type temp[4];
-///
-///         int logical_warp_id = i.local[0]/16;
-///         int value = ...;
-///         // execute reduce
-///             warp_reduce_int().reduce(
-///             value, // input
-///             value, // output
-///             temp[logical_warp_id]
-///         );
-///     }
-/// );
 /// \endcode
 /// \endparblock
 template<
@@ -152,7 +127,7 @@ public:
     ///
     /// Depending on the implemention the operations exposed by parallel primitive may
     /// require a temporary storage for thread communication. The storage should be allocated
-    /// using keywords <tt>__shared__</tt> in HIP or \p tile_static in HC. It can be aliased to
+    /// using keywords <tt>__shared__</tt>. It can be aliased to
     /// an externally allocated memory, or be a part of a union type with other storage types
     /// to increase shared memory reusability.
     using storage_type = typename base_type::storage_type;
@@ -172,8 +147,7 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Examples
     /// \parblock
@@ -181,7 +155,6 @@ public:
     /// one \p int value, result is returned using the same variable as for input. Hardware
     /// warp size is 64. Block (tile) size is 64.
     ///
-    /// \b HIP: \n
     /// \code{.cpp}
     /// __global__ void example_kernel(...)
     /// {
@@ -201,31 +174,6 @@ public:
     ///     );
     ///     ...
     /// }
-    /// \endcode
-    ///
-    /// \b HC: \n
-    /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(64),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize warp_reduce for int and logical warp of 16 threads
-    ///         using warp_reduce_int = rocprim::warp_reduce<int, 16>;
-    ///
-    ///         // allocate storage in shared memory
-    ///         tile_static warp_reduce_int::storage_type temp[4];
-    ///
-    ///         int logical_warp_id = i.local[0]/16;
-    ///         int value = ...;
-    ///         // execute reduction
-    ///             warp_reduce_int().reduce(
-    ///             value, // input
-    ///             value, // output
-    ///             temp[logical_warp_id],
-    ///             rocprim::minimum<float>()
-    ///         );
-    ///     }
-    /// );
     /// \endcode
     /// \endparblock
     template<class BinaryFunction = ::rocprim::plus<T>>
@@ -254,8 +202,7 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Examples
     /// \parblock
@@ -263,7 +210,6 @@ public:
     /// one \p int value, result is returned using the same variable as for input. Hardware
     /// warp size is 64. Block (tile) size is 64.
     ///
-    /// \b HIP: \n
     /// \code{.cpp}
     /// __global__ void example_kernel(...)
     /// {
@@ -284,32 +230,6 @@ public:
     ///     );
     ///     ...
     /// }
-    /// \endcode
-    ///
-    /// \b HC: \n
-    /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(64),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize warp_reduce for int and logical warp of 16 threads
-    ///         using warp_reduce_int = rocprim::warp_reduce<int, 16>;
-    ///
-    ///         // allocate storage in shared memory
-    ///         tile_static warp_reduce_int::storage_type temp[4];
-    ///
-    ///         int logical_warp_id = i.local[0]/16;
-    ///         int value = ...;
-    ///         int valid_items = 4;
-    ///         // execute reduction
-    ///             warp_reduce_int().reduce(
-    ///             value, // input
-    ///             value, // output
-    ///             valid_items,
-    ///             temp[logical_warp_id]
-    ///         );
-    ///     }
-    /// );
     /// \endcode
     /// \endparblock
     template<class BinaryFunction = ::rocprim::plus<T>>
@@ -340,8 +260,7 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     template<class Flag, class BinaryFunction = ::rocprim::plus<T>>
     ROCPRIM_DEVICE inline
     void head_segmented_reduce(T input,
@@ -370,8 +289,7 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     template<class Flag, class BinaryFunction = ::rocprim::plus<T>>
     ROCPRIM_DEVICE inline
     void tail_segmented_reduce(T input,
