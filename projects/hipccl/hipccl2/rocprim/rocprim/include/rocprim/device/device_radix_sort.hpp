@@ -37,7 +37,7 @@
 #include "device_radix_sort_config.hpp"
 #include "detail/device_radix_sort.hpp"
 
-/// \addtogroup devicemodule_hip
+/// \addtogroup devicemodule
 /// @{
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -483,7 +483,7 @@ hipError_t radix_sort_impl(void * temporary_storage,
 
 } // end namespace detail
 
-/// \brief HIP parallel ascending radix sort primitive for device level.
+/// \brief Parallel ascending radix sort primitive for device level.
 ///
 /// \p radix_sort_keys function performs a device-wide radix sort
 /// of keys. Function sorts input keys in ascending order.
@@ -586,7 +586,7 @@ hipError_t radix_sort_keys(void * temporary_storage,
     );
 }
 
-/// \brief HIP parallel descending radix sort primitive for device level.
+/// \brief Parallel descending radix sort primitive for device level.
 ///
 /// \p radix_sort_keys_desc function performs a device-wide radix sort
 /// of keys. Function sorts input keys in descending order.
@@ -689,7 +689,7 @@ hipError_t radix_sort_keys_desc(void * temporary_storage,
     );
 }
 
-/// \brief HIP parallel ascending radix sort-by-key primitive for device level.
+/// \brief Parallel ascending radix sort-by-key primitive for device level.
 ///
 /// \p radix_sort_pairs_desc function performs a device-wide radix sort
 /// of (key, value) pairs. Function sorts input pairs in ascending order of keys.
@@ -811,7 +811,7 @@ hipError_t radix_sort_pairs(void * temporary_storage,
     );
 }
 
-/// \brief HIP parallel descending radix sort-by-key primitive for device level.
+/// \brief Parallel descending radix sort-by-key primitive for device level.
 ///
 /// \p radix_sort_pairs_desc function performs a device-wide radix sort
 /// of (key, value) pairs. Function sorts input pairs in descending order of keys.
@@ -929,7 +929,7 @@ hipError_t radix_sort_pairs_desc(void * temporary_storage,
     );
 }
 
-/// \brief HIP parallel ascending radix sort primitive for device level.
+/// \brief Parallel ascending radix sort primitive for device level.
 ///
 /// \p radix_sort_keys function performs a device-wide radix sort
 /// of keys. Function sorts input keys in ascending order.
@@ -1038,7 +1038,7 @@ hipError_t radix_sort_keys(void * temporary_storage,
     return error;
 }
 
-/// \brief HIP parallel descending radix sort primitive for device level.
+/// \brief Parallel descending radix sort primitive for device level.
 ///
 /// \p radix_sort_keys_desc function performs a device-wide radix sort
 /// of keys. Function sorts input keys in descending order.
@@ -1147,7 +1147,7 @@ hipError_t radix_sort_keys_desc(void * temporary_storage,
     return error;
 }
 
-/// \brief HIP parallel ascending radix sort-by-key primitive for device level.
+/// \brief Parallel ascending radix sort-by-key primitive for device level.
 ///
 /// \p radix_sort_pairs_desc function performs a device-wide radix sort
 /// of (key, value) pairs. Function sorts input pairs in ascending order of keys.
@@ -1271,7 +1271,7 @@ hipError_t radix_sort_pairs(void * temporary_storage,
     return error;
 }
 
-/// \brief HIP parallel descending radix sort-by-key primitive for device level.
+/// \brief Parallel descending radix sort-by-key primitive for device level.
 ///
 /// \p radix_sort_pairs_desc function performs a device-wide radix sort
 /// of (key, value) pairs. Function sorts input pairs in descending order of keys.
@@ -1392,6 +1392,6 @@ hipError_t radix_sort_pairs_desc(void * temporary_storage,
 END_ROCPRIM_NAMESPACE
 
 /// @}
-// end of group devicemodule_hip
+// end of group devicemodule
 
 #endif // ROCPRIM_DEVICE_DEVICE_RADIX_SORT_HPP_

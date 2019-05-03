@@ -33,7 +33,7 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// \addtogroup devicemodule_hip
+/// \addtogroup devicemodule
 /// @{
 
 namespace detail
@@ -168,7 +168,7 @@ hipError_t binary_search(void * temporary_storage,
 }
 
 /// @}
-// end of group devicemodule_hip
+// end of group devicemodule
 
 END_ROCPRIM_NAMESPACE
 

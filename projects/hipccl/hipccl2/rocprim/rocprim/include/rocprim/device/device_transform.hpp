@@ -34,7 +34,7 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// \addtogroup devicemodule_hip
+/// \addtogroup devicemodule
 /// @{
 
 namespace detail
@@ -76,7 +76,7 @@ void transform_kernel(InputIterator input,
 
 } // end of detail namespace
 
-/// \brief HIP parallel transform primitive for device level.
+/// \brief Parallel transform primitive for device level.
 ///
 /// transform function performs a device-wide transformation operation
 /// using unary \p transform_op operator.
@@ -186,7 +186,7 @@ hipError_t transform(InputIterator input,
     return hipSuccess;
 }
 
-/// \brief HIP parallel device-level transform primitive for two inputs.
+/// \brief Parallel device-level transform primitive for two inputs.
 ///
 /// transform function performs a device-wide transformation operation
 /// on two input ranges using binary \p transform_op operator.
@@ -272,7 +272,7 @@ hipError_t transform(InputIterator1 input1,
 #undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
 
 /// @}
-// end of group devicemodule_hip
+// end of group devicemodule
 
 END_ROCPRIM_NAMESPACE
 

@@ -35,7 +35,7 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// \addtogroup devicemodule_hip
+/// \addtogroup devicemodule
 /// @{
 
 namespace detail
@@ -57,7 +57,7 @@ namespace detail
 
 } // end detail namespace
 
-/// \brief HIP parallel select primitive for device level using range of flags.
+/// \brief Parallel select primitive for device level using range of flags.
 ///
 /// Performs a device-wide selection based on input \p flags. If a value from \p input
 /// should be selected and copied into \p output range the corresponding item from
@@ -165,7 +165,7 @@ hipError_t select(void * temporary_storage,
     );
 }
 
-/// \brief HIP parallel select primitive for device level using selection operator.
+/// \brief Parallel select primitive for device level using selection operator.
 ///
 /// Performs a device-wide selection using selection operator. If a value \p x from \p input
 /// should be selected and copied into \p output range, then <tt>predicate(x)</tt> has to
@@ -277,7 +277,7 @@ hipError_t select(void * temporary_storage,
     );
 }
 
-/// \brief HIP device-level parallel unique primitive.
+/// \brief Device-level parallel unique primitive.
 ///
 /// From given \p input range unique primitive eliminates all but the first element from every
 /// consecutive group of equivalent elements and copies them into \p output.
@@ -388,7 +388,7 @@ hipError_t unique(void * temporary_storage,
 #undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
 
 /// @}
-// end of group devicemodule_hip
+// end of group devicemodule
 
 END_ROCPRIM_NAMESPACE
 

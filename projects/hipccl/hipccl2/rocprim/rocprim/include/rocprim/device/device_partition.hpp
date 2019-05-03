@@ -34,7 +34,7 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// \addtogroup devicemodule_hip
+/// \addtogroup devicemodule
 /// @{
 
 namespace detail
@@ -214,7 +214,7 @@ hipError_t partition_impl(void * temporary_storage,
 
 } // end of detail namespace
 
-/// \brief HIP parallel select primitive for device level using range of flags.
+/// \brief Parallel select primitive for device level using range of flags.
 ///
 /// Performs a device-wide partition based on input \p flags. Partition copies
 /// the values from \p input to \p output in such a way that all values for which the corresponding
@@ -322,7 +322,7 @@ hipError_t partition(void * temporary_storage,
     );
 }
 
-/// \brief HIP parallel select primitive for device level using selection predicate.
+/// \brief Parallel select primitive for device level using selection predicate.
 ///
 /// Performs a device-wide partition using selection predicate. Partition copies
 /// the values from \p input to \p output  in such a way that all values for which
@@ -440,7 +440,7 @@ hipError_t partition(void * temporary_storage,
 }
 
 /// @}
-// end of group devicemodule_hip
+// end of group devicemodule
 
 END_ROCPRIM_NAMESPACE
 

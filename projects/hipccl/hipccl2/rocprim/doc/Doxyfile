@@ -775,8 +775,7 @@ INPUT                  = mainpage.dox \
                          primitivesmodule.dox \
                          warpmodule.dox \
                          blockmodule.dox \
-                         devicemodulehc.dox \
-                         devicemodulehip.dox \
+                         devicemodule.dox \
                          utilsmodule.dox \
                          iteratormodule.dox \
                          intrinsicsmodule.dox \

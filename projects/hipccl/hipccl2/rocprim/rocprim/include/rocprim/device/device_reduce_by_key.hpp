@@ -35,7 +35,7 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// \addtogroup devicemodule_hip
+/// \addtogroup devicemodule
 /// @{
 
 namespace detail
@@ -270,7 +270,7 @@ hipError_t reduce_by_key_impl(void * temporary_storage,
 
 } // end of detail namespace
 
-/// \brief HIP parallel reduce-by-key primitive for device level.
+/// \brief Parallel reduce-by-key primitive for device level.
 ///
 /// reduce_by_key function performs a device-wide reduction operation of groups
 /// of consecutive values having the same key using binary \p reduce_op operator. The first key of each group
@@ -405,7 +405,7 @@ hipError_t reduce_by_key(void * temporary_storage,
 }
 
 /// @}
-// end of group devicemodule_hip
+// end of group devicemodule
 
 END_ROCPRIM_NAMESPACE
 

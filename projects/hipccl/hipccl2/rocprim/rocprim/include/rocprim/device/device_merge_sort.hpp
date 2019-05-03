@@ -33,7 +33,7 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// \addtogroup devicemodule_hip
+/// \addtogroup devicemodule
 /// @{
 
 namespace detail
@@ -237,7 +237,7 @@ hipError_t merge_sort_impl(void * temporary_storage,
 
 } // end of detail namespace
 
-/// \brief HIP parallel merge sort primitive for device level.
+/// \brief Parallel merge sort primitive for device level.
 ///
 /// \p merge_sort function performs a device-wide merge sort
 /// of keys. Function sorts input keys based on comparison function.
@@ -328,7 +328,7 @@ hipError_t merge_sort(void * temporary_storage,
     );
 }
 
-/// \brief HIP parallel ascending merge sort-by-key primitive for device level.
+/// \brief Parallel ascending merge sort-by-key primitive for device level.
 ///
 /// \p merge_sort function performs a device-wide merge sort
 /// of (key, value) pairs. Function sorts input pairs based on comparison function.
@@ -434,7 +434,7 @@ hipError_t merge_sort(void * temporary_storage,
 }
 
 /// @}
-// end of group devicemodule_hip
+// end of group devicemodule
 
 END_ROCPRIM_NAMESPACE
 
