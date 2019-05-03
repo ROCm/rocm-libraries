@@ -38,7 +38,7 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// \addtogroup devicemodule_hip
+/// \addtogroup devicemodule
 /// @{
 
 namespace detail
@@ -60,7 +60,7 @@ namespace detail
 
 } // end detail namespace
 
-/// \brief HIP parallel run-length encoding for device level.
+/// \brief Parallel run-length encoding for device level.
 ///
 /// run_length_encode function performs a device-wide run-length encoding of runs (groups)
 /// of consecutive values. The first value of each run is copied to \p unique_output and
@@ -175,7 +175,7 @@ hipError_t run_length_encode(void * temporary_storage,
     );
 }
 
-/// \brief HIP parallel run-length encoding of non-trivial runs for device level.
+/// \brief Parallel run-length encoding of non-trivial runs for device level.
 ///
 /// run_length_encode_non_trivial_runs function performs a device-wide run-length encoding of
 /// non-trivial runs (groups) of consecutive values (groups of more than one element).
@@ -402,7 +402,7 @@ hipError_t run_length_encode_non_trivial_runs(void * temporary_storage,
 #undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
 
 /// @}
-// end of group devicemodule_hip
+// end of group devicemodule
 
 END_ROCPRIM_NAMESPACE
 

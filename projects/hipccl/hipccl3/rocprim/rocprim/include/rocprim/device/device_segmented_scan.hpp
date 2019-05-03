@@ -38,7 +38,7 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// \addtogroup devicemodule_hip
+/// \addtogroup devicemodule
 /// @{
 
 namespace detail
@@ -143,7 +143,7 @@ hipError_t segmented_scan_impl(void * temporary_storage,
 
 } // end of detail namespace
 
-/// \brief HIP parallel segmented inclusive scan primitive for device level.
+/// \brief Parallel segmented inclusive scan primitive for device level.
 ///
 /// segmented_inclusive_scan function performs a device-wide inclusive scan operation
 /// across multiple sequences from \p input using binary \p scan_op operator.
@@ -260,7 +260,7 @@ hipError_t segmented_inclusive_scan(void * temporary_storage,
     );
 }
 
-/// \brief HIP parallel segmented exclusive scan primitive for device level.
+/// \brief Parallel segmented exclusive scan primitive for device level.
 ///
 /// segmented_exclusive_scan function performs a device-wide exclusive scan operation
 /// across multiple sequences from \p input using binary \p scan_op operator.
@@ -379,7 +379,7 @@ hipError_t segmented_exclusive_scan(void * temporary_storage,
     );
 }
 
-/// \brief HIP parallel segmented inclusive scan primitive for device level.
+/// \brief Parallel segmented inclusive scan primitive for device level.
 ///
 /// segmented_inclusive_scan function performs a device-wide inclusive scan operation
 /// across multiple sequences from \p input using binary \p scan_op operator. Beginnings
@@ -494,7 +494,7 @@ hipError_t segmented_inclusive_scan(void * temporary_storage,
     );
 }
 
-/// \brief HIP parallel segmented exclusive scan primitive for device level.
+/// \brief Parallel segmented exclusive scan primitive for device level.
 ///
 /// segmented_exclusive_scan function performs a device-wide exclusive scan operation
 /// across multiple sequences from \p input using binary \p scan_op operator. Beginnings
@@ -639,7 +639,7 @@ hipError_t segmented_exclusive_scan(void * temporary_storage,
 }
 
 /// @}
-// end of group devicemodule_hip
+// end of group devicemodule
 
 END_ROCPRIM_NAMESPACE
 

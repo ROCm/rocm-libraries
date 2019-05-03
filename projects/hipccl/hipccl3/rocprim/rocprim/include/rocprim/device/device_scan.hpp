@@ -36,7 +36,7 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// \addtogroup devicemodule_hip
+/// \addtogroup devicemodule
 /// @{
 
 namespace detail
@@ -410,7 +410,7 @@ auto scan_impl(void * temporary_storage,
 
 } // end of detail namespace
 
-/// \brief HIP parallel inclusive scan primitive for device level.
+/// \brief Parallel inclusive scan primitive for device level.
 ///
 /// inclusive_scan function performs a device-wide inclusive prefix scan operation
 /// using binary \p scan_op operator.
@@ -519,7 +519,7 @@ hipError_t inclusive_scan(void * temporary_storage,
     );
 }
 
-/// \brief HIP parallel exclusive scan primitive for device level.
+/// \brief Parallel exclusive scan primitive for device level.
 ///
 /// exclusive_scan function performs a device-wide exclusive prefix scan operation
 /// using binary \p scan_op operator.
@@ -640,7 +640,7 @@ hipError_t exclusive_scan(void * temporary_storage,
 }
 
 /// @}
-// end of group devicemodule_hip
+// end of group devicemodule
 
 END_ROCPRIM_NAMESPACE
 

@@ -34,10 +34,10 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// \addtogroup devicemodule_hip
+/// \addtogroup devicemodule
 /// @{
 
-/// \brief HIP parallel inclusive scan-by-key primitive for device level.
+/// \brief Parallel inclusive scan-by-key primitive for device level.
 ///
 /// inclusive_scan_by_key function performs a device-wide inclusive prefix scan-by-key
 /// operation using binary \p scan_op operator.
@@ -182,7 +182,7 @@ hipError_t inclusive_scan_by_key(void * temporary_storage,
     );
 }
 
-/// \brief HIP parallel exclusive scan-by-key primitive for device level.
+/// \brief Parallel exclusive scan-by-key primitive for device level.
 ///
 /// inclusive_scan_by_key function performs a device-wide exclusive prefix scan-by-key
 /// operation using binary \p scan_op operator.
@@ -341,7 +341,7 @@ hipError_t exclusive_scan_by_key(void * temporary_storage,
 }
 
 /// @}
-// end of group devicemodule_hip
+// end of group devicemodule
 
 END_ROCPRIM_NAMESPACE
 

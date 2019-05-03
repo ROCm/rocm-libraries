@@ -33,7 +33,7 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// \addtogroup devicemodule_hip
+/// \addtogroup devicemodule
 /// @{
 
 namespace detail
@@ -190,7 +190,7 @@ hipError_t reduce_impl(void * temporary_storage,
 
 } // end of detail namespace
 
-/// \brief HIP parallel reduction primitive for device level.
+/// \brief Parallel reduction primitive for device level.
 ///
 /// reduce function performs a device-wide reduction operation
 /// using binary \p reduce_op operator.
@@ -300,7 +300,7 @@ hipError_t reduce(void * temporary_storage,
     );
 }
 
-/// \brief HIP parallel reduce primitive for device level.
+/// \brief Parallel reduce primitive for device level.
 ///
 /// reduce function performs a device-wide reduction operation
 /// using binary \p reduce_op operator.
@@ -401,7 +401,7 @@ hipError_t reduce(void * temporary_storage,
 }
 
 /// @}
-// end of group devicemodule_hip
+// end of group devicemodule
 
 END_ROCPRIM_NAMESPACE
 

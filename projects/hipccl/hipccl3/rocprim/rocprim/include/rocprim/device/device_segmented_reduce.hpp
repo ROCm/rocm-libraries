@@ -33,7 +33,7 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// \addtogroup devicemodule_hip
+/// \addtogroup devicemodule
 /// @{
 
 namespace detail
@@ -138,7 +138,7 @@ hipError_t segmented_reduce_impl(void * temporary_storage,
 
 } // end of detail namespace
 
-/// \brief HIP parallel segmented reduction primitive for device level.
+/// \brief Parallel segmented reduction primitive for device level.
 ///
 /// segmented_reduce function performs a device-wide reduction operation across multiple sequences
 /// using binary \p reduce_op operator.
@@ -263,7 +263,7 @@ hipError_t segmented_reduce(void * temporary_storage,
 }
 
 /// @}
-// end of group devicemodule_hip
+// end of group devicemodule
 
 END_ROCPRIM_NAMESPACE
 
