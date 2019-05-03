@@ -22,6 +22,14 @@
 
 cmake_minimum_required(VERSION 3.5.1 FATAL_ERROR)
 
+# Install prefix
+if(WIN32)
+  set(CMAKE_INSTALL_PREFIX ${PROJECT_BINARY_DIR}/package)
+else()
+  set(CMAKE_INSTALL_PREFIX /opt/rocm)
+endif()
+
+# Thrust project
 project(thrust VERSION 0.0.1.0 LANGUAGES CXX)
 
 # CMake modules
@@ -72,23 +80,18 @@ if(BUILD_TEST)
 endif()
 
 # Package
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "hip_hcc (>= 1.5.18263)") # 1.5.18263 is HIP version in ROCm 1.8.2
-set(CPACK_RPM_PACKAGE_REQUIRES "hip_hcc >= 1.5.18263")
+set(CPACK_DEBIAN_ARCHIVE_TYPE "gnutar")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "hip_hcc (>= 1.5.18263), rocprim (>= 1.0)") # 1.5.18263 is HIP version in ROCm 1.8.2
+set(CPACK_RPM_PACKAGE_REQUIRES "hip_hcc >= 1.5.18263, rocprim >= 1.0")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 if(NOT CPACK_PACKAGING_INSTALL_PREFIX)
   set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
 endif()
 
-set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" "\${CPACK_PACKAGING_INSTALL_PREFIX}/include" )
+set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" "\${CPACK_PACKAGING_INSTALL_PREFIX}/include")
 
 rocm_create_package(
-  NAME thrust
+  NAME rocthrust
   DESCRIPTION "Radeon Open Compute Thrust library"
-  MAINTAINER "Stream HPC Maintainers <maintainer@streamhpc.com>"
-)
-
-rocm_install_targets(
-  INCLUDE
-  ${CMAKE_SOURCE_DIR}/thrust/
-  PREFIX thrust
+  MAINTAINER "Saad Rahim <saad.rahim@amd.com>"
 )
