@@ -101,7 +101,6 @@ struct select_block_histogram_impl<block_histogram_algorithm::using_sort>
 /// In the examples histogram operation is performed on block of 192 threads, each provides
 /// one \p int value, result is returned using the same variable as for input.
 ///
-/// \b HIP: \n
 /// \code{.cpp}
 /// __global__ void example_kernel(...)
 /// {
@@ -123,32 +122,6 @@ struct select_block_histogram_impl<block_histogram_algorithm::using_sort>
 ///     ...
 /// }
 /// \endcode
-///
-/// \b HC: \n
-/// \code{.cpp}
-/// hc::parallel_for_each(
-///     hc::extent<1>(...).tile(64),
-///     [=](hc::tiled_index<1> i) [[hc]]
-///     {
-///         // specialize block_histogram for int, logical block of 192 threads,
-///         // 2 items per thread and a bin size of 192.
-///         using block_histogram_int = rocprim::block_histogram<int, 192, 2, 192>;
-///         // allocate storage in shared memory
-///         tile_static block_histogram_int::storage_type storage;
-///         tile_static int hist[192];
-///
-///         int value[2];
-///         ...
-///         // execute histogram
-///         block_histogram_int().histogram(
-///             value, // input
-///             hist, // output
-///             storage
-///         );
-///         ...
-///     }
-/// );
-/// \endcode
 /// \endparblock
 template<
     class T,
@@ -169,7 +142,7 @@ public:
     ///
     /// Depending on the implemention the operations exposed by parallel primitive may
     /// require a temporary storage for thread communication. The storage should be allocated
-    /// using keywords <tt>__shared__</tt> in HIP or \p tile_static in HC. It can be aliased to
+    /// using keywords <tt>__shared__</tt>. It can be aliased to
     /// an externally allocated memory, or be a part of a union type with other storage types
     /// to increase shared memory reusability.
     using storage_type = typename base_type::storage_type;
@@ -207,15 +180,13 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Examples
     /// \parblock
     /// In the examples histogram operation is performed on block of 192 threads, each provides
     /// one \p int value, result is returned using the same variable as for input.
     ///
-    /// \b HIP: \n
     /// \code{.cpp}
     /// __global__ void example_kernel(...)
     /// {
@@ -243,39 +214,6 @@ public:
     ///     );
     ///     ...
     /// }
-    /// \endcode
-    ///
-    /// \b HC: \n
-    /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(64),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize block_histogram for int, logical block of 192 threads,
-    ///         // 2 items per thread and a bin size of 192.
-    ///         using block_histogram_int = rocprim::block_histogram<int, 192, 2, 192>;
-    ///         // allocate storage in shared memory
-    ///         tile_static block_histogram_int::storage_type storage;
-    ///         tile_static int hist[192];
-    ///
-    ///         int value[2];
-    ///         ...
-    ///         // initialize histogram
-    ///         block_histogram_int().init_histogram(
-    ///             hist // output
-    ///         );
-    ///
-    ///         rocprim::syncthreads();
-    ///
-    ///         // update histogram
-    ///         block_histogram_int().composite(
-    ///             value, // input
-    ///             hist, // output
-    ///             storage
-    ///         );
-    ///         ...
-    ///     }
-    /// );
     /// \endcode
     /// \endparblock
     template<class Counter>
@@ -317,15 +255,13 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Examples
     /// \parblock
     /// In the examples histogram operation is performed on block of 192 threads, each provides
     /// one \p int value, result is returned using the same variable as for input.
     ///
-    /// \b HIP: \n
     /// \code{.cpp}
     /// __global__ void example_kernel(...)
     /// {
@@ -346,32 +282,6 @@ public:
     ///     );
     ///     ...
     /// }
-    /// \endcode
-    ///
-    /// \b HC: \n
-    /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(64),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize block_histogram for int, logical block of 192 threads,
-    ///         // 2 items per thread and a bin size of 192.
-    ///         using block_histogram_int = rocprim::block_histogram<int, 192, 2, 192>;
-    ///         // allocate storage in shared memory
-    ///         tile_static block_histogram_int::storage_type storage;
-    ///         tile_static int hist[192];
-    ///
-    ///         int value[2];
-    ///         ...
-    ///         // execute histogram
-    ///         block_histogram_int().histogram(
-    ///             value, // input
-    ///             hist, // output
-    ///             storage
-    ///         );
-    ///         ...
-    ///     }
-    /// );
     /// \endcode
     /// \endparblock
     template<class Counter>
