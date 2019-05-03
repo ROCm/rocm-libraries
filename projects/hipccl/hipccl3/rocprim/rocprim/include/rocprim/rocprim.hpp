@@ -23,7 +23,7 @@
 
 /// \file
 ///
-/// Meta-header to include rocPRIM HC or HIP APIs.
+/// Meta-header to include rocPRIM API.
 
 // Meta configuration for rocPRIM
 #include "config.hpp"

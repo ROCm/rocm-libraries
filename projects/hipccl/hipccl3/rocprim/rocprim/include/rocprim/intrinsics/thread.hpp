@@ -39,24 +39,14 @@ BEGIN_ROCPRIM_NAMESPACE
 ROCPRIM_HOST_DEVICE inline
 constexpr unsigned int warp_size()
 {
-    #ifdef ROCPRIM_HC_API
-        // Using marco allows contexpr, but we may have to
-        // change it to hc::__wavesize() for safety
-        return __HSA_WAVEFRONT_SIZE__;
-    #else // HIP
-        return warpSize;
-    #endif
+    return warpSize;
 }
 
 /// \brief Returns flat size of a multidimensional block (tile).
 ROCPRIM_DEVICE inline
 unsigned int flat_block_size()
 {
-    #ifdef ROCPRIM_HC_API
-        return hc_get_group_size(2) * hc_get_group_size(1) * hc_get_group_size(0);
-    #else // HIP
-        return hipBlockDim_z * hipBlockDim_y * hipBlockDim_x;
-    #endif
+    return hipBlockDim_z * hipBlockDim_y * hipBlockDim_x;
 }
 
 /// \brief Returns flat size of a multidimensional tile (block).
@@ -72,26 +62,16 @@ unsigned int flat_tile_size()
 ROCPRIM_DEVICE inline
 unsigned int lane_id()
 {
-    #ifdef ROCPRIM_HC_API
-        return hc::__lane_id();
-    #else // HIP
-        return ::__lane_id();
-    #endif
+    return ::__lane_id();
 }
 
 /// \brief Returns flat (linear, 1D) thread identifier in a multidimensional block (tile).
 ROCPRIM_DEVICE inline
 unsigned int flat_block_thread_id()
 {
-    #ifdef ROCPRIM_HC_API
-        return (hc_get_workitem_id(2) * hc_get_group_size(1) * hc_get_group_size(0))
-            + (hc_get_workitem_id(1) * hc_get_group_size(0))
-            + hc_get_workitem_id(0);
-    #else // HIP
-        return (hipThreadIdx_z * hipBlockDim_y * hipBlockDim_x)
-            + (hipThreadIdx_y * hipBlockDim_x)
-            + hipThreadIdx_x;
-    #endif
+    return (hipThreadIdx_z * hipBlockDim_y * hipBlockDim_x)
+        + (hipThreadIdx_y * hipBlockDim_x)
+        + hipThreadIdx_x;
 }
 
 /// \brief Returns flat (linear, 1D) thread identifier in a multidimensional tile (block).
@@ -112,15 +92,9 @@ unsigned int warp_id()
 ROCPRIM_DEVICE inline
 unsigned int flat_block_id()
 {
-    #ifdef ROCPRIM_HC_API
-        return (hc_get_group_id(2) * hc_get_num_groups(1) * hc_get_num_groups(0))
-            + (hc_get_group_id(1) * hc_get_num_groups(0))
-            + hc_get_group_id(0);
-    #else // HIP
-        return (hipBlockIdx_z * hipGridDim_y * hipGridDim_x)
-            + (hipBlockIdx_y * hipGridDim_x)
-            + hipBlockIdx_x;
-    #endif
+    return (hipBlockIdx_z * hipGridDim_y * hipGridDim_x)
+        + (hipBlockIdx_y * hipGridDim_x)
+        + hipBlockIdx_x;
 }
 
 // Sync
@@ -129,11 +103,7 @@ unsigned int flat_block_id()
 ROCPRIM_DEVICE inline
 void syncthreads()
 {
-    #ifdef ROCPRIM_HC_API
-        hc_barrier(CLK_LOCAL_MEM_FENCE);
-    #else // HIP
-        __syncthreads();
-    #endif
+    __syncthreads();
 }
 
 namespace detail
@@ -143,13 +113,9 @@ namespace detail
     ROCPRIM_DEVICE inline
     unsigned int block_thread_id()
     {
-        #ifdef ROCPRIM_HC_API
-            return hc_get_workitem_id(Dim);
-        #else
-            static_assert(Dim > 2, "Dim must be 0, 1 or 2");
-            // dummy return, correct values handled by specializations
-            return 0;
-        #endif
+        static_assert(Dim > 2, "Dim must be 0, 1 or 2");
+        // dummy return, correct values handled by specializations
+        return 0;
     }
 
     /// \brief Returns block identifier in a multidimensional grid by dimension.
@@ -157,13 +123,9 @@ namespace detail
     ROCPRIM_DEVICE inline
     unsigned int block_id()
     {
-        #ifdef ROCPRIM_HC_API
-            return hc_get_group_id(Dim);
-        #else
-            static_assert(Dim > 2, "Dim must be 0, 1 or 2");
-            // dummy return, correct values handled by specializations
-            return 0;
-        #endif
+        static_assert(Dim > 2, "Dim must be 0, 1 or 2");
+        // dummy return, correct values handled by specializations
+        return 0;
     }
 
     /// \brief Returns block size in a multidimensional grid by dimension.
@@ -171,13 +133,9 @@ namespace detail
     ROCPRIM_DEVICE inline
     unsigned int block_size()
     {
-        #ifdef ROCPRIM_HC_API
-            return hc_get_group_size(Dim);
-        #else
-            static_assert(Dim > 2, "Dim must be 0, 1 or 2");
-            // dummy return, correct values handled by specializations
-            return 0;
-        #endif
+        static_assert(Dim > 2, "Dim must be 0, 1 or 2");
+        // dummy return, correct values handled by specializations
+        return 0;
     }
 
     /// \brief Returns grid size by dimension.
@@ -185,13 +143,9 @@ namespace detail
     ROCPRIM_DEVICE inline
     unsigned int grid_size()
     {
-        #ifdef ROCPRIM_HC_API
-            return hc_get_num_groups(Dim);
-        #else
-            static_assert(Dim > 2, "Dim must be 0, 1 or 2");
-            // dummy return, correct values handled by specializations
-            return 0;
-        #endif
+        static_assert(Dim > 2, "Dim must be 0, 1 or 2");
+        // dummy return, correct values handled by specializations
+        return 0;
     }
 
     #define ROCPRIM_DETAIL_CONCAT(A, B) A ## B
@@ -207,12 +161,10 @@ namespace detail
         ROCPRIM_DETAIL_DEFINE_HIP_API_ID_FUNC(name, prefix, 1, y) \
         ROCPRIM_DETAIL_DEFINE_HIP_API_ID_FUNC(name, prefix, 2, z)
 
-    #ifdef ROCPRIM_HIP_API
-        ROCPRIM_DETAIL_DEFINE_HIP_API_ID_FUNCS(block_thread_id, hipThreadIdx_)
-        ROCPRIM_DETAIL_DEFINE_HIP_API_ID_FUNCS(block_id, hipBlockIdx_)
-        ROCPRIM_DETAIL_DEFINE_HIP_API_ID_FUNCS(block_size, hipBlockDim_)
-        ROCPRIM_DETAIL_DEFINE_HIP_API_ID_FUNCS(grid_size, hipGridDim_)
-    #endif
+    ROCPRIM_DETAIL_DEFINE_HIP_API_ID_FUNCS(block_thread_id, hipThreadIdx_)
+    ROCPRIM_DETAIL_DEFINE_HIP_API_ID_FUNCS(block_id, hipBlockIdx_)
+    ROCPRIM_DETAIL_DEFINE_HIP_API_ID_FUNCS(block_size, hipBlockDim_)
+    ROCPRIM_DETAIL_DEFINE_HIP_API_ID_FUNCS(grid_size, hipGridDim_)
 
     #undef ROCPRIM_DETAIL_DEFINE_HIP_API_ID_FUNCS
     #undef ROCPRIM_DETAIL_DEFINE_HIP_API_ID_FUNC
@@ -257,8 +209,6 @@ namespace detail
         return warp_id();
     }
 
-    #ifdef ROCPRIM_HIP_API
-
     ROCPRIM_DEVICE inline
     void memory_fence_system()
     {
@@ -276,44 +226,6 @@ namespace detail
     {
         ::__threadfence();
     }
-
-    #else
-
-    extern "C" ROCPRIM_DEVICE void __atomic_work_item_fence(unsigned int, unsigned int, unsigned int);
-
-    // Works like __threadfence_system()
-    ROCPRIM_DEVICE inline
-    void memory_fence_system()
-    {
-        __atomic_work_item_fence(
-            0,
-            /* memory_order_seq_cst */ __ATOMIC_SEQ_CST,
-            /* memory_scope_all_svm_devices */ __OPENCL_MEMORY_SCOPE_ALL_SVM_DEVICES
-        );
-    }
-
-    // Works like __threadfence_block()
-    ROCPRIM_DEVICE inline
-    void memory_fence_block()
-    {
-        __atomic_work_item_fence(
-            0,
-            /* memory_order_seq_cst */ __ATOMIC_SEQ_CST,
-            /* memory_scope_work_group */ __OPENCL_MEMORY_SCOPE_WORK_GROUP
-        );
-    }
-
-    // Works like __threadfence()
-    ROCPRIM_DEVICE inline
-    void memory_fence_device()
-    {
-        __atomic_work_item_fence(
-            0,
-            /* memory_order_seq_cst */ __ATOMIC_SEQ_CST,
-            /* memory_scope_device */ __OPENCL_MEMORY_SCOPE_DEVICE
-        );
-    }
-    #endif
 }
 
 /// @}
