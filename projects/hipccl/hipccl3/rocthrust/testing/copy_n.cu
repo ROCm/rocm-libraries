@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+ 
 #include <unittest/unittest.h>
 #include <thrust/copy.h>
 
@@ -130,7 +147,7 @@ void TestCopyNVectorBool(void)
 
     thrust::host_vector<bool> h(3);
     thrust::device_vector<bool> d(3);
-    
+
     thrust::copy_n(v.begin(), v.size(), h.begin());
     thrust::copy_n(v.begin(), v.size(), d.begin());
 
@@ -157,7 +174,7 @@ void TestCopyNListTo(void)
     l.push_back(2);
     l.push_back(3);
     l.push_back(4);
-   
+
     Vector v(l.size());
 
     typename Vector::iterator v_result = thrust::copy_n(l.begin(), l.size(), v.begin());
@@ -209,7 +226,7 @@ void TestCopyNZipIterator(void)
     typedef typename Vector::value_type T;
 
     Vector v1(3); v1[0] = 1; v1[1] = 2; v1[2] = 3;
-    Vector v2(3); v2[0] = 4; v2[1] = 5; v2[2] = 6; 
+    Vector v2(3); v2[0] = 4; v2[1] = 5; v2[2] = 6;
     Vector v3(3, T(0));
     Vector v4(3, T(0));
 
@@ -283,4 +300,3 @@ void TestCopyNDispatchImplicit()
     ASSERT_EQUAL(13, vec.front());
 }
 DECLARE_UNITTEST(TestCopyNDispatchImplicit);
-
