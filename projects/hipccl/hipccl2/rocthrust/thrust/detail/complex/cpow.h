@@ -48,7 +48,7 @@ complex<typename detail::promoted_numerical_type<T0, T1>::type>
 pow(const T0& x, const complex<T1>& y)
 {
   typedef typename detail::promoted_numerical_type<T0, T1>::type T;
-  #ifdef __HCC_ACCELERATOR__
+  #ifdef __HIP_DEVICE_COMPILE__
     using ::log;
   #else
     // Find `log` by ADL.

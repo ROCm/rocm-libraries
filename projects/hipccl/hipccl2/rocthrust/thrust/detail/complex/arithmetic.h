@@ -225,7 +225,7 @@ __host__ __device__
 T arg(const complex<T>& z)
 {
   // Find `atan2` by ADL.
-  #ifdef __HCC_ACCELERATOR__
+  #ifdef __HIP_DEVICE_COMPILE__
     using ::atan2;
   #else
     using std::atan2;
@@ -256,7 +256,7 @@ inline float norm(const complex<float>& z)
 {
   // Find `abs` and `sqrt` by ADL.
   using std::abs;
-  #ifdef __HCC_ACCELERATOR__
+  #ifdef __HIP_DEVICE_COMPILE__
     using ::sqrt;
   #else
     using std::sqrt;
@@ -278,7 +278,7 @@ inline double norm(const complex<double>& z)
 {
   // Find `abs` and `sqrt` by ADL.
   using std::abs;
-  #ifdef __HCC_ACCELERATOR__
+  #ifdef __HIP_DEVICE_COMPILE__
     using ::sqrt;
   #else
     using std::sqrt;
@@ -304,7 +304,7 @@ polar(const T0& m, const T1& theta)
   typedef typename detail::promoted_numerical_type<T0, T1>::type T;
 
   // Find `cos` and `sin` by ADL.
-  #ifdef __HCC_ACCELERATOR__
+  #ifdef __HIP_DEVICE_COMPILE__
     using ::cos;
     using ::sin;
   #else
