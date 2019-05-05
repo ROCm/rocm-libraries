@@ -67,7 +67,7 @@ inline __host__ __device__ double infinity<double>()
 }
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-#ifdef __HCC_ACCELERATOR__
+#ifdef __HIP_DEVICE_COMPILE__
   using ::cos;
   using ::log;
   using ::exp;
