@@ -1,6 +1,7 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
  *  Copyright 2013 Filipe RNC Maia
+ *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved. 
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -58,12 +59,11 @@ using thrust::complex;
 /* round down to 18 = 54/3 bits */
 __host__ __device__ inline
 double trim(double x){
-  uint32_t hi;    
+  uint32_t hi;
   get_high_word(hi, x);
   insert_words(x, hi &0xfffffff8, 0);
   return x;
 }
-
 
 __host__ __device__ inline
 complex<double> clog(const complex<double>& z){
@@ -81,7 +81,7 @@ complex<double> clog(const complex<double>& z){
 
   /* Handle NaNs using the general formula to mix them right. */
   if (x != x || y != y){
-    return (complex<double>(std::log(norm(z)), std::atan2(y, x)));
+    return (complex<double>(log(norm(z)), atan2(y, x)));
   }
 
   ax = std::abs(x);
@@ -103,13 +103,13 @@ complex<double> clog(const complex<double>& z){
   // For high values of ay -> hypotf(DBL_MAX,ay) = inf
   // We expect that for values at or below ay = 5e307 this should not happen
   if (ay > 5e307){
-    return (complex<double>(std::log(hypot(x / e, y / e)) + 1.0, std::atan2(y, x)));
+    return (complex<double>(log(hypot(x / e, y / e)) + 1.0, atan2(y, x)));
   }
   if (ax == 1.) {
     if (ay < 1e-150){
-      return (complex<double>((ay * 0.5) * ay, std::atan2(y, x)));
+      return (complex<double>((ay * 0.5) * ay, atan2(y, x)));
     }
-    return (complex<double>(log1p(ay * ay) * 0.5, std::atan2(y, x)));
+    return (complex<double>(log1p(ay * ay) * 0.5, atan2(y, x)));
   }
 
   /*
@@ -117,10 +117,10 @@ complex<double> clog(const complex<double>& z){
    * edge cases when x or y are 0 or infinite.
    */
   if (ax < 1e-50 || ay < 1e-50 || ax > 1e50 || ay > 1e50){
-    return (complex<double>(std::log(hypot(x, y)), std::atan2(y, x)));
+    return (complex<double>(log(hypot(x, y)), atan2(y, x)));
   }
 
-  /* 
+  /*
    * From this point on, we don't need to worry about underflow or
    * overflow in calculating ax*ax or ay*ay.
    */
@@ -132,7 +132,7 @@ complex<double> clog(const complex<double>& z){
   }
 
   if (ax*ax + ay*ay <= 0.7){
-    return (complex<double>(std::log(ax*ax + ay*ay) * 0.5, std::atan2(y, x)));
+    return (complex<double>(log(ax*ax + ay*ay) * 0.5, atan2(y, x)));
   }
 
   /*
@@ -183,7 +183,7 @@ complex<double> clog(const complex<double>& z){
   }
   return (complex<double>(0.5 * log1p(hm1), atan2(y, x)));
 }
-  
+
 } // namespace complex
 
 } // namespace detail
@@ -191,7 +191,7 @@ complex<double> clog(const complex<double>& z){
 template <typename ValueType>
 __host__ __device__
 inline complex<ValueType> log(const complex<ValueType>& z){
-  return complex<ValueType>(std::log(thrust::abs(z)),thrust::arg(z));
+  return complex<ValueType>(log(thrust::abs(z)),thrust::arg(z));
 }
 
 template <>
@@ -202,11 +202,10 @@ inline complex<double> log(const complex<double>& z){
 
 template <typename ValueType>
 __host__ __device__
-inline complex<ValueType> log10(const complex<ValueType>& z){ 
+inline complex<ValueType> log10(const complex<ValueType>& z){
   // Using the explicit literal prevents compile time warnings in
-  // devices that don't support doubles 
+  // devices that don't support doubles
   return thrust::log(z)/ValueType(2.30258509299404568402);
 }
 
 } // namespace thrust
-    
