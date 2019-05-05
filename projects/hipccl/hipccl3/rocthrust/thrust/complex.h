@@ -1,6 +1,7 @@
 /*
  *  Copyright 2008-2019 NVIDIA Corporation
  *  Copyright 2013 Filipe RNC Maia
+ *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved. 
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -102,6 +103,7 @@ public:
 #if THRUST_CPP_DIALECT >= 2011
   /*! Default construct a complex number.
    */
+   __host__ __device__
   complex() = default;
 
   /*! This copy constructor copies from a \p complex with a type that is
@@ -109,6 +111,7 @@ public:
    *
    *  \param z The \p complex to copy from.
    */
+   __host__ __device__
   complex(const complex<T>& z) = default;
 #else
   /*! Default construct a complex number.
@@ -173,6 +176,7 @@ public:
    *
    *  \param z The \p complex to copy from.
    */
+   __host__ __device__
   complex& operator=(const complex<T>& z) = default;
 #else
   /*! Assign `z.real()` and `z.imag()` to the real and imaginary parts of this
@@ -373,7 +377,7 @@ public:
 
   /*! Casts this \p complex to a <tt>std::complex</tt> of the same type.
    */
-  __host__
+  __host__ __device__
   operator std::complex<T>() const { return std::complex<T>(real(), imag()); }
 
 private:
@@ -383,7 +387,7 @@ private:
   /*! \endcond
    */
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC || THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
   typedef typename detail::conditional<
     detail::is_same<T, float>::value, float2,
     typename detail::conditional<
@@ -874,7 +878,7 @@ operator<<(std::basic_ostream<CharT, Traits>& os, const complex<T>& z);
  *  \param z The \p complex number to set.
  */
 template <typename T, typename CharT, typename Traits>
-__host__
+__host__ __device__
 std::basic_istream<CharT, Traits>&
 operator>>(std::basic_istream<CharT, Traits>& is, complex<T>& z);
 
@@ -989,4 +993,3 @@ bool operator!=(const complex<T0>& x, const T1& y);
 
 /*! \} // numerics
  */
-
