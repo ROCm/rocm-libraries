@@ -27,12 +27,13 @@ TYPED_TEST(ComplexTests, TestComplexConstructors)
   using T = typename TestFixture::input_type;
 
   thrust::host_vector<T> data = get_random_data<T>(2,
-                                                   std::numeric_limits<T>::min(),
-                                                   std::numeric_limits<T>::max());
+                                                   T(-1000),
+                                                   T(1000));
 
 
   thrust::complex<T> a(data[0],data[1]);
   thrust::complex<T> b(a);
+  thrust::complex<float> float_b(a);
   a = thrust::complex<T>(data[0],data[1]);
   ASSERT_NEAR_COMPLEX(a, b);
 
@@ -43,17 +44,16 @@ TYPED_TEST(ComplexTests, TestComplexConstructors)
   a = thrust::complex<T>();
   ASSERT_NEAR_COMPLEX(a,std::complex<T>(0));
 
-  a = thrust::complex<T>(thrust::complex<float>(data[0],data[1]));
+  a = thrust::complex<T>(thrust::complex<float>(static_cast<float>(data[0]),static_cast<float>(data[1])));
+  ASSERT_NEAR_COMPLEX(a, float_b);
+
+  a = thrust::complex<T>(thrust::complex<double>(static_cast<double>(data[0]),static_cast<double>(data[1])));
   ASSERT_NEAR_COMPLEX(a, b);
 
-  a = thrust::complex<T>(thrust::complex<double>(data[0],data[1]));
-  ASSERT_NEAR_COMPLEX(a, b);
+  a = thrust::complex<T>(std::complex<float>(static_cast<float>(data[0]),static_cast<float>(data[1])));
+  ASSERT_NEAR_COMPLEX(a, float_b);
 
-  a = thrust::complex<T>(std::complex<float>(data[0],data[1]));
-  ASSERT_NEAR_COMPLEX(a, b);
-
-  a = thrust::complex<T>(std::complex<double>(data[0],data[1]));
-  ASSERT_NEAR_COMPLEX(a, b);
+  a = thrust::complex<T>(std::complex<double>(static_cast<double>(data[0]),static_cast<double>(data[1])));
   ASSERT_NEAR_COMPLEX(a, b);
 }
 
@@ -91,12 +91,12 @@ TYPED_TEST(ComplexTests, TestComplexMemberOperators)
   using T = typename TestFixture::input_type;
 
   thrust::host_vector<T> data_a = get_random_data<T>(2,
-                                                     std::numeric_limits<T>::min(),
-                                                     std::numeric_limits<T>::max());
+                                                     10000,
+                                                     10000);
 
   thrust::host_vector<T> data_b = get_random_data<T>(2,
-                                                    std::numeric_limits<T>::min(),
-                                                    std::numeric_limits<T>::max());
+                                                     10000,
+                                                     10000);
 
   thrust::complex<T> a(data_a[0], data_a[1]);
   thrust::complex<T> b(data_b[0], data_b[1]);
@@ -130,24 +130,23 @@ TYPED_TEST(ComplexTests, TestComplexBasicArithmetic)
 
 
   thrust::host_vector<T> data = get_random_data<T>(2,
-                                                   std::numeric_limits<T>::min(),
-                                                   std::numeric_limits<T>::max());
+                                                   T(-100),
+                                                   T(100));
 
   thrust::complex<T> a(data[0], data[1]);
   std::complex<T> b(a);
 
   // Test the basic arithmetic functions against std
 
-  ASSERT_NEAR(abs(a),abs(b),std::numeric_limits<T>::epsilon());
+  ASSERT_NEAR(abs(a), abs(b), T(0.01));
 
-  ASSERT_NEAR(arg(a),arg(b),std::numeric_limits<T>::epsilon());
+  ASSERT_NEAR(arg(a), arg(b), T(0.01));
 
-  ASSERT_NEAR(norm(a),norm(b),std::numeric_limits<T>::epsilon());
+  ASSERT_NEAR(norm(a), norm(b), T(0.01));
 
   ASSERT_EQ(conj(a),conj(b));
 
-  // TODO: Find a good assert for this.
-  //ASSERT_NEAR(thrust::polar(data[0],data[1]),std::polar(data[0],data[1]));
+  ASSERT_NEAR_COMPLEX(thrust::polar(data[0],data[1]),std::polar(data[0],data[1]));
 
   // random_samples does not seem to produce infinities so proj(z) == z
   ASSERT_EQ(proj(a),a);
@@ -158,31 +157,31 @@ TYPED_TEST(ComplexTests, TestComplexBinaryArithmetic)
   using T = typename TestFixture::input_type;
 
   thrust::host_vector<T> data_a = get_random_data<T>(2,
-                                                     std::numeric_limits<T>::min(),
-                                                     std::numeric_limits<T>::max());
+                                                     -10000,
+                                                     10000);
 
   thrust::host_vector<T> data_b = get_random_data<T>(2,
-                                                    std::numeric_limits<T>::min(),
-                                                    std::numeric_limits<T>::max());
+                                                     -10000,
+                                                     10000);
 
   thrust::complex<T> a(data_a[0], data_a[1]);
   thrust::complex<T> b(data_b[0], data_b[1]);
 
   ASSERT_NEAR_COMPLEX(a * b,std::complex<T>(a) * std::complex<T>(b));
   ASSERT_NEAR_COMPLEX(a * data_b[0],std::complex<T>(a) * data_b[0]);
-  ASSERT_NEAR_COMPLEX(data_a[0]*b,data_b[0] * std::complex<T>(b));
+  ASSERT_NEAR_COMPLEX(data_a[0]*b,data_a[0] * std::complex<T>(b));
 
   ASSERT_NEAR_COMPLEX(a / b, std::complex<T>(a) / std::complex<T>(b));
   ASSERT_NEAR_COMPLEX(a / data_b[0], std::complex<T>(a) / data_b[0]);
-  ASSERT_NEAR_COMPLEX(data_a[0] / b, data_b[0] / std::complex<T>(b));
+  ASSERT_NEAR_COMPLEX(data_a[0] / b, data_a[0] / std::complex<T>(b));
 
   ASSERT_EQ(a + b, std::complex<T>(a) + std::complex<T>(b));
   ASSERT_EQ(a + data_b[0], std::complex<T>(a) + data_b[0]);
-  ASSERT_EQ(data_a[0] + b, data_b[0] + std::complex<T>(b));
+  ASSERT_EQ(data_a[0] + b, data_a[0] + std::complex<T>(b));
 
   ASSERT_EQ(a - b, std::complex<T>(a) - std::complex<T>(b));
   ASSERT_EQ(a - data_b[0], std::complex<T>(a) - data_b[0]);
-  ASSERT_EQ(data_a[0] - b, data_b[0] - std::complex<T>(b));
+  ASSERT_EQ(data_a[0] - b, data_a[0] - std::complex<T>(b));
 }
 
 TYPED_TEST(ComplexTests, TestComplexUnaryArithmetic)
@@ -204,8 +203,8 @@ TYPED_TEST(ComplexTests, TestComplexExponentialFunctions)
   using T = typename TestFixture::input_type;
 
   thrust::host_vector<T> data_a = get_random_data<T>(2,
-                                                     std::numeric_limits<T>::min(),
-                                                     std::numeric_limits<T>::max());
+                                                     -100,
+                                                     100);
 
   thrust::complex<T> a(data_a[0], data_a[1]);
   std::complex<T> b(a);
@@ -220,12 +219,12 @@ TYPED_TEST(ComplexTests, TestComplexPowerFunctions)
   using T = typename TestFixture::input_type;
 
   thrust::host_vector<T> data_a = get_random_data<T>(2,
-                                                     std::numeric_limits<T>::min(),
-                                                     std::numeric_limits<T>::max());
+                                                     -100,
+                                                     100);
 
   thrust::host_vector<T> data_b = get_random_data<T>(2,
-                                                    std::numeric_limits<T>::min(),
-                                                    std::numeric_limits<T>::max());
+                                                     -100,
+                                                     100);
 
   thrust::complex<T> a(data_a[0], data_a[1]);
   thrust::complex<T> b(data_b[0], data_b[1]);
@@ -244,8 +243,8 @@ TYPED_TEST(ComplexTests, TestComplexTrigonometricFunctions)
   using T = typename TestFixture::input_type;
 
   thrust::host_vector<T> data_a = get_random_data<T>(2,
-                                                     std::numeric_limits<T>::min(),
-                                                     std::numeric_limits<T>::max());
+                                                     T(-1),
+                                                     T(1));
 
   thrust::complex<T> a(data_a[0], data_a[1]);
   std::complex<T> c(a);
@@ -270,8 +269,8 @@ TYPED_TEST(ComplexTests, TestComplexStreamOperators)
   using T = typename TestFixture::input_type;
 
   thrust::host_vector<T> data_a = get_random_data<T>(2,
-                                                     std::numeric_limits<T>::min(),
-                                                     std::numeric_limits<T>::max());
+                                                     T(-1000),
+                                                     T(1000));
 
   thrust::complex<T> a(data_a[0], data_a[1]);
   std::stringstream out;

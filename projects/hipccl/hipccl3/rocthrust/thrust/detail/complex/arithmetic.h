@@ -1,6 +1,7 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
  *  Copyright 2013 Filipe RNC Maia
+ *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved. 
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -160,14 +161,14 @@ operator/(const T0& x, const complex<T1>& y)
 
 /* --- Unary Arithmetic Operators --- */
 
-template <typename T> 
+template <typename T>
 __host__ __device__
 complex<T> operator+(const complex<T>& y)
 {
   return y;
 }
 
-template <typename T> 
+template <typename T>
 __host__ __device__
 complex<T> operator-(const complex<T>& y)
 {
@@ -187,7 +188,7 @@ T abs(const complex<T>& z)
 
 // XXX Why are we specializing here?
 namespace detail {
-namespace complex {	
+namespace complex {
 
 __host__ __device__
 inline float abs(const thrust::complex<float>& z)
@@ -224,7 +225,11 @@ __host__ __device__
 T arg(const complex<T>& z)
 {
   // Find `atan2` by ADL.
-  using std::atan2;
+  #ifdef __HIP_DEVICE_COMPILE__
+    using ::atan2;
+  #else
+    using std::atan2;
+  #endif
   return atan2(z.imag(), z.real());
 }
 
@@ -251,14 +256,18 @@ inline float norm(const complex<float>& z)
 {
   // Find `abs` and `sqrt` by ADL.
   using std::abs;
-  using std::sqrt;
+  #ifdef __HIP_DEVICE_COMPILE__
+    using ::sqrt;
+  #else
+    using std::sqrt;
+  #endif
 
   if (abs(z.real()) < sqrt(FLT_MIN) && abs(z.imag()) < sqrt(FLT_MIN))
   {
     float a = z.real() * 4.0f;
     float b = z.imag() * 4.0f;
     return (a * a + b * b) / 16.0f;
-  } 
+  }
 
   return z.real() * z.real() + z.imag() * z.imag();
 }
@@ -269,14 +278,19 @@ inline double norm(const complex<double>& z)
 {
   // Find `abs` and `sqrt` by ADL.
   using std::abs;
-  using std::sqrt;
+  #ifdef __HIP_DEVICE_COMPILE__
+    using ::sqrt;
+  #else
+    using std::sqrt;
+  #endif
+
 
   if (abs(z.real()) < sqrt(DBL_MIN) && abs(z.imag()) < sqrt(DBL_MIN))
   {
     double a = z.real() * 4.0;
     double b = z.imag() * 4.0;
     return (a * a + b * b) / 16.0;
-  } 
+  }
 
   return z.real() * z.real() + z.imag() * z.imag();
 }
@@ -286,15 +300,19 @@ template <typename T0, typename T1>
 __host__ __device__
 complex<typename detail::promoted_numerical_type<T0, T1>::type>
 polar(const T0& m, const T1& theta)
-{ 
+{
   typedef typename detail::promoted_numerical_type<T0, T1>::type T;
 
   // Find `cos` and `sin` by ADL.
-  using std::cos;
-  using std::sin;
+  #ifdef __HIP_DEVICE_COMPILE__
+    using ::cos;
+    using ::sin;
+  #else
+    using std::cos;
+    using std::sin;
+  #endif
 
   return complex<T>(m * cos(theta), m * sin(theta));
 }
 
 } // end namespace thrust
-
