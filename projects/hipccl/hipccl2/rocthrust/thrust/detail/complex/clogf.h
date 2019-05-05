@@ -1,6 +1,7 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
  *  Copyright 2013 Filipe RNC Maia
+ *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved. 
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -82,7 +83,7 @@ complex<float> clogf(const complex<float>& z){
 
   /* Handle NaNs using the general formula to mix them right. */
   if (x != x || y != y){
-    return (complex<float>(std::log(norm(z)), std::atan2(y, x)));
+    return (complex<float>(log(norm(z)), atan2(y, x)));
   }
 
   ax = std::abs(x);
@@ -103,13 +104,13 @@ complex<float> clogf(const complex<float>& z){
   // For high values of ay -> hypotf(FLT_MAX,ay) = inf
   // We expect that for values at or below ay = 1e34f this should not happen
   if (ay > 1e34f){ 
-    return (complex<float>(std::log(hypotf(x / e, y / e)) + 1.0f, std::atan2(y, x)));
+    return (complex<float>(log(hypotf(x / e, y / e)) + 1.0f, atan2(y, x)));
   }
   if (ax == 1.f) {
     if (ay < 1e-19f){
-      return (complex<float>((ay * 0.5f) * ay, std::atan2(y, x)));
+      return (complex<float>((ay * 0.5f) * ay, atan2(y, x)));
     }
-    return (complex<float>(log1pf(ay * ay) * 0.5f, std::atan2(y, x)));
+    return (complex<float>(log1pf(ay * ay) * 0.5f, atan2(y, x)));
   }
 
   /*
@@ -117,7 +118,7 @@ complex<float> clogf(const complex<float>& z){
    * edge cases when x or y are 0 or infinite.
    */
   if (ax < 1e-6f || ay < 1e-6f || ax > 1e6f || ay > 1e6f){
-    return (complex<float>(std::log(hypotf(x, y)), std::atan2(y, x)));
+    return (complex<float>(log(hypotf(x, y)), atan2(y, x)));
   }
 
   /* 
@@ -132,7 +133,7 @@ complex<float> clogf(const complex<float>& z){
   }
 
   if (ax*ax + ay*ay <= 0.7f){
-    return (complex<float>(std::log(ax*ax + ay*ay) * 0.5f, std::atan2(y, x)));
+    return (complex<float>(log(ax*ax + ay*ay) * 0.5f, atan2(y, x)));
   }
 
   /*
