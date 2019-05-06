@@ -51,22 +51,6 @@ namespace test_utils
 
 // Support half operators on host side
 
-#if defined(__HIP_DEVICE_COMPILE__)
-
-ROCPRIM_DEVICE inline
-rocprim::half half_to_native(const rocprim::half& x)
-{
-    return x;
-}
-
-ROCPRIM_DEVICE inline
-rocprim::half native_to_half(const rocprim::half& x)
-{
-    return x;
-}
-
-#else
-
 ROCPRIM_HOST inline
 _Float16 half_to_native(const rocprim::half& x)
 {
@@ -79,14 +63,16 @@ rocprim::half native_to_half(const _Float16& x)
     return *reinterpret_cast<const rocprim::half *>(&x);
 }
 
-#endif
-
 struct half_less
 {
     ROCPRIM_HOST_DEVICE inline
     bool operator()(const rocprim::half& a, const rocprim::half& b) const
     {
+        #if __HIP_DEVICE_COMPILE__
+        return a < b;
+        #else
         return half_to_native(a) < half_to_native(b);
+        #endif
     }
 };
 
@@ -95,7 +81,11 @@ struct half_less_equal
     ROCPRIM_HOST_DEVICE inline
     bool operator()(const rocprim::half& a, const rocprim::half& b) const
     {
+        #if __HIP_DEVICE_COMPILE__
+        return a <= b;
+        #else
         return half_to_native(a) <= half_to_native(b);
+        #endif
     }
 };
 
@@ -104,7 +94,11 @@ struct half_greater
     ROCPRIM_HOST_DEVICE inline
     bool operator()(const rocprim::half& a, const rocprim::half& b) const
     {
+        #if __HIP_DEVICE_COMPILE__
+        return a > b;
+        #else
         return half_to_native(a) > half_to_native(b);
+        #endif
     }
 };
 
@@ -113,7 +107,11 @@ struct half_greater_equal
     ROCPRIM_HOST_DEVICE inline
     bool operator()(const rocprim::half& a, const rocprim::half& b) const
     {
+        #if __HIP_DEVICE_COMPILE__
+        return a >= b;
+        #else
         return half_to_native(a) >= half_to_native(b);
+        #endif
     }
 };
 
@@ -122,7 +120,11 @@ struct half_equal_to
     ROCPRIM_HOST_DEVICE inline
     bool operator()(const rocprim::half& a, const rocprim::half& b) const
     {
+        #if __HIP_DEVICE_COMPILE__
+        return a == b;
+        #else
         return half_to_native(a) == half_to_native(b);
+        #endif
     }
 };
 
@@ -131,7 +133,11 @@ struct half_not_equal_to
     ROCPRIM_HOST_DEVICE inline
     bool operator()(const rocprim::half& a, const rocprim::half& b) const
     {
+        #if __HIP_DEVICE_COMPILE__
+        return a != b;
+        #else
         return half_to_native(a) != half_to_native(b);
+        #endif
     }
 };
 
@@ -140,7 +146,11 @@ struct half_plus
     ROCPRIM_HOST_DEVICE inline
     rocprim::half operator()(const rocprim::half& a, const rocprim::half& b) const
     {
+        #if __HIP_DEVICE_COMPILE__
+        return a + b;
+        #else
         return native_to_half(half_to_native(a) + half_to_native(b));
+        #endif
     }
 };
 
@@ -149,7 +159,11 @@ struct half_minus
     ROCPRIM_HOST_DEVICE inline
     rocprim::half operator()(const rocprim::half& a, const rocprim::half& b) const
     {
+        #if __HIP_DEVICE_COMPILE__
+        return a - b;
+        #else
         return native_to_half(half_to_native(a) - half_to_native(b));
+        #endif
     }
 };
 
@@ -158,7 +172,11 @@ struct half_multiplies
     ROCPRIM_HOST_DEVICE inline
     rocprim::half operator()(const rocprim::half& a, const rocprim::half& b) const
     {
+        #if __HIP_DEVICE_COMPILE__
+        return a * b;
+        #else
         return native_to_half(half_to_native(a) * half_to_native(b));
+        #endif
     }
 };
 
@@ -167,7 +185,11 @@ struct half_maximum
     ROCPRIM_HOST_DEVICE inline
     rocprim::half operator()(const rocprim::half& a, const rocprim::half& b) const
     {
+        #if __HIP_DEVICE_COMPILE__
+        return a < b ? b : a;
+        #else
         return half_to_native(a) < half_to_native(b) ? b : a;
+        #endif
     }
 };
 
@@ -176,7 +198,11 @@ struct half_minimum
     ROCPRIM_HOST_DEVICE inline
     rocprim::half operator()(const rocprim::half& a, const rocprim::half& b) const
     {
+        #if __HIP_DEVICE_COMPILE__
+        return a < b ? a : b;
+        #else
         return half_to_native(a) < half_to_native(b) ? a : b;
+        #endif
     }
 };
 

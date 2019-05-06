@@ -81,9 +81,13 @@ typedef ::testing::Types<
     params<custom_int2, custom_short2, rocprim::maximum<custom_int2>, 10, 1000, 10000>,
     params<float, double, rocprim::maximum<double>, 50, 2, 10>,
     params<float, float, rocprim::plus<float>, 123, 100, 200, true>,
-    params<unsigned char, long long, rocprim::plus<int>, 10, 3000, 4000>,
+#ifndef __HIP__
+    // hip-clang does not allow to convert half to float
     params<rp::half, float, rp::plus<float>, 0, 10, 300, true>,
-    params<rp::half, rp::half, test_utils::half_minimum, 0, 1000, 30000>
+    // hip-clang does provide host comparison operators
+    params<rp::half, rp::half, test_utils::half_minimum, 0, 1000, 30000>,
+#endif
+    params<unsigned char, long long, rocprim::plus<int>, 10, 3000, 4000>
 > Params;
 
 TYPED_TEST_CASE(RocprimDeviceSegmentedScan, Params);
