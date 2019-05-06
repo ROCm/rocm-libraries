@@ -29,7 +29,7 @@ import java.nio.file.Path;
 hipCUBCI:
 {
 
-    def hipcub = new rocProject('hipCUB')
+    def hipcub = new rocProject('hipcub')
     // customize for project
     hipcub.paths.build_command = 'cmake -D CMAKE_CXX_COMPILER="/opt/rocm/hcc/bin/hcc" CMakeLists.txt -Bbuild && cd build && make'
 
