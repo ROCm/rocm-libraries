@@ -97,9 +97,9 @@ typedef ::testing::Types<
     params<unsigned int, unsigned int, 255,  15, 255, rocprim::block_histogram_algorithm::using_sort>,
     params<unsigned char, unsigned int, 6U,   32,  18U, rocprim::block_histogram_algorithm::using_sort>,
     params<unsigned char, unsigned int, 32,   2,   64, rocprim::block_histogram_algorithm::using_sort>,
-    params<unsigned char, unsigned int, 256,  3,  512, rocprim::block_histogram_algorithm::using_sort>,
-    params<unsigned char, unsigned char, 512,  4,  512, rocprim::block_histogram_algorithm::using_sort>,
-    params<unsigned char, unsigned char, 1024, 1, 1024, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned char, unsigned int,   64, 3, 190, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned char, unsigned char,  64, 4, 256, rocprim::block_histogram_algorithm::using_sort>,
+    params<unsigned char, unsigned char, 128, 1, 192, rocprim::block_histogram_algorithm::using_sort>,
     params<unsigned short, unsigned int, 6U,   32,  18U, rocprim::block_histogram_algorithm::using_sort>,
     params<unsigned short, unsigned int, 32,   2,   64, rocprim::block_histogram_algorithm::using_sort>,
     params<unsigned short, unsigned int, 256,  3,  512, rocprim::block_histogram_algorithm::using_sort>,
@@ -129,10 +129,10 @@ void histogram_kernel(T* device_output, T* device_output_bin)
     {
         in_out[j] = device_output[index + j];
     }
-    
+
     rp::block_histogram<T, BlockSize, ItemsPerThread, BinSize, Algorithm> bhist;
     bhist.histogram(in_out, hist);
-    
+
     #pragma unroll
     for (unsigned int offset = 0; offset < BinSize; offset += BlockSize)
     {
@@ -140,7 +140,7 @@ void histogram_kernel(T* device_output, T* device_output_bin)
         {
             device_output_bin[global_offset + hipThreadIdx_x] = hist[offset + hipThreadIdx_x];
             global_offset += BlockSize;
-        }    
+        }
     }
 }
 
@@ -202,14 +202,14 @@ TYPED_TEST(RocprimBlockHistogramInputArrayTests, Histogram)
             hipMemcpyHostToDevice
         )
     );
-    
+
     // Running kernel
     hipLaunchKernelGGL(
         HIP_KERNEL_NAME(histogram_kernel<block_size, items_per_thread, bin, algorithm, T, BinType>),
         dim3(grid_size), dim3(block_size), 0, 0,
         device_output, device_output_bin
     );
-    
+
     // Reading results back
     HIP_CHECK(
         hipMemcpy(
@@ -218,14 +218,14 @@ TYPED_TEST(RocprimBlockHistogramInputArrayTests, Histogram)
             hipMemcpyDeviceToHost
         )
     );
-    
+
     for(size_t i = 0; i < output_bin.size(); i++)
     {
         ASSERT_EQ(
             output_bin[i], expected_bin[i]
         );
     }
-    
+
     HIP_CHECK(hipFree(device_output));
     HIP_CHECK(hipFree(device_output_bin));
 }

@@ -271,7 +271,7 @@ TYPED_TEST(RocprimDevicePartitionTests, PredicateEmptyInput)
         rocprim::partition(
             nullptr,
             temp_storage_size_bytes,
-            rocprim::make_constant_iterator<T>(345),
+            rocprim::make_constant_iterator<T>(T(345)),
             d_checking_output,
             d_selected_count_output,
             0,
@@ -291,7 +291,7 @@ TYPED_TEST(RocprimDevicePartitionTests, PredicateEmptyInput)
         rocprim::partition(
             d_temp_storage,
             temp_storage_size_bytes,
-            rocprim::make_constant_iterator<T>(345),
+            rocprim::make_constant_iterator<T>(T(345)),
             d_checking_output,
             d_selected_count_output,
             0,
