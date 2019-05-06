@@ -109,7 +109,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceEmptyInput)
     HIP_CHECK(
         rocprim::reduce(
             nullptr, temp_storage_size_bytes,
-            rocprim::make_constant_iterator<T>(345),
+            rocprim::make_constant_iterator<T>(T(345)),
             d_output,
             initial_value,
             0, rocprim::minimum<U>(), stream, debug_synchronous
@@ -123,7 +123,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceEmptyInput)
     HIP_CHECK(
         rocprim::reduce(
             d_temp_storage, temp_storage_size_bytes,
-            rocprim::make_constant_iterator<T>(345),
+            rocprim::make_constant_iterator<T>(T(345)),
             d_output,
             initial_value,
             0, rocprim::minimum<U>(), stream, debug_synchronous
