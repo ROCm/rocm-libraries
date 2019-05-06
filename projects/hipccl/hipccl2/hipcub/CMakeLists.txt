@@ -92,13 +92,13 @@ set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PR
 if(HIP_PLATFORM STREQUAL "hcc")
   rocm_create_package(
     NAME hipcub
-    DESCRIPTION "Radeon Open Compute Parallel Primitives Libary"
-    MAINTAINER "Jakub Szuppe <jakub@streamhpc.com>"
+    DESCRIPTION "hipCUB (rocPRIM backend)"
+    MAINTAINER "Saad Rahim <saad.rahim@amd.com>"
   )
 else()
   rocm_create_package(
     NAME hipcub_nvcc
-    DESCRIPTION "Radeon Open Compute Parallel Primitives Libary (hipCUB only)"
-    MAINTAINER "Jakub Szuppe <jakub@streamhpc.com>"
+    DESCRIPTION "hipCUB (CUB backend)"
+    MAINTAINER "Saad Rahim <saad.rahim@amd.com>"
   )
 endif()
