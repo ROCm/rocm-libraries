@@ -82,7 +82,10 @@ typedef ::testing::Types<
     params<custom_double2, custom_double2, rp::maximum<custom_double2>, 50, 2, 10>,
     params<float, float, rp::plus<float>, 123, 100, 200>,
     params<unsigned char, long long, rp::plus<int>, 10, 3000, 4000>,
+#ifndef __HIP__
+    // hip-clang does not allow to convert half to float
     params<rp::half, float, rp::plus<float>, 0, 10, 300>,
+#endif
     params<rp::half, rp::half, test_utils::half_minimum, 0, 1000, 30000>
 > Params;
 

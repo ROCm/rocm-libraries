@@ -236,6 +236,18 @@ void reduce_multiplies_kernel(T* device_output, T* device_output_reductions)
     }
 }
 
+template<class T>
+T host_multiplies(const T& x, const T& y)
+{
+    return x * y;
+}
+
+rp::half host_multiplies(const rp::half&, const rp::half&)
+{
+    // Used to allow compilation of tests with half
+    return rp::half(); // Any value since half is not tested in ReduceMultiplies
+}
+
 TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceMultiplies)
 {
     using T = typename TestFixture::type;
@@ -273,7 +285,7 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceMultiplies)
         for(size_t j = 0; j < block_size; j++)
         {
             auto idx = i * block_size + j;
-            value *= output[idx];
+            value = host_multiplies(value, output[idx]);
         }
         expected_reductions[i] = value;
     }

@@ -78,7 +78,10 @@ typedef ::testing::Types<
     params<custom_short2, custom_double2, 128, 7>,
     params<int, unsigned char, 128, 3>,
     params<unsigned long long, unsigned long long, 64, 3>,
+#ifndef __HIP__
+    // hip-clang does not allow to convert half to float
     params<rp::half, float, 256, 4>,
+#endif
 
     // Non-power of 2 BlockSize and ItemsPerThread > 1
     params<int, double, 33U, 5>,
