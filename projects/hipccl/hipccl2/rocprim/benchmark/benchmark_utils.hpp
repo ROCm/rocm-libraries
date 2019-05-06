@@ -118,7 +118,7 @@ struct custom_type
     ROCPRIM_HOST_DEVICE inline
     bool operator<(const custom_type& rhs) const
     {
-        return std::tie(x, y) < std::tie(rhs.x, rhs.y);
+        return (x < rhs.x || (x == rhs.x && y < rhs.y));
     }
 
     ROCPRIM_HOST_DEVICE inline
