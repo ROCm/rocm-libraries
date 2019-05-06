@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+ 
 #include <unittest/unittest.h>
 #include <thrust/adjacent_difference.h>
 #include <thrust/iterator/discard_iterator.h>
@@ -13,21 +30,21 @@ void TestAdjacentDifferenceSimple(void)
     input[0] = 1; input[1] = 4; input[2] = 6;
 
     typename Vector::iterator result;
-    
+
     result = thrust::adjacent_difference(input.begin(), input.end(), output.begin());
 
     ASSERT_EQUAL(result - output.begin(), 3);
     ASSERT_EQUAL(output[0], T(1));
     ASSERT_EQUAL(output[1], T(3));
     ASSERT_EQUAL(output[2], T(2));
-    
+
     result = thrust::adjacent_difference(input.begin(), input.end(), output.begin(), thrust::plus<T>());
-    
+
     ASSERT_EQUAL(result - output.begin(), 3);
     ASSERT_EQUAL(output[0], T( 1));
     ASSERT_EQUAL(output[1], T( 5));
     ASSERT_EQUAL(output[2], T(10));
-    
+
     // test in-place operation, result and first are permitted to be the same
     result = thrust::adjacent_difference(input.begin(), input.end(), input.begin());
 
@@ -57,14 +74,14 @@ void TestAdjacentDifference(const size_t n)
     ASSERT_EQUAL(h_result - h_output.begin(), n);
     ASSERT_EQUAL(d_result - d_output.begin(), n);
     ASSERT_EQUAL(h_output, d_output);
-    
+
     h_result = thrust::adjacent_difference(h_input.begin(), h_input.end(), h_output.begin(), thrust::plus<T>());
     d_result = thrust::adjacent_difference(d_input.begin(), d_input.end(), d_output.begin(), thrust::plus<T>());
 
     ASSERT_EQUAL(h_result - h_output.begin(), n);
     ASSERT_EQUAL(d_result - d_output.begin(), n);
     ASSERT_EQUAL(h_output, d_output);
-    
+
     // in-place operation
     h_result = thrust::adjacent_difference(h_input.begin(), h_input.end(), h_input.begin(), thrust::plus<T>());
     d_result = thrust::adjacent_difference(d_input.begin(), d_input.end(), d_input.begin(), thrust::plus<T>());
@@ -90,7 +107,7 @@ void TestAdjacentDifferenceInPlaceWithRelatedIteratorTypes(const size_t n)
 
     h_result = thrust::adjacent_difference(h_input.begin(), h_input.end(), h_output.begin(), thrust::plus<T>());
     d_result = thrust::adjacent_difference(d_input.begin(), d_input.end(), d_output.begin(), thrust::plus<T>());
-    
+
     // in-place operation with different iterator types
     h_result = thrust::adjacent_difference(h_input.cbegin(), h_input.cend(), h_input.begin(), thrust::plus<T>());
     d_result = thrust::adjacent_difference(d_input.cbegin(), d_input.cend(), d_input.begin(), thrust::plus<T>());
@@ -159,4 +176,3 @@ void TestAdjacentDifferenceDispatchImplicit()
     ASSERT_EQUAL(13, d_input.front());
 }
 DECLARE_UNITTEST(TestAdjacentDifferenceDispatchImplicit);
-
