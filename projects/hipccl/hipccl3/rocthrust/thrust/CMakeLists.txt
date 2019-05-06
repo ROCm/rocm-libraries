@@ -85,6 +85,5 @@ rocm_export_targets(
   PREFIX rocthrust
 )
 
-# TODO: Add symlinks later
 # Create symlinks
-# rocm_install_symlink_subdir(rocthrust)
+rocm_install_symlink_subdir(rocthrust)
