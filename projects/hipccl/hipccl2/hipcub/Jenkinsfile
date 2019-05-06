@@ -31,7 +31,7 @@ hipCUBCI:
 
     def hipcub = new rocProject('hipCUB')
     // customize for project
-    hipcub.paths.build_command = 'cmake -D CMAKE_CXX_COMPILER "/opt/rocm/hcc/bin/hcc" CMakeLists.txt -Bbuild'
+    hipcub.paths.build_command = 'cmake -D CMAKE_CXX_COMPILER="/opt/rocm/hcc/bin/hcc" CMakeLists.txt -Bbuild && cd build && make'
 
     // Define test architectures, optional rocm version argument is available
     def nodes = new dockerNodes(['gfx900', 'gfx906'], hipcub)
