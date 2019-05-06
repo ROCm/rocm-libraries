@@ -164,7 +164,13 @@ hipError_t inclusive_scan_by_key(void * temporary_storage,
         rocprim::make_transform_iterator(
             rocprim::make_counting_iterator<size_t>(0),
             [values_input, keys_input, key_compare_op]
-            ROCPRIM_DEVICE (const size_t i)
+            #ifdef __HIP__
+            // Workaround: hip-clang does not support std::result_of of device-only functions
+            ROCPRIM_HOST_DEVICE
+            #else
+            ROCPRIM_DEVICE
+            #endif
+            (const size_t i)
             {
                 flag_type flag(true);
                 if(i > 0)
@@ -316,7 +322,7 @@ hipError_t exclusive_scan_by_key(void * temporary_storage,
         rocprim::make_transform_iterator(
             rocprim::make_counting_iterator<size_t>(0),
             [values_input, keys_input, key_compare_op, initial_value_converted, size]
-            ROCPRIM_DEVICE (const size_t i)
+            ROCPRIM_HOST_DEVICE (const size_t i)
             {
                 flag_type flag(false);
                 if(i + 1 < size)
