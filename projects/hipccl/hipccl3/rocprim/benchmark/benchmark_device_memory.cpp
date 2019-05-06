@@ -213,11 +213,11 @@ template<
     unsigned int ItemsPerThread,
     memory_operation_method MemOp,
     class CustomOp =
-        typename operation<no_operation, T, ItemsPerThread>::value_type
+        typename operation<no_operation, T, ItemsPerThread>::value_type,
+    typename std::enable_if<MemOp == block_primitive_direct, int>::type = 0
 >
 __global__
-auto operation_kernel(T* input, T* output, CustomOp op)
-    -> typename std::enable_if<MemOp == block_primitive_direct>::type
+void operation_kernel(T* input, T* output, CustomOp op)
 {
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
 
@@ -251,11 +251,11 @@ template<
     unsigned int ItemsPerThread,
     memory_operation_method MemOp,
     class CustomOp =
-        typename operation<no_operation, T, ItemsPerThread>::value_type
+        typename operation<no_operation, T, ItemsPerThread>::value_type,
+    typename std::enable_if<MemOp == vectorized, int>::type = 0
 >
 __global__
-auto operation_kernel(T* input, T* output, CustomOp op)
-    -> typename std::enable_if<MemOp == vectorized>::type
+void operation_kernel(T* input, T* output, CustomOp op)
 {
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
     int offset = hipBlockIdx_x * items_per_block;
@@ -278,11 +278,11 @@ template<
     unsigned int ItemsPerThread,
     memory_operation_method MemOp,
     class CustomOp =
-        typename operation<no_operation, T, ItemsPerThread>::value_type
+        typename operation<no_operation, T, ItemsPerThread>::value_type,
+    typename std::enable_if<MemOp == striped, int>::type = 0
 >
 __global__
-auto operation_kernel(T* input, T* output, CustomOp op)
-    -> typename std::enable_if<MemOp == striped>::type
+void operation_kernel(T* input, T* output, CustomOp op)
 {
     const unsigned int lid = hipThreadIdx_x;
     const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
@@ -299,11 +299,11 @@ template<
     unsigned int ItemsPerThread,
     memory_operation_method MemOp,
     class CustomOp =
-        typename operation<no_operation, T, ItemsPerThread>::value_type
+        typename operation<no_operation, T, ItemsPerThread>::value_type,
+    typename std::enable_if<MemOp == block_primitives_transpose, int>::type = 0
 >
 __global__
-auto operation_kernel(T* input, T* output, CustomOp op)
-    -> typename std::enable_if<MemOp == block_primitives_transpose>::type
+void operation_kernel(T* input, T* output, CustomOp op)
 {
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
 
