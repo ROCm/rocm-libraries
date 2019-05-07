@@ -61,9 +61,8 @@ BEGIN_ROCPRIM_NAMESPACE
 /// warp_sort type, and instantiating an object that will be used to invoke a
 /// member function.
 ///
-/// \b HIP: \n
 /// \code{.cpp}
-/// __global__ void ExampleKernel(...)
+/// __global__ void example_kernel(...)
 /// {
 ///     const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
 ///
@@ -74,37 +73,22 @@ BEGIN_ROCPRIM_NAMESPACE
 /// }
 /// \endcode
 ///
-/// \b HC: \n
-/// \code{.cpp}
-/// hc::parallel_for_each(
-///     hc::extent<1>(...).tile(block_size),
-///     [=](hc::tiled_index<1> i) [[hc]]
-///     {
-///         int value = ...;
-///         rocprim::warp_sort<int, 64> wsort;
-///         wsort.sort(value);
-///         ...
-///     }
-/// );
-/// \endcode
-///
 /// Below is a snippet demonstrating how to pass a custom compare function:
 /// \code{.cpp}
-/// bool customCompare(const int& a, const int& b) [[hc]]
+/// __device__ bool customCompare(const int& a, const int& b)
 /// {
 ///     return a < b;
 /// }
 /// ...
-/// hc::parallel_for_each(
-///     hc::extent<1>(...).tile(block_size),
-///     [=](hc::tiled_index<1> i) [[hc]]
-///     {
-///         int value = ...;
-///         rocprim::warp_sort<int, warpsize> wsort;
-///         wsort.sort(value, customCompare);
-///         ...
-///     }
-/// );
+/// __global__ void example_kernel(...)
+/// {
+///     const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+///
+///     int value = input[i];
+///     rocprim::warp_sort<int, 64> wsort;
+///     wsort.sort(value, customCompare);
+///     input[i] = value;
+/// }
 /// \endcode
 /// \endparblock
 template<
@@ -125,7 +109,7 @@ public:
     ///
     /// Depending on the implemention the operations exposed by parallel primitive may
     /// require a temporary storage for thread communication. The storage should be allocated
-    /// using keywords \p __shared__ in HIP or \p tile_static in HC. It can be aliased to
+    /// using keywords \p __shared__. It can be aliased to
     /// an externally allocated memory, or be a part of a union with other storage types
     /// to increase shared memory reusability.
     typedef typename base_type::storage_type storage_type;
@@ -162,23 +146,19 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Example.
     /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(block_size),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         int value = ...;
-    ///         using warp_sort_int = rp::warp_sort<int, 64>;
-    ///         warp_sort_int wsort;
-    ///         tile_static typename warp_sort_int::storage_type storage;
-    ///         wsort.sort(value, storage);
-    ///         ...
-    ///     }
-    /// );
+    /// __global__ void example_kernel(...)
+    /// {
+    ///     int value = ...;
+    ///     using warp_sort_int = rp::warp_sort<int, 64>;
+    ///     warp_sort_int wsort;
+    ///     __shared__ typename warp_sort_int::storage_type storage;
+    ///     wsort.sort(value, storage);
+    ///     ...
+    /// }
     /// \endcode
     template<class BinaryFunction = ::rocprim::less<Key>>
     ROCPRIM_DEVICE inline
@@ -228,25 +208,19 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Example.
     /// \code{.cpp}
-    /// hc::array_view<int, 1> d_output(...);
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(block_size),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         int value = ...;
-    ///         using warp_sort_int = rp::warp_sort<int, 64>;
-    ///         warp_sort_int wsort;
-    ///         tile_static typename warp_sort_int::storage_type storage;
-    ///         wsort.sort(key, value, storage);
-    ///         ...
-    ///     }
-    /// );
-    /// d_output.synchronize();
+    /// __global__ void example_kernel(...)
+    /// {
+    ///     int value = ...;
+    ///     using warp_sort_int = rp::warp_sort<int, 64>;
+    ///     warp_sort_int wsort;
+    ///     __shared__ typename warp_sort_int::storage_type storage;
+    ///     wsort.sort(key, value, storage);
+    ///     ...
+    /// }
     /// \endcode
     template<class BinaryFunction = ::rocprim::less<Key>>
     ROCPRIM_DEVICE inline

@@ -97,7 +97,6 @@ apply(FlagOp flag_op, const T& a, const T& b, unsigned int)
 /// In the examples discontinuity operation is performed on block of 128 threads, using type
 /// \p int.
 ///
-/// \b HIP: \n
 /// \code{.cpp}
 /// __global__ void example_kernel(...)
 /// {
@@ -115,29 +114,6 @@ apply(FlagOp flag_op, const T& a, const T& b, unsigned int)
 ///     b_discontinuity.flag_heads(head_flags, input, flag_op_type(), storage);
 ///     ...
 /// }
-/// \endcode
-///
-/// \b HC: \n
-/// \code{.cpp}
-/// hc::parallel_for_each(
-///     hc::extent<1>(...).tile(128),
-///     [=](hc::tiled_index<1> i) [[hc]]
-///     {
-///         // specialize discontinuity for int and a block of 128 threads
-///         using block_discontinuity_int = rocprim::block_discontinuity<int, 128>;
-///         // allocate storage in shared memory
-///         tile_static block_discontinuity_int::storage_type storage;
-///
-///         // segment of consecutive items to be used
-///         int input[8];
-///         ...
-///         int head_flags[8];
-///         block_discontinuity_int b_discontinuity;
-///         using flag_op_type = typename rocprim::greater<int>;
-///         b_discontinuity.flag_heads(head_flags, input, flag_op_type(), storage);
-///         ...
-///     }
-/// );
 /// \endcode
 /// \endparblock
 template<
@@ -160,7 +136,7 @@ public:
     ///
     /// Depending on the implemention the operations exposed by parallel primitive may
     /// require a temporary storage for thread communication. The storage should be allocated
-    /// using keywords <tt>__shared__</tt> in HIP or \p tile_static in HC. It can be aliased to
+    /// using keywords <tt>__shared__</tt>. It can be aliased to
     /// an externally allocated memory, or be a part of a union type with other storage types
     /// to increase shared memory reusability.
     #ifndef DOXYGEN_SHOULD_SKIP_THIS // hides storage_type implementation for Doxygen
@@ -189,30 +165,26 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Example.
     /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(128),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize discontinuity for int and a block of 128 threads
-    ///         using block_discontinuity_int = rocprim::block_discontinuity<int, 128>;
-    ///         // allocate storage in shared memory
-    ///         tile_static block_discontinuity_int::storage_type storage;
+    /// __global__ void example_kernel(...)
+    /// {
+    ///     // specialize discontinuity for int and a block of 128 threads
+    ///     using block_discontinuity_int = rocprim::block_discontinuity<int, 128>;
+    ///     // allocate storage in shared memory
+    ///     __shared__ block_discontinuity_int::storage_type storage;
     ///
-    ///         // segment of consecutive items to be used
-    ///         int input[8];
-    ///         ...
-    ///         int head_flags[8];
-    ///         block_discontinuity_int b_discontinuity;
-    ///         using flag_op_type = typename rocprim::greater<int>;
-    ///         b_discontinuity.flag_heads(head_flags, input, flag_op_type(), storage);
-    ///         ...
-    ///     }
-    /// );
+    ///     // segment of consecutive items to be used
+    ///     int input[8];
+    ///     ...
+    ///     int head_flags[8];
+    ///     block_discontinuity_int b_discontinuity;
+    ///     using flag_op_type = typename rocprim::greater<int>;
+    ///     b_discontinuity.flag_heads(head_flags, input, flag_op_type(), storage);
+    ///     ...
+    /// }
     /// \endcode
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     ROCPRIM_DEVICE inline
@@ -275,36 +247,32 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Example.
     /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(128),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize discontinuity for int and a block of 128 threads
-    ///         using block_discontinuity_int = rocprim::block_discontinuity<int, 128>;
-    ///         // allocate storage in shared memory
-    ///         tile_static block_discontinuity_int::storage_type storage;
+    /// __global__ void example_kernel(...)
+    /// {
+    ///     // specialize discontinuity for int and a block of 128 threads
+    ///     using block_discontinuity_int = rocprim::block_discontinuity<int, 128>;
+    ///     // allocate storage in shared memory
+    ///     __shared__ block_discontinuity_int::storage_type storage;
     ///
-    ///         // segment of consecutive items to be used
-    ///         int input[8];
-    ///         int tile_item = 0;
-    ///         if (i.local[0] == 0)
-    ///         {
-    ///             tile_item = ...
-    ///         }
-    ///         ...
-    ///         int head_flags[8];
-    ///         block_discontinuity_int b_discontinuity;
-    ///         using flag_op_type = typename rocprim::greater<int>;
-    ///         b_discontinuity.flag_heads(head_flags, tile_item, input, flag_op_type(),
-    ///                                    storage);
-    ///         ...
+    ///     // segment of consecutive items to be used
+    ///     int input[8];
+    ///     int tile_item = 0;
+    ///     if (threadIdx.x == 0)
+    ///     {
+    ///         tile_item = ...
     ///     }
-    /// );
+    ///     ...
+    ///     int head_flags[8];
+    ///     block_discontinuity_int b_discontinuity;
+    ///     using flag_op_type = typename rocprim::greater<int>;
+    ///     b_discontinuity.flag_heads(head_flags, tile_item, input, flag_op_type(),
+    ///                                storage);
+    ///     ...
+    /// }
     /// \endcode
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     ROCPRIM_DEVICE inline
@@ -369,30 +337,26 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Example.
     /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(128),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize discontinuity for int and a block of 128 threads
-    ///         using block_discontinuity_int = rocprim::block_discontinuity<int, 128>;
-    ///         // allocate storage in shared memory
-    ///         tile_static block_discontinuity_int::storage_type storage;
+    /// __global__ void example_kernel(...)
+    /// {
+    ///     // specialize discontinuity for int and a block of 128 threads
+    ///     using block_discontinuity_int = rocprim::block_discontinuity<int, 128>;
+    ///     // allocate storage in shared memory
+    ///     __shared__ block_discontinuity_int::storage_type storage;
     ///
-    ///         // segment of consecutive items to be used
-    ///         int input[8];
-    ///         ...
-    ///         int tail_flags[8];
-    ///         block_discontinuity_int b_discontinuity;
-    ///         using flag_op_type = typename rocprim::greater<int>;
-    ///         b_discontinuity.flag_tails(tail_flags, input, flag_op_type(), storage);
-    ///         ...
-    ///     }
-    /// );
+    ///     // segment of consecutive items to be used
+    ///     int input[8];
+    ///     ...
+    ///     int tail_flags[8];
+    ///     block_discontinuity_int b_discontinuity;
+    ///     using flag_op_type = typename rocprim::greater<int>;
+    ///     b_discontinuity.flag_tails(tail_flags, input, flag_op_type(), storage);
+    ///     ...
+    /// }
     /// \endcode
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     ROCPRIM_DEVICE inline
@@ -455,36 +419,32 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Example.
     /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(128),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize discontinuity for int and a block of 128 threads
-    ///         using block_discontinuity_int = rocprim::block_discontinuity<int, 128>;
-    ///         // allocate storage in shared memory
-    ///         tile_static block_discontinuity_int::storage_type storage;
+    /// __global__ void example_kernel(...)
+    /// {
+    ///     // specialize discontinuity for int and a block of 128 threads
+    ///     using block_discontinuity_int = rocprim::block_discontinuity<int, 128>;
+    ///     // allocate storage in shared memory
+    ///     __shared__ block_discontinuity_int::storage_type storage;
     ///
-    ///         // segment of consecutive items to be used
-    ///         int input[8];
-    ///         int tile_item = 0;
-    ///         if (i.local[0] == 0)
-    ///         {
-    ///             tile_item = ...
-    ///         }
-    ///         ...
-    ///         int tail_flags[8];
-    ///         block_discontinuity_int b_discontinuity;
-    ///         using flag_op_type = typename rocprim::greater<int>;
-    ///         b_discontinuity.flag_tails(tail_flags, tile_item, input, flag_op_type(),
-    ///                                    storage);
-    ///         ...
+    ///     // segment of consecutive items to be used
+    ///     int input[8];
+    ///     int tile_item = 0;
+    ///     if (threadIdx.x == 0)
+    ///     {
+    ///         tile_item = ...
     ///     }
-    /// );
+    ///     ...
+    ///     int tail_flags[8];
+    ///     block_discontinuity_int b_discontinuity;
+    ///     using flag_op_type = typename rocprim::greater<int>;
+    ///     b_discontinuity.flag_tails(tail_flags, tile_item, input, flag_op_type(),
+    ///                                storage);
+    ///     ...
+    /// }
     /// \endcode
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     ROCPRIM_DEVICE inline
@@ -549,32 +509,28 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Example.
     /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(128),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize discontinuity for int and a block of 128 threads
-    ///         using block_discontinuity_int = rocprim::block_discontinuity<int, 128>;
-    ///         // allocate storage in shared memory
-    ///         tile_static block_discontinuity_int::storage_type storage;
+    /// __global__ void example_kernel(...)
+    /// {
+    ///     // specialize discontinuity for int and a block of 128 threads
+    ///     using block_discontinuity_int = rocprim::block_discontinuity<int, 128>;
+    ///     // allocate storage in shared memory
+    ///     __shared__ block_discontinuity_int::storage_type storage;
     ///
-    ///         // segment of consecutive items to be used
-    ///         int input[8];
-    ///         ...
-    ///         int head_flags[8];
-    ///         int tail_flags[8];
-    ///         block_discontinuity_int b_discontinuity;
-    ///         using flag_op_type = typename rocprim::greater<int>;
-    ///         b_discontinuity.flag_heads_and_tails(head_flags, tail_flags, input,
-    ///                                              flag_op_type(), storage);
-    ///         ...
-    ///     }
-    /// );
+    ///     // segment of consecutive items to be used
+    ///     int input[8];
+    ///     ...
+    ///     int head_flags[8];
+    ///     int tail_flags[8];
+    ///     block_discontinuity_int b_discontinuity;
+    ///     using flag_op_type = typename rocprim::greater<int>;
+    ///     b_discontinuity.flag_heads_and_tails(head_flags, tail_flags, input,
+    ///                                          flag_op_type(), storage);
+    ///     ...
+    /// }
     /// \endcode
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     ROCPRIM_DEVICE inline
@@ -640,38 +596,34 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Example.
     /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(128),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize discontinuity for int and a block of 128 threads
-    ///         using block_discontinuity_int = rocprim::block_discontinuity<int, 128>;
-    ///         // allocate storage in shared memory
-    ///         tile_static block_discontinuity_int::storage_type storage;
+    /// __global__ void example_kernel(...)
+    /// {
+    ///     // specialize discontinuity for int and a block of 128 threads
+    ///     using block_discontinuity_int = rocprim::block_discontinuity<int, 128>;
+    ///     // allocate storage in shared memory
+    ///     __shared__ block_discontinuity_int::storage_type storage;
     ///
-    ///         // segment of consecutive items to be used
-    ///         int input[8];
-    ///         int tile_item = 0;
-    ///         if (i.local[0] == 0)
-    ///         {
-    ///             tile_item = ...
-    ///         }
-    ///         ...
-    ///         int head_flags[8];
-    ///         int tail_flags[8];
-    ///         block_discontinuity_int b_discontinuity;
-    ///         using flag_op_type = typename rocprim::greater<int>;
-    ///         b_discontinuity.flag_heads_and_tails(head_flags, tail_flags, tile_item,
-    ///                                              input, flag_op_type(),
-    ///                                              storage);
-    ///         ...
+    ///     // segment of consecutive items to be used
+    ///     int input[8];
+    ///     int tile_item = 0;
+    ///     if (threadIdx.x == 0)
+    ///     {
+    ///         tile_item = ...
     ///     }
-    /// );
+    ///     ...
+    ///     int head_flags[8];
+    ///     int tail_flags[8];
+    ///     block_discontinuity_int b_discontinuity;
+    ///     using flag_op_type = typename rocprim::greater<int>;
+    ///     b_discontinuity.flag_heads_and_tails(head_flags, tail_flags, tile_item,
+    ///                                          input, flag_op_type(),
+    ///                                          storage);
+    ///     ...
+    /// }
     /// \endcode
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     ROCPRIM_DEVICE inline
@@ -742,38 +694,34 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Example.
     /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(128),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize discontinuity for int and a block of 128 threads
-    ///         using block_discontinuity_int = rocprim::block_discontinuity<int, 128>;
-    ///         // allocate storage in shared memory
-    ///         tile_static block_discontinuity_int::storage_type storage;
+    /// __global__ void example_kernel(...)
+    /// {
+    ///     // specialize discontinuity for int and a block of 128 threads
+    ///     using block_discontinuity_int = rocprim::block_discontinuity<int, 128>;
+    ///     // allocate storage in shared memory
+    ///     __shared__ block_discontinuity_int::storage_type storage;
     ///
-    ///         // segment of consecutive items to be used
-    ///         int input[8];
-    ///         int tile_item = 0;
-    ///         if (i.local[0] == 0)
-    ///         {
-    ///             tile_item = ...
-    ///         }
-    ///         ...
-    ///         int head_flags[8];
-    ///         int tail_flags[8];
-    ///         block_discontinuity_int b_discontinuity;
-    ///         using flag_op_type = typename rocprim::greater<int>;
-    ///         b_discontinuity.flag_heads_and_tails(head_flags, tile_item, tail_flags,
-    ///                                              input, flag_op_type(),
-    ///                                              storage);
-    ///         ...
+    ///     // segment of consecutive items to be used
+    ///     int input[8];
+    ///     int tile_item = 0;
+    ///     if (threadIdx.x == 0)
+    ///     {
+    ///         tile_item = ...
     ///     }
-    /// );
+    ///     ...
+    ///     int head_flags[8];
+    ///     int tail_flags[8];
+    ///     block_discontinuity_int b_discontinuity;
+    ///     using flag_op_type = typename rocprim::greater<int>;
+    ///     b_discontinuity.flag_heads_and_tails(head_flags, tile_item, tail_flags,
+    ///                                          input, flag_op_type(),
+    ///                                          storage);
+    ///     ...
+    /// }
     /// \endcode
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     ROCPRIM_DEVICE inline
@@ -847,41 +795,37 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Example.
     /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(128),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize discontinuity for int and a block of 128 threads
-    ///         using block_discontinuity_int = rocprim::block_discontinuity<int, 128>;
-    ///         // allocate storage in shared memory
-    ///         tile_static block_discontinuity_int::storage_type storage;
+    /// __global__ void example_kernel(...)
+    /// {
+    ///     // specialize discontinuity for int and a block of 128 threads
+    ///     using block_discontinuity_int = rocprim::block_discontinuity<int, 128>;
+    ///     // allocate storage in shared memory
+    ///     __shared__ block_discontinuity_int::storage_type storage;
     ///
-    ///         // segment of consecutive items to be used
-    ///         int input[8];
-    ///         int tile_predecessor_item = 0;
-    ///         int tile_successor_item = 0;
-    ///         if (i.local[0] == 0)
-    ///         {
-    ///             tile_predecessor_item = ...
-    ///             tile_successor_item = ...
-    ///         }
-    ///         ...
-    ///         int head_flags[8];
-    ///         int tail_flags[8];
-    ///         block_discontinuity_int b_discontinuity;
-    ///         using flag_op_type = typename rocprim::greater<int>;
-    ///         b_discontinuity.flag_heads_and_tails(head_flags, tile_predecessor_item,
-    ///                                              tail_flags, tile_successor_item,
-    ///                                              input, flag_op_type(),
-    ///                                              storage);
-    ///         ...
+    ///     // segment of consecutive items to be used
+    ///     int input[8];
+    ///     int tile_predecessor_item = 0;
+    ///     int tile_successor_item = 0;
+    ///     if (threadIdx.x == 0)
+    ///     {
+    ///         tile_predecessor_item = ...
+    ///         tile_successor_item = ...
     ///     }
-    /// );
+    ///     ...
+    ///     int head_flags[8];
+    ///     int tail_flags[8];
+    ///     block_discontinuity_int b_discontinuity;
+    ///     using flag_op_type = typename rocprim::greater<int>;
+    ///     b_discontinuity.flag_heads_and_tails(head_flags, tile_predecessor_item,
+    ///                                          tail_flags, tile_successor_item,
+    ///                                          input, flag_op_type(),
+    ///                                          storage);
+    ///     ...
+    /// }
     /// \endcode
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
     ROCPRIM_DEVICE inline
