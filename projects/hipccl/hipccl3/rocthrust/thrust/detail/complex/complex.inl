@@ -17,31 +17,28 @@
 
 #include <thrust/complex.h>
 
+// TODO: Uncomment after the thrust update
+//#include <thrust/type_traits/is_trivially_relocatable.h>
+
 namespace thrust
 {
 
 /* --- Constructors --- */
 
+#if THRUST_CPP_DIALECT < 2011
 template <typename T>
 __host__ __device__
 complex<T>::complex()
-#if __cplusplus >= 201103L
-  // Initialize the storage in the member initializer list using C++ unicorn
-  // initialization. This allows `complex<T const>` to work.
-  // We do a functional-style cast here to suppress conversion warnings.
-  : data{T(), T()}
-{}
-#else
 {
   real(T());
   imag(T());
-} 
+}
 #endif
 
 template <typename T>
 __host__ __device__
 complex<T>::complex(const T& re)
-#if __cplusplus >= 201103L
+#if THRUST_CPP_DIALECT >= 2011
   // Initialize the storage in the member initializer list using C++ unicorn
   // initialization. This allows `complex<T const>` to work.
   : data{re, T()}
@@ -50,30 +47,14 @@ complex<T>::complex(const T& re)
 {
   real(re);
   imag(T());
-} 
+}
 #endif
 
-template <typename T>
-template <typename R>
-__host__ __device__
-complex<T>::complex(const R& re)
-#if __cplusplus >= 201103L
-  // Initialize the storage in the member initializer list using C++ unicorn
-  // initialization. This allows `complex<T const>` to work.
-  // We do a functional-style cast here to suppress conversion warnings.
-  : data{T(re), T()}
-{}
-#else
-{
-  real(T(re));
-  imag(T());
-} 
-#endif
 
 template <typename T>
 __host__ __device__
 complex<T>::complex(const T& re, const T& im)
-#if __cplusplus >= 201103L
+#if THRUST_CPP_DIALECT >= 2011
   // Initialize the storage in the member initializer list using C++ unicorn
   // initialization. This allows `complex<T const>` to work.
   : data{re, im}
@@ -83,77 +64,23 @@ complex<T>::complex(const T& re, const T& im)
   real(re);
   imag(im);
 }
-#endif 
+#endif
 
-template <typename T>
-template <typename R, typename I>
-__host__ __device__
-complex<T>::complex(const R& re, const I& im)
-#if __cplusplus >= 201103L
-  // Initialize the storage in the member initializer list using C++ unicorn
-  // initialization. This allows `complex<T const>` to work.
-  // We do a functional-style cast here to suppress conversion warnings.
-  : data{T(re), T(im)}
-{}
-#else
-{
-  real(T(re));
-  imag(T(im));
-}
-#endif 
-
+#if THRUST_CPP_DIALECT < 2011
 template <typename T>
 __host__ __device__
 complex<T>::complex(const complex<T>& z)
-#if __cplusplus >= 201103L
-  // Initialize the storage in the member initializer list using C++ unicorn
-  // initialization. This allows `complex<T const>` to work.
-  : data{z.real(), z.imag()}
-{}
-#else
 {
   real(z.real());
   imag(z.imag());
 }
-#endif 
-
-template <typename T>
-template <typename U> 
-__host__ __device__
-complex<T>::complex(const complex<U>& z)
-#if __cplusplus >= 201103L
-  // Initialize the storage in the member initializer list using C++ unicorn
-  // initialization. This allows `complex<T const>` to work.
-  // We do a functional-style cast here to suppress conversion warnings.
-  : data{T(z.real()), T(z.imag())}
-{}
-#else
-{
-  real(T(z.real()));
-  imag(T(z.imag()));
-}
-#endif 
-
-template <typename T>
-__host__
-complex<T>::complex(const std::complex<T>& z)
-#if __cplusplus >= 201103L
-  // Initialize the storage in the member initializer list using C++ unicorn
-  // initialization. This allows `complex<T const>` to work.
-  : data{z.real(), z.imag()}
-{}
-#else
-{
-  real(z.real());
-  imag(z.imag());
-}  
 #endif
 
 template <typename T>
-template <typename U> 
-__host__
-complex<T>::complex(const std::complex<U>& z)
-#if __cplusplus >= 201103L
+template <typename U>
+__host__ __device__
+complex<T>::complex(const complex<U>& z)
+#if THRUST_CPP_DIALECT >= 2011
   // Initialize the storage in the member initializer list using C++ unicorn
   // initialization. This allows `complex<T const>` to work.
   // We do a functional-style cast here to suppress conversion warnings.
@@ -163,7 +90,39 @@ complex<T>::complex(const std::complex<U>& z)
 {
   real(T(z.real()));
   imag(T(z.imag()));
-}  
+}
+#endif
+
+template <typename T>
+__host__ THRUST_STD_COMPLEX_DEVICE
+complex<T>::complex(const std::complex<T>& z)
+#if THRUST_CPP_DIALECT >= 2011
+  // Initialize the storage in the member initializer list using C++ unicorn
+  // initialization. This allows `complex<T const>` to work.
+  : data{THRUST_STD_COMPLEX_REAL(z), THRUST_STD_COMPLEX_IMAG(z)}
+{}
+#else
+{
+  real(THRUST_STD_COMPLEX_REAL(z));
+  imag(THRUST_STD_COMPLEX_IMAG(z));
+}
+#endif
+
+template <typename T>
+template <typename U>
+__host__ THRUST_STD_COMPLEX_DEVICE
+complex<T>::complex(const std::complex<U>& z)
+#if THRUST_CPP_DIALECT >= 2011
+  // Initialize the storage in the member initializer list using C++ unicorn
+  // initialization. This allows `complex<T const>` to work.
+  // We do a functional-style cast here to suppress conversion warnings.
+  : data{T(THRUST_STD_COMPLEX_REAL(z)), T(THRUST_STD_COMPLEX_IMAG(z))}
+{}
+#else
+{
+  real(T(THRUST_STD_COMPLEX_REAL(z)));
+  imag(T(THRUST_STD_COMPLEX_IMAG(z)));
+}
 #endif
 
 
@@ -179,23 +138,16 @@ complex<T>& complex<T>::operator=(const T& re)
   return *this;
 }
 
+#if THRUST_CPP_DIALECT < 2011
 template <typename T>
-template <typename R>
 __host__ __device__
-complex<T>& complex<T>::operator=(const R& re)
-{
-  real(re);
-  imag(T());
-  return *this;
-}
-
-template <typename T>
 complex<T>& complex<T>::operator=(const complex<T>& z)
 {
   real(z.real());
   imag(z.imag());
   return *this;
 }
+#endif
 
 template <typename T>
 template <typename U>
@@ -208,21 +160,21 @@ complex<T>& complex<T>::operator=(const complex<U>& z)
 }
 
 template <typename T>
-__host__
+__host__ THRUST_STD_COMPLEX_DEVICE
 complex<T>& complex<T>::operator=(const std::complex<T>& z)
 {
-  real(z.real());
-  imag(z.imag());
+  real(THRUST_STD_COMPLEX_REAL(z));
+  imag(THRUST_STD_COMPLEX_IMAG(z));
   return *this;
 }
 
 template <typename T>
-template <typename U> 
-__host__
+template <typename U>
+__host__ THRUST_STD_COMPLEX_DEVICE
 complex<T>& complex<T>::operator=(const std::complex<U>& z)
 {
-  real(T(z.real()));
-  imag(T(z.imag()));
+  real(T(THRUST_STD_COMPLEX_REAL(z)));
+  imag(T(THRUST_STD_COMPLEX_IMAG(z)));
   return *this;
 }
 
@@ -231,8 +183,8 @@ complex<T>& complex<T>::operator=(const std::complex<U>& z)
 /* --- Compound Assignment Operators --- */
 
 template <typename T>
-template <typename U> 
-__host__ __device__ 
+template <typename U>
+__host__ __device__
 complex<T>& complex<T>::operator+=(const complex<U>& z)
 {
   *this = *this + z;
@@ -240,7 +192,7 @@ complex<T>& complex<T>::operator+=(const complex<U>& z)
 }
 
 template <typename T>
-template <typename U> 
+template <typename U>
 __host__ __device__
 complex<T>& complex<T>::operator-=(const complex<U>& z)
 {
@@ -249,7 +201,7 @@ complex<T>& complex<T>::operator-=(const complex<U>& z)
 }
 
 template <typename T>
-template <typename U> 
+template <typename U>
 __host__ __device__
 complex<T>& complex<T>::operator*=(const complex<U>& z)
 {
@@ -258,7 +210,7 @@ complex<T>& complex<T>::operator*=(const complex<U>& z)
 }
 
 template <typename T>
-template <typename U> 
+template <typename U>
 __host__ __device__
 complex<T>& complex<T>::operator/=(const complex<U>& z)
 {
@@ -267,8 +219,8 @@ complex<T>& complex<T>::operator/=(const complex<U>& z)
 }
 
 template <typename T>
-template <typename U> 
-__host__ __device__ 
+template <typename U>
+__host__ __device__
 complex<T>& complex<T>::operator+=(const U& z)
 {
   *this = *this + z;
@@ -276,7 +228,7 @@ complex<T>& complex<T>::operator+=(const U& z)
 }
 
 template <typename T>
-template <typename U> 
+template <typename U>
 __host__ __device__
 complex<T>& complex<T>::operator-=(const U& z)
 {
@@ -285,7 +237,7 @@ complex<T>& complex<T>::operator-=(const U& z)
 }
 
 template <typename T>
-template <typename U> 
+template <typename U>
 __host__ __device__
 complex<T>& complex<T>::operator*=(const U& z)
 {
@@ -294,7 +246,7 @@ complex<T>& complex<T>::operator*=(const U& z)
 }
 
 template <typename T>
-template <typename U> 
+template <typename U>
 __host__ __device__
 complex<T>& complex<T>::operator/=(const U& z)
 {
@@ -306,75 +258,79 @@ complex<T>& complex<T>::operator/=(const U& z)
 
 /* --- Equality Operators --- */
 
-template <typename T0, typename T1> 
+template <typename T0, typename T1>
 __host__ __device__
 bool operator==(const complex<T0>& x, const complex<T1>& y)
 {
   return x.real() == y.real() && x.imag() == y.imag();
 }
 
-template <typename T0, typename T1> 
-__host__ 
+template <typename T0, typename T1>
+__host__ THRUST_STD_COMPLEX_DEVICE
 bool operator==(const complex<T0>& x, const std::complex<T1>& y)
 {
-  return x.real() == y.real() && x.imag() == y.imag();
+  return x.real() == THRUST_STD_COMPLEX_REAL(y) && x.imag() == THRUST_STD_COMPLEX_IMAG(y);
 }
 
-template <typename T0, typename T1> 
-__host__ 
+template <typename T0, typename T1>
+__host__ THRUST_STD_COMPLEX_DEVICE
 bool operator==(const std::complex<T0>& x, const complex<T1>& y)
 {
-  return x.real() == y.real() && x.imag() == y.imag();
+  return THRUST_STD_COMPLEX_REAL(x) == y.real() && THRUST_STD_COMPLEX_IMAG(x) == y.imag();
 }
 
-template <typename T0, typename T1> 
+template <typename T0, typename T1>
 __host__ __device__
 bool operator==(const T0& x, const complex<T1>& y)
 {
   return x == y.real() && y.imag() == T1();
 }
 
-template <typename T0, typename T1> 
+template <typename T0, typename T1>
 __host__ __device__
 bool operator==(const complex<T0>& x, const T1& y)
 {
   return x.real() == y && x.imag() == T1();
 }
 
-template <typename T0, typename T1> 
+template <typename T0, typename T1>
 __host__ __device__
 bool operator!=(const complex<T0>& x, const complex<T1>& y)
 {
   return !(x == y);
 }
 
-template <typename T0, typename T1> 
-__host__
+template <typename T0, typename T1>
+__host__ THRUST_STD_COMPLEX_DEVICE
 bool operator!=(const complex<T0>& x, const std::complex<T1>& y)
 {
   return !(x == y);
 }
 
-template <typename T0, typename T1> 
-__host__
+template <typename T0, typename T1>
+__host__ THRUST_STD_COMPLEX_DEVICE
 bool operator!=(const std::complex<T0>& x, const complex<T1>& y)
 {
   return !(x == y);
 }
 
-template <typename T0, typename T1> 
+template <typename T0, typename T1>
 __host__ __device__
 bool operator!=(const T0& x, const complex<T1>& y)
 {
   return !(x == y);
 }
 
-template <typename T0, typename T1> 
+template <typename T0, typename T1>
 __host__ __device__
 bool operator!=(const complex<T0>& x, const T1& y)
 {
   return !(x == y);
 }
+
+// TODO: Uncomment after the thrust update
+//template <typename T>
+//struct proclaim_trivially_relocatable<complex<T> > : thrust::true_type {};
 
 } // end namespace thrust
 
