@@ -41,9 +41,6 @@
     } /* hipcub */
 
 #ifdef __HIP_PLATFORM_HCC__
-    #ifndef ROCPRIM_HIP_API
-        #define ROCPRIM_HIP_API
-    #endif // ROCPRIM_HIP_API
     #include <rocprim/rocprim.hpp>
 
     #define HIPCUB_ROCPRIM_API 1
