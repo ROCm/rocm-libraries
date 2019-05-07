@@ -31,12 +31,12 @@ hipCUBCI:
 
     def hipcub = new rocProject('hipcub')
     // customize for project
-    hipcub.paths.build_command = 'cmake -D CMAKE_CXX_COMPILER="/opt/rocm/hcc/bin/hcc" CMakeLists.txt -Bbuild && cd build && make'
+    hipcub.paths.build_command = 'cmake -D CMAKE_CXX_COMPILER="/opt/rocm/hcc/bin/hcc" CMakeLists.txt -Bbuild && cd build'
 
     // Define test architectures, optional rocm version argument is available
     def nodes = new dockerNodes(['gfx900', 'gfx906'], hipcub)
 
-    boolean formatCheck = true
+    boolean formatCheck = false
 
     def compileCommand =
     {
@@ -56,28 +56,14 @@ hipCUBCI:
     {
         platform, project->
 
-        def command
-
-        if(auxiliary.isJobStartedByTimer())
-        {
-          command = """#!/usr/bin/env bash
+        def command = """#!/usr/bin/env bash
                 set -x
-                cd ${project.paths.project_build_prefix}/build/release/clients/staging
-                LD_LIBRARY_PATH=/opt/rocm/hcc/lib GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./hipcub-test --gtest_output=xml --gtest_color=yes --gtest_filter=*nightly*-*known_bug* #--gtest_filter=*nightly*
+                cd ${project.paths.project_build_prefix}/build
+                make -j4
+                ctest --output-on-failure
             """
-        }
-        else
-        {
-          command = """#!/usr/bin/env bash
-                set -x
-                cd ${project.paths.project_build_prefix}/build/release/clients/staging
-                LD_LIBRARY_PATH=/opt/rocm/hcc/lib ./example-sscal
-                LD_LIBRARY_PATH=/opt/rocm/hcc/lib GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./hipcub-test --gtest_output=xml --gtest_color=yes  --gtest_filter=*quick*:*pre_checkin*-*known_bug* #--gtest_filter=*checkin*
-            """
-        }
 
         platform.runCommand(this, command)
-        junit "${project.paths.project_build_prefix}/build/release/clients/staging/*.xml"
     }
 
     def packageCommand =
@@ -86,7 +72,7 @@ hipCUBCI:
 
         def command = """
                       set -x
-                      cd ${project.paths.project_build_prefix}/build/release
+                      cd ${project.paths.project_build_prefix}/build
                       make package
                       rm -rf package && mkdir -p package
                       mv *.deb package/
@@ -94,7 +80,7 @@ hipCUBCI:
                       """
 
         platform.runCommand(this, command)
-        platform.archiveArtifacts(this, """${project.paths.project_build_prefix}/build/release/package/*.deb""")
+        platform.archiveArtifacts(this, """${project.paths.project_build_prefix}/build/package/*.deb""")
     }
 
     buildProject(hipcub, formatCheck, nodes.dockerArray, compileCommand, testCommand, packageCommand)
