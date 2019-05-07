@@ -27,7 +27,7 @@ Optional:
 
 ## Build And Install
 
-```
+```shell
 git clone https://github.com/ROCmSoftwarePlatform/hipCUB.git
 
 # Go to hipCUB directory, create and go to the build directory.
@@ -76,7 +76,7 @@ target_link_libraries(<your_target> hip::hipcub)
 
 ## Running Unit Tests
 
-```
+```shell
 # Go to hipCUB build directory
 cd hipCUB; cd build
 
@@ -89,7 +89,7 @@ ctest
 
 ## Documentation
 
-```
+```shell
 # go to hipCUB doc directory
 cd hipCUB; cd doc
 
