@@ -162,7 +162,7 @@ void block_load_direct_blocked(unsigned int flat_id,
 /// The following conditions will prevent vectorization and switch to default
 /// block_load_direct_blocked:
 /// * \p ItemsPerThread is odd.
-/// * The datatype \p T is not a primitive or a HC/HIP vector type (e.g. int2,
+/// * The datatype \p T is not a primitive or a HIP vector type (e.g. int2,
 /// int4, etc.
 ///
 /// \tparam T - [inferred] the input data type

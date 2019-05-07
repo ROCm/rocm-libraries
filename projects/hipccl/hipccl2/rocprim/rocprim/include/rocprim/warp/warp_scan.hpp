@@ -84,7 +84,6 @@ struct select_warp_scan_impl
 /// one \p int value, result is returned using the same variable as for input. Hardware
 /// warp size is 64. Block (tile) size is 64.
 ///
-/// \b HIP: \n
 /// \code{.cpp}
 /// __global__ void example_kernel(...)
 /// {
@@ -103,30 +102,6 @@ struct select_warp_scan_impl
 ///     );
 ///     ...
 /// }
-/// \endcode
-///
-/// \b HC: \n
-/// \code{.cpp}
-/// hc::parallel_for_each(
-///     hc::extent<1>(...).tile(64),
-///     [=](hc::tiled_index<1> i) [[hc]]
-///     {
-///         // specialize warp_scan for int and logical warp of 16 threads
-///         using warp_scan_int = rocprim::warp_scan<int, 16>;
-///
-///         // allocate storage in shared memory
-///         tile_static warp_scan_int::storage_type temp[4];
-///
-///         int logical_warp_id = i.local[0]/16;
-///         int value = ...;
-///         // execute inclusive scan
-///         warp_scan_int().inclusive_scan(
-///             value, // input
-///             value, // output
-///             temp[logical_warp_id]
-///         );
-///     }
-/// );
 /// \endcode
 /// \endparblock
 template<
@@ -149,7 +124,7 @@ public:
     ///
     /// Depending on the implemention the operations exposed by parallel primitive may
     /// require a temporary storage for thread communication. The storage should be allocated
-    /// using keywords <tt>__shared__</tt> in HIP or \p tile_static in HC. It can be aliased to
+    /// using keywords <tt>__shared__</tt>. It can be aliased to
     /// an externally allocated memory, or be a part of a union type with other storage types
     /// to increase shared memory reusability.
     using storage_type = typename base_type::storage_type;
@@ -169,8 +144,7 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Examples
     /// \parblock
@@ -178,7 +152,6 @@ public:
     /// each provides one \p float value, result is returned using the same variable as for input.
     /// Hardware warp size is 64. Block (tile) size is 256.
     ///
-    /// \b HIP: \n
     /// \code{.cpp}
     /// __global__ void example_kernel(...) // hipBlockDim_x = 256
     /// {
@@ -200,31 +173,6 @@ public:
     /// }
     /// \endcode
     ///
-    /// \b HC: \n
-    /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(256),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize warp_scan for float and logical warp of 32 threads
-    ///         using warp_scan_f = rocprim::warp_scan<float, 32>;
-    ///
-    ///         // allocate storage in shared memory
-    ///         tile_static warp_scan_f::storage_type temp[8]; // 256/32 = 8
-    ///
-    ///         int logical_warp_id = i.local[0]/32;
-    ///         float value = ...;
-    ///         // execute inclusive min scan
-    ///         warp_scan_float().inclusive_scan(
-    ///             value, // input
-    ///             value, // output
-    ///             temp[logical_warp_id],
-    ///             rocprim::minimum<float>()
-    ///         );
-    ///         ...
-    ///     }
-    /// );
-    /// \endcode
     /// If the input values across threads in a block/tile are <tt>{1, -2, 3, -4, ..., 255, -256}</tt>, then
     /// output values in the first logical warp will be <tt>{1, -2, -2, -4, ..., -32},</tt> in the second:
     /// <tt>{33, -34, -34, -36, ..., -64}</tt> etc.
@@ -255,15 +203,13 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Examples
     /// \parblock
     /// The examples present inclusive prefix sum operations performed on groups of 64 threads,
     /// each thread provides one \p int value. Hardware warp size is 64. Block (tile) size is 256.
     ///
-    /// \b HIP: \n
     /// \code{.cpp}
     /// __global__ void example_kernel(...) // hipBlockDim_x = 256
     /// {
@@ -286,32 +232,6 @@ public:
     /// }
     /// \endcode
     ///
-    /// \b HC: \n
-    /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(256),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize warp_scan for int and logical warp of 64 threads
-    ///         using warp_scan_int = rocprim::warp_scan<int, 64>;
-    ///
-    ///         // allocate storage in shared memory
-    ///         tile_static warp_scan_int::storage_type temp[4]; // 256/64 = 4
-    ///
-    ///         int logical_warp_id = i.local[0]/64;
-    ///         int input = ...;
-    ///         int output, reduction;
-    ///         // inclusive prefix sum
-    ///         warp_scan_int().inclusive_scan(
-    ///             input,
-    ///             output,
-    ///             reduction,
-    ///             temp[logical_warp_id]
-    ///         );
-    ///         ...
-    ///     }
-    /// );
-    /// \endcode
     /// If the \p input values across threads in a block/tile are <tt>{1, 1, 1, 1, ..., 1, 1}</tt>, then
     /// \p output values in the every logical warp will be <tt>{1, 2, 3, 4, ..., 64}</tt>.
     /// The \p reduction will be equal \p 64.
@@ -344,8 +264,7 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Examples
     /// \parblock
@@ -353,7 +272,6 @@ public:
     /// each provides one \p float value, result is returned using the same variable as for input.
     /// Hardware warp size is 64. Block (tile) size is 256.
     ///
-    /// \b HIP: \n
     /// \code{.cpp}
     /// __global__ void example_kernel(...) // hipBlockDim_x = 256
     /// {
@@ -376,32 +294,6 @@ public:
     /// }
     /// \endcode
     ///
-    /// \b HC: \n
-    /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(256),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize warp_scan for float and logical warp of 32 threads
-    ///         using warp_scan_f = rocprim::warp_scan<float, 32>;
-    ///
-    ///         // allocate storage in shared memory
-    ///         tile_static warp_scan_f::storage_type temp[8]; // 256/32 = 8
-    ///
-    ///         int logical_warp_id = i.local[0]/32;
-    ///         float value = ...;
-    ///         // execute exclusive min scan
-    ///         warp_scan_float().exclusive_scan(
-    ///             value, // input
-    ///             value, // output
-    ///             100.0f, // init
-    ///             temp[logical_warp_id],
-    ///             rocprim::minimum<float>()
-    ///         );
-    ///         ...
-    ///     }
-    /// );
-    /// \endcode
     /// If the initial value is \p 100 and input values across threads in a block/tile are
     /// <tt>{1, -2, 3, -4, ..., 255, -256}</tt>, then output values in the first logical
     /// warp will be <tt>{100, 1, -2, -2, -4, ..., -30},</tt> in the second:
@@ -437,15 +329,13 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Examples
     /// \parblock
     /// The examples present exclusive prefix sum operations performed on groups of 64 threads,
     /// each thread provides one \p int value. Hardware warp size is 64. Block (tile) size is 256.
     ///
-    /// \b HIP: \n
     /// \code{.cpp}
     /// __global__ void example_kernel(...) // hipBlockDim_x = 256
     /// {
@@ -469,33 +359,6 @@ public:
     /// }
     /// \endcode
     ///
-    /// \b HC: \n
-    /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(256),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize warp_scan for int and logical warp of 64 threads
-    ///         using warp_scan_int = rocprim::warp_scan<int, 64>;
-    ///
-    ///         // allocate storage in shared memory
-    ///         tile_static warp_scan_int::storage_type temp[4]; // 256/64 = 4
-    ///
-    ///         int logical_warp_id = i.local[0]/64;
-    ///         int input = ...;
-    ///         int output, reduction;
-    ///         // exclusive prefix sum
-    ///         warp_scan_int().exclusive_scan(
-    ///             input,
-    ///             output,
-    ///             10, // init
-    ///             reduction,
-    ///             temp[logical_warp_id]
-    ///         );
-    ///         ...
-    ///     }
-    /// );
-    /// \endcode
     /// If the initial value is \p 10 and \p input values across threads in a block/tile are
     /// <tt>{1, 1, ..., 1, 1}</tt>, then \p output values in every logical warp will be
     /// <tt>{10, 11, 12, 13, ..., 73}</tt>. The \p reduction will be 64.
@@ -531,8 +394,7 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Examples
     /// \parblock
@@ -540,7 +402,6 @@ public:
     /// each provides one \p float value, result is returned using the same variable as for input.
     /// Hardware warp size is 64. Block (tile) size is 256.
     ///
-    /// \b HIP: \n
     /// \code{.cpp}
     /// __global__ void example_kernel(...) // hipBlockDim_x = 256
     /// {
@@ -565,34 +426,6 @@ public:
     /// }
     /// \endcode
     ///
-    /// \b HC: \n
-    /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(256),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize warp_scan for float and logical warp of 32 threads
-    ///         using warp_scan_f = rocprim::warp_scan<float, 32>;
-    ///
-    ///         // allocate storage in shared memory
-    ///         tile_static warp_scan_f::storage_type temp[8]; // 256/32 = 8
-    ///
-    ///         int logical_warp_id = i.local[0]/32;
-    ///         float input = ...;
-    ///         float ex_output, in_output;
-    ///         // execute exclusive min scan
-    ///         warp_scan_float().scan(
-    ///             input,
-    ///             in_output,
-    ///             ex_output,
-    ///             100.0f, // init
-    ///             temp[logical_warp_id],
-    ///             rocprim::minimum<float>()
-    ///         );
-    ///         ...
-    ///     }
-    /// );
-    /// \endcode
     /// If the initial value is \p 100 and input values across threads in a block/tile are
     /// <tt>{1, -2, 3, -4, ..., 255, -256}</tt>, then \p in_output values in the first logical
     /// warp will be <tt>{1, -2, -2, -4, ..., -32},</tt> in the second:
@@ -633,8 +466,7 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Examples
     /// \parblock
@@ -642,7 +474,6 @@ public:
     /// of 64 threads, each thread provides one \p int value. Hardware warp size is 64.
     /// Block (tile) size is 256.
     ///
-    /// \b HIP: \n
     /// \code{.cpp}
     /// __global__ void example_kernel(...) // hipBlockDim_x = 256
     /// {
@@ -667,34 +498,6 @@ public:
     /// }
     /// \endcode
     ///
-    /// \b HC: \n
-    /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(256),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize warp_scan for int and logical warp of 64 threads
-    ///         using warp_scan_int = rocprim::warp_scan<int, 64>;
-    ///
-    ///         // allocate storage in shared memory
-    ///         tile_static warp_scan_int::storage_type temp[4]; // 256/64 = 4
-    ///
-    ///         int logical_warp_id = i.local[0]/64;
-    ///         int input = ...;
-    ///         int in_output, ex_output, reduction;
-    ///         // inclusive and exclusive prefix sum
-    ///         warp_scan_int().scan(
-    ///             input,
-    ///             in_output,
-    ///             ex_output,
-    ///             init,
-    ///             reduction,
-    ///             temp[logical_warp_id]
-    ///         );
-    ///         ...
-    ///     }
-    /// );
-    /// \endcode
     /// If the initial value is \p 10 and \p input values across threads in a block/tile are
     /// <tt>{1, 1, ..., 1, 1}</tt>, then \p in_output values in every logical warp will be
     /// <tt>{1, 2, 3, 4, ..., 63, 64}</tt>, and \p ex_output values in every logical warp will
@@ -724,8 +527,7 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ROCPRIM_DEVICE inline
     T broadcast(T input,
                 const unsigned int src_lane,

@@ -40,33 +40,27 @@ namespace detail
 {
 
 // Define vector types that will be used by rocPRIM internally.
-#ifdef ROCPRIM_HC_API
-    #define DEFINE_VECTOR_TYPE(name, base) \
-    using name##2 = ::hc::short_vector::name##2; \
-    using name##4 = ::hc::short_vector::name##4;
-#else // ROCPRIM_HIP_API
-    // We don't use HIP vector types because they don't generate correct
-    // load/store operations, see https://github.com/RadeonOpenCompute/ROCm/issues/341
-    #define DEFINE_VECTOR_TYPE(name, base) \
-    \
-    struct name##2 \
-    { \
-        typedef base vector_value_type __attribute__((ext_vector_type(2))); \
-        union { \
-            vector_value_type data; \
-            struct { base x, y; }; \
-        }; \
-    } __attribute__((aligned(sizeof(base) * 2))); \
-    \
-    struct name##4 \
-    { \
-        typedef base vector_value_type __attribute__((ext_vector_type(4))); \
-        union { \
-            vector_value_type data; \
-            struct { base x, y, w, z; }; \
-        }; \
-    } __attribute__((aligned(sizeof(base) * 4)));
-#endif
+// We don't use HIP vector types because they don't generate correct
+// load/store operations, see https://github.com/RadeonOpenCompute/ROCm/issues/341
+#define DEFINE_VECTOR_TYPE(name, base) \
+\
+struct name##2 \
+{ \
+    typedef base vector_value_type __attribute__((ext_vector_type(2))); \
+    union { \
+        vector_value_type data; \
+        struct { base x, y; }; \
+    }; \
+} __attribute__((aligned(sizeof(base) * 2))); \
+\
+struct name##4 \
+{ \
+    typedef base vector_value_type __attribute__((ext_vector_type(4))); \
+    union { \
+        vector_value_type data; \
+        struct { base x, y, w, z; }; \
+    }; \
+} __attribute__((aligned(sizeof(base) * 4)));
 
 DEFINE_VECTOR_TYPE(char, char);
 DEFINE_VECTOR_TYPE(short, short);
@@ -116,11 +110,7 @@ struct empty_type
 };
 
 /// \brief Half-precision floating point type
-#ifdef ROCPRIM_HC_API
-    using half = ::hc::half;
-#else // HIP
-    using half = ::__half;
-#endif
+using half = ::__half;
 
 END_ROCPRIM_NAMESPACE
 
