@@ -95,7 +95,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanSum)
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, 1, 1);
+        std::vector<T> input = test_utils::get_random_data<T>(size, 1, 10);
         std::vector<U> output(input.size(), 0);
 
         T * d_input;
