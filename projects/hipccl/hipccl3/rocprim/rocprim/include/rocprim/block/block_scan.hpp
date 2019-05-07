@@ -103,7 +103,6 @@ struct select_block_scan_impl<block_scan_algorithm::reduce_then_scan>
 /// In the examples scan operation is performed on block of 192 threads, each provides
 /// one \p int value, result is returned using the same variable as for input.
 ///
-/// \b HIP: \n
 /// \code{.cpp}
 /// __global__ void example_kernel(...)
 /// {
@@ -121,29 +120,6 @@ struct select_block_scan_impl<block_scan_algorithm::reduce_then_scan>
 ///     );
 ///     ...
 /// }
-/// \endcode
-///
-/// \b HC: \n
-/// \code{.cpp}
-/// hc::parallel_for_each(
-///     hc::extent<1>(...).tile(64),
-///     [=](hc::tiled_index<1> i) [[hc]]
-///     {
-///         // specialize warp_scan for int and logical warp of 16 threads
-///         using block_scan_int = rocprim::block_scan<int, 192>;
-///
-///         // allocate storage in shared memory
-///         tile_static block_scan_int::storage_type storage;///
-///
-///         int value = ...;
-///         // execute inclusive scan
-///         block_scan_int().inclusive_scan(
-///             value, // input
-///             value, // output
-///             storage
-///         );
-///     }
-/// );
 /// \endcode
 /// \endparblock
 template<
@@ -163,7 +139,7 @@ public:
     ///
     /// Depending on the implemention the operations exposed by parallel primitive may
     /// require a temporary storage for thread communication. The storage should be allocated
-    /// using keywords <tt>__shared__</tt> in HIP or \p tile_static in HC. It can be aliased to
+    /// using keywords <tt>__shared__</tt>. It can be aliased to
     /// an externally allocated memory, or be a part of a union type with other storage types
     /// to increase shared memory reusability.
     using storage_type = typename base_type::storage_type;
@@ -183,15 +159,13 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Examples
     /// \parblock
     /// The examples present inclusive min scan operations performed on a block of 256 threads,
     /// each provides one \p float value.
     ///
-    /// \b HIP: \n
     /// \code{.cpp}
     /// __global__ void example_kernel(...) // hipBlockDim_x = 256
     /// {
@@ -213,30 +187,6 @@ public:
     /// }
     /// \endcode
     ///
-    /// \b HC: \n
-    /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(256),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize block_scan for float and block of 256 threads
-    ///         using block_scan_f = rocprim::block_scan<float, 256>;
-    ///         // allocate storage in shared memory for the block
-    ///         __shared__ block_scan_float::storage_type storage;
-    ///
-    ///         float input = ...;
-    ///         float output;
-    ///         // execute inclusive min scan
-    ///         block_scan_float().inclusive_scan(
-    ///             input,
-    ///             output,
-    ///             storage,
-    ///             rocprim::minimum<float>()
-    ///         );
-    ///         ...
-    ///     }
-    /// );
-    /// \endcode
     /// If the \p input values across threads in a block are <tt>{1, -2, 3, -4, ..., 255, -256}</tt>, then
     /// \p output values in will be <tt>{1, -2, -2, -4, ..., -254, -256}</tt>.
     /// \endparblock
@@ -290,15 +240,13 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Examples
     /// \parblock
     /// The examples present inclusive min scan operations performed on a block of 256 threads,
     /// each provides one \p float value.
     ///
-    /// \b HIP: \n
     /// \code{.cpp}
     /// __global__ void example_kernel(...) // hipBlockDim_x = 256
     /// {
@@ -322,32 +270,6 @@ public:
     /// }
     /// \endcode
     ///
-    /// \b HC: \n
-    /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(256),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize block_scan for float and block of 256 threads
-    ///         using block_scan_f = rocprim::block_scan<float, 256>;
-    ///         // allocate storage in shared memory for the block
-    ///         __shared__ block_scan_float::storage_type storage;
-    ///
-    ///         float input = ...;
-    ///         float output;
-    ///         float reduction;
-    ///         // execute inclusive min scan
-    ///         block_scan_float().inclusive_scan(
-    ///             input,
-    ///             output,
-    ///             reduction,
-    ///             storage,
-    ///             rocprim::minimum<float>()
-    ///         );
-    ///         ...
-    ///     }
-    /// );
-    /// \endcode
     /// If the \p input values across threads in a block are <tt>{1, -2, 3, -4, ..., 255, -256}</tt>, then
     /// \p output values in will be <tt>{1, -2, -2, -4, ..., -254, -256}</tt>, and the \p reduction will
     /// be <tt>-256</tt>.
@@ -404,7 +326,7 @@ public:
     /// The signature of the \p prefix_callback_op should be equivalent to the following:
     /// <tt>T f(const T &block_reduction);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
-    /// The object will be called by the first warp of the block with block reduction of 
+    /// The object will be called by the first warp of the block with block reduction of
     /// \p input values as input argument. The result of the first thread will be used as the
     /// block-wide prefix.
     /// \param [in] scan_op - binary operation function object that will be used for scan.
@@ -414,15 +336,13 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Examples
     /// \parblock
     /// The examples present inclusive prefix sum operations performed on a block of 256 threads,
     /// each thread provides one \p int value.
     ///
-    /// \b HIP: \n
     /// \code{.cpp}
     ///
     /// struct my_block_prefix
@@ -463,39 +383,6 @@ public:
     /// }
     /// \endcode
     ///
-    /// \b HC: \n
-    /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(256),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize block_scan for int and block of 256 threads
-    ///         using block_scan_f = rocprim::block_scan<int, 256>;
-    ///         // allocate storage in shared memory for the block
-    ///         __shared__ block_scan_int::storage_type storage;
-    ///
-    ///         int prefix = 10;
-    ///         auto prefix_callback = [&prefix](int reduction)
-    ///         {
-    ///             int old_prefix = prefix;
-    ///             prefix += reduction;
-    ///             return old_prefix;
-    ///         };
-    ///
-    ///         int input = ...;
-    ///         int output;
-    ///         // execute inclusive min scan
-    ///         block_scan_int().inclusive_scan(
-    ///             input,
-    ///             output,
-    ///             storage,
-    ///             prefix_callback,
-    ///             rocprim::plus<int>()
-    ///         );
-    ///         ...
-    ///     }
-    /// );
-    /// \endcode
     /// If the \p input values across threads in a block are <tt>{1, 1, 1, ..., 1}</tt>, then
     /// \p output values in will be <tt>{11, 12, 13, ..., 266}</tt>, and the \p prefix will
     /// be <tt>266</tt>.
@@ -530,15 +417,13 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Examples
     /// \parblock
     /// The examples present inclusive maximum scan operations performed on a block of 128 threads,
     /// each provides two \p long value.
     ///
-    /// \b HIP: \n
     /// \code{.cpp}
     /// __global__ void example_kernel(...) // hipBlockDim_x = 128
     /// {
@@ -560,30 +445,6 @@ public:
     /// }
     /// \endcode
     ///
-    /// \b HC: \n
-    /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(128),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize block_scan for long and block of 128 threads
-    ///         using block_scan_f = rocprim::block_scan<long, 128>;
-    ///         // allocate storage in shared memory for the block
-    ///         __shared__ block_scan_long::storage_type storage;
-    ///
-    ///         long input[2] = ...;
-    ///         long output[2];
-    ///         // execute inclusive min scan
-    ///         block_scan_long().inclusive_scan(
-    ///             input,
-    ///             output,
-    ///             storage,
-    ///             rocprim::maximum<long>()
-    ///         );
-    ///         ...
-    ///     }
-    /// );
-    /// \endcode
     /// If the \p input values across threads in a block are <tt>{-1, 2, -3, 4, ..., -255, 256}</tt>, then
     /// \p output values in will be <tt>{-1, 2, 2, 4, ..., 254, 256}</tt>.
     /// \endparblock
@@ -659,15 +520,13 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Examples
     /// \parblock
     /// The examples present inclusive maximum scan operations performed on a block of 128 threads,
     /// each provides two \p long value.
     ///
-    /// \b HIP: \n
     /// \code{.cpp}
     /// __global__ void example_kernel(...) // hipBlockDim_x = 128
     /// {
@@ -691,32 +550,6 @@ public:
     /// }
     /// \endcode
     ///
-    /// \b HC: \n
-    /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(128),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize block_scan for long and block of 128 threads
-    ///         using block_scan_f = rocprim::block_scan<long, 128>;
-    ///         // allocate storage in shared memory for the block
-    ///         __shared__ block_scan_long::storage_type storage;
-    ///
-    ///         long input[2] = ...;
-    ///         long output[2];
-    ///         long reduction;
-    ///         // execute inclusive min scan
-    ///         block_scan_long().inclusive_scan(
-    ///             input,
-    ///             output,
-    ///             reduction,
-    ///             storage,
-    ///             rocprim::maximum<long>()
-    ///         );
-    ///         ...
-    ///     }
-    /// );
-    /// \endcode
     /// If the \p input values across threads in a block are <tt>{-1, 2, -3, 4, ..., -255, 256}</tt>, then
     /// \p output values in will be <tt>{-1, 2, 2, 4, ..., 254, 256}</tt> and the \p reduction will be \p 256.
     /// \endparblock
@@ -794,7 +627,7 @@ public:
     /// The signature of the \p prefix_callback_op should be equivalent to the following:
     /// <tt>T f(const T &block_reduction);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
-    /// The object will be called by the first warp of the block with block reduction of 
+    /// The object will be called by the first warp of the block with block reduction of
     /// \p input values as input argument. The result of the first thread will be used as the
     /// block-wide prefix.
     /// \param [in] scan_op - binary operation function object that will be used for scan.
@@ -804,15 +637,13 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Examples
     /// \parblock
     /// The examples present inclusive prefix sum operations performed on a block of 128 threads,
     /// each thread provides two \p int value.
     ///
-    /// \b HIP: \n
     /// \code{.cpp}
     ///
     /// struct my_block_prefix
@@ -853,39 +684,6 @@ public:
     /// }
     /// \endcode
     ///
-    /// \b HC: \n
-    /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(256),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize block_scan for int and block of 256 threads
-    ///         using block_scan_f = rocprim::block_scan<int, 256>;
-    ///         // allocate storage in shared memory for the block
-    ///         __shared__ block_scan_int::storage_type storage;
-    ///
-    ///         int prefix = 10;
-    ///         auto prefix_callback = [&prefix](int reduction)
-    ///         {
-    ///             int old_prefix = prefix;
-    ///             prefix += reduction;
-    ///             return old_prefix;
-    ///         };
-    ///
-    ///         int input[2] = ...;
-    ///         int output[2];
-    ///         // execute inclusive min scan
-    ///         block_scan_int().inclusive_scan(
-    ///             input,
-    ///             output,
-    ///             storage,
-    ///             prefix_callback,
-    ///             rocprim::plus<int>()
-    ///         );
-    ///         ...
-    ///     }
-    /// );
-    /// \endcode
     /// If the \p input values across threads in a block are <tt>{1, 1, 1, ..., 1}</tt>, then
     /// \p output values in will be <tt>{11, 12, 13, ..., 266}</tt>, and the \p prefix will
     /// be <tt>266</tt>.
@@ -929,15 +727,13 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Examples
     /// \parblock
     /// The examples present exclusive min scan operations performed on a block of 256 threads,
     /// each provides one \p float value.
     ///
-    /// \b HIP: \n
     /// \code{.cpp}
     /// __global__ void example_kernel(...) // hipBlockDim_x = 256
     /// {
@@ -961,32 +757,6 @@ public:
     /// }
     /// \endcode
     ///
-    /// \b HC: \n
-    /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(256),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize block_scan for float and block of 256 threads
-    ///         using block_scan_f = rocprim::block_scan<float, 256>;
-    ///         // allocate storage in shared memory for the block
-    ///         __shared__ block_scan_float::storage_type storage;
-    ///
-    ///         float init = ...;
-    ///         float input = ...;
-    ///         float output;
-    ///         // execute exclusive min scan
-    ///         block_scan_float().exclusive_scan(
-    ///             input,
-    ///             output,
-    ///             init,
-    ///             storage,
-    ///             rocprim::minimum<float>()
-    ///         );
-    ///         ...
-    ///     }
-    /// );
-    /// \endcode
     /// If the \p input values across threads in a block are <tt>{1, -2, 3, -4, ..., 255, -256}</tt>
     /// and \p init is \p 0, then \p output values in will be <tt>{0, 0, -2, -2, -4, ..., -254, -254}</tt>.
     /// \endparblock
@@ -1046,15 +816,13 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Examples
     /// \parblock
     /// The examples present exclusive min scan operations performed on a block of 256 threads,
     /// each provides one \p float value.
     ///
-    /// \b HIP: \n
     /// \code{.cpp}
     /// __global__ void example_kernel(...) // hipBlockDim_x = 256
     /// {
@@ -1080,34 +848,6 @@ public:
     /// }
     /// \endcode
     ///
-    /// \b HC: \n
-    /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(256),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize block_scan for float and block of 256 threads
-    ///         using block_scan_f = rocprim::block_scan<float, 256>;
-    ///         // allocate storage in shared memory for the block
-    ///         __shared__ block_scan_float::storage_type storage;
-    ///
-    ///         float init = 0;
-    ///         float input = ...;
-    ///         float output;
-    ///         float reduction;
-    ///         // execute exclusive min scan
-    ///         block_scan_float().exclusive_scan(
-    ///             input,
-    ///             output,
-    ///             init,
-    ///             reduction,
-    ///             storage,
-    ///             rocprim::minimum<float>()
-    ///         );
-    ///         ...
-    ///     }
-    /// );
-    /// \endcode
     /// If the \p input values across threads in a block are <tt>{1, -2, 3, -4, ..., 255, -256}</tt>
     /// and \p init is \p 0, then \p output values in will be <tt>{0, 0, -2, -2, -4, ..., -254, -254}</tt>
     /// and the \p reduction will be \p -256.
@@ -1168,7 +908,7 @@ public:
     /// The signature of the \p prefix_callback_op should be equivalent to the following:
     /// <tt>T f(const T &block_reduction);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
-    /// The object will be called by the first warp of the block with block reduction of 
+    /// The object will be called by the first warp of the block with block reduction of
     /// \p input values as input argument. The result of the first thread will be used as the
     /// block-wide prefix.
     /// \param [in] scan_op - binary operation function object that will be used for scan.
@@ -1178,15 +918,13 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Examples
     /// \parblock
     /// The examples present exclusive prefix sum operations performed on a block of 256 threads,
     /// each thread provides one \p int value.
     ///
-    /// \b HIP: \n
     /// \code{.cpp}
     ///
     /// struct my_block_prefix
@@ -1227,39 +965,6 @@ public:
     /// }
     /// \endcode
     ///
-    /// \b HC: \n
-    /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(256),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize block_scan for int and block of 256 threads
-    ///         using block_scan_f = rocprim::block_scan<int, 256>;
-    ///         // allocate storage in shared memory for the block
-    ///         __shared__ block_scan_int::storage_type storage;
-    ///
-    ///         int prefix = 10;
-    ///         auto prefix_callback = [&prefix](int reduction)
-    ///         {
-    ///             int old_prefix = prefix;
-    ///             prefix += reduction;
-    ///             return old_prefix;
-    ///         };
-    ///
-    ///         int input = ...;
-    ///         int output;
-    ///         // execute exclusive min scan
-    ///         block_scan_int().exclusive_scan(
-    ///             input,
-    ///             output,
-    ///             storage,
-    ///             prefix_callback,
-    ///             rocprim::plus<int>()
-    ///         );
-    ///         ...
-    ///     }
-    /// );
-    /// \endcode
     /// If the \p input values across threads in a block are <tt>{1, 1, 1, ..., 1}</tt>, then
     /// \p output values in will be <tt>{10, 11, 12, 13, ..., 265}</tt>, and the \p prefix will
     /// be <tt>266</tt>.
@@ -1296,15 +1001,13 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Examples
     /// \parblock
     /// The examples present exclusive maximum scan operations performed on a block of 128 threads,
     /// each provides two \p long value.
     ///
-    /// \b HIP: \n
     /// \code{.cpp}
     /// __global__ void example_kernel(...) // hipBlockDim_x = 128
     /// {
@@ -1328,32 +1031,6 @@ public:
     /// }
     /// \endcode
     ///
-    /// \b HC: \n
-    /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(128),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize block_scan for long and block of 128 threads
-    ///         using block_scan_f = rocprim::block_scan<long, 128>;
-    ///         // allocate storage in shared memory for the block
-    ///         __shared__ block_scan_long::storage_type storage;
-    ///
-    ///         long init = ...;
-    ///         long input[2] = ...;
-    ///         long output[2];
-    ///         // execute exclusive min scan
-    ///         block_scan_long().exclusive_scan(
-    ///             input,
-    ///             output,
-    ///             init,
-    ///             storage,
-    ///             rocprim::maximum<long>()
-    ///         );
-    ///         ...
-    ///     }
-    /// );
-    /// \endcode
     /// If the \p input values across threads in a block are <tt>{-1, 2, -3, 4, ..., -255, 256}</tt>
     /// and \p init is 0, then \p output values in will be <tt>{0, 0, 2, 2, 4, ..., 254, 254}</tt>.
     /// \endparblock
@@ -1435,15 +1112,13 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Examples
     /// \parblock
     /// The examples present exclusive maximum scan operations performed on a block of 128 threads,
     /// each provides two \p long value.
     ///
-    /// \b HIP: \n
     /// \code{.cpp}
     /// __global__ void example_kernel(...) // hipBlockDim_x = 128
     /// {
@@ -1469,34 +1144,6 @@ public:
     /// }
     /// \endcode
     ///
-    /// \b HC: \n
-    /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(128),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize block_scan for long and block of 128 threads
-    ///         using block_scan_f = rocprim::block_scan<long, 128>;
-    ///         // allocate storage in shared memory for the block
-    ///         __shared__ block_scan_long::storage_type storage;
-    ///
-    ///         long init = ...;
-    ///         long input[2] = ...;
-    ///         long output[2];
-    ///         long reduction;
-    ///         // execute exclusive min scan
-    ///         block_scan_long().exclusive_scan(
-    ///             input,
-    ///             output,
-    ///             init,
-    ///             reduction,
-    ///             storage,
-    ///             rocprim::maximum<long>()
-    ///         );
-    ///         ...
-    ///     }
-    /// );
-    /// \endcode
     /// If the \p input values across threads in a block are <tt>{-1, 2, -3, 4, ..., -255, 256}</tt>
     /// and \p init is 0, then \p output values in will be <tt>{0, 0, 2, 2, 4, ..., 254, 254}</tt>
     /// and the \p reduction will be \p 256.
@@ -1579,7 +1226,7 @@ public:
     /// The signature of the \p prefix_callback_op should be equivalent to the following:
     /// <tt>T f(const T &block_reduction);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
-    /// The object will be called by the first warp of the block with block reduction of 
+    /// The object will be called by the first warp of the block with block reduction of
     /// \p input values as input argument. The result of the first thread will be used as the
     /// block-wide prefix.
     /// \param [in] scan_op - binary operation function object that will be used for scan.
@@ -1589,15 +1236,13 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Examples
     /// \parblock
     /// The examples present exclusive prefix sum operations performed on a block of 128 threads,
     /// each thread provides two \p int value.
     ///
-    /// \b HIP: \n
     /// \code{.cpp}
     ///
     /// struct my_block_prefix
@@ -1638,39 +1283,6 @@ public:
     /// }
     /// \endcode
     ///
-    /// \b HC: \n
-    /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(256),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize block_scan for int and block of 256 threads
-    ///         using block_scan_f = rocprim::block_scan<int, 256>;
-    ///         // allocate storage in shared memory for the block
-    ///         __shared__ block_scan_int::storage_type storage;
-    ///
-    ///         int prefix = 10;
-    ///         auto prefix_callback = [&prefix](int reduction)
-    ///         {
-    ///             int old_prefix = prefix;
-    ///             prefix += reduction;
-    ///             return old_prefix;
-    ///         };
-    ///
-    ///         int input[2] = ...;
-    ///         int output[2];
-    ///         // execute exclusive min scan
-    ///         block_scan_int().exclusive_scan(
-    ///             input,
-    ///             output,
-    ///             storage,
-    ///             prefix_callback,
-    ///             rocprim::plus<int>()
-    ///         );
-    ///         ...
-    ///     }
-    /// );
-    /// \endcode
     /// If the \p input values across threads in a block are <tt>{1, 1, 1, ..., 1}</tt>, then
     /// \p output values in will be <tt>{10, 11, 12, 13, ..., 265}</tt>, and the \p prefix will
     /// be <tt>266</tt>.

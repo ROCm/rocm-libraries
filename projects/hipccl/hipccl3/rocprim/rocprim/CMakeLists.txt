@@ -39,38 +39,10 @@ target_include_directories(rocprim
     $<INSTALL_INTERFACE:rocprim/include/>
 )
 
-# This target allows using only HC interface, links only
-# against HC/HSA library, doesn't require HIP
-if(HIP_COMPILER STREQUAL "hcc" OR hcc_FOUND)
-  add_library(rocprim_hc INTERFACE)
-  target_link_libraries(rocprim_hc
-    INTERFACE
-      rocprim
-      hcc::hccrt
-      hcc::hc_am
-  )
-  target_compile_definitions(rocprim_hc
-    INTERFACE
-      ROCPRIM_HC_API=1
-  )
-endif()
-
-
-# This target allows using both HIP and HC interfaces,
-# links against HIP library (which depends on HC)
+# This target links against HIP library
 add_library(rocprim_hip INTERFACE)
+target_link_libraries(rocprim_hip INTERFACE rocprim hip::device)
 
-# Remove this check when we no longer build with older rocm stack(ie < 1.8.2)
-if(TARGET hip::device)
-  target_link_libraries(rocprim_hip INTERFACE rocprim hip::device)
-else()
-  target_link_libraries(rocprim_hip INTERFACE rocprim hip::hip_hcc hip::hip_device)
-endif()
-
-target_compile_definitions(rocprim_hip
-  INTERFACE
-    ROCPRIM_HIP_API=1
-)
 
 # Installation
 
@@ -79,15 +51,6 @@ set(INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_INCLUDEDIR})
 
 # We need to install headers manually as rocm_install_targets
 # does not support header-only libraries (INTERFACE targets)
-if(TARGET rocprim_hc)
-rocm_install_targets(
-  TARGETS rocprim rocprim_hip rocprim_hc
-#   INCLUDE
-#   ${CMAKE_SOURCE_DIR}/rocprim/include
-#   ${CMAKE_BINARY_DIR}/rocprim/include
-  PREFIX rocprim
-)
-else()
 rocm_install_targets(
   TARGETS rocprim rocprim_hip
 #   INCLUDE
@@ -95,7 +58,6 @@ rocm_install_targets(
 #   ${CMAKE_BINARY_DIR}/rocprim/include
   PREFIX rocprim
 )
-endif()
 
 install(
   DIRECTORY
