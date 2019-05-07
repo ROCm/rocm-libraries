@@ -1,14 +1,23 @@
-test:rocm241:
-  extends: .unittest
+test:vega20:
+  extends: .test
+  dependencies:
+    - build:rocm
   tags:
-    - tag241
+    - vega20
+    - rocm
 
-test:rocm243:
-  extends: .unittest
+test:s9300:
+  extends: .test
+  dependencies:
+    - build:rocm
   tags:
-    - tag243
+    - s9300
+    - rocm
 
-test:rocm244:
-  extends: .unittest
+test:mi25:
+  extends: .test
+  dependencies:
+    - build:rocm
   tags:
-    - tag244
+    - mi25
+    - rocm 
