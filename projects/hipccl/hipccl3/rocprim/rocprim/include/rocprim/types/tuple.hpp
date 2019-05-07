@@ -58,7 +58,7 @@ template<class... Types>
 class tuple_size<::rocprim::tuple<Types...>> : public std::integral_constant<size_t, sizeof...(Types)>
 {
     // All member functions of std::integral_constant are constexpr, so it should work
-    // without problems on HC and HIP
+    // without problems on HIP
 };
 /// <tt>const T</tt> specialization of \ref tuple_size
 template<class T>

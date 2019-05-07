@@ -1,6 +1,6 @@
 # rocPRIM
 
-The rocPRIM is a header-only library providing HIP and HC parallel primitives for developing
+The rocPRIM is a header-only library providing HIP parallel primitives for developing
 performant GPU-accelerated code on AMD ROCm platform.
 
 ## Requirements
@@ -22,7 +22,7 @@ Optional:
 
 ## Build and Install
 
-```
+```shell
 git clone https://github.com/ROCmSoftwarePlatform/rocPRIM.git
 
 # Go to rocPRIM directory, create and go to the build directory.
@@ -49,18 +49,12 @@ ctest --output-on-failure
 [sudo] make install
 ```
 
-### Using rocPRIM's HC and HIP APIs
+### Using rocPRIM
 
-rocPRIM provides two separate APIs that work on ROCm platform: HC and HIP API. After including
-`<rocprim/rocprim.hpp>` header the default API is HIP. In order to switch to HC API user has to
-define `ROCPRIM_HC_API` before the `#include` statement. Alternatively, user can include
-`<rocprim/rocprim_hc.hpp>` or `<rocprim/rocprim_hip.hpp>`, in this case `ROCPRIM_HIP_API` or
-`ROCPRIM_HC_API` should not be defined.
+Include `<rocprim/rocprim.hpp>` header:
 
 ```cpp
-#include <rocprim/rocprim.hpp>     // defaults to HIP API, unless ROCPRIM_HC_API defined before
-#include <rocprim/rocprim_hip.hpp> // HIP API
-#include <rocprim/rocprim_hc.hpp>  // HC API
+#include <rocprim/rocprim.hpp>
 ```
 
 Recommended way of including rocPRIM into a CMake project is by using its package
@@ -72,12 +66,9 @@ find_package(rocprim REQUIRED CONFIG PATHS "/opt/rocm/rocprim")
 
 ...
 
-# Includes only rocPRIM headers, HC/HIP libraries have
+# Includes only rocPRIM headers, HIP libraries have
 # to be linked manually by user
 target_link_libraries(<your_target> roc::rocprim)
-
-# Includes rocPRIM headers and required HC dependencies
-target_link_libraries(<your_target> roc::rocprim_hc)
 
 # Includes rocPRIM headers and required HIP dependencies
 target_link_libraries(<your_target> roc::rocprim_hip)
@@ -85,7 +76,7 @@ target_link_libraries(<your_target> roc::rocprim_hip)
 
 ## Running Unit Tests
 
-```
+```shell
 # Go to rocPRIM build directory
 cd rocPRIM; cd build
 
@@ -98,27 +89,24 @@ ctest
 
 ## Running Benchmarks
 
-```
+```shell
 # Go to rocPRIM build directory
 cd rocPRIM; cd build
 
 # To run benchmark for warp functions:
 # Further option can be found using --help
 # [] Fields are optional
-./benchmark/benchmark_hc_warp_<function_name> [--size <size>] [--trials <trials>]
-./benchmark/benchmark_hip_warp_<function_name> [--size <size>] [--trials <trials>]
+./benchmark/benchmark_warp_<function_name> [--size <size>] [--trials <trials>]
 
 # To run benchmark for block functions:
 # Further option can be found using --help
 # [] Fields are optional
-./benchmark/benchmark_hc_block_<function_name> [--size <size>] [--trials <trials>]
-./benchmark/benchmark_hip_block_<function_name> [--size <size>] [--trials <trials>]
+./benchmark/benchmark_block_<function_name> [--size <size>] [--trials <trials>]
 
 # To run benchmark for device functions:
 # Further option can be found using --help
 # [] Fields are optional
-./benchmark/benchmark_hc_device_<function_name> [--size <size>] [--trials <trials>]
-./benchmark/benchmark_hip_device_<function_name> [--size <size>] [--trials <trials>]
+./benchmark/benchmark_device_<function_name> [--size <size>] [--trials <trials>]
 ```
 
 ### Performance configuration
@@ -134,7 +122,7 @@ should be optimized for gfx803 GCN version, or to `900` for gfx900.
 
 ## Documentation
 
-```
+```shell
 # go to rocPRIM doc directory
 cd rocPRIM; cd doc
 
@@ -146,11 +134,11 @@ doxygen Doxyfile
 
 ## hipCUB
 
-hipCUB is a thin wrapper library on top of [rocPRIM](https://github.com/ROCmSoftwarePlatform/rocPRIM) or
-[CUB](https://github.com/NVlabs/cub). It enables developers to port project that uses CUB library to the
+[hipCUB](https://github.com/ROCmSoftwarePlatform/hipCUB/) is a thin wrapper library on top of
+[rocPRIM](https://github.com/ROCmSoftwarePlatform/rocPRIM) or [CUB](https://github.com/NVlabs/cub).
+It enables developers to port project that uses CUB library to the
 [HIP](https://github.com/ROCm-Developer-Tools/HIP) layer and to run them on AMD hardware. In [ROCm](https://rocm.github.io/)
 environment hipCUB uses rocPRIM library as the backend, however, on CUDA platforms it uses CUB instead.
-
 
 ## Support
 

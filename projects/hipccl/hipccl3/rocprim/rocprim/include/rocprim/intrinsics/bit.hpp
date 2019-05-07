@@ -41,11 +41,7 @@ int get_bit(int x, int i)
 ROCPRIM_DEVICE inline
 unsigned int bit_count(unsigned int x)
 {
-    #ifdef ROCPRIM_HC_API
-        return hc::__popcount_u32_b32(x);
-    #else
-        return __popc(x);
-    #endif
+    return __popc(x);
 }
 
 /// \brief Bit count
@@ -54,11 +50,7 @@ unsigned int bit_count(unsigned int x)
 ROCPRIM_DEVICE inline
 unsigned int bit_count(unsigned long long x)
 {
-    #ifdef ROCPRIM_HC_API
-        return hc::__popcount_u32_b64(x);
-    #else
-        return __popcll(x);
-    #endif
+    return __popcll(x);
 }
 
 /// @}

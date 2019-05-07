@@ -57,7 +57,7 @@ enum class block_load_method
     /// * The following conditions will prevent vectorization and switch to default
     /// \p block_load_direct:
     ///   * \p ItemsPerThread is odd.
-    ///   * The datatype \p T is not a primitive or a HC/HIP vector type (e.g. int2,
+    ///   * The datatype \p T is not a primitive or a HIP vector type (e.g. int2,
     /// int4, etc.
     block_load_vectorize,
 
@@ -107,9 +107,8 @@ enum class block_load_method
 /// In the examples load operation is performed on block of 128 threads, using type
 /// \p int and 8 items per thread.
 ///
-/// \b HIP: \n
 /// \code{.cpp}
-/// __global__ void ExampleKernel(int * input, ...)
+/// __global__ void example_kernel(int * input, ...)
 /// {
 ///     const int offset = hipBlockIdx_x * 128 * 8;
 ///     int items[8];
@@ -117,20 +116,6 @@ enum class block_load_method
 ///     blockload.load(input + offset, items);
 ///     ...
 /// }
-/// \endcode
-///
-/// \b HC: \n
-/// \code{.cpp}
-/// hc::parallel_for_each(
-///     hc::extent<1>(...).tile(block_size),
-///     [=](hc::tiled_index<1> i) [[hc]]
-///     {
-///         int items[8];
-///         rocprim::block_load<int, 128, 8, load_method> blockload;
-///         blockload.load(..., items);
-///         ...
-///     }
-/// );
 /// \endcode
 /// \endparblock
 template<
@@ -150,7 +135,7 @@ public:
     ///
     /// Depending on the implemention the operations exposed by parallel primitive may
     /// require a temporary storage for thread communication. The storage should be allocated
-    /// using keywords \p __shared__ in HIP or \p tile_static in HC. It can be aliased to
+    /// using keywords \p __shared__. It can be aliased to
     /// an externally allocated memory, or be a part of a union with other storage types
     /// to increase shared memory reusability.
     #ifndef DOXYGEN_SHOULD_SKIP_THIS // hides storage_type implementation for Doxygen
@@ -262,23 +247,19 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Example.
     /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(block_size),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         int items[8];
-    ///         using block_load_int = rocprim::block_load<int, 128, 8>;
-    ///         block_load_int bload;
-    ///         tile_static typename block_load_int::storage_type storage;
-    ///         bload.load(..., items, storage);
-    ///         ...
-    ///     }
-    /// );
+    /// __global__ void example_kernel(...)
+    /// {
+    ///     int items[8];
+    ///     using block_load_int = rocprim::block_load<int, 128, 8>;
+    ///     block_load_int bload;
+    ///     __shared__ typename block_load_int::storage_type storage;
+    ///     bload.load(..., items, storage);
+    ///     ...
+    /// }
     /// \endcode
     template<class InputIterator>
     ROCPRIM_DEVICE inline
@@ -311,23 +292,19 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Example.
     /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(block_size),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         int items[8];
-    ///         using block_load_int = rocprim::block_load<int, 128, 8>;
-    ///         block_load_int bload;
-    ///         tile_static typename block_load_int::storage_type storage;
-    ///         bload.load(..., items, valid, storage);
-    ///         ...
-    ///     }
-    /// );
+    /// __global__ void example_kernel(...)
+    /// {
+    ///     int items[8];
+    ///     using block_load_int = rocprim::block_load<int, 128, 8>;
+    ///     block_load_int bload;
+    ///     tile_static typename block_load_int::storage_type storage;
+    ///     bload.load(..., items, valid, storage);
+    ///     ...
+    /// }
     /// \endcode
     template<class InputIterator>
     ROCPRIM_DEVICE inline
@@ -364,23 +341,19 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Example.
     /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(block_size),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         int items[8];
-    ///         using block_load_int = rocprim::block_load<int, 128, 8>;
-    ///         block_load_int bload;
-    ///         tile_static typename block_load_int::storage_type storage;
-    ///         bload.load(..., items, valid, out_of_bounds, storage);
-    ///         ...
-    ///     }
-    /// );
+    /// __global__ void example_kernel(...)
+    /// {
+    ///     int items[8];
+    ///     using block_load_int = rocprim::block_load<int, 128, 8>;
+    ///     block_load_int bload;
+    ///     __shared__ typename block_load_int::storage_type storage;
+    ///     bload.load(..., items, valid, out_of_bounds, storage);
+    ///     ...
+    /// }
     /// \endcode
     template<
         class InputIterator,
