@@ -52,7 +52,7 @@ tabulate(execution_policy<Derived>& policy,
                          thrust::make_counting_iterator<size_type>(0),
                          thrust::make_counting_iterator<size_type>(thrust::distance(first, last)),
                          first,
-                         [tabulate_op](size_type i) { return tabulate_op(i); });
+                         [tabulate_op](size_type i) mutable { return tabulate_op(i); });
 }
 
 }    // namespace hip_rocprim
