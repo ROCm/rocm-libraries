@@ -360,7 +360,7 @@ void block_sort_kernel_impl(KeysInputIterator keys_input,
     );
 
     // Special comparison that preserves relative order of equal keys
-    auto stable_compare_function = [compare_function](const stable_key_type& a, const stable_key_type& b) -> bool
+    auto stable_compare_function = [compare_function](const stable_key_type& a, const stable_key_type& b) mutable -> bool
     {
         const bool ab = compare_function(rocprim::get<0>(a), rocprim::get<0>(b));
         const bool ba = compare_function(rocprim::get<0>(b), rocprim::get<0>(a));
