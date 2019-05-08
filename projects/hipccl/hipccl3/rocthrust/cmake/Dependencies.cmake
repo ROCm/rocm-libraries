@@ -48,8 +48,8 @@ message(STATUS "Downloading and building rocPRIM.")
 set(ROCPRIM_ROOT ${CMAKE_CURRENT_BINARY_DIR}/rocPRIM CACHE PATH "")
 download_project(
   PROJ           rocPRIM
-  GIT_REPOSITORY https://projects.streamhpc.com/amd/rocPRIM.git
-  GIT_TAG        develop_stream
+  GIT_REPOSITORY https://github.com/ROCmSoftwarePlatform/rocPRIM.git
+  GIT_TAG        develop
   INSTALL_DIR    ${ROCPRIM_ROOT}
   CMAKE_ARGS     -DBUILD_TEST=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
   LOG_DOWNLOAD   TRUE
