@@ -58,18 +58,18 @@ option(BUILD_TEST "Build tests (requires googletest)" ON)
 # Get dependencies
 include(cmake/Dependencies.cmake)
 
+# AMD targets
+set(AMDGPU_TARGETS gfx803;gfx900;gfx906 CACHE STRING "List of specific machine types for library to target")
+
 # Print configuration summary
 include(cmake/Summary.cmake)
 print_configuration_summary()
-
-# AMD targets
-set(AMDGPU_TARGETS gfx803;gfx900;gfx906 CACHE STRING "List of specific machine types for library to target")
 
 # hipCUB library
 add_subdirectory(hipcub)
 
 # Tests
-if(BUILD_TEST )
+if(BUILD_TEST)
   enable_testing()
   add_subdirectory(test)
 endif()
@@ -92,13 +92,13 @@ set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PR
 if(HIP_PLATFORM STREQUAL "hcc")
   rocm_create_package(
     NAME hipcub
-    DESCRIPTION "Radeon Open Compute Parallel Primitives Libary"
-    MAINTAINER "Jakub Szuppe <jakub@streamhpc.com>"
+    DESCRIPTION "hipCUB (rocPRIM backend)"
+    MAINTAINER "Saad Rahim <saad.rahim@amd.com>"
   )
 else()
   rocm_create_package(
     NAME hipcub_nvcc
-    DESCRIPTION "Radeon Open Compute Parallel Primitives Libary (hipCUB only)"
-    MAINTAINER "Jakub Szuppe <jakub@streamhpc.com>"
+    DESCRIPTION "hipCUB (CUB backend)"
+    MAINTAINER "Saad Rahim <saad.rahim@amd.com>"
   )
 endif()

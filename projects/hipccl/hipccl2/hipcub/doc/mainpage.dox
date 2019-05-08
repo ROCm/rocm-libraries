@@ -14,18 +14,18 @@ hipCUB is a thin wrapper library on top of rocPRIM or CUB. It enables developers
 environment hipCUB uses rocPRIM library as the backend, however, on CUDA platforms it uses CUB instead.
 
 - When using hipCUB you should only include `<hipcub/hipcub.hpp>` header.
-- When rocPRIM HIP API is used as backend `HIPCUB_ROCPRIM_API` is defined.
+- When rocPRIM is used as backend `HIPCUB_ROCPRIM_API` is defined.
 - When CUB is used as backend `HIPCUB_CUB_API` is defined.
 - Backends are automaticaly selected based on platform detected by HIP layer (`__HIP_PLATFORM_HCC__`, `__HIP_PLATFORM_NVCC__`).
 
 @section hipcub_rocprim rocPRIM backend
 
-hipCUB with rocPRIM HIP API backend may not support all function and features CUB has because of the differences
+hipCUB with rocPRIM backend may not support all function and features CUB has because of the differences
 between ROCm (HIP) platform and CUDA platform.
 
 Not-supported features and differences:
 - Functions, classes and macros which are not in the public API or not documented are not supported.
-- Device-wide primitives can't be called from kernels (dynamic parallelism is not supported in HIP/HC).
+- Device-wide primitives can't be called from kernels (dynamic parallelism is not supported in HIP on ROCm).
 - `DeviceSpmv` is not supported.
 - Fancy iterators: `CacheModifiedInputIterator`, `CacheModifiedOutputIterator`, and `TexRefInputIterator`
 are not supported.
@@ -41,6 +41,6 @@ are not supported.
     - `member_mask` input argument is ignored in `WARP_*` functions.
     - Arguments `first_lane`, `last_lane`, and `member_mask` are ignored in `Shuffle*` functions.
 - Utilities:
-    - `SwizzleScanOp`, `ReduceBySegmentOp`, `ReduceByKeyOp`, CastOp` - not supported.
+    - `SwizzleScanOp`, `ReduceBySegmentOp`, `ReduceByKeyOp`, `CastOp` - not supported.
 
 */
