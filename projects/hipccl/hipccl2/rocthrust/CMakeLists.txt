@@ -22,7 +22,15 @@
 
 cmake_minimum_required(VERSION 3.5.1 FATAL_ERROR)
 
-project(thrust VERSION 0.0.1.0 LANGUAGES CXX)
+# Install prefix
+if(WIN32)
+  set(CMAKE_INSTALL_PREFIX ${PROJECT_BINARY_DIR}/package CACHE PATH "Install path prefix, prepended onto install directories")
+else()
+  set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended onto install directories")
+endif()
+
+# Thrust project
+project(thrust VERSION 2.5.0.0 LANGUAGES CXX)
 
 # CMake modules
 list(APPEND CMAKE_MODULE_PATH
@@ -54,12 +62,12 @@ option(BUILD_TEST "Build tests" ON)
 # Get dependencies
 include(cmake/Dependencies.cmake)
 
+# AMD targets
+set(AMDGPU_TARGETS gfx803;gfx900;gfx906 CACHE STRING "List of specific machine types for library to target")
+
 # Print configuration summary
 include(cmake/Summary.cmake)
 print_configuration_summary()
-
-# AMD targets
-set(AMDGPU_TARGETS gfx803;gfx900;gfx906 CACHE STRING "List of specific machine types for library to target")
 
 # Thrust (with HIP backend)
 add_subdirectory(thrust)
@@ -72,23 +80,18 @@ if(BUILD_TEST)
 endif()
 
 # Package
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "hip_hcc (>= 1.5.18263)") # 1.5.18263 is HIP version in ROCm 1.8.2
-set(CPACK_RPM_PACKAGE_REQUIRES "hip_hcc >= 1.5.18263")
+set(CPACK_DEBIAN_ARCHIVE_TYPE "gnutar")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "hip_hcc (>= 1.5.18263), rocprim (>= 1.0)") # 1.5.18263 is HIP version in ROCm 1.8.2
+set(CPACK_RPM_PACKAGE_REQUIRES "hip_hcc >= 1.5.18263, rocprim >= 1.0")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 if(NOT CPACK_PACKAGING_INSTALL_PREFIX)
   set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
 endif()
 
-set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" "\${CPACK_PACKAGING_INSTALL_PREFIX}/include" )
+set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" "\${CPACK_PACKAGING_INSTALL_PREFIX}/include")
 
 rocm_create_package(
-  NAME thrust
+  NAME rocthrust
   DESCRIPTION "Radeon Open Compute Thrust library"
-  MAINTAINER "Stream HPC Maintainers <maintainer@streamhpc.com>"
-)
-
-rocm_install_targets(
-  INCLUDE
-  ${CMAKE_SOURCE_DIR}/thrust/
-  PREFIX thrust
+  MAINTAINER "Saad Rahim <saad.rahim@amd.com>"
 )
