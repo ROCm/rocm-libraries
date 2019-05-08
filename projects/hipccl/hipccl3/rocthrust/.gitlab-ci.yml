@@ -95,7 +95,7 @@ include: '.gitlab-ci-gputest.yml'
 #     # Install rocPRIM package
 #     - echo ${ROCPRIM_GIT_URL}
 #     - echo $ROCPRIM_GIT_URL
-#     - git clone -b develop_thrust_stream https://gitlab-ci-token:${CI_JOB_TOKEN}@${ROCPRIM_GIT_URL}
+#     - git clone -b develop_stream https://gitlab-ci-token:${CI_JOB_TOKEN}@${ROCPRIM_GIT_URL}
 #     - cd rocPRIM
 #     - mkdir build
 #     - cd build
