@@ -32,6 +32,7 @@
 
 #include "../config.hpp"
 
+#include "util_allocator.hpp"
 #include "util_type.hpp"
 #include "util_ptx.hpp"
 #include "thread/thread_operators.hpp"
