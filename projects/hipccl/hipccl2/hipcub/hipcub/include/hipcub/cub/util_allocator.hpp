@@ -1,7 +1,6 @@
 /******************************************************************************
- * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
+ * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -27,33 +26,75 @@
  *
  ******************************************************************************/
 
-#ifndef HIPCUB_CUB_HIPCUB_HPP_
-#define HIPCUB_CUB_HIPCUB_HPP_
+#ifndef HIPCUB_CUB_UTIL_ALLOCATOR_HPP_
+#define HIPCUB_CUB_UTIL_ALLOCATOR_HPP_
+
+#if defined(HIPCUB_STDERR) && !defined(CUB_STDERR)
+    #define CUB_STDERR
+#endif
 
 #include "../config.hpp"
 
-#define HIPCUB_WARP_THREADS CUB_PTX_WARP_THREADS
-#define HIPCUB_ARCH CUB_PTX_ARCH
+#include <cub/util_allocator.cuh>
 
 BEGIN_HIPCUB_NAMESPACE
 
-using namespace cub;
+struct CachingDeviceAllocator : public ::cub::CachingDeviceAllocator
+{
+    hipError_t SetMaxCachedBytes(
+        size_t max_cached_bytes)
+    {
+        return hipCUDAErrorTohipError(
+            ::cub::CachingDeviceAllocator::SetMaxCachedBytes(max_cached_bytes)
+        );
+    }
+
+    hipError_t DeviceAllocate(
+        int             device,
+        void            **d_ptr,
+        size_t          bytes,
+        hipStream_t     active_stream = 0)
+    {
+        return hipCUDAErrorTohipError(
+            ::cub::CachingDeviceAllocator::DeviceAllocate(device, d_ptr, bytes, active_stream)
+        );
+    }
+
+    hipError_t DeviceAllocate(
+        void            **d_ptr,
+        size_t          bytes,
+        hipStream_t     active_stream = 0)
+    {
+        return hipCUDAErrorTohipError(
+            ::cub::CachingDeviceAllocator::DeviceAllocate(d_ptr, bytes, active_stream)
+        );
+    }
+
+    hipError_t DeviceFree(
+        int             device,
+        void*           d_ptr)
+    {
+        return hipCUDAErrorTohipError(
+            ::cub::CachingDeviceAllocator::DeviceFree(device, d_ptr)
+        );
+    }
+
+    hipError_t DeviceFree(
+        void*           d_ptr)
+    {
+        return hipCUDAErrorTohipError(
+            ::cub::CachingDeviceAllocator::DeviceFree(d_ptr)
+        );
+    }
+
+    hipError_t FreeAllCached()
+    {
+        return hipCUDAErrorTohipError(
+            ::cub::CachingDeviceAllocator::FreeAllCached()
+        );
+    }
+};
 
 END_HIPCUB_NAMESPACE
 
-// These functions must be wrapped so they return
-// hipError_t instead of cudaError_t
-#include "util_allocator.hpp"
-
-// Device functions must be wrapped so they return
-// hipError_t instead of cudaError_t
-#include "device/device_histogram.hpp"
-#include "device/device_radix_sort.hpp"
-#include "device/device_reduce.hpp"
-#include "device/device_run_length_encode.hpp"
-#include "device/device_segmented_radix_sort.hpp"
-#include "device/device_segmented_reduce.hpp"
-#include "device/device_scan.hpp"
-#include "device/device_select.hpp"
-
-#endif // HIPCUB_CUB_HIPCUB_HPP_
+#endif // HIPCUB_CUB_UTIL_ALLOCATOR_HPP_
