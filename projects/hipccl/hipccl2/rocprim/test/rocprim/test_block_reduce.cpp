@@ -29,105 +29,24 @@
 #include <rocprim/rocprim.hpp>
 
 #include "test_utils.hpp"
+#include "test_utils_types.hpp"
 
 #define HIP_CHECK(error) ASSERT_EQ(static_cast<hipError_t>(error), hipSuccess)
 
 namespace rp = rocprim;
 
-template<class T, class BinaryOp>
-T apply(BinaryOp binary_op, const T& a, const T& b)
-{
-    return binary_op(a, b);
-}
-
-// Params for tests
-template<
-    class T,
-    unsigned int BlockSize = 256U,
-    unsigned int ItemsPerThread = 1U,
-    rp::block_reduce_algorithm Algorithm = rp::block_reduce_algorithm::using_warp_reduce,
-    class BinaryOp = rocprim::plus<T>
->
-struct params
-{
-    using type = T;
-    using binary_op_type = BinaryOp;
-    static constexpr rp::block_reduce_algorithm algorithm = Algorithm;
-    static constexpr unsigned int block_size = BlockSize;
-    static constexpr unsigned int items_per_thread = ItemsPerThread;
-};
-
 // ---------------------------------------------------------
 // Test for reduce ops taking single input value
 // ---------------------------------------------------------
-
 template<class Params>
 class RocprimBlockReduceSingleValueTests : public ::testing::Test
 {
 public:
-    using type = typename Params::type;
-    using binary_op_type = typename Params::binary_op_type;
-    static constexpr rp::block_reduce_algorithm algorithm = Params::algorithm;
+    using input_type = typename Params::input_type;
     static constexpr unsigned int block_size = Params::block_size;
 };
 
-typedef ::testing::Types<
-    // -----------------------------------------------------------------------
-    // rocprim::block_reduce_algorithm::using_warp_reduce
-    // -----------------------------------------------------------------------
-    params<int, 64U>,
-    params<int, 128U>,
-    params<int, 192U>,
-    params<int, 256U>,
-    params<int, 512U>,
-    params<int, 1024U>,
-    params<int, 65U>,
-    params<int, 37U>,
-    params<int, 129U>,
-    params<int, 162U>,
-    params<int, 255U>,
-    // uint tests
-    params<unsigned int, 64U>,
-    params<unsigned int, 256U>,
-    params<unsigned int, 377U>,
-    // char tests
-    params<char, 64U>,
-    params<char, 256U>,
-    params<char, 377U>,
-    // half tests
-    params<rp::half, 64U, 1, rp::block_reduce_algorithm::using_warp_reduce, test_utils::half_maximum>,
-    params<rp::half, 256U, 1, rp::block_reduce_algorithm::using_warp_reduce, test_utils::half_maximum>,
-    params<rp::half, 377U, 1, rp::block_reduce_algorithm::using_warp_reduce, test_utils::half_maximum>,
-    // long tests
-    params<long, 64U>,
-    params<long, 256U>,
-    params<long, 377U>,
-    // -----------------------------------------------------------------------
-    // rocprim::block_reduce_algorithm::raking_reduce
-    // -----------------------------------------------------------------------
-    params<int, 64U, 1, rp::block_reduce_algorithm::raking_reduce>,
-    params<int, 128U, 1, rp::block_reduce_algorithm::raking_reduce>,
-    params<int, 192U, 1, rp::block_reduce_algorithm::raking_reduce>,
-    params<int, 256U, 1, rp::block_reduce_algorithm::raking_reduce>,
-    params<int, 512U, 1, rp::block_reduce_algorithm::raking_reduce>,
-    params<int, 1024U, 1, rp::block_reduce_algorithm::raking_reduce>,
-    params<char, 64U, 1, rp::block_reduce_algorithm::raking_reduce>,
-    params<char, 128U, 1, rp::block_reduce_algorithm::raking_reduce>,
-    params<char, 192U, 1, rp::block_reduce_algorithm::raking_reduce>,
-    params<char, 256U, 1, rp::block_reduce_algorithm::raking_reduce>,
-    params<rp::half, 64U, 1, rp::block_reduce_algorithm::raking_reduce, test_utils::half_maximum>,
-    params<rp::half, 128U, 1, rp::block_reduce_algorithm::raking_reduce, test_utils::half_maximum>,
-    params<rp::half, 192U, 1, rp::block_reduce_algorithm::raking_reduce, test_utils::half_maximum>,
-    params<rp::half, 256U, 1, rp::block_reduce_algorithm::raking_reduce, test_utils::half_maximum>,
-    params<unsigned long, 65U, 1, rp::block_reduce_algorithm::raking_reduce>,
-    params<long, 37U, 1, rp::block_reduce_algorithm::raking_reduce>,
-    params<short, 162U, 1, rp::block_reduce_algorithm::raking_reduce>,
-    params<unsigned int, 255U, 1, rp::block_reduce_algorithm::raking_reduce>,
-    params<int, 377U, 1, rp::block_reduce_algorithm::raking_reduce>,
-    params<unsigned char, 377U, 1, rp::block_reduce_algorithm::raking_reduce>
-> SingleValueTestParams;
-
-TYPED_TEST_CASE(RocprimBlockReduceSingleValueTests, SingleValueTestParams);
+TYPED_TEST_CASE(RocprimBlockReduceSingleValueTests, BlockParams);
 
 template<
     unsigned int BlockSize,
@@ -148,11 +67,62 @@ void reduce_kernel(T* device_output, T* device_output_reductions)
     }
 }
 
+template <
+    class T,
+    unsigned int BlockSize,
+    rp::block_reduce_algorithm Algorithm,
+    class BinaryOp
+>
+struct static_run_algo
+{
+    static void run(std::vector<T>& output,
+                    std::vector<T>& output_reductions,
+                    std::vector<T>& expected_reductions,
+                    T* device_output,
+                    T* device_output_reductions,
+                    size_t grid_size,
+                    bool check_equal)
+    {
+        HIP_CHECK(
+            hipMemcpy(
+                device_output, output.data(),
+                output.size() * sizeof(T),
+                hipMemcpyHostToDevice
+            )
+        );
+
+        // Running kernel
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(reduce_kernel<BlockSize, Algorithm, T, BinaryOp>),
+            dim3(grid_size), dim3(BlockSize), 0, 0,
+            device_output, device_output_reductions
+        );
+
+        // Reading results back
+        HIP_CHECK(
+            hipMemcpy(
+                output_reductions.data(), device_output_reductions,
+                output_reductions.size() * sizeof(T),
+                hipMemcpyDeviceToHost
+            )
+        );
+
+        // Verifying results
+        if(check_equal)
+        {
+            test_utils::assert_eq(output_reductions, expected_reductions);
+        }
+        else
+        {
+            test_utils::assert_near(output_reductions, expected_reductions, 0.01);
+        }
+    }
+};
+
 TYPED_TEST(RocprimBlockReduceSingleValueTests, Reduce)
 {
-    using T = typename TestFixture::type;
-    using binary_op_type = typename TestFixture::binary_op_type;
-    constexpr auto algorithm = TestFixture::algorithm;
+    using T = typename TestFixture::input_type;
+    using binary_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_plus, rp::plus<T>>::type;
     constexpr size_t block_size = TestFixture::block_size;
 
     // Given block size not supported
@@ -161,7 +131,7 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, Reduce)
         return;
     }
 
-    const size_t size = block_size * 113;
+    const size_t size = block_size * 58;
     const size_t grid_size = size / block_size;
     // Generate data
     std::vector<T> output = test_utils::get_random_data<T>(size, 2, 50);
@@ -187,78 +157,24 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, Reduce)
     T* device_output_reductions;
     HIP_CHECK(hipMalloc(&device_output_reductions, output_reductions.size() * sizeof(T)));
 
-    HIP_CHECK(
-        hipMemcpy(
-            device_output, output.data(),
-            output.size() * sizeof(T),
-            hipMemcpyHostToDevice
-        )
+    static_run_algo<T, block_size, rp::block_reduce_algorithm::using_warp_reduce, binary_op_type>::run(
+        output, output_reductions, expected_reductions,
+        device_output, device_output_reductions, grid_size, false
     );
-
-    // Running kernel
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(reduce_kernel<block_size, algorithm, T, binary_op_type>),
-        dim3(grid_size), dim3(block_size), 0, 0,
-        device_output, device_output_reductions
+    static_run_algo<T, block_size, rp::block_reduce_algorithm::raking_reduce, binary_op_type>::run(
+        output, output_reductions, expected_reductions,
+        device_output, device_output_reductions, grid_size, false
     );
-
-    // Reading results back
-    HIP_CHECK(
-        hipMemcpy(
-            output_reductions.data(), device_output_reductions,
-            output_reductions.size() * sizeof(T),
-            hipMemcpyDeviceToHost
-        )
-    );
-
-    // Verifying results
-    test_utils::assert_eq(output_reductions, expected_reductions);
 
     HIP_CHECK(hipFree(device_output));
     HIP_CHECK(hipFree(device_output_reductions));
 }
 
-template<
-    unsigned int BlockSize,
-    rocprim::block_reduce_algorithm Algorithm,
-    class T
->
-__global__
-void reduce_multiplies_kernel(T* device_output, T* device_output_reductions)
-{
-    const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
-    T value = device_output[index];
-    rp::block_reduce<T, BlockSize, Algorithm> breduce;
-    breduce.reduce(value, value, rocprim::multiplies<T>());
-    if(hipThreadIdx_x == 0)
-    {
-        device_output_reductions[hipBlockIdx_x] = value;
-    }
-}
-
-template<class T>
-T host_multiplies(const T& x, const T& y)
-{
-    return x * y;
-}
-
-rp::half host_multiplies(const rp::half&, const rp::half&)
-{
-    // Used to allow compilation of tests with half
-    return rp::half(); // Any value since half is not tested in ReduceMultiplies
-}
-
 TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceMultiplies)
 {
-    using T = typename TestFixture::type;
-    constexpr auto algorithm = TestFixture::algorithm;
+    using T = typename TestFixture::input_type;
+    using binary_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_multiplies, rp::multiplies<T>>::type;
     constexpr size_t block_size = TestFixture::block_size;
-
-    // Half not tested here
-    if(std::is_same<T, rp::half>::value)
-    {
-        return;
-    }
 
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
@@ -266,7 +182,7 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceMultiplies)
         return;
     }
 
-    const size_t size = block_size * 113;
+    const size_t size = block_size * 58;
     const size_t grid_size = size / block_size;
     // Generate data
     std::vector<T> output(size, 1);
@@ -279,13 +195,14 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceMultiplies)
 
     // Calculate expected results on host
     std::vector<T> expected_reductions(output_reductions.size(), 0);
+    binary_op_type binary_op;
     for(size_t i = 0; i < output.size() / block_size; i++)
     {
         T value = 1;
         for(size_t j = 0; j < block_size; j++)
         {
             auto idx = i * block_size + j;
-            value = host_multiplies(value, output[idx]);
+            value = apply(binary_op, value, output[idx]);
         }
         expected_reductions[i] = value;
     }
@@ -296,38 +213,18 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceMultiplies)
     T* device_output_reductions;
     HIP_CHECK(hipMalloc(&device_output_reductions, output_reductions.size() * sizeof(T)));
 
-    HIP_CHECK(
-        hipMemcpy(
-            device_output, output.data(),
-            output.size() * sizeof(T),
-            hipMemcpyHostToDevice
-        )
+    static_run_algo<T, block_size, rp::block_reduce_algorithm::using_warp_reduce, binary_op_type>::run(
+        output, output_reductions, expected_reductions,
+        device_output, device_output_reductions, grid_size, true
     );
-
-    // Running kernel
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(reduce_multiplies_kernel<block_size, algorithm, T>),
-        dim3(grid_size), dim3(block_size), 0, 0,
-        device_output, device_output_reductions
+    static_run_algo<T, block_size, rp::block_reduce_algorithm::raking_reduce, binary_op_type>::run(
+        output, output_reductions, expected_reductions,
+        device_output, device_output_reductions, grid_size, true
     );
-
-    // Reading results back
-    HIP_CHECK(
-        hipMemcpy(
-            output_reductions.data(), device_output_reductions,
-            output_reductions.size() * sizeof(T),
-            hipMemcpyDeviceToHost
-        )
-    );
-
-    // Verifying results
-    test_utils::assert_eq(output_reductions, expected_reductions);
 
     HIP_CHECK(hipFree(device_output));
     HIP_CHECK(hipFree(device_output_reductions));
 }
-
-TYPED_TEST_CASE(RocprimBlockReduceSingleValueTests, SingleValueTestParams);
 
 template<
     unsigned int BlockSize,
@@ -348,11 +245,55 @@ void reduce_valid_kernel(T* device_output, T* device_output_reductions, const un
     }
 }
 
+template <
+    class T,
+    unsigned int BlockSize,
+    rp::block_reduce_algorithm Algorithm,
+    class BinaryOp
+>
+struct static_run_valid
+{
+    static void run(std::vector<T>& output,
+                    std::vector<T>& output_reductions,
+                    std::vector<T>& expected_reductions,
+                    T* device_output,
+                    T* device_output_reductions,
+                    const unsigned int valid_items,
+                    size_t grid_size)
+    {
+        HIP_CHECK(
+            hipMemcpy(
+                device_output, output.data(),
+                output.size() * sizeof(T),
+                hipMemcpyHostToDevice
+            )
+        );
+
+        // Running kernel
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(reduce_valid_kernel<BlockSize, Algorithm, T, BinaryOp>),
+            dim3(grid_size), dim3(BlockSize), 0, 0,
+            device_output, device_output_reductions, valid_items
+        );
+
+        // Reading results back
+        HIP_CHECK(
+            hipMemcpy(
+                output_reductions.data(), device_output_reductions,
+                output_reductions.size() * sizeof(T),
+                hipMemcpyDeviceToHost
+            )
+        );
+
+        // Verifying results
+        test_utils::assert_near(output_reductions, expected_reductions, 0.01);
+    }
+};
+
 TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceValid)
 {
-    using T = typename TestFixture::type;
-    using binary_op_type = typename TestFixture::binary_op_type;
-    constexpr auto algorithm = TestFixture::algorithm;
+    using T = typename TestFixture::input_type;
+    using binary_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_plus, rp::plus<T>>::type;
     constexpr size_t block_size = TestFixture::block_size;
     const unsigned int valid_items = test_utils::get_random_value(block_size - 10, block_size);
 
@@ -362,7 +303,7 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceValid)
         return;
     }
 
-    const size_t size = block_size * 113;
+    const size_t size = block_size * 58;
     const size_t grid_size = size / block_size;
     // Generate data
     std::vector<T> output = test_utils::get_random_data<T>(size, 2, 50);
@@ -388,32 +329,14 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceValid)
     T* device_output_reductions;
     HIP_CHECK(hipMalloc(&device_output_reductions, output_reductions.size() * sizeof(T)));
 
-    HIP_CHECK(
-        hipMemcpy(
-            device_output, output.data(),
-            output.size() * sizeof(T),
-            hipMemcpyHostToDevice
-        )
+    static_run_valid<T, block_size, rp::block_reduce_algorithm::using_warp_reduce, binary_op_type>::run(
+        output, output_reductions, expected_reductions,
+        device_output, device_output_reductions, valid_items, grid_size
     );
-
-    // Running kernel
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(reduce_valid_kernel<block_size, algorithm, T, binary_op_type>),
-        dim3(grid_size), dim3(block_size), 0, 0,
-        device_output, device_output_reductions, valid_items
+    static_run_valid<T, block_size, rp::block_reduce_algorithm::raking_reduce, binary_op_type>::run(
+        output, output_reductions, expected_reductions,
+        device_output, device_output_reductions, valid_items, grid_size
     );
-
-    // Reading results back
-    HIP_CHECK(
-        hipMemcpy(
-            output_reductions.data(), device_output_reductions,
-            output_reductions.size() * sizeof(T),
-            hipMemcpyDeviceToHost
-        )
-    );
-
-    // Verifying results
-    test_utils::assert_eq(output_reductions, expected_reductions);
 
     HIP_CHECK(hipFree(device_output));
     HIP_CHECK(hipFree(device_output_reductions));
@@ -424,53 +347,11 @@ template<class Params>
 class RocprimBlockReduceInputArrayTests : public ::testing::Test
 {
 public:
-    using type = typename Params::type;
-    using binary_op_type = typename Params::binary_op_type;
+    using input_type = typename Params::input_type;
     static constexpr unsigned int block_size = Params::block_size;
-    static constexpr rocprim::block_reduce_algorithm algorithm = Params::algorithm;
-    static constexpr unsigned int items_per_thread = Params::items_per_thread;
 };
 
-typedef ::testing::Types<
-    // -----------------------------------------------------------------------
-    // rocprim::block_reduce_algorithm::using_warp_reduce
-    // -----------------------------------------------------------------------
-    params<float, 6U,   32>,
-    params<float, 32,   2>,
-    params<unsigned int, 256,  3>,
-    params<int, 512,  4>,
-    params<float, 1024, 1>,
-    params<float, 37,   2>,
-    params<float, 65,   5>,
-    params<float, 162,  7>,
-    params<float, 255,  15>,
-    params<char, 1024, 1>,
-    params<char, 37,   2>,
-    params<char, 65,   5>,
-    params<rp::half, 1024, 1, rp::block_reduce_algorithm::using_warp_reduce, test_utils::half_maximum>,
-    params<rp::half, 37,   2, rp::block_reduce_algorithm::using_warp_reduce, test_utils::half_maximum>,
-    params<rp::half, 65,   5, rp::block_reduce_algorithm::using_warp_reduce, test_utils::half_maximum>,
-    // -----------------------------------------------------------------------
-    // rocprim::block_reduce_algorithm::raking_reduce
-    // -----------------------------------------------------------------------
-    params<float, 6U,   32, rp::block_reduce_algorithm::raking_reduce>,
-    params<float, 32,   2,  rp::block_reduce_algorithm::raking_reduce>,
-    params<int, 256,  3,  rp::block_reduce_algorithm::raking_reduce>,
-    params<unsigned int, 512,  4,  rp::block_reduce_algorithm::raking_reduce>,
-    params<float, 1024, 1,  rp::block_reduce_algorithm::raking_reduce>,
-    params<float, 37,   2,  rp::block_reduce_algorithm::raking_reduce>,
-    params<float, 65,   5,  rp::block_reduce_algorithm::raking_reduce>,
-    params<float, 162,  7,  rp::block_reduce_algorithm::raking_reduce>,
-    params<float, 255,  15, rp::block_reduce_algorithm::raking_reduce>,
-    params<char, 1024, 1,  rp::block_reduce_algorithm::raking_reduce>,
-    params<char, 37,   2,  rp::block_reduce_algorithm::raking_reduce>,
-    params<char, 65,   5,  rp::block_reduce_algorithm::raking_reduce>,
-    params<rp::half, 1024, 1,  rp::block_reduce_algorithm::raking_reduce, test_utils::half_maximum>,
-    params<rp::half, 37,   2,  rp::block_reduce_algorithm::raking_reduce, test_utils::half_maximum>,
-    params<rp::half, 65,   5,  rp::block_reduce_algorithm::raking_reduce, test_utils::half_maximum>
-> InputArrayTestParams;
-
-TYPED_TEST_CASE(RocprimBlockReduceInputArrayTests, InputArrayTestParams);
+TYPED_TEST_CASE(RocprimBlockReduceInputArrayTests, BlockParams);
 
 template<
     unsigned int BlockSize,
@@ -500,13 +381,19 @@ void reduce_array_kernel(T* device_output, T* device_output_reductions)
     }
 }
 
-TYPED_TEST(RocprimBlockReduceInputArrayTests, Reduce)
+// Test for reduce
+template<
+    class T,
+    unsigned int BlockSize = 256U,
+    unsigned int ItemsPerThread = 1U,
+    rp::block_reduce_algorithm Algorithm = rp::block_reduce_algorithm::using_warp_reduce
+>
+void test_block_reduce_input_arrays()
 {
-    using T = typename TestFixture::type;
-    using binary_op_type = typename TestFixture::binary_op_type;
-    constexpr auto algorithm = TestFixture::algorithm;
-    constexpr size_t block_size = TestFixture::block_size;
-    constexpr size_t items_per_thread = TestFixture::items_per_thread;
+    using binary_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_maximum, rp::maximum<T>>::type;
+    constexpr auto algorithm = Algorithm;
+    constexpr size_t block_size = BlockSize;
+    constexpr size_t items_per_thread = ItemsPerThread;
 
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
@@ -515,10 +402,10 @@ TYPED_TEST(RocprimBlockReduceInputArrayTests, Reduce)
     }
 
     const size_t items_per_block = block_size * items_per_thread;
-    const size_t size = items_per_block * 37;
+    const size_t size = items_per_block * 19;
     const size_t grid_size = size / items_per_block;
     // Generate data
-    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 50);
+    std::vector<T> output = test_utils::get_random_data<T>(size, 0, 100);
 
     // Output reduce results
     std::vector<T> output_reductions(size / block_size, 0);
@@ -580,4 +467,43 @@ TYPED_TEST(RocprimBlockReduceInputArrayTests, Reduce)
 
     HIP_CHECK(hipFree(device_output));
     HIP_CHECK(hipFree(device_output_reductions));
+}
+
+// Static for-loop
+template <
+    unsigned int First,
+    unsigned int Last,
+    class T,
+    unsigned int BlockSize = 256U,
+    rp::block_reduce_algorithm Algorithm = rp::block_reduce_algorithm::using_warp_reduce
+>
+struct static_for_input_array
+{
+    static void run()
+    {
+        test_block_reduce_input_arrays<T, BlockSize, items[First], Algorithm>();
+        static_for_input_array<First + 1, Last, T, BlockSize, Algorithm>::run();
+    }
+};
+
+template <
+    unsigned int N,
+    class T,
+    unsigned int BlockSize,
+    rp::block_reduce_algorithm Algorithm
+>
+struct static_for_input_array<N, N, T, BlockSize, Algorithm>
+{
+    static void run()
+    {
+    }
+};
+
+TYPED_TEST(RocprimBlockReduceInputArrayTests, Reduce)
+{
+    using T = typename TestFixture::input_type;
+    constexpr size_t block_size = TestFixture::block_size;
+
+    static_for_input_array<0, n_items, T, block_size, rp::block_reduce_algorithm::using_warp_reduce>::run();
+    static_for_input_array<0, n_items, T, block_size, rp::block_reduce_algorithm::raking_reduce>::run();
 }

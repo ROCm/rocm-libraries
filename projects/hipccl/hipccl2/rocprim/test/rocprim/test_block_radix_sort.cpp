@@ -33,32 +33,11 @@
 #include <rocprim/rocprim.hpp>
 
 #include "test_utils.hpp"
+#include "test_utils_types.hpp"
 
 #define HIP_CHECK(error) ASSERT_EQ(static_cast<hipError_t>(error), hipSuccess)
 
 namespace rp = rocprim;
-
-template<
-    class Key,
-    class Value,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    bool Descending = false,
-    bool ToStriped = false,
-    unsigned int StartBit = 0,
-    unsigned int EndBit = sizeof(Key) * 8
->
-struct params
-{
-    using key_type = Key;
-    using value_type = Value;
-    static constexpr unsigned int block_size = BlockSize;
-    static constexpr unsigned int items_per_thread = ItemsPerThread;
-    static constexpr bool descending = Descending;
-    static constexpr bool to_striped = ToStriped;
-    static constexpr unsigned int start_bit = StartBit;
-    static constexpr unsigned int end_bit = EndBit;
-};
 
 template<class Params>
 class RocprimBlockRadixSort : public ::testing::Test {
@@ -66,48 +45,24 @@ public:
     using params = Params;
 };
 
-using custom_int2 = test_utils::custom_test_type<int>;
-using custom_double2 = test_utils::custom_test_type<double>;
+static constexpr size_t n_sizes = 12;
+static constexpr unsigned int items_radix[n_sizes] = {
+    1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3
+};
+static constexpr bool desc_radix[n_sizes] = {
+    false, false, false, false, false, false, true, true, true, true, true, true
+};
+static constexpr bool striped_radix[n_sizes] = {
+    false, false, false, true, true, true, false, false, false, true, true, true
+};
+static constexpr unsigned int start_radix[n_sizes] = {
+    0, 0, 0, 3, 4, 8, 0, 0, 0, 3, 4, 8
+};
+static constexpr unsigned int end_radix[n_sizes] = {
+    0, 0, 0, 10, 11, 12, 0, 0, 0, 10, 11, 12
+};
 
-typedef ::testing::Types<
-    // Power of 2 BlockSize
-    params<unsigned int, int, 64U, 1>,
-    params<int, int, 128U, 1>,
-    params<unsigned int, int, 256U, 1>,
-    params<unsigned short, char, 1024U, 1, true>,
-    params<rp::half, int, 128U, 1>,
-
-    // Non-power of 2 BlockSize
-    params<double, unsigned int, 65U, 1>,
-    params<float, int, 37U, 1>,
-    params<long long, char, 510U, 1, true>,
-    params<unsigned int, long long, 162U, 1, false, true>,
-    params<unsigned char, float, 255U, 1>,
-    params<rp::half, float, 113U, 1>,
-
-    // Power of 2 BlockSize and ItemsPerThread > 1
-    params<float, char, 64U, 2, true>,
-    params<int, rp::half, 128U, 4>,
-    params<unsigned short, char, 256U, 7>,
-
-    // Non-power of 2 BlockSize and ItemsPerThread > 1
-    params<double, int, 33U, 5>,
-    params<char, double, 464U, 2, true, true>,
-    params<unsigned short, custom_int2, 100U, 3>,
-    params<rp::half, int, 234U, 9>,
-
-    // StartBit and EndBit
-    params<unsigned long long, char, 64U, 1, false, false, 8, 20>,
-    params<unsigned short, int, 102U, 3, true, false, 4, 10>,
-    params<unsigned int, short, 162U, 2, true, true, 3, 12>,
-
-    // Stability (a number of key values is lower than BlockSize * ItemsPerThread: some keys appear
-    // multiple times with different values or key parts outside [StartBit, EndBit))
-    params<unsigned char, int, 512U, 2, false, true>,
-    params<unsigned short, custom_double2, 60U, 1, true, false, 8, 11>
-> Params;
-
-TYPED_TEST_CASE(RocprimBlockRadixSort, Params);
+TYPED_TEST_CASE(RocprimBlockRadixSort, BlockParams);
 
 template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
 struct key_comparator
@@ -193,23 +148,84 @@ void sort_key_kernel(
     }
 }
 
-TYPED_TEST(RocprimBlockRadixSort, SortKeys)
+template<
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    class key_type,
+    class value_type
+>
+__global__
+void sort_key_value_kernel(
+    key_type* device_keys_output,
+    value_type* device_values_output,
+    bool to_striped,
+    bool descending,
+    unsigned int start_bit,
+    unsigned int end_bit)
 {
-    using key_type = typename TestFixture::params::key_type;
-    constexpr size_t block_size = TestFixture::params::block_size;
-    constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
-    constexpr bool descending = TestFixture::params::descending;
-    constexpr bool to_striped = TestFixture::params::to_striped;
-    constexpr unsigned int start_bit = TestFixture::params::start_bit;
-    constexpr unsigned int end_bit = TestFixture::params::end_bit;
+    constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
+    const unsigned int lid = hipThreadIdx_x;
+    const unsigned int block_offset = hipBlockIdx_x * items_per_block;
+
+    key_type keys[ItemsPerThread];
+    value_type values[ItemsPerThread];
+    rp::block_load_direct_blocked(lid, device_keys_output + block_offset, keys);
+    rp::block_load_direct_blocked(lid, device_values_output + block_offset, values);
+
+    rp::block_radix_sort<key_type, BlockSize, ItemsPerThread, value_type> bsort;
+    if(to_striped)
+    {
+        if(descending)
+            bsort.sort_desc_to_striped(keys, values, start_bit, end_bit);
+        else
+            bsort.sort_to_striped(keys, values, start_bit, end_bit);
+
+        rp::block_store_direct_striped<BlockSize>(lid, device_keys_output + block_offset, keys);
+        rp::block_store_direct_striped<BlockSize>(lid, device_values_output + block_offset, values);
+    }
+    else
+    {
+        if(descending)
+            bsort.sort_desc(keys, values, start_bit, end_bit);
+        else
+            bsort.sort(keys, values, start_bit, end_bit);
+
+        rp::block_store_direct_blocked(lid, device_keys_output + block_offset, keys);
+        rp::block_store_direct_blocked(lid, device_values_output + block_offset, values);
+    }
+}
+
+// Test for radix sort
+template<
+    class Key,
+    class Value,
+    unsigned int Method,
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    bool Descending = false,
+    bool ToStriped = false,
+    unsigned int StartBit = 0,
+    unsigned int EndBit = sizeof(Key) * 8
+>
+auto test_block_radix_sort()
+-> typename std::enable_if<Method == 0>::type
+{
+    using key_type = Key;
+    constexpr size_t block_size = BlockSize;
+    constexpr size_t items_per_thread = ItemsPerThread;
+    constexpr bool descending = Descending;
+    constexpr bool to_striped = ToStriped;
+    constexpr unsigned int start_bit = (rp::is_unsigned<Key>::value == false) ? 0 : StartBit;
+    constexpr unsigned int end_bit = (rp::is_unsigned<Key>::value == false) ? sizeof(Key) * 8 : EndBit;
     constexpr size_t items_per_block = block_size * items_per_thread;
+
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
     {
         return;
     }
 
-    const size_t size = items_per_block * 1134;
+    const size_t size = items_per_block * 19;
     const size_t grid_size = size / items_per_block;
     // Generate data
     std::vector<key_type> keys_output;
@@ -272,71 +288,36 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeys)
 }
 
 template<
+    class Key,
+    class Value,
+    unsigned int Method,
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
-    class key_type,
-    class value_type
+    bool Descending = false,
+    bool ToStriped = false,
+    unsigned int StartBit = 0,
+    unsigned int EndBit = sizeof(Key) * 8
 >
-__global__
-void sort_key_value_kernel(
-    key_type* device_keys_output,
-    value_type* device_values_output,
-    bool to_striped,
-    bool descending,
-    unsigned int start_bit,
-    unsigned int end_bit)
+auto test_block_radix_sort()
+-> typename std::enable_if<Method == 1>::type
 {
-    constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
-    const unsigned int lid = hipThreadIdx_x;
-    const unsigned int block_offset = hipBlockIdx_x * items_per_block;
-
-    key_type keys[ItemsPerThread];
-    value_type values[ItemsPerThread];
-    rp::block_load_direct_blocked(lid, device_keys_output + block_offset, keys);
-    rp::block_load_direct_blocked(lid, device_values_output + block_offset, values);
-
-    rp::block_radix_sort<key_type, BlockSize, ItemsPerThread, value_type> bsort;
-    if(to_striped)
-    {
-        if(descending)
-            bsort.sort_desc_to_striped(keys, values, start_bit, end_bit);
-        else
-            bsort.sort_to_striped(keys, values, start_bit, end_bit);
-
-        rp::block_store_direct_striped<BlockSize>(lid, device_keys_output + block_offset, keys);
-        rp::block_store_direct_striped<BlockSize>(lid, device_values_output + block_offset, values);
-    }
-    else
-    {
-        if(descending)
-            bsort.sort_desc(keys, values, start_bit, end_bit);
-        else
-            bsort.sort(keys, values, start_bit, end_bit);
-
-        rp::block_store_direct_blocked(lid, device_keys_output + block_offset, keys);
-        rp::block_store_direct_blocked(lid, device_values_output + block_offset, values);
-    }
-}
-
-
-TYPED_TEST(RocprimBlockRadixSort, SortKeysValues)
-{
-    using key_type = typename TestFixture::params::key_type;
-    using value_type = typename TestFixture::params::value_type;
-    constexpr size_t block_size = TestFixture::params::block_size;
-    constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
-    constexpr bool descending = TestFixture::params::descending;
-    constexpr bool to_striped = TestFixture::params::to_striped;
-    constexpr unsigned int start_bit = TestFixture::params::start_bit;
-    constexpr unsigned int end_bit = TestFixture::params::end_bit;
+    using key_type = Key;
+    using value_type = Value;
+    constexpr size_t block_size = BlockSize;
+    constexpr size_t items_per_thread = ItemsPerThread;
+    constexpr bool descending = Descending;
+    constexpr bool to_striped = ToStriped;
+    constexpr unsigned int start_bit = (rp::is_unsigned<Key>::value == false) ? 0 : StartBit;
+    constexpr unsigned int end_bit = (rp::is_unsigned<Key>::value == false) ? sizeof(Key) * 8 : EndBit;
     constexpr size_t items_per_block = block_size * items_per_thread;
+
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
     {
         return;
     }
 
-    const size_t size = items_per_block * 1134;
+    const size_t size = items_per_block * 19;
     const size_t grid_size = size / items_per_block;
     // Generate data
     std::vector<key_type> keys_output;
@@ -433,3 +414,54 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeysValues)
     HIP_CHECK(hipFree(device_values_output));
 }
 
+// Static for-loop
+template <
+    unsigned int First,
+    unsigned int Last,
+    class T,
+    class U,
+    int Method,
+    unsigned int BlockSize = 256U
+>
+struct static_for
+{
+    static constexpr unsigned int end = (end_radix[First] == 0) ? sizeof(T) * 8 : end_radix[First];
+
+    static void run()
+    {
+        test_block_radix_sort<T, U, Method, BlockSize, items_radix[First], desc_radix[First], striped_radix[First], start_radix[First], end>();
+        static_for<First + 1, Last, T, U, Method, BlockSize>::run();
+    }
+};
+
+template <
+    unsigned int N,
+    class T,
+    class U,
+    int Method,
+    unsigned int BlockSize
+>
+struct static_for<N, N, T, U, Method, BlockSize>
+{
+    static void run()
+    {
+    }
+};
+
+TYPED_TEST(RocprimBlockRadixSort, SortKeys)
+{
+    using key_type = typename TestFixture::params::input_type;
+    using value_type = typename TestFixture::params::output_type;
+    constexpr size_t block_size = TestFixture::params::block_size;
+
+    static_for<0, n_sizes, key_type, value_type, 0, block_size>::run();
+}
+
+TYPED_TEST(RocprimBlockRadixSort, SortKeysValues)
+{
+    using key_type = typename TestFixture::params::input_type;
+    using value_type = typename TestFixture::params::output_type;
+    constexpr size_t block_size = TestFixture::params::block_size;
+
+    static_for<0, n_sizes, key_type, value_type, 1, block_size>::run();
+}
