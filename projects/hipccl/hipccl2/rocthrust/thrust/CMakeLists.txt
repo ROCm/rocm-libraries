@@ -20,12 +20,12 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# Only header target, does not include dependencies
+# rocThrust header-only library
 
 # Configure a header file to pass the rocThrust version
 configure_file(
   "${CMAKE_CURRENT_SOURCE_DIR}/rocthrust_version.hpp.in"
-  "${CMAKE_CURRENT_BINARY_DIR}/rocthrust_version.hpp"
+  "${CMAKE_CURRENT_BINARY_DIR}/include/rocthrust_version.hpp"
   @ONLY
 )
 
@@ -35,13 +35,13 @@ target_include_directories(rocthrust
   INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
-    $<INSTALL_INTERFACE:rocthrust/include>
+    $<INSTALL_INTERFACE:rocthrust/include/>
 )
 
 target_link_libraries(rocthrust
   INTERFACE
     roc::rocprim_hip
-    hip::device
+#    hip::device
 )
 
 # TODO: Remove after the Rocprim HC API removal
@@ -54,6 +54,7 @@ target_compile_definitions(rocthrust
 # Installation
 
 include(GNUInstallDirs)
+set(INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_INCLUDEDIR})
 
 # We need to install headers manually as rocm_install_targets
 # does not support header-only libraries (INTERFACE targets)
@@ -68,7 +69,8 @@ rocm_install_targets(
 install(
   DIRECTORY
     "./"
-  DESTINATION ${CMAKE_INSTALL_PREFIX}/rocthrust/include/thrust/
+    "${PROJECT_BINARY_DIR}/thrust/include/"
+  DESTINATION rocthrust/include/thrust/
   FILES_MATCHING
   PATTERN "*.h"
   PATTERN "*.cuh"
