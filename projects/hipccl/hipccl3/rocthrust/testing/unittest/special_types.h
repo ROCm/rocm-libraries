@@ -11,6 +11,7 @@ struct FixedVector
     __host__ __device__
     FixedVector()
     {
+        #pragma nounroll
         for(unsigned int i = 0; i < N; i++)
             data[i] = T();
     }
@@ -18,6 +19,7 @@ struct FixedVector
     __host__ __device__
     FixedVector(T init)
     {
+        #pragma nounroll
         for(unsigned int i = 0; i < N; i++)
             data[i] = init;
     }
@@ -26,6 +28,7 @@ struct FixedVector
     FixedVector operator+(const FixedVector& bs) const
     {
         FixedVector output;
+        #pragma nounroll
         for(unsigned int i = 0; i < N; i++)
             output.data[i] = data[i] + bs.data[i];
         return output;
@@ -34,6 +37,7 @@ struct FixedVector
     __host__ __device__
     bool operator<(const FixedVector& bs) const
     {
+        #pragma nounroll
         for(unsigned int i = 0; i < N; i++)
         {
             if(data[i] < bs.data[i])
@@ -47,6 +51,7 @@ struct FixedVector
     __host__ __device__
     bool operator==(const FixedVector& bs) const
     {
+        #pragma nounroll
         for(unsigned int i = 0; i < N; i++)
         {
             if(!(data[i] == bs.data[i]))
@@ -181,4 +186,3 @@ using thrust::detail::uint64_t;
 
   
 }
-

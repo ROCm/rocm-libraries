@@ -1,7 +1,7 @@
 /*
- *  Copyright 2008-2018 NVIDIA Corporation
+ *  Copyright 2008-2019 NVIDIA Corporation
  *  Copyright 2013 Filipe RNC Maia
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved. 
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -28,6 +28,22 @@
 #include <complex>
 #include <sstream>
 #include <thrust/detail/type_traits.h>
+
+#if THRUST_CPP_DIALECT >= 2011
+#  define THRUST_STD_COMPLEX_REAL(z) \
+    reinterpret_cast< \
+      const typename thrust::detail::remove_reference<decltype(z)>::type::value_type (&)[2] \
+    >(z)[0]
+#  define THRUST_STD_COMPLEX_IMAG(z) \
+    reinterpret_cast< \
+      const typename thrust::detail::remove_reference<decltype(z)>::type::value_type (&)[2] \
+    >(z)[1]
+#  define THRUST_STD_COMPLEX_DEVICE __device__
+#else
+#  define THRUST_STD_COMPLEX_REAL(z) (z).real()
+#  define THRUST_STD_COMPLEX_IMAG(z) (z).imag()
+#  define THRUST_STD_COMPLEX_DEVICE
+#endif
 
 namespace thrust
 {
@@ -69,27 +85,12 @@ public:
 
   /* --- Constructors --- */
 
-  /*! Default construct a complex number.
-   */
-  __host__ __device__
-  complex();
-
   /*! Construct a complex number with an imaginary part of 0.
    *
    *  \param re The real part of the number.
    */
   __host__ __device__
   complex(const T& re);
-
-  /*! Construct a complex number with an imaginary part of 0.
-   *
-   *  \param re The real part of the number.
-   *
-   *  \tparam R is convertible to \c value_type.
-   */
-  template <typename R>
-  __host__ __device__
-  complex(const R& re);
 
   /*! Construct a complex number from its real and imaginary parts.
    *
@@ -99,17 +100,24 @@ public:
   __host__ __device__
   complex(const T& re, const T& im);
 
-  /*! Construct a complex number from its real and imaginary parts.
-   *
-   *  \param re The real part of the number.
-   *  \param im The imaginary part of the number.
-   *
-   *  \tparam R is convertible to \c value_type.
-   *  \tparam I is convertible to \c value_type.
+#if THRUST_CPP_DIALECT >= 2011
+  /*! Default construct a complex number.
    */
-  template <typename R, typename I>
+   __host__ __device__
+  complex() = default;
+
+  /*! This copy constructor copies from a \p complex with a type that is
+   *  convertible to this \p complex's \c value_type.
+   *
+   *  \param z The \p complex to copy from.
+   */
+   __host__ __device__
+  complex(const complex<T>& z) = default;
+#else
+  /*! Default construct a complex number.
+   */
   __host__ __device__
-  complex(const R& re, const I& im);
+  complex();
 
   /*! This copy constructor copies from a \p complex with a type that is
    *  convertible to this \p complex's \c value_type.
@@ -118,6 +126,7 @@ public:
    */
   __host__ __device__
   complex(const complex<T>& z);
+#endif
 
   /*! This converting copy constructor copies from a \p complex with a type
    *  that is convertible to this \p complex's \c value_type.
@@ -135,7 +144,7 @@ public:
    *
    *  \param z The \p complex to copy from.
    */
-  __host__
+  __host__ THRUST_STD_COMPLEX_DEVICE
   complex(const std::complex<T>& z);
 
   /*! This converting copy constructor copies from a <tt>std::complex</tt> with
@@ -146,7 +155,7 @@ public:
    *  \tparam U is convertible to \c value_type.
    */
   template <typename U>
-  __host__
+  __host__ THRUST_STD_COMPLEX_DEVICE
   complex(const std::complex<U>& z);
 
 
@@ -161,17 +170,15 @@ public:
   __host__ __device__
   complex& operator=(const T& re);
 
-  /*! Assign `re` to the real part of this \p complex and set the imaginary part
-   *  to 0.
+#if THRUST_CPP_DIALECT >= 2011
+  /*! Assign `z.real()` and `z.imag()` to the real and imaginary parts of this
+   *  \p complex respectively.
    *
-   *  \param re The real part of the number.
-   *
-   *  \tparam R is convertible to \c value_type.
+   *  \param z The \p complex to copy from.
    */
-  template <typename R>
-  __host__ __device__
-  complex& operator=(const R& re);
-
+   __host__ __device__
+  complex& operator=(const complex<T>& z) = default;
+#else
   /*! Assign `z.real()` and `z.imag()` to the real and imaginary parts of this
    *  \p complex respectively.
    *
@@ -179,6 +186,7 @@ public:
    */
   __host__ __device__
   complex& operator=(const complex<T>& z);
+#endif
 
   /*! Assign `z.real()` and `z.imag()` to the real and imaginary parts of this
    *  \p complex respectively.
@@ -196,7 +204,7 @@ public:
    *
    *  \param z The \p complex to copy from.
    */
-  __host__
+  __host__ THRUST_STD_COMPLEX_DEVICE
   complex& operator=(const std::complex<T>& z);
 
   /*! Assign `z.real()` and `z.imag()` to the real and imaginary parts of this
@@ -207,9 +215,8 @@ public:
    *  \tparam U is convertible to \c value_type.
    */
   template <typename U>
-  __host__
+  __host__ THRUST_STD_COMPLEX_DEVICE
   complex& operator=(const std::complex<U>& z);
-
 
 
   /* --- Compound Assignment Operators --- */
@@ -370,13 +377,17 @@ public:
 
   /*! Casts this \p complex to a <tt>std::complex</tt> of the same type.
    */
-  __host__
+  __host__ __device__
   operator std::complex<T>() const { return std::complex<T>(real(), imag()); }
 
 private:
+  /*! \cond
+   */
   struct generic_storage_type { T x; T y; };
+  /*! \endcond
+   */
 
-#if (THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC) || (THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC)
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC || THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
   typedef typename detail::conditional<
     detail::is_same<T, float>::value, float2,
     typename detail::conditional<
@@ -867,7 +878,7 @@ operator<<(std::basic_ostream<CharT, Traits>& os, const complex<T>& z);
  *  \param z The \p complex number to set.
  */
 template <typename T, typename CharT, typename Traits>
-__host__
+__host__ __device__
 std::basic_istream<CharT, Traits>&
 operator>>(std::basic_istream<CharT, Traits>& is, complex<T>& z);
 
@@ -890,7 +901,7 @@ bool operator==(const complex<T0>& x, const complex<T1>& y);
  *  \param y The second \p complex.
  */
 template <typename T0, typename T1>
-__host__
+__host__ THRUST_STD_COMPLEX_DEVICE
 bool operator==(const complex<T0>& x, const std::complex<T1>& y);
 
 /*! Returns true if two \p complex numbers are equal and false otherwise.
@@ -899,7 +910,7 @@ bool operator==(const complex<T0>& x, const std::complex<T1>& y);
  *  \param y The second \p complex.
  */
 template <typename T0, typename T1>
-__host__
+__host__ THRUST_STD_COMPLEX_DEVICE
 bool operator==(const std::complex<T0>& x, const complex<T1>& y);
 
 /*! Returns true if the imaginary part of the \p complex number is zero and
@@ -937,7 +948,7 @@ bool operator!=(const complex<T0>& x, const complex<T1>& y);
  *  \param y The second \p complex.
  */
 template <typename T0, typename T1>
-__host__
+__host__ THRUST_STD_COMPLEX_DEVICE
 bool operator!=(const complex<T0>& x, const std::complex<T1>& y);
 
 /*! Returns true if two \p complex numbers are different and false otherwise.
@@ -946,7 +957,7 @@ bool operator!=(const complex<T0>& x, const std::complex<T1>& y);
  *  \param y The second \p complex.
  */
 template <typename T0, typename T1>
-__host__
+__host__ THRUST_STD_COMPLEX_DEVICE
 bool operator!=(const std::complex<T0>& x, const complex<T1>& y);
 
 /*! Returns true if the imaginary part of the \p complex number is not zero or
@@ -972,6 +983,10 @@ bool operator!=(const complex<T0>& x, const T1& y);
 } // end namespace thrust
 
 #include <thrust/detail/complex/complex.inl>
+
+#undef THRUST_STD_COMPLEX_REAL
+#undef THRUST_STD_COMPLEX_IMAG
+#undef THRUST_STD_COMPLEX_DEVICE
 
 /*! \} // complex_numbers
  */

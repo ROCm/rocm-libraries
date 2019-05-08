@@ -20,29 +20,72 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# Only header target, does not include dependencies
-add_library(thrust_headers INTERFACE)
-target_include_directories(thrust_headers
-  INTERFACE
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
+# rocThrust header-only library
+
+# Configure a header file to pass the rocThrust version
+configure_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/rocthrust_version.hpp.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/include/rocthrust_version.hpp"
+  @ONLY
 )
 
+# Only header target, does not include dependencies
 add_library(rocthrust INTERFACE)
+target_include_directories(rocthrust
+  INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
+    $<INSTALL_INTERFACE:rocthrust/include/>
+)
+
 target_link_libraries(rocthrust
   INTERFACE
-    thrust_headers
-    hcc::hccrt
-    hcc::hc_am
+    roc::rocprim_hip
+#    hip::device
 )
-# Remove this check when we no longer build with older rocm stack(ie < 1.8.2)
-if(TARGET hip::device)
-  target_link_libraries(rocthrust INTERFACE hip::device)
-else()
-  target_link_libraries(rocthrust INTERFACE hip::hip_hcc hip::hip_device)
-endif()
 
+# TODO: Remove after the Rocprim HC API removal
 # We will use rocPRIM HIP API
 target_compile_definitions(rocthrust
   INTERFACE
     ROCPRIM_HIP_API=1
 )
+
+# Installation
+
+include(GNUInstallDirs)
+set(INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_INCLUDEDIR})
+
+# We need to install headers manually as rocm_install_targets
+# does not support header-only libraries (INTERFACE targets)
+rocm_install_targets(
+  TARGETS rocthrust
+  EXPORT rocthrust-targets
+#   INCLUDE
+#   ${CMAKE_SOURCE_DIR}/thrust
+#   ${CMAKE_BINARY_DIR}/thrust
+  PREFIX rocthrust
+)
+install(
+  DIRECTORY
+    "./"
+    "${PROJECT_BINARY_DIR}/thrust/include/"
+  DESTINATION rocthrust/include/thrust/
+  FILES_MATCHING
+  PATTERN "*.h"
+  PATTERN "*.cuh"
+  PATTERN "*.hpp"
+  PATTERN "*.in"
+  PATTERN "*.inl"
+  PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ
+)
+
+# Export targets
+rocm_export_targets(
+  TARGETS rocthrust-targets
+  NAME rocthrust
+  PREFIX rocthrust
+)
+
+# Create symlinks
+rocm_install_symlink_subdir(rocthrust)
