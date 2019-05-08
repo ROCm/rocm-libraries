@@ -58,7 +58,7 @@ build:rocm:
     # CXX=hcc cmake -DBUILD_TEST=ON -DBUILD_EXAMPLE=ON -DBUILD_BENCHMARK=ON ../.
     - CXX=hcc cmake -DBUILD_TEST=ON ../.
     - make -j16
-    # - make package
+    - make package
   artifacts:
     paths:
     - build/library/
@@ -82,3 +82,49 @@ build:rocm:
     - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 2
 
 include: '.gitlab-ci-gputest.yml'
+
+# test:rocm_package:
+#   stage: test
+#   tags:
+#     - rocm
+#   variables:
+#     SUDO_CMD: "sudo -E"
+#   dependencies:
+#     - build:rocm
+#   script:
+#     # Install rocPRIM package
+#     - echo ${ROCPRIM_GIT_URL}
+#     - echo $ROCPRIM_GIT_URL
+#     - git clone -b develop_thrust_stream https://gitlab-ci-token:${CI_JOB_TOKEN}@${ROCPRIM_GIT_URL}
+#     - cd rocPRIM
+#     - mkdir build
+#     - cd build
+#     - CXX=hcc cmake -DBUILD_TEST=OFF ../.
+#     - make package
+#     - $SUDO_CMD dpkg -i rocprim-*.deb
+#     - cd ../..
+#     # rocThrust
+#     - cd build
+#     - $SUDO_CMD dpkg -i rocthrust-*.deb
+#     - mkdir ../package_test && cd ../package_test
+#     - CXX=hcc cmake ../extra/. -Drocprim_DIR="/opt/rocm/rocprim"
+#     - make VERBOSE=1
+#     - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 2
+#     - $SUDO_CMD dpkg -r rocthrust
+#     - $SUDO_CMD dpkg -r rocprim
+
+test:rocm_install:
+  stage: test
+  tags:
+    - rocm
+  variables:
+    SUDO_CMD: "sudo -E"
+  script:
+    - mkdir build_only_install
+    - cd build_only_install
+    - CXX=hcc cmake -DBUILD_TEST=OFF ../.
+    - $SUDO_CMD make install
+    - mkdir ../install_test && cd ../install_test
+    - CXX=hcc cmake ../extra/.
+    - make VERBOSE=1
+    - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 2
