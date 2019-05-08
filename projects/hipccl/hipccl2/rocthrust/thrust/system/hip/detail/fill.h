@@ -48,7 +48,7 @@ fill_n(execution_policy<Derived>& policy,
                                 thrust::make_counting_iterator<Size>(0),
                                 thrust::make_counting_iterator<Size>(count),
                                 first,
-                                [value](Size) mutable { return value; });
+                                [value](Size) { return value; });
 } // func fill_n
 
 template <class Derived, class ForwardIterator, class T>

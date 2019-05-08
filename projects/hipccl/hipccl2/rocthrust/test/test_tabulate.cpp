@@ -26,6 +26,32 @@
 
 TESTS_DEFINE(TabulateTests, FullTestsParams);
 
+template<class OutputType>
+struct nonconst_op
+{
+    THRUST_HIP_FUNCTION
+    OutputType operator()(size_t idx)
+    {
+        return (OutputType)(idx >= 3);
+    }
+};
+
+TYPED_TEST(TabulateTests, TestTabulateSimpleNonConstOP)
+{
+    using Vector = typename TestFixture::input_type;
+    using T = typename Vector::value_type;
+
+    Vector v(5);
+
+    thrust::tabulate(v.begin(), v.end(), nonconst_op<T>());
+
+    ASSERT_EQ(v[0], T(0));
+    ASSERT_EQ(v[1], T(0));
+    ASSERT_EQ(v[2], T(0));
+    ASSERT_EQ(v[3], T(1));
+    ASSERT_EQ(v[4], T(1));
+}
+
 template<typename ForwardIterator, typename UnaryOperation>
 void tabulate(my_system &system, ForwardIterator, ForwardIterator, UnaryOperation)
 {

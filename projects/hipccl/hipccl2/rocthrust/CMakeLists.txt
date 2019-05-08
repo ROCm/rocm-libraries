@@ -62,12 +62,12 @@ option(BUILD_TEST "Build tests" ON)
 # Get dependencies
 include(cmake/Dependencies.cmake)
 
+# AMD targets
+set(AMDGPU_TARGETS gfx803;gfx900;gfx906 CACHE STRING "List of specific machine types for library to target")
+
 # Print configuration summary
 include(cmake/Summary.cmake)
 print_configuration_summary()
-
-# AMD targets
-set(AMDGPU_TARGETS gfx803;gfx900;gfx906 CACHE STRING "List of specific machine types for library to target")
 
 # Thrust (with HIP backend)
 add_subdirectory(thrust)
