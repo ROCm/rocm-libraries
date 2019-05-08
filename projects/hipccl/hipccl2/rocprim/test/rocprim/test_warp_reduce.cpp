@@ -31,20 +31,11 @@
 #include <rocprim/rocprim.hpp>
 
 #include "test_utils.hpp"
+#include "test_utils_types.hpp"
 
 #define HIP_CHECK(error) ASSERT_EQ(static_cast<hipError_t>(error),hipSuccess)
 
 namespace rp = rocprim;
-
-template<
-    class T,
-    unsigned int WarpSize
->
-struct params
-{
-    using type = T;
-    static constexpr unsigned int warp_size = WarpSize;
-};
 
 template<class Params>
 class RocprimWarpReduceTests : public ::testing::Test {
@@ -52,35 +43,7 @@ public:
     using params = Params;
 };
 
-
-typedef ::testing::Types<
-    // shuffle based reduce
-    params<int, 2U>,
-    params<int, 4U>,
-    params<int, 8U>,
-    params<int, 16U>,
-    params<int, 32U>,
-    params<int, 64U>,
-    params<float, 2U>,
-    params<float, 4U>,
-    params<float, 8U>,
-    params<float, 16U>,
-    params<float, 32U>,
-    params<float, 64U>,
-    // shared memory reduce
-    params<int, 3U>,
-    params<int, 7U>,
-    params<int, 15U>,
-    params<int, 37U>,
-    params<int, 61U>,
-    params<float, 3U>,
-    params<float, 7U>,
-    params<float, 15U>,
-    params<float, 37U>,
-    params<float, 61U>
-> Params;
-
-TYPED_TEST_CASE(RocprimWarpReduceTests, Params);
+TYPED_TEST_CASE(RocprimWarpReduceTests, WarpParams);
 
 template<
     class T,
@@ -110,6 +73,7 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSum)
 {
     // logical warp side for warp primitive, execution warp size is always rp::warp_size()
     using T = typename TestFixture::params::type;
+    using binary_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_plus, rp::plus<T>>::type;
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
     constexpr size_t block_size =
         rp::detail::is_power_of_two(logical_warp_size)
@@ -124,18 +88,19 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSum)
     }
 
     // Generate data
-    std::vector<T> input = test_utils::get_random_data<T>(size, -100, 100); // used for input
+    std::vector<T> input = test_utils::get_random_data<T>(size, 2, 50); // used for input
     std::vector<T> output(input.size() / logical_warp_size, 0);
 
     // Calculate expected results on host
     std::vector<T> expected(output.size(), 1);
+    binary_op_type binary_op;
     for(size_t i = 0; i < output.size(); i++)
     {
         T value = 0;
         for(size_t j = 0; j < logical_warp_size; j++)
         {
             auto idx = i * logical_warp_size + j;
-            value += input[idx];
+            value = apply(binary_op, value, input[idx]);
         }
         expected[i] = value;
     }
@@ -172,18 +137,7 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSum)
         )
     );
 
-    for(size_t i = 0; i < output.size(); i++)
-    {
-        if (std::is_integral<T>::value)
-        {
-            ASSERT_EQ(output[i], expected[i]);
-        }
-        else if(std::is_floating_point<T>::value)
-        {
-            auto tolerance = std::max<T>(std::abs(0.1f * expected[i]), T(0.01f));
-            ASSERT_NEAR(output[i], expected[i], tolerance);
-        }
-    }
+    test_utils::assert_near(output, expected, 0.01);
 
     HIP_CHECK(hipFree(device_input));
     HIP_CHECK(hipFree(device_output));
@@ -214,6 +168,7 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSum)
 {
     // logical warp side for warp primitive, execution warp size is always rp::warp_size()
     using T = typename TestFixture::params::type;
+    using binary_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_plus, rp::plus<T>>::type;
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
     constexpr size_t block_size =
         rp::detail::is_power_of_two(logical_warp_size)
@@ -228,18 +183,19 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSum)
     }
 
     // Generate data
-    std::vector<T> input = test_utils::get_random_data<T>(size, -100, 100); // used for input
+    std::vector<T> input = test_utils::get_random_data<T>(size, 2, 50); // used for input
     std::vector<T> output(input.size(), 0);
 
     // Calculate expected results on host
     std::vector<T> expected(output.size(), 0);
+    binary_op_type binary_op;
     for(size_t i = 0; i < output.size() / logical_warp_size; i++)
     {
         T value = 0;
         for(size_t j = 0; j < logical_warp_size; j++)
         {
             auto idx = i * logical_warp_size + j;
-            value += input[idx];
+            value = apply(binary_op, value, input[idx]);
         }
         for (size_t j = 0; j < logical_warp_size; j++)
         {
@@ -280,18 +236,7 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSum)
         )
     );
 
-    for(size_t i = 0; i < output.size(); i++)
-    {
-        if (std::is_integral<T>::value)
-        {
-            ASSERT_EQ(output[i], expected[i]);
-        }
-        else if(std::is_floating_point<T>::value)
-        {
-            auto tolerance = std::max<T>(std::abs(0.1f * expected[i]), T(0.01f));
-            ASSERT_NEAR(output[i], expected[i], tolerance);
-        }
-    }
+    test_utils::assert_near(output, expected, 0.01);
 
     HIP_CHECK(hipFree(device_input));
     HIP_CHECK(hipFree(device_output));
@@ -325,6 +270,7 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumValid)
 {
     // logical warp side for warp primitive, execution warp size is always rp::warp_size()
     using T = typename TestFixture::params::type;
+    using binary_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_plus, rp::plus<T>>::type;
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
     constexpr size_t block_size =
         rp::detail::is_power_of_two(logical_warp_size)
@@ -340,18 +286,19 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumValid)
     }
 
     // Generate data
-    std::vector<T> input = test_utils::get_random_data<T>(size, -100, 100); // used for input
+    std::vector<T> input = test_utils::get_random_data<T>(size, 2, 50); // used for input
     std::vector<T> output(input.size() / logical_warp_size, 0);
 
     // Calculate expected results on host
     std::vector<T> expected(output.size(), 1);
+    binary_op_type binary_op;
     for(size_t i = 0; i < output.size(); i++)
     {
         T value = 0;
         for(size_t j = 0; j < valid; j++)
         {
             auto idx = i * logical_warp_size + j;
-            value += input[idx];
+            value = apply(binary_op, value, input[idx]);
         }
         expected[i] = value;
     }
@@ -388,18 +335,7 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumValid)
         )
     );
 
-    for(size_t i = 0; i < output.size(); i++)
-    {
-        if (std::is_integral<T>::value)
-        {
-            ASSERT_EQ(output[i], expected[i]);
-        }
-        else if(std::is_floating_point<T>::value)
-        {
-            auto tolerance = std::max<T>(std::abs(0.1f * expected[i]), T(0.01f));
-            ASSERT_NEAR(output[i], expected[i], tolerance);
-        }
-    }
+    test_utils::assert_near(output, expected, 0.01);
 
     HIP_CHECK(hipFree(device_input));
     HIP_CHECK(hipFree(device_output));
@@ -430,6 +366,7 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSumValid)
 {
     // logical warp side for warp primitive, execution warp size is always rp::warp_size()
     using T = typename TestFixture::params::type;
+    using binary_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_plus, rp::plus<T>>::type;
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
     constexpr size_t block_size =
         rp::detail::is_power_of_two(logical_warp_size)
@@ -445,18 +382,19 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSumValid)
     }
 
     // Generate data
-    std::vector<T> input = test_utils::get_random_data<T>(size, -100, 100); // used for input
+    std::vector<T> input = test_utils::get_random_data<T>(size, 2, 50); // used for input
     std::vector<T> output(input.size(), 0);
 
     // Calculate expected results on host
     std::vector<T> expected(output.size(), 0);
+    binary_op_type binary_op;
     for(size_t i = 0; i < output.size() / logical_warp_size; i++)
     {
         T value = 0;
         for(size_t j = 0; j < valid; j++)
         {
             auto idx = i * logical_warp_size + j;
-            value += input[idx];
+            value = apply(binary_op, value, input[idx]);
         }
         for (size_t j = 0; j < logical_warp_size; j++)
         {
@@ -497,18 +435,7 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSumValid)
         )
     );
 
-    for(size_t i = 0; i < output.size(); i++)
-    {
-        if (std::is_integral<T>::value)
-        {
-            ASSERT_EQ(output[i], expected[i]);
-        }
-        else if(std::is_floating_point<T>::value)
-        {
-            auto tolerance = std::max<T>(std::abs(0.1f * expected[i]), T(0.01f));
-            ASSERT_NEAR(output[i], expected[i], tolerance);
-        }
-    }
+    test_utils::assert_near(output, expected, 0.01);
 
     HIP_CHECK(hipFree(device_input));
     HIP_CHECK(hipFree(device_output));
@@ -537,7 +464,7 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumCustomStruct)
     std::vector<T> input(size);
     {
         auto random_values =
-            test_utils::get_random_data<base_type>(2 * input.size(), 0, 100);
+            test_utils::get_random_data<base_type>(2 * input.size(), 2, 50);
         for(size_t i = 0; i < input.size(); i++)
         {
             input[i].x = random_values[i];
@@ -591,16 +518,7 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumCustomStruct)
         )
     );
 
-    for(size_t i = 0; i < output.size(); i++)
-    {
-        auto diffx = std::max<base_type>(std::abs(0.1f * expected[i].x), base_type(0.01f));
-        if(std::is_integral<base_type>::value) diffx = 0;
-        ASSERT_NEAR(output[i].x, expected[i].x, diffx);
-
-        auto diffy = std::max<base_type>(std::abs(0.1f * expected[i].y), base_type(0.01f));
-        if(std::is_integral<base_type>::value) diffy = 0;
-        ASSERT_NEAR(output[i].y, expected[i].y, diffy);
-    }
+    test_utils::assert_near(output, expected, 0.01);
 
     HIP_CHECK(hipFree(device_input));
     HIP_CHECK(hipFree(device_output));
@@ -633,6 +551,7 @@ TYPED_TEST(RocprimWarpReduceTests, HeadSegmentedReduceSum)
 {
     // logical warp side for warp primitive, execution warp size is always rp::warp_size()
     using T = typename TestFixture::params::type;
+    using binary_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_plus, rp::plus<T>>::type;
     using flag_type = unsigned char;
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
     constexpr size_t block_size =
@@ -680,6 +599,7 @@ TYPED_TEST(RocprimWarpReduceTests, HeadSegmentedReduceSum)
 
     // Calculate expected results on host
     std::vector<T> expected(output.size());
+    binary_op_type binary_op;
     size_t segment_head_index = 0;
     T reduction = input[0];
     for(size_t i = 0; i < output.size(); i++)
@@ -692,7 +612,7 @@ TYPED_TEST(RocprimWarpReduceTests, HeadSegmentedReduceSum)
         }
         else
         {
-            reduction = reduction + input[i];
+            reduction = apply(binary_op, reduction, input[i]);
         }
     }
     expected[segment_head_index] = reduction;
@@ -718,15 +638,17 @@ TYPED_TEST(RocprimWarpReduceTests, HeadSegmentedReduceSum)
     );
     HIP_CHECK(hipDeviceSynchronize());
 
+    std::vector<T> output_segment(output.size(), 0);
+    std::vector<T> expected_segment(output.size(), 0);
     for(size_t i = 0; i < output.size(); i++)
     {
         if(flags[i])
         {
-            auto diff = std::max<T>(std::abs(0.1f * expected[i]), T(0.01f));
-            if(std::is_integral<T>::value) diff = 0;
-            ASSERT_NEAR(output[i], expected[i], diff) << " with index: " << index;
+            output_segment[i] = output[i];
+            expected_segment[i] = expected[i];
         }
     }
+    test_utils::assert_near(output_segment, expected_segment, 0.01);
 
     HIP_CHECK(hipFree(device_input));
     HIP_CHECK(hipFree(device_flags));
@@ -760,6 +682,7 @@ TYPED_TEST(RocprimWarpReduceTests, TailSegmentedReduceSum)
 {
     // logical warp side for warp primitive, execution warp size is always rp::warp_size()
     using T = typename TestFixture::params::type;
+    using binary_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_plus, rp::plus<T>>::type;
     using flag_type = unsigned char;
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
     constexpr size_t block_size =
@@ -807,6 +730,7 @@ TYPED_TEST(RocprimWarpReduceTests, TailSegmentedReduceSum)
 
     // Calculate expected results on host
     std::vector<T> expected(output.size());
+    binary_op_type binary_op;
     std::vector<size_t> segment_indexes;
     size_t segment_index = 0;
     T reduction;
@@ -825,12 +749,12 @@ TYPED_TEST(RocprimWarpReduceTests, TailSegmentedReduceSum)
             auto next = i + 1;
             while(next < output.size() && !flags[next])
             {
-                reduction = reduction + input[next];
+                reduction = apply(binary_op, reduction, input[next]);
                 i++;
                 next++;
             }
             i++;
-            expected[segment_index] = reduction + input[i];
+            expected[segment_index] = apply(binary_op, reduction, input[i]);
             segment_indexes.push_back(segment_index);
         }
     }
@@ -856,13 +780,15 @@ TYPED_TEST(RocprimWarpReduceTests, TailSegmentedReduceSum)
     );
     HIP_CHECK(hipDeviceSynchronize());
 
+    std::vector<T> output_segment(segment_indexes.size());
+    std::vector<T> expected_segment(segment_indexes.size());
     for(size_t i = 0; i < segment_indexes.size(); i++)
     {
         auto index = segment_indexes[i];
-        auto diff = std::max<T>(std::abs(0.1f * expected[i]), T(0.01f));
-        if(std::is_integral<T>::value) diff = 0;
-        ASSERT_NEAR(output[index], expected[index], diff) << " with index: " << index;
+        output_segment[i] = output[index];
+        expected_segment[i] = expected[index];
     }
+    test_utils::assert_near(output_segment, expected_segment, 0.01);
 
     HIP_CHECK(hipFree(device_input));
     HIP_CHECK(hipFree(device_flags));
