@@ -33,7 +33,6 @@ are not supported.
     - `CacheLoadModifier`, `CacheStoreModifier` cache modifiers are not supported.
     - `ThreadLoad`, `ThreadStore` functions are not supported.
 - Storage management and debug functions:
-    - `CachingDeviceAllocator` class is not supported.
     - `Debug`, `PtxVersion`, `SmVersion` functions and `CubDebug`, `CubDebugExit`, `_CubLog` macros are not supported.
 - Intrinsics:
     - `ThreadExit`, `ThreadTrap` - not supported.
