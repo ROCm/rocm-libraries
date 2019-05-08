@@ -32,10 +32,10 @@
 ///
 /// For example, if HIPCUB_VERSION is 100500, then the major version is 1,
 /// the minor version is 5, and the patch level is 0.
-#define HIPCUB_VERSION @rocprim_VERSION_MAJOR@ * 100000 + @rocprim_VERSION_MINOR@ * 100 + @rocprim_VERSION_PATCH@
+#define HIPCUB_VERSION @hipcub_VERSION_MAJOR@ * 100000 + @hipcub_VERSION_MINOR@ * 100 + @hipcub_VERSION_PATCH@
 
-#define HIPCUB_VERSION_MAJOR @rocprim_VERSION_MAJOR@
-#define HIPCUB_VERSION_MINOR @rocprim_VERSION_MINOR@
-#define HIPCUB_VERSION_PATCH @rocprim_VERSION_PATCH@
+#define HIPCUB_VERSION_MAJOR @hipcub_VERSION_MAJOR@
+#define HIPCUB_VERSION_MINOR @hipcub_VERSION_MINOR@
+#define HIPCUB_VERSION_PATCH @hipcub_VERSION_PATCH@
 
 #endif // HIPCUB_VERSION_HPP_
