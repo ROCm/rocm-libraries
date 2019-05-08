@@ -227,7 +227,7 @@ private:
         const auto warp_id_is_even = ((flat_tid / ::rocprim::warp_size()) % 2) == 0;
         ::rocprim::warp_sort<Key, ::rocprim::warp_size(), Value> wsort;
         auto compare_function2 =
-            [compare_function, warp_id_is_even](const Key& a, const Key& b) -> bool
+            [compare_function, warp_id_is_even](const Key& a, const Key& b) mutable -> bool
             {
                 auto r = compare_function(a, b);
                 if(warp_id_is_even)
@@ -235,11 +235,12 @@ private:
                 return !r;
             };
         wsort.sort(kv..., compare_function2);
- 
+
         #pragma unroll
         for(unsigned int length = ::rocprim::warp_size(); length < Size; length *= 2)
         {
             bool dir = (flat_tid & (length * 2)) != 0;
+            #pragma unroll
             for(unsigned int k = length; k > 0; k /= 2)
             {
                 copy_to_shared(kv..., flat_tid, storage);

@@ -51,22 +51,6 @@ namespace test_utils
 
 // Support half operators on host side
 
-#if defined(__HCC_ACCELERATOR__) || defined(__HIP_DEVICE_COMPILE__)
-
-ROCPRIM_DEVICE inline
-rocprim::half half_to_native(const rocprim::half& x)
-{
-    return x;
-}
-
-ROCPRIM_DEVICE inline
-rocprim::half native_to_half(const rocprim::half& x)
-{
-    return x;
-}
-
-#else
-
 ROCPRIM_HOST inline
 _Float16 half_to_native(const rocprim::half& x)
 {
@@ -79,14 +63,16 @@ rocprim::half native_to_half(const _Float16& x)
     return *reinterpret_cast<const rocprim::half *>(&x);
 }
 
-#endif
-
 struct half_less
 {
     ROCPRIM_HOST_DEVICE inline
     bool operator()(const rocprim::half& a, const rocprim::half& b) const
     {
+        #if __HIP_DEVICE_COMPILE__
+        return a < b;
+        #else
         return half_to_native(a) < half_to_native(b);
+        #endif
     }
 };
 
@@ -95,7 +81,11 @@ struct half_less_equal
     ROCPRIM_HOST_DEVICE inline
     bool operator()(const rocprim::half& a, const rocprim::half& b) const
     {
+        #if __HIP_DEVICE_COMPILE__
+        return a <= b;
+        #else
         return half_to_native(a) <= half_to_native(b);
+        #endif
     }
 };
 
@@ -104,7 +94,11 @@ struct half_greater
     ROCPRIM_HOST_DEVICE inline
     bool operator()(const rocprim::half& a, const rocprim::half& b) const
     {
+        #if __HIP_DEVICE_COMPILE__
+        return a > b;
+        #else
         return half_to_native(a) > half_to_native(b);
+        #endif
     }
 };
 
@@ -113,7 +107,11 @@ struct half_greater_equal
     ROCPRIM_HOST_DEVICE inline
     bool operator()(const rocprim::half& a, const rocprim::half& b) const
     {
+        #if __HIP_DEVICE_COMPILE__
+        return a >= b;
+        #else
         return half_to_native(a) >= half_to_native(b);
+        #endif
     }
 };
 
@@ -122,7 +120,11 @@ struct half_equal_to
     ROCPRIM_HOST_DEVICE inline
     bool operator()(const rocprim::half& a, const rocprim::half& b) const
     {
+        #if __HIP_DEVICE_COMPILE__
+        return a == b;
+        #else
         return half_to_native(a) == half_to_native(b);
+        #endif
     }
 };
 
@@ -131,7 +133,11 @@ struct half_not_equal_to
     ROCPRIM_HOST_DEVICE inline
     bool operator()(const rocprim::half& a, const rocprim::half& b) const
     {
+        #if __HIP_DEVICE_COMPILE__
+        return a != b;
+        #else
         return half_to_native(a) != half_to_native(b);
+        #endif
     }
 };
 
@@ -140,7 +146,11 @@ struct half_plus
     ROCPRIM_HOST_DEVICE inline
     rocprim::half operator()(const rocprim::half& a, const rocprim::half& b) const
     {
+        #if __HIP_DEVICE_COMPILE__
+        return a + b;
+        #else
         return native_to_half(half_to_native(a) + half_to_native(b));
+        #endif
     }
 };
 
@@ -149,7 +159,11 @@ struct half_minus
     ROCPRIM_HOST_DEVICE inline
     rocprim::half operator()(const rocprim::half& a, const rocprim::half& b) const
     {
+        #if __HIP_DEVICE_COMPILE__
+        return a - b;
+        #else
         return native_to_half(half_to_native(a) - half_to_native(b));
+        #endif
     }
 };
 
@@ -158,7 +172,11 @@ struct half_multiplies
     ROCPRIM_HOST_DEVICE inline
     rocprim::half operator()(const rocprim::half& a, const rocprim::half& b) const
     {
+        #if __HIP_DEVICE_COMPILE__
+        return a * b;
+        #else
         return native_to_half(half_to_native(a) * half_to_native(b));
+        #endif
     }
 };
 
@@ -167,7 +185,11 @@ struct half_maximum
     ROCPRIM_HOST_DEVICE inline
     rocprim::half operator()(const rocprim::half& a, const rocprim::half& b) const
     {
+        #if __HIP_DEVICE_COMPILE__
+        return a < b ? b : a;
+        #else
         return half_to_native(a) < half_to_native(b) ? b : a;
+        #endif
     }
 };
 
@@ -176,7 +198,11 @@ struct half_minimum
     ROCPRIM_HOST_DEVICE inline
     rocprim::half operator()(const rocprim::half& a, const rocprim::half& b) const
     {
+        #if __HIP_DEVICE_COMPILE__
+        return a < b ? a : b;
+        #else
         return half_to_native(a) < half_to_native(b) ? a : b;
+        #endif
     }
 };
 
@@ -241,9 +267,8 @@ OutputIt host_inclusive_scan(InputIt first, InputIt last,
                              OutputIt d_first, BinaryOperation op)
 {
     using input_type = typename std::iterator_traits<InputIt>::value_type;
-    using output_type = typename std::iterator_traits<OutputIt>::value_type;
     using result_type = typename ::rocprim::detail::match_result_type<
-        input_type, output_type, BinaryOperation
+        input_type, BinaryOperation
     >::type;
 
     if (first == last) return d_first;
@@ -264,9 +289,8 @@ OutputIt host_exclusive_scan(InputIt first, InputIt last,
                              BinaryOperation op)
 {
     using input_type = typename std::iterator_traits<InputIt>::value_type;
-    using output_type = typename std::iterator_traits<OutputIt>::value_type;
     using result_type = typename ::rocprim::detail::match_result_type<
-        input_type, output_type, BinaryOperation
+        input_type, BinaryOperation
     >::type;
 
     if (first == last) return d_first;
@@ -289,9 +313,8 @@ OutputIt host_exclusive_scan_by_key(InputIt first, InputIt last, KeyIt k_first,
                                     BinaryOperation op, KeyCompare key_compare_op)
 {
     using input_type = typename std::iterator_traits<InputIt>::value_type;
-    using output_type = typename std::iterator_traits<OutputIt>::value_type;
     using result_type = typename ::rocprim::detail::match_result_type<
-        input_type, output_type, BinaryOperation
+        input_type, BinaryOperation
     >::type;
 
     if (first == last) return d_first;
@@ -315,15 +338,6 @@ OutputIt host_exclusive_scan_by_key(InputIt first, InputIt last, KeyIt k_first,
     return ++d_first;
 }
 
-#ifdef ROCPRIM_HC_API
-inline
-size_t get_max_tile_size(hc::accelerator acc = hc::accelerator())
-{
-    return acc.get_max_tile_static_size();
-}
-#endif
-
-#ifdef ROCPRIM_HIP_API
 inline
 size_t get_max_block_size()
 {
@@ -339,7 +353,6 @@ size_t get_max_block_size()
     }
     return device_properties.maxThreadsPerBlock;
 }
-#endif
 
 template<class T>
 struct is_custom_test_type : std::false_type
@@ -357,7 +370,6 @@ struct inner_type
     using type = T;
 };
 
-#if defined(ROCPRIM_HC_API) || defined(ROCPRIM_HIP_API)
 // Custom type used in tests
 template<class T>
 struct custom_test_type
@@ -680,7 +692,6 @@ inline auto get_random_value(typename T::value_type min, typename T::value_type 
 {
     return get_random_data(1, min, max)[0];
 }
-#endif
 
 template<class T>
 auto assert_near(const std::vector<T>& result, const std::vector<T>& expected, const float percent)

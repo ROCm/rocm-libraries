@@ -156,7 +156,6 @@ public:
 /// In the examples radix sort is performed on a block of 256 threads, each thread provides
 /// eight \p int value, results are returned using the same array as for input.
 ///
-/// \b HIP: \n
 /// \code{.cpp}
 /// __global__ void example_kernel(...)
 /// {
@@ -174,29 +173,6 @@ public:
 ///     );
 ///     ...
 /// }
-/// \endcode
-///
-/// \b HC: \n
-/// \code{.cpp}
-/// hc::parallel_for_each(
-///     hc::extent<1>(...).tile(256),
-///     [=](hc::tiled_index<1> i) [[hc]]
-///     {
-///         // specialize block_radix_sort for int, block of 256 threads,
-///         // and eight items per thread; key-only sort
-///         using block_rsort_int = rocprim::block_radix_sort<int, 256, 8>;
-///
-///         // allocate storage in shared memory
-///         tile_static block_rsort_int::storage_type storage;
-///
-///         int input[8] = ...;
-///         // execute block radix sort (ascending)
-///         block_rsort_int().sort(
-///             input,
-///             storage
-///         );
-///     }
-/// );
 /// \endcode
 /// \endparblock
 template<
@@ -233,7 +209,7 @@ public:
     ///
     /// Depending on the implemention the operations exposed by parallel primitive may
     /// require a temporary storage for thread communication. The storage should be allocated
-    /// using keywords <tt>__shared__</tt> in HIP or \p tile_static in HC. It can be aliased to
+    /// using keywords <tt>__shared__</tt>. It can be aliased to
     /// an externally allocated memory, or be a part of a union type with other storage types
     /// to increase shared memory reusability.
     #ifndef DOXYGEN_SHOULD_SKIP_THIS // hides storage_type implementation for Doxygen
@@ -254,15 +230,13 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Examples
     /// \parblock
     /// In the examples radix sort is performed on a block of 128 threads, each thread provides
     /// two \p float value, results are returned using the same array as for input.
     ///
-    /// \b HIP: \n
     /// \code{.cpp}
     /// __global__ void example_kernel(...)
     /// {
@@ -282,28 +256,6 @@ public:
     /// }
     /// \endcode
     ///
-    /// \b HC: \n
-    /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(128),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize block_radix_sort for float, block of 128 threads,
-    ///         // and two items per thread; key-only sort
-    ///         using block_rsort_float = rocprim::block_radix_sort<float, 128, 2>;
-    ///
-    ///         // allocate storage in shared memory
-    ///         tile_static block_rsort_float::storage_type storage;
-    ///
-    ///         float input[2] = ...;
-    ///         // execute block radix sort (ascending)
-    ///         block_rsort_float().sort(
-    ///             input,
-    ///             storage
-    ///         );
-    ///     }
-    /// );
-    /// \endcode
     /// If the \p input values across threads in a block are <tt>{[256, 255], ..., [4, 3], [2, 1]}}</tt>, then
     /// then after sort they will be equal <tt>{[1, 2], [3, 4]  ..., [255, 256]}</tt>.
     /// \endparblock
@@ -350,15 +302,13 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Examples
     /// \parblock
     /// In the examples radix sort is performed on a block of 128 threads, each thread provides
     /// two \p float value, results are returned using the same array as for input.
     ///
-    /// \b HIP: \n
     /// \code{.cpp}
     /// __global__ void example_kernel(...)
     /// {
@@ -378,28 +328,6 @@ public:
     /// }
     /// \endcode
     ///
-    /// \b HC: \n
-    /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(128),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize block_radix_sort for float, block of 128 threads,
-    ///         // and two items per thread; key-only sort
-    ///         using block_rsort_float = rocprim::block_radix_sort<float, 128, 2>;
-    ///
-    ///         // allocate storage in shared memory
-    ///         tile_static block_rsort_float::storage_type storage;
-    ///
-    ///         float input[2] = ...;
-    ///         // execute block radix sort (descending)
-    ///         block_rsort_float().sort_desc(
-    ///             input,
-    ///             storage
-    ///         );
-    ///     }
-    /// );
-    /// \endcode
     /// If the \p input values across threads in a block are <tt>{[1, 2], [3, 4]  ..., [255, 256]}</tt>,
     /// then after sort they will be equal <tt>{[256, 255], ..., [4, 3], [2, 1]}</tt>.
     /// \endparblock
@@ -450,8 +378,7 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Examples
     /// \parblock
@@ -459,7 +386,6 @@ public:
     /// two key-value <tt>int</tt>-<tt>float</tt> pairs, results are returned using the same
     /// arrays as for input.
     ///
-    /// \b HIP: \n
     /// \code{.cpp}
     /// __global__ void example_kernel(...)
     /// {
@@ -480,30 +406,6 @@ public:
     /// }
     /// \endcode
     ///
-    /// \b HC: \n
-    /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(128),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize block_radix_sort for int-float pairs, block of 128
-    ///         // threads, and two items per thread
-    ///         using block_rsort_ii = rocprim::block_radix_sort<int, 128, 2, int>;
-    ///
-    ///         // allocate storage in shared memory
-    ///         tile_static block_rsort_ii::storage_type storage;
-    ///
-    ///         int keys[2] = ...;
-    ///         float values[2] = ...;
-    ///         // execute block radix sort-by-key (ascending)
-    ///         block_rsort_ii().sort(
-    ///             keys, values,
-    ///             storage
-    ///         );
-    ///         ...
-    ///     }
-    /// );
-    /// \endcode
     /// If the \p keys across threads in a block are <tt>{[256, 255], ..., [4, 3], [2, 1]}</tt> and
     /// the \p values are <tt>{[1, 1], [2, 2]  ..., [128, 128]}</tt>, then after sort the \p keys
     /// will be equal <tt>{[1, 2], [3, 4]  ..., [255, 256]}</tt> and the \p values will be
@@ -563,8 +465,7 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Examples
     /// \parblock
@@ -572,7 +473,6 @@ public:
     /// two key-value <tt>int</tt>-<tt>float</tt> pairs, results are returned using the same
     /// arrays as for input.
     ///
-    /// \b HIP: \n
     /// \code{.cpp}
     /// __global__ void example_kernel(...)
     /// {
@@ -593,30 +493,6 @@ public:
     /// }
     /// \endcode
     ///
-    /// \b HC: \n
-    /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(128),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize block_radix_sort for int-float pairs, block of 128
-    ///         // threads, and two items per thread
-    ///         using block_rsort_ii = rocprim::block_radix_sort<int, 128, 2, int>;
-    ///
-    ///         // allocate storage in shared memory
-    ///         tile_static block_rsort_ii::storage_type storage;
-    ///
-    ///         int keys[2] = ...;
-    ///         float values[2] = ...;
-    ///         // execute block radix sort-by-key (descending)
-    ///         block_rsort_ii().sort_desc(
-    ///             keys, values,
-    ///             storage
-    ///         );
-    ///         ...
-    ///     }
-    /// );
-    /// \endcode
     /// If the \p keys across threads in a block are <tt>{[1, 2], [3, 4]  ..., [255, 256]}</tt> and
     /// the \p values are <tt>{[128, 128], [127, 127]  ..., [2, 2], [1, 1]}</tt>, then after sort
     /// the \p keys will be equal <tt>{[256, 255], ..., [4, 3], [2, 1]}</tt> and the \p values
@@ -673,15 +549,13 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Examples
     /// \parblock
     /// In the examples radix sort is performed on a block of 128 threads, each thread provides
     /// two \p float value, results are returned using the same array as for input.
     ///
-    /// \b HIP: \n
     /// \code{.cpp}
     /// __global__ void example_kernel(...)
     /// {
@@ -701,28 +575,6 @@ public:
     /// }
     /// \endcode
     ///
-    /// \b HC: \n
-    /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(128),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize block_radix_sort for float, block of 128 threads,
-    ///         // and two items per thread; key-only sort
-    ///         using block_rsort_float = rocprim::block_radix_sort<float, 128, 2>;
-    ///
-    ///         // allocate storage in shared memory
-    ///         tile_static block_rsort_float::storage_type storage;
-    ///
-    ///         float keys[2] = ...;
-    ///         // execute block radix sort (ascending)
-    ///         block_rsort_float().sort_to_striped(
-    ///             keys,
-    ///             storage
-    ///         );
-    ///     }
-    /// );
-    /// \endcode
     /// If the \p input values across threads in a block are <tt>{[256, 255], ..., [4, 3], [2, 1]}}</tt>, then
     /// then after sort they will be equal <tt>{[1, 129], [2, 130]  ..., [128, 256]}</tt>.
     /// \endparblock
@@ -771,15 +623,13 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Examples
     /// \parblock
     /// In the examples radix sort is performed on a block of 128 threads, each thread provides
     /// two \p float value, results are returned using the same array as for input.
     ///
-    /// \b HIP: \n
     /// \code{.cpp}
     /// __global__ void example_kernel(...)
     /// {
@@ -799,28 +649,6 @@ public:
     /// }
     /// \endcode
     ///
-    /// \b HC: \n
-    /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(128),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize block_radix_sort for float, block of 128 threads,
-    ///         // and two items per thread; key-only sort
-    ///         using block_rsort_float = rocprim::block_radix_sort<float, 128, 2>;
-    ///
-    ///         // allocate storage in shared memory
-    ///         tile_static block_rsort_float::storage_type storage;
-    ///
-    ///         float input[2] = ...;
-    ///         // execute block radix sort (descending)
-    ///         block_rsort_float().sort_desc_to_striped(
-    ///             input,
-    ///             storage
-    ///         );
-    ///     }
-    /// );
-    /// \endcode
     /// If the \p input values across threads in a block are <tt>{[1, 2], [3, 4]  ..., [255, 256]}</tt>,
     /// then after sort they will be equal <tt>{[256, 128], ..., [130, 2], [129, 1]}</tt>.
     /// \endparblock
@@ -872,8 +700,7 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Examples
     /// \parblock
@@ -881,7 +708,6 @@ public:
     /// two key-value <tt>int</tt>-<tt>float</tt> pairs, results are returned using the same
     /// arrays as for input.
     ///
-    /// \b HIP: \n
     /// \code{.cpp}
     /// __global__ void example_kernel(...)
     /// {
@@ -902,30 +728,6 @@ public:
     /// }
     /// \endcode
     ///
-    /// \b HC: \n
-    /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(4),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize block_radix_sort for int-float pairs, block of 4
-    ///         // threads, and two items per thread
-    ///         using block_rsort_ii = rocprim::block_radix_sort<int, 4, 2, int>;
-    ///
-    ///         // allocate storage in shared memory
-    ///         tile_static block_rsort_ii::storage_type storage;
-    ///
-    ///         int keys[2] = ...;
-    ///         float values[2] = ...;
-    ///         // execute block radix sort-by-key (ascending)
-    ///         block_rsort_ii().sort_to_striped(
-    ///             keys, values,
-    ///             storage
-    ///         );
-    ///         ...
-    ///     }
-    /// );
-    /// \endcode
     /// If the \p keys across threads in a block are <tt>{[8, 7], [6, 5], [4, 3], [2, 1]}</tt> and
     /// the \p values are <tt>{[-1, -2], [-3, -4], [-5, -6], [-7, -8]}</tt>, then after sort the
     /// \p keys will be equal <tt>{[1, 5], [2, 6], [3, 7], [4, 8]}</tt> and the \p values will be
@@ -983,8 +785,7 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Examples
     /// \parblock
@@ -992,7 +793,6 @@ public:
     /// two key-value <tt>int</tt>-<tt>float</tt> pairs, results are returned using the same
     /// arrays as for input.
     ///
-    /// \b HIP: \n
     /// \code{.cpp}
     /// __global__ void example_kernel(...)
     /// {
@@ -1013,30 +813,6 @@ public:
     /// }
     /// \endcode
     ///
-    /// \b HC: \n
-    /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(4),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize block_radix_sort for int-float pairs, block of 4
-    ///         // threads, and two items per thread
-    ///         using block_rsort_ii = rocprim::block_radix_sort<int, 4, 2, int>;
-    ///
-    ///         // allocate storage in shared memory
-    ///         tile_static block_rsort_ii::storage_type storage;
-    ///
-    ///         int keys[2] = ...;
-    ///         float values[2] = ...;
-    ///         // execute block radix sort-by-key (descending)
-    ///         block_rsort_ii().sort_desc_to_striped(
-    ///             keys, values,
-    ///             storage
-    ///         );
-    ///         ...
-    ///     }
-    /// );
-    /// \endcode
     /// If the \p keys across threads in a block are <tt>{[1, 2], [3, 4], [5, 6], [7, 8]}</tt> and
     /// the \p values are <tt>{[80, 70], [60, 50], [40, 30], [20, 10]}</tt>, then after sort the
     /// \p keys will be equal <tt>{[8, 4], [7, 3], [6, 2], [5, 1]}</tt> and the \p values will be

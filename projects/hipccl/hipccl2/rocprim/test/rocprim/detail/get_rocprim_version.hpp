@@ -29,16 +29,14 @@
 // rocPRIM API
 #include <rocprim/rocprim.hpp>
 
-#ifdef ROCPRIM_HIP_API
-    #define HIP_CHECK(condition)         \
-    {                                  \
-        hipError_t error = condition;    \
-        if(error != hipSuccess){         \
-            std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
-            exit(error); \
-        } \
-    }
-#endif
+#define HIP_CHECK(condition)         \
+{                                    \
+    hipError_t error = condition;    \
+    if(error != hipSuccess){         \
+        std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
+        exit(error); \
+    } \
+}
 
 unsigned int get_rocprim_version_on_device();
 

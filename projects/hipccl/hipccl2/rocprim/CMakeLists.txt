@@ -109,5 +109,5 @@ set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PR
 rocm_create_package(
   NAME rocprim
   DESCRIPTION "Radeon Open Compute Parallel Primitives Library"
-  MAINTAINER "Stream HPC Maintainers <maintainer@streamhpc.com>"
+  MAINTAINER "Saad Rahim <saad.rahim@amd.com>"
 )

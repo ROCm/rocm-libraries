@@ -42,7 +42,7 @@ find_package(Git REQUIRED)
 if (NOT Git_FOUND)
   message(FATAL_ERROR "Please ensure Git is installed on the system")
 endif()
-		
+
 # Test dependencies
 if(BUILD_TEST)
   # Google Test (https://github.com/google/googletest)
@@ -68,6 +68,10 @@ endif()
 if(BUILD_BENCHMARK)
   # Google Benchmark (https://github.com/google/benchmark.git)
   message(STATUS "Downloading and building Google Benchmark.")
+  if(CMAKE_CXX_COMPILER MATCHES ".*/hipcc$")
+    # hip-clang cannot compile googlebenchmark for some reason
+    set(COMPILER_OVERRIDE "-DCMAKE_CXX_COMPILER=g++")
+  endif()
   # Download, build and install googlebenchmark library
   set(GOOGLEBENCHMARK_ROOT ${CMAKE_CURRENT_BINARY_DIR}/googlebenchmark CACHE PATH "")
   download_project(
@@ -75,7 +79,7 @@ if(BUILD_BENCHMARK)
     GIT_REPOSITORY https://github.com/google/benchmark.git
     GIT_TAG        v1.4.0
     INSTALL_DIR    ${GOOGLEBENCHMARK_ROOT}
-    CMAKE_ARGS     -DCMAKE_BUILD_TYPE=RELEASE -DBENCHMARK_ENABLE_TESTING=OFF -DBUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
+    CMAKE_ARGS     -DCMAKE_BUILD_TYPE=RELEASE -DBENCHMARK_ENABLE_TESTING=OFF -DBUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> ${COMPILER_OVERRIDE}
     LOG_DOWNLOAD   TRUE
     LOG_CONFIGURE  TRUE
     LOG_BUILD      TRUE

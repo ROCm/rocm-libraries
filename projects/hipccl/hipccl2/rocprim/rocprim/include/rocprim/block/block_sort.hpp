@@ -84,7 +84,6 @@ struct select_block_sort_impl<block_sort_algorithm::bitonic_sort>
 /// In the examples sort is performed on a block of 256 threads, each thread provides
 /// one \p int value, results are returned using the same variable as for input.
 ///
-/// \b HIP: \n
 /// \code{.cpp}
 /// __global__ void example_kernel(...)
 /// {
@@ -102,29 +101,6 @@ struct select_block_sort_impl<block_sort_algorithm::bitonic_sort>
 ///     );
 ///     ...
 /// }
-/// \endcode
-///
-/// \b HC: \n
-/// \code{.cpp}
-/// hc::parallel_for_each(
-///     hc::extent<1>(...).tile(256),
-///     [=](hc::tiled_index<1> i) [[hc]]
-///     {
-///         // specialize block_sort for int, block of 256 threads,
-///         // key-only sort
-///         using block_sort_int = rocprim::block_sort<int, 256>;
-///
-///         // allocate storage in shared memory
-///         tile_static block_sort_int::storage_type storage;
-///
-///         int input = ...;
-///         // execute block sort (ascending)
-///         block_sort_int().sort(
-///             input,
-///             storage
-///         );
-///     }
-/// );
 /// \endcode
 /// \endparblock
 template<
@@ -145,7 +121,7 @@ public:
     ///
     /// Depending on the implemention the operations exposed by parallel primitive may
     /// require a temporary storage for thread communication. The storage should be allocated
-    /// using keywords <tt>__shared__</tt> in HIP or \p tile_static in HC. It can be aliased to
+    /// using keywords <tt>__shared__</tt>. It can be aliased to
     /// an externally allocated memory, or be a part of a union type with other storage types
     /// to increase shared memory reusability.
     using storage_type = typename base_type::storage_type;
@@ -184,15 +160,13 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Examples
     /// \parblock
     /// In the examples sort is performed on a block of 256 threads, each thread provides
     /// one \p int value, results are returned using the same variable as for input.
     ///
-    /// \b HIP: \n
     /// \code{.cpp}
     /// __global__ void example_kernel(...)
     /// {
@@ -210,29 +184,6 @@ public:
     ///     );
     ///     ...
     /// }
-    /// \endcode
-    ///
-    /// \b HC: \n
-    /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(256),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize block_sort for int, block of 256 threads,
-    ///         // key-only sort
-    ///         using block_sort_int = rocprim::block_sort<int, 256>;
-    ///
-    ///         // allocate storage in shared memory
-    ///         tile_static block_sort_int::storage_type storage;
-    ///
-    ///         int input = ...;
-    ///         // execute block sort (ascending)
-    ///         block_sort_int().sort(
-    ///             input,
-    ///             storage
-    ///         );
-    ///     }
-    /// );
     /// \endcode
     /// \endparblock
     template<class BinaryFunction = ::rocprim::less<Key>>
@@ -281,14 +232,12 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \parblock
     /// In the examples sort is performed on a block of 256 threads, each thread provides
     /// one \p int key and one \p int value, results are returned using the same variable as for input.
     ///
-    /// \b HIP: \n
     /// \code{.cpp}
     /// __global__ void example_kernel(...)
     /// {
@@ -307,30 +256,6 @@ public:
     ///     );
     ///     ...
     /// }
-    /// \endcode
-    ///
-    /// \b HC: \n
-    /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(256),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize block_sort for int, block of 256 threads,
-    ///         using block_sort_int = rocprim::block_sort<int, 256, int>;
-    ///
-    ///         // allocate storage in shared memory
-    ///         tile_static block_sort_int::storage_type storage;
-    ///
-    ///         int key = ...;
-    ///         int value = ...;
-    ///         // execute block sort (ascending)
-    ///         block_sort_int().sort(
-    ///             key,
-    ///             value,
-    ///             storage
-    ///         );
-    ///     }
-    /// );
     /// \endcode
     /// \endparblock
     template<class BinaryFunction = ::rocprim::less<Key>>

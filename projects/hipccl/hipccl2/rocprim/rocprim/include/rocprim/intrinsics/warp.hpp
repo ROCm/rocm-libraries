@@ -36,11 +36,7 @@ BEGIN_ROCPRIM_NAMESPACE
 ROCPRIM_DEVICE inline
 unsigned long long ballot(int predicate)
 {
-    #ifdef ROCPRIM_HC_API
-        return hc::__ballot(predicate);
-    #else // HIP
-        return ::__ballot(predicate);
-    #endif
+    return ::__ballot(predicate);
 }
 
 /// \brief Masked bit count
@@ -50,17 +46,10 @@ unsigned long long ballot(int predicate)
 ROCPRIM_DEVICE inline
 unsigned int masked_bit_count(unsigned long long x, unsigned int add = 0)
 {
-    #ifdef ROCPRIM_HC_API
-        int c;
-        c = hc::__amdgcn_mbcnt_lo(static_cast<int>(x), add);
-        c = hc::__amdgcn_mbcnt_hi(static_cast<int>(x >> 32), c);
-        return c;
-    #else // HIP
-        int c;
-        c = ::__mbcnt_lo(static_cast<int>(x), add);
-        c = ::__mbcnt_hi(static_cast<int>(x >> 32), c);
-        return c;
-    #endif
+    int c;
+    c = ::__mbcnt_lo(static_cast<int>(x), add);
+    c = ::__mbcnt_hi(static_cast<int>(x >> 32), c);
+    return c;
 }
 
 namespace detail
@@ -69,21 +58,13 @@ namespace detail
 ROCPRIM_DEVICE inline
 int warp_any(int predicate)
 {
-    #ifdef ROCPRIM_HC_API
-        return hc::__any(predicate);
-    #else // ROCPRIM_HIP_API
-        return ::__any(predicate);
-    #endif
+    return ::__any(predicate);
 }
 
 ROCPRIM_DEVICE inline
 int warp_all(int predicate)
 {
-    #ifdef ROCPRIM_HC_API
-        return hc::__all(predicate);
-    #else // ROCPRIM_HIP_API
-        return ::__all(predicate);
-    #endif
+    return ::__all(predicate);
 }
 
 } // end detail namespace

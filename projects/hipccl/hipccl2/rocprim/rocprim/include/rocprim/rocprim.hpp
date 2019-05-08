@@ -23,7 +23,7 @@
 
 /// \file
 ///
-/// Meta-header to include rocPRIM HC or HIP APIs.
+/// Meta-header to include rocPRIM API.
 
 // Meta configuration for rocPRIM
 #include "config.hpp"
@@ -49,39 +49,22 @@
 #include "block/block_sort.hpp"
 #include "block/block_store.hpp"
 
-#ifdef ROCPRIM_HC_API
-    #include "device/device_histogram_hc.hpp"
-    #include "device/device_merge_hc.hpp"
-    #include "device/device_merge_sort_hc.hpp"
-    #include "device/device_partition_hc.hpp"
-    #include "device/device_radix_sort_hc.hpp"
-    #include "device/device_reduce_by_key_hc.hpp"
-    #include "device/device_reduce_hc.hpp"
-    #include "device/device_run_length_encode_hc.hpp"
-    #include "device/device_scan_by_key_hc.hpp"
-    #include "device/device_scan_hc.hpp"
-    #include "device/device_segmented_radix_sort_hc.hpp"
-    #include "device/device_segmented_reduce_hc.hpp"
-    #include "device/device_segmented_scan_hc.hpp"
-    #include "device/device_select_hc.hpp"
-    #include "device/device_transform_hc.hpp"
-#else
-    #include "device/device_histogram_hip.hpp"
-    #include "device/device_merge_hip.hpp"
-    #include "device/device_merge_sort_hip.hpp"
-    #include "device/device_partition_hip.hpp"
-    #include "device/device_radix_sort_hip.hpp"
-    #include "device/device_reduce_by_key_hip.hpp"
-    #include "device/device_reduce_hip.hpp"
-    #include "device/device_run_length_encode_hip.hpp"
-    #include "device/device_scan_by_key_hip.hpp"
-    #include "device/device_scan_hip.hpp"
-    #include "device/device_segmented_radix_sort_hip.hpp"
-    #include "device/device_segmented_reduce_hip.hpp"
-    #include "device/device_segmented_scan_hip.hpp"
-    #include "device/device_select_hip.hpp"
-    #include "device/device_transform_hip.hpp"
-#endif
+#include "device/device_binary_search.hpp"
+#include "device/device_histogram.hpp"
+#include "device/device_merge.hpp"
+#include "device/device_merge_sort.hpp"
+#include "device/device_partition.hpp"
+#include "device/device_radix_sort.hpp"
+#include "device/device_reduce_by_key.hpp"
+#include "device/device_reduce.hpp"
+#include "device/device_run_length_encode.hpp"
+#include "device/device_scan_by_key.hpp"
+#include "device/device_scan.hpp"
+#include "device/device_segmented_radix_sort.hpp"
+#include "device/device_segmented_reduce.hpp"
+#include "device/device_segmented_scan.hpp"
+#include "device/device_select.hpp"
+#include "device/device_transform.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 

@@ -20,12 +20,12 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-function(meta_add_rocprim_example EXAMPLE_SOURCE ROCPRIM_TARGET)
+function(add_rocprim_example EXAMPLE_SOURCE)
   get_filename_component(EXAMPLE_TARGET ${EXAMPLE_SOURCE} NAME_WE)
   add_executable(${EXAMPLE_TARGET} ${EXAMPLE_SOURCE})
   target_link_libraries(${EXAMPLE_TARGET}
     PRIVATE
-      ${ROCPRIM_TARGET}
+    rocprim_hip
   )
   foreach(amdgpu_target ${AMDGPU_TARGETS})
     target_link_libraries(${EXAMPLE_TARGET}
@@ -39,19 +39,8 @@ function(meta_add_rocprim_example EXAMPLE_SOURCE ROCPRIM_TARGET)
   )
 endfunction()
 
-function(add_rocprim_example_hc EXAMPLE_SOURCE)
-  meta_add_rocprim_example(${EXAMPLE_SOURCE} rocprim_hc)
-endfunction()
-
-function(add_rocprim_example_hip EXAMPLE_SOURCE)
-  meta_add_rocprim_example(${EXAMPLE_SOURCE} rocprim_hip)
-endfunction()
-
 # ****************************************************************************
 # rocPRIM examples
 # ****************************************************************************
 
-add_rocprim_example_hip(example_hip_temporary_storage.cpp)
-if(HIP_COMPILER STREQUAL "hcc")
-add_rocprim_example_hc(example_hc_temporary_storage.cpp)
-endif()
+add_rocprim_example(example_temporary_storage.cpp)

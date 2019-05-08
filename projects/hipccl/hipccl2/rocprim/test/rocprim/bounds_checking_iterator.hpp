@@ -159,8 +159,6 @@ private:
     size_t size_;
 };
 
-#ifdef ROCPRIM_HIP_API
-
 class out_of_bounds_flag
 {
 public:
@@ -190,38 +188,6 @@ public:
 private:
     bool * device_pointer_;
 };
-
-#endif // ROCPRIM_HIP_API
-
-#ifdef ROCPRIM_HC_API
-
-class out_of_bounds_flag
-{
-public:
-    out_of_bounds_flag(hc::accelerator_view& acc_view)
-        : device_pointer_(hc::array<bool>(1, acc_view))
-    {
-        bool value = false;
-        hc::copy(&value, &value + 1, device_pointer_);
-    }
-
-    bool get() const
-    {
-        bool value;
-        hc::copy(device_pointer_, &value);
-        return value;
-    }
-
-    bool * device_pointer() const
-    {
-        return device_pointer_.accelerator_pointer();
-    }
-
-private:
-    hc::array<bool> device_pointer_;
-};
-
-#endif // ROCPRIM_HC_API
 
 } // end test_utils namespace
 
