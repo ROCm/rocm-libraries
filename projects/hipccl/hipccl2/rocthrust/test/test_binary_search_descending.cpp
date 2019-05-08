@@ -25,6 +25,28 @@
 
 TESTS_DEFINE(BinarySearchDescendingTests, FullTestsParams);
 
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+__global__ void kern(int N,
+                     float* inp,
+                     float val)
+{
+        auto low_bound = thrust::lower_bound(thrust::device, inp, inp + N, val);
+}
+
+TEST(HipThrustMemory, MallocUseMemory)
+{
+    float * input_device;
+    hipMalloc(&input_device, sizeof(float)*6);
+    float value = 5;
+
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(kern), dim3(1), dim3(1), 0,0,6, input_device, value);
+
+    hipFree(input_device);
+
+    return 0;
+}
+#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+
 TYPED_TEST(BinarySearchDescendingTests, TestScalarLowerBoundDescendingSimple)
 {
     using Vector = typename TestFixture::input_type;
