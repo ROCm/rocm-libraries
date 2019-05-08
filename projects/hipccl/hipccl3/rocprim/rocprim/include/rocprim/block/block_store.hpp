@@ -58,7 +58,7 @@ enum class block_store_method
     /// * The following conditions will prevent vectorization and switch to default
     /// \p block_store_direct:
     ///   * \p ItemsPerThread is odd.
-    ///   * The datatype \p T is not a primitive or a HC/HIP vector type (e.g. int2,
+    ///   * The datatype \p T is not a primitive or a HIP vector type (e.g. int2,
     /// int4, etc.
     block_store_vectorize,
 
@@ -107,7 +107,6 @@ enum class block_store_method
 /// In the examples store operation is performed on block of 128 threads, using type
 /// \p int and 8 items per thread.
 ///
-/// \b HIP: \n
 /// \code{.cpp}
 /// __global__ void kernel(int * output)
 /// {
@@ -117,20 +116,6 @@ enum class block_store_method
 ///     blockstore.store(output + offset, items);
 ///     ...
 /// }
-/// \endcode
-///
-/// \b HC: \n
-/// \code{.cpp}
-/// hc::parallel_for_each(
-///     hc::extent<1>(...).tile(block_size),
-///     [=](hc::tiled_index<1> i) [[hc]]
-///     {
-///         int items[8];
-///         rocprim::block_store<int, 128, 8, store_method> blockstore;
-///         blockstore.store(..., items);
-///         ...
-///     }
-/// );
 /// \endcode
 /// \endparblock
 template<
@@ -150,7 +135,7 @@ public:
     ///
     /// Depending on the implemention the operations exposed by parallel primitive may
     /// require a temporary storage for thread communication. The storage should be allocated
-    /// using keywords \p __shared__ in HIP or \p tile_static in HC. It can be aliased to
+    /// using keywords \p __shared__. It can be aliased to
     /// an externally allocated memory, or be a part of a union with other storage types
     /// to increase shared memory reusability.
     #ifndef DOXYGEN_SHOULD_SKIP_THIS // hides storage_type implementation for Doxygen
@@ -219,23 +204,19 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Example.
     /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(block_size),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         int items[8];
-    ///         using block_store_int = rocprim::block_store<int, 128, 8>;
-    ///         block_store_int bstore;
-    ///         tile_static typename block_store_int::storage_type storage;
-    ///         bstore.store(..., items, storage);
-    ///         ...
-    ///     }
-    /// );
+    /// __global__ void kernel(...)
+    /// {
+    ///     int items[8];
+    ///     using block_store_int = rocprim::block_store<int, 128, 8>;
+    ///     block_store_int bstore;
+    ///     __shared__ typename block_store_int::storage_type storage;
+    ///     bstore.store(..., items, storage);
+    ///     ...
+    /// }
     /// \endcode
     template<class OutputIterator>
     ROCPRIM_DEVICE inline
@@ -265,23 +246,19 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Example.
     /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(block_size),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         int items[8];
-    ///         using block_store_int = rocprim::block_store<int, 128, 8>;
-    ///         block_store_int bstore;
-    ///         tile_static typename block_store_int::storage_type storage;
-    ///         bstore.store(..., items, valid, storage);
-    ///         ...
-    ///     }
-    /// );
+    /// __global__ void kernel(...)
+    /// {
+    ///     int items[8];
+    ///     using block_store_int = rocprim::block_store<int, 128, 8>;
+    ///     block_store_int bstore;
+    ///     __shared__ typename block_store_int::storage_type storage;
+    ///     bstore.store(..., items, valid, storage);
+    ///     ...
+    /// }
     /// \endcode
     template<class OutputIterator>
     ROCPRIM_DEVICE inline

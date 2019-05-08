@@ -27,42 +27,14 @@
 #define END_ROCPRIM_NAMESPACE \
     } /* rocprim */
 
-#if defined(__HCC_HC__) && !defined(ROCPRIM_HIP_API)
-    #ifndef ROCPRIM_HC_API
-        #define ROCPRIM_HC_API
-    #endif
-#elif defined(__HIPCC__) && !defined(ROCPRIM_HC_API)
-    #ifndef ROCPRIM_HIP_API
-        #define ROCPRIM_HIP_API
-    #endif
-#endif
+#include <hip/hip_runtime.h>
+#include <hip/hip_fp16.h>
 
-#if defined(ROCPRIM_HC_API)
-    #include <hcc/hc.hpp>
-    #include <hcc/hc_short_vector.hpp>
-
-    #ifndef ROCPRIM_DEVICE
-        #define ROCPRIM_DEVICE __attribute__((hc))
-        #define ROCPRIM_HOST __attribute__((cpu))
-        #define ROCPRIM_HOST_DEVICE __attribute__((hc, cpu))
-        #define ROCPRIM_SHARED_MEMORY tile_static
-    #endif
-#elif defined(ROCPRIM_HIP_API)
-    #include <hip/hip_runtime.h>
-    #include <hip/hip_fp16.h>
-
-    #ifndef ROCPRIM_DEVICE
-        #define ROCPRIM_DEVICE __device__
-        #define ROCPRIM_HOST __host__
-        #define ROCPRIM_HOST_DEVICE __host__ __device__
-        #define ROCPRIM_SHARED_MEMORY __shared__
-    #endif
-#else
-    #define ROCPRIM_DEVICE
-    #define ROCPRIM_HOST
-    #define ROCPRIM_HOST_DEVICE
-    #define ROCPRIM_SHARED_MEMORY
-    #error "HIP and HC APIs are not available"
+#ifndef ROCPRIM_DEVICE
+    #define ROCPRIM_DEVICE __device__
+    #define ROCPRIM_HOST __host__
+    #define ROCPRIM_HOST_DEVICE __host__ __device__
+    #define ROCPRIM_SHARED_MEMORY __shared__
 #endif
 
 // TODO remove when the issue https://github.com/RadeonOpenCompute/hcc/issues/715 is fixed

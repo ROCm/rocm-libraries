@@ -52,6 +52,39 @@ struct kernel_config
 namespace detail
 {
 
+template<
+    unsigned int MaxBlockSize,
+    unsigned int SharedMemoryPerThread,
+    // Most kernels require block sizes not smaller than warp
+    unsigned int MinBlockSize = ::rocprim::warp_size(),
+    // Can fit in shared memory?
+    // Although GPUs have 64KiB, 32KiB is used here as a "soft" limit,
+    // because some additional memory may be required in kernels
+    bool = (MaxBlockSize * SharedMemoryPerThread <= (1u << 15))
+>
+struct limit_block_size
+{
+    // No, then try to decrease block size
+    static constexpr unsigned int value =
+        limit_block_size<
+            detail::next_power_of_two(MaxBlockSize) / 2,
+            SharedMemoryPerThread,
+            MinBlockSize
+        >::value;
+};
+
+template<
+    unsigned int MaxBlockSize,
+    unsigned int SharedMemoryPerThread,
+    unsigned int MinBlockSize
+>
+struct limit_block_size<MaxBlockSize, SharedMemoryPerThread, MinBlockSize, true>
+{
+    static_assert(MaxBlockSize >= MinBlockSize, "Data is too large, it cannot fit in shared memory");
+
+    static constexpr unsigned int value = MaxBlockSize;
+};
+
 template<class...>
 using void_t = void;
 

@@ -92,7 +92,13 @@ struct radix_sort_config_803
             (sizeof(Key) == 8 && sizeof(Value) <= 8),
             radix_sort_config<7, 6, scan, kernel_config<256, 13> >
         >,
-        radix_sort_config<7, 6, scan, kernel_config<256, ::rocprim::max(1u, 15u / item_scale)> >
+        radix_sort_config<
+            6, 4, scan,
+            kernel_config<
+                limit_block_size<256U, sizeof(Value)>::value,
+                ::rocprim::max(1u, 15u / item_scale)
+            >
+        >
     >;
 };
 
@@ -130,7 +136,13 @@ struct radix_sort_config_900
             (sizeof(Key) == 8 && sizeof(Value) <= 8),
             radix_sort_config<7, 6, scan, kernel_config<256, 15> >
         >,
-        radix_sort_config<7, 6, scan, kernel_config<256, ::rocprim::max(1u, 15u / item_scale)> >
+        radix_sort_config<
+            6, 4, scan,
+            kernel_config<
+                limit_block_size<256U, sizeof(Value)>::value,
+                ::rocprim::max(1u, 15u / item_scale)
+            >
+        >
     >;
 };
 

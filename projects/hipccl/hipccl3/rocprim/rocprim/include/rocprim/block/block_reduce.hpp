@@ -96,7 +96,6 @@ struct select_block_reduce_impl<block_reduce_algorithm::raking_reduce>
 /// In the examples reduce operation is performed on block of 192 threads, each provides
 /// one \p int value, result is returned using the same variable as for input.
 ///
-/// \b HIP: \n
 /// \code{.cpp}
 /// __global__ void example_kernel(...)
 /// {
@@ -114,30 +113,6 @@ struct select_block_reduce_impl<block_reduce_algorithm::raking_reduce>
 ///     );
 ///     ...
 /// }
-/// \endcode
-///
-/// \b HC: \n
-/// \code{.cpp}
-/// hc::parallel_for_each(
-///     hc::extent<1>(...).tile(64),
-///     [=](hc::tiled_index<1> i) [[hc]]
-///     {
-///         // specialize warp_reduce for int and logical warp of 16 threads
-///         using block_reduce_int = rocprim::block_reduce<int, 192>;
-///
-///         // allocate storage in shared memory
-///         tile_static block_reduce_int::storage_type storage;///
-///
-///         int value = ...;
-///         // execute reduce
-///         block_reduce_int().reduce(
-///             value, // input
-///             value, // output
-///             storage
-///         );
-///         ...
-///     }
-/// );
 /// \endcode
 /// \endparblock
 template<
@@ -157,7 +132,7 @@ public:
     ///
     /// Depending on the implemention the operations exposed by parallel primitive may
     /// require a temporary storage for thread communication. The storage should be allocated
-    /// using keywords <tt>__shared__</tt> in HIP or \p tile_static in HC. It can be aliased to
+    /// using keywords <tt>__shared__</tt>. It can be aliased to
     /// an externally allocated memory, or be a part of a union type with other storage types
     /// to increase shared memory reusability.
     using storage_type = typename base_type::storage_type;
@@ -177,15 +152,13 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Examples
     /// \parblock
     /// The examples present min reduce operations performed on a block of 256 threads,
     /// each provides one \p float value.
     ///
-    /// \b HIP: \n
     /// \code{.cpp}
     /// __global__ void example_kernel(...) // hipBlockDim_x = 256
     /// {
@@ -207,30 +180,6 @@ public:
     /// }
     /// \endcode
     ///
-    /// \b HC: \n
-    /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(256),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize block_reduce for float and block of 256 threads
-    ///         using block_reduce_f = rocprim::block_reduce<float, 256>;
-    ///         // allocate storage in shared memory for the block
-    ///         __shared__ block_reduce_float::storage_type storage;
-    ///
-    ///         float input = ...;
-    ///         float output;
-    ///         // execute min reduce
-    ///         block_reduce_float().reduce(
-    ///             input,
-    ///             output,
-    ///             storage,
-    ///             rocprim::minimum<float>()
-    ///         );
-    ///         ...
-    ///     }
-    /// );
-    /// \endcode
     /// If the \p input values across threads in a block are <tt>{1, -2, 3, -4, ..., 255, -256}</tt>, then
     /// \p output value will be <tt>{-256}</tt>.
     /// \endparblock
@@ -284,15 +233,13 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Examples
     /// \parblock
     /// The examples present maximum reduce operations performed on a block of 128 threads,
     /// each provides two \p long value.
     ///
-    /// \b HIP: \n
     /// \code{.cpp}
     /// __global__ void example_kernel(...) // hipBlockDim_x = 128
     /// {
@@ -314,30 +261,6 @@ public:
     /// }
     /// \endcode
     ///
-    /// \b HC: \n
-    /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(128),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize block_reduce for long and block of 128 threads
-    ///         using block_reduce_f = rocprim::block_reduce<long, 128>;
-    ///         // allocate storage in shared memory for the block
-    ///         __shared__ block_reduce_long::storage_type storage;
-    ///
-    ///         long input[2] = ...;
-    ///         long output[2];
-    ///         // execute max reduce
-    ///         block_reduce_long().reduce(
-    ///             input,
-    ///             output,
-    ///             storage,
-    ///             rocprim::maximum<long>()
-    ///         );
-    ///         ...
-    ///     }
-    /// );
-    /// \endcode
     /// If the \p input values across threads in a block are <tt>{-1, 2, -3, 4, ..., -255, 256}</tt>, then
     /// \p output value will be <tt>{256}</tt>.
     /// \endparblock
@@ -398,15 +321,13 @@ public:
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
-    /// or repurposed: \p __syncthreads() in HIP, \p tile_barrier::wait() in HC, or
-    /// universal rocprim::syncthreads().
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     ///
     /// \par Examples
     /// \parblock
     /// The examples present min reduce operations performed on a block of 256 threads,
     /// each provides one \p float value.
     ///
-    /// \b HIP: \n
     /// \code{.cpp}
     /// __global__ void example_kernel(...) // hipBlockDim_x = 256
     /// {
@@ -428,33 +349,6 @@ public:
     ///     );
     ///     ...
     /// }
-    /// \endcode
-    ///
-    /// \b HC: \n
-    /// \code{.cpp}
-    /// hc::parallel_for_each(
-    ///     hc::extent<1>(...).tile(256),
-    ///     [=](hc::tiled_index<1> i) [[hc]]
-    ///     {
-    ///         // specialize block_reduce for float and block of 256 threads
-    ///         using block_reduce_f = rocprim::block_reduce<float, 256>;
-    ///         // allocate storage in shared memory for the block
-    ///         __shared__ block_reduce_float::storage_type storage;
-    ///
-    ///         float input = ...;
-    ///         unsigned int valid_items = 250;
-    ///         float output;
-    ///         // execute min reduce
-    ///         block_reduce_float().reduce(
-    ///             input,
-    ///             output,
-    ///             valid_items,
-    ///             storage,
-    ///             rocprim::minimum<float>()
-    ///         );
-    ///         ...
-    ///     }
-    /// );
     /// \endcode
     /// \endparblock
     template<class BinaryFunction = ::rocprim::plus<T>>

@@ -42,44 +42,8 @@ namespace detail
 template<class T, unsigned int Size>
 class fixed_array
 {
-// Workaround: HCC does not support passing structs with array-typed members into kernels
-// Custom serializer and deserializer are used:
-#ifdef ROCPRIM_HC_API
-
-private:
-    static constexpr unsigned int MaxSize = 4;
-    T values[MaxSize];
-    static_assert(Size <= MaxSize, "HC implementation does not support Size greater than MaxSize");
-
-public:
-
-    __attribute__((annotate("serialize")))
-    ROCPRIM_HOST inline
-    void __cxxamp_serialize(Kalmar::Serialize& s) const
-    {
-        for(unsigned int i = 0; i < MaxSize; i++)
-        {
-            s.Append(sizeof(T), &values[i]);
-        }
-    }
-
-    __attribute__((annotate("user_deserialize")))
-    ROCPRIM_HOST_DEVICE inline
-    fixed_array(T value0, T value1, T value2, T value3)
-    {
-        // Implementation for MaxSize = 4 only
-        values[0] = value0;
-        values[1] = value1;
-        values[2] = value2;
-        values[3] = value3;
-    }
-
-#else
-
 private:
     T values[Size];
-
-#endif
 
 public:
 

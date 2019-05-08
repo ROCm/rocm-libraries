@@ -44,7 +44,7 @@ struct tuple_contains_type<T, ::rocprim::tuple<U, Ts...>> : tuple_contains_type<
 template<class T, class... Ts>
 struct tuple_contains_type<T, ::rocprim::tuple<T, Ts...>> : std::true_type {};
 
-template<class InputType, class OutputType, class BinaryFunction>
+template<class InputType, class BinaryFunction>
 struct match_result_type
 {
 private:
@@ -54,22 +54,11 @@ private:
     using binary_result_type = typename std::result_of<BinaryFunction(InputType, InputType)>::type;
     #endif
 
-    // Fixed output_type in case OutputType is void or is a tuple containing void
-    static constexpr bool is_output_type_invalid =
-        std::is_void<OutputType>::value || tuple_contains_type<void, OutputType>::value;
-    using value_type =
-        typename std::conditional<is_output_type_invalid, InputType, OutputType>::type;
-
-    // value_type is not a valid result_type if we can't covert it to binary_result_type
-    static constexpr bool is_value_type_valid =
-        std::is_convertible<value_type, binary_result_type>::value;
-
 public:
-    using type = typename std::conditional<is_value_type_valid, value_type, binary_result_type>::type;
+    using type = binary_result_type;
 };
 
 } // end namespace detail
 END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_DETAIL_MATCH_RESULT_TYPE_HPP_
-
