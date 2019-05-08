@@ -41,6 +41,10 @@ using namespace cub;
 
 END_HIPCUB_NAMESPACE
 
+// These functions must be wrapped so they return
+// hipError_t instead of cudaError_t
+#include "util_allocator.hpp"
+
 // Device functions must be wrapped so they return
 // hipError_t instead of cudaError_t
 #include "device/device_histogram.hpp"
