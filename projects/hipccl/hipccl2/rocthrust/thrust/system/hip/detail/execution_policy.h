@@ -34,37 +34,45 @@
 #include <thrust/system/hip/config.h>
 
 BEGIN_NS_THRUST
-namespace hip_rocprim {
+namespace hip_rocprim
+{
+    struct tag;
 
-  struct tag;
+    template <class>
+    struct execution_policy;
 
-  template <class>
-  struct execution_policy;
+    template <>
+    struct execution_policy<tag> : thrust::execution_policy<tag>
+    {
+    };
 
-  template <>
-  struct execution_policy<tag> : thrust::execution_policy<tag>
-  {};
+    struct tag : execution_policy<tag>
+    {
+    };
 
-  struct tag : execution_policy<tag>
-  {};
+    template <class Derived>
+    struct execution_policy : thrust::execution_policy<Derived>
+    {
+        inline operator tag() const
+        {
+            return tag();
+        }
+    };
+} // namespace hip_rocprim
 
-  template <class Derived>
-  struct execution_policy : thrust::execution_policy<Derived>
-  {
-    inline operator tag() const { return tag(); }
-  };
-}    // namespace hip_rocprim
-
-namespace system {
-namespace hip {
-  using thrust::hip_rocprim::tag;
-  using thrust::hip_rocprim::execution_policy;
+namespace system
+{
+namespace hip
+{
+    using thrust::hip_rocprim::execution_policy;
+    using thrust::hip_rocprim::tag;
 } // namespace hip
 } // namespace system
 
-namespace hip {
-using thrust::hip_rocprim::execution_policy;
-using thrust::hip_rocprim::tag;
+namespace hip
+{
+    using thrust::hip_rocprim::execution_policy;
+    using thrust::hip_rocprim::tag;
 } // namespace hip
 
 END_NS_THRUST

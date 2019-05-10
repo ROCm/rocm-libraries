@@ -19,5 +19,4 @@
 
 #include <thrust/detail/config.h>
 
-// this system has no special version of this algorithm 
-
+// this system has no special version of this algorithm

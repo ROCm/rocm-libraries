@@ -4,7 +4,8 @@
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
- *     * Redistributions of source code must retain the above copyright *       notice, this list of conditions and the following disclaimer.
+ *     * Redistributions of source code must retain the above copyright
+ *       notice, this list of conditions and the following disclaimer.
  *     * Redistributions in binary form must reproduce the above copyright
  *       notice, this list of conditions and the following disclaimer in the
  *       documentation and/or other materials provided with the distribution.
@@ -66,10 +67,10 @@
 // Implicit instantiation of function template
 // that will be used in #if __THRUST_HAS_HIPRT__ block.
 #define THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(function) do \
-  { \
-    auto ptr = function; \
-    (void) ptr; \
-  } while (0)
+    { \
+        auto ptr = function; \
+        (void) ptr; \
+    } while (0)
 
 #define THRUST_ROCPRIM_NS_PREFIX namespace thrust {   namespace hip_rocprim {
 #define THRUST_ROCPRIM_NS_POSTFIX }  }

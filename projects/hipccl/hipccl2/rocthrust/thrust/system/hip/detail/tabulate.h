@@ -35,26 +35,27 @@
 #include <thrust/system/hip/detail/transform.h>
 
 BEGIN_NS_THRUST
-namespace hip_rocprim {
+namespace hip_rocprim
+{
 
-template <class Derived,
-          class Iterator,
-          class TabulateOp>
-void __host__ __device__
+template <class Derived, class Iterator, class TabulateOp>
+void THRUST_HIP_FUNCTION
 tabulate(execution_policy<Derived>& policy,
          Iterator                   first,
          Iterator                   last,
          TabulateOp                 tabulate_op)
 {
-  typedef typename iterator_traits<Iterator>::difference_type size_type;
+    typedef typename iterator_traits<Iterator>::difference_type size_type;
 
-  hip_rocprim::transform(policy,
-                         thrust::make_counting_iterator<size_type>(0),
-                         thrust::make_counting_iterator<size_type>(thrust::distance(first, last)),
-                         first,
-                         [tabulate_op](size_type i) mutable { return tabulate_op(i); });
+    hip_rocprim::transform(
+        policy,
+        thrust::make_counting_iterator<size_type>(0),
+        thrust::make_counting_iterator<size_type>(thrust::distance(first, last)),
+        first,
+        [tabulate_op](size_type i) mutable { return tabulate_op(i); }
+    );
 }
 
-}    // namespace hip_rocprim
+} // namespace hip_rocprim
 END_NS_THRUST
 #endif

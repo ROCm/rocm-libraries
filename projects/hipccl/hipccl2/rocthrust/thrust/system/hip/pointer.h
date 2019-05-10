@@ -29,16 +29,16 @@
 
 #include <thrust/detail/pointer.h>
 
-template<typename Element, typename Tag, typename Reference, typename Derived>
-struct std::iterator_traits<thrust::pointer<Element,Tag,Reference,Derived> >
-  {
+template <typename Element, typename Tag, typename Reference, typename Derived>
+struct std::iterator_traits<thrust::pointer<Element, Tag, Reference, Derived>>
+{
 private:
-  typedef thrust::pointer<Element,Tag,Reference,Derived> ptr;
+    typedef thrust::pointer<Element, Tag, Reference, Derived> ptr;
 
 public:
-  typedef typename ptr::iterator_category iterator_category;
-  typedef typename ptr::value_type        value_type;
-  typedef typename ptr::difference_type   difference_type;
-  typedef Element *                       pointer;
-  typedef typename ptr::reference         reference;
+    typedef typename ptr::iterator_category iterator_category;
+    typedef typename ptr::value_type        value_type;
+    typedef typename ptr::difference_type   difference_type;
+    typedef Element*                        pointer;
+    typedef typename ptr::reference         reference;
 };
