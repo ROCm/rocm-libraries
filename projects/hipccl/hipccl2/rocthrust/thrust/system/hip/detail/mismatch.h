@@ -27,89 +27,69 @@
  ******************************************************************************/
 #pragma once
 
-
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+#include <thrust/distance.h>
+#include <thrust/pair.h>
 #include <thrust/system/hip/config.h>
 #include <thrust/system/hip/detail/execution_policy.h>
-#include <thrust/pair.h>
-#include <thrust/distance.h>
 
 BEGIN_NS_THRUST
-namespace hip_rocprim {
+namespace hip_rocprim
+{
 
-template <class Derived,
-          class InputIt1,
-          class InputIt2,
-          class BinaryPred>
-pair<InputIt1, InputIt2> __host__ __device__
-mismatch(execution_policy<Derived>& policy,
-         InputIt1                   first1,
-         InputIt1                   last1,
-         InputIt2                   first2,
-         BinaryPred                 binary_pred);
+    template <class Derived, class InputIt1, class InputIt2, class BinaryPred>
+    pair<InputIt1, InputIt2> THRUST_HIP_FUNCTION
+    mismatch(execution_policy<Derived>& policy,
+             InputIt1                   first1,
+             InputIt1                   last1,
+             InputIt2                   first2,
+             BinaryPred                 binary_pred);
 
-template <class Derived,
-          class InputIt1,
-          class InputIt2>
-pair<InputIt1, InputIt2> __host__ __device__
-mismatch(execution_policy<Derived>& policy,
-         InputIt1                   first1,
-         InputIt1                   last1,
-         InputIt2                   first2);
+    template <class Derived, class InputIt1, class InputIt2>
+    pair<InputIt1, InputIt2> THRUST_HIP_FUNCTION
+    mismatch(execution_policy<Derived>& policy,
+             InputIt1                   first1,
+             InputIt1                   last1,
+             InputIt2                   first2);
 } // namespace cuda_
 END_NS_THRUST
 
 #include <thrust/system/hip/detail/find.h>
 
 BEGIN_NS_THRUST
-namespace hip_rocprim {
-
-template <class Derived,
-          class InputIt1,
-          class InputIt2,
-          class BinaryPred>
-pair<InputIt1, InputIt2> __host__ __device__
-mismatch(execution_policy<Derived>& policy,
-         InputIt1                   first1,
-         InputIt1                   last1,
-         InputIt2                   first2,
-         BinaryPred                 binary_pred)
+namespace hip_rocprim
 {
-  typedef transform_pair_of_input_iterators_t<bool,
-                                              InputIt1,
-                                              InputIt2,
-                                              BinaryPred>
-      transform_t;
 
-  transform_t transform_first = transform_t(first1, first2, binary_pred);
+    template <class Derived, class InputIt1, class InputIt2, class BinaryPred>
+    pair<InputIt1, InputIt2> THRUST_HIP_FUNCTION
+    mismatch(execution_policy<Derived>& policy,
+             InputIt1                   first1,
+             InputIt1                   last1,
+             InputIt2                   first2,
+             BinaryPred                 binary_pred)
+    {
+        typedef transform_pair_of_input_iterators_t<bool, InputIt1, InputIt2, BinaryPred>
+            transform_t;
 
-  transform_t result = hip_rocprim::find_if_not(policy,
-                                                transform_first,
-                                                transform_first + thrust::distance(first1, last1),
-                                                identity());
+        transform_t transform_first = transform_t(first1, first2, binary_pred);
 
-  return make_pair(first1 + thrust::distance(transform_first,result),
-                   first2 + thrust::distance(transform_first,result));
-}
+        transform_t result = hip_rocprim::find_if_not(
+            policy, transform_first, transform_first + thrust::distance(first1, last1), identity());
 
-template <class Derived,
-          class InputIt1,
-          class InputIt2>
-pair<InputIt1, InputIt2> __host__ __device__
-mismatch(execution_policy<Derived>& policy,
-         InputIt1                   first1,
-         InputIt1                   last1,
-         InputIt2                   first2)
-{
-  typedef typename thrust::iterator_value<InputIt1>::type InputType1;
-  return hip_rocprim::mismatch(policy,
-                               first1,
-                               last1,
-                               first2,
-                               equal_to<InputType1>());
-}
+        return make_pair(first1 + thrust::distance(transform_first, result),
+                         first2 + thrust::distance(transform_first, result));
+    }
 
-
+    template <class Derived, class InputIt1, class InputIt2>
+    pair<InputIt1, InputIt2> THRUST_HIP_FUNCTION
+    mismatch(execution_policy<Derived>& policy,
+             InputIt1                   first1,
+             InputIt1                   last1,
+             InputIt2                   first2)
+    {
+        typedef typename thrust::iterator_value<InputIt1>::type InputType1;
+        return hip_rocprim::mismatch(policy, first1, last1, first2, equal_to<InputType1>());
+    }
 
 } // namespace hip_rocprim
 END_NS_THRUST
