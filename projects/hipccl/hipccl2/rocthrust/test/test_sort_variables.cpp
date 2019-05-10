@@ -15,42 +15,39 @@
  *  limitations under the License.
  */
 
-// Thrust
 #include <thrust/sort.h>
 
 #include "test_header.hpp"
 
 TESTS_DEFINE(SortByKeyVariableTests, AllIntegerTestsParams);
 
-
 TYPED_TEST(SortByKeyVariableTests, TestSortVariableBits)
 {
-  using T = typename TestFixture::input_type;
+    using T = typename TestFixture::input_type;
 
-  for (auto size : get_sizes())
-  {
-    for(size_t num_bits = 0; num_bits < 8 * sizeof(T); num_bits += 3)
+    for(auto size : get_sizes())
     {
-      SCOPED_TRACE(testing::Message() << "with size = " << size);
+        for(size_t num_bits = 0; num_bits < 8 * sizeof(T); num_bits += 3)
+        {
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
 
-      thrust::host_vector<T> h_keys = get_random_data<T>(size,
-                                                         std::numeric_limits<T>::min(),
-                                                         std::numeric_limits<T>::max());
+            thrust::host_vector<T> h_keys = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
 
-      size_t mask = (1 << num_bits) - 1;
-      for(size_t i = 0; i < size; i++)
-         h_keys[i] &= mask;
+            size_t mask = (1 << num_bits) - 1;
+            for(size_t i = 0; i < size; i++)
+                h_keys[i] &= mask;
 
-      thrust::host_vector<T>   reference = h_keys;
-      thrust::device_vector<T> d_keys    = h_keys;
+            thrust::host_vector<T>   reference = h_keys;
+            thrust::device_vector<T> d_keys    = h_keys;
 
-      std::sort(reference.begin(), reference.end());
+            std::sort(reference.begin(), reference.end());
 
-      thrust::sort(h_keys.begin(), h_keys.end());
-      thrust::sort(d_keys.begin(), d_keys.end());
+            thrust::sort(h_keys.begin(), h_keys.end());
+            thrust::sort(d_keys.begin(), d_keys.end());
 
-      ASSERT_EQ(reference, h_keys);
-      ASSERT_EQ(h_keys, d_keys);
+            ASSERT_EQ(reference, h_keys);
+            ASSERT_EQ(h_keys, d_keys);
+        }
     }
-  }
 }

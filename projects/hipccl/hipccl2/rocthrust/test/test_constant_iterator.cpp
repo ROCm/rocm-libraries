@@ -15,12 +15,11 @@
  *  limitations under the License.
  */
 
-// Thrust
+#include <thrust/copy.h>
 #include <thrust/device_vector.h>
 #include <thrust/iterator/constant_iterator.h>
-#include <thrust/copy.h>
-#include <thrust/transform.h>
 #include <thrust/reduce.h>
+#include <thrust/transform.h>
 
 #include "test_header.hpp"
 
@@ -44,11 +43,10 @@ TEST(ConstantIteratorTests, ConstantIteratorConstructFromConvertibleSystem)
     ASSERT_EQ(*default_system, *device_system);
 }
 
-
 TEST(ConstantIteratorTests, ConstantIteratorIncrement)
 {
-    constant_iterator<int> lhs(0,0);
-    constant_iterator<int> rhs(0,0);
+    constant_iterator<int> lhs(0, 0);
+    constant_iterator<int> rhs(0, 0);
 
     ASSERT_EQ(0, lhs - rhs);
 
@@ -91,7 +89,6 @@ TEST(ConstantIteratorTests, ConstantIteratorComparison)
     ASSERT_EQ(true, iter1 == iter2);
 }
 
-
 TEST(ConstantIteratorTests, TestMakeConstantIterator)
 {
     // test one argument version
@@ -100,12 +97,11 @@ TEST(ConstantIteratorTests, TestMakeConstantIterator)
     ASSERT_EQ(13, *iter0);
 
     // test two argument version
-    constant_iterator<int,int> iter1 = make_constant_iterator<int,int>(13, 7);
+    constant_iterator<int, int> iter1 = make_constant_iterator<int, int>(13, 7);
 
     ASSERT_EQ(13, *iter1);
     ASSERT_EQ(7, iter1 - iter0);
 }
-
 
 TYPED_TEST(ConstantIteratorTests, MakeConstantIterator)
 {
@@ -125,11 +121,10 @@ TYPED_TEST(ConstantIteratorTests, MakeConstantIterator)
     ASSERT_EQ(7, result[3]);
 };
 
-
 TYPED_TEST(ConstantIteratorTests, ConstantIteratorTransform)
 {
     using Vector = typename TestFixture::input_type;
-    using T = typename Vector::value_type;
+    using T      = typename Vector::value_type;
 
     using ConstIter = constant_iterator<T>;
 
@@ -154,11 +149,10 @@ TYPED_TEST(ConstantIteratorTests, ConstantIteratorTransform)
     ASSERT_EQ(10, result[3]);
 };
 
-
 TYPED_TEST(ConstantIteratorTests, ConstantIteratorReduce)
 {
     using Vector = typename TestFixture::input_type;
-    using T = typename Vector::value_type;
+    using T      = typename Vector::value_type;
 
     using ConstIter = constant_iterator<T>;
 

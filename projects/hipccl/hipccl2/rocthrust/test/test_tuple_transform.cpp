@@ -15,9 +15,8 @@
  *  limitations under the License.
  */
 
-// Thrust
-#include <thrust/tuple.h>
 #include <thrust/transform.h>
+#include <thrust/tuple.h>
 
 #include "test_header.hpp"
 
@@ -25,63 +24,57 @@ TESTS_DEFINE(TupleTransformTests, SignedIntegerTestsParams);
 
 struct MakeTupleFunctor
 {
-  template<typename T1, typename T2>
-  __host__ __device__
-  thrust::tuple<T1,T2> operator()(T1 &lhs, T2 &rhs)
-  {
-    return thrust::make_tuple(lhs, rhs);
-  }
+    template <typename T1, typename T2>
+    __host__ __device__ thrust::tuple<T1, T2> operator()(T1& lhs, T2& rhs)
+    {
+        return thrust::make_tuple(lhs, rhs);
+    }
 };
 
-template<int N>
+template <int N>
 struct GetFunctor
 {
-  template<typename Tuple>
-  __host__ __device__
-  typename thrust::access_traits<
-    typename thrust::tuple_element<N, Tuple>::type
-  >::const_type
-  operator()(const Tuple &t)
-  {
-    return thrust::get<N>(t);
-  }
+    template <typename Tuple>
+    __host__ __device__
+        typename thrust::access_traits<typename thrust::tuple_element<N, Tuple>::type>::const_type
+        operator()(const Tuple& t)
+    {
+        return thrust::get<N>(t);
+    }
 };
 
 TYPED_TEST(TupleTransformTests, TestTupleTransform)
 {
-  using T = typename TestFixture::input_type;
+    using T = typename TestFixture::input_type;
 
-  const std::vector<size_t> sizes = get_sizes();
-  for(auto size : sizes)
-  {
-    thrust::host_vector<T> h_t1 = get_random_data<T>(size,
-                                                     std::numeric_limits<T>::min(),
-                                                     std::numeric_limits<T>::max());
+    const std::vector<size_t> sizes = get_sizes();
+    for(auto size : sizes)
+    {
+        thrust::host_vector<T> h_t1 = get_random_data<T>(
+            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
 
-    thrust::host_vector<T> h_t2 = get_random_data<T>(size,
-                                                     std::numeric_limits<T>::min(),
-                                                     std::numeric_limits<T>::max());
+        thrust::host_vector<T> h_t2 = get_random_data<T>(
+            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
 
-    // zip up the data
-    thrust::host_vector< thrust::tuple<T,T> > h_tuples(size);
-    thrust::transform(h_t1.begin(), h_t1.end(),
-                      h_t2.begin(), h_tuples.begin(),
-                      MakeTupleFunctor());
+        // zip up the data
+        thrust::host_vector<thrust::tuple<T, T>> h_tuples(size);
+        thrust::transform(
+            h_t1.begin(), h_t1.end(), h_t2.begin(), h_tuples.begin(), MakeTupleFunctor());
 
-    // copy to device
-    thrust::device_vector< thrust::tuple<T,T> > d_tuples = h_tuples;
+        // copy to device
+        thrust::device_vector<thrust::tuple<T, T>> d_tuples = h_tuples;
 
-    thrust::device_vector<T> d_t1(size), d_t2(size);
+        thrust::device_vector<T> d_t1(size), d_t2(size);
 
-    // select 0th
-    thrust::transform(d_tuples.begin(), d_tuples.end(), d_t1.begin(), GetFunctor<0>());
+        // select 0th
+        thrust::transform(d_tuples.begin(), d_tuples.end(), d_t1.begin(), GetFunctor<0>());
 
-    // select 1st
-    thrust::transform(d_tuples.begin(), d_tuples.end(), d_t2.begin(), GetFunctor<1>());
+        // select 1st
+        thrust::transform(d_tuples.begin(), d_tuples.end(), d_t2.begin(), GetFunctor<1>());
 
-    ASSERT_EQ(h_t1, d_t1);
-    ASSERT_EQ(h_t2, d_t2);
+        ASSERT_EQ(h_t1, d_t1);
+        ASSERT_EQ(h_t2, d_t2);
 
-    ASSERT_EQ_QUIET(h_tuples, d_tuples);
-  }
+        ASSERT_EQ_QUIET(h_tuples, d_tuples);
+    }
 }
