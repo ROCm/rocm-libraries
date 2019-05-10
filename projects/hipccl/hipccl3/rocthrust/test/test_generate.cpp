@@ -15,7 +15,6 @@
  *  limitations under the License.
  */
 
-// Thrust
 #include <thrust/generate.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
@@ -24,10 +23,8 @@
 
 __THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_BEGIN
 
-typedef ::testing::Types<
-        Params<thrust::host_vector<short>>,
-        Params<thrust::host_vector<int>>
-> VectorParams;
+typedef ::testing::Types<Params<thrust::host_vector<short>>, Params<thrust::host_vector<int>>>
+    VectorParams;
 
 TESTS_DEFINE(GenerateTests, FullTestsParams);
 TESTS_DEFINE(GenerateVectorTests, VectorParams);
@@ -38,16 +35,15 @@ TEST(ReplaceTests, UsingHip)
     ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
 }
 
-template<typename T> struct return_value
+template <typename T>
+struct return_value
 {
     T val;
 
-    return_value(void)
-    {
-    }
+    return_value(void) {}
 
-    return_value(T v) :
-            val(v)
+    return_value(T v)
+        : val(v)
     {
     }
 
@@ -60,7 +56,7 @@ template<typename T> struct return_value
 TYPED_TEST(GenerateVectorTests, TestGenerateSimple)
 {
     using Vector = typename TestFixture::input_type;
-    using T = typename Vector::value_type;
+    using T      = typename Vector::value_type;
 
     Vector result(5);
 
@@ -77,8 +73,8 @@ TYPED_TEST(GenerateVectorTests, TestGenerateSimple)
     ASSERT_EQ(result[4], value);
 }
 
-template<typename ForwardIterator, typename Generator> __host__ __device__ void
-generate(my_system& system, ForwardIterator, ForwardIterator, Generator)
+template <typename ForwardIterator, typename Generator>
+__host__ __device__ void generate(my_system& system, ForwardIterator, ForwardIterator, Generator)
 {
     system.validate_dispatch();
 }
@@ -93,8 +89,8 @@ TEST(GenerateTests, TestGenerateDispatchExplicit)
     ASSERT_EQ(true, sys.is_valid());
 }
 
-template<typename ForwardIterator, typename Generator> __host__ __device__ void
-generate(my_tag, ForwardIterator first, ForwardIterator, Generator)
+template <typename ForwardIterator, typename Generator>
+__host__ __device__ void generate(my_tag, ForwardIterator first, ForwardIterator, Generator)
 {
     *first = 13;
 }
@@ -103,8 +99,7 @@ TEST(GenerateTests, TestGenerateDispatchImplicit)
 {
     thrust::device_vector<int> vec(1);
 
-    thrust::generate(
-            thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), 0);
+    thrust::generate(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), 0);
 
     ASSERT_EQ(13, vec.front());
 }
@@ -112,15 +107,15 @@ TEST(GenerateTests, TestGenerateDispatchImplicit)
 TYPED_TEST(GenerateVariablesTests, TestGenerate)
 {
     using Vector = typename TestFixture::input_type;
-    using T = typename Vector::value_type;
+    using T      = typename Vector::value_type;
 
     const std::vector<size_t> sizes = get_sizes();
-    for (auto size : sizes)
+    for(auto size : sizes)
     {
-        thrust::host_vector<T> h_result(size);
+        thrust::host_vector<T>   h_result(size);
         thrust::device_vector<T> d_result(size);
 
-        T value = 13;
+        T               value = 13;
         return_value<T> f(value);
 
         thrust::generate(h_result.begin(), h_result.end(), f);
@@ -133,9 +128,9 @@ TYPED_TEST(GenerateVariablesTests, TestGenerate)
 TYPED_TEST(GenerateVariablesTests, TestGenerateToDiscardIterator)
 {
     using Vector = typename TestFixture::input_type;
-    using T = typename Vector::value_type;
+    using T      = typename Vector::value_type;
 
-    T value = 13;
+    T               value = 13;
     return_value<T> f(value);
 
     thrust::discard_iterator<thrust::host_system_tag> h_first;
@@ -150,7 +145,7 @@ TYPED_TEST(GenerateVariablesTests, TestGenerateToDiscardIterator)
 TYPED_TEST(GenerateVectorTests, TestGenerateNSimple)
 {
     using Vector = typename TestFixture::input_type;
-    using T = typename Vector::value_type;
+    using T      = typename Vector::value_type;
 
     Vector result(5);
 
@@ -167,9 +162,9 @@ TYPED_TEST(GenerateVectorTests, TestGenerateNSimple)
     ASSERT_EQ(result[4], value);
 }
 
-template<typename ForwardIterator, typename Size, typename Generator>
+template <typename ForwardIterator, typename Size, typename Generator>
 __host__ __device__ ForwardIterator
-generate_n(my_system& system, ForwardIterator first, Size, Generator)
+                    generate_n(my_system& system, ForwardIterator first, Size, Generator)
 {
     system.validate_dispatch();
     return first;
@@ -185,9 +180,8 @@ TEST(GenerateTests, TestGenerateNDispatchExplicit)
     ASSERT_EQ(true, sys.is_valid());
 }
 
-template<typename ForwardIterator, typename Size, typename Generator>
-__host__ __device__ ForwardIterator
-generate_n(my_tag, ForwardIterator first, Size, Generator)
+template <typename ForwardIterator, typename Size, typename Generator>
+__host__ __device__ ForwardIterator generate_n(my_tag, ForwardIterator first, Size, Generator)
 {
     *first = 13;
     return first;
@@ -205,20 +199,20 @@ TEST(GenerateTests, TestGenerateNDispatchImplicit)
 TYPED_TEST(GenerateVariablesTests, TestGenerateNToDiscardIterator)
 {
     using Vector = typename TestFixture::input_type;
-    using T = typename Vector::value_type;
+    using T      = typename Vector::value_type;
 
     const std::vector<size_t> sizes = get_sizes();
-    for (auto size : sizes)
+    for(auto size : sizes)
     {
 
-        T value = 13;
+        T               value = 13;
         return_value<T> f(value);
 
-        thrust::discard_iterator<thrust::host_system_tag> h_result = thrust::generate_n(
-                thrust::discard_iterator<thrust::host_system_tag>(), size, f);
+        thrust::discard_iterator<thrust::host_system_tag> h_result
+            = thrust::generate_n(thrust::discard_iterator<thrust::host_system_tag>(), size, f);
 
-        thrust::discard_iterator<thrust::device_system_tag> d_result = thrust::generate_n(
-                thrust::discard_iterator<thrust::device_system_tag>(), size, f);
+        thrust::discard_iterator<thrust::device_system_tag> d_result
+            = thrust::generate_n(thrust::discard_iterator<thrust::device_system_tag>(), size, f);
 
         thrust::discard_iterator<> reference(size);
 
@@ -230,15 +224,14 @@ TYPED_TEST(GenerateVariablesTests, TestGenerateNToDiscardIterator)
 TYPED_TEST(GenerateVectorTests, TestGenerateZipIterator)
 {
     using Vector = typename TestFixture::input_type;
-    using T = typename Vector::value_type;
+    using T      = typename Vector::value_type;
 
     Vector v1(3, T(0));
     Vector v2(3, T(0));
 
-    thrust::generate(
-            thrust::make_zip_iterator(thrust::make_tuple(v1.begin(), v2.begin())),
-            thrust::make_zip_iterator(thrust::make_tuple(v1.end(), v2.end())),
-            return_value<thrust::tuple<T, T>>(thrust::tuple<T, T>(4, 7)));
+    thrust::generate(thrust::make_zip_iterator(thrust::make_tuple(v1.begin(), v2.begin())),
+                     thrust::make_zip_iterator(thrust::make_tuple(v1.end(), v2.end())),
+                     return_value<thrust::tuple<T, T>>(thrust::tuple<T, T>(4, 7)));
 
     ASSERT_EQ(v1[0], 4);
     ASSERT_EQ(v1[1], 4);
@@ -250,10 +243,10 @@ TYPED_TEST(GenerateVectorTests, TestGenerateZipIterator)
 
 TEST(GenerateTests, TestGenerateTuple)
 {
-    using T = int;
+    using T     = int;
     using Tuple = thrust::tuple<T, T>;
 
-    thrust::host_vector<Tuple> h(3, Tuple(0, 0));
+    thrust::host_vector<Tuple>   h(3, Tuple(0, 0));
     thrust::device_vector<Tuple> d(3, Tuple(0, 0));
 
     thrust::generate(h.begin(), h.end(), return_value<Tuple>(Tuple(4, 7)));

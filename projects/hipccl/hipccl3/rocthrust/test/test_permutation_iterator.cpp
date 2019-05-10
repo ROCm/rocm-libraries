@@ -15,12 +15,11 @@
  *  limitations under the License.
  */
 
-// Thrust
-#include <thrust/iterator/permutation_iterator.h>
 #include <thrust/iterator/counting_iterator.h>
+#include <thrust/iterator/permutation_iterator.h>
 #include <thrust/reduce.h>
-#include <thrust/transform_reduce.h>
 #include <thrust/sequence.h>
+#include <thrust/transform_reduce.h>
 
 #include "test_header.hpp"
 
@@ -28,13 +27,13 @@ TESTS_DEFINE(PermutationIteratorTests, FullTestsParams);
 
 TEST(PermutationIteratorTests, UsingHip)
 {
-  ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
+    ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
 }
 
 TYPED_TEST(PermutationIteratorTests, PermutationIteratorSimple)
 {
-    using Vector = typename TestFixture::input_type;
-    using T = typename Vector::value_type;
+    using Vector   = typename TestFixture::input_type;
+    using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
 
     Vector source(8);
@@ -49,18 +48,18 @@ TYPED_TEST(PermutationIteratorTests, PermutationIteratorSimple)
     indices[3] = 7;
 
     thrust::permutation_iterator<Iterator, Iterator> begin(source.begin(), indices.begin());
-    thrust::permutation_iterator<Iterator, Iterator> end(source.begin(),   indices.end());
+    thrust::permutation_iterator<Iterator, Iterator> end(source.begin(), indices.end());
 
     ASSERT_EQ(end - begin, 4);
     ASSERT_EQ((begin + 4) == end, true);
 
-    ASSERT_EQ((T) *begin, 4);
+    ASSERT_EQ((T)*begin, 4);
 
     begin++;
     end--;
 
-    ASSERT_EQ((T) *begin, 1);
-    ASSERT_EQ((T) *end,   8);
+    ASSERT_EQ((T)*begin, 1);
+    ASSERT_EQ((T)*end, 8);
     ASSERT_EQ(end - begin, 2);
 
     end--;
@@ -69,18 +68,18 @@ TYPED_TEST(PermutationIteratorTests, PermutationIteratorSimple)
     *end   = 20;
 
     ASSERT_EQ(source[0], 10);
-    ASSERT_EQ(source[1],  2);
-    ASSERT_EQ(source[2],  3);
-    ASSERT_EQ(source[3],  4);
-    ASSERT_EQ(source[4],  5);
+    ASSERT_EQ(source[1], 2);
+    ASSERT_EQ(source[2], 3);
+    ASSERT_EQ(source[3], 4);
+    ASSERT_EQ(source[4], 5);
     ASSERT_EQ(source[5], 20);
-    ASSERT_EQ(source[6],  7);
-    ASSERT_EQ(source[7],  8);
+    ASSERT_EQ(source[6], 7);
+    ASSERT_EQ(source[7], 8);
 }
 
 TYPED_TEST(PermutationIteratorTests, PermutationIteratorGather)
 {
-    using Vector = typename TestFixture::input_type;
+    using Vector   = typename TestFixture::input_type;
     using Iterator = typename Vector::iterator;
 
     Vector source(8);
@@ -107,7 +106,7 @@ TYPED_TEST(PermutationIteratorTests, PermutationIteratorGather)
 
 TYPED_TEST(PermutationIteratorTests, PermutationIteratorScatter)
 {
-    using Vector = typename TestFixture::input_type;
+    using Vector   = typename TestFixture::input_type;
     using Iterator = typename Vector::iterator;
 
     Vector source(4, 10);
@@ -128,12 +127,12 @@ TYPED_TEST(PermutationIteratorTests, PermutationIteratorScatter)
     thrust::copy(source.begin(), source.end(), p_output);
 
     ASSERT_EQ(output[0], 10);
-    ASSERT_EQ(output[1],  2);
-    ASSERT_EQ(output[2],  3);
+    ASSERT_EQ(output[1], 2);
+    ASSERT_EQ(output[2], 3);
     ASSERT_EQ(output[3], 10);
-    ASSERT_EQ(output[4],  5);
+    ASSERT_EQ(output[4], 5);
     ASSERT_EQ(output[5], 10);
-    ASSERT_EQ(output[6],  7);
+    ASSERT_EQ(output[6], 7);
     ASSERT_EQ(output[7], 10);
 }
 
@@ -165,8 +164,8 @@ TYPED_TEST(PermutationIteratorTests, MakePermutationIterator)
 
 TYPED_TEST(PermutationIteratorTests, PermutationIteratorReduce)
 {
-    using Vector = typename TestFixture::input_type;
-    using T = typename Vector::value_type;
+    using Vector   = typename TestFixture::input_type;
+    using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
 
     Vector source(8);
@@ -184,25 +183,27 @@ TYPED_TEST(PermutationIteratorTests, PermutationIteratorReduce)
     // construct transform_iterator
     thrust::permutation_iterator<Iterator, Iterator> iter(source.begin(), indices.begin());
 
-    T result1 = thrust::reduce(thrust::make_permutation_iterator(source.begin(), indices.begin()),
-                               thrust::make_permutation_iterator(source.begin(), indices.begin()) + 4);
+    T result1
+        = thrust::reduce(thrust::make_permutation_iterator(source.begin(), indices.begin()),
+                         thrust::make_permutation_iterator(source.begin(), indices.begin()) + 4);
 
     ASSERT_EQ(result1, (T)19);
 
-    T result2 = thrust::transform_reduce(thrust::make_permutation_iterator(source.begin(), indices.begin()),
-                                         thrust::make_permutation_iterator(source.begin(), indices.begin()) + 4,
-                                         thrust::negate<T>(),
-                                         T(0),
-                                         thrust::plus<T>());
+    T result2 = thrust::transform_reduce(
+        thrust::make_permutation_iterator(source.begin(), indices.begin()),
+        thrust::make_permutation_iterator(source.begin(), indices.begin()) + 4,
+        thrust::negate<T>(),
+        T(0),
+        thrust::plus<T>());
     ASSERT_EQ(result2, (T)-19);
 };
 
 TEST(PermutationIteratorTests, PermutationIteratorHostDeviceGather)
 {
-    using T = int;
-    using HostVector = typename thrust::host_vector<T>;
-    using DeviceVector = typename thrust::host_vector<T>;
-    using HostIterator = typename HostVector::iterator;
+    using T              = int;
+    using HostVector     = typename thrust::host_vector<T>;
+    using DeviceVector   = typename thrust::host_vector<T>;
+    using HostIterator   = typename HostVector::iterator;
     using DeviceIterator = typename DeviceVector::iterator;
 
     HostVector h_source(8);
@@ -222,8 +223,10 @@ TEST(PermutationIteratorTests, PermutationIteratorHostDeviceGather)
     h_indices[2] = d_indices[2] = 5;
     h_indices[3] = d_indices[3] = 7;
 
-    thrust::permutation_iterator<HostIterator,   HostIterator>   p_h_source(h_source.begin(), h_indices.begin());
-    thrust::permutation_iterator<DeviceIterator, DeviceIterator> p_d_source(d_source.begin(), d_indices.begin());
+    thrust::permutation_iterator<HostIterator, HostIterator>     p_h_source(h_source.begin(),
+                                                                        h_indices.begin());
+    thrust::permutation_iterator<DeviceIterator, DeviceIterator> p_d_source(d_source.begin(),
+                                                                            d_indices.begin());
 
     // gather host->device
     thrust::copy(p_h_source, p_h_source + 4, d_output.begin());
@@ -244,17 +247,17 @@ TEST(PermutationIteratorTests, PermutationIteratorHostDeviceGather)
 
 TEST(PermutationIteratorTests, PermutationIteratorHostDeviceScatter)
 {
-    using T = int;
-    using HostVector = typename thrust::host_vector<T>;
-    using DeviceVector = typename thrust::host_vector<T>;
-    using HostIterator = typename HostVector::iterator;
+    using T              = int;
+    using HostVector     = typename thrust::host_vector<T>;
+    using DeviceVector   = typename thrust::host_vector<T>;
+    using HostIterator   = typename HostVector::iterator;
     using DeviceIterator = typename DeviceVector::iterator;
 
-    HostVector h_source(4,10);
+    HostVector h_source(4, 10);
     HostVector h_indices(4);
     HostVector h_output(8);
 
-    DeviceVector d_source(4,10);
+    DeviceVector d_source(4, 10);
     DeviceVector d_indices(4);
     DeviceVector d_output(8);
 
@@ -267,48 +270,50 @@ TEST(PermutationIteratorTests, PermutationIteratorHostDeviceScatter)
     h_indices[2] = d_indices[2] = 5;
     h_indices[3] = d_indices[3] = 7;
 
-    thrust::permutation_iterator<HostIterator,   HostIterator>   p_h_output(h_output.begin(), h_indices.begin());
-    thrust::permutation_iterator<DeviceIterator, DeviceIterator> p_d_output(d_output.begin(), d_indices.begin());
+    thrust::permutation_iterator<HostIterator, HostIterator>     p_h_output(h_output.begin(),
+                                                                        h_indices.begin());
+    thrust::permutation_iterator<DeviceIterator, DeviceIterator> p_d_output(d_output.begin(),
+                                                                            d_indices.begin());
 
     // scatter host->device
     thrust::copy(h_source.begin(), h_source.end(), p_d_output);
 
     ASSERT_EQ(d_output[0], 10);
-    ASSERT_EQ(d_output[1],  2);
-    ASSERT_EQ(d_output[2],  3);
+    ASSERT_EQ(d_output[1], 2);
+    ASSERT_EQ(d_output[2], 3);
     ASSERT_EQ(d_output[3], 10);
-    ASSERT_EQ(d_output[4],  5);
+    ASSERT_EQ(d_output[4], 5);
     ASSERT_EQ(d_output[5], 10);
-    ASSERT_EQ(d_output[6],  7);
+    ASSERT_EQ(d_output[6], 7);
     ASSERT_EQ(d_output[7], 10);
 
     // scatter device->host
     thrust::copy(d_source.begin(), d_source.end(), p_h_output);
 
     ASSERT_EQ(h_output[0], 10);
-    ASSERT_EQ(h_output[1],  2);
-    ASSERT_EQ(h_output[2],  3);
+    ASSERT_EQ(h_output[1], 2);
+    ASSERT_EQ(h_output[2], 3);
     ASSERT_EQ(h_output[3], 10);
-    ASSERT_EQ(h_output[4],  5);
+    ASSERT_EQ(h_output[4], 5);
     ASSERT_EQ(h_output[5], 10);
-    ASSERT_EQ(h_output[6],  7);
+    ASSERT_EQ(h_output[6], 7);
     ASSERT_EQ(h_output[7], 10);
 }
 
 TYPED_TEST(PermutationIteratorTests, PermutationIteratorWithCountingIterator)
 {
     using Vector = typename TestFixture::input_type;
-    using T = typename Vector::value_type;
+    using T      = typename Vector::value_type;
 
     typename thrust::counting_iterator<T> input(0), index(0);
 
     // test copy()
     {
-        Vector output(4,0);
+        Vector output(4, 0);
 
         thrust::copy(thrust::make_permutation_iterator(input, index),
-                    thrust::make_permutation_iterator(input, index + output.size()),
-                    output.begin());
+                     thrust::make_permutation_iterator(input, index + output.size()),
+                     output.begin());
 
         ASSERT_EQ(output[0], 0);
         ASSERT_EQ(output[1], 1);
@@ -318,12 +323,12 @@ TYPED_TEST(PermutationIteratorTests, PermutationIteratorWithCountingIterator)
 
     // test copy()
     {
-        Vector output(4,0);
+        Vector output(4, 0);
 
         thrust::transform(thrust::make_permutation_iterator(input, index),
-                        thrust::make_permutation_iterator(input, index + 4),
-                        output.begin(),
-                        thrust::identity<T>());
+                          thrust::make_permutation_iterator(input, index + 4),
+                          output.begin(),
+                          thrust::identity<T>());
 
         ASSERT_EQ(output[0], 0);
         ASSERT_EQ(output[1], 1);
