@@ -15,7 +15,6 @@
  *  limitations under the License.
  */
 
-// Thrust
 #include <thrust/iterator/discard_iterator.h>
 
 #include "test_header.hpp"
@@ -50,10 +49,10 @@ TEST(DiscardIteratorTests, DiscardIteratorIncrement)
     lhs -= 10;
 
     ASSERT_EQ(-2, lhs - rhs);
-  }
+}
 
-  TEST(DiscardIteratorTests, DiscardIteratorComparison)
-  {
+TEST(DiscardIteratorTests, DiscardIteratorComparison)
+{
     discard_iterator<> iter1(0);
     discard_iterator<> iter2(0);
 
@@ -92,8 +91,8 @@ TEST(DiscardIteratorTests, MakeDiscardIterator)
 
 TEST(DiscardIteratorTests, ZippedDiscardIterator)
 {
-    using IteratorTuple1 = tuple<discard_iterator<> >;
-    using ZipIterator1 = zip_iterator<IteratorTuple1> ;
+    using IteratorTuple1 = tuple<discard_iterator<>>;
+    using ZipIterator1   = zip_iterator<IteratorTuple1>;
 
     IteratorTuple1 t = make_tuple(make_discard_iterator());
 
@@ -101,20 +100,20 @@ TEST(DiscardIteratorTests, ZippedDiscardIterator)
     ZipIterator1 z_iter1_last  = z_iter1_first + 10;
     for(; z_iter1_first != z_iter1_last; ++z_iter1_first)
     {
-      ;
+        ;
     }
 
     ASSERT_EQ(10, get<0>(z_iter1_first.get_iterator_tuple()) - make_discard_iterator());
 
-    using IteratorTuple2 = tuple<int *, discard_iterator<> > ;
-    using ZipIterator2 = zip_iterator<IteratorTuple2>      ;
+    using IteratorTuple2 = tuple<int*, discard_iterator<>>;
+    using ZipIterator2   = zip_iterator<IteratorTuple2>;
 
     ZipIterator2 z_iter_first = make_zip_iterator(make_tuple((int*)0, make_discard_iterator()));
     ZipIterator2 z_iter_last  = z_iter_first + 10;
 
     for(; z_iter_first != z_iter_last; ++z_iter_first)
     {
-      ;
+        ;
     }
 
     ASSERT_EQ(10, get<1>(z_iter_first.get_iterator_tuple()) - make_discard_iterator());

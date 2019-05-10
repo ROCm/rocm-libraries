@@ -15,37 +15,36 @@
  *  limitations under the License.
  */
 
-// Thrust
-#include <thrust/device_vector.h>
-#include <thrust/device_ptr.h>
-#include <thrust/device_new.h>
 #include <thrust/device_delete.h>
+#include <thrust/device_new.h>
+#include <thrust/device_ptr.h>
+#include <thrust/device_vector.h>
 
 #include "test_header.hpp"
 
 struct Foo
 {
-  __host__ __device__
-  Foo(void)
-    :set_me_upon_destruction(0)
-  {}
+    __host__ __device__ Foo(void)
+        : set_me_upon_destruction(0)
+    {
+    }
 
-  bool *set_me_upon_destruction;
+    bool* set_me_upon_destruction;
 };
 
 TEST(DeviceDelete, TestDeviceDeleteDestructorInvocation)
 {
-  thrust::device_vector<bool> destructor_flag(1, false);
+    thrust::device_vector<bool> destructor_flag(1, false);
 
-  thrust::device_ptr<Foo> foo_ptr  = thrust::device_new<Foo>();
+    thrust::device_ptr<Foo> foo_ptr = thrust::device_new<Foo>();
 
-  Foo exemplar;
-  exemplar.set_me_upon_destruction = thrust::raw_pointer_cast(&destructor_flag[0]);
-  *foo_ptr = exemplar;
+    Foo exemplar;
+    exemplar.set_me_upon_destruction = thrust::raw_pointer_cast(&destructor_flag[0]);
+    *foo_ptr                         = exemplar;
 
-  ASSERT_EQ(false, destructor_flag[0]);
+    ASSERT_EQ(false, destructor_flag[0]);
 
-  // TODO: Known failure
-  //thrust::device_delete(foo_ptr);
-  //ASSERT_EQ(true, destructor_flag[0]);
+    // TODO: Known failure
+    //thrust::device_delete(foo_ptr);
+    //ASSERT_EQ(true, destructor_flag[0]);
 }

@@ -15,7 +15,6 @@
  *  limitations under the License.
  */
 
-// Thrust
 #include <thrust/device_vector.h>
 #include <thrust/inner_product.h>
 #include <thrust/iterator/retag.h>
@@ -25,40 +24,45 @@
 TESTS_DEFINE(InnerProductTests, FullTestsParams);
 TESTS_DEFINE(PrimitiveInnerProductTests, NumericalTestsParams);
 
-template<class T>
-T clip_infinity(T val){
+template <class T>
+T clip_infinity(T val)
+{
     T min = std::numeric_limits<T>::min();
     T max = std::numeric_limits<T>::max();
-    if (val > max)
+    if(val > max)
         return max;
-    if (val < min)
+    if(val < min)
         return min;
     return val;
 }
 
 TEST(InnerProductTests, UsingHip)
 {
-  ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
+    ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
 }
 
 TYPED_TEST(InnerProductTests, InnerProductSimple)
 {
     using Vector = typename TestFixture::input_type;
-    using T = typename Vector::value_type;
+    using T      = typename Vector::value_type;
 
     Vector v1(3);
     Vector v2(3);
-    v1[0] =  1; v1[1] = -2; v1[2] =  3;
-    v2[0] = -4; v2[1] =  5; v2[2] =  6;
+    v1[0] = 1;
+    v1[1] = -2;
+    v1[2] = 3;
+    v2[0] = -4;
+    v2[1] = 5;
+    v2[2] = 6;
 
-    T init = 3;
+    T init   = 3;
     T result = thrust::inner_product(v1.begin(), v1.end(), v2.begin(), init);
 
-    ASSERT_NEAR(result, (T) 7, (T) 0.01);
+    ASSERT_NEAR(result, (T)7, (T)0.01);
 }
 
 template <typename InputIterator1, typename InputIterator2, typename OutputType>
-int inner_product(my_system &system, InputIterator1, InputIterator1, InputIterator2, OutputType)
+int inner_product(my_system& system, InputIterator1, InputIterator1, InputIterator2, OutputType)
 {
     system.validate_dispatch();
     return 13;
@@ -69,11 +73,7 @@ TEST(InnerProductTests, InnerProductDispatchExplicit)
     thrust::device_vector<int> vec;
 
     my_system sys(0);
-    thrust::inner_product(sys,
-                          vec.begin(),
-                          vec.end(),
-                          vec.begin(),
-                          0);
+    thrust::inner_product(sys, vec.begin(), vec.end(), vec.begin(), 0);
 
     ASSERT_EQ(true, sys.is_valid());
 }
@@ -98,19 +98,23 @@ TEST(InnerProductTests, InnerProductDispatchImplicit)
 
 TYPED_TEST(InnerProductTests, InnerProductWithOperator)
 {
-    using Vector = typename TestFixture::input_type;
-    using T = typename Vector::value_type;
-    T error_margin = (T) 0.01;
+    using Vector   = typename TestFixture::input_type;
+    using T        = typename Vector::value_type;
+    T error_margin = (T)0.01;
 
     Vector v1(3);
     Vector v2(3);
-    v1[0] =  1; v1[1] = -2; v1[2] =  3;
-    v2[0] = -1; v2[1] =  3; v2[2] =  6;
+    v1[0] = 1;
+    v1[1] = -2;
+    v1[2] = 3;
+    v2[0] = -1;
+    v2[1] = 3;
+    v2[2] = 6;
 
     // compute (v1 - v2) and perform a multiplies reduction
-    T init = 3;
-    T result = thrust::inner_product(v1.begin(), v1.end(), v2.begin(), init,
-                                      thrust::multiplies<T>(), thrust::minus<T>());
+    T init   = 3;
+    T result = thrust::inner_product(
+        v1.begin(), v1.end(), v2.begin(), init, thrust::multiplies<T>(), thrust::minus<T>());
     ASSERT_NEAR(result, (T)90, error_margin);
 }
 
@@ -121,9 +125,9 @@ TYPED_TEST(PrimitiveInnerProductTests, InnerProductWithRandomData)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        T error_margin = (T) 0.01 * size;
-        T min = (T) std::numeric_limits<T>::min() / (size + 1);
-        T max = (T) std::numeric_limits<T>::max() / (size + 1);
+        T error_margin = (T)0.01 * size;
+        T min          = (T)std::numeric_limits<T>::min() / (size + 1);
+        T max          = (T)std::numeric_limits<T>::max() / (size + 1);
 
         thrust::host_vector<T> h_v1 = get_random_data<T>(size, min, max);
         thrust::host_vector<T> h_v2 = get_random_data<T>(size, min, max);

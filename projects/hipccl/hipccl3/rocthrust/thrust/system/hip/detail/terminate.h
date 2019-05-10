@@ -30,6 +30,7 @@
 
 #include <thrust/detail/config.h>
 #include <thrust/system/hip/detail/util.h>
+
 #include <cstdio>
 
 namespace thrust
@@ -41,21 +42,16 @@ namespace hip
 namespace detail
 {
 
-
-inline __device__
-void terminate()
+void THRUST_HIP_DEVICE_FUNCTION terminate()
 {
-  thrust::hip_rocprim::terminate();
+    thrust::hip_rocprim::terminate();
 }
 
-
-inline __host__ __device__
-void terminate_with_message(const char* message)
+void THRUST_HIP_FUNCTION terminate_with_message(const char* message)
 {
-  printf("%s\n", message);
-  thrust::hip_rocprim::terminate();
+    printf("%s\n", message);
+    thrust::hip_rocprim::terminate();
 }
-
 
 } // end detail
 } // end hip

@@ -27,101 +27,84 @@
  ******************************************************************************/
 #pragma once
 
-
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 #include <thrust/system/hip/detail/copy_if.h>
 
 BEGIN_NS_THRUST
-namespace hip_rocprim {
+namespace hip_rocprim
+{
 
 // in-place
 
-template <class Derived,
-          class InputIt,
-          class StencilIt,
-          class Predicate>
-InputIt __host__ __device__
-remove_if(execution_policy<Derived> &policy,
+template <class Derived, class InputIt, class StencilIt, class Predicate>
+InputIt THRUST_HIP_FUNCTION
+remove_if(execution_policy<Derived>& policy,
           InputIt                    first,
           InputIt                    last,
           StencilIt                  stencil,
           Predicate                  predicate)
 {
-  return hip_rocprim::copy_if(policy, first, last, stencil, first, detail::not1(predicate));
+    return hip_rocprim::copy_if(policy, first, last, stencil, first, detail::not1(predicate));
 }
 
-template <class Derived,
-          class InputIt,
-          class Predicate>
-InputIt __host__ __device__
-remove_if(execution_policy<Derived> &policy,
+template <class Derived, class InputIt, class Predicate>
+InputIt THRUST_HIP_FUNCTION
+remove_if(execution_policy<Derived>& policy,
           InputIt                    first,
           InputIt                    last,
           Predicate                  predicate)
 {
-  return hip_rocprim::copy_if(policy, first, last, first, detail::not1(predicate));
+    return hip_rocprim::copy_if(policy, first, last, first, detail::not1(predicate));
 }
 
-template <class Derived,
-          class InputIt,
-          class T>
-InputIt __host__ __device__
-remove(execution_policy<Derived> &policy,
+template <class Derived, class InputIt, class T>
+InputIt THRUST_HIP_FUNCTION
+remove(execution_policy<Derived>& policy,
        InputIt                    first,
        InputIt                    last,
-       const T &                  value)
+       const T&                   value)
 {
-  detail::equal_to_value<T> pred(value);
-  return hip_rocprim::remove_if(policy, first, last, pred);
+    detail::equal_to_value<T> pred(value);
+    return hip_rocprim::remove_if(policy, first, last, pred);
 }
 
 // copy
 
-template <class Derived,
-          class InputIt,
-          class StencilIt,
-          class OutputIt,
-          class Predicate>
-OutputIt __host__ __device__
-remove_copy_if(execution_policy<Derived> &policy,
+template <class Derived, class InputIt, class StencilIt, class OutputIt, class Predicate>
+OutputIt THRUST_HIP_FUNCTION
+remove_copy_if(execution_policy<Derived>& policy,
                InputIt                    first,
                InputIt                    last,
                StencilIt                  stencil,
                OutputIt                   result,
                Predicate                  predicate)
 {
-  return hip_rocprim::copy_if(policy, first, last, stencil, result, detail::not1(predicate));
+    return hip_rocprim::copy_if(policy, first, last, stencil, result, detail::not1(predicate));
 }
 
-template <class Derived,
-          class InputIt,
-          class OutputIt,
-          class Predicate>
-OutputIt __host__ __device__
-remove_copy_if(execution_policy<Derived> &policy,
+template <class Derived, class InputIt, class OutputIt, class Predicate>
+OutputIt THRUST_HIP_FUNCTION
+remove_copy_if(execution_policy<Derived>& policy,
                InputIt                    first,
                InputIt                    last,
                OutputIt                   result,
                Predicate                  predicate)
 {
-  return hip_rocprim::copy_if(policy, first, last, result, detail::not1(predicate));
+    return hip_rocprim::copy_if(policy, first, last, result, detail::not1(predicate));
 }
 
-template <class Derived,
-          class InputIt,
-          class OutputIt,
-          class T>
-OutputIt __host__ __device__
-remove_copy(execution_policy<Derived> &policy,
+template <class Derived, class InputIt, class OutputIt, class T>
+OutputIt THRUST_HIP_FUNCTION
+remove_copy(execution_policy<Derived>& policy,
             InputIt                    first,
             InputIt                    last,
             OutputIt                   result,
-            const T &                  value)
+            const T&                   value)
 {
-  detail::equal_to_value<T> pred(value);
-  return hip_rocprim::remove_copy_if(policy, first, last, result, pred);
+    detail::equal_to_value<T> pred(value);
+    return hip_rocprim::remove_copy_if(policy, first, last, result, pred);
 }
 
-}    // namespace hip_rocprim
+} // namespace hip_rocprim
 END_NS_THRUST
 #endif
