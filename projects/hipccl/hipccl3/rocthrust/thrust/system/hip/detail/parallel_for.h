@@ -27,123 +27,107 @@
  ******************************************************************************/
 #pragma once
 
-
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 #include <thrust/system/hip/config.h>
 
-#include <thrust/system/hip/detail/util.h>
 #include <thrust/detail/type_traits/result_of_adaptable_function.h>
 #include <thrust/system/hip/detail/par_to_seq.h>
+#include <thrust/system/hip/detail/util.h>
 
 BEGIN_NS_THRUST
-
-namespace hip_rocprim {
-
-// STREAMHPC TODO implement parallel_for (for_each) in rocPRIM
-namespace __parallel_for {
-
-  template<unsigned int BlockSize, unsigned int ItemsPerThread>
-  struct kernel_config
-  {
-    static constexpr unsigned int block_size = BlockSize;
-    static constexpr unsigned int items_per_thread = ItemsPerThread;
-  };
-
-  template<unsigned int BlockSize,
-           unsigned int ItemsPerThread,
-           class F,
-           class Size>
-  __global__
-  void kernel(F f, Size num_items)
-  {
-      constexpr auto items_per_block = BlockSize * ItemsPerThread;
-      Size tile_base     = blockIdx.x * items_per_block;
-      Size num_remaining = num_items - tile_base;
-      const unsigned int items_in_tile = static_cast<unsigned int>(
-        num_remaining < (Size)items_per_block ? num_remaining : items_per_block
-      );
-
-      if(items_in_tile == items_per_block)
-      {
-        #pragma unroll
-        for(unsigned int i = 0; i < ItemsPerThread; i++)
-        {
-          unsigned int idx = BlockSize * i + threadIdx.x;
-          f(tile_base + idx);
-        }
-      }
-      else
-      {
-        #pragma unroll
-        for(unsigned int i = 0; i < ItemsPerThread; i++)
-        {
-          unsigned int idx = BlockSize * i + threadIdx.x;
-          if(idx < items_in_tile)
-            f(tile_base + idx);
-        }
-      }
-  }
-
-  template <class F,
-            class Size>
-  THRUST_HIP_RUNTIME_FUNCTION hipError_t
-  parallel_for(Size         num_items,
-               F            f,
-               hipStream_t stream)
-  {
-    using config = kernel_config<256, 1>;
-    bool debug_sync = THRUST_HIP_DEBUG_SYNC_FLAG;
-    // STREAMHPC Use debug_sync
-    (void) debug_sync;
-
-    constexpr unsigned int block_size = config::block_size;
-    constexpr unsigned int items_per_thread = config::items_per_thread;
-    constexpr auto items_per_block = block_size * items_per_thread;
-    const auto number_of_blocks = (num_items + items_per_block - 1)/items_per_block;
-
-    hipLaunchKernelGGL(
-      HIP_KERNEL_NAME(kernel<block_size, items_per_thread, F, Size>),
-      dim3(number_of_blocks), dim3(block_size), 0, stream,
-      f, num_items
-    );
-
-    auto error = hipPeekAtLastError();
-    if(error != hipSuccess) return error;
-    return hipSuccess;
-  }
-}    // __parallel_for
-
-__thrust_exec_check_disable__
-template <class Derived,
-          class F,
-          class Size>
-void __host__ __device__
-parallel_for(execution_policy<Derived> &policy,
-             F                          f,
-             Size                       count)
+namespace hip_rocprim
 {
-  if (count == 0)
-    return;
+namespace __parallel_for
+{
+    template <unsigned int BlockSize, unsigned int ItemsPerThread>
+    struct kernel_config
+    {
+        static constexpr unsigned int block_size       = BlockSize;
+        static constexpr unsigned int items_per_thread = ItemsPerThread;
+    };
 
-  THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((
-    __parallel_for::parallel_for<F, Size>
-  ));
+    template <unsigned int BlockSize, unsigned int ItemsPerThread, class F, class Size>
+    __global__ void kernel(F f, Size num_items)
+    {
+        constexpr auto     items_per_block = BlockSize * ItemsPerThread;
+        Size               tile_base       = blockIdx.x * items_per_block;
+        Size               num_remaining   = num_items - tile_base;
+        const unsigned int items_in_tile   = static_cast<unsigned int>(
+            num_remaining < (Size)items_per_block ? num_remaining : items_per_block);
+
+        if(items_in_tile == items_per_block)
+        {
+            #pragma unroll
+            for(unsigned int i = 0; i < ItemsPerThread; i++)
+            {
+                unsigned int idx = BlockSize * i + threadIdx.x;
+                f(tile_base + idx);
+            }
+        }
+        else
+        {
+            #pragma unroll
+            for(unsigned int i = 0; i < ItemsPerThread; i++)
+            {
+                unsigned int idx = BlockSize * i + threadIdx.x;
+                if(idx < items_in_tile)
+                    f(tile_base + idx);
+            }
+        }
+    }
+
+    template <class F, class Size>
+    hipError_t THRUST_HIP_RUNTIME_FUNCTION
+    parallel_for(Size num_items, F f, hipStream_t stream)
+    {
+        using config    = kernel_config<256, 1>;
+        bool debug_sync = THRUST_HIP_DEBUG_SYNC_FLAG;
+        // STREAMHPC Use debug_sync
+        (void)debug_sync;
+
+        constexpr unsigned int block_size       = config::block_size;
+        constexpr unsigned int items_per_thread = config::items_per_thread;
+        constexpr auto         items_per_block  = block_size * items_per_thread;
+        const auto number_of_blocks = (num_items + items_per_block - 1) / items_per_block;
+
+        hipLaunchKernelGGL(HIP_KERNEL_NAME(kernel<block_size, items_per_thread, F, Size>),
+                           dim3(number_of_blocks),
+                           dim3(block_size),
+                           0,
+                           stream,
+                           f,
+                           num_items);
+
+        auto error = hipPeekAtLastError();
+        if(error != hipSuccess)
+            return error;
+        return hipSuccess;
+    }
+} // __parallel_for
+
+__thrust_exec_check_disable__ template <class Derived, class F, class Size>
+void THRUST_HIP_FUNCTION
+parallel_for(execution_policy<Derived>& policy, F f, Size count)
+{
+    if(count == 0)
+        return;
+
+    THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((__parallel_for::parallel_for<F, Size>));
 #if __THRUST_HAS_HIPRT__
-  {
-    hipStream_t stream = hip_rocprim::stream(policy);
-    hipError_t  status = __parallel_for::parallel_for(count, f, stream);
-    hip_rocprim::throw_on_error(status, "parallel_for failed");
-  }
+    {
+        hipStream_t stream = hip_rocprim::stream(policy);
+        hipError_t  status = __parallel_for::parallel_for(count, f, stream);
+        hip_rocprim::throw_on_error(status, "parallel_for failed");
+    }
 #else
-  {
-    (void) policy;
-    for (Size idx = 0; idx != count; ++idx)
-      f(idx);
-  }
+    {
+        (void)policy;
+        for(Size idx = 0; idx != count; ++idx)
+            f(idx);
+    }
 #endif
 }
 
-}    // namespace hip_rocprim
-
+} // namespace hip_rocprim
 END_NS_THRUST
 #endif

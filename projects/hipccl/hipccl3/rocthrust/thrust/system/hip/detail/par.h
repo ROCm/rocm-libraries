@@ -27,139 +27,136 @@
  ******************************************************************************/
 #pragma once
 
-#include <thrust/detail/config.h>
 #include <thrust/detail/allocator/allocator_traits.h>
+#include <thrust/detail/config.h>
 #include <thrust/detail/execute_with_allocator.h>
 #include <thrust/system/hip/detail/execution_policy.h>
 
 BEGIN_NS_THRUST
-namespace hip_rocprim {
-
-__host__ __device__ inline hipStream_t default_stream()
+namespace hip_rocprim
 {
-  return hipStreamDefault; // STREAMHPC There's not hipStreamLegacy
-}
 
-template <class Derived>
-hipStream_t __host__ __device__
-get_stream(execution_policy<Derived> &)
-{
-  return default_stream();
-}
+    __host__ __device__ inline hipStream_t default_stream()
+    {
+        return hipStreamDefault; // STREAMHPC There's not hipStreamLegacy
+    }
 
-template <class Derived>
-hipError_t THRUST_HIP_RUNTIME_FUNCTION
-synchronize_stream(execution_policy<Derived> &)
-{
-  hipDeviceSynchronize();
-  return hipGetLastError();
-}
+    template <class Derived>
+    hipStream_t __host__ __device__ get_stream(execution_policy<Derived>&)
+    {
+        return default_stream();
+    }
 
+    template <class Derived>
+    hipError_t THRUST_HIP_RUNTIME_FUNCTION synchronize_stream(execution_policy<Derived>&)
+    {
+        hipDeviceSynchronize();
+        return hipGetLastError();
+    }
 
-template <class Derived>
-struct execute_on_stream_base : execution_policy<Derived>
-{
-private:
-  hipStream_t stream;
+    template <class Derived>
+    struct execute_on_stream_base : execution_policy<Derived>
+    {
+    private:
+        hipStream_t stream;
 
-public:
-  __host__ __device__
-  execute_on_stream_base(hipStream_t stream_ = default_stream())
-      : stream(stream_) {}
+    public:
+        __host__ __device__ execute_on_stream_base(hipStream_t stream_ = default_stream())
+            : stream(stream_)
+        {
+        }
 
-  __host__ __device__
-      Derived
-      on(hipStream_t const &s) const
-  {
-    Derived result = derived_cast(*this);
-    result.stream  = s;
-    return result;
-  }
+        __host__ __device__ Derived on(hipStream_t const& s) const
+        {
+            Derived result = derived_cast(*this);
+            result.stream  = s;
+            return result;
+        }
 
-private:
-  friend hipStream_t __host__ __device__
-  get_stream(execute_on_stream_base &exec)
-  {
-    return exec.stream;
-  }
+    private:
+        friend hipStream_t __host__ __device__ get_stream(execute_on_stream_base& exec)
+        {
+            return exec.stream;
+        }
 
-  friend hipError_t THRUST_HIP_RUNTIME_FUNCTION
-  synchronize_stream(execute_on_stream_base &exec)
-  {
+        friend hipError_t THRUST_HIP_RUNTIME_FUNCTION
+                          synchronize_stream(execute_on_stream_base& exec)
+        {
 #ifdef __HIP_DEVICE_COMPILE__
 #ifdef __THRUST_HAS_HIPRT__
-    THRUST_UNUSED_VAR(exec);
-    hipDeviceSynchronize();
+            THRUST_UNUSED_VAR(exec);
+            hipDeviceSynchronize();
 #endif
 #else
-    hipStreamSynchronize(exec.stream);
+            hipStreamSynchronize(exec.stream);
 #endif
-    return hipGetLastError();
-  }
-};
+            return hipGetLastError();
+        }
+    };
 
-struct execute_on_stream : execute_on_stream_base<execute_on_stream>
-{
-  typedef execute_on_stream_base<execute_on_stream> base_t;
+    struct execute_on_stream : execute_on_stream_base<execute_on_stream>
+    {
+        typedef execute_on_stream_base<execute_on_stream> base_t;
 
-  __host__ __device__
-  execute_on_stream() : base_t(){};
-  __host__ __device__
-  execute_on_stream(hipStream_t stream) : base_t(stream){};
-};
+        __host__ __device__ execute_on_stream()
+            : base_t() {};
+        __host__ __device__ execute_on_stream(hipStream_t stream)
+            : base_t(stream) {};
+    };
 
+    struct par_t : execution_policy<par_t>
+    {
+        typedef execution_policy<par_t> base_t;
 
-struct par_t : execution_policy<par_t>
-{
-  typedef execution_policy<par_t> base_t;
+        __device__ __host__ par_t()
+            : base_t()
+        {
+        }
 
-  __device__ __host__
-  par_t() : base_t() {}
+        template <class Allocator>
+        struct enable_alloc
+        {
+            typedef typename thrust::detail::enable_if<
+                thrust::detail::is_allocator<Allocator>::value,
+                thrust::detail::execute_with_allocator<Allocator, execute_on_stream_base>>::type
+                type;
+        };
 
-  template <class Allocator>
-  struct enable_alloc
-  {
-    typedef typename thrust::detail::enable_if<
-        thrust::detail::is_allocator<Allocator>::value,
-        thrust::detail::execute_with_allocator<Allocator,
-                                               execute_on_stream_base> >::type
-        type;
-  };
+        template <class Allocator>
+        __host__ __device__ typename enable_alloc<Allocator>::type
+                 operator()(Allocator& alloc) const
+        {
+            return thrust::detail::execute_with_allocator<Allocator, execute_on_stream_base>(alloc);
+        }
 
-  template <class Allocator>
-  __host__ __device__ typename enable_alloc<Allocator>::type
-  operator()(Allocator &alloc) const
-  {
-    return thrust::detail::execute_with_allocator<
-        Allocator,
-        execute_on_stream_base>(alloc);
-  }
-
-  execute_on_stream __device__ __host__
-  on(hipStream_t const &stream) const
-  {
-    return execute_on_stream(stream);
-  }
-};
+        execute_on_stream __device__ __host__ on(hipStream_t const& stream) const
+        {
+            return execute_on_stream(stream);
+        }
+    };
 
 #ifdef __HIP_DEVICE_COMPILE__
-static const __device__ par_t par;
+    static const __device__ par_t par;
 #else
-static const par_t par;
+    static const par_t par;
 #endif
-}    // namespace hip_rocprim
+} // namespace hip_rocprim
 
-namespace system {
-namespace hip {
-  using thrust::hip_rocprim::par;
-  namespace detail {
-    using thrust::hip_rocprim::par_t;
-  }
-} // namesapce hip
+namespace system
+{
+    namespace hip
+    {
+        using thrust::hip_rocprim::par;
+        namespace detail
+        {
+            using thrust::hip_rocprim::par_t;
+        }
+    } // namesapce hip
 } // namespace system
 
-namespace hip {
-using thrust::hip_rocprim::par;
+namespace hip
+{
+    using thrust::hip_rocprim::par;
 } // namespace hip
 
 END_NS_THRUST
