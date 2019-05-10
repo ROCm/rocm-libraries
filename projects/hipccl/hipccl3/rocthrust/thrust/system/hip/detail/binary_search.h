@@ -28,215 +28,197 @@
 #pragma once
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-#include <thrust/system/hip/execution_policy.h>
-#include <thrust/system/hip/detail/par_to_seq.h>
 #include <thrust/binary_search.h>
 #include <thrust/distance.h>
+#include <thrust/system/hip/detail/par_to_seq.h>
+#include <thrust/system/hip/execution_policy.h>
 
 #include <rocprim/rocprim.hpp>
 
 BEGIN_NS_THRUST
-namespace hip_rocprim {
-
-namespace __binary_search {
-
-template <class Policy,
-          class HaystackIt,
-          class NeedlesIt,
-          class OutputIt,
-          class CompareOp>
-OutputIt THRUST_HIP_RUNTIME_FUNCTION
-lower_bound(Policy&    policy,
-            HaystackIt haystack_begin,
-            HaystackIt haystack_end,
-            NeedlesIt  needles_begin,
-            NeedlesIt  needles_end,
-            OutputIt   result,
-            CompareOp  compare_op)
+namespace hip_rocprim
 {
-    using size_type = typename iterator_traits<NeedlesIt>::difference_type;
-
-    const size_type needles_size  = thrust::distance(needles_begin, needles_end);
-    const size_type haystack_size = thrust::distance(haystack_begin, haystack_end);
-
-    if (needles_size == 0)
-        return result;
-
-    void*       d_temp_storage     = nullptr;
-    size_t      temp_storage_bytes = 0;
-    hipStream_t stream             = hip_rocprim::stream(policy);
-    bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
-
-    // Determine temporary device storage requirements.
-    hip_rocprim::throw_on_error(
-        rocprim::lower_bound(d_temp_storage,
-                             temp_storage_bytes,
-                             haystack_begin,
-                             needles_begin,
-                             result,
-                             haystack_size,
-                             needles_size,
-                             compare_op,
-                             stream,
-                             debug_sync),
-        "lower_bound: failed on 1st call");
-
-    // Allocate temporary storage.
-    d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes);
-    hip_rocprim::throw_on_error(hipGetLastError(),
-                                "lower_bound: failed to get memory buffer");
-
-    hip_rocprim::throw_on_error(
-        rocprim::lower_bound(d_temp_storage,
-                             temp_storage_bytes,
-                             haystack_begin,
-                             needles_begin,
-                             result,
-                             haystack_size,
-                             needles_size,
-                             compare_op,
-                             stream,
-                             debug_sync),
-        "lower_bound: failed on 2nt call");
-
-    hip_rocprim::return_memory_buffer(policy, d_temp_storage);
-    hip_rocprim::throw_on_error(hipGetLastError(),
-                                "lower_bound: failed to return memory buffer");
-
-    return result + needles_size;
-}
-
-template <class Policy,
-          class HaystackIt,
-          class NeedlesIt,
-          class OutputIt,
-          class CompareOp>
-OutputIt THRUST_HIP_RUNTIME_FUNCTION
-upper_bound(Policy&    policy,
-            HaystackIt haystack_begin,
-            HaystackIt haystack_end,
-            NeedlesIt  needles_begin,
-            NeedlesIt  needles_end,
-            OutputIt   result,
-            CompareOp  compare_op)
+namespace __binary_search
 {
-    using size_type = typename iterator_traits<NeedlesIt>::difference_type;
+    template <class Policy, class HaystackIt, class NeedlesIt, class OutputIt, class CompareOp>
+    OutputIt THRUST_HIP_RUNTIME_FUNCTION
+    lower_bound(Policy&    policy,
+                HaystackIt haystack_begin,
+                HaystackIt haystack_end,
+                NeedlesIt  needles_begin,
+                NeedlesIt  needles_end,
+                OutputIt   result,
+                CompareOp  compare_op)
+    {
+        using size_type = typename iterator_traits<NeedlesIt>::difference_type;
 
-    const size_type needles_size  = thrust::distance(needles_begin, needles_end);
-    const size_type haystack_size = thrust::distance(haystack_begin, haystack_end);
+        const size_type needles_size  = thrust::distance(needles_begin, needles_end);
+        const size_type haystack_size = thrust::distance(haystack_begin, haystack_end);
 
-    if (needles_size == 0)
-        return result;
+        if(needles_size == 0)
+            return result;
 
-    void*       d_temp_storage     = nullptr;
-    size_t      temp_storage_bytes = 0;
-    hipStream_t stream             = hip_rocprim::stream(policy);
-    bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
+        void*       d_temp_storage     = nullptr;
+        size_t      temp_storage_bytes = 0;
+        hipStream_t stream             = hip_rocprim::stream(policy);
+        bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
 
-    // Determine temporary device storage requirements.
-    hip_rocprim::throw_on_error(
-        rocprim::upper_bound(d_temp_storage,
-                             temp_storage_bytes,
-                             haystack_begin,
-                             needles_begin,
-                             result,
-                             haystack_size,
-                             needles_size,
-                             compare_op,
-                             stream,
-                             debug_sync),
-        "upper_bound: failed on 1st call");
+        // Determine temporary device storage requirements.
+        hip_rocprim::throw_on_error(rocprim::lower_bound(d_temp_storage,
+                                                         temp_storage_bytes,
+                                                         haystack_begin,
+                                                         needles_begin,
+                                                         result,
+                                                         haystack_size,
+                                                         needles_size,
+                                                         compare_op,
+                                                         stream,
+                                                         debug_sync),
+                                    "lower_bound: failed on 1st call");
 
-    // Allocate temporary storage.
-    d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes);
-    hip_rocprim::throw_on_error(hipGetLastError(),
-                                "upper_bound: failed to get memory buffer");
+        // Allocate temporary storage.
+        d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes);
+        hip_rocprim::throw_on_error(hipGetLastError(),
+                                    "lower_bound: failed to get memory buffer");
 
-    hip_rocprim::throw_on_error(
-        rocprim::upper_bound(d_temp_storage,
-                             temp_storage_bytes,
-                             haystack_begin,
-                             needles_begin,
-                             result,
-                             haystack_size,
-                             needles_size,
-                             compare_op,
-                             stream,
-                             debug_sync),
-        "upper_bound: failed on 2nt call");
+        hip_rocprim::throw_on_error(rocprim::lower_bound(d_temp_storage,
+                                                         temp_storage_bytes,
+                                                         haystack_begin,
+                                                         needles_begin,
+                                                         result,
+                                                         haystack_size,
+                                                         needles_size,
+                                                         compare_op,
+                                                         stream,
+                                                         debug_sync),
+                                    "lower_bound: failed on 2nt call");
 
-    hip_rocprim::return_memory_buffer(policy, d_temp_storage);
-    hip_rocprim::throw_on_error(hipGetLastError(),
-                                "upper_bound: failed to return memory buffer");
+        hip_rocprim::return_memory_buffer(policy, d_temp_storage);
+        hip_rocprim::throw_on_error(hipGetLastError(),
+                                    "lower_bound: failed to return memory buffer");
 
-    return result + needles_size;
-}
+        return result + needles_size;
+    }
 
-template <class Policy,
-          class HaystackIt,
-          class NeedlesIt,
-          class OutputIt,
-          class CompareOp>
-OutputIt THRUST_HIP_RUNTIME_FUNCTION
-binary_search(Policy&    policy,
-              HaystackIt haystack_begin,
-              HaystackIt haystack_end,
-              NeedlesIt  needles_begin,
-              NeedlesIt  needles_end,
-              OutputIt   result,
-              CompareOp  compare_op)
-{
-    using size_type = typename iterator_traits<NeedlesIt>::difference_type;
+    template <class Policy, class HaystackIt, class NeedlesIt, class OutputIt, class CompareOp>
+    OutputIt THRUST_HIP_RUNTIME_FUNCTION
+    upper_bound(Policy&    policy,
+                HaystackIt haystack_begin,
+                HaystackIt haystack_end,
+                NeedlesIt  needles_begin,
+                NeedlesIt  needles_end,
+                OutputIt   result,
+                CompareOp  compare_op)
+    {
+        using size_type = typename iterator_traits<NeedlesIt>::difference_type;
 
-    const size_type needles_size  = thrust::distance(needles_begin, needles_end);
-    const size_type haystack_size = thrust::distance(haystack_begin, haystack_end);
+        const size_type needles_size  = thrust::distance(needles_begin, needles_end);
+        const size_type haystack_size = thrust::distance(haystack_begin, haystack_end);
 
-    if (needles_size == 0)
-        return result;
+        if(needles_size == 0)
+            return result;
 
-    void*       d_temp_storage     = nullptr;
-    size_t      temp_storage_bytes = 0;
-    hipStream_t stream             = hip_rocprim::stream(policy);
-    bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
+        void*       d_temp_storage     = nullptr;
+        size_t      temp_storage_bytes = 0;
+        hipStream_t stream             = hip_rocprim::stream(policy);
+        bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
 
-    // Determine temporary device storage requirements.
-    hip_rocprim::throw_on_error(
-        rocprim::binary_search(d_temp_storage,
-                               temp_storage_bytes,
-                               haystack_begin,
-                               needles_begin,
-                               result,
-                               haystack_size,
-                               needles_size,
-                               compare_op,
-                               stream,
-                               debug_sync),
-        "binary_search: failed on 1st call");
+        // Determine temporary device storage requirements.
+        hip_rocprim::throw_on_error(rocprim::upper_bound(d_temp_storage,
+                                                         temp_storage_bytes,
+                                                         haystack_begin,
+                                                         needles_begin,
+                                                         result,
+                                                         haystack_size,
+                                                         needles_size,
+                                                         compare_op,
+                                                         stream,
+                                                         debug_sync),
+                                    "upper_bound: failed on 1st call");
 
-    // Allocate temporary storage.
-    d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes);
-    hip_rocprim::throw_on_error(hipGetLastError(),
-                                "binary_search: failed to get memory buffer");
+        // Allocate temporary storage.
+        d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes);
+        hip_rocprim::throw_on_error(hipGetLastError(),
+                                    "upper_bound: failed to get memory buffer");
 
-    hip_rocprim::throw_on_error(
-        rocprim::binary_search(d_temp_storage,
-                               temp_storage_bytes,
-                               haystack_begin,
-                               needles_begin,
-                               result,
-                               haystack_size,
-                               needles_size,
-                               compare_op,
-                               stream,
-                               debug_sync),
-        "binary_search: failed on 2nt call");
+        hip_rocprim::throw_on_error(rocprim::upper_bound(d_temp_storage,
+                                                         temp_storage_bytes,
+                                                         haystack_begin,
+                                                         needles_begin,
+                                                         result,
+                                                         haystack_size,
+                                                         needles_size,
+                                                         compare_op,
+                                                         stream,
+                                                         debug_sync),
+                                    "upper_bound: failed on 2nt call");
 
-    hip_rocprim::return_memory_buffer(policy, d_temp_storage);
-    hip_rocprim::throw_on_error(hipGetLastError(),
-                                "binary_search: failed to return memory buffer");
+        hip_rocprim::return_memory_buffer(policy, d_temp_storage);
+        hip_rocprim::throw_on_error(hipGetLastError(),
+                                    "upper_bound: failed to return memory buffer");
 
-    return result + needles_size;
-}
+        return result + needles_size;
+    }
+
+    template <class Policy, class HaystackIt, class NeedlesIt, class OutputIt, class CompareOp>
+    OutputIt THRUST_HIP_RUNTIME_FUNCTION
+    binary_search(Policy&    policy,
+                  HaystackIt haystack_begin,
+                  HaystackIt haystack_end,
+                  NeedlesIt  needles_begin,
+                  NeedlesIt  needles_end,
+                  OutputIt   result,
+                  CompareOp  compare_op)
+    {
+        using size_type = typename iterator_traits<NeedlesIt>::difference_type;
+
+        const size_type needles_size  = thrust::distance(needles_begin, needles_end);
+        const size_type haystack_size = thrust::distance(haystack_begin, haystack_end);
+
+        if(needles_size == 0)
+            return result;
+
+        void*       d_temp_storage     = nullptr;
+        size_t      temp_storage_bytes = 0;
+        hipStream_t stream             = hip_rocprim::stream(policy);
+        bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
+
+        // Determine temporary device storage requirements.
+        hip_rocprim::throw_on_error(rocprim::binary_search(d_temp_storage,
+                                                           temp_storage_bytes,
+                                                           haystack_begin,
+                                                           needles_begin,
+                                                           result,
+                                                           haystack_size,
+                                                           needles_size,
+                                                           compare_op,
+                                                           stream,
+                                                           debug_sync),
+                                    "binary_search: failed on 1st call");
+
+        // Allocate temporary storage.
+        d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes);
+        hip_rocprim::throw_on_error(hipGetLastError(),
+                                    "binary_search: failed to get memory buffer");
+
+        hip_rocprim::throw_on_error(rocprim::binary_search(d_temp_storage,
+                                                           temp_storage_bytes,
+                                                           haystack_begin,
+                                                           needles_begin,
+                                                           result,
+                                                           haystack_size,
+                                                           needles_size,
+                                                           compare_op,
+                                                           stream,
+                                                           debug_sync),
+                                    "binary_search: failed on 2nt call");
+
+        hip_rocprim::return_memory_buffer(policy, d_temp_storage);
+        hip_rocprim::throw_on_error(hipGetLastError(),
+                                    "binary_search: failed to return memory buffer");
+
+        return result + needles_size;
+    }
 
 } // namespace __binary_search
 
@@ -244,11 +226,7 @@ binary_search(Policy&    policy,
 // Thrust API entry points
 //-------------------------
 
-template <class Derived,
-          class HaystackIt,
-          class NeedlesIt,
-          class OutputIt,
-          class CompareOp>
+template <class Derived, class HaystackIt, class NeedlesIt, class OutputIt, class CompareOp>
 OutputIt THRUST_HIP_FUNCTION
 lower_bound(execution_policy<Derived>& policy,
             HaystackIt                 first,
@@ -258,139 +236,19 @@ lower_bound(execution_policy<Derived>& policy,
             OutputIt                   result,
             CompareOp                  compare_op)
 {
-  THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((
-    __binary_search::lower_bound<
-      execution_policy<Derived>, HaystackIt, NeedlesIt, OutputIt, CompareOp
-    >
-  ));
+    THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+        (__binary_search::lower_bound<execution_policy<Derived>,
+                                      HaystackIt,
+                                      NeedlesIt,
+                                      OutputIt,
+                                      CompareOp>)
+    );
 #if __THRUST_HAS_HIPRT__
-  return __binary_search::lower_bound(policy,
-                                      first,
-                                      last,
-                                      values_first,
-                                      values_last,
-                                      result,
-                                      compare_op);
+    return __binary_search::lower_bound(
+        policy, first, last, values_first, values_last, result, compare_op
+    );
 #else
-  return thrust::lower_bound(cvt_to_seq(derived_cast(policy)),
-                             first,
-                             last,
-                             values_first,
-                             values_last,
-                             result,
-                             compare_op);
-#endif
-}
-
-template <class Derived,
-          class HaystackIt,
-          class NeedlesIt,
-          class OutputIt>
-OutputIt THRUST_HIP_FUNCTION
-lower_bound(execution_policy<Derived>& policy,
-            HaystackIt                 first,
-            HaystackIt                 last,
-            NeedlesIt                  values_first,
-            NeedlesIt                  values_last,
-            OutputIt                   result)
-{
-  return hip_rocprim::lower_bound(policy,
-                                  first,
-                                  last,
-                                  values_first,
-                                  values_last,
-                                  result,
-                                  rocprim::less<>());
-}
-
-template <class Derived,
-          class HaystackIt,
-          class NeedlesIt,
-          class OutputIt,
-          class CompareOp>
-OutputIt THRUST_HIP_FUNCTION
-upper_bound(execution_policy<Derived>& policy,
-            HaystackIt                 first,
-            HaystackIt                 last,
-            NeedlesIt                  values_first,
-            NeedlesIt                  values_last,
-            OutputIt                   result,
-            CompareOp                  compare_op)
-{
-  THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((
-    __binary_search::upper_bound<
-      execution_policy<Derived>, HaystackIt, NeedlesIt, OutputIt, CompareOp
-    >
-  ));
-#if __THRUST_HAS_HIPRT__
-  return __binary_search::upper_bound(policy,
-                                      first,
-                                      last,
-                                      values_first,
-                                      values_last,
-                                      result,
-                                      compare_op);
-#else
-  return thrust::upper_bound(cvt_to_seq(derived_cast(policy)),
-                             first,
-                             last,
-                             values_first,
-                             values_last,
-                             result,
-                             compare_op);
-#endif
-}
-
-template <class Derived,
-          class HaystackIt,
-          class NeedlesIt,
-          class OutputIt>
-OutputIt THRUST_HIP_FUNCTION
-upper_bound(execution_policy<Derived>& policy,
-            HaystackIt                 first,
-            HaystackIt                 last,
-            NeedlesIt                  values_first,
-            NeedlesIt                  values_last,
-            OutputIt                   result)
-{
-  return hip_rocprim::upper_bound(policy,
-                                  first,
-                                  last,
-                                  values_first,
-                                  values_last,
-                                  result,
-                                  rocprim::less<>());
-}
-
-template <class Derived,
-          class HaystackIt,
-          class NeedlesIt,
-          class OutputIt,
-          class CompareOp>
-OutputIt THRUST_HIP_FUNCTION
-binary_search(execution_policy<Derived>& policy,
-              HaystackIt                 first,
-              HaystackIt                 last,
-              NeedlesIt                  values_first,
-              NeedlesIt                  values_last,
-              OutputIt                   result,
-              CompareOp                  compare_op)
-{
-  THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((
-    __binary_search::binary_search<
-      execution_policy<Derived>, HaystackIt, NeedlesIt, OutputIt, CompareOp
-    >
-  ));
-#if __THRUST_HAS_HIPRT__
-  return __binary_search::binary_search(policy,
-                                        first,
-                                        last,
-                                        values_first,
-                                        values_last,
-                                        result,
-                                        compare_op);
-#else
-  return thrust::binary_search(cvt_to_seq(derived_cast(policy)),
+    return thrust::lower_bound(cvt_to_seq(derived_cast(policy)),
                                first,
                                last,
                                values_first,
@@ -400,10 +258,98 @@ binary_search(execution_policy<Derived>& policy,
 #endif
 }
 
-template <class Derived,
-          class HaystackIt,
-          class NeedlesIt,
-          class OutputIt>
+template <class Derived, class HaystackIt, class NeedlesIt, class OutputIt>
+OutputIt THRUST_HIP_FUNCTION
+lower_bound(execution_policy<Derived>& policy,
+            HaystackIt                 first,
+            HaystackIt                 last,
+            NeedlesIt                  values_first,
+            NeedlesIt                  values_last,
+            OutputIt                   result)
+{
+    return hip_rocprim::lower_bound(
+        policy, first, last, values_first, values_last, result, rocprim::less<>()
+    );
+}
+
+template <class Derived, class HaystackIt, class NeedlesIt, class OutputIt, class CompareOp>
+OutputIt THRUST_HIP_FUNCTION
+upper_bound(execution_policy<Derived>& policy,
+            HaystackIt                 first,
+            HaystackIt                 last,
+            NeedlesIt                  values_first,
+            NeedlesIt                  values_last,
+            OutputIt                   result,
+            CompareOp                  compare_op)
+{
+    THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+        (__binary_search::upper_bound<execution_policy<Derived>,
+                                      HaystackIt,
+                                      NeedlesIt,
+                                      OutputIt,
+                                      CompareOp>)
+    );
+#if __THRUST_HAS_HIPRT__
+    return __binary_search::upper_bound(
+        policy, first, last, values_first, values_last, result, compare_op
+    );
+#else
+    return thrust::upper_bound(cvt_to_seq(derived_cast(policy)),
+                               first,
+                               last,
+                               values_first,
+                               values_last,
+                               result,
+                               compare_op);
+#endif
+}
+
+template <class Derived, class HaystackIt, class NeedlesIt, class OutputIt>
+OutputIt THRUST_HIP_FUNCTION
+upper_bound(execution_policy<Derived>& policy,
+            HaystackIt                 first,
+            HaystackIt                 last,
+            NeedlesIt                  values_first,
+            NeedlesIt                  values_last,
+            OutputIt                   result)
+{
+    return hip_rocprim::upper_bound(
+        policy, first, last, values_first, values_last, result, rocprim::less<>()
+    );
+}
+
+template <class Derived, class HaystackIt, class NeedlesIt, class OutputIt, class CompareOp>
+OutputIt THRUST_HIP_FUNCTION
+binary_search(execution_policy<Derived>& policy,
+              HaystackIt                 first,
+              HaystackIt                 last,
+              NeedlesIt                  values_first,
+              NeedlesIt                  values_last,
+              OutputIt                   result,
+              CompareOp                  compare_op)
+{
+    THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+        (__binary_search::binary_search<execution_policy<Derived>,
+                                        HaystackIt,
+                                        NeedlesIt,
+                                        OutputIt,
+                                        CompareOp>)
+    );
+#if __THRUST_HAS_HIPRT__
+    return __binary_search::binary_search(
+        policy, first, last, values_first, values_last, result, compare_op);
+#else
+    return thrust::binary_search(cvt_to_seq(derived_cast(policy)),
+                                 first,
+                                 last,
+                                 values_first,
+                                 values_last,
+                                 result,
+                                 compare_op);
+#endif
+}
+
+template <class Derived, class HaystackIt, class NeedlesIt, class OutputIt>
 OutputIt THRUST_HIP_FUNCTION
 binary_search(execution_policy<Derived>& policy,
               HaystackIt                 first,
@@ -412,13 +358,9 @@ binary_search(execution_policy<Derived>& policy,
               NeedlesIt                  values_last,
               OutputIt                   result)
 {
-  return hip_rocprim::binary_search(policy,
-                                    first,
-                                    last,
-                                    values_first,
-                                    values_last,
-                                    result,
-                                    rocprim::less<>());
+    return hip_rocprim::binary_search(
+        policy, first, last, values_first, values_last, result, rocprim::less<>()
+    );
 }
 
 } // namespace hip_rocprim
