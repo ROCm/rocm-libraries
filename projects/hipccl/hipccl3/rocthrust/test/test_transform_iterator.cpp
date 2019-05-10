@@ -15,13 +15,12 @@
  *  limitations under the License.
  */
 
-// Thrust
-#include <thrust/iterator/transform_iterator.h>
 #include <thrust/copy.h>
-#include <thrust/reduce.h>
 #include <thrust/functional.h>
-#include <thrust/sequence.h>
 #include <thrust/iterator/counting_iterator.h>
+#include <thrust/iterator/transform_iterator.h>
+#include <thrust/reduce.h>
+#include <thrust/sequence.h>
 
 #include "test_header.hpp"
 
@@ -30,16 +29,16 @@ TESTS_DEFINE(PrimitiveTransformIteratorTests, NumericalTestsParams);
 
 TEST(TransformIteratorTests, UsingHip)
 {
-  ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
+    ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
 }
 
 TYPED_TEST(TransformIteratorTests, TransformIterator)
 {
     using Vector = typename TestFixture::input_type;
-    using T = typename Vector::value_type;
+    using T      = typename Vector::value_type;
 
     using UnaryFunction = thrust::negate<T>;
-    using Iterator = typename Vector::iterator;
+    using Iterator      = typename Vector::iterator;
 
     Vector input(4);
     Vector output(4);
@@ -56,16 +55,15 @@ TYPED_TEST(TransformIteratorTests, TransformIterator)
     ASSERT_EQ(output[1], (T)-2);
     ASSERT_EQ(output[2], (T)-3);
     ASSERT_EQ(output[3], (T)-4);
-
 }
 
 TYPED_TEST(TransformIteratorTests, MakeTransformIterator)
 {
     using Vector = typename TestFixture::input_type;
-    using T = typename Vector::value_type;
+    using T      = typename Vector::value_type;
 
     using UnaryFunction = thrust::negate<T>;
-    using Iterator = typename Vector::iterator;
+    using Iterator      = typename Vector::iterator;
 
     Vector input(4);
     Vector output(4);
@@ -84,7 +82,6 @@ TYPED_TEST(TransformIteratorTests, MakeTransformIterator)
     ASSERT_EQ(output[1], (T)-2);
     ASSERT_EQ(output[2], (T)-3);
     ASSERT_EQ(output[3], (T)-4);
-
 }
 
 TYPED_TEST(PrimitiveTransformIteratorTests, TransformIteratorReduce)
@@ -94,19 +91,20 @@ TYPED_TEST(PrimitiveTransformIteratorTests, TransformIteratorReduce)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        T error_margin = (T) 0.01 * size;
-        thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10);
-        thrust::device_vector<T> d_data = h_data;
+        T                        error_margin = (T)0.01 * size;
+        thrust::host_vector<T>   h_data       = get_random_data<T>(size, 0, 10);
+        thrust::device_vector<T> d_data       = h_data;
 
         // run on host
-        T h_result = thrust::reduce( thrust::make_transform_iterator(h_data.begin(), thrust::negate<T>()),
-                                     thrust::make_transform_iterator(h_data.end(),   thrust::negate<T>()) );
+        T h_result
+            = thrust::reduce(thrust::make_transform_iterator(h_data.begin(), thrust::negate<T>()),
+                             thrust::make_transform_iterator(h_data.end(), thrust::negate<T>()));
 
         // run on device
-        T d_result = thrust::reduce( thrust::make_transform_iterator(d_data.begin(), thrust::negate<T>()),
-                                     thrust::make_transform_iterator(d_data.end(),   thrust::negate<T>()) );
+        T d_result
+            = thrust::reduce(thrust::make_transform_iterator(d_data.begin(), thrust::negate<T>()),
+                             thrust::make_transform_iterator(d_data.end(), thrust::negate<T>()));
 
         ASSERT_NEAR(h_result, d_result, error_margin);
-
     }
 }

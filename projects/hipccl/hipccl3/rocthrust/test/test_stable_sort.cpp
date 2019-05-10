@@ -15,33 +15,32 @@
  *  limitations under the License.
  */
 
-// Thrust
-#include <thrust/sort.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/retag.h>
+#include <thrust/sort.h>
 
 #include "test_header.hpp"
 
 TESTS_DEFINE(StableSortTests, UnsignedIntegerTestsParams);
 TESTS_DEFINE(StableSortVectorTests, VectorIntegerTestsParams);
 
-template<typename RandomAccessIterator>
-void stable_sort(my_system &system, RandomAccessIterator, RandomAccessIterator)
+template <typename RandomAccessIterator>
+void stable_sort(my_system& system, RandomAccessIterator, RandomAccessIterator)
 {
     system.validate_dispatch();
 }
 
 TEST(StableSortTests, TestStableSortDispatchExplicit)
 {
-  thrust::device_vector<int> vec(1);
+    thrust::device_vector<int> vec(1);
 
-  my_system sys(0);
-  thrust::stable_sort(sys, vec.begin(), vec.begin());
+    my_system sys(0);
+    thrust::stable_sort(sys, vec.begin(), vec.begin());
 
-  ASSERT_EQ(true, sys.is_valid());
+    ASSERT_EQ(true, sys.is_valid());
 }
 
-template<typename RandomAccessIterator>
+template <typename RandomAccessIterator>
 void stable_sort(my_tag, RandomAccessIterator first, RandomAccessIterator)
 {
     *first = 13;
@@ -49,18 +48,20 @@ void stable_sort(my_tag, RandomAccessIterator first, RandomAccessIterator)
 
 TEST(StableSortTests, TestStableSortDispatchImplicit)
 {
-  thrust::device_vector<int> vec(1);
+    thrust::device_vector<int> vec(1);
 
-  thrust::stable_sort(thrust::retag<my_tag>(vec.begin()),
-                      thrust::retag<my_tag>(vec.begin()));
+    thrust::stable_sort(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.begin()));
 
-  ASSERT_EQ(13, vec.front());
+    ASSERT_EQ(13, vec.front());
 }
 
 template <typename T>
 struct less_div_10
 {
-  __host__ __device__ bool operator()(const T &lhs, const T &rhs) const {return ((int) lhs) / 10 < ((int) rhs) / 10;}
+    __host__ __device__ bool operator()(const T& lhs, const T& rhs) const
+    {
+        return ((int)lhs) / 10 < ((int)rhs) / 10;
+    }
 };
 
 template <class Vector>
@@ -91,80 +92,82 @@ void InitializeSimpleStableKeySortTest(Vector& unsorted_keys, Vector& sorted_key
 
 TYPED_TEST(StableSortVectorTests, TestStableSortSimple)
 {
-  using Vector = typename TestFixture::input_type;
-  using T = typename Vector::value_type;
+    using Vector = typename TestFixture::input_type;
+    using T      = typename Vector::value_type;
 
-  Vector unsorted_keys;
-  Vector   sorted_keys;
+    Vector unsorted_keys;
+    Vector sorted_keys;
 
-  InitializeSimpleStableKeySortTest(unsorted_keys, sorted_keys);
+    InitializeSimpleStableKeySortTest(unsorted_keys, sorted_keys);
 
-  thrust::stable_sort(unsorted_keys.begin(), unsorted_keys.end(), less_div_10<T>());
+    thrust::stable_sort(unsorted_keys.begin(), unsorted_keys.end(), less_div_10<T>());
 
-  ASSERT_EQ(unsorted_keys,   sorted_keys);
+    ASSERT_EQ(unsorted_keys, sorted_keys);
 }
 
 TYPED_TEST(StableSortTests, TestStableSort)
 {
-  using T = typename TestFixture::input_type;
+    using T = typename TestFixture::input_type;
 
-  for(auto size : get_sizes())
-  {
-    thrust::host_vector<T> h_data = get_random_data<T>(size,
-                                                       std::numeric_limits<T>::min(),
-                                                       std::numeric_limits<T>::max());
-    thrust::device_vector<T> d_data = h_data;
+    for(auto size : get_sizes())
+    {
+        thrust::host_vector<T> h_data = get_random_data<T>(
+            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+        thrust::device_vector<T> d_data = h_data;
 
-    thrust::stable_sort(h_data.begin(), h_data.end(), less_div_10<T>());
-    thrust::stable_sort(d_data.begin(), d_data.end(), less_div_10<T>());
+        thrust::stable_sort(h_data.begin(), h_data.end(), less_div_10<T>());
+        thrust::stable_sort(d_data.begin(), d_data.end(), less_div_10<T>());
 
-    ASSERT_EQ(h_data, d_data);
-  }
+        ASSERT_EQ(h_data, d_data);
+    }
 }
 
 template <typename T>
 struct comp_mod3
 {
-    T * table;
+    T* table;
 
-    comp_mod3(T * table) : table(table) {}
-
-    __host__ __device__
-    bool operator()(T a, T b) const
+    comp_mod3(T* table)
+        : table(table)
     {
-        return table[(int) a] < table[(int) b];
+    }
+
+    __host__ __device__ bool operator()(T a, T b) const
+    {
+        return table[(int)a] < table[(int)b];
     }
 };
 
 TYPED_TEST(StableSortVectorTests, TestStableSortWithIndirection)
 {
-  using Vector = typename TestFixture::input_type;
-  using T = typename Vector::value_type;
+    using Vector = typename TestFixture::input_type;
+    using T      = typename Vector::value_type;
 
-  Vector data(7);
-  data[0] = T(1);
-  data[1] = T(3);
-  data[2] = T(5);
-  data[3] = T(3);
-  data[4] = T(0);
-  data[5] = T(2);
-  data[6] = T(1);
+    Vector data(7);
+    data[0] = T(1);
+    data[1] = T(3);
+    data[2] = T(5);
+    data[3] = T(3);
+    data[4] = T(0);
+    data[5] = T(2);
+    data[6] = T(1);
 
-  Vector table(6);
-  table[0] = T(0);
-  table[1] = T(1);
-  table[2] = T(2);
-  table[3] = T(0);
-  table[4] = T(1);
-  table[5] = T(2);
+    Vector table(6);
+    table[0] = T(0);
+    table[1] = T(1);
+    table[2] = T(2);
+    table[3] = T(0);
+    table[4] = T(1);
+    table[5] = T(2);
 
-  thrust::stable_sort(data.begin(), data.end(), comp_mod3<T>(thrust::raw_pointer_cast(&table[0])));
+    thrust::stable_sort(
+        data.begin(), data.end(), comp_mod3<T>(thrust::raw_pointer_cast(&table[0])));
 
-  ASSERT_EQ(data[0], T(3));
-  ASSERT_EQ(data[1], T(3));
-  ASSERT_EQ(data[2], T(0));
-  ASSERT_EQ(data[3], T(1));
-  ASSERT_EQ(data[4], T(1));
-  ASSERT_EQ(data[5], T(5));
-  ASSERT_EQ(data[6], T(2));
+    ASSERT_EQ(data[0], T(3));
+    ASSERT_EQ(data[1], T(3));
+    ASSERT_EQ(data[2], T(0));
+    ASSERT_EQ(data[3], T(1));
+    ASSERT_EQ(data[4], T(1));
+    ASSERT_EQ(data[5], T(5));
+    ASSERT_EQ(data[6], T(2));
 }
