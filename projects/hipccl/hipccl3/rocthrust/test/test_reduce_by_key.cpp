@@ -15,74 +15,76 @@
  *  limitations under the License.
  */
 
-// Thrust
-#include <thrust/reduce.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
+#include <thrust/reduce.h>
 
 #include "test_header.hpp"
 
 TESTS_DEFINE(ReduceByKeysIntegralTests, IntegerTestsParams);
 TESTS_DEFINE(ReduceByKeysTests, FullTestsParams);
 
-template<typename T>
+template <typename T>
 struct is_equal_div_10_reduce
 {
-    __host__ __device__
-    bool operator()(const T x, const T& y) const { return ((int) x / 10) == ((int) y / 10); }
+    __host__ __device__ bool operator()(const T x, const T& y) const
+    {
+        return ((int)x / 10) == ((int)y / 10);
+    }
 };
 
 template <typename Vector>
 void initialize_keys(Vector& keys)
 {
-	keys.resize(9);
-	keys[0] = 11;
-	keys[1] = 11;
-	keys[2] = 21;
-	keys[3] = 20;
-	keys[4] = 21;
-	keys[5] = 21;
-	keys[6] = 21;
-	keys[7] = 37;
-	keys[8] = 37;
+    keys.resize(9);
+    keys[0] = 11;
+    keys[1] = 11;
+    keys[2] = 21;
+    keys[3] = 20;
+    keys[4] = 21;
+    keys[5] = 21;
+    keys[6] = 21;
+    keys[7] = 37;
+    keys[8] = 37;
 }
 
 template <typename Vector>
 void initialize_values(Vector& values)
 {
-	values.resize(9);
-	values[0] = 0;
-	values[1] = 1;
-	values[2] = 2;
-	values[3] = 3;
-	values[4] = 4;
-	values[5] = 5;
-	values[6] = 6;
-	values[7] = 7;
-	values[8] = 8;
+    values.resize(9);
+    values[0] = 0;
+    values[1] = 1;
+    values[2] = 2;
+    values[3] = 3;
+    values[4] = 4;
+    values[5] = 5;
+    values[6] = 6;
+    values[7] = 7;
+    values[8] = 8;
 }
 
 TYPED_TEST(ReduceByKeysTests, TestReduceByKeySimple)
 {
     using Vector = typename TestFixture::input_type;
-    using T = typename Vector::value_type;
+    using T      = typename Vector::value_type;
 
-	Vector keys;
-	Vector values;
+    Vector keys;
+    Vector values;
 
-	typename thrust::pair<typename Vector::iterator, typename Vector::iterator> new_last;
+    typename thrust::pair<typename Vector::iterator, typename Vector::iterator> new_last;
 
-	// basic test
+    // basic test
     initialize_keys(keys);
     initialize_values(values);
 
-	Vector output_keys(keys.size());
-	Vector output_values(values.size());
+    Vector output_keys(keys.size());
+    Vector output_values(values.size());
 
-	new_last = thrust::reduce_by_key(keys.begin(), keys.end(), values.begin(), output_keys.begin(), output_values.begin());
+    new_last = thrust::reduce_by_key(
+        keys.begin(), keys.end(), values.begin(), output_keys.begin(), output_values.begin());
 
-    ASSERT_EQ(new_last.first  - output_keys.begin(),   5);
+    ASSERT_EQ(new_last.first - output_keys.begin(), 5);
     ASSERT_EQ(new_last.second - output_values.begin(), 5);
     ASSERT_EQ(output_keys[0], 11);
     ASSERT_EQ(output_keys[1], 21);
@@ -90,9 +92,9 @@ TYPED_TEST(ReduceByKeysTests, TestReduceByKeySimple)
     ASSERT_EQ(output_keys[3], 21);
     ASSERT_EQ(output_keys[4], 37);
 
-    ASSERT_EQ(output_values[0],  1);
-    ASSERT_EQ(output_values[1],  2);
-    ASSERT_EQ(output_values[2],  3);
+    ASSERT_EQ(output_values[0], 1);
+    ASSERT_EQ(output_values[1], 2);
+    ASSERT_EQ(output_values[2], 3);
     ASSERT_EQ(output_values[3], 15);
     ASSERT_EQ(output_values[4], 15);
 
@@ -100,15 +102,20 @@ TYPED_TEST(ReduceByKeysTests, TestReduceByKeySimple)
     initialize_keys(keys);
     initialize_values(values);
 
-    new_last = thrust::reduce_by_key(keys.begin(), keys.end(), values.begin(), output_keys.begin(), output_values.begin(), is_equal_div_10_reduce<T>());
+    new_last = thrust::reduce_by_key(keys.begin(),
+                                     keys.end(),
+                                     values.begin(),
+                                     output_keys.begin(),
+                                     output_values.begin(),
+                                     is_equal_div_10_reduce<T>());
 
-    ASSERT_EQ(new_last.first  - output_keys.begin(),   3);
+    ASSERT_EQ(new_last.first - output_keys.begin(), 3);
     ASSERT_EQ(new_last.second - output_values.begin(), 3);
     ASSERT_EQ(output_keys[0], 11);
     ASSERT_EQ(output_keys[1], 21);
     ASSERT_EQ(output_keys[2], 37);
 
-    ASSERT_EQ(output_values[0],  1);
+    ASSERT_EQ(output_values[0], 1);
     ASSERT_EQ(output_values[1], 20);
     ASSERT_EQ(output_values[2], 15);
 
@@ -116,9 +123,15 @@ TYPED_TEST(ReduceByKeysTests, TestReduceByKeySimple)
     initialize_keys(keys);
     initialize_values(values);
 
-    new_last = thrust::reduce_by_key(keys.begin(), keys.end(), values.begin(), output_keys.begin(), output_values.begin(), thrust::equal_to<T>(), thrust::plus<T>());
+    new_last = thrust::reduce_by_key(keys.begin(),
+                                     keys.end(),
+                                     values.begin(),
+                                     output_keys.begin(),
+                                     output_values.begin(),
+                                     thrust::equal_to<T>(),
+                                     thrust::plus<T>());
 
-    ASSERT_EQ(new_last.first  - output_keys.begin(),   5);
+    ASSERT_EQ(new_last.first - output_keys.begin(), 5);
     ASSERT_EQ(new_last.second - output_values.begin(), 5);
 
     ASSERT_EQ(output_keys[0], 11);
@@ -127,27 +140,26 @@ TYPED_TEST(ReduceByKeysTests, TestReduceByKeySimple)
     ASSERT_EQ(output_keys[3], 21);
     ASSERT_EQ(output_keys[4], 37);
 
-    ASSERT_EQ(output_values[0],  1);
-    ASSERT_EQ(output_values[1],  2);
-    ASSERT_EQ(output_values[2],  3);
+    ASSERT_EQ(output_values[0], 1);
+    ASSERT_EQ(output_values[1], 2);
+    ASSERT_EQ(output_values[2], 3);
     ASSERT_EQ(output_values[3], 15);
     ASSERT_EQ(output_values[4], 15);
 }
 
 TYPED_TEST(ReduceByKeysIntegralTests, TestReduceByKey)
 {
-    using K = typename TestFixture::input_type;;  // key type
+    using K = typename TestFixture::input_type;
+    ; // key type
     typedef unsigned int V; // value type
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        thrust::host_vector<K>   h_keys = get_random_data<bool>(size,
-                                                                std::numeric_limits<bool>::min(),
-                                                                std::numeric_limits<bool>::max());
-        thrust::host_vector<V>   h_vals = get_random_data<V>(size,
-                                                             std::numeric_limits<V>::min(),
-                                                             std::numeric_limits<V>::max());
+        thrust::host_vector<K> h_keys = get_random_data<bool>(
+            size, std::numeric_limits<bool>::min(), std::numeric_limits<bool>::max());
+        thrust::host_vector<V> h_vals = get_random_data<V>(
+            size, std::numeric_limits<V>::min(), std::numeric_limits<V>::max());
         thrust::device_vector<K> d_keys = h_keys;
         thrust::device_vector<V> d_vals = h_vals;
 
@@ -161,13 +173,21 @@ TYPED_TEST(ReduceByKeysIntegralTests, TestReduceByKey)
         typedef typename thrust::device_vector<K>::iterator DeviceKeyIterator;
         typedef typename thrust::device_vector<V>::iterator DeviceValIterator;
 
-        typedef typename thrust::pair<HostKeyIterator,  HostValIterator>   HostIteratorPair;
-        typedef typename thrust::pair<DeviceKeyIterator,DeviceValIterator> DeviceIteratorPair;
+        typedef typename thrust::pair<HostKeyIterator, HostValIterator>     HostIteratorPair;
+        typedef typename thrust::pair<DeviceKeyIterator, DeviceValIterator> DeviceIteratorPair;
 
-        HostIteratorPair   h_last = thrust::reduce_by_key(h_keys.begin(), h_keys.end(), h_vals.begin(), h_keys_output.begin(), h_vals_output.begin());
-        DeviceIteratorPair d_last = thrust::reduce_by_key(d_keys.begin(), d_keys.end(), d_vals.begin(), d_keys_output.begin(), d_vals_output.begin());
+        HostIteratorPair   h_last = thrust::reduce_by_key(h_keys.begin(),
+                                                        h_keys.end(),
+                                                        h_vals.begin(),
+                                                        h_keys_output.begin(),
+                                                        h_vals_output.begin());
+        DeviceIteratorPair d_last = thrust::reduce_by_key(d_keys.begin(),
+                                                          d_keys.end(),
+                                                          d_vals.begin(),
+                                                          d_keys_output.begin(),
+                                                          d_vals_output.begin());
 
-        ASSERT_EQ(h_last.first  - h_keys_output.begin(), d_last.first  - d_keys_output.begin());
+        ASSERT_EQ(h_last.first - h_keys_output.begin(), d_last.first - d_keys_output.begin());
         ASSERT_EQ(h_last.second - h_vals_output.begin(), d_last.second - d_vals_output.begin());
 
         size_t N = h_last.first - h_keys_output.begin();
@@ -184,18 +204,17 @@ TYPED_TEST(ReduceByKeysIntegralTests, TestReduceByKey)
 
 TYPED_TEST(ReduceByKeysIntegralTests, TestReduceByKeyToDiscardIterator)
 {
-    using V = typename TestFixture::input_type;;  // value type
+    using V = typename TestFixture::input_type;
+    ; // value type
     typedef unsigned int K; // key type
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        thrust::host_vector<K>   h_keys = get_random_data<bool>(size,
-                                                                std::numeric_limits<bool>::min(),
-                                                                std::numeric_limits<bool>::max());
-        thrust::host_vector<V>   h_vals = get_random_data<V>(size,
-                                                             std::numeric_limits<V>::min(),
-                                                             std::numeric_limits<V>::max());
+        thrust::host_vector<K> h_keys = get_random_data<bool>(
+            size, std::numeric_limits<bool>::min(), std::numeric_limits<bool>::max());
+        thrust::host_vector<V> h_vals = get_random_data<V>(
+            size, std::numeric_limits<V>::min(), std::numeric_limits<V>::max());
         thrust::device_vector<K> d_keys = h_keys;
         thrust::device_vector<V> d_vals = h_vals;
 
@@ -205,20 +224,25 @@ TYPED_TEST(ReduceByKeysIntegralTests, TestReduceByKeyToDiscardIterator)
         thrust::device_vector<V> d_vals_output(size);
 
         thrust::host_vector<K> unique_keys = h_keys;
-        unique_keys.erase(thrust::unique(unique_keys.begin(), unique_keys.end()), unique_keys.end());
+        unique_keys.erase(thrust::unique(unique_keys.begin(), unique_keys.end()),
+                          unique_keys.end());
 
         // discard key output
-        size_t h_size =
-        thrust::reduce_by_key(h_keys.begin(), h_keys.end(),
-                              h_vals.begin(),
-                              thrust::make_discard_iterator(),
-                              h_vals_output.begin()).second - h_vals_output.begin();
+        size_t h_size = thrust::reduce_by_key(h_keys.begin(),
+                                              h_keys.end(),
+                                              h_vals.begin(),
+                                              thrust::make_discard_iterator(),
+                                              h_vals_output.begin())
+                            .second
+                        - h_vals_output.begin();
 
-        size_t d_size =
-        thrust::reduce_by_key(d_keys.begin(), d_keys.end(),
-                              d_vals.begin(),
-                              thrust::make_discard_iterator(),
-                              d_vals_output.begin()).second - d_vals_output.begin();
+        size_t d_size = thrust::reduce_by_key(d_keys.begin(),
+                                              d_keys.end(),
+                                              d_vals.begin(),
+                                              thrust::make_discard_iterator(),
+                                              d_vals_output.begin())
+                            .second
+                        - d_vals_output.begin();
 
         h_vals_output.resize(h_size);
         d_vals_output.resize(d_size);
@@ -229,17 +253,16 @@ TYPED_TEST(ReduceByKeysIntegralTests, TestReduceByKeyToDiscardIterator)
     }
 };
 
-template<typename InputIterator1,
-typename InputIterator2,
-typename OutputIterator1,
-typename OutputIterator2>
-thrust::pair<OutputIterator1,OutputIterator2>
-reduce_by_key(my_system &system,
-              InputIterator1,
-              InputIterator1,
-              InputIterator2,
-              OutputIterator1 keys_output,
-              OutputIterator2 values_output)
+template <typename InputIterator1,
+          typename InputIterator2,
+          typename OutputIterator1,
+          typename OutputIterator2>
+thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(my_system& system,
+                                                             InputIterator1,
+                                                             InputIterator1,
+                                                             InputIterator2,
+                                                             OutputIterator1 keys_output,
+                                                             OutputIterator2 values_output)
 {
     system.validate_dispatch();
     return thrust::make_pair(keys_output, values_output);
@@ -250,27 +273,21 @@ TYPED_TEST(ReduceByKeysTests, TestReduceByKeyDispatchExplicit)
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
-    thrust::reduce_by_key(sys,
-                          vec.begin(),
-                          vec.begin(),
-                          vec.begin(),
-                          vec.begin(),
-                          vec.begin());
+    thrust::reduce_by_key(sys, vec.begin(), vec.begin(), vec.begin(), vec.begin(), vec.begin());
 
     ASSERT_EQ(true, sys.is_valid());
 }
 
-template<typename InputIterator1,
-typename InputIterator2,
-typename OutputIterator1,
-typename OutputIterator2>
-thrust::pair<OutputIterator1,OutputIterator2>
-reduce_by_key(my_tag,
-              InputIterator1,
-              InputIterator1,
-              InputIterator2,
-              OutputIterator1 keys_output,
-              OutputIterator2 values_output)
+template <typename InputIterator1,
+          typename InputIterator2,
+          typename OutputIterator1,
+          typename OutputIterator2>
+thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(my_tag,
+                                                             InputIterator1,
+                                                             InputIterator1,
+                                                             InputIterator2,
+                                                             OutputIterator1 keys_output,
+                                                             OutputIterator2 values_output)
 {
     *keys_output = 13;
     return thrust::make_pair(keys_output, values_output);
