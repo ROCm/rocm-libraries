@@ -259,7 +259,8 @@ namespace __adjacent_difference
               bool        debug_synchronous)
     {
         using input_type  = typename std::iterator_traits<InputIt>::value_type;
-        using result_type = typename BinaryOp::result_type;
+        using result_type
+            = typename ::rocprim::detail::match_result_type<input_type,BinaryOp>::type;
 
         // Get default config if Config is default_config
         using config = default_adjacent_difference_config<ROCPRIM_TARGET_ARCH, result_type>;
