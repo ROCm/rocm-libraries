@@ -27,30 +27,27 @@
  ******************************************************************************/
 #pragma once
 
-
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-#include <thrust/system/hip/detail/transform.h>
 #include <thrust/iterator/permutation_iterator.h>
+#include <thrust/system/hip/detail/transform.h>
 
 BEGIN_NS_THRUST
-namespace hip_rocprim {
-
-template <class Derived,
-          class MapIt,
-          class ItemsIt,
-          class ResultIt>
-ResultIt __host__ __device__
-gather(execution_policy<Derived>& policy,
-    MapIt map_first,
-    MapIt map_last,
-    ItemsIt items,
-    ResultIt result)
+namespace hip_rocprim
 {
-  return hip_rocprim::transform(policy,
-                          thrust::make_permutation_iterator(items, map_first),
-                          thrust::make_permutation_iterator(items, map_last),
-                          result,
-                          identity());
+
+template <class Derived, class MapIt, class ItemsIt, class ResultIt>
+ResultIt THRUST_HIP_FUNCTION
+gather(execution_policy<Derived>& policy,
+       MapIt                      map_first,
+       MapIt                      map_last,
+       ItemsIt                    items,
+       ResultIt                   result)
+{
+    return hip_rocprim::transform(policy,
+                                  thrust::make_permutation_iterator(items, map_first),
+                                  thrust::make_permutation_iterator(items, map_last),
+                                  result,
+                                  identity());
 }
 
 template <class Derived,
@@ -59,7 +56,7 @@ template <class Derived,
           class ItemsIt,
           class ResultIt,
           class Predicate>
-ResultIt __host__ __device__
+ResultIt THRUST_HIP_FUNCTION
 gather_if(execution_policy<Derived>& policy,
           MapIt                      map_first,
           MapIt                      map_last,
@@ -68,21 +65,17 @@ gather_if(execution_policy<Derived>& policy,
           ResultIt                   result,
           Predicate                  predicate)
 {
-  return hip_rocprim::transform_if(policy,
-                              thrust::make_permutation_iterator(items, map_first),
-                              thrust::make_permutation_iterator(items, map_last),
-                              stencil,
-                              result,
-                              identity(),
-                              predicate);
+    return hip_rocprim::transform_if(policy,
+                                     thrust::make_permutation_iterator(items, map_first),
+                                     thrust::make_permutation_iterator(items, map_last),
+                                     stencil,
+                                     result,
+                                     identity(),
+                                     predicate);
 }
 
-template <class Derived,
-          class MapIt,
-          class StencilIt,
-          class ItemsIt,
-          class ResultIt>
-ResultIt __host__ __device__
+template <class Derived, class MapIt, class StencilIt, class ItemsIt, class ResultIt>
+ResultIt THRUST_HIP_FUNCTION
 gather_if(execution_policy<Derived>& policy,
           MapIt                      map_first,
           MapIt                      map_last,
@@ -90,13 +83,9 @@ gather_if(execution_policy<Derived>& policy,
           ItemsIt                    items,
           ResultIt                   result)
 {
-  return hip_rocprim::gather_if(policy,
-                          map_first,
-                          map_last,
-                          stencil,
-                          items,
-                          result,
-                          identity());
+    return hip_rocprim::gather_if(
+        policy, map_first, map_last, stencil, items, result, identity()
+    );
 }
 
 } // namespace hip_rocprim
