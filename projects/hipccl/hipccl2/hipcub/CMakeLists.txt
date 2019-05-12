@@ -26,7 +26,7 @@ cmake_minimum_required(VERSION 3.5.1 FATAL_ERROR)
 set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended onto install directories")
 
 # hipCUB project
-project(hipcub VERSION 1.0.0.0 LANGUAGES CXX)
+project(hipcub LANGUAGES CXX)
 
 # CMake modules
 list(APPEND CMAKE_MODULE_PATH
@@ -58,6 +58,18 @@ option(BUILD_TEST "Build tests (requires googletest)" ON)
 # Get dependencies
 include(cmake/Dependencies.cmake)
 
+# Setup VERSION
+set ( VERSION_STRING "2.5.0." )
+
+# Check if BUILD_NUMBER is defined in a Jenkins envirnment
+if ($ENV{BUILD_NUMBER} )
+  string(CONCAT BUILD_VERSION ${VERSION_STRING} $ENV{BUILD_NUMBER})
+else ()
+  string(CONCAT BUILD_VERSION ${VERSION_STRING} "0")
+endif ()
+
+rocm_setup_version( VERSION ${BUILD_VERSION} NO_GIT_TAG_VERSION )
+
 # AMD targets
 set(AMDGPU_TARGETS gfx803;gfx900;gfx906 CACHE STRING "List of specific machine types for library to target")
 
@@ -76,8 +88,8 @@ endif()
 
 # Package
 if(HIP_PLATFORM STREQUAL "hcc")
-  set(CPACK_DEBIAN_PACKAGE_DEPENDS "hip_hcc (>= 1.5), rocprim (>= 1.0)")
-  set(CPACK_RPM_PACKAGE_REQUIRES "hip_hcc >= 1.5, rocprim >= 1.0")
+  set(CPACK_DEBIAN_PACKAGE_DEPENDS "hip_hcc (>= 1.5), rocprim (>= 2.5)")
+  set(CPACK_RPM_PACKAGE_REQUIRES "hip_hcc >= 1.5, rocprim >= 2.5")
 else()
   set(CPACK_DEBIAN_PACKAGE_DEPENDS "hip_nvcc (>= 1.5)")
   set(CPACK_RPM_PACKAGE_REQUIRES "hip_nvcc >= 1.5")
