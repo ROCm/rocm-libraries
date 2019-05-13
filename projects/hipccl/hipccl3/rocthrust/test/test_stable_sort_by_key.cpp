@@ -23,6 +23,7 @@
 
 TESTS_DEFINE(StableSortByKeyTests, UnsignedIntegerTestsParams);
 TESTS_DEFINE(StableSortByKeyVectorTests, VectorIntegerTestsParams);
+TESTS_DEFINE(StableSortByKeyVectorPrimitiveTests, IntegerTestsParams);
 
 template <typename RandomAccessIterator1, typename RandomAccessIterator2>
 void stable_sort_by_key(my_system& system,
@@ -139,10 +140,9 @@ TYPED_TEST(StableSortByKeyVectorTests, TestStableSortByKeySimple)
     ASSERT_EQ(unsorted_values, sorted_values);
 }
 
-TYPED_TEST(StableSortByKeyVectorTests, TestStableSortByKey)
+TYPED_TEST(StableSortByKeyVectorPrimitiveTests, TestStableSortByKey)
 {
-    using Vector = typename TestFixture::input_type;
-    using T      = typename Vector::value_type;
+    using T = typename TestFixture::input_type;
 
     for(auto size : get_sizes())
     {

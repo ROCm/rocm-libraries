@@ -24,6 +24,7 @@
 #include "test_header.hpp"
 
 TESTS_DEFINE(EqualTests, FullTestsParams);
+TESTS_DEFINE(EqualsPrimitiveTests, NumericalTestsParams);
 
 TYPED_TEST(EqualTests, TestEqualSimple)
 {
@@ -56,10 +57,9 @@ TYPED_TEST(EqualTests, TestEqualSimple)
     ASSERT_EQ(thrust::equal(v1.begin(), v1.end(), v2.begin(), thrust::greater<T>()), false);
 }
 
-TYPED_TEST(EqualTests, TestEqual)
+TYPED_TEST(EqualsPrimitiveTests, TestEqual)
 {
-    using Vector = typename TestFixture::input_type;
-    using T      = typename Vector::value_type;
+    using T = typename TestFixture::input_type;
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)

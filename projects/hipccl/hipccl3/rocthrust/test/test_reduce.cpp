@@ -23,6 +23,7 @@
 
 TESTS_DEFINE(ReduceTests, FullTestsParams);
 TESTS_DEFINE(ReduceIntegerTests, UnsignedIntegerTestsParams);
+TESTS_DEFINE(ReducePrimitiveTests, NumericalTestsParams);
 
 template <typename T>
 struct plus_mod_10
@@ -83,10 +84,9 @@ TEST(ReduceTests, TestReduceDispatchImplicit)
     ASSERT_EQ(true, sys.is_valid());
 }
 
-TYPED_TEST(ReduceTests, TestReduce)
+TYPED_TEST(ReducePrimitiveTests, TestReduce)
 {
-    using Vector = typename TestFixture::input_type;
-    using T      = typename Vector::value_type;
+    using T = typename TestFixture::input_type;
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -198,10 +198,9 @@ TYPED_TEST(ReduceTests, TestReduceWithIndirection)
     ASSERT_EQ(result, T(1));
 }
 
-TYPED_TEST(ReduceTests, TestReduceCountingIterator)
+TYPED_TEST(ReducePrimitiveTests, TestReduceCountingIterator)
 {
-    using Vector = typename TestFixture::input_type;
-    using T      = typename Vector::value_type;
+    using T = typename TestFixture::input_type;
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)

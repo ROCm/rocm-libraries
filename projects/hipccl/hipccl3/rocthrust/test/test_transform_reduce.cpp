@@ -25,6 +25,7 @@
 
 TESTS_DEFINE(TransformReduceTests, FullTestsParams);
 TESTS_DEFINE(TransformReduceIntegerTests, VectorSignedIntegerTestsParams);
+TESTS_DEFINE(TransformReduceIntegerPrimitiveTests, IntegerTestsParams);
 
 template <typename InputIterator,
           typename UnaryFunction,
@@ -85,10 +86,9 @@ TYPED_TEST(TransformReduceTests, TestTransformReduceSimple)
     ASSERT_EQ(result, T(8));
 }
 
-TYPED_TEST(TransformReduceIntegerTests, TestTransformReduce)
+TYPED_TEST(TransformReduceIntegerPrimitiveTests, TestTransformReduce)
 {
-    using Vector = typename TestFixture::input_type;
-    using T      = typename Vector::value_type;
+    using T = typename TestFixture::input_type;
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -109,10 +109,9 @@ TYPED_TEST(TransformReduceIntegerTests, TestTransformReduce)
     }
 }
 
-TYPED_TEST(TransformReduceIntegerTests, TestTransformReduceFromConst)
+TYPED_TEST(TransformReduceIntegerPrimitiveTests, TestTransformReduceFromConst)
 {
-    using Vector = typename TestFixture::input_type;
-    using T      = typename Vector::value_type;
+    using T = typename TestFixture::input_type;
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -133,7 +132,7 @@ TYPED_TEST(TransformReduceIntegerTests, TestTransformReduceFromConst)
     }
 }
 
-TYPED_TEST(TransformReduceTests, TestTransformReduceCountingIterator)
+TYPED_TEST(TransformReduceIntegerTests, TestTransformReduceCountingIterator)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;

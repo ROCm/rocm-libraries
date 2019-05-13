@@ -25,6 +25,7 @@
 #include "test_header.hpp"
 
 TESTS_DEFINE(CountTests, FullTestsParams);
+TESTS_DEFINE(CountPrimitiveTests, NumericalTestsParams);
 
 TYPED_TEST(CountTests, TestCountSimple)
 {
@@ -43,10 +44,9 @@ TYPED_TEST(CountTests, TestCountSimple)
     ASSERT_EQ(thrust::count(data.begin(), data.end(), T(2)), 0);
 }
 
-TYPED_TEST(CountTests, TestCount)
+TYPED_TEST(CountPrimitiveTests, TestCount)
 {
-    using Vector = typename TestFixture::input_type;
-    using T      = typename Vector::value_type;
+    using T = typename TestFixture::input_type;
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)

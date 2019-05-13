@@ -24,6 +24,7 @@
 #include "test_header.hpp"
 
 TESTS_DEFINE(TabulateTests, FullTestsParams);
+TESTS_DEFINE(TabulatePrimitiveTests, NumericalTestsParams);
 
 template <typename ForwardIterator, typename UnaryOperation>
 void tabulate(my_system& system, ForwardIterator, ForwardIterator, UnaryOperation)
@@ -117,10 +118,9 @@ TYPED_TEST(TabulateTests, TestTabulateSimpleNonConstOP)
     ASSERT_EQ(v[4], T(1));
 }
 
-TYPED_TEST(TabulateTests, TestTabulate)
+TYPED_TEST(TabulatePrimitiveTests, TestTabulate)
 {
-    using Vector = typename TestFixture::input_type;
-    using T      = typename Vector::value_type;
+    using T = typename TestFixture::input_type;
     using namespace thrust::placeholders;
 
     for(auto size : get_sizes())
