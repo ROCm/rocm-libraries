@@ -15,10 +15,10 @@
  *  limitations under the License.
  */
 
-#include <thrust/detail/config.h>
-#include <thrust/system/hip/memory.h>
-#include <thrust/system/hip/detail/malloc_and_free.h>
 #include <limits>
+#include <thrust/detail/config.h>
+#include <thrust/system/hip/detail/malloc_and_free.h>
+#include <thrust/system/hip/memory.h>
 
 namespace thrust
 {
@@ -41,49 +41,46 @@ namespace thrust
 // } // end detail
 // #endif
 
-namespace hip_rocprim {
+namespace hip_rocprim
+{
 
 template <typename T>
 template <typename OtherT>
-__host__ __device__ reference<T> &reference<T>::operator=(
-    const reference<OtherT> &other) {
-  return super_t::operator=(other);
+THRUST_HIP_FUNCTION reference<T>& reference<T>::operator=(const reference<OtherT>& other)
+{
+    return super_t::operator=(other);
 } // end reference::operator=()
 
 template <typename T>
-__host__ __device__ reference<T> &reference<T>::operator=(const value_type &x) {
-  return super_t::operator=(x);
+THRUST_HIP_FUNCTION reference<T>& reference<T>::operator=(const value_type& x)
+{
+    return super_t::operator=(x);
 } // end reference::operator=()
 
-template<typename T>
-__host__ __device__
-void swap(reference<T> a, reference<T> b)
+template <typename T>
+THRUST_HIP_FUNCTION void swap(reference<T> a, reference<T> b)
 {
-  a.swap(b);
+    a.swap(b);
 } // end swap()
 
-__host__ __device__
-pointer<void> malloc(std::size_t n)
+THRUST_HIP_FUNCTION pointer<void> malloc(std::size_t n)
 {
-  tag hip_tag;
-  return pointer<void>(thrust::hip_rocprim::malloc(hip_tag, n));
+    tag hip_tag;
+    return pointer<void>(thrust::hip_rocprim::malloc(hip_tag, n));
 } // end malloc()
 
-template<typename T>
-__host__ __device__
-pointer<T> malloc(std::size_t n)
+template <typename T>
+THRUST_HIP_FUNCTION pointer<T> malloc(std::size_t n)
 {
-  pointer<void> raw_ptr = thrust::hip_rocprim::malloc(sizeof(T) * n);
-  return pointer<T>(reinterpret_cast<T*>(raw_ptr.get()));
+    pointer<void> raw_ptr = thrust::hip_rocprim::malloc(sizeof(T) * n);
+    return pointer<T>(reinterpret_cast<T*>(raw_ptr.get()));
 } // end malloc()
 
-__host__ __device__
-void free(pointer<void> ptr)
+THRUST_HIP_FUNCTION void free(pointer<void> ptr)
 {
-  tag hip_tag;
-  return thrust::hip_rocprim::free(hip_tag, ptr.get());
+    tag hip_tag;
+    return thrust::hip_rocprim::free(hip_tag, ptr.get());
 } // end free()
 
 } // end hip_rocprim
 } // end thrust
-

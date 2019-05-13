@@ -15,100 +15,96 @@
  *  limitations under the License.
  */
 
-#include <thrust/partition.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/retag.h>
+#include <thrust/partition.h>
 
 #include "test_header.hpp"
+
 TESTS_DEFINE(PartitionPointTests, FullTestsParams);
+
 TESTS_DEFINE(PartitionPointVectorTests, VectorSignedIntegerTestsParams);
 
-template<typename T>
+template <typename T>
 struct is_even
 {
-  __host__ __device__
-  bool operator()(T x) const { return ((int) x % 2) == 0; }
+    __host__ __device__ bool operator()(T x) const
+    {
+        return ((int)x % 2) == 0;
+    }
 };
 
 TYPED_TEST(PartitionPointVectorTests, TestPartitionPointSimple)
 {
-  using Vector = typename TestFixture::input_type;
-  using T = typename Vector::value_type;
-  using Iterator = typename Vector::iterator;
+    using Vector   = typename TestFixture::input_type;
+    using T        = typename Vector::value_type;
+    using Iterator = typename Vector::iterator;
 
-  Vector v(4);
-  v[0] = 1; v[1] = 1; v[2] = 1; v[3] = 0;
+    Vector v(4);
+    v[0] = 1;
+    v[1] = 1;
+    v[2] = 1;
+    v[3] = 0;
 
-  Iterator first = v.begin();
+    Iterator first = v.begin();
 
-  Iterator last = v.begin() + 4;
-  Iterator ref = first + 3;
-  ASSERT_EQ_QUIET(ref, thrust::partition_point(first, last, thrust::identity<T>()));
+    Iterator last = v.begin() + 4;
+    Iterator ref  = first + 3;
+    ASSERT_EQ_QUIET(ref, thrust::partition_point(first, last, thrust::identity<T>()));
 
-  last = v.begin() + 3;
-  ref = last;
-  ASSERT_EQ_QUIET(ref, thrust::partition_point(first, last, thrust::identity<T>()));
+    last = v.begin() + 3;
+    ref  = last;
+    ASSERT_EQ_QUIET(ref, thrust::partition_point(first, last, thrust::identity<T>()));
 }
 
 TYPED_TEST(PartitionPointVectorTests, TestPartitionPoint)
 {
-  using Vector = typename TestFixture::input_type;
-  using T = typename Vector::value_type;
-  using Iterator = typename Vector::iterator;
+    using Vector   = typename TestFixture::input_type;
+    using T        = typename Vector::value_type;
+    using Iterator = typename Vector::iterator;
 
-  const size_t n = (1 << 16) + 13;
+    const size_t n = (1 << 16) + 13;
 
-  Vector v = get_random_data<T>(n,
-                                std::numeric_limits<T>::min(),
-                                std::numeric_limits<T>::max());
+    Vector v = get_random_data<T>(n, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
 
-  Iterator ref = thrust::stable_partition(v.begin(), v.end(), is_even<T>());
+    Iterator ref = thrust::stable_partition(v.begin(), v.end(), is_even<T>());
 
-  ASSERT_EQ(ref - v.begin(), thrust::partition_point(v.begin(), v.end(), is_even<T>()) - v.begin());
+    ASSERT_EQ(ref - v.begin(),
+              thrust::partition_point(v.begin(), v.end(), is_even<T>()) - v.begin());
 }
 
-template<typename ForwardIterator, typename Predicate>
-__host__ __device__
-ForwardIterator partition_point(my_system &system,
-                                ForwardIterator first,
-                                ForwardIterator,
-                                Predicate)
+template <typename ForwardIterator, typename Predicate>
+__host__ __device__ ForwardIterator
+                    partition_point(my_system& system, ForwardIterator first, ForwardIterator, Predicate)
 {
-  system.validate_dispatch();
-  return first;
+    system.validate_dispatch();
+    return first;
 }
 
 TYPED_TEST(PartitionPointTests, TestPartitionPointDispatchExplicit)
 {
-  thrust::device_vector<int> vec(1);
+    thrust::device_vector<int> vec(1);
 
-  my_system sys(0);
-  thrust::partition_point(sys,
-                          vec.begin(),
-                          vec.begin(),
-                          0);
+    my_system sys(0);
+    thrust::partition_point(sys, vec.begin(), vec.begin(), 0);
 
-  ASSERT_EQ(true, sys.is_valid());
+    ASSERT_EQ(true, sys.is_valid());
 }
 
-template<typename ForwardIterator, typename Predicate>
-__host__ __device__
-ForwardIterator partition_point(my_tag,
-                                ForwardIterator first,
-                                ForwardIterator,
-                                Predicate)
+template <typename ForwardIterator, typename Predicate>
+__host__ __device__ ForwardIterator
+                    partition_point(my_tag, ForwardIterator first, ForwardIterator, Predicate)
 {
-  *first = 13;
-  return first;
+    *first = 13;
+    return first;
 }
 
 TYPED_TEST(PartitionPointTests, TestPartitionPointDispatchImplicit)
 {
-  thrust::device_vector<int> vec(1);
+    thrust::device_vector<int> vec(1);
 
-  thrust::partition_point(thrust::retag<my_tag>(vec.begin()),
-                          thrust::retag<my_tag>(vec.begin()),
-                          0);
+    thrust::partition_point(
+        thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.begin()), 0);
 
-  ASSERT_EQ(13, vec.front());
+    ASSERT_EQ(13, vec.front());
 }

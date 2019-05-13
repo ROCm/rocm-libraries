@@ -14,8 +14,7 @@
  *  See the License for the specific language governing permissions and
  *  limitations under the License.
  */
- 
-// Thrust
+
 #include <thrust/extrema.h>
 #include <thrust/iterator/retag.h>
 
@@ -35,19 +34,20 @@ TYPED_TEST(MinmaxElementTests, TestMinmaxElementSimple)
     data[4] = 5;
     data[5] = 1;
 
-    ASSERT_EQ(*thrust::minmax_element(data.begin(), data.end()).first,  1);
+    ASSERT_EQ(*thrust::minmax_element(data.begin(), data.end()).first, 1);
     ASSERT_EQ(*thrust::minmax_element(data.begin(), data.end()).second, 5);
-    ASSERT_EQ(thrust::minmax_element(data.begin(), data.end()).first  - data.begin(), 2);
+    ASSERT_EQ(thrust::minmax_element(data.begin(), data.end()).first - data.begin(), 2);
     ASSERT_EQ(thrust::minmax_element(data.begin(), data.end()).second - data.begin(), 1);
 }
 
 TYPED_TEST(MinmaxElementTests, TestMinmaxElementWithTransform)
 {
     using Vector = typename TestFixture::input_type;
-    using T = typename Vector::value_type;
+    using T      = typename Vector::value_type;
 
     // We cannot use unsigned types for this test case
-    if (std::is_unsigned<T>::value) return;
+    if(std::is_unsigned<T>::value)
+        return;
 
     Vector data(6);
     data[0] = 3;
@@ -57,25 +57,28 @@ TYPED_TEST(MinmaxElementTests, TestMinmaxElementWithTransform)
     data[4] = 5;
     data[5] = 1;
 
-    ASSERT_EQ(*thrust::minmax_element(
-        thrust::make_transform_iterator(data.begin(), thrust::negate<T>()),
-        thrust::make_transform_iterator(data.end(),   thrust::negate<T>())).first, -5);
-    ASSERT_EQ( *thrust::minmax_element(
-        thrust::make_transform_iterator(data.begin(), thrust::negate<T>()),
-        thrust::make_transform_iterator(data.end(),   thrust::negate<T>())).second, -1);
+    ASSERT_EQ(
+        *thrust::minmax_element(thrust::make_transform_iterator(data.begin(), thrust::negate<T>()),
+                                thrust::make_transform_iterator(data.end(), thrust::negate<T>()))
+             .first,
+        -5);
+    ASSERT_EQ(
+        *thrust::minmax_element(thrust::make_transform_iterator(data.begin(), thrust::negate<T>()),
+                                thrust::make_transform_iterator(data.end(), thrust::negate<T>()))
+             .second,
+        -1);
 }
 
 TYPED_TEST(MinmaxElementTests, TestMinmaxElement)
 {
     using Vector = typename TestFixture::input_type;
-    using T = typename Vector::value_type;
+    using T      = typename Vector::value_type;
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        thrust::host_vector<T> h_data = get_random_data<T>(size,
-                                                           std::numeric_limits<T>::min(),
-                                                           std::numeric_limits<T>::max());
+        thrust::host_vector<T> h_data = get_random_data<T>(
+            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
         thrust::device_vector<T> d_data = h_data;
 
         typename thrust::host_vector<T>::iterator   h_min;
@@ -101,9 +104,9 @@ TYPED_TEST(MinmaxElementTests, TestMinmaxElement)
     }
 }
 
-
-template<typename ForwardIterator>
-thrust::pair<ForwardIterator,ForwardIterator> minmax_element(my_system &system, ForwardIterator first, ForwardIterator)
+template <typename ForwardIterator>
+thrust::pair<ForwardIterator, ForwardIterator>
+    minmax_element(my_system& system, ForwardIterator first, ForwardIterator)
 {
     system.validate_dispatch();
     return thrust::make_pair(first, first);
@@ -119,9 +122,9 @@ TEST(MinmaxElementTests, TestMinmaxElementDispatchExplicit)
     ASSERT_EQ(true, sys.is_valid());
 }
 
-
-template<typename ForwardIterator>
-thrust::pair<ForwardIterator,ForwardIterator> minmax_element(my_tag, ForwardIterator first, ForwardIterator)
+template <typename ForwardIterator>
+thrust::pair<ForwardIterator, ForwardIterator>
+    minmax_element(my_tag, ForwardIterator first, ForwardIterator)
 {
     *first = 13;
     return thrust::make_pair(first, first);
@@ -131,8 +134,7 @@ TEST(MinmaxElementTests, TestMinmaxElementDispatchImplicit)
 {
     thrust::device_vector<int> vec(1);
 
-    thrust::minmax_element(thrust::retag<my_tag>(vec.begin()),
-                           thrust::retag<my_tag>(vec.end()));
+    thrust::minmax_element(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()));
 
     ASSERT_EQ(13, vec.front());
 }

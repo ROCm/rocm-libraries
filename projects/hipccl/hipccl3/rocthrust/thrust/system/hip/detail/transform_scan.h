@@ -29,64 +29,53 @@
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 #include <iterator>
-#include <thrust/system/hip/detail/scan.h>
 #include <thrust/distance.h>
+#include <thrust/system/hip/detail/scan.h>
 
 // rocprim include
 #include <rocprim/rocprim.hpp>
-#include <thrust/detail/cstdint.h>
 #include <thrust/detail/alignment.h>
+#include <thrust/detail/cstdint.h>
 
 BEGIN_NS_THRUST
 
-namespace hip_rocprim {
+namespace hip_rocprim
+{
 
-template <class Derived,
-          class InputIt,
-          class OutputIt,
-          class TransformOp,
-          class ScanOp>
-OutputIt __host__ __device__
-transform_inclusive_scan(execution_policy<Derived> &policy,
+template <class Derived, class InputIt, class OutputIt, class TransformOp, class ScanOp>
+OutputIt THRUST_HIP_FUNCTION
+transform_inclusive_scan(execution_policy<Derived>& policy,
                          InputIt                    first,
                          InputIt                    last,
                          OutputIt                   result,
                          TransformOp                transform_op,
                          ScanOp                     scan_op)
 {
-  // the pseudocode for deducing the type of the temporary used below:
-  //
-  // if UnaryFunction is AdaptableUnaryFunction
-  //   TemporaryType = AdaptableUnaryFunction::result_type
-  // else if OutputIterator is a "pure" output iterator
-  //   TemporaryType = InputIterator::value_type
-  // else
-  //   TemporaryType = OutputIterator::value_type
-  //
-  // XXX upon c++0x, TemporaryType needs to be:
-  // result_of_adaptable_function<UnaryFunction>::type
-  typedef typename detail::eval_if<
-    detail::has_result_type<TransformOp>::value,
-    detail::result_type<TransformOp>,
-    detail::eval_if<
-      detail::is_output_iterator<OutputIt>::value,
-      iterator_value<InputIt>,
-      iterator_value<OutputIt>
-    >
-  >::type result_type;
+    // the pseudocode for deducing the type of the temporary used below:
+    //
+    // if UnaryFunction is AdaptableUnaryFunction
+    //   TemporaryType = AdaptableUnaryFunction::result_type
+    // else if OutputIterator is a "pure" output iterator
+    //   TemporaryType = InputIterator::value_type
+    // else
+    //   TemporaryType = OutputIterator::value_type
+    //
+    // XXX upon c++0x, TemporaryType needs to be:
+    // result_of_adaptable_function<UnaryFunction>::type
+    typedef typename detail::eval_if<detail::has_result_type<TransformOp>::value,
+                                     detail::result_type<TransformOp>,
+                                     detail::eval_if<detail::is_output_iterator<OutputIt>::value,
+                                                     iterator_value<InputIt>,
+                                                     iterator_value<OutputIt>>>::type result_type;
 
-  typedef typename iterator_traits<InputIt>::difference_type size_type;
-  size_type num_items = static_cast<size_type>(thrust::distance(first, last));
-  typedef transform_input_iterator_t<result_type,
-                                     InputIt,
-                                     TransformOp>
-      transformed_iterator_t;
+    typedef typename iterator_traits<InputIt>::difference_type size_type;
+    size_type num_items = static_cast<size_type>(thrust::distance(first, last));
+    typedef transform_input_iterator_t<result_type, InputIt, TransformOp>
+        transformed_iterator_t;
 
-  return hip_rocprim::inclusive_scan_n(policy,
-                                 transformed_iterator_t(first, transform_op),
-                                 num_items,
-                                 result,
-                                 scan_op);
+    return hip_rocprim::inclusive_scan_n(
+        policy, transformed_iterator_t(first, transform_op), num_items, result, scan_op
+    );
 }
 
 template <class Derived,
@@ -95,8 +84,8 @@ template <class Derived,
           class TransformOp,
           class T,
           class ScanOp>
-OutputIt __host__ __device__
-transform_exclusive_scan(execution_policy<Derived> &policy,
+OutputIt THRUST_HIP_FUNCTION
+transform_exclusive_scan(execution_policy<Derived>& policy,
                          InputIt                    first,
                          InputIt                    last,
                          OutputIt                   result,
@@ -104,44 +93,36 @@ transform_exclusive_scan(execution_policy<Derived> &policy,
                          T                          init,
                          ScanOp                     scan_op)
 {
-  // the pseudocode for deducing the type of the temporary used below:
-  //
-  // if UnaryFunction is AdaptableUnaryFunction
-  //   TemporaryType = AdaptableUnaryFunction::result_type
-  // else if OutputIterator is a "pure" output iterator
-  //   TemporaryType = InputIterator::value_type
-  // else
-  //   TemporaryType = OutputIterator::value_type
-  //
-  // XXX upon c++0x, TemporaryType needs to be:
-  // result_of_adaptable_function<UnaryFunction>::type
+    // the pseudocode for deducing the type of the temporary used below:
+    //
+    // if UnaryFunction is AdaptableUnaryFunction
+    //   TemporaryType = AdaptableUnaryFunction::result_type
+    // else if OutputIterator is a "pure" output iterator
+    //   TemporaryType = InputIterator::value_type
+    // else
+    //   TemporaryType = OutputIterator::value_type
+    //
+    // XXX upon c++0x, TemporaryType needs to be:
+    // result_of_adaptable_function<UnaryFunction>::type
 
-  typedef typename thrust::detail::eval_if<
-    thrust::detail::has_result_type<TransformOp>::value,
-    thrust::detail::result_type<TransformOp>,
-    thrust::detail::eval_if<
-      thrust::detail::is_output_iterator<OutputIt>::value,
-      thrust::iterator_value<InputIt>,
-      thrust::iterator_value<OutputIt>
-    >
-  >::type result_type;
+    typedef typename thrust::detail::eval_if<
+            thrust::detail::has_result_type<TransformOp>::value,
+            thrust::detail::result_type<TransformOp>,
+            thrust::detail::eval_if<thrust::detail::is_output_iterator<OutputIt>::value,
+                                    thrust::iterator_value<InputIt>,
+                                    thrust::iterator_value<OutputIt>>>::type result_type;
 
-  typedef typename iterator_traits<InputIt>::difference_type size_type;
-  size_type num_items = static_cast<size_type>(thrust::distance(first, last));
-  typedef transform_input_iterator_t<result_type,
-                                     InputIt,
-                                     TransformOp>
-      transformed_iterator_t;
+    typedef typename iterator_traits<InputIt>::difference_type size_type;
+    size_type num_items = static_cast<size_type>(thrust::distance(first, last));
+    typedef transform_input_iterator_t<result_type, InputIt, TransformOp>
+        transformed_iterator_t;
 
-  return hip_rocprim::exclusive_scan_n(policy,
-                                 transformed_iterator_t(first, transform_op),
-                                 num_items,
-                                 result,
-                                 init,
-                                 scan_op);
+    return hip_rocprim::exclusive_scan_n(
+        policy, transformed_iterator_t(first, transform_op), num_items, result, init, scan_op
+    );
 }
 
-}    // namespace hip_rocprim
+} // namespace hip_rocprim
 
- END_NS_THRUST
+END_NS_THRUST
 #endif

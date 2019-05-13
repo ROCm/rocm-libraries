@@ -15,10 +15,8 @@
  *  limitations under the License.
  */
 
-// Google Test
 #include <gtest/gtest.h>
 
-// Standard library
 #include <algorithm>
 #include <cmath>
 #include <iterator>
@@ -41,207 +39,176 @@
 #include "test_utils.hpp"
 
 // Input type parameter
-template<class InputType>
+template <class InputType>
 struct Params
 {
     using input_type = InputType;
 };
 
 // Definition of typed test cases with given parameter type
-#define TESTS_DEFINE(x, y) \
-template<class Params> \
-class x : public ::testing::Test \
-{ \
-public: \
-    using input_type = typename Params::input_type; \
-}; \
-\
-TYPED_TEST_CASE(x, y);
+#define TESTS_DEFINE(x, y)                              \
+    template <class Params>                             \
+    class x : public ::testing::Test                    \
+    {                                                   \
+    public:                                             \
+        using input_type = typename Params::input_type; \
+    };                                                  \
+                                                        \
+    TYPED_TEST_CASE(x, y);
 
 // Set of test parameter types
 
 // Host and device vectors of all type as a test parameter
-typedef ::testing::Types<
-    Params<thrust::host_vector<short>>,
-    Params<thrust::host_vector<int>>,
-    Params<thrust::host_vector<long long>>,
-    Params<thrust::host_vector<unsigned short>>,
-    Params<thrust::host_vector<unsigned int>>,
-    Params<thrust::host_vector<unsigned long long>>,
-    Params<thrust::host_vector<float>>,
-    Params<thrust::host_vector<double>>,
-    Params<thrust::device_vector<short>>,
-    Params<thrust::device_vector<int>>,
-    Params<thrust::device_vector<long long>>,
-    Params<thrust::device_vector<unsigned short>>,
-    Params<thrust::device_vector<unsigned int>>,
-    Params<thrust::device_vector<unsigned long long>>,
-    Params<thrust::device_vector<float>>,
-    Params<thrust::device_vector<double>>
-> FullTestsParams;
-
+typedef ::testing::Types<Params<thrust::host_vector<short>>,
+                         Params<thrust::host_vector<int>>,
+                         Params<thrust::host_vector<long long>>,
+                         Params<thrust::host_vector<unsigned short>>,
+                         Params<thrust::host_vector<unsigned int>>,
+                         Params<thrust::host_vector<unsigned long long>>,
+                         Params<thrust::host_vector<float>>,
+                         Params<thrust::host_vector<double>>,
+                         Params<thrust::device_vector<short>>,
+                         Params<thrust::device_vector<int>>,
+                         Params<thrust::device_vector<long long>>,
+                         Params<thrust::device_vector<unsigned short>>,
+                         Params<thrust::device_vector<unsigned int>>,
+                         Params<thrust::device_vector<unsigned long long>>,
+                         Params<thrust::device_vector<float>>,
+                         Params<thrust::device_vector<double>>>
+    FullTestsParams;
 
 // Host and device vectors of signed type
-typedef ::testing::Types<
-    Params<thrust::host_vector<short>>,
-    Params<thrust::host_vector<int>>,
-    Params<thrust::host_vector<long long>>,
-    Params<thrust::host_vector<float>>,
-    Params<thrust::host_vector<double>>,
-    Params<thrust::device_vector<short>>,
-    Params<thrust::device_vector<int>>,
-    Params<thrust::device_vector<long long>>,
-    Params<thrust::device_vector<float>>,
-    Params<thrust::device_vector<double>>
-> VectorSignedTestsParams;
-
+typedef ::testing::Types<Params<thrust::host_vector<short>>,
+                         Params<thrust::host_vector<int>>,
+                         Params<thrust::host_vector<long long>>,
+                         Params<thrust::host_vector<float>>,
+                         Params<thrust::host_vector<double>>,
+                         Params<thrust::device_vector<short>>,
+                         Params<thrust::device_vector<int>>,
+                         Params<thrust::device_vector<long long>>,
+                         Params<thrust::device_vector<float>>,
+                         Params<thrust::device_vector<double>>>
+    VectorSignedTestsParams;
 
 // Host and device vectors of integer types as a test parameter
-typedef ::testing::Types<
-    Params<thrust::host_vector<short>>,
-    Params<thrust::host_vector<int>>,
-    Params<thrust::host_vector<long long>>,
-    Params<thrust::host_vector<unsigned short>>,
-    Params<thrust::host_vector<unsigned int>>,
-    Params<thrust::host_vector<unsigned long long>>,
-    Params<thrust::device_vector<short>>,
-    Params<thrust::device_vector<int>>,
-    Params<thrust::device_vector<long long>>,
-    Params<thrust::device_vector<unsigned short>>,
-    Params<thrust::device_vector<unsigned int>>,
-    Params<thrust::device_vector<unsigned long long>>
-> VectorIntegerTestsParams;
-
+typedef ::testing::Types<Params<thrust::host_vector<short>>,
+                         Params<thrust::host_vector<int>>,
+                         Params<thrust::host_vector<long long>>,
+                         Params<thrust::host_vector<unsigned short>>,
+                         Params<thrust::host_vector<unsigned int>>,
+                         Params<thrust::host_vector<unsigned long long>>,
+                         Params<thrust::device_vector<short>>,
+                         Params<thrust::device_vector<int>>,
+                         Params<thrust::device_vector<long long>>,
+                         Params<thrust::device_vector<unsigned short>>,
+                         Params<thrust::device_vector<unsigned int>>,
+                         Params<thrust::device_vector<unsigned long long>>>
+    VectorIntegerTestsParams;
 
 // Host and device vectors of signed integer types as a test parameter
-typedef ::testing::Types<
-    Params<thrust::host_vector<short>>,
-    Params<thrust::host_vector<int>>,
-    Params<thrust::host_vector<long long>>,
-    Params<thrust::device_vector<short>>,
-    Params<thrust::device_vector<int>>,
-    Params<thrust::device_vector<long long>>
-> VectorSignedIntegerTestsParams;
-
+typedef ::testing::Types<Params<thrust::host_vector<short>>,
+                         Params<thrust::host_vector<int>>,
+                         Params<thrust::host_vector<long long>>,
+                         Params<thrust::device_vector<short>>,
+                         Params<thrust::device_vector<int>>,
+                         Params<thrust::device_vector<long long>>>
+    VectorSignedIntegerTestsParams;
 
 // Host vectors of numerical types as a test parameter
-typedef ::testing::Types<
-    Params<thrust::host_vector<short>>,
-    Params<thrust::host_vector<int>>,
-    Params<thrust::host_vector<long long>>,
-    Params<thrust::host_vector<unsigned short>>,
-    Params<thrust::host_vector<unsigned int>>,
-    Params<thrust::host_vector<unsigned long long>>,
-    Params<thrust::host_vector<float>>,
-    Params<thrust::host_vector<double>>
-> HostVectorTestsParams;
-
+typedef ::testing::Types<Params<thrust::host_vector<short>>,
+                         Params<thrust::host_vector<int>>,
+                         Params<thrust::host_vector<long long>>,
+                         Params<thrust::host_vector<unsigned short>>,
+                         Params<thrust::host_vector<unsigned int>>,
+                         Params<thrust::host_vector<unsigned long long>>,
+                         Params<thrust::host_vector<float>>,
+                         Params<thrust::host_vector<double>>>
+    HostVectorTestsParams;
 
 // Host vectors of integer types as a test parameter
-typedef ::testing::Types<
-    Params<thrust::host_vector<short>>,
-    Params<thrust::host_vector<int>>,
-    Params<thrust::host_vector<long long>>,
-    Params<thrust::host_vector<unsigned short>>,
-    Params<thrust::host_vector<unsigned int>>,
-    Params<thrust::host_vector<unsigned long long>>
-> HostVectorIntegerTestsParams;
-
+typedef ::testing::Types<Params<thrust::host_vector<short>>,
+                         Params<thrust::host_vector<int>>,
+                         Params<thrust::host_vector<long long>>,
+                         Params<thrust::host_vector<unsigned short>>,
+                         Params<thrust::host_vector<unsigned int>>,
+                         Params<thrust::host_vector<unsigned long long>>>
+    HostVectorIntegerTestsParams;
 
 // Scalar numerical types
-typedef ::testing::Types<
-    Params<short>,
-    Params<int>,
-    Params<long long>,
-    Params<unsigned short>,
-    Params<unsigned int>,
-    Params<unsigned long long>,
-    Params<float>,
-    Params<double>
-> NumericalTestsParams;
-
+typedef ::testing::Types<Params<short>,
+                         Params<int>,
+                         Params<long long>,
+                         Params<unsigned short>,
+                         Params<unsigned int>,
+                         Params<unsigned long long>,
+                         Params<float>,
+                         Params<double>>
+    NumericalTestsParams;
 
 // Scalar interger types
-typedef ::testing::Types<
-    Params<short>,
-    Params<int>,
-    Params<long long>,
-    Params<unsigned short>,
-    Params<unsigned int>,
-    Params<unsigned long long>
-> IntegerTestsParams;
-
+typedef ::testing::Types<Params<short>,
+                         Params<int>,
+                         Params<long long>,
+                         Params<unsigned short>,
+                         Params<unsigned int>,
+                         Params<unsigned long long>>
+    IntegerTestsParams;
 
 // Scalar signed interger types
-typedef ::testing::Types<
-    Params<short>,
-    Params<int>,
-    Params<long long>
-> SignedIntegerTestsParams;
-
+typedef ::testing::Types<Params<short>, Params<int>, Params<long long>> SignedIntegerTestsParams;
 
 // Scalar unsigned interger types of all lengths
-typedef ::testing::Types<
-    Params<thrust::detail::uint8_t>,
-    Params<thrust::detail::uint16_t>,
-    Params<thrust::detail::uint32_t>,
-    Params<thrust::detail::uint64_t>
-> UnsignedIntegerTestsParams;
-
+typedef ::testing::Types<Params<thrust::detail::uint8_t>,
+                         Params<thrust::detail::uint16_t>,
+                         Params<thrust::detail::uint32_t>,
+                         Params<thrust::detail::uint64_t>>
+    UnsignedIntegerTestsParams;
 
 // Scalar all interger types
-typedef ::testing::Types<
-    Params<short>,
-    Params<int>,
-    Params<long long>,
-    Params<unsigned short>,
-    Params<unsigned int>,
-    Params<unsigned long long>,
-    Params<thrust::detail::uint8_t>,
-    Params<thrust::detail::uint16_t>,
-    Params<thrust::detail::uint32_t>,
-    Params<thrust::detail::uint64_t>
-> AllIntegerTestsParams;
-
+typedef ::testing::Types<Params<short>,
+                         Params<int>,
+                         Params<long long>,
+                         Params<unsigned short>,
+                         Params<unsigned int>,
+                         Params<unsigned long long>,
+                         Params<thrust::detail::uint8_t>,
+                         Params<thrust::detail::uint16_t>,
+                         Params<thrust::detail::uint32_t>,
+                         Params<thrust::detail::uint64_t>>
+    AllIntegerTestsParams;
 
 // Scalar float types
-typedef ::testing::Types<
-    Params<float>,
-    Params<double>
-> FloatTestsParams;
-
+typedef ::testing::Types<Params<float>, Params<double>> FloatTestsParams;
 
 // --------------------Input Output test parameters--------
-template<class Input,
-         class Output = Input>
+template <class Input, class Output = Input>
 struct ParamsInOut
 {
-    using input_type = Input;
+    using input_type  = Input;
     using output_type = Output;
 };
 
 // Definition of typed test cases with given parameter type
-#define TESTS_INOUT_DEFINE(x, y) \
-template<class ParamsInOut> \
-class x : public ::testing::Test \
-{ \
-public: \
-using input_type = typename ParamsInOut::input_type; \
-using output_type = typename ParamsInOut::output_type; \
-}; \
-\
-TYPED_TEST_CASE(x, y);
+#define TESTS_INOUT_DEFINE(x, y)                               \
+    template <class ParamsInOut>                               \
+    class x : public ::testing::Test                           \
+    {                                                          \
+    public:                                                    \
+        using input_type  = typename ParamsInOut::input_type;  \
+        using output_type = typename ParamsInOut::output_type; \
+    };                                                         \
+                                                               \
+    TYPED_TEST_CASE(x, y);
 
-typedef ::testing::Types<
-    ParamsInOut<short>,
-    ParamsInOut<int>,
-    ParamsInOut<long long>,
-    ParamsInOut<unsigned short>,
-    ParamsInOut<unsigned int>,
-    ParamsInOut<unsigned long long>,
-    ParamsInOut<float>,
-    ParamsInOut<double>,
-    ParamsInOut<int, long long>,
-    ParamsInOut<unsigned int, unsigned long long>,
-    ParamsInOut<float, double>
-> AllInOutTestsParams;
+typedef ::testing::Types<ParamsInOut<short>,
+                         ParamsInOut<int>,
+                         ParamsInOut<long long>,
+                         ParamsInOut<unsigned short>,
+                         ParamsInOut<unsigned int>,
+                         ParamsInOut<unsigned long long>,
+                         ParamsInOut<float>,
+                         ParamsInOut<double>,
+                         ParamsInOut<int, long long>,
+                         ParamsInOut<unsigned int, unsigned long long>,
+                         ParamsInOut<float, double>>
+    AllInOutTestsParams;
