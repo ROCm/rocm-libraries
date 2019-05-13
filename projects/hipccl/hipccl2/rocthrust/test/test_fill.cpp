@@ -26,6 +26,7 @@
 #include "test_header.hpp"
 
 TESTS_DEFINE(FillTests, FullTestsParams);
+TESTS_DEFINE(FillPrimitiveTests, NumericalTestsParams);
 
 TYPED_TEST(FillTests, TestFillSimple)
 {
@@ -106,10 +107,9 @@ TYPED_TEST(FillTests, TestFillMixedTypes)
     ASSERT_EQ(v[3], T(20));
 }
 
-TYPED_TEST(FillTests, TestFill)
+TYPED_TEST(FillPrimitiveTests, TestFill)
 {
-    using Vector = typename TestFixture::input_type;
-    using T      = typename Vector::value_type;
+    using T = typename TestFixture::input_type;
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -247,10 +247,9 @@ TYPED_TEST(FillTests, TestFillNMixedTypes)
     ASSERT_EQ_QUIET(v.end(), iter);
 }
 
-TYPED_TEST(FillTests, TestFillN)
+TYPED_TEST(FillPrimitiveTests, TestFillN)
 {
-    using Vector = typename TestFixture::input_type;
-    using T      = typename Vector::value_type;
+    using T = typename TestFixture::input_type;
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -321,11 +320,10 @@ TYPED_TEST(FillTests, TestFillZipIterator)
     ASSERT_EQ(T(13), v3[2]);
 }
 
-TYPED_TEST(FillTests, TestFillTuple)
+TYPED_TEST(FillPrimitiveTests, TestFillTuple)
 {
-    using Vector = typename TestFixture::input_type;
-    using T      = typename Vector::value_type;
-    using Tuple  = typename thrust::tuple<T, T>;
+    using T     = typename TestFixture::input_type;
+    using Tuple = typename thrust::tuple<T, T>;
 
     thrust::host_vector<Tuple>   h(3, Tuple(0, 0));
     thrust::device_vector<Tuple> d(3, Tuple(0, 0));
