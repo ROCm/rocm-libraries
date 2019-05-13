@@ -21,8 +21,6 @@
 
 #include "test_header.hpp"
 
-TESTS_DEFINE(PartitionPointTests, FullTestsParams);
-
 TESTS_DEFINE(PartitionPointVectorTests, VectorSignedIntegerTestsParams);
 
 template <typename T>
@@ -81,7 +79,7 @@ __host__ __device__ ForwardIterator
     return first;
 }
 
-TYPED_TEST(PartitionPointTests, TestPartitionPointDispatchExplicit)
+TEST(PartitionPointTests, TestPartitionPointDispatchExplicit)
 {
     thrust::device_vector<int> vec(1);
 
@@ -99,7 +97,7 @@ __host__ __device__ ForwardIterator
     return first;
 }
 
-TYPED_TEST(PartitionPointTests, TestPartitionPointDispatchImplicit)
+TEST(PartitionPointTests, TestPartitionPointDispatchImplicit)
 {
     thrust::device_vector<int> vec(1);
 

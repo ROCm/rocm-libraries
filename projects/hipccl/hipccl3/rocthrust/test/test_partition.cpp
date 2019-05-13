@@ -1239,7 +1239,7 @@ __host__ __device__ ForwardIterator
     return first;
 }
 
-TYPED_TEST(PartitionTests, TestPartitionDispatchExplicit)
+TEST(PartitionTests, TestPartitionDispatchExplicit)
 {
     thrust::device_vector<int> vec(1);
 
@@ -1257,7 +1257,7 @@ __host__ __device__ ForwardIterator
     return first;
 }
 
-TYPED_TEST(PartitionTests, TestPartitionStencilDispatchExplicit)
+TEST(PartitionTests, TestPartitionStencilDispatchExplicit)
 {
     thrust::device_vector<int> vec(1);
 
@@ -1320,7 +1320,7 @@ __host__ __device__ thrust::pair<OutputIterator1, OutputIterator2>
     return thrust::make_pair(out_true, out_false);
 }
 
-TYPED_TEST(PartitionTests, TestPartitionCopyDispatchExplicit)
+TEST(PartitionTests, TestPartitionCopyDispatchExplicit)
 {
     thrust::device_vector<int> vec(1);
 
@@ -1348,7 +1348,7 @@ __host__ __device__ thrust::pair<OutputIterator1, OutputIterator2>
     return thrust::make_pair(out_true, out_false);
 }
 
-TYPED_TEST(PartitionTests, TestPartitionCopyStencilDispatchExplicit)
+TEST(PartitionTests, TestPartitionCopyStencilDispatchExplicit)
 {
     thrust::device_vector<int> vec(1);
 
@@ -1374,7 +1374,7 @@ __host__ __device__ thrust::pair<OutputIterator1, OutputIterator2>
     return thrust::make_pair(out_true, out_false);
 }
 
-TYPED_TEST(PartitionTests, TestPartitionCopyDispatchImplicit)
+TEST(PartitionTests, TestPartitionCopyDispatchImplicit)
 {
     thrust::device_vector<int> vec(1);
 
@@ -1405,7 +1405,7 @@ __host__ __device__ thrust::pair<OutputIterator1, OutputIterator2>
     return thrust::make_pair(out_true, out_false);
 }
 
-TYPED_TEST(PartitionTests, TestPartitionCopyStencilDispatchImplicit)
+TEST(PartitionTests, TestPartitionCopyStencilDispatchImplicit)
 {
     thrust::device_vector<int> vec(1);
 
@@ -1427,7 +1427,7 @@ __host__ __device__ ForwardIterator
     return first;
 }
 
-TYPED_TEST(PartitionTests, TestStablePartitionDispatchExplicit)
+TEST(PartitionTests, TestStablePartitionDispatchExplicit)
 {
     thrust::device_vector<int> vec(1);
 
@@ -1445,7 +1445,7 @@ __host__ __device__ ForwardIterator stable_partition(
     return first;
 }
 
-TYPED_TEST(PartitionTests, TestStablePartitionStencilDispatchExplicit)
+TEST(PartitionTests, TestStablePartitionStencilDispatchExplicit)
 {
     thrust::device_vector<int> vec(1);
 
@@ -1463,7 +1463,7 @@ __host__ __device__ ForwardIterator
     return first;
 }
 
-TYPED_TEST(PartitionTests, TestStablePartitionDispatchImplicit)
+TEST(PartitionTests, TestStablePartitionDispatchImplicit)
 {
     thrust::device_vector<int> vec(1);
 
@@ -1481,7 +1481,7 @@ __host__ __device__ ForwardIterator
     return first;
 }
 
-TYPED_TEST(PartitionTests, TestStablePartitionStencilDispatchImplicit)
+TEST(PartitionTests, TestStablePartitionStencilDispatchImplicit)
 {
     thrust::device_vector<int> vec(1);
 
@@ -1509,7 +1509,7 @@ __host__ __device__ thrust::pair<OutputIterator1, OutputIterator2>
     return thrust::make_pair(out_true, out_false);
 }
 
-TYPED_TEST(PartitionTests, TestStablePartitionCopyDispatchExplicit)
+TEST(PartitionTests, TestStablePartitionCopyDispatchExplicit)
 {
     thrust::device_vector<int> vec(1);
 
@@ -1537,7 +1537,7 @@ __host__ __device__ thrust::pair<OutputIterator1, OutputIterator2>
     return thrust::make_pair(out_true, out_false);
 }
 
-TYPED_TEST(PartitionTests, TestStablePartitionCopyStencilDispatchExplicit)
+TEST(PartitionTests, TestStablePartitionCopyStencilDispatchExplicit)
 {
     thrust::device_vector<int> vec(1);
 
@@ -1564,7 +1564,7 @@ __host__ __device__ thrust::pair<OutputIterator1, OutputIterator2>
     return thrust::make_pair(out_true, out_false);
 }
 
-TYPED_TEST(PartitionTests, TestStablePartitionCopyDispatchImplicit)
+TEST(PartitionTests, TestStablePartitionCopyDispatchImplicit)
 {
     thrust::device_vector<int> vec(1);
 
@@ -1595,7 +1595,7 @@ __host__ __device__ thrust::pair<OutputIterator1, OutputIterator2>
     return thrust::make_pair(out_true, out_false);
 }
 
-TYPED_TEST(PartitionTests, TestStablePartitionCopyStencilDispatchImplicit)
+TEST(PartitionTests, TestStablePartitionCopyStencilDispatchImplicit)
 {
     thrust::device_vector<int> vec(1);
 

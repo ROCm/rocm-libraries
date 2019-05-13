@@ -25,11 +25,11 @@
 #include "test_header.hpp"
 
 TESTS_DEFINE(CopyNTests, FullTestsParams);
+TESTS_DEFINE(CopyNPrimitiveTests, NumericalTestsParams);
 
-TYPED_TEST(CopyNTests, TestCopyNFromConstIterator)
+TYPED_TEST(CopyNPrimitiveTests, TestCopyNFromConstIterator)
 {
-    using Vector = typename TestFixture::input_type;
-    using T      = typename Vector::value_type;
+    using T = typename TestFixture::input_type;
 
     std::vector<T> v(5);
     v[0] = T(0);
@@ -62,10 +62,9 @@ TYPED_TEST(CopyNTests, TestCopyNFromConstIterator)
     ASSERT_EQ_QUIET(d_result, d.end());
 }
 
-TYPED_TEST(CopyNTests, TestCopyNToDiscardIterator)
+TYPED_TEST(CopyNPrimitiveTests, TestCopyNToDiscardIterator)
 {
-    using Vector = typename TestFixture::input_type;
-    using T      = typename Vector::value_type;
+    using T = typename TestFixture::input_type;
 
     thrust::host_vector<T>   h_input(5, 1);
     thrust::device_vector<T> d_input = h_input;

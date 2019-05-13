@@ -23,8 +23,6 @@
 
 #include "test_header.hpp"
 
-TESTS_DEFINE(DereferenceTests, FullTestsParams);
-
 template <typename Iterator1, typename Iterator2>
 __global__ void simple_copy_on_device(Iterator1 first1, Iterator1 last1, Iterator2 first2)
 {
