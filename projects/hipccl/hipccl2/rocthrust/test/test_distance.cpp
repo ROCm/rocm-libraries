@@ -14,11 +14,10 @@
  *  See the License for the specific language governing permissions and
  *  limitations under the License.
  */
- 
-// Thrust
+
+#include <thrust/device_vector.h>
 #include <thrust/distance.h>
 #include <thrust/host_vector.h>
-#include <thrust/device_vector.h>
 
 #include "test_header.hpp"
 
@@ -26,48 +25,48 @@ TESTS_DEFINE(DistanceTests, FullTestsParams);
 
 TYPED_TEST(DistanceTests, TestDistance)
 {
-  using Vector = typename TestFixture::input_type;
-  using Iterator = typename Vector::iterator;
+    using Vector   = typename TestFixture::input_type;
+    using Iterator = typename Vector::iterator;
 
-  Vector v(100);
+    Vector v(100);
 
-  Iterator i = v.begin();
+    Iterator i = v.begin();
 
-  ASSERT_EQ(thrust::distance(i, v.end()), 100);
+    ASSERT_EQ(thrust::distance(i, v.end()), 100);
 
-  i++;
+    i++;
 
-  ASSERT_EQ(thrust::distance(i, v.end()), 99);
+    ASSERT_EQ(thrust::distance(i, v.end()), 99);
 
-  i += 49;
+    i += 49;
 
-  ASSERT_EQ(thrust::distance(i, v.end()), 50);
+    ASSERT_EQ(thrust::distance(i, v.end()), 50);
 
-  ASSERT_EQ(thrust::distance(i, i), 0);
+    ASSERT_EQ(thrust::distance(i, i), 0);
 }
 
 TYPED_TEST(DistanceTests, TestDistanceLarge)
 {
-  using Vector = typename TestFixture::input_type;
-  using Iterator = typename Vector::iterator;
+    using Vector   = typename TestFixture::input_type;
+    using Iterator = typename Vector::iterator;
 
-  Vector v(1000);
+    Vector v(1000);
 
-  Iterator i = v.begin();
+    Iterator i = v.begin();
 
-  ASSERT_EQ(thrust::distance(i, v.end()), 1000);
+    ASSERT_EQ(thrust::distance(i, v.end()), 1000);
 
-  i++;
+    i++;
 
-  ASSERT_EQ(thrust::distance(i, v.end()), 999);
+    ASSERT_EQ(thrust::distance(i, v.end()), 999);
 
-  i += 49;
+    i += 49;
 
-  ASSERT_EQ(thrust::distance(i, v.end()), 950);
+    ASSERT_EQ(thrust::distance(i, v.end()), 950);
 
-  i += 950;
+    i += 950;
 
-  ASSERT_EQ(thrust::distance(i, v.end()), 0);
+    ASSERT_EQ(thrust::distance(i, v.end()), 0);
 
-  ASSERT_EQ(thrust::distance(i, i), 0);
+    ASSERT_EQ(thrust::distance(i, i), 0);
 }

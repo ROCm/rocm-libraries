@@ -15,7 +15,6 @@
  *  limitations under the License.
  */
 
-// Thrust
 #include <thrust/advance.h>
 #include <thrust/sequence.h>
 
@@ -28,7 +27,7 @@ TESTS_DEFINE(AdvanceVectorTests, VectorSignedIntegerTestsParams);
 TYPED_TEST(AdvanceVectorTests, TestAdvance)
 {
     using Vector = typename TestFixture::input_type;
-    using T = typename Vector::value_type;
+    using T      = typename Vector::value_type;
 
     typedef typename Vector::iterator Iterator;
 

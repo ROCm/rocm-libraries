@@ -15,7 +15,6 @@
  *  limitations under the License.
  */
 
-// Thrust
 #include <thrust/binary_search.h>
 #include <thrust/functional.h>
 #include <thrust/sequence.h>
@@ -30,7 +29,7 @@ TESTS_DEFINE(BinarySearchVectorDescendingIntegerTests, SignedIntegerTestsParams)
 template <class ExampleVector, typename NewType>
 struct vector_like
 {
-    typedef typename ExampleVector::allocator_type alloc;
+    typedef typename ExampleVector::allocator_type          alloc;
     typedef typename alloc::template rebind<NewType>::other new_alloc;
     typedef thrust::detail::vector_base<NewType, new_alloc> type;
 };
@@ -38,7 +37,7 @@ struct vector_like
 TYPED_TEST(BinarySearchVectorDescendingTests, TestVectorLowerBoundDescendingSimple)
 {
     using Vector = typename TestFixture::input_type;
-    using T = typename Vector::value_type;
+    using T      = typename Vector::value_type;
     Vector vec(5);
 
     vec[0] = 8;
@@ -53,8 +52,13 @@ TYPED_TEST(BinarySearchVectorDescendingTests, TestVectorLowerBoundDescendingSimp
     typedef typename vector_like<Vector, int>::type IntVector;
 
     // test with integral output type
-    IntVector integral_output(10);
-    typename IntVector::iterator output_end = thrust::lower_bound(vec.begin(), vec.end(), input.begin(), input.end(), integral_output.begin(), thrust::greater<T>());
+    IntVector                    integral_output(10);
+    typename IntVector::iterator output_end = thrust::lower_bound(vec.begin(),
+                                                                  vec.end(),
+                                                                  input.begin(),
+                                                                  input.end(),
+                                                                  integral_output.begin(),
+                                                                  thrust::greater<T>());
 
     ASSERT_EQ_QUIET(integral_output.end(), output_end);
 
@@ -87,8 +91,13 @@ TYPED_TEST(BinarySearchVectorDescendingTests, TestVectorUpperBoundDescendingSimp
     using IntVector = typename vector_like<Vector, int>::type;
 
     // test with integral output type
-    IntVector integral_output(10);
-    typename IntVector::iterator output_end = thrust::upper_bound(vec.begin(), vec.end(), input.begin(), input.end(), integral_output.begin(), thrust::greater<int>());
+    IntVector                    integral_output(10);
+    typename IntVector::iterator output_end = thrust::upper_bound(vec.begin(),
+                                                                  vec.end(),
+                                                                  input.begin(),
+                                                                  input.end(),
+                                                                  integral_output.begin(),
+                                                                  thrust::greater<int>());
 
     ASSERT_EQ_QUIET(output_end, integral_output.end());
 
@@ -119,28 +128,38 @@ TYPED_TEST(BinarySearchVectorDescendingTests, TestVectorBinarySearchDescendingSi
     thrust::sequence(input.begin(), input.end());
 
     using BoolVector = typename vector_like<Vector, bool>::type;
-    using IntVector = typename vector_like<Vector,  int>::type;
+    using IntVector  = typename vector_like<Vector, int>::type;
 
     // test with boolean output type
-    BoolVector bool_output(10);
-    typename BoolVector::iterator bool_output_end = thrust::binary_search(vec.begin(), vec.end(), input.begin(), input.end(), bool_output.begin(), thrust::greater<int>());
+    BoolVector                    bool_output(10);
+    typename BoolVector::iterator bool_output_end = thrust::binary_search(vec.begin(),
+                                                                          vec.end(),
+                                                                          input.begin(),
+                                                                          input.end(),
+                                                                          bool_output.begin(),
+                                                                          thrust::greater<int>());
 
     ASSERT_EQ_QUIET(bool_output_end, bool_output.end());
 
-    ASSERT_EQ(true,  bool_output[0]);
+    ASSERT_EQ(true, bool_output[0]);
     ASSERT_EQ(false, bool_output[1]);
-    ASSERT_EQ(true,  bool_output[2]);
+    ASSERT_EQ(true, bool_output[2]);
     ASSERT_EQ(false, bool_output[3]);
     ASSERT_EQ(false, bool_output[4]);
-    ASSERT_EQ(true,  bool_output[5]);
+    ASSERT_EQ(true, bool_output[5]);
     ASSERT_EQ(false, bool_output[6]);
-    ASSERT_EQ(true,  bool_output[7]);
-    ASSERT_EQ(true,  bool_output[8]);
+    ASSERT_EQ(true, bool_output[7]);
+    ASSERT_EQ(true, bool_output[8]);
     ASSERT_EQ(false, bool_output[9]);
 
     // test with integral output type
-    IntVector integral_output(10, 2);
-    typename IntVector::iterator int_output_end = thrust::binary_search(vec.begin(), vec.end(), input.begin(), input.end(), integral_output.begin(), thrust::greater<int>());
+    IntVector                    integral_output(10, 2);
+    typename IntVector::iterator int_output_end = thrust::binary_search(vec.begin(),
+                                                                        vec.end(),
+                                                                        input.begin(),
+                                                                        input.end(),
+                                                                        integral_output.begin(),
+                                                                        thrust::greater<int>());
 
     ASSERT_EQ_QUIET(int_output_end, integral_output.end());
 
@@ -159,26 +178,34 @@ TYPED_TEST(BinarySearchVectorDescendingTests, TestVectorBinarySearchDescendingSi
 TYPED_TEST(BinarySearchVectorDescendingIntegerTests, TestVectorLowerBoundDescending)
 {
     using T = typename TestFixture::input_type;
-    for (auto size : get_sizes())
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
-        thrust::host_vector<T> h_vec = get_random_data<T>(size,
-                                                          std::numeric_limits<T>::min(),
-                                                          std::numeric_limits<T>::max());
+        thrust::host_vector<T> h_vec = get_random_data<T>(
+            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
         thrust::sort(h_vec.begin(), h_vec.end(), thrust::greater<T>());
         thrust::device_vector<T> d_vec = h_vec;
 
-        thrust::host_vector<T> h_input = get_random_data<T>(2*size,
-                                                            std::numeric_limits<T>::min(),
-                                                            std::numeric_limits<T>::max());
+        thrust::host_vector<T> h_input = get_random_data<T>(
+            2 * size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
         thrust::device_vector<T> d_input = h_input;
 
-        thrust::host_vector<int>   h_output(2*size);
-        thrust::device_vector<int> d_output(2*size);
+        thrust::host_vector<int>   h_output(2 * size);
+        thrust::device_vector<int> d_output(2 * size);
 
-        thrust::lower_bound(h_vec.begin(), h_vec.end(), h_input.begin(), h_input.end(), h_output.begin(), thrust::greater<T>());
-        thrust::lower_bound(d_vec.begin(), d_vec.end(), d_input.begin(), d_input.end(), d_output.begin(), thrust::greater<T>());
+        thrust::lower_bound(h_vec.begin(),
+                            h_vec.end(),
+                            h_input.begin(),
+                            h_input.end(),
+                            h_output.begin(),
+                            thrust::greater<T>());
+        thrust::lower_bound(d_vec.begin(),
+                            d_vec.end(),
+                            d_input.begin(),
+                            d_input.end(),
+                            d_output.begin(),
+                            thrust::greater<T>());
 
         ASSERT_EQ(h_output, d_output);
     }
@@ -187,26 +214,34 @@ TYPED_TEST(BinarySearchVectorDescendingIntegerTests, TestVectorLowerBoundDescend
 TYPED_TEST(BinarySearchVectorDescendingIntegerTests, TestVectorUpperBoundDescending)
 {
     using T = typename TestFixture::input_type;
-    for (auto size : get_sizes())
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
-        thrust::host_vector<T> h_vec = get_random_data<T>(size,
-                                                          std::numeric_limits<T>::min(),
-                                                          std::numeric_limits<T>::max());
+        thrust::host_vector<T> h_vec = get_random_data<T>(
+            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
         thrust::sort(h_vec.begin(), h_vec.end(), thrust::greater<T>());
         thrust::device_vector<T> d_vec = h_vec;
 
-        thrust::host_vector<T> h_input = get_random_data<T>(2*size,
-                                                            std::numeric_limits<T>::min(),
-                                                            std::numeric_limits<T>::max());
+        thrust::host_vector<T> h_input = get_random_data<T>(
+            2 * size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
         thrust::device_vector<T> d_input = h_input;
 
-        thrust::host_vector<int>   h_output(2*size);
-        thrust::device_vector<int> d_output(2*size);
+        thrust::host_vector<int>   h_output(2 * size);
+        thrust::device_vector<int> d_output(2 * size);
 
-        thrust::upper_bound(h_vec.begin(), h_vec.end(), h_input.begin(), h_input.end(), h_output.begin(), thrust::greater<T>());
-        thrust::upper_bound(d_vec.begin(), d_vec.end(), d_input.begin(), d_input.end(), d_output.begin(), thrust::greater<T>());
+        thrust::upper_bound(h_vec.begin(),
+                            h_vec.end(),
+                            h_input.begin(),
+                            h_input.end(),
+                            h_output.begin(),
+                            thrust::greater<T>());
+        thrust::upper_bound(d_vec.begin(),
+                            d_vec.end(),
+                            d_input.begin(),
+                            d_input.end(),
+                            d_output.begin(),
+                            thrust::greater<T>());
 
         ASSERT_EQ(h_output, d_output);
     }
@@ -215,26 +250,34 @@ TYPED_TEST(BinarySearchVectorDescendingIntegerTests, TestVectorUpperBoundDescend
 TYPED_TEST(BinarySearchVectorDescendingIntegerTests, TestVectorBinarySearchDescending)
 {
     using T = typename TestFixture::input_type;
-    for (auto size : get_sizes())
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
-        thrust::host_vector<T> h_vec = get_random_data<T>(size,
-                                                          std::numeric_limits<T>::min(),
-                                                          std::numeric_limits<T>::max());
+        thrust::host_vector<T> h_vec = get_random_data<T>(
+            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
         thrust::sort(h_vec.begin(), h_vec.end(), thrust::greater<T>());
         thrust::device_vector<T> d_vec = h_vec;
 
-        thrust::host_vector<T> h_input = get_random_data<T>(2*size,
-                                                            std::numeric_limits<T>::min(),
-                                                            std::numeric_limits<T>::max());
+        thrust::host_vector<T> h_input = get_random_data<T>(
+            2 * size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
         thrust::device_vector<T> d_input = h_input;
 
-        thrust::host_vector<int>   h_output(2*size);
-        thrust::device_vector<int> d_output(2*size);
+        thrust::host_vector<int>   h_output(2 * size);
+        thrust::device_vector<int> d_output(2 * size);
 
-        thrust::binary_search(h_vec.begin(), h_vec.end(), h_input.begin(), h_input.end(), h_output.begin(), thrust::greater<T>());
-        thrust::binary_search(d_vec.begin(), d_vec.end(), d_input.begin(), d_input.end(), d_output.begin(), thrust::greater<T>());
+        thrust::binary_search(h_vec.begin(),
+                              h_vec.end(),
+                              h_input.begin(),
+                              h_input.end(),
+                              h_output.begin(),
+                              thrust::greater<T>());
+        thrust::binary_search(d_vec.begin(),
+                              d_vec.end(),
+                              d_input.begin(),
+                              d_input.end(),
+                              d_output.begin(),
+                              thrust::greater<T>());
 
         ASSERT_EQ(h_output, d_output);
     }

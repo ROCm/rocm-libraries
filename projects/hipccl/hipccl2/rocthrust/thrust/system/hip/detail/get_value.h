@@ -20,46 +20,41 @@
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 #include <thrust/detail/config.h>
 #include <thrust/detail/raw_pointer_cast.h>
+#include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/detail/adl/assign_value.h>
 #include <thrust/system/hip/config.h>
 #include <thrust/system/hip/detail/cross_system.h>
-#include <thrust/iterator/iterator_traits.h>
 
 BEGIN_NS_THRUST
-namespace hip_rocprim {
-
-
-template<typename DerivedPolicy, typename Pointer>
-inline __host__ __device__
-  typename thrust::iterator_value<Pointer>::type
-    get_value(execution_policy<DerivedPolicy> &exec, Pointer ptr)
+namespace hip_rocprim
 {
-  typedef typename thrust::iterator_value<Pointer>::type result_type;
 
-  // STREAMHPC WORKAROUND
+template <typename DerivedPolicy, typename Pointer>
+typename thrust::iterator_value<Pointer>::type THRUST_HIP_FUNCTION
+get_value(execution_policy<DerivedPolicy>& exec, Pointer ptr)
+{
+    typedef typename thrust::iterator_value<Pointer>::type result_type;
+
+    // STREAMHPC WORKAROUND
 #if defined(THRUST_HIP_DEVICE_CODE)
+    THRUST_UNUSED_VAR(exec);
+    void (*fptr)(cross_system<thrust::host_system_tag, DerivedPolicy>&, result_type*, Pointer)
+        = assign_value;
+    (void)fptr;
 
-  THRUST_UNUSED_VAR(exec);
-  void (*fptr)(cross_system<thrust::host_system_tag, DerivedPolicy> &, result_type *, Pointer) = assign_value;
-  (void) fptr;
-
-  return *thrust::raw_pointer_cast(ptr);
-
+    return *thrust::raw_pointer_cast(ptr);
 #else
+    // when called from host code, implement with assign_value
+    // note that this requires a type with default constructor
+    result_type result;
 
-  // when called from host code, implement with assign_value
-  // note that this requires a type with default constructor
-  result_type result;
+    thrust::host_system_tag                              host_tag;
+    cross_system<thrust::host_system_tag, DerivedPolicy> systems(host_tag, exec);
+    assign_value(systems, &result, ptr);
 
-  thrust::host_system_tag host_tag;
-  cross_system<thrust::host_system_tag, DerivedPolicy> systems(host_tag, exec);
-  assign_value(systems, &result, ptr);
-
-  return result;
-
+    return result;
 #endif
 } // end get_value()
-
 
 } // end hip_rocprim
 END_NS_THRUST

@@ -15,9 +15,8 @@
  *  limitations under the License.
  */
 
-// Thrust
-#include <thrust/gather.h>
 #include <thrust/fill.h>
+#include <thrust/gather.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
@@ -30,20 +29,35 @@ TESTS_DEFINE(PrimitiveGatherTests, NumericalTestsParams);
 
 TEST(GatherTests, UsingHip)
 {
-  ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
+    ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
 }
 
 TYPED_TEST(GatherTests, GatherSimple)
 {
     using Vector = typename TestFixture::input_type;
 
-    Vector map(5);  // gather indices
-    Vector src(8);  // source vector
-    Vector dst(5);  // destination vector
+    Vector map(5); // gather indices
+    Vector src(8); // source vector
+    Vector dst(5); // destination vector
 
-    map[0] = 6; map[1] = 2; map[2] = 1; map[3] = 7; map[4] = 2;
-    src[0] = 0; src[1] = 1; src[2] = 2; src[3] = 3; src[4] = 4; src[5] = 5; src[6] = 6; src[7] = 7;
-    dst[0] = 0; dst[1] = 0; dst[2] = 0; dst[3] = 0; dst[4] = 0;
+    map[0] = 6;
+    map[1] = 2;
+    map[2] = 1;
+    map[3] = 7;
+    map[4] = 2;
+    src[0] = 0;
+    src[1] = 1;
+    src[2] = 2;
+    src[3] = 3;
+    src[4] = 4;
+    src[5] = 5;
+    src[6] = 6;
+    src[7] = 7;
+    dst[0] = 0;
+    dst[1] = 0;
+    dst[2] = 0;
+    dst[3] = 0;
+    dst[4] = 0;
 
     thrust::gather(map.begin(), map.end(), src.begin(), dst.begin());
 
@@ -54,8 +68,9 @@ TYPED_TEST(GatherTests, GatherSimple)
     ASSERT_EQ(dst[4], 2);
 }
 
-template<typename InputIterator, typename RandomAccessIterator, typename OutputIterator>
-OutputIterator gather(my_system &system, InputIterator, InputIterator, RandomAccessIterator, OutputIterator result)
+template <typename InputIterator, typename RandomAccessIterator, typename OutputIterator>
+OutputIterator gather(
+    my_system& system, InputIterator, InputIterator, RandomAccessIterator, OutputIterator result)
 {
     system.validate_dispatch();
     return result;
@@ -66,17 +81,14 @@ TEST(GatherTests, GatherDispatchExplicit)
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
-    thrust::gather(sys,
-                   vec.begin(),
-                   vec.end(),
-                   vec.begin(),
-                   vec.begin());
+    thrust::gather(sys, vec.begin(), vec.end(), vec.begin(), vec.begin());
 
     ASSERT_EQ(true, sys.is_valid());
 }
 
-template<typename InputIterator, typename RandomAccessIterator, typename OutputIterator>
-OutputIterator gather(my_tag, InputIterator, InputIterator, RandomAccessIterator, OutputIterator result)
+template <typename InputIterator, typename RandomAccessIterator, typename OutputIterator>
+OutputIterator
+    gather(my_tag, InputIterator, InputIterator, RandomAccessIterator, OutputIterator result)
 {
     *result = 13;
     return result;
@@ -99,12 +111,12 @@ TYPED_TEST(PrimitiveGatherTests, Gather)
     using T = typename TestFixture::input_type;
 
     const std::vector<size_t> sizes = get_sizes();
-    T min = (T) std::numeric_limits<T>::min();
-    T max = (T) std::numeric_limits<T>::max();
+    T                         min   = (T)std::numeric_limits<T>::min();
+    T                         max   = (T)std::numeric_limits<T>::max();
 
     for(auto size : sizes)
     {
-        const size_t source_size = std::min((size_t) 10, 2 * size);
+        const size_t source_size = std::min((size_t)10, 2 * size);
 
         // source vectors to gather from
         thrust::host_vector<T>   h_source = get_random_data<T>(source_size, min, max);
@@ -114,7 +126,7 @@ TYPED_TEST(PrimitiveGatherTests, Gather)
         thrust::host_vector<unsigned int> h_map = get_random_data<unsigned int>(size, min, max);
 
         for(size_t i = 0; i < size; i++)
-            h_map[i] =  h_map[i] % source_size;
+            h_map[i] = h_map[i] % source_size;
 
         thrust::device_vector<unsigned int> d_map = h_map;
 
@@ -135,12 +147,12 @@ TYPED_TEST(PrimitiveGatherTests, GatherToDiscardIterator)
     using T = typename TestFixture::input_type;
 
     const std::vector<size_t> sizes = get_sizes();
-    T min = (T) std::numeric_limits<T>::min();
-    T max = (T) std::numeric_limits<T>::max();
+    T                         min   = (T)std::numeric_limits<T>::min();
+    T                         max   = (T)std::numeric_limits<T>::max();
 
     for(auto size : sizes)
     {
-        const size_t source_size = std::min((size_t) 10, 2 * size);
+        const size_t source_size = std::min((size_t)10, 2 * size);
 
         // source vectors to gather from
         thrust::host_vector<T>   h_source = get_random_data<T>(source_size, min, max);
@@ -150,15 +162,15 @@ TYPED_TEST(PrimitiveGatherTests, GatherToDiscardIterator)
         thrust::host_vector<unsigned int> h_map = get_random_data<unsigned int>(size, min, max);
 
         for(size_t i = 0; i < size; i++)
-            h_map[i] =  h_map[i] % source_size;
+            h_map[i] = h_map[i] % source_size;
 
         thrust::device_vector<unsigned int> d_map = h_map;
 
-        thrust::discard_iterator<> h_result =
-        thrust::gather(h_map.begin(), h_map.end(), h_source.begin(), thrust::make_discard_iterator());
+        thrust::discard_iterator<> h_result = thrust::gather(
+            h_map.begin(), h_map.end(), h_source.begin(), thrust::make_discard_iterator());
 
-        thrust::discard_iterator<> d_result =
-        thrust::gather(d_map.begin(), d_map.end(), d_source.begin(), thrust::make_discard_iterator());
+        thrust::discard_iterator<> d_result = thrust::gather(
+            d_map.begin(), d_map.end(), d_source.begin(), thrust::make_discard_iterator());
 
         thrust::discard_iterator<> reference(size);
 
@@ -171,15 +183,34 @@ TYPED_TEST(GatherTests, GatherIfSimple)
 {
     using Vector = typename TestFixture::input_type;
 
-    Vector flg(5);  // predicate array
-    Vector map(5);  // gather indices
-    Vector src(8);  // source vector
-    Vector dst(5);  // destination vector
+    Vector flg(5); // predicate array
+    Vector map(5); // gather indices
+    Vector src(8); // source vector
+    Vector dst(5); // destination vector
 
-    flg[0] = 0; flg[1] = 1; flg[2] = 0; flg[3] = 1; flg[4] = 0;
-    map[0] = 6; map[1] = 2; map[2] = 1; map[3] = 7; map[4] = 2;
-    src[0] = 0; src[1] = 1; src[2] = 2; src[3] = 3; src[4] = 4; src[5] = 5; src[6] = 6; src[7] = 7;
-    dst[0] = 0; dst[1] = 0; dst[2] = 0; dst[3] = 0; dst[4] = 0;
+    flg[0] = 0;
+    flg[1] = 1;
+    flg[2] = 0;
+    flg[3] = 1;
+    flg[4] = 0;
+    map[0] = 6;
+    map[1] = 2;
+    map[2] = 1;
+    map[3] = 7;
+    map[4] = 2;
+    src[0] = 0;
+    src[1] = 1;
+    src[2] = 2;
+    src[3] = 3;
+    src[4] = 4;
+    src[5] = 5;
+    src[6] = 6;
+    src[7] = 7;
+    dst[0] = 0;
+    dst[1] = 0;
+    dst[2] = 0;
+    dst[3] = 0;
+    dst[4] = 0;
 
     thrust::gather_if(map.begin(), map.end(), flg.begin(), src.begin(), dst.begin());
 
@@ -193,23 +224,22 @@ TYPED_TEST(GatherTests, GatherIfSimple)
 template <typename T>
 struct is_even_gather_if
 {
-    __host__ __device__
-    bool operator()(const T i) const
+    __host__ __device__ bool operator()(const T i) const
     {
         return (i % 2) == 0;
     }
 };
 
-template<typename InputIterator1,
-         typename InputIterator2,
-         typename RandomAccessIterator,
-         typename OutputIterator>
-OutputIterator gather_if(my_system &           system,
+template <typename InputIterator1,
+          typename InputIterator2,
+          typename RandomAccessIterator,
+          typename OutputIterator>
+OutputIterator gather_if(my_system& system,
                          InputIterator1,
                          InputIterator1,
                          InputIterator2,
                          RandomAccessIterator,
-                         OutputIterator        result)
+                         OutputIterator result)
 {
     system.validate_dispatch();
     return result;
@@ -220,26 +250,21 @@ TEST(GatherTests, GatherIfDispatchExplicit)
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
-    thrust::gather_if(sys,
-                      vec.begin(),
-                      vec.end(),
-                      vec.begin(),
-                      vec.begin(),
-                      vec.begin());
+    thrust::gather_if(sys, vec.begin(), vec.end(), vec.begin(), vec.begin(), vec.begin());
 
     ASSERT_EQ(true, sys.is_valid());
 }
 
-template<typename InputIterator1,
-         typename InputIterator2,
-         typename RandomAccessIterator,
-         typename OutputIterator>
+template <typename InputIterator1,
+          typename InputIterator2,
+          typename RandomAccessIterator,
+          typename OutputIterator>
 OutputIterator gather_if(my_tag,
                          InputIterator1,
                          InputIterator1,
                          InputIterator2,
                          RandomAccessIterator,
-                         OutputIterator       result)
+                         OutputIterator result)
 {
     *result = 13;
     return result;
@@ -263,12 +288,12 @@ TYPED_TEST(PrimitiveGatherTests, GatherIf)
     using T = typename TestFixture::input_type;
 
     const std::vector<size_t> sizes = get_sizes();
-    T min = (T) std::numeric_limits<T>::min();
-    T max = (T) std::numeric_limits<T>::max();
+    T                         min   = (T)std::numeric_limits<T>::min();
+    T                         max   = (T)std::numeric_limits<T>::max();
 
     for(auto size : sizes)
     {
-        const size_t source_size = std::min((size_t) 10, 2 * size);
+        const size_t source_size = std::min((size_t)10, 2 * size);
 
         // source vectors to gather from
         thrust::host_vector<T>   h_source = get_random_data<T>(source_size, min, max);
@@ -294,8 +319,18 @@ TYPED_TEST(PrimitiveGatherTests, GatherIf)
         thrust::host_vector<T>   h_output(size);
         thrust::device_vector<T> d_output(size);
 
-        thrust::gather_if(h_map.begin(), h_map.end(), h_stencil.begin(), h_source.begin(), h_output.begin(), is_even_gather_if<unsigned int>());
-        thrust::gather_if(d_map.begin(), d_map.end(), d_stencil.begin(), d_source.begin(), d_output.begin(), is_even_gather_if<unsigned int>());
+        thrust::gather_if(h_map.begin(),
+                          h_map.end(),
+                          h_stencil.begin(),
+                          h_source.begin(),
+                          h_output.begin(),
+                          is_even_gather_if<unsigned int>());
+        thrust::gather_if(d_map.begin(),
+                          d_map.end(),
+                          d_stencil.begin(),
+                          d_source.begin(),
+                          d_output.begin(),
+                          is_even_gather_if<unsigned int>());
 
         thrust::host_vector<T> d_output_h = d_output;
         ASSERT_EQ(h_output, d_output_h);
@@ -307,12 +342,12 @@ TYPED_TEST(PrimitiveGatherTests, GatherIfToDiscardIterator)
     using T = typename TestFixture::input_type;
 
     const std::vector<size_t> sizes = get_sizes();
-    T min = (T) std::numeric_limits<T>::min();
-    T max = (T) std::numeric_limits<T>::max();
+    T                         min   = (T)std::numeric_limits<T>::min();
+    T                         max   = (T)std::numeric_limits<T>::max();
 
     for(auto size : sizes)
     {
-        const size_t source_size = std::min((size_t) 10, 2 * size);
+        const size_t source_size = std::min((size_t)10, 2 * size);
 
         // source vectors to gather from
         thrust::host_vector<T>   h_source = get_random_data<T>(source_size, min, max);
@@ -334,11 +369,19 @@ TYPED_TEST(PrimitiveGatherTests, GatherIfToDiscardIterator)
 
         thrust::device_vector<unsigned int> d_stencil = h_stencil;
 
-        thrust::discard_iterator<> h_result =
-        thrust::gather_if(h_map.begin(), h_map.end(), h_stencil.begin(), h_source.begin(), thrust::make_discard_iterator(), is_even_gather_if<unsigned int>());
+        thrust::discard_iterator<> h_result = thrust::gather_if(h_map.begin(),
+                                                                h_map.end(),
+                                                                h_stencil.begin(),
+                                                                h_source.begin(),
+                                                                thrust::make_discard_iterator(),
+                                                                is_even_gather_if<unsigned int>());
 
-        thrust::discard_iterator<> d_result =
-        thrust::gather_if(d_map.begin(), d_map.end(), d_stencil.begin(), d_source.begin(), thrust::make_discard_iterator(), is_even_gather_if<unsigned int>());
+        thrust::discard_iterator<> d_result = thrust::gather_if(d_map.begin(),
+                                                                d_map.end(),
+                                                                d_stencil.begin(),
+                                                                d_source.begin(),
+                                                                thrust::make_discard_iterator(),
+                                                                is_even_gather_if<unsigned int>());
 
         thrust::discard_iterator<> reference(size);
 
@@ -361,10 +404,7 @@ TYPED_TEST(GatherTests, TestGatherCountingIterator)
 
     // source has any_system_tag
     thrust::fill(output.begin(), output.end(), 0);
-    thrust::gather(map.begin(),
-                   map.end(),
-                   thrust::make_counting_iterator(0),
-                   output.begin());
+    thrust::gather(map.begin(), map.end(), thrust::make_counting_iterator(0), output.begin());
 
     ASSERT_EQ(output, map);
 

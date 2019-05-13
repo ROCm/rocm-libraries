@@ -15,9 +15,8 @@
  *  limitations under the License.
  */
 
-// Thrust
-#include <thrust/sort.h>
 #include <thrust/iterator/retag.h>
+#include <thrust/sort.h>
 
 #include "test_header.hpp"
 
@@ -27,86 +26,87 @@ TESTS_DEFINE(IsSortedUntilVectorTests, VectorSignedIntegerTestsParams);
 TYPED_TEST(IsSortedUntilVectorTests, TestIsSortedUntilSimple)
 {
     using Vector = typename TestFixture::input_type;
-    using T = typename Vector::value_type;
+    using T      = typename Vector::value_type;
 
     typedef typename Vector::iterator Iterator;
 
     Vector v(4);
-    v[0] = 0; v[1] = 5; v[2] = 8; v[3] = 0;
+    v[0] = 0;
+    v[1] = 5;
+    v[2] = 8;
+    v[3] = 0;
 
     Iterator first = v.begin();
 
-    Iterator last  = v.begin() + 0;
-    Iterator ref = last;
+    Iterator last = v.begin() + 0;
+    Iterator ref  = last;
     ASSERT_EQ_QUIET(ref, thrust::is_sorted_until(first, last));
 
     last = v.begin() + 1;
-    ref = last;
+    ref  = last;
     ASSERT_EQ_QUIET(ref, thrust::is_sorted_until(first, last));
 
     last = v.begin() + 2;
-    ref = last;
+    ref  = last;
     ASSERT_EQ_QUIET(ref, thrust::is_sorted_until(first, last));
 
     last = v.begin() + 3;
-    ref = v.begin() + 3;
+    ref  = v.begin() + 3;
     ASSERT_EQ_QUIET(ref, thrust::is_sorted_until(first, last));
 
     last = v.begin() + 4;
-    ref = v.begin() + 3;
+    ref  = v.begin() + 3;
     ASSERT_EQ_QUIET(ref, thrust::is_sorted_until(first, last));
 
     last = v.begin() + 3;
-    ref = v.begin() + 3;
+    ref  = v.begin() + 3;
     ASSERT_EQ_QUIET(ref, thrust::is_sorted_until(first, last, thrust::less<T>()));
 
     last = v.begin() + 4;
-    ref = v.begin() + 3;
+    ref  = v.begin() + 3;
     ASSERT_EQ_QUIET(ref, thrust::is_sorted_until(first, last, thrust::less<T>()));
 
     last = v.begin() + 1;
-    ref = v.begin() + 1;
+    ref  = v.begin() + 1;
     ASSERT_EQ_QUIET(ref, thrust::is_sorted_until(first, last, thrust::greater<T>()));
 
     last = v.begin() + 4;
-    ref = v.begin() + 1;
+    ref  = v.begin() + 1;
     ASSERT_EQ_QUIET(ref, thrust::is_sorted_until(first, last, thrust::greater<T>()));
 
     first = v.begin() + 2;
-    last = v.begin() + 4;
-    ref = v.begin() + 4;
+    last  = v.begin() + 4;
+    ref   = v.begin() + 4;
     ASSERT_EQ_QUIET(ref, thrust::is_sorted_until(first, last, thrust::greater<T>()));
 }
 
 TYPED_TEST(IsSortedUntilVectorTests, TestIsSortedUntilRepeatedElements)
 {
-  using Vector = typename TestFixture::input_type;
-  Vector v(10);
+    using Vector = typename TestFixture::input_type;
+    Vector v(10);
 
-  v[0] = 0;
-  v[1] = 1;
-  v[2] = 1;
-  v[3] = 2;
-  v[4] = 3;
-  v[5] = 4;
-  v[6] = 5;
-  v[7] = 5;
-  v[8] = 5;
-  v[9] = 6;
+    v[0] = 0;
+    v[1] = 1;
+    v[2] = 1;
+    v[3] = 2;
+    v[4] = 3;
+    v[5] = 4;
+    v[6] = 5;
+    v[7] = 5;
+    v[8] = 5;
+    v[9] = 6;
 
-  ASSERT_EQ_QUIET(v.end(), thrust::is_sorted_until(v.begin(), v.end()));
+    ASSERT_EQ_QUIET(v.end(), thrust::is_sorted_until(v.begin(), v.end()));
 }
 
 TYPED_TEST(IsSortedUntilVectorTests, TestIsSortedUntil)
 {
     using Vector = typename TestFixture::input_type;
-    using T = typename Vector::value_type;
+    using T      = typename Vector::value_type;
 
     const size_t n = (1 << 16) + 13;
 
-    Vector v = get_random_data<T>(n,
-                                  std::numeric_limits<T>::min(),
-                                  std::numeric_limits<T>::max());
+    Vector v = get_random_data<T>(n, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
 
     v[0] = 1;
     v[1] = 0;
@@ -118,9 +118,8 @@ TYPED_TEST(IsSortedUntilVectorTests, TestIsSortedUntil)
     ASSERT_EQ_QUIET(v.end(), thrust::is_sorted_until(v.begin(), v.end()));
 }
 
-
-template<typename ForwardIterator>
-ForwardIterator is_sorted_until(my_system &system, ForwardIterator first, ForwardIterator)
+template <typename ForwardIterator>
+ForwardIterator is_sorted_until(my_system& system, ForwardIterator first, ForwardIterator)
 {
     system.validate_dispatch();
     return first;
@@ -136,8 +135,7 @@ TEST(IsSortedUntilTests, TestIsSortedUntilExplicit)
     ASSERT_EQ(true, sys.is_valid());
 }
 
-
-template<typename ForwardIterator>
+template <typename ForwardIterator>
 ForwardIterator is_sorted_until(my_tag, ForwardIterator first, ForwardIterator)
 {
     *first = 13;
@@ -148,8 +146,7 @@ TEST(IsSortedUntilTests, TestIsSortedUntilImplicit)
 {
     thrust::device_vector<int> vec(1);
 
-    thrust::is_sorted_until(thrust::retag<my_tag>(vec.begin()),
-                            thrust::retag<my_tag>(vec.end()));
+    thrust::is_sorted_until(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()));
 
     ASSERT_EQ(13, vec.front());
 }
