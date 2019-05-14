@@ -1378,7 +1378,7 @@ namespace placeholders
 
 /*! \p thrust::placeholders::_1 is the placeholder for the first function parameter.
  */
-#if defined(__CUDA_ARCH__) || defined(__HCC_ACCELERATOR__)
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 static const __device__ thrust::detail::functional::placeholder<0>::type _1;
 #else
 static const thrust::detail::functional::placeholder<0>::type _1;
@@ -1387,7 +1387,7 @@ static const thrust::detail::functional::placeholder<0>::type _1;
 
 /*! \p thrust::placeholders::_2 is the placeholder for the second function parameter.
  */
-#if defined(__CUDA_ARCH__) || defined(__HCC_ACCELERATOR__)
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 static const __device__ thrust::detail::functional::placeholder<1>::type _2;
 #else
 static const thrust::detail::functional::placeholder<1>::type _2;
@@ -1396,7 +1396,7 @@ static const thrust::detail::functional::placeholder<1>::type _2;
 
 /*! \p thrust::placeholders::_3 is the placeholder for the third function parameter.
  */
-#if defined(__CUDA_ARCH__) || defined(__HCC_ACCELERATOR__)
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 static const __device__ thrust::detail::functional::placeholder<2>::type _3;
 #else
 static const thrust::detail::functional::placeholder<2>::type _3;
@@ -1405,7 +1405,7 @@ static const thrust::detail::functional::placeholder<2>::type _3;
 
 /*! \p thrust::placeholders::_4 is the placeholder for the fourth function parameter.
  */
-#if defined(__CUDA_ARCH__) || defined(__HCC_ACCELERATOR__)
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 static const __device__ thrust::detail::functional::placeholder<3>::type _4;
 #else
 static const thrust::detail::functional::placeholder<3>::type _4;
@@ -1414,7 +1414,7 @@ static const thrust::detail::functional::placeholder<3>::type _4;
 
 /*! \p thrust::placeholders::_5 is the placeholder for the fifth function parameter.
  */
-#if defined(__CUDA_ARCH__) || defined(__HCC_ACCELERATOR__)
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 static const __device__ thrust::detail::functional::placeholder<4>::type _5;
 #else
 static const thrust::detail::functional::placeholder<4>::type _5;
@@ -1423,7 +1423,7 @@ static const thrust::detail::functional::placeholder<4>::type _5;
 
 /*! \p thrust::placeholders::_6 is the placeholder for the sixth function parameter.
  */
-#if defined(__CUDA_ARCH__) || defined(__HCC_ACCELERATOR__)
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 static const __device__ thrust::detail::functional::placeholder<5>::type _6;
 #else
 static const thrust::detail::functional::placeholder<5>::type _6;
@@ -1432,7 +1432,7 @@ static const thrust::detail::functional::placeholder<5>::type _6;
 
 /*! \p thrust::placeholders::_7 is the placeholder for the seventh function parameter.
  */
-#if defined(__CUDA_ARCH__) || defined(__HCC_ACCELERATOR__)
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 static const __device__ thrust::detail::functional::placeholder<6>::type _7;
 #else
 static const thrust::detail::functional::placeholder<6>::type _7;
@@ -1441,7 +1441,7 @@ static const thrust::detail::functional::placeholder<6>::type _7;
 
 /*! \p thrust::placeholders::_8 is the placeholder for the eighth function parameter.
  */
-#if defined(__CUDA_ARCH__) || defined(__HCC_ACCELERATOR__)
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 static const __device__ thrust::detail::functional::placeholder<7>::type _8;
 #else
 static const thrust::detail::functional::placeholder<7>::type _8;
@@ -1450,7 +1450,7 @@ static const thrust::detail::functional::placeholder<7>::type _8;
 
 /*! \p thrust::placeholders::_9 is the placeholder for the ninth function parameter.
  */
-#if defined(__CUDA_ARCH__) || defined(__HCC_ACCELERATOR__)
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 static const __device__ thrust::detail::functional::placeholder<8>::type _9;
 #else
 static const thrust::detail::functional::placeholder<8>::type _9;
@@ -1459,7 +1459,7 @@ static const thrust::detail::functional::placeholder<8>::type _9;
 
 /*! \p thrust::placeholders::_10 is the placeholder for the tenth function parameter.
  */
-#if defined(__CUDA_ARCH__) || defined(__HCC_ACCELERATOR__)
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 static const __device__ thrust::detail::functional::placeholder<9>::type _10;
 #else
 static const thrust::detail::functional::placeholder<9>::type _10;
@@ -1477,4 +1477,3 @@ static const thrust::detail::functional::placeholder<9>::type _10;
 
 #include <thrust/detail/functional.inl>
 #include <thrust/detail/functional/operators.h>
-

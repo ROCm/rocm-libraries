@@ -32,7 +32,7 @@
 
 #endif // __CUDACC__
 
-#ifdef __HCC__
+#if defined(__HCC__) || defined(__HIP__)
 #include <hip/hip_runtime.h>
 #endif
 
@@ -55,7 +55,7 @@
 #if   defined(_MSC_VER)
 #define THRUST_HOST_COMPILER THRUST_HOST_COMPILER_MSVC
 #define THRUST_DEPRECATED __declspec(deprecated)
-#elif defined(__clang__) || defined(__HCC__)
+#elif defined(__clang__)
 #define THRUST_HOST_COMPILER THRUST_HOST_COMPILER_CLANG
 #define THRUST_DEPRECATED __attribute__ ((deprecated))
 #define THRUST_CLANG_VERSION (__clang_major__ * 10000 + __clang_minor__ * 100 + __clang_patchlevel__)
@@ -79,7 +79,7 @@
 // CUDA-capable clang should behave similar to NVCC.
 #if defined(__CUDA__)
 #define THRUST_DEVICE_COMPILER THRUST_DEVICE_COMPILER_NVCC
-#elif defined(__HCC__)
+#elif defined(__HCC__) || defined(__HIP__)
 #define THRUST_DEVICE_COMPILER THRUST_DEVICE_COMPILER_HCC
 #else
 #define THRUST_DEVICE_COMPILER THRUST_DEVICE_COMPILER_CLANG
