@@ -35,8 +35,8 @@
 
 #define THRUST_UNUSED_VAR(expr) do { (void)(expr); } while (0)
 
-#ifdef __HCC__
-    #ifdef __HCC_ACCELERATOR__
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+    #ifdef __HIP_DEVICE_COMPILE__
         #define __THRUST_HAS_HIPRT__ 0
         #define THRUST_HIP_RUNTIME_FUNCTION __host__ __forceinline__
     #else
@@ -48,7 +48,7 @@
     #define THRUST_HIP_RUNTIME_FUNCTION __host__ __forceinline__
 #endif
 
-#ifdef __HCC_ACCELERATOR__
+#ifdef __HIP_DEVICE_COMPILE__
 #define THRUST_HIP_DEVICE_CODE
 #endif
 

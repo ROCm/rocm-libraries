@@ -41,7 +41,7 @@ __host__ __device__
                     std::ptrdiff_t n,
                     T *result)
 {
-#if !defined(__CUDA_ARCH__) && !defined(__HCC_ACCELERATOR__)
+#if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
   std::memmove(result, first, n * sizeof(T));
   return result + n;
 #else
@@ -54,4 +54,3 @@ __host__ __device__
 } // end namespace detail
 } // end namespace system
 } // end namespace thrust
-
