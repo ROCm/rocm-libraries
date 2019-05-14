@@ -614,12 +614,7 @@ hipError_t segmented_exclusive_scan(void * temporary_storage,
         rocprim::make_transform_iterator(
             rocprim::make_counting_iterator<size_t>(0),
             [input, head_flags, initial_value_converted, size]
-            #ifdef __HIP__
-            // Workaround: hip-clang does not support std::result_of of device-only functions
-            ROCPRIM_HOST_DEVICE
-            #else
             ROCPRIM_DEVICE
-            #endif
             (const size_t i)
             {
                 flag_type flag(false);

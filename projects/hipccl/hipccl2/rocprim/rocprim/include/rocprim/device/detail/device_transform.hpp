@@ -26,6 +26,7 @@
 
 #include "../../config.hpp"
 #include "../../detail/various.hpp"
+#include "../../detail/match_result_type.hpp"
 
 #include "../../intrinsics.hpp"
 #include "../../functional.hpp"
@@ -44,11 +45,7 @@ namespace detail
 template<class T1, class T2, class BinaryFunction>
 struct unpack_binary_op
 {
-    #ifdef __cpp_lib_is_invocable
-    using result_type = typename std::invoke_result<BinaryFunction, T1, T2>::type;
-    #else
-    using result_type = typename std::result_of<BinaryFunction(T1, T2)>::type;
-    #endif
+    using result_type = typename ::rocprim::detail::invoke_result<BinaryFunction, T1, T2>::type;
 
     ROCPRIM_HOST_DEVICE inline
     unpack_binary_op() = default;
