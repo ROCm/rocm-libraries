@@ -878,7 +878,6 @@ operator<<(std::basic_ostream<CharT, Traits>& os, const complex<T>& z);
  *  \param z The \p complex number to set.
  */
 template <typename T, typename CharT, typename Traits>
-__host__ __device__
 std::basic_istream<CharT, Traits>&
 operator>>(std::basic_istream<CharT, Traits>& is, complex<T>& z);
 
