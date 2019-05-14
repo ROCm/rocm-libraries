@@ -319,28 +319,54 @@ transform(execution_policy<Derived>& policy,
     if(num_items == 0)
         return result;
 
-    THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-        (rocprim::transform<rocprim::default_config, InputIt, OutputIt, TransformOp>)
-    );
-#if __THRUST_HAS_HIPRT__
+    // struct workaround is required for HIP-clang
+    // THRUST_HIP_PRESERVE_KERNELS_WORKAROUND is required for HCC
+    struct workaround
     {
-        hipStream_t stream     = hip_rocprim::stream(policy);
-        bool        debug_sync = THRUST_HIP_DEBUG_SYNC_FLAG;
-        hipError_t  status
-            = rocprim::transform(first, result, num_items, transform_op, stream, debug_sync);
-        hip_rocprim::throw_on_error(status, "transform failed");
-
-        return result + num_items;
-    }
-#else
-    {
-        (void)policy;
-        while(first != last)
+        __host__
+        static OutputIt par(execution_policy<Derived>& policy,
+                            InputIt                    first,
+                            InputIt                    last,
+                            OutputIt                   result,
+                            TransformOp                transform_op)
         {
-            *result++ = transform_op(raw_reference_cast(*first++));
+            size_type num_items    = static_cast<size_type>(thrust::distance(first, last));
+#if __HCC__ && __HIP_DEVICE_COMPILE__
+            THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+                (rocprim::transform<rocprim::default_config, InputIt, OutputIt, TransformOp>)
+            );
+            (void)policy;
+            (void)transform_op;
+#else
+            hipStream_t stream     = hip_rocprim::stream(policy);
+            bool        debug_sync = THRUST_HIP_DEBUG_SYNC_FLAG;
+            hipError_t  status
+                = rocprim::transform(first, result, num_items, transform_op, stream, debug_sync);
+            hip_rocprim::throw_on_error(status, "transform failed");
+#endif
+            return result + num_items;
         }
-        return result;
-    }
+
+        __device__
+        static OutputIt seq(execution_policy<Derived>& policy,
+                            InputIt                    first,
+                            InputIt                    last,
+                            OutputIt                   result,
+                            TransformOp                transform_op)
+        {
+            (void)policy;
+            while(first != last)
+            {
+                *result++ = transform_op(raw_reference_cast(*first++));
+            }
+            return result;
+        }
+    };
+
+#if __THRUST_HAS_HIPRT__
+    return workaround::par(policy, first, last, result, transform_op);
+#else
+    return workaround::seq(policy, first, last, result, transform_op);
 #endif
 } // func transform
 
