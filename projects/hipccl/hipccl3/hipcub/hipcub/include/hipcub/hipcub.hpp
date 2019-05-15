@@ -21,6 +21,8 @@
 #ifndef HIPCUB_HPP_
 #define HIPCUB_HPP_
 
+#define HIPCUB_MAIN_HEADER_INCLUDED
+
 /// \file
 ///
 /// Meta-header to include all hipCUB APIs.
