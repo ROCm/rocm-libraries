@@ -105,7 +105,7 @@ TYPED_TEST(TransformReduceIntegerPrimitiveTests, TestTransformReduce)
         T gpu_result = thrust::transform_reduce(
             d_data.begin(), d_data.end(), thrust::negate<T>(), init, thrust::plus<T>());
 
-        ASSERT_NEAR(cpu_result, gpu_result, std::abs(T(0.01 * cpu_result)));
+        ASSERT_EQ(cpu_result, gpu_result);
     }
 }
 
@@ -128,7 +128,7 @@ TYPED_TEST(TransformReduceIntegerPrimitiveTests, TestTransformReduceFromConst)
         T gpu_result = thrust::transform_reduce(
             d_data.cbegin(), d_data.cend(), thrust::negate<T>(), init, thrust::plus<T>());
 
-        ASSERT_NEAR(cpu_result, gpu_result, std::abs(T(0.01 * cpu_result)));
+        ASSERT_EQ(cpu_result, gpu_result);
     }
 }
 

@@ -23,7 +23,7 @@
 // such as __host__ and __device__, which may already be defined by thrust
 // and to undefine them before entering hip/hip_runtime_api.h (which will redefine them)
 
-#if(defined(__HCC__) && !defined(HIP_INCLUDE_HIP_HCC_DETAIL_HOST_DEFINES_H))
+#if !defined(HIP_INCLUDE_HIP_HCC_DETAIL_HOST_DEFINES_H)
 
 #ifdef __host__
 #undef __host__

@@ -36,7 +36,7 @@ template<typename DerivedPolicy>
 inline __host__ __device__
 void *malloc(execution_policy<DerivedPolicy> &, std::size_t n)
 {
-#if defined(__HCC__) && defined(__HIP_DEVICE_COMPILE__)
+#if defined(__HIP_DEVICE_COMPILE__)
   (void) n;
   return 0;
 #elif !defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 200)
@@ -52,7 +52,7 @@ template<typename DerivedPolicy, typename Pointer>
 inline __host__ __device__
 void free(sequential::execution_policy<DerivedPolicy> &, Pointer ptr)
 {
-#if defined(__HCC__) && defined(__HIP_DEVICE_COMPILE__)
+#if defined(__HIP_DEVICE_COMPILE__)
   (void) ptr;
 #elif !defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 200)
   std::free(thrust::raw_pointer_cast(ptr));
@@ -64,4 +64,3 @@ void free(sequential::execution_policy<DerivedPolicy> &, Pointer ptr)
 } // end detail
 } // end system
 } // end thrust
-
