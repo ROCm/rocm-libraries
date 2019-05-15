@@ -30,6 +30,12 @@
 #ifndef HIPCUB_CONFIG_HPP_
 #define HIPCUB_CONFIG_HPP_
 
+#ifndef HIPCUB_MAIN_HEADER_INCLUDED
+    // Unlike CUB, hipCUB does not support including particular headers,
+    // because it is a wrapper of two backends
+    #error "Include only the main header file: #include <hipcub/hipcub.hpp>"
+#endif
+
 #include <hip/hip_runtime.h>
 
 #define HIPCUB_NAMESPACE hipcub
