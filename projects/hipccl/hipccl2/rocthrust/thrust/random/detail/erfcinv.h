@@ -23,7 +23,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 /* sqrt(2pi) */
 static double s2pi = 2.50662827463100050242E0;
-static const double one_o_sqrt2 = (1/sqrt(2));
+static const double one_o_sqrt2 = (1/sqrt(2.0));
 
 /* approximation for 0 <= |y - 0.5| <= 3/8 */
 static double P0[5] = {

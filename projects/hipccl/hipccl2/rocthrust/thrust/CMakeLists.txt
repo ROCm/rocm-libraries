@@ -44,13 +44,6 @@ target_link_libraries(rocthrust
 #    hip::device
 )
 
-# TODO: Remove after the Rocprim HC API removal
-# We will use rocPRIM HIP API
-target_compile_definitions(rocthrust
-  INTERFACE
-    ROCPRIM_HIP_API=1
-)
-
 # Installation
 
 include(GNUInstallDirs)

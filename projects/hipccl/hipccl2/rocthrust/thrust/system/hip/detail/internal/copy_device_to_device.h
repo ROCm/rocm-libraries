@@ -40,7 +40,7 @@ namespace hip_rocprim
 namespace __copy
 {
     template <class Derived, class InputIt, class OutputIt>
-    OutputIt THRUST_HIP_HOST_FUNCTION
+    OutputIt THRUST_HIP_FUNCTION
     device_to_device(execution_policy<Derived>& policy,
                      InputIt                    first,
                      InputIt                    last,

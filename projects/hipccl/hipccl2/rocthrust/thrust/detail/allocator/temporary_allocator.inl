@@ -25,7 +25,7 @@
 #include <thrust/system/cuda/detail/terminate.h>
 #endif
 
-#ifdef __HCC__
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 #include <thrust/system/hip/detail/terminate.h>
 #endif
 
@@ -52,7 +52,7 @@ __host__ __device__
 
 #if defined(__CUDA_ARCH__)
     thrust::system::cuda::detail::terminate_with_message("temporary_buffer::allocate: get_temporary_buffer failed");
-#elif defined(__HCC_ACCELERATOR__)
+#elif defined(__HIP_DEVICE_COMPILE__)
     thrust::system::hip::detail::terminate_with_message("temporary_buffer::allocate: get_temporary_buffer failed");
 #else
     throw thrust::system::detail::bad_alloc("temporary_buffer::allocate: get_temporary_buffer failed");

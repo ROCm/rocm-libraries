@@ -27,9 +27,8 @@
 
 #define __thrust_forceinline__ __forceinline__
 
-#elif defined(__HCC__)
+#elif THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
-// STREAMHPC Should we add static?
 #define __thrust_forceinline__ __forceinline__
 
 #else
@@ -39,4 +38,3 @@
 #define __thrust_forceinline__
 
 #endif
-
