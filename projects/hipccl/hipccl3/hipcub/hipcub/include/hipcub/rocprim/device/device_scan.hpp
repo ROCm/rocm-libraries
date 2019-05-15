@@ -54,7 +54,7 @@ public:
     {
         return InclusiveScan(
             d_temp_storage, temp_storage_bytes,
-            d_in, d_out, num_items, ::hipcub::Sum(),
+            d_in, d_out, ::hipcub::Sum(), num_items, 
             stream, debug_synchronous
         );
     }
@@ -98,7 +98,7 @@ public:
         using T = typename std::iterator_traits<InputIteratorT>::value_type;
         return ExclusiveScan(
             d_temp_storage, temp_storage_bytes,
-            d_in, d_out, T(0), num_items, ::hipcub::Sum(),
+            d_in, d_out, ::hipcub::Sum(), T(0), num_items,
             stream, debug_synchronous
         );
     }
