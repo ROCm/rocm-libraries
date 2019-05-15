@@ -74,6 +74,14 @@ find_package(hipcub REQUIRED CONFIG PATHS "/opt/rocm/hipcub")
 target_link_libraries(<your_target> hip::hipcub)
 ```
 
+Include only the main header file:
+
+```cpp
+#include <hipcub/hipcub.hpp>
+```
+
+CUB or rocPRIM headers are included by hipCUB depending on the current HIP platform.
+
 ## Running Unit Tests
 
 ```shell

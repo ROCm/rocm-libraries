@@ -32,6 +32,8 @@
 
 #include "../../config.hpp"
 
+#include "../util_type.hpp"
+
 BEGIN_HIPCUB_NAMESPACE
 
 struct Equality
