@@ -21,6 +21,7 @@
 #include "test_header.hpp"
 
 TESTS_DEFINE(MaxElementTests, FullTestsParams);
+TESTS_DEFINE(MaxElementPrimitiveTests, NumericalTestsParams);
 
 TYPED_TEST(MaxElementTests, TestMaxElementSimple)
 {
@@ -71,10 +72,9 @@ TYPED_TEST(MaxElementTests, TestMaxElementWithTransform)
         -5);
 }
 
-TYPED_TEST(MaxElementTests, TestMaxElement)
+TYPED_TEST(MaxElementPrimitiveTests, TestMaxElement)
 {
-    using Vector = typename TestFixture::input_type;
-    using T      = typename Vector::value_type;
+    using T = typename TestFixture::input_type;
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)

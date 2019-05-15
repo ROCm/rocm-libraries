@@ -67,7 +67,7 @@ template<typename Derived>
 };
 
 
-#if defined(__CUDA_ARCH__) || defined(__HCC_ACCELERATOR__)
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 static const __device__ tag seq;
 #else
 static const tag seq;
@@ -78,4 +78,3 @@ static const tag seq;
 } // end detail
 } // end system
 } // end thrust
-
