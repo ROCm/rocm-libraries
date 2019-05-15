@@ -26,6 +26,7 @@
 
 TESTS_DEFINE(ForEachTests, SignedIntegerTestsParams)
 TESTS_DEFINE(ForEachVectorTests, FullTestsParams)
+TESTS_DEFINE(ForEachPrimitiveTests, NumericalTestsParams);
 
 template <typename T>
 struct mark_processed_functor
@@ -319,10 +320,9 @@ TEST(ForEachVectorTests, TestForEachNSimpleAnySystem)
     ASSERT_EQ_QUIET(result, thrust::make_counting_iterator(5));
 }
 
-TYPED_TEST(ForEachVectorTests, TestForEach)
+TYPED_TEST(ForEachPrimitiveTests, TestForEach)
 {
-    using Vector = typename TestFixture::input_type;
-    using T      = typename Vector::value_type;
+    using T = typename TestFixture::input_type;
 
     for(auto size : get_sizes())
     {
@@ -356,10 +356,9 @@ TYPED_TEST(ForEachVectorTests, TestForEach)
     }
 }
 
-TYPED_TEST(ForEachVectorTests, TestForEachN)
+TYPED_TEST(ForEachPrimitiveTests, TestForEachN)
 {
-    using Vector = typename TestFixture::input_type;
-    using T      = typename Vector::value_type;
+    using T = typename TestFixture::input_type;
 
     for(auto size : get_sizes())
     {

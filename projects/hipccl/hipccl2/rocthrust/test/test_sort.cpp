@@ -51,6 +51,7 @@ typedef ::testing::Types<ParamsSort<unsigned short, int, thrust::less<unsigned s
 TYPED_TEST_CASE(SortTests, SortTestsParams);
 
 TESTS_DEFINE(SortVector, FullTestsParams);
+TESTS_DEFINE(SortVectorPrimitives, NumericalTestsParams);
 
 TYPED_TEST(SortTests, Sort)
 {
@@ -282,10 +283,9 @@ TYPED_TEST(SortVector, TestSortSimple)
     ASSERT_EQ(unsorted_keys, sorted_keys);
 }
 
-TYPED_TEST(SortVector, TestSortAscendingKey)
+TYPED_TEST(SortVectorPrimitives, TestSortAscendingKey)
 {
-    using Vector = typename TestFixture::input_type;
-    using T      = typename Vector::value_type;
+    using T = typename TestFixture::input_type;
 
     for(auto size : get_sizes())
     {

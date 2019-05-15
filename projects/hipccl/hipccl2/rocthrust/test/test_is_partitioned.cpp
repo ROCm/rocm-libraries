@@ -95,7 +95,7 @@ __host__ __device__ bool is_partitioned(my_system& system, InputIterator, InputI
     return false;
 }
 
-TYPED_TEST(IsPartitionedTests, TestIsPartitionedDispatchExplicit)
+TEST(IsPartitionedTests, TestIsPartitionedDispatchExplicit)
 {
     thrust::device_vector<int> vec(1);
 
@@ -112,7 +112,7 @@ __host__ __device__ bool is_partitioned(my_tag, InputIterator first, InputIterat
     return false;
 }
 
-TYPED_TEST(IsPartitionedTests, TestIsPartitionedDispatchImplicit)
+TEST(IsPartitionedTests, TestIsPartitionedDispatchImplicit)
 {
     thrust::device_vector<int> vec(1);
 

@@ -149,8 +149,7 @@ TYPED_TEST(ReduceByKeysTests, TestReduceByKeySimple)
 
 TYPED_TEST(ReduceByKeysIntegralTests, TestReduceByKey)
 {
-    using K = typename TestFixture::input_type;
-    ; // key type
+    using K = typename TestFixture::input_type; // key type
     typedef unsigned int V; // value type
 
     const std::vector<size_t> sizes = get_sizes();
@@ -204,8 +203,7 @@ TYPED_TEST(ReduceByKeysIntegralTests, TestReduceByKey)
 
 TYPED_TEST(ReduceByKeysIntegralTests, TestReduceByKeyToDiscardIterator)
 {
-    using V = typename TestFixture::input_type;
-    ; // value type
+    using V = typename TestFixture::input_type; // value type
     typedef unsigned int K; // key type
 
     const std::vector<size_t> sizes = get_sizes();
@@ -268,7 +266,7 @@ thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(my_system& system,
     return thrust::make_pair(keys_output, values_output);
 }
 
-TYPED_TEST(ReduceByKeysTests, TestReduceByKeyDispatchExplicit)
+TEST(ReduceByKeysTests, TestReduceByKeyDispatchExplicit)
 {
     thrust::device_vector<int> vec(1);
 
@@ -293,7 +291,7 @@ thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(my_tag,
     return thrust::make_pair(keys_output, values_output);
 }
 
-TYPED_TEST(ReduceByKeysTests, TestReduceByKeyDispatchImplicit)
+TEST(ReduceByKeysTests, TestReduceByKeyDispatchImplicit)
 {
     thrust::device_vector<int> vec(1);
 
