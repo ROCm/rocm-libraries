@@ -26,7 +26,7 @@ cmake_minimum_required(VERSION 3.5.1 FATAL_ERROR)
 set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended onto install directories")
 
 # rocPRIM project
-project(rocprim VERSION 1.0.2.0 LANGUAGES CXX)
+project(rocprim LANGUAGES CXX)
 
 # CMake modules
 list(APPEND CMAKE_MODULE_PATH
@@ -71,6 +71,17 @@ include(cmake/Dependencies.cmake)
 
 # AMD targets
 set(AMDGPU_TARGETS gfx803;gfx900;gfx906 CACHE STRING "List of specific machine types for library to target")
+
+# Setup VERSION
+set ( VERSION_STRING "2.5.0." )
+
+# Check if BUILD_NUMBER is defined in a Jenkins envirnment
+if ($ENV{BUILD_NUMBER} )
+  string(CONCAT BUILD_VERSION ${VERSION_STRING} $ENV{BUILD_NUMBER})
+else ()
+  string(CONCAT BUILD_VERSION ${VERSION_STRING} "0")
+endif ()
+rocm_setup_version( VERSION ${BUILD_VERSION} NO_GIT_TAG_VERSION )
 
 # Print configuration summary
 include(cmake/Summary.cmake)
