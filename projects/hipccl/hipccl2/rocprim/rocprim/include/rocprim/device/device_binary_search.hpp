@@ -74,12 +74,7 @@ hipError_t binary_search(void * temporary_storage,
         needles, output,
         needles_size,
         [haystack, haystack_size, search_op, compare_op]
-        #ifdef __HIP__
-        // Workaround: hip-clang does not support std::result_of of device-only functions
-        ROCPRIM_HOST_DEVICE
-        #else
         ROCPRIM_DEVICE
-        #endif
         (const value_type& value)
         {
             return search_op(haystack, haystack_size, value, compare_op);

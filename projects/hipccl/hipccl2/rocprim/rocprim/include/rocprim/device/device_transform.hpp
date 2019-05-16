@@ -26,6 +26,7 @@
 
 #include "../config.hpp"
 #include "../detail/various.hpp"
+#include "../detail/match_result_type.hpp"
 #include "../types/tuple.hpp"
 #include "../iterator/zip_iterator.hpp"
 
@@ -145,11 +146,7 @@ hipError_t transform(InputIterator input,
                      bool debug_synchronous = false)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    #ifdef __cpp_lib_is_invocable
-    using result_type = typename std::invoke_result<UnaryFunction, input_type>::type;
-    #else
-    using result_type = typename std::result_of<UnaryFunction(input_type)>::type;
-    #endif
+    using result_type = typename ::rocprim::detail::invoke_result<UnaryFunction, input_type>::type;
 
     // Get default config if Config is default_config
     using config = detail::default_or_custom_config<
