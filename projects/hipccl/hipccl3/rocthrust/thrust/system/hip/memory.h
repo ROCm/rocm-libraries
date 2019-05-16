@@ -24,11 +24,11 @@
 #include <hip/hip_runtime.h>
 
 #include <ostream>
-#include <thrust/detail/allocator/malloc_allocator.h>
 #include <thrust/detail/config.h>
-#include <thrust/detail/type_traits.h>
-#include <thrust/memory.h>
 #include <thrust/system/hip/execution_policy.h>
+#include <thrust/memory.h>
+#include <thrust/detail/type_traits.h>
+#include <thrust/detail/allocator/malloc_allocator.h>
 
 BEGIN_NS_THRUST
 namespace hip_rocprim
@@ -67,15 +67,6 @@ namespace hip_rocprim
 template <typename Element>
 class reference;
 
-// STREAMHPC Not needed for HIP
-// // XXX nvcc + msvc have trouble instantiating reference below
-// //     this is a workaround
-// template <typename Element>
-// struct reference_msvc_workaround
-// {
-//   typedef thrust::hip_rocprim::reference<Element> type;
-// };    // end reference_msvc_workaround
-
 template <typename T>
 class pointer : public thrust::pointer<T,
                                        thrust::hip_rocprim::tag,
@@ -86,7 +77,7 @@ class pointer : public thrust::pointer<T,
 private:
     typedef thrust::pointer<T,
                             thrust::hip_rocprim::tag,
-                            typename reference_msvc_workaround<T>::type,
+                            thrust::hip_rocprim::reference<T>,
                             thrust::hip_rocprim::pointer<T>>
         super_t;
 

@@ -16,35 +16,182 @@
  */
 
 #include <thrust/binary_search.h>
+#include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/retag.h>
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
 
 #include "test_header.hpp"
 
+TESTS_DEFINE(BinarySearchTestsInKernel, NumericalTestsParams);
+
+struct custom_less
+{
+    template<class T>
+    __device__ inline
+    bool operator()(T a, T b)
+    {
+        return a < b;
+    }
+};
+
+template<class T>
+__global__
+void lower_bound_kernel(size_t n,
+                        T* input,
+                        ptrdiff_t* output)
+{
+    output[0] = thrust::lower_bound(thrust::device, input, input + n, T(0), custom_less()) - input;
+    output[1] = thrust::lower_bound(thrust::device, input, input + n, T(1)) - input;
+    output[2] = thrust::lower_bound(thrust::device, input, input + n, T(2)) - input;
+    output[3] = thrust::lower_bound(thrust::device, input, input + n, T(3)) - input;
+    output[4] = thrust::lower_bound(thrust::device, input, input + n, T(4), custom_less()) - input;
+    output[5] = thrust::lower_bound(thrust::device, input, input + n, T(5)) - input;
+    output[6] = thrust::lower_bound(thrust::device, input, input + n, T(6)) - input;
+    output[7] = thrust::lower_bound(thrust::device, input, input + n, T(7)) - input;
+    output[8] = thrust::lower_bound(thrust::device, input, input + n, T(8)) - input;
+    output[9] = thrust::lower_bound(thrust::device, input, input + n, T(9), custom_less()) - input;
+}
+
+TYPED_TEST(BinarySearchTestsInKernel, TestLowerBound)
+{
+    using T = typename TestFixture::input_type;
+
+    thrust::device_vector<T> d_input(5);
+    d_input[0] = 0;
+    d_input[1] = 2;
+    d_input[2] = 5;
+    d_input[3] = 7;
+    d_input[4] = 8;
+
+    thrust::device_vector<ptrdiff_t> d_output(10);
+
+    hipLaunchKernelGGL(
+        HIP_KERNEL_NAME(lower_bound_kernel),
+        dim3(1), dim3(1), 0, 0,
+        size_t(d_input.size()),
+        thrust::raw_pointer_cast(d_input.data()),
+        thrust::raw_pointer_cast(d_output.data())
+    );
+
+    thrust::host_vector<ptrdiff_t> output = d_output;
+    ASSERT_EQ(output[0], 0);
+    ASSERT_EQ(output[1], 1);
+    ASSERT_EQ(output[2], 1);
+    ASSERT_EQ(output[3], 2);
+    ASSERT_EQ(output[4], 2);
+    ASSERT_EQ(output[5], 2);
+    ASSERT_EQ(output[6], 3);
+    ASSERT_EQ(output[7], 3);
+    ASSERT_EQ(output[8], 4);
+    ASSERT_EQ(output[9], 5);
+}
+
+template<class T>
+__global__
+void upper_bound_kernel(size_t n,
+                        T* input,
+                        ptrdiff_t* output)
+{
+    output[0] = thrust::upper_bound(thrust::device, input, input + n, T(0)) - input;
+    output[1] = thrust::upper_bound(thrust::device, input, input + n, T(1)) - input;
+    output[2] = thrust::upper_bound(thrust::device, input, input + n, T(2)) - input;
+    output[3] = thrust::upper_bound(thrust::device, input, input + n, T(3)) - input;
+    output[4] = thrust::upper_bound(thrust::device, input, input + n, T(4)) - input;
+    output[5] = thrust::upper_bound(thrust::device, input, input + n, T(5)) - input;
+    output[6] = thrust::upper_bound(thrust::device, input, input + n, T(6)) - input;
+    output[7] = thrust::upper_bound(thrust::device, input, input + n, T(7)) - input;
+    output[8] = thrust::upper_bound(thrust::device, input, input + n, T(8)) - input;
+    output[9] = thrust::upper_bound(thrust::device, input, input + n, T(9)) - input;
+}
+
+TYPED_TEST(BinarySearchTestsInKernel, TestUpperBound)
+{
+    using T = typename TestFixture::input_type;
+
+    thrust::device_vector<T> d_input(5);
+    d_input[0] = 0;
+    d_input[1] = 2;
+    d_input[2] = 5;
+    d_input[3] = 7;
+    d_input[4] = 8;
+
+    thrust::device_vector<ptrdiff_t> d_output(10);
+
+    hipLaunchKernelGGL(
+        HIP_KERNEL_NAME(upper_bound_kernel),
+        dim3(1), dim3(1), 0, 0,
+        size_t(d_input.size()),
+        thrust::raw_pointer_cast(d_input.data()),
+        thrust::raw_pointer_cast(d_output.data())
+    );
+
+    thrust::host_vector<ptrdiff_t> output = d_output;
+    ASSERT_EQ(output[0], 1);
+    ASSERT_EQ(output[1], 1);
+    ASSERT_EQ(output[2], 2);
+    ASSERT_EQ(output[3], 2);
+    ASSERT_EQ(output[4], 2);
+    ASSERT_EQ(output[5], 3);
+    ASSERT_EQ(output[6], 3);
+    ASSERT_EQ(output[7], 4);
+    ASSERT_EQ(output[8], 5);
+    ASSERT_EQ(output[9], 5);
+}
+
+template<class T>
+__global__
+void binary_search_kernel(size_t n,
+                          T* input,
+                          bool* output)
+{
+    output[0] = thrust::binary_search(thrust::device, input, input + n, T(0));
+    output[1] = thrust::binary_search(thrust::device, input, input + n, T(1));
+    output[2] = thrust::binary_search(thrust::device, input, input + n, T(2));
+    output[3] = thrust::binary_search(thrust::device, input, input + n, T(3));
+    output[4] = thrust::binary_search(thrust::device, input, input + n, T(4));
+    output[5] = thrust::binary_search(thrust::device, input, input + n, T(5));
+    output[6] = thrust::binary_search(thrust::device, input, input + n, T(6));
+    output[7] = thrust::binary_search(thrust::device, input, input + n, T(7));
+    output[8] = thrust::binary_search(thrust::device, input, input + n, T(8));
+    output[9] = thrust::binary_search(thrust::device, input, input + n, T(9));
+}
+
+TYPED_TEST(BinarySearchTestsInKernel, TestBinarySearch)
+{
+    using T = typename TestFixture::input_type;
+
+    thrust::device_vector<T> d_input(5);
+    d_input[0] = 0;
+    d_input[1] = 2;
+    d_input[2] = 5;
+    d_input[3] = 7;
+    d_input[4] = 8;
+
+    thrust::device_vector<bool> d_output(10);
+
+    hipLaunchKernelGGL(
+        HIP_KERNEL_NAME(binary_search_kernel),
+        dim3(1), dim3(1), 0, 0,
+        size_t(d_input.size()),
+        thrust::raw_pointer_cast(d_input.data()),
+        thrust::raw_pointer_cast(d_output.data())
+    );
+
+    thrust::host_vector<bool> output = d_output;
+    ASSERT_EQ(output[0], true);
+    ASSERT_EQ(output[1], false);
+    ASSERT_EQ(output[2], true);
+    ASSERT_EQ(output[3], false);
+    ASSERT_EQ(output[4], false);
+    ASSERT_EQ(output[5], true);
+    ASSERT_EQ(output[6], false);
+    ASSERT_EQ(output[7], true);
+    ASSERT_EQ(output[8], true);
+    ASSERT_EQ(output[9], false);
+}
+
 TESTS_DEFINE(BinarySearchTests, FullTestsParams);
-
-// TODO: Check the compiler error
-//#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-//__global__ void kern(int N,
-//                     float* inp,
-//                     float val)
-//{
-//    auto low_bound = thrust::lower_bound(thrust::device, inp, inp + N, val);
-//}
-//
-//TEST(BinarySearchTests, TestLoweBoundInKernel)
-//{
-//    float * input_device;
-//    hipMalloc(&input_device, sizeof(float)*6);
-//    float value = 5;
-//
-//    hipLaunchKernelGGL(HIP_KERNEL_NAME(kern), dim3(1), dim3(1), 0,0,6, input_device, value);
-//
-//    hipFree(input_device);
-//}
-//#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-
 
 __THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_BEGIN
 
