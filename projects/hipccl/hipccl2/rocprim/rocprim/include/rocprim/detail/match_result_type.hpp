@@ -24,38 +24,85 @@
 #include <type_traits>
 
 #include "../config.hpp"
-#include "../types/tuple.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-// tuple_contains_type::value is false if Tuple is not rocprim::tuple<> or Tuple is
-// rocprim::tuple<> class which does not contain element of type T; otherwise it's true.
-template<class T, class Tuple>
-struct tuple_contains_type : std::false_type {};
+// invoke_result is based on https://en.cppreference.com/w/cpp/types/result_of
+// The main difference is using ROCPRIM_HOST_DEVICE, this allows to
+// use invoke_result with device-only lambdas/functors in host-only functions
+// on HIP-clang.
+
+template <class T>
+struct is_reference_wrapper : std::false_type {};
+template <class U>
+struct is_reference_wrapper<std::reference_wrapper<U>> : std::true_type {};
 
 template<class T>
-struct tuple_contains_type<T, ::rocprim::tuple<>> : std::false_type {};
+struct invoke_impl {
+    template<class F, class... Args>
+    ROCPRIM_HOST_DEVICE
+    static auto call(F&& f, Args&&... args)
+        -> decltype(std::forward<F>(f)(std::forward<Args>(args)...));
+};
 
-template<class T, class U, class... Ts>
-struct tuple_contains_type<T, ::rocprim::tuple<U, Ts...>> : tuple_contains_type<T, ::rocprim::tuple<Ts...>> {};
+template<class B, class MT>
+struct invoke_impl<MT B::*>
+{
+    template<class T, class Td = typename std::decay<T>::type,
+        class = typename std::enable_if<std::is_base_of<B, Td>::value>::type
+    >
+    ROCPRIM_HOST_DEVICE
+    static auto get(T&& t) -> T&&;
 
-template<class T, class... Ts>
-struct tuple_contains_type<T, ::rocprim::tuple<T, Ts...>> : std::true_type {};
+    template<class T, class Td = typename std::decay<T>::type,
+        class = typename std::enable_if<is_reference_wrapper<Td>::value>::type
+    >
+    ROCPRIM_HOST_DEVICE
+    static auto get(T&& t) -> decltype(t.get());
+
+    template<class T, class Td = typename std::decay<T>::type,
+        class = typename std::enable_if<!std::is_base_of<B, Td>::value>::type,
+        class = typename std::enable_if<!is_reference_wrapper<Td>::value>::type
+    >
+    ROCPRIM_HOST_DEVICE
+    static auto get(T&& t) -> decltype(*std::forward<T>(t));
+
+    template<class T, class... Args, class MT1,
+        class = typename std::enable_if<std::is_function<MT1>::value>::type
+    >
+    ROCPRIM_HOST_DEVICE
+    static auto call(MT1 B::*pmf, T&& t, Args&&... args)
+        -> decltype((invoke_impl::get(std::forward<T>(t)).*pmf)(std::forward<Args>(args)...));
+
+    template<class T>
+    ROCPRIM_HOST_DEVICE
+    static auto call(MT B::*pmd, T&& t)
+        -> decltype(invoke_impl::get(std::forward<T>(t)).*pmd);
+};
+
+template<class F, class... Args, class Fd = typename std::decay<F>::type>
+ROCPRIM_HOST_DEVICE
+auto INVOKE(F&& f, Args&&... args)
+    -> decltype(invoke_impl<Fd>::call(std::forward<F>(f), std::forward<Args>(args)...));
+
+// Conforming C++14 implementation (is also a valid C++11 implementation):
+template <typename AlwaysVoid, typename, typename...>
+struct invoke_result_impl { };
+template <typename F, typename...Args>
+struct invoke_result_impl<decltype(void(INVOKE(std::declval<F>(), std::declval<Args>()...))), F, Args...>
+{
+    using type = decltype(INVOKE(std::declval<F>(), std::declval<Args>()...));
+};
+
+template <class F, class... ArgTypes>
+struct invoke_result : invoke_result_impl<void, F, ArgTypes...> {};
 
 template<class InputType, class BinaryFunction>
 struct match_result_type
 {
-private:
-    #ifdef __cpp_lib_is_invocable
-    using binary_result_type = typename std::invoke_result<BinaryFunction, InputType, InputType>::type;
-    #else
-    using binary_result_type = typename std::result_of<BinaryFunction(InputType, InputType)>::type;
-    #endif
-
-public:
-    using type = binary_result_type;
+    using type = typename invoke_result<BinaryFunction, InputType, InputType>::type;
 };
 
 } // end namespace detail

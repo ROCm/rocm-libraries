@@ -26,6 +26,7 @@
 #include <type_traits>
 
 #include "../config.hpp"
+#include "../detail/match_result_type.hpp"
 
 /// \addtogroup iteratormodule
 /// @{
@@ -49,17 +50,10 @@ BEGIN_ROCPRIM_NAMESPACE
 template<
     class InputIterator,
     class UnaryFunction,
-#if defined(__cpp_lib_is_invocable) && !defined(DOXYGEN_SHOULD_SKIP_THIS) // C++17
     class ValueType =
-        typename std::invoke_result<
+        typename ::rocprim::detail::invoke_result<
             UnaryFunction, typename std::iterator_traits<InputIterator>::value_type
         >::type
-#else
-    class ValueType =
-        typename std::result_of<
-            UnaryFunction(typename std::iterator_traits<InputIterator>::value_type)
-        >::type
-#endif
 >
 class transform_iterator
 {
