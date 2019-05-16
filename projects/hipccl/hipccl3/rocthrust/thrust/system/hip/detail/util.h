@@ -104,7 +104,7 @@ trivial_copy_device_to_device(Policy& policy, Type* dst, Type const* src, size_t
 inline void __host__ __device__ terminate()
 {
 #ifdef __HIP_DEVICE_COMPILE__
-    asm("trap;");
+    abort();
 #else
     std::terminate();
 #endif
