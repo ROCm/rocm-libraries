@@ -29,6 +29,16 @@ struct Foo
     {
     }
 
+    __host__ __device__
+    ~Foo(void)
+    {
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+        // __device__ overload
+        if(set_me_upon_destruction != 0)
+            *set_me_upon_destruction = true;
+#endif
+    }
+
     bool* set_me_upon_destruction;
 };
 
@@ -44,7 +54,7 @@ TEST(DeviceDelete, TestDeviceDeleteDestructorInvocation)
 
     ASSERT_EQ(false, destructor_flag[0]);
 
-    // TODO: Known failure
-    //thrust::device_delete(foo_ptr);
-    //ASSERT_EQ(true, destructor_flag[0]);
+    thrust::device_delete(foo_ptr);
+
+    ASSERT_EQ(true, destructor_flag[0]);
 }
