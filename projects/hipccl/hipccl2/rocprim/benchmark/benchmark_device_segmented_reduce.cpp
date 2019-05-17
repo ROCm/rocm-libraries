@@ -186,6 +186,13 @@ benchmark::RegisterBenchmark( \
     SEGMENTS, stream, size \
 )
 
+#define BENCHMARK_TYPE(type) \
+    CREATE_BENCHMARK(type, 1), \
+    CREATE_BENCHMARK(type, 10), \
+    CREATE_BENCHMARK(type, 100), \
+    CREATE_BENCHMARK(type, 1000), \
+    CREATE_BENCHMARK(type, 10000)
+
 void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                     hipStream_t stream,
                     size_t size)
@@ -195,33 +202,14 @@ void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
 
     std::vector<benchmark::internal::Benchmark*> bs =
     {
-        CREATE_BENCHMARK(float, 1),
-        CREATE_BENCHMARK(float, 10),
-        CREATE_BENCHMARK(float, 100),
-        CREATE_BENCHMARK(float, 1000),
-        CREATE_BENCHMARK(float, 10000),
-        CREATE_BENCHMARK(float, 100000),
-
-        CREATE_BENCHMARK(double, 1),
-        CREATE_BENCHMARK(double, 10),
-        CREATE_BENCHMARK(double, 100),
-        CREATE_BENCHMARK(double, 1000),
-        CREATE_BENCHMARK(double, 10000),
-        CREATE_BENCHMARK(double, 100000),
-
-        CREATE_BENCHMARK(custom_float2, 1),
-        CREATE_BENCHMARK(custom_float2, 10),
-        CREATE_BENCHMARK(custom_float2, 100),
-        CREATE_BENCHMARK(custom_float2, 1000),
-        CREATE_BENCHMARK(custom_float2, 10000),
-        CREATE_BENCHMARK(custom_float2, 100000),
-
-        CREATE_BENCHMARK(custom_double2, 1),
-        CREATE_BENCHMARK(custom_double2, 10),
-        CREATE_BENCHMARK(custom_double2, 100),
-        CREATE_BENCHMARK(custom_double2, 1000),
-        CREATE_BENCHMARK(custom_double2, 10000),
-        CREATE_BENCHMARK(custom_double2, 100000),
+        BENCHMARK_TYPE(float),
+        BENCHMARK_TYPE(double),
+        BENCHMARK_TYPE(int8_t),
+        BENCHMARK_TYPE(uint8_t),
+        BENCHMARK_TYPE(rocprim::half),
+        BENCHMARK_TYPE(int),
+        BENCHMARK_TYPE(custom_float2),
+        BENCHMARK_TYPE(custom_double2),
     };
 
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());

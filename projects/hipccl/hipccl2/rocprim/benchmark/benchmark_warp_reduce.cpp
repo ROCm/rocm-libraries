@@ -212,6 +212,12 @@ benchmark::RegisterBenchmark( \
     stream, size \
 )
 
+#define BENCHMARK_TYPE(type) \
+    CREATE_BENCHMARK(type, 32, 64), \
+    CREATE_BENCHMARK(type, 37, 64), \
+    CREATE_BENCHMARK(type, 61, 64), \
+    CREATE_BENCHMARK(type, 64, 64)
+
 template<bool AllReduce, bool Segmented>
 void add_benchmarks(const std::string& name,
                     std::vector<benchmark::internal::Benchmark*>& benchmarks,
@@ -220,12 +226,12 @@ void add_benchmarks(const std::string& name,
 {
     std::vector<benchmark::internal::Benchmark*> bs =
     {
-        CREATE_BENCHMARK(int, 32, 64),
-        CREATE_BENCHMARK(int, 64, 64),
-        CREATE_BENCHMARK(int, 37, 64),
-        CREATE_BENCHMARK(int, 61, 64),
-        CREATE_BENCHMARK(double, 64, 64),
-        CREATE_BENCHMARK(double, 61, 64)
+        BENCHMARK_TYPE(int),
+        BENCHMARK_TYPE(float),
+        BENCHMARK_TYPE(double),
+        BENCHMARK_TYPE(int8_t),
+        BENCHMARK_TYPE(uint8_t),
+        BENCHMARK_TYPE(rocprim::half)
     };
 
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());

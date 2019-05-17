@@ -175,6 +175,17 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
         stream, size \
     )
 
+#define BENCHMARK_TYPE(type) \
+    CREATE_SORT_BENCHMARK(type, 64, 64), \
+    CREATE_SORT_BENCHMARK(type, 128, 64), \
+    CREATE_SORT_BENCHMARK(type, 256, 64), \
+    CREATE_SORT_BENCHMARK(type, 64, 32), \
+    CREATE_SORT_BENCHMARK(type, 64, 16)
+
+#define BENCHMARK_KEY_TYPE(type, value) \
+    CREATE_SORTBYKEY_BENCHMARK(type, value, 64, 64), \
+    CREATE_SORTBYKEY_BENCHMARK(type, value, 256, 64)
+
 int main(int argc, char *argv[])
 {
     cli::Parser parser(argc, argv);
@@ -199,26 +210,20 @@ int main(int argc, char *argv[])
     using custom_int_double = custom_type<int, double>;
     std::vector<benchmark::internal::Benchmark*> benchmarks =
     {
-        // key type, block size, warp size
-        CREATE_SORT_BENCHMARK(float, 64, 64),
-        CREATE_SORT_BENCHMARK(float, 128, 64),
-        CREATE_SORT_BENCHMARK(float, 256, 64),
-        CREATE_SORT_BENCHMARK(float, 64, 32),
-        CREATE_SORT_BENCHMARK(float, 64, 16),
+        BENCHMARK_TYPE(int),
+        BENCHMARK_TYPE(float),
+        BENCHMARK_TYPE(double),
+        BENCHMARK_TYPE(int8_t),
+        BENCHMARK_TYPE(uint8_t),
+        BENCHMARK_TYPE(rocprim::half),
 
-        CREATE_SORT_BENCHMARK(int, 64, 64),
-        CREATE_SORT_BENCHMARK(double, 64, 64),
-        CREATE_SORT_BENCHMARK(custom_double2, 64, 64),
-        CREATE_SORT_BENCHMARK(custom_int_double , 64, 64),
-
-        // key type, value type, block size, warp size
-        CREATE_SORTBYKEY_BENCHMARK(float, float, 64, 64),
-        CREATE_SORTBYKEY_BENCHMARK(float, float, 256, 64),
-
-        CREATE_SORTBYKEY_BENCHMARK(unsigned int, int, 64, 64),
-        CREATE_SORTBYKEY_BENCHMARK(int, double, 64, 64),
-        CREATE_SORTBYKEY_BENCHMARK(int, custom_double2, 64, 64),
-        CREATE_SORTBYKEY_BENCHMARK(int, custom_int_double, 64, 64),
+        BENCHMARK_KEY_TYPE(float, float),
+        BENCHMARK_KEY_TYPE(unsigned int, int),
+        BENCHMARK_KEY_TYPE(int, custom_double2),
+        BENCHMARK_KEY_TYPE(int, custom_int_double),
+        BENCHMARK_KEY_TYPE(int8_t, int8_t),
+        BENCHMARK_KEY_TYPE(uint8_t, uint8_t),
+        BENCHMARK_KEY_TYPE(rocprim::half, rocprim::half)
     };
 
     // Use manual timing
