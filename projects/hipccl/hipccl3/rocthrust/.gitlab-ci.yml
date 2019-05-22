@@ -83,35 +83,35 @@ build:rocm:
 
 include: '.gitlab-ci-gputest.yml'
 
-# test:rocm_package:
-#   stage: test
-#   tags:
-#     - rocm
-#   variables:
-#     SUDO_CMD: "sudo -E"
-#   dependencies:
-#     - build:rocm
-#   script:
-#     # Install rocPRIM package
-#     - echo ${ROCPRIM_GIT_URL}
-#     - echo $ROCPRIM_GIT_URL
-#     - git clone -b develop_stream https://gitlab-ci-token:${CI_JOB_TOKEN}@${ROCPRIM_GIT_URL}
-#     - cd rocPRIM
-#     - mkdir build
-#     - cd build
-#     - CXX=hcc cmake -DBUILD_TEST=OFF ../.
-#     - make package
-#     - $SUDO_CMD dpkg -i rocprim-*.deb
-#     - cd ../..
-#     # rocThrust
-#     - cd build
-#     - $SUDO_CMD dpkg -i rocthrust-*.deb
-#     - mkdir ../package_test && cd ../package_test
-#     - CXX=hcc cmake ../extra/. -Drocprim_DIR="/opt/rocm/rocprim"
-#     - make VERBOSE=1
-#     - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 2
-#     - $SUDO_CMD dpkg -r rocthrust
-#     - $SUDO_CMD dpkg -r rocprim
+test:rocm_package:
+  stage: test
+  tags:
+    - rocm
+  variables:
+    SUDO_CMD: "sudo -E"
+  dependencies:
+    - build:rocm
+  script:
+    # Install rocPRIM package
+    - echo ${ROCPRIM_GIT_URL}
+    - echo $ROCPRIM_GIT_URL
+    - git clone -b develop_stream https://gitlab-ci-token:${CI_JOB_TOKEN}@${ROCPRIM_GIT_URL}
+    - cd rocPRIM
+    - mkdir build
+    - cd build
+    - CXX=hcc cmake -DBUILD_TEST=OFF ../.
+    - make package
+    - $SUDO_CMD dpkg -i rocprim-*.deb
+    - cd ../..
+    # rocThrust
+    - cd build
+    - $SUDO_CMD dpkg -i rocthrust-*.deb
+    - mkdir ../package_test && cd ../package_test
+    - CXX=hcc cmake ../extra/. -Drocprim_DIR="/opt/rocm/rocprim"
+    - make VERBOSE=1
+    - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 2
+    - $SUDO_CMD dpkg -r rocthrust
+    - $SUDO_CMD dpkg -r rocprim
 
 test:rocm_install:
   stage: test

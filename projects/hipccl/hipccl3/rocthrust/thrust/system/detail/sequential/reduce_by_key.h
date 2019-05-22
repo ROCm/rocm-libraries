@@ -19,7 +19,7 @@
 #include <thrust/detail/config.h>
 #include <thrust/pair.h>
 #include <thrust/iterator/iterator_traits.h>
-#include <thrust/detail/type_traits/algorithm/intermediate_type_from_function_and_iterators.h>
+#include <thrust/detail/type_traits/algorithm/intermediate_type.h>
 #include <thrust/system/detail/sequential/execution_policy.h>
 
 namespace thrust
