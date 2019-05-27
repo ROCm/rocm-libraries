@@ -91,7 +91,7 @@ template<typename T>
     __host__ __device__
     explicit device_ptr(OtherT *ptr) : super_t(ptr) {}
 
-    // STREAMHPC Fixes HCC linkage error
+    // Fixes HCC linkage error
     __host__ __device__
     explicit device_ptr(T *ptr) : super_t(ptr) {}
 
