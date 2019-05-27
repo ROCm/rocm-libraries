@@ -152,7 +152,7 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
     __host__ __device__
     explicit pointer(OtherElement *ptr);
 
-    // STREAMHPC Fixes HCC linkage error
+    // Fixes HCC linkage error
     __host__ __device__
     explicit pointer(Element *ptr);
 

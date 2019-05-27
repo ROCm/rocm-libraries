@@ -25,6 +25,7 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  ******************************************************************************/
+
 #pragma once
 
 #include <hip/hip_runtime.h>
@@ -80,4 +81,151 @@
 // #include <thrust/system/hip/detail/set_operations.h>
 #include <thrust/system/hip/detail/sort.h>
 
-// // work in progress
+/*! \file thrust/system/hip/execution_policy.h
+ *  \brief Execution policies for Thrust's hip system.
+ */
+
+#if 0
+namespace thrust
+{
+namespace system
+{
+/*! \addtogroup system_backends Systems
+ *  \ingroup system
+ *  \{
+ */
+
+/*! \namespace thrust::system::hip
+ *  \brief \p thrust::system::hip is the namespace containing functionality for allocating, manipulating,
+ *         and deallocating memory available to Thrust's hip backend system.
+ *         The identifiers are provided in a separate namespace underneath <tt>thrust::system</tt>
+ *         for import convenience but are also aliased in the top-level <tt>thrust::hip</tt>
+ *         namespace for easy access.
+ *
+ */
+namespace hip
+{
+
+/*! \addtogroup execution_policies
+ *  \{
+ */
+
+
+/*! \p thrust::hip::execution_policy is the base class for all Thrust parallel execution
+ *  policies which are derived from Thrust's hip backend system.
+ */
+template<typename DerivedPolicy>
+struct execution_policy : thrust::execution_policy<DerivedPolicy>
+{};
+
+
+/*! \p hip::tag is a type representing Thrust's hip backend system in C++'s type system.
+ *  Iterators "tagged" with a type which is convertible to \p hip::tag assert that they may be
+ *  "dispatched" to algorithm implementations in the \p hip system.
+ */
+struct tag : thrust::system::hip::execution_policy<tag> { unspecified };
+
+
+/*! \p thrust::hip::par is the parallel execution policy associated with Thrust's hip
+ *  backend system.
+ *
+ *  Instead of relying on implicit algorithm dispatch through iterator system tags, users may
+ *  directly target Thrust's hip backend system by providing \p thrust::hip::par as an algorithm
+ *  parameter.
+ *
+ *  Explicit dispatch can be useful in avoiding the introduction of data copies into containers such
+ *  as \p thrust::hip::vector.
+ *
+ *  The type of \p thrust::hip::par is implementation-defined.
+ *
+ *  The following code snippet demonstrates how to use \p thrust::hip::par to explicitly dispatch an
+ *  invocation of \p thrust::for_each to the hip backend system:
+ *
+ *  \code
+ *  #include <thrust/for_each.h>
+ *  #include <thrust/system/hip/execution_policy.h>
+ *  #include <cstdio>
+ *
+ *  struct printf_functor
+ *  {
+ *    __host__ __device__
+ *    void operator()(int x)
+ *    {
+ *      printf("%d\n", x);
+ *    }
+ *  };
+ *  ...
+ *  int vec[3];
+ *  vec[0] = 0; vec[1] = 1; vec[2] = 2;
+ *
+ *  thrust::for_each(thrust::hip::par, vec.begin(), vec.end(), printf_functor());
+ *
+ *  // 0 1 2 is printed to standard output in some unspecified order
+ *  \endcode
+ *
+ *  Explicit dispatch may also be used to direct Thrust's hip backend to launch hip kernels implementing
+ *  an algorithm invocation on a particular hip stream. In some cases, this may achieve concurrency with the
+ *  caller and other algorithms and hip kernels executing on a separate hip stream. The following code
+ *  snippet demonstrates how to use the \p thrust::hip::par execution policy to explicitly dispatch invocations
+ *  of \p thrust::for_each on separate hip streams:
+ *
+ *  \code
+ *  #include <thrust/for_each.h>
+ *  #include <thrust/system/hip/execution_policy.h>
+ *
+ *  struct printf_functor
+ *  {
+ *    hipStream_t s;
+ *
+ *    printf_functor(hipStream_t s) : s(s) {}
+ *
+ *    __host__ __device__
+ *    void operator()(int)
+ *    {
+ *      printf("Hello, world from stream %p\n", static_cast<void*>(s));
+ *    }
+ *  };
+ *
+ *  int main()
+ *  {
+ *    // create two hip streams
+ *    hipStream_t s1, s2;
+ *    hipStreamCreate(&s1);
+ *    hipStreamCreate(&s2);
+ *  
+ *    thrust::counting_iterator<int> iter(0);
+ *  
+ *    // execute for_each on two different streams
+ *    thrust::for_each(thrust::hip::par.on(s1), iter, iter + 1, printf_functor(s1));
+ *    thrust::for_each(thrust::hip::par.on(s2), iter, iter + 1, printf_functor(s2));
+ *  
+ *    // synchronize with both streams
+ *    hipStreamSynchronize(s1);
+ *    hipStreamSynchronize(s2);
+ *  
+ *    // destroy streams
+ *    hipStreamDestroy(s1);
+ *    hipStreamDestroy(s2);
+ *  
+ *    return 0;
+ *  }
+ *  \endcode
+ *
+ *  Even when using hip streams with \p thrust::hip::par.on(), there is no guarantee of concurrency. Algorithms
+ *  which return a data-dependent result or whose implementations require temporary memory allocation may
+ *  cause blocking synchronization events. Moreover, it may be necessary to explicitly synchronize through
+ *  \p hipStreamSynchronize or similar before any effects induced through algorithm execution are visible to
+ *  the rest of the system. Finally, it is the responsibility of the caller to own the lifetime of any hip
+ *  streams involved.
+ */
+static const unspecified par;
+
+
+/*! \}
+ */
+
+
+} // end hip
+} // end system
+} // end thrust
+#endif
