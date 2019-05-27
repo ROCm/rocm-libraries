@@ -23,7 +23,7 @@
 #include <thrust/detail/seq.h>
 #include <thrust/memory.h>
 #include <thrust/system/hip/config.h>
-// STREAMHPC No caching allocator in rocPRIM
+// No caching allocator in rocPRIM
 // #ifdef THRUST_CACHING_DEVICE_MALLOC
 // #include <thrust/system/cuda/detail/cub/util_allocator.cuh>
 // #endif
@@ -34,7 +34,7 @@ BEGIN_NS_THRUST
 namespace hip_rocprim
 {
 
-// STREAMHPC No caching allocator in rocPRIM
+// No caching allocator in rocPRIM
 // #ifdef THRUST_CACHING_DEVICE_MALLOC
 // #define __CUB_CACHING_MALLOC
 // #ifndef __CUDA_ARCH__
@@ -55,7 +55,7 @@ malloc(execution_policy<DerivedPolicy>&, std::size_t n)
     void* result = 0;
 
 #ifndef __HIP_DEVICE_COMPILE__
-    // STREAMHPC No caching allocator in rocPRIM
+    // No caching allocator in rocPRIM
     // #ifdef __CUB_CACHING_MALLOC
     //   cub::CachingDeviceAllocator &alloc = get_allocator();
     //   cudsError_t status = alloc.DeviceAllocate(&result, n);
@@ -80,7 +80,7 @@ void __host__ __device__
 free(execution_policy<DerivedPolicy>&, Pointer ptr)
 {
 #ifndef __HIP_DEVICE_COMPILE__
-    // STREAMHPC No caching allocator in rocPRIM
+    // No caching allocator in rocPRIM
     // #ifdef __CUB_CACHING_MALLOC
     //   cub::CachingDeviceAllocator &alloc = get_allocator();
     //   hipError_t status = alloc.DeviceFree(thrust::raw_pointer_cast(ptr));

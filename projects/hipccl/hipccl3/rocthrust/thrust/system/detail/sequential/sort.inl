@@ -162,7 +162,7 @@ void stable_sort(sequential::execution_policy<DerivedPolicy> &exec,
                  StrictWeakOrdering comp)
 {
 
-  // the compilation time of stable_primitive_sort is too expensive to use within a single CUDA thread
+  // the compilation time of stable_primitive_sort is too expensive to use within a single CUDA or HIP thread
 #if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
   typedef typename thrust::iterator_traits<RandomAccessIterator>::value_type KeyType;
   sort_detail::use_primitive_sort<KeyType,StrictWeakOrdering> use_primitive_sort;
@@ -186,7 +186,7 @@ void stable_sort_by_key(sequential::execution_policy<DerivedPolicy> &exec,
                         StrictWeakOrdering comp)
 {
 
-  // the compilation time of stable_primitive_sort_by_key is too expensive to use within a single CUDA thread
+  // the compilation time of stable_primitive_sort_by_key is too expensive to use within a single CUDA or HIP thread
 #if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
   typedef typename thrust::iterator_traits<RandomAccessIterator1>::value_type KeyType;
   sort_detail::use_primitive_sort<KeyType,StrictWeakOrdering> use_primitive_sort;
