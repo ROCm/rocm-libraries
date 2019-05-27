@@ -39,7 +39,7 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
         : super_t(other)
 {} // end pointer::pointer
 
-// STREAMHPC Fixes HCC linkage error
+// Fixes HCC linkage error
 template<typename Element, typename Tag, typename Reference, typename Derived>
   __host__ __device__
   pointer<Element,Tag,Reference,Derived>

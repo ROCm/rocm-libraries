@@ -82,7 +82,7 @@ namespace __parallel_for
     {
         using config    = kernel_config<256, 1>;
         bool debug_sync = THRUST_HIP_DEBUG_SYNC_FLAG;
-        // STREAMHPC Use debug_sync
+        // Use debug_sync
         (void)debug_sync;
 
         constexpr unsigned int block_size       = config::block_size;

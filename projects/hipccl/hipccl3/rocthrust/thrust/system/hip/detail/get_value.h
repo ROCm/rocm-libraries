@@ -35,7 +35,7 @@ get_value(execution_policy<DerivedPolicy>& exec, Pointer ptr)
 {
     typedef typename thrust::iterator_value<Pointer>::type result_type;
 
-    // STREAMHPC WORKAROUND
+    // WORKAROUND
 #if defined(THRUST_HIP_DEVICE_CODE)
     THRUST_UNUSED_VAR(exec);
     void (*fptr)(cross_system<thrust::host_system_tag, DerivedPolicy>&, result_type*, Pointer)
