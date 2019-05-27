@@ -29,7 +29,7 @@
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 #include <iterator>
-// STREAMHPC this include is not required
+// This include is not required
 // #include <thrust/system/hip/detail/transform.h>
 #include <thrust/distance.h>
 #include <thrust/swap.h>

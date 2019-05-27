@@ -48,7 +48,7 @@ namespace system
  *  originate from the operating system or other low-level application program interfaces.
  *
  *  Thrust uses \p system_error to report the error codes returned from device backends
- *  such as the CUDA runtime.
+ *  such as the CUDA/HIP runtime.
  *
  *  The following code listing demonstrates how to catch a \p system_error to recover
  *  from an error.
