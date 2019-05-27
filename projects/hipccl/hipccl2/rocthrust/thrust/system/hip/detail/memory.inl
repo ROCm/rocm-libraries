@@ -23,7 +23,7 @@
 namespace thrust
 {
 
-// STREAMHPC Not needed for HIP
+// Not needed for HIP
 // // XXX WAR an issue with MSVC 2005 (cl v14.00) incorrectly implementing
 // //     pointer_raw_pointer for pointer by specializing it here
 // //     note that we specialize it here, before the use of raw_pointer_cast

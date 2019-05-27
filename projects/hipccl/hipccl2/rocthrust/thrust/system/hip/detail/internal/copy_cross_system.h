@@ -74,7 +74,7 @@ namespace __copy
     }
 
     template <class System1, class System2, class InputIt, class Size, class OutputIt>
-    OutputIt __host__ /* STREAMHPC WORKAROUND */ __device__
+    OutputIt __host__ /* WORKAROUND */ __device__
     cross_system_copy_n(thrust::execution_policy<System1>& sys1,
                         thrust::execution_policy<System2>& sys2,
                         InputIt                            begin,
@@ -82,7 +82,7 @@ namespace __copy
                         OutputIt                           result,
                         thrust::detail::true_type) // trivial copy
     {
-        // STREAMHPC WORKAROUND
+        // WORKAROUND
 #if defined(THRUST_HIP_DEVICE_CODE)
         THRUST_UNUSED_VAR(sys1);
         THRUST_UNUSED_VAR(sys2);
@@ -102,7 +102,7 @@ namespace __copy
 
     // non-trivial H->D copy
     template <class H, class D, class InputIt, class Size, class OutputIt>
-    OutputIt __host__ /* STREAMHPC WORKAROUND */ __device__
+    OutputIt __host__ /* WORKAROUND */ __device__
     cross_system_copy_n(thrust::cpp::execution_policy<H>&         host_s,
                         thrust::hip_rocprim::execution_policy<D>& device_s,
                         InputIt                                   first,
@@ -113,7 +113,7 @@ namespace __copy
         // get type of the input data
         typedef typename thrust::iterator_value<InputIt>::type InputTy;
 
-        // STREAMHPC WORKAROUND
+        // WORKAROUND
 #if defined(THRUST_HIP_DEVICE_CODE)
         THRUST_UNUSED_VAR(host_s);
         THRUST_UNUSED_VAR(device_s);
@@ -162,7 +162,7 @@ namespace __copy
     // because copy ctor must have  __device__ annotations, which is hcc-only
     // feature
     template <class D, class H, class InputIt, class Size, class OutputIt>
-    OutputIt __host__ /* STREAMHPC WORKAROUND */ __device__
+    OutputIt __host__ /* WORKAROUND */ __device__
     cross_system_copy_n(thrust::hip_rocprim::execution_policy<D>& device_s,
                         thrust::cpp::execution_policy<H>&         host_s,
                         InputIt                                   first,
@@ -174,7 +174,7 @@ namespace __copy
         // get type of the input data
         typedef typename thrust::iterator_value<InputIt>::type InputTy;
 
-        // STREAMHPC WORKAROUND
+        // WORKAROUND
 #if defined(THRUST_HIP_DEVICE_CODE)
         THRUST_UNUSED_VAR(device_s);
         THRUST_UNUSED_VAR(host_s);
@@ -225,7 +225,7 @@ namespace __copy
 #endif
 
     template <class System1, class System2, class InputIt, class Size, class OutputIt>
-    OutputIt __host__ /* STREAMHPC WORKAROUND */ __device__
+    OutputIt __host__ /* WORKAROUND */ __device__
     cross_system_copy_n(cross_system<System1, System2> systems, InputIt begin, Size n, OutputIt result)
     {
         return cross_system_copy_n(
@@ -238,7 +238,7 @@ namespace __copy
     }
 
     template <class System1, class System2, class InputIterator, class OutputIterator>
-    OutputIterator __host__ /* STREAMHPC WORKAROUND */ __device__
+    OutputIterator __host__ /* WORKAROUND */ __device__
     cross_system_copy(cross_system<System1, System2> systems,
                       InputIterator                  begin,
                       InputIterator                  end,

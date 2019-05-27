@@ -32,7 +32,7 @@ template <typename DerivedPolicy, typename Pointer1, typename Pointer2>
 THRUST_HIP_FUNCTION void
 assign_value(thrust::hip::execution_policy<DerivedPolicy>& exec, Pointer1 dst, Pointer2 src)
 {
-    // STREAMHPC WORKAROUND
+//WORKAROUND
 #if defined(THRUST_HIP_DEVICE_CODE)
 
     THRUST_UNUSED_VAR(exec);
@@ -51,17 +51,17 @@ template <typename System1, typename System2, typename Pointer1, typename Pointe
 THRUST_HIP_FUNCTION void
 assign_value(cross_system<System1, System2>& systems, Pointer1 dst, Pointer2 src)
 {
-    // STREAMHPC WORKAROUND
+//WORKAROUND
 #if defined(THRUST_HIP_DEVICE_CODE)
     THRUST_UNUSED_VAR(systems);
     Pointer1 (*fptr)(cross_system<System2, System1>, Pointer2, Pointer2, Pointer1)
         = hip_rocprim::copy;
     (void)fptr;
-    // STREAMHPC WORKAROUND build error fixed - start here
+    // WORKAROUND build error fixed - start here
     // thrust::hip::tag hip_tag;
     // thrust::hip_rocprim::assign_value(hip_tag, dst, src);
     *thrust::raw_pointer_cast(dst) = *thrust::raw_pointer_cast(src);
-    // STREAMHPC WORKAROUND - end here
+    // WORKAROUND - end here
 #else
     cross_system<System2, System1> rotated_systems = systems.rotate();
     hip_rocprim::copy(rotated_systems, src, src + 1, dst);

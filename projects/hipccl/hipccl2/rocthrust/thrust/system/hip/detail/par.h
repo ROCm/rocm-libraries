@@ -38,7 +38,7 @@ namespace hip_rocprim
 
     __host__ __device__ inline hipStream_t default_stream()
     {
-        return hipStreamDefault; // STREAMHPC There's not hipStreamLegacy
+        return hipStreamDefault; // There's not hipStreamLegacy
     }
 
     template <class Derived>
