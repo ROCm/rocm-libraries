@@ -78,13 +78,13 @@ ExperimentalAutoDetectBinPacking: false
 ForEachMacros:   [ foreach, Q_FOREACH, BOOST_FOREACH ]
 IndentCaseLabels: false
 #FixNamespaceComments: true
-IndentWrappedFunctionNames: true
+IndentWrappedFunctionNames: false
 KeepEmptyLinesAtTheStartOfBlocks: true
 MacroBlockBegin: ''
 MacroBlockEnd:   ''
 #JavaScriptQuotes: Double
 MaxEmptyLinesToKeep: 1
-NamespaceIndentation: All
+NamespaceIndentation: Inner
 ObjCBlockIndentWidth: 4
 #ObjCSpaceAfterProperty: true
 #ObjCSpaceBeforeProtocolList: true
