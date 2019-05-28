@@ -302,13 +302,13 @@ static const detail::host_t host;
  *  algorithm dispatch at Thrust's device system by providing \p thrust::device as an algorithm parameter.
  *
  *  Explicit dispatch can be useful in avoiding the introduction of data copies into containers such as
- *  \p thrust::device_vector or to avoid wrapping e.g. raw pointers allocated by the CUDA or HIP API with types
+ *  \p thrust::device_vector or to avoid wrapping e.g. raw pointers allocated by the HIP API with types
  *  such as \p thrust::device_ptr.
  *
  *  The user must take care to guarantee that the iterators provided to an algorithm are compatible with
  *  the device backend system. For example, raw pointers allocated by <tt>std::malloc</tt> typically
  *  cannot be dereferenced by a GPU. For this reason, raw pointers allocated by host APIs should not be mixed
- *  with a \p thrust::device algorithm invocation when the device backend is CUDA/HIP.
+ *  with a \p thrust::device algorithm invocation when the device backend is HIP.
  *
  *  The type of \p thrust::device is implementation-defined.
  *
