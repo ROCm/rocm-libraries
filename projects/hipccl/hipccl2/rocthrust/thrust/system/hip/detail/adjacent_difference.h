@@ -342,6 +342,8 @@ namespace __adjacent_difference
         return hipSuccess;
     }
 
+#undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
+
     template <class Policy, class InputIt, class OutputIt, class BinaryOp>
     static OutputIt THRUST_HIP_RUNTIME_FUNCTION adjacent_difference(
         Policy& policy, InputIt first, InputIt last, OutputIt result, BinaryOp binary_op)
