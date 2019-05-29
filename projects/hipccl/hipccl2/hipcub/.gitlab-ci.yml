@@ -20,8 +20,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-image: rocm/rocm-terminal:latest
-
 variables:
   SUDO_CMD: "" # Must be "sudo" on images which don't use root user
   DEPS_DIR: "$CI_PROJECT_DIR/__dependencies"
@@ -33,24 +31,30 @@ variables:
   LOCAL_CXXFLAGS: ""
   LOCAL_CMAKE_OPTIONS: ""
 
-before_script:
-  - $SUDO_CMD apt-get update -qq
-  - $SUDO_CMD apt-get install -y -qq libnuma-dev libunwind-dev git wget tar xz-utils bzip2 build-essential pkg-config ca-certificates
-  - hipconfig
-  # cmake
-  - mkdir -p $DEPS_DIR/cmake
-  - wget --no-check-certificate --quiet -O - $CMAKE_URL | tar --strip-components=1 -xz -C $DEPS_DIR/cmake
-  - export PATH=$DEPS_DIR/cmake/bin:$PATH
-  # Combine global build options with local options
-  - export CXXFLAGS=$CXXFLAGS" "$LOCAL_CXXFLAGS
-  - export CMAKE_OPTIONS=$CXXFLAGS" "$LOCAL_CMAKE_OPTIONS
 
-build:rocm:
-  stage: build
-  tags:
-    - rocm
+# hipCUB with rocPRIM backend
+
+.rocm:
   variables:
     SUDO_CMD: "sudo -E"
+  tags:
+    - rocm
+  image: rocm/rocm-terminal:latest
+  before_script:
+    - $SUDO_CMD apt-get update -qq
+    - $SUDO_CMD apt-get install -y -qq libnuma-dev libunwind-dev git wget tar xz-utils bzip2 build-essential pkg-config ca-certificates
+    - hipconfig
+    # cmake
+    - mkdir -p $DEPS_DIR/cmake
+    - wget --no-check-certificate --quiet -O - $CMAKE_URL | tar --strip-components=1 -xz -C $DEPS_DIR/cmake
+    - export PATH=$DEPS_DIR/cmake/bin:$PATH
+    # Combine global build options with local options
+    - export CXXFLAGS=$CXXFLAGS" "$LOCAL_CXXFLAGS
+    - export CMAKE_OPTIONS=$CXXFLAGS" "$LOCAL_CMAKE_OPTIONS
+
+build:rocm:
+  extends: .rocm
+  stage: build
   script:
     - mkdir build
     - cd build
@@ -70,24 +74,42 @@ build:rocm:
     - build/hipcub*.zip
     expire_in: 2 weeks
 
-.test:
-  stage: test
-  variables:
-    SUDO_CMD: "sudo -E"
+test:rocm_vega20:
+  extends: .rocm
   dependencies:
     - build:rocm
+  tags:
+    - vega20
+    - rocm
   script:
     - cd build
     - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 2
 
-include: '.gitlab-ci-gputest.yml'
+test:rocm_s9300:
+  extends: .rocm
+  dependencies:
+    - build:rocm
+  tags:
+    - s9300
+    - rocm
+  script:
+    - cd build
+    - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 2
+
+test:rocm_mi25:
+  extends: .rocm
+  dependencies:
+    - build:rocm
+  tags:
+    - mi25
+    - rocm
+  script:
+    - cd build
+    - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 2
 
 test:rocm_package:
+  extends: .rocm
   stage: test
-  tags:
-    - rocm
-  variables:
-    SUDO_CMD: "sudo -E"
   dependencies:
     - build:rocm
   script:
@@ -113,11 +135,8 @@ test:rocm_package:
     - $SUDO_CMD dpkg -r rocprim
 
 test:rocm_install:
+  extends: .rocm
   stage: test
-  tags:
-    - rocm
-  variables:
-    SUDO_CMD: "sudo -E"
   script:
     - mkdir build_only_install
     - cd build_only_install
@@ -127,3 +146,100 @@ test:rocm_install:
     - CXX=hcc cmake ../test/extra/.
     - make VERBOSE=1
     - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 2
+
+
+# hipCUB with CUB backend
+
+.nvcc:
+  tags:
+    - nvcc
+  image: nvidia/cuda:10.1-devel-ubuntu16.04
+  before_script:
+    - nvidia-smi
+    # HIP-nvcc
+    - $SUDO_CMD apt-get update -qq
+    - $SUDO_CMD apt-get install -y -qq libnuma-dev libunwind-dev git wget tar xz-utils bzip2 build-essential pkg-config ca-certificates
+    - wget -qO - http://repo.radeon.com/rocm/apt/debian/rocm.gpg.key | $SUDO_CMD apt-key add -
+    - echo 'deb [arch=amd64] http://repo.radeon.com/rocm/apt/debian/ xenial main' | $SUDO_CMD tee /etc/apt/sources.list.d/rocm.list
+    - $SUDO_CMD apt-get update -qq
+    - $SUDO_CMD apt-get install -y hip_base
+    # Install hip_nvcc ignoring dependencies because it depends on cuda metapackage
+    # (with heavy libraries, tools etc. that also require GUI and other packages)
+    - apt-get download hip_nvcc
+    - $SUDO_CMD dpkg -i --ignore-depends=cuda hip*.deb
+    - export PATH=$PATH:/opt/rocm/bin
+    - hipconfig
+    # cmake
+    - mkdir -p $DEPS_DIR/cmake
+    - wget --no-check-certificate --quiet -O - $CMAKE_URL | tar --strip-components=1 -xz -C $DEPS_DIR/cmake
+    - export PATH=$DEPS_DIR/cmake/bin:$PATH
+    # Combine global build options with local options
+    - export CXXFLAGS=$CXXFLAGS" "$LOCAL_CXXFLAGS
+    - export CMAKE_OPTIONS=$CXXFLAGS" "$LOCAL_CMAKE_OPTIONS
+
+build:nvcc:
+  extends: .nvcc
+  stage: build
+  script:
+    - mkdir build
+    - cd build
+    - cmake -DBUILD_TEST=ON ../.
+    - make -j16
+    - make package
+  artifacts:
+    paths:
+    - build/library/
+    - build/test/hipcub/test_*
+    - build/test/CTestTestfile.cmake
+    - build/test/hipcub/CTestTestfile.cmake
+    - build/gtest/
+    - build/CMakeCache.txt
+    - build/CTestTestfile.cmake
+    - build/hipcub*.deb
+    - build/hipcub*.zip
+    expire_in: 2 weeks
+
+test:nvcc_titanv:
+  extends: .nvcc
+  stage: test
+  dependencies:
+    - build:nvcc
+  script:
+    - cd build
+    - CUDA_VISIBLE_DEVICES=0 ctest --output-on-failure --repeat-until-fail 2
+
+test:nvcc_980:
+  extends: .nvcc
+  stage: test
+  dependencies:
+    - build:nvcc
+  script:
+    - cd build
+    - CUDA_VISIBLE_DEVICES=1 ctest --output-on-failure --repeat-until-fail 2
+
+test:nvcc_package:
+  extends: .nvcc
+  stage: test
+  dependencies:
+    - build:nvcc
+  script:
+    - cd build
+    - $SUDO_CMD dpkg -i hipcub_nvcc-*.deb
+    - mkdir ../package_test && cd ../package_test
+    - cmake ../test/extra/.
+    - make VERBOSE=1
+    - ctest --output-on-failure --repeat-until-fail 2
+    - $SUDO_CMD dpkg -r hipcub_nvcc
+
+test:nvcc_install:
+  extends: .nvcc
+  stage: test
+  script:
+    - mkdir build_only_install
+    - cd build_only_install
+    - cmake -DBUILD_TEST=OFF ../.
+    - $SUDO_CMD make install
+    - mkdir ../install_test && cd ../install_test
+    - cmake ../test/extra/.
+    - make VERBOSE=1
+    - ctest --output-on-failure --repeat-until-fail 2
