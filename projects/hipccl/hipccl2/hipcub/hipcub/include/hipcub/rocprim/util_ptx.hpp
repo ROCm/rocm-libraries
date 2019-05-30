@@ -117,7 +117,7 @@ T ShuffleUp(T input,
             int first_thread,
             unsigned int member_mask)
 {
-    // Not supproted in rocPRIM.
+    // Not supported in rocPRIM.
     (void) first_thread;
     // Member mask is not supported in rocPRIM, because it's
     // not supported in ROCm.
@@ -137,7 +137,7 @@ T ShuffleDown(T input,
               int last_thread,
               unsigned int member_mask)
 {
-    // Not supproted in rocPRIM.
+    // Not supported in rocPRIM.
     (void) last_thread;
     // Member mask is not supported in rocPRIM, because it's
     // not supported in ROCm.

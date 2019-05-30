@@ -71,17 +71,17 @@ if(HIP_PLATFORM STREQUAL "hcc")
     message(STATUS "Downloading and building rocPRIM.")
     set(rocprim_DIR "${CMAKE_CURRENT_BINARY_DIR}/rocprim" CACHE PATH "")
     download_project(
-      PROJ           rocprim
-      GIT_REPOSITORY https://github.com/ROCmSoftwarePlatform/rocPRIM.git
-      GIT_TAG        master
-      INSTALL_DIR    ${rocprim_DIR}
-      CMAKE_ARGS     -DBUILD_TEST=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
-      LOG_DOWNLOAD   TRUE
-      LOG_CONFIGURE  TRUE
-      LOG_BUILD      TRUE
-      LOG_INSTALL    TRUE
-      BUILD_PROJECT  TRUE
-      ${UPDATE_DISCONNECTED_IF_AVAILABLE}
+      PROJ                rocprim
+      GIT_REPOSITORY      https://github.com/ROCmSoftwarePlatform/rocPRIM.git
+      GIT_TAG             master
+      INSTALL_DIR         ${rocprim_DIR}
+      CMAKE_ARGS          -DBUILD_TEST=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
+      LOG_DOWNLOAD        TRUE
+      LOG_CONFIGURE       TRUE
+      LOG_BUILD           TRUE
+      LOG_INSTALL         TRUE
+      BUILD_PROJECT       TRUE
+      UPDATE_DISCONNECTED TRUE # Never update automatically from the remote repository
     )
   endif()
   find_package(rocprim REQUIRED CONFIG PATHS "${rocprim_DIR}")
