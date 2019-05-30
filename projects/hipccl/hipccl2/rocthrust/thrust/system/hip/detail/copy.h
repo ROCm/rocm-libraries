@@ -59,7 +59,7 @@ copy(execution_policy<System>& system,
      OutputIterator            result);
 
 template <class System1, class System2, class InputIterator, class OutputIterator>
-OutputIterator __host__ /* STREAMHPC WORKAROUND */ __device__
+OutputIterator __host__ /* WORKAROUND */ __device__
 copy(cross_system<System1, System2> systems,
      InputIterator                  first,
      InputIterator                  last,
@@ -73,7 +73,7 @@ copy_n(execution_policy<System>& system,
        OutputIterator            result);
 
 template <class System1, class System2, class InputIterator, class Size, class OutputIterator>
-OutputIterator __host__ /* STREAMHPC WORKAROUND */ __device__
+OutputIterator __host__ /* WORKAROUND */ __device__
 copy_n(cross_system<System1, System2> systems,
        InputIterator                  first,
        Size                           n,
@@ -144,7 +144,7 @@ copy_n(execution_policy<System>& system,
 #endif
 
 template <class System1, class System2, class InputIterator, class OutputIterator>
-OutputIterator __host__ /* STREAMHPC WORKAROUND */ __device__
+OutputIterator __host__ /* WORKAROUND */ __device__
 copy(cross_system<System1, System2> systems,
      InputIterator                  first,
      InputIterator                  last,
@@ -154,7 +154,7 @@ copy(cross_system<System1, System2> systems,
 } // end copy()
 
 template <class System1, class System2, class InputIterator, class Size, class OutputIterator>
-OutputIterator __host__ /* STREAMHPC WORKAROUND */ __device__
+OutputIterator __host__ /* WORKAROUND */ __device__
 copy_n(cross_system<System1, System2> systems,
        InputIterator                  first,
        Size                           n,

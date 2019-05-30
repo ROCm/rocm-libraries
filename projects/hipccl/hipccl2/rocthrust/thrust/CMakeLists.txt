@@ -44,13 +44,6 @@ target_link_libraries(rocthrust
 #    hip::device
 )
 
-# TODO: Remove after the Rocprim HC API removal
-# We will use rocPRIM HIP API
-target_compile_definitions(rocthrust
-  INTERFACE
-    ROCPRIM_HIP_API=1
-)
-
 # Installation
 
 include(GNUInstallDirs)
@@ -66,17 +59,24 @@ rocm_install_targets(
 #   ${CMAKE_BINARY_DIR}/thrust
   PREFIX rocthrust
 )
+if(CMAKE_VERSION VERSION_LESS 3.7)
+  # Workaround: old versions of CMake do not support set(CPACK_DEBIAN_ARCHIVE_TYPE "gnutar")
+  # The default archive type is "paxr" which generates corrupted DEB packages
+  # if there are long file names.
+  set(EXCLUDE_PATTERNS PATTERN "./system/cuda/detail/cub/*" EXCLUDE)
+endif()
 install(
   DIRECTORY
     "./"
     "${PROJECT_BINARY_DIR}/thrust/include/"
-  DESTINATION rocthrust/include/thrust/
+  DESTINATION rocthrust/include/thrust
   FILES_MATCHING
   PATTERN "*.h"
   PATTERN "*.cuh"
   PATTERN "*.hpp"
   PATTERN "*.in"
   PATTERN "*.inl"
+  ${EXCLUDE_PATTERNS}
   PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ
 )
 

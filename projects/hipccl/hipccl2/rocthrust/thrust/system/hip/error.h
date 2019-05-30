@@ -93,8 +93,6 @@ enum errc_t
     set_on_active_process_error        = hipErrorSetOnActiveProcess,
     no_device                          = hipErrorNoDevice,
     ecc_uncorrectable                  = hipErrorTbd,
-
-#if defined(__HCC__)
     shared_object_symbol_not_found     = hipErrorSharedObjectSymbolNotFound,
     shared_object_init_failed          = hipErrorSharedObjectInitFailed,
     unsupported_limit                  = hipErrorUnsupportedLimit,
@@ -114,9 +112,6 @@ enum errc_t
     host_memory_already_registered     = hipErrorHostMemoryAlreadyRegistered,
     host_memory_not_registered         = hipErrorHostMemoryNotRegistered,
     operating_system_error             = hipErrorTbd,
-#endif
-
-#if defined(__HCC__)
     peer_access_unsupported            = hipErrorTbd,
     launch_max_depth_exceeded          = hipErrorTbd,
     launch_file_scoped_texture_used    = hipErrorTbd,
@@ -124,8 +119,6 @@ enum errc_t
     sync_depth_exceeded                = hipErrorTbd,
     attempted_operation_not_permitted  = hipErrorTbd,
     attempted_operation_not_supported  = hipErrorTbd,
-#endif
-
     startup_failure                    = hipErrorTbd
 }; // end errc_t
 

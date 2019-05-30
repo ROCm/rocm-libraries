@@ -25,6 +25,7 @@
 
 TESTS_DEFINE(TransformReduceTests, FullTestsParams);
 TESTS_DEFINE(TransformReduceIntegerTests, VectorSignedIntegerTestsParams);
+TESTS_DEFINE(TransformReduceIntegerPrimitiveTests, IntegerTestsParams);
 
 template <typename InputIterator,
           typename UnaryFunction,
@@ -85,10 +86,9 @@ TYPED_TEST(TransformReduceTests, TestTransformReduceSimple)
     ASSERT_EQ(result, T(8));
 }
 
-TYPED_TEST(TransformReduceIntegerTests, TestTransformReduce)
+TYPED_TEST(TransformReduceIntegerPrimitiveTests, TestTransformReduce)
 {
-    using Vector = typename TestFixture::input_type;
-    using T      = typename Vector::value_type;
+    using T = typename TestFixture::input_type;
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -105,14 +105,13 @@ TYPED_TEST(TransformReduceIntegerTests, TestTransformReduce)
         T gpu_result = thrust::transform_reduce(
             d_data.begin(), d_data.end(), thrust::negate<T>(), init, thrust::plus<T>());
 
-        ASSERT_NEAR(cpu_result, gpu_result, std::abs(T(0.01 * cpu_result)));
+        ASSERT_EQ(cpu_result, gpu_result);
     }
 }
 
-TYPED_TEST(TransformReduceIntegerTests, TestTransformReduceFromConst)
+TYPED_TEST(TransformReduceIntegerPrimitiveTests, TestTransformReduceFromConst)
 {
-    using Vector = typename TestFixture::input_type;
-    using T      = typename Vector::value_type;
+    using T = typename TestFixture::input_type;
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -129,11 +128,11 @@ TYPED_TEST(TransformReduceIntegerTests, TestTransformReduceFromConst)
         T gpu_result = thrust::transform_reduce(
             d_data.cbegin(), d_data.cend(), thrust::negate<T>(), init, thrust::plus<T>());
 
-        ASSERT_NEAR(cpu_result, gpu_result, std::abs(T(0.01 * cpu_result)));
+        ASSERT_EQ(cpu_result, gpu_result);
     }
 }
 
-TYPED_TEST(TransformReduceTests, TestTransformReduceCountingIterator)
+TYPED_TEST(TransformReduceIntegerTests, TestTransformReduceCountingIterator)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;

@@ -52,7 +52,7 @@ struct seq_t : thrust::system::detail::sequential::execution_policy<seq_t>
 } // end detail
 
 
-#if defined(__CUDA_ARCH__) || defined(__HCC_ACCELERATOR__)
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 static const __device__ detail::seq_t seq;
 #else
 static const detail::seq_t seq;
@@ -60,5 +60,3 @@ static const detail::seq_t seq;
 
 
 } // end thrust
-
-
