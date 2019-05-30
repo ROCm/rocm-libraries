@@ -25,7 +25,7 @@
 
 // Google Test
 #include <gtest/gtest.h>
-// rocPRIM API
+// hipCUB API
 #include <hipcub/hipcub.hpp>
 
 #include "test_utils.hpp"

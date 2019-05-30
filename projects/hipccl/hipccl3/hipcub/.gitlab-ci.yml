@@ -63,15 +63,15 @@ build:rocm:
     - make package
   artifacts:
     paths:
-    - build/library/
-    - build/test/hipcub/test_*
-    - build/test/CTestTestfile.cmake
-    - build/test/hipcub/CTestTestfile.cmake
-    - build/gtest/
-    - build/CMakeCache.txt
-    - build/CTestTestfile.cmake
-    - build/hipcub*.deb
-    - build/hipcub*.zip
+      - build/library/
+      - build/test/hipcub/test_*
+      - build/test/CTestTestfile.cmake
+      - build/test/hipcub/CTestTestfile.cmake
+      - build/gtest/
+      - build/CMakeCache.txt
+      - build/CTestTestfile.cmake
+      - build/hipcub*.deb
+      - build/hipcub*.zip
     expire_in: 2 weeks
 
 test:rocm_vega20:
@@ -188,15 +188,15 @@ build:nvcc:
     - make package
   artifacts:
     paths:
-    - build/library/
-    - build/test/hipcub/test_*
-    - build/test/CTestTestfile.cmake
-    - build/test/hipcub/CTestTestfile.cmake
-    - build/gtest/
-    - build/CMakeCache.txt
-    - build/CTestTestfile.cmake
-    - build/hipcub*.deb
-    - build/hipcub*.zip
+      - build/library/
+      - build/test/hipcub/test_*
+      - build/test/CTestTestfile.cmake
+      - build/test/hipcub/CTestTestfile.cmake
+      - build/gtest/
+      - build/CMakeCache.txt
+      - build/CTestTestfile.cmake
+      - build/hipcub*.deb
+      - build/hipcub*.zip
     expire_in: 2 weeks
 
 test:nvcc_titanv:
