@@ -51,7 +51,7 @@ namespace hip_rocprim
              InputIt1                   first1,
              InputIt1                   last1,
              InputIt2                   first2);
-} // namespace cuda_
+} // namespace hip_rocprim
 END_NS_THRUST
 
 #include <thrust/system/hip/detail/find.h>

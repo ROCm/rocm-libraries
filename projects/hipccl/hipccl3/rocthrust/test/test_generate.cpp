@@ -28,7 +28,7 @@ typedef ::testing::Types<Params<thrust::host_vector<short>>, Params<thrust::host
 
 TESTS_DEFINE(GenerateTests, FullTestsParams);
 TESTS_DEFINE(GenerateVectorTests, VectorParams);
-TESTS_DEFINE(GenerateVariablesTests, HostVectorTestsParams);
+TESTS_DEFINE(GenerateVariablesTests, NumericalTestsParams);
 
 TEST(ReplaceTests, UsingHip)
 {
@@ -106,8 +106,7 @@ TEST(GenerateTests, TestGenerateDispatchImplicit)
 
 TYPED_TEST(GenerateVariablesTests, TestGenerate)
 {
-    using Vector = typename TestFixture::input_type;
-    using T      = typename Vector::value_type;
+    using T = typename TestFixture::input_type;
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -127,8 +126,7 @@ TYPED_TEST(GenerateVariablesTests, TestGenerate)
 
 TYPED_TEST(GenerateVariablesTests, TestGenerateToDiscardIterator)
 {
-    using Vector = typename TestFixture::input_type;
-    using T      = typename Vector::value_type;
+    using T = typename TestFixture::input_type;
 
     T               value = 13;
     return_value<T> f(value);
@@ -198,8 +196,7 @@ TEST(GenerateTests, TestGenerateNDispatchImplicit)
 
 TYPED_TEST(GenerateVariablesTests, TestGenerateNToDiscardIterator)
 {
-    using Vector = typename TestFixture::input_type;
-    using T      = typename Vector::value_type;
+    using T = typename TestFixture::input_type;
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)

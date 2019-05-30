@@ -354,8 +354,8 @@ void stable_merge_sort(sequential::execution_policy<DerivedPolicy> &exec,
                        RandomAccessIterator last,
                        StrictWeakOrdering comp)
 {
-  // avoid recursion in CUDA threads
-#if defined(__CUDA_ARCH__) || defined(__HCC_ACCELERATOR__)
+  // avoid recursion in CUDA or HIP threads
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
   stable_merge_sort_detail::iterative_stable_merge_sort(exec, first, last, comp);
 #else
   stable_merge_sort_detail::recursive_stable_merge_sort(exec, first, last, comp);
@@ -374,8 +374,8 @@ void stable_merge_sort_by_key(sequential::execution_policy<DerivedPolicy> &exec,
                               RandomAccessIterator2 first2,
                               StrictWeakOrdering comp)
 {
-  // avoid recursion in CUDA threads
-#if defined(__CUDA_ARCH__) || defined(__HCC_ACCELERATOR__)
+  // avoid recursion in CUDA or HIP threads
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
   stable_merge_sort_detail::iterative_stable_merge_sort_by_key(exec, first1, last1, first2, comp);
 #else
   stable_merge_sort_detail::recursive_stable_merge_sort_by_key(exec, first1, last1, first2, comp);
@@ -387,4 +387,3 @@ void stable_merge_sort_by_key(sequential::execution_policy<DerivedPolicy> &exec,
 } // end namespace detail
 } // end namespace system
 } // end namespace thrust
-

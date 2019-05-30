@@ -22,6 +22,7 @@
 #include "test_header.hpp"
 
 TESTS_DEFINE(SortByKeyTests, FullTestsParams);
+TESTS_DEFINE(SortByKeyPrimitiveTests, NumericalTestsParams);
 
 template <typename RandomAccessIterator1, typename RandomAccessIterator2>
 void sort_by_key(my_system& system,
@@ -120,10 +121,9 @@ TYPED_TEST(SortByKeyTests, TestSortByKeySimple)
     ASSERT_EQ(unsorted_values, sorted_values);
 }
 
-TYPED_TEST(SortByKeyTests, TestSortAscendingKeyValue)
+TYPED_TEST(SortByKeyPrimitiveTests, TestSortAscendingKeyValue)
 {
-    using Vector = typename TestFixture::input_type;
-    using T      = typename Vector::value_type;
+    using T = typename TestFixture::input_type;
 
     for(auto size : get_sizes())
     {

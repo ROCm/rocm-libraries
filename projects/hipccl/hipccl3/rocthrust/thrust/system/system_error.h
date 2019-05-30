@@ -48,7 +48,7 @@ namespace system
  *  originate from the operating system or other low-level application program interfaces.
  *
  *  Thrust uses \p system_error to report the error codes returned from device backends
- *  such as the CUDA runtime.
+ *  such as the HIP runtime.
  *
  *  The following code listing demonstrates how to catch a \p system_error to recover
  *  from an error.
@@ -91,7 +91,7 @@ class system_error
 {
   public:
     // [19.5.5.2] Class system_error members
-    
+
     /*! Constructs an object of class \p system_error.
      *  \param ec The value returned by \p code().
      *  \param what_arg A string to include in the result returned by \p what().
@@ -142,7 +142,7 @@ class system_error
     /*! Destructor does not throw.
      */
     inline virtual ~system_error(void) throw () {};
-    
+
     /*! Returns an object encoding the error.
      *  \return <tt>ec</tt> or <tt>error_code(ev, ecat)</tt>, from the
      *          constructor, as appropriate.
@@ -176,4 +176,3 @@ using system::system_error;
 } // end thrust
 
 #include <thrust/system/detail/system_error.inl>
-
