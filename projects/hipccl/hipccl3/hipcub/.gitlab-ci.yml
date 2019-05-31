@@ -137,6 +137,7 @@ test:rocm_package:
 test:rocm_install:
   extends: .rocm
   stage: test
+  dependencies: []
   script:
     - mkdir build_only_install
     - cd build_only_install
@@ -234,6 +235,7 @@ test:nvcc_package:
 test:nvcc_install:
   extends: .nvcc
   stage: test
+  dependencies: []
   script:
     - mkdir build_only_install
     - cd build_only_install

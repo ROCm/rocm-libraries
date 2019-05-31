@@ -119,7 +119,7 @@ function(add_hipcub_test TEST_NAME TEST_SOURCES)
     add_executable(${TEST_TARGET} ${TEST_SOURCES})
     target_link_libraries(${TEST_TARGET}
       PRIVATE
-        hip::hipcub
+        ${hipcub_LIBRARIES} # hip::hipcub
     )
     foreach(amdgpu_target ${AMDGPU_TARGETS})
       target_link_libraries(${TEST_TARGET}
