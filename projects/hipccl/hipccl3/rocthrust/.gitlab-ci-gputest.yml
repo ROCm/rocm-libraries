@@ -10,7 +10,7 @@ test:vega20:
 test:s9300:
   extends: .test
   before_script:
-#    - echo 'deb [arch=amd64] http://repo.radeon.com/rocm/apt/.apt_2.2/ xenial main' | $SUDO_CMD tee /etc/apt/sources.list.d/rocm.list
+    - echo 'deb [arch=amd64] http://repo.radeon.com/rocm/apt/.apt_2.5/ xenial main' | $SUDO_CMD tee /etc/apt/sources.list.d/rocm.list
     - $SUDO_CMD apt-get update -qq
     - $SUDO_CMD apt-get upgrade -qq
   dependencies:
