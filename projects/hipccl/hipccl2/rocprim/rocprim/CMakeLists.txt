@@ -53,9 +53,6 @@ set(INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_INCLUDEDIR})
 # does not support header-only libraries (INTERFACE targets)
 rocm_install_targets(
   TARGETS rocprim rocprim_hip
-#   INCLUDE
-#   ${CMAKE_SOURCE_DIR}/rocprim/include
-#   ${CMAKE_BINARY_DIR}/rocprim/include
   PREFIX rocprim
 )
 
@@ -72,7 +69,7 @@ install(
 
 # Export targets
 rocm_export_targets(
-  TARGETS rocprim-targets
+  TARGETS roc::rocprim roc::rocprim_hip
   PREFIX rocprim
   NAMESPACE roc::
 )

@@ -57,7 +57,7 @@ function(add_rocprim_test TEST_NAME TEST_SOURCES)
   add_executable(${TEST_TARGET} ${TEST_SOURCES})
   target_link_libraries(${TEST_TARGET}
     PRIVATE
-      roc::rocprim_hip
+      ${rocprim_LIBRARIES} # roc::rocprim_hip
   )
   foreach(amdgpu_target ${AMDGPU_TARGETS})
     target_link_libraries(${TEST_TARGET}
