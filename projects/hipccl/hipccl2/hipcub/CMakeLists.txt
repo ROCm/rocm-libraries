@@ -59,16 +59,16 @@ option(BUILD_TEST "Build tests (requires googletest)" ON)
 include(cmake/Dependencies.cmake)
 
 # Setup VERSION
-set ( VERSION_STRING "2.5.0." )
+set(VERSION_STRING "2.5.0.")
 
-# Check if BUILD_NUMBER is defined in a Jenkins envirnment
-if ($ENV{BUILD_NUMBER} )
+# Check if BUILD_NUMBER is defined in a Jenkins environment
+if($ENV{BUILD_NUMBER})
   string(CONCAT BUILD_VERSION ${VERSION_STRING} $ENV{BUILD_NUMBER})
-else ()
+else()
   string(CONCAT BUILD_VERSION ${VERSION_STRING} "0")
-endif ()
+endif()
 
-rocm_setup_version( VERSION ${BUILD_VERSION} NO_GIT_TAG_VERSION )
+rocm_setup_version(VERSION ${BUILD_VERSION} NO_GIT_TAG_VERSION)
 
 # AMD targets
 set(AMDGPU_TARGETS gfx803;gfx900;gfx906 CACHE STRING "List of specific machine types for library to target")
@@ -92,7 +92,6 @@ if(HIP_PLATFORM STREQUAL "hcc")
   set(CPACK_RPM_PACKAGE_REQUIRES "hip_hcc >= 1.5, rocprim >= 2.5")
   set(CPACK_DEBIAN_PACKAGE_REPLACES "cub-hip")
   set(CPACK_RPM_PACKAGE_OBSOLETES "cub-hip")
-
 else()
   set(CPACK_DEBIAN_PACKAGE_DEPENDS "hip_nvcc (>= 1.5)")
   set(CPACK_RPM_PACKAGE_REQUIRES "hip_nvcc >= 1.5")
@@ -102,7 +101,7 @@ if(NOT CPACK_PACKAGING_INSTALL_PREFIX)
   set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
 endif()
 
-set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" "\${CPACK_PACKAGING_INSTALL_PREFIX}/include" )
+set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" "\${CPACK_PACKAGING_INSTALL_PREFIX}/include")
 
 if(HIP_PLATFORM STREQUAL "hcc")
   rocm_create_package(

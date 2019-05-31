@@ -29,7 +29,7 @@
 find_package(HIP 1.5.18263 REQUIRED) # 1.5.18263 is HIP version in ROCm 1.8.2
 
 if(HIP_PLATFORM STREQUAL "nvcc")
-  include(cmake/SetupNVCC.cmake)
+  include(SetupNVCC)
   message(STATUS "CUB will be used as hipCUB's backend.")
 elseif(HIP_PLATFORM STREQUAL "hcc")
   if(NOT (CMAKE_CXX_COMPILER MATCHES ".*/hcc$" OR CMAKE_CXX_COMPILER MATCHES ".*/hipcc$"))
