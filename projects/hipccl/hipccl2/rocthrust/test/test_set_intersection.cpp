@@ -39,7 +39,7 @@ OutputIterator set_intersection(my_system& system,
     return result;
 }
 
-TYPED_TEST(SetIntersectionTests, TestSetIntersectionDispatchExplicit)
+TEST(SetIntersectionTests, TestSetIntersectionDispatchExplicit)
 {
     thrust::device_vector<int> vec(1);
 
@@ -57,7 +57,7 @@ OutputIterator set_intersection(
     return result;
 }
 
-TYPED_TEST(SetIntersectionTests, TestSetIntersectionDispatchImplicit)
+TEST(SetIntersectionTests, TestSetIntersectionDispatchImplicit)
 {
     thrust::device_vector<int> vec(1);
 
