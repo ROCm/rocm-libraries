@@ -10,6 +10,7 @@ function display_help()
     echo "./install [-h|--help] "
     echo "    [-h|--help] prints this help message"
     echo "    [-i|--install] install after build"
+    echo "    [-p|--package] build package"
     #Not implemented yet
     #    echo "    [-d|--dependencies] install build dependencies"
     echo "    [-c|--clients] build library clients too (combines with -i & -d)"
@@ -21,6 +22,7 @@ function display_help()
 # global variables
 # #################################################
 install_package=false
+build_package=false
 build_clients=false
 build_release=true
 run_tests=false
@@ -32,7 +34,7 @@ rocm_path=/opt/rocm/bin
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ $? -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,debug,test --options hicdt -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,debug,test,package --options hicdtp -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -54,6 +56,9 @@ while true; do
 	    ;;
 	-i|--install)
 	    install_package=true
+	    shift ;;
+	-p|--package)
+	    build_package=true
 	    shift ;;
 	-c|--clients)
 	    build_clients=true
@@ -99,7 +104,7 @@ fi
 CXX=$rocm_path/hcc cmake -DBUILD_BENCHMARK=ON ../../. # or cmake-gui ../.
 
 # Build
-make -j32
+make -j$(nproc)
 
 if ($run_tests); then
 # Optionally, run tests if they're enabled.
@@ -109,4 +114,9 @@ fi
 if ($install_package); then
 # Install
 make install
+fi
+
+if ($build_package); then
+# Install
+make package -j$(nproc)
 fi
