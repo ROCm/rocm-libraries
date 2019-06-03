@@ -119,6 +119,7 @@ test:rocm_install:
     - rocm
   variables:
     SUDO_CMD: "sudo -E"
+  dependencies: []
   script:
     - mkdir build_only_install
     - cd build_only_install

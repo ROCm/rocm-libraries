@@ -41,7 +41,6 @@ target_include_directories(rocthrust
 target_link_libraries(rocthrust
   INTERFACE
     roc::rocprim_hip
-#    hip::device
 )
 
 # Installation
@@ -53,10 +52,6 @@ set(INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_INCLUDEDIR})
 # does not support header-only libraries (INTERFACE targets)
 rocm_install_targets(
   TARGETS rocthrust
-  EXPORT rocthrust-targets
-#   INCLUDE
-#   ${CMAKE_SOURCE_DIR}/thrust
-#   ${CMAKE_BINARY_DIR}/thrust
   PREFIX rocthrust
 )
 if(CMAKE_VERSION VERSION_LESS 3.7)
@@ -82,8 +77,7 @@ install(
 
 # Export targets
 rocm_export_targets(
-  TARGETS rocthrust-targets
-  NAME rocthrust
+  TARGETS rocthrust
   PREFIX rocthrust
 )
 
