@@ -87,11 +87,6 @@ function(add_rocthrust_test TEST_NAME TEST_SOURCES)
         --amdgpu-target=${amdgpu_target}
     )
   endforeach()
-  # Set HIP as device system for Thrust
-  target_compile_definitions(${TEST_TARGET}
-      PRIVATE
-          THRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP
-  )
   add_test(${TEST_NAME} ${TEST_TARGET})
 endfunction()
 
