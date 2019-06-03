@@ -21,10 +21,9 @@
 
 #include "test_header.hpp"
 
-TESTS_DEFINE(SetIntersectionKeyValueTests, FullTestsParams);
-TESTS_DEFINE(SetIntersectionKeyValuePrimitiveTests, NumericalTestsParams);
+TESTS_DEFINE(SetIntersectionKeyValueTests, NumericalTestsParams);
 
-TYPED_TEST(SetIntersectionKeyValuePrimitiveTests, TestSetIntersectionKeyValue)
+TYPED_TEST(SetIntersectionKeyValueTests, TestSetIntersectionKeyValue)
 {
     using U = typename TestFixture::input_type;
     using T = key_value<U, U>;
