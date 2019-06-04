@@ -41,11 +41,6 @@ function(add_thrust_test TEST_TARGET)
                 --amdgpu-target=${amdgpu_target}
         )
     endforeach()
-    # Set HIP as device system for Thrust
-    target_compile_definitions(${TEST_TARGET}
-        PRIVATE
-            THRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP
-    )
     set_target_properties(${TEST_TARGET}
         PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/testing/"
