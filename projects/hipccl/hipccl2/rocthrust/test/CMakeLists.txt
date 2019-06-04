@@ -33,11 +33,10 @@ endfunction()
 # Tests
 # ****************************************************************************
 
-add_rocthrust_test("thrust.hip.set_intersection" test_set_intersection.cpp)
-add_rocthrust_test("thrust.hip.set_intersection_by_key" test_set_intersection_by_key.cpp)
-add_rocthrust_test("thrust.hip.set_intersection_by_key_descending" test_set_intersection_by_key_descending.cpp)
-add_rocthrust_test("thrust.hip.set_intersection_descending" test_set_intersection_descending.cpp)
-add_rocthrust_test("thrust.hip.set_intersection_key_value" test_set_intersection_key_value.cpp)
+add_rocthrust_test("thrust.hip.set_difference" test_set_difference.cpp)
+add_rocthrust_test("thrust.hip.set_difference_descending" test_set_difference_descending.cpp)
+add_rocthrust_test("thrust.hip.set_difference_by_key" test_set_difference_by_key.cpp)
+add_rocthrust_test("thrust.hip.set_difference_by_key_descending" test_set_difference_by_key_descending.cpp)
 if(FALSE)
 add_rocthrust_test("thrust.hip.adjacent_difference" test_adjacent_difference.cpp)
 add_rocthrust_test("thrust.hip.advance" test_advance.cpp)
