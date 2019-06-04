@@ -23,7 +23,7 @@ template<typename T, typename U>
 template<typename Vector> \
   struct TestFunctionalPlaceholders##name \
 { \
-  void operator()(const size_t dummy) \
+  void operator()(const size_t) \
   { \
     static const size_t num_samples = 10000; \
     const size_t zero = 0; \
@@ -82,4 +82,3 @@ template<typename Vector>
   ASSERT_EQUAL(reference, result);
 }
 DECLARE_VECTOR_UNITTEST(TestFunctionalPlaceholdersBitNegate);
-
