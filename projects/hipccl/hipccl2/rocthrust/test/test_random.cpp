@@ -20,6 +20,7 @@
 #include <thrust/random.h>
 #include <thrust/random/detail/normal_distribution_base.h>
 
+#include <cmath>
 #include <limits>
 #include <sstream>
 
@@ -861,7 +862,7 @@ TEST(RandomTests, erfcinvFunction)
     }
 
     float inf_f = std::numeric_limits<float>::infinity();
-    float nan_f = std::nan("undefined");
+    float nan_f = std::nanf("undefined");
 
     float float_inputs[8]
         = {-3.0f,
