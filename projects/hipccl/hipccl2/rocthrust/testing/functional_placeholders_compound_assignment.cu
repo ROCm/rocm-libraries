@@ -7,7 +7,7 @@
 template<typename Vector> \
   struct TestFunctionalPlaceholders##name \
 { \
-  void operator()(const size_t dummy) \
+  void operator()(const size_t) \
   { \
     const size_t num_samples = 10000; \
     typedef typename Vector::value_type T; \
@@ -189,5 +189,3 @@ DECLARE_VECTOR_UNITTEST(TestFunctionalPlaceholdersSuffix##name);
 
 SUFFIX_FUNCTIONAL_PLACEHOLDERS_TEST(Increment,  ++,  suffix_increment_reference);
 SUFFIX_FUNCTIONAL_PLACEHOLDERS_TEST(Decrement,  --,  suffix_decrement_reference);
-
-
