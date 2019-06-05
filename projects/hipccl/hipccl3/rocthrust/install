@@ -1,0 +1,122 @@
+#!/bin/bash
+
+
+# #################################################
+# helper functions
+# #################################################
+function display_help()
+{
+    echo "rocThust build & installation helper script"
+    echo "./install [-h|--help] "
+    echo "    [-h|--help] prints this help message"
+    echo "    [-i|--install] install after build"
+    echo "    [-p|--package] build package"
+    #Not implemented yet
+    #    echo "    [-d|--dependencies] install build dependencies"
+    echo "    [-c|--clients] build library clients too (combines with -i & -d)"
+    echo "    [-g|--debug] -DCMAKE_BUILD_TYPE=Debug (default is =Release)"
+}
+
+
+# #################################################
+# global variables
+# #################################################
+install_package=false
+build_package=false
+build_clients=false
+build_release=true
+run_tests=false
+rocm_path=/opt/rocm/bin
+# #################################################
+# Parameter parsing
+# #################################################
+
+# check if we have a modern version of getopt that can handle whitespace and long parameters
+getopt -T
+if [[ $? -eq 4 ]]; then
+    GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,debug,test,package --options hicdtp -- "$@")
+else
+    echo "Need a new version of getopt"
+    exit 1
+fi
+
+if [[ $? -ne 0 ]]; then
+    echo "getopt invocation failed; could not parse the command line";
+    exit 1
+fi
+
+eval set -- "${GETOPT_PARSE}"
+
+
+while true; do
+    case "${1}" in
+	-h|--help)
+	    display_help
+	    exit 0
+	    ;;
+	-i|--install)
+	    install_package=true
+	    shift ;;
+	-p|--package)
+	    build_package=true
+	    shift ;;
+	-c|--clients)
+	    build_clients=true
+	    shift ;;
+	-g|--debug)
+	    build_release=false
+	    shift ;;
+	-t|--test)
+	    run_tests=true
+	    shift ;;
+	--) shift ; break ;;
+	*)  echo "Unexpected command line parameter received; aborting";
+	    exit 1
+	    ;;
+    esac
+    done
+
+
+# Instal the pre-commit hook
+#bash .githooks/install
+
+
+# Create and go to the build directory.
+mkdir -p build; cd build
+
+if ($build_release); then
+    mkdir -p release; cd release
+else
+    mkdir -p debug; cd debug
+fi
+
+# Configure hipCUB, setup options for your system.
+# Build options:
+#   BUILD_TEST - on by default,
+#   BUILD_BENCHMARK - off by default.
+#
+# ! IMPORTANT !
+# On ROCm platform set C++ compiler to HCC. You can do it by adding 'CXX=<path-to-hcc>'
+# before 'cmake' or setting cmake option 'CMAKE_CXX_COMPILER' to path to the HCC compiler.
+#
+
+
+CXX=$rocm_path/hcc cmake -DBUILD_BENCHMARK=ON ../../. # or cmake-gui ../.
+
+# Build
+make -j$(nproc)
+
+if ($run_tests); then
+# Optionally, run tests if they're enabled.
+ctest --output-on-failure
+fi
+
+if ($install_package); then
+# Install
+make install
+fi
+
+if ($build_package); then
+# Install
+make package -j$(nproc)
+fi
