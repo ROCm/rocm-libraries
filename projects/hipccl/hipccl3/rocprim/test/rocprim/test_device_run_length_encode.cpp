@@ -76,6 +76,12 @@ typedef ::testing::Types<
     params<double, int, 100, 2000>,
     params<custom_double2, custom_int2, 10, 30000, true>,
     params<int, unsigned int, 1000, 5000>,
+    params<int8_t, int8_t, 100, 2000>,
+    params<uint8_t, uint8_t, 100, 2000>,
+    params<int, rocprim::half, 100, 2000>,
+    params<int8_t, int8_t, 1000, 5000>,
+    params<uint8_t, uint8_t, 1000, 5000>,
+    params<int, rocprim::half, 1000, 5000>,
     params<unsigned int, size_t, 2048, 2048>,
     params<unsigned int, unsigned int, 1000, 50000>,
     params<unsigned long long, custom_double2, 100000, 100000>
@@ -234,13 +240,12 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, Encode)
 
         // Validating results
 
-        ASSERT_EQ(runs_count_output[0], static_cast<count_type>(runs_count_expected));
+        std::vector<count_type> runs_count_expected_2;
+        runs_count_expected_2.push_back(static_cast<count_type>(runs_count_expected));
+        test_utils::custom_assert_eq(runs_count_output, runs_count_expected_2, 1);
 
-        for(size_t i = 0; i < runs_count_expected; i++)
-        {
-            ASSERT_EQ(unique_output[i], unique_expected[i]);
-            ASSERT_EQ(counts_output[i], counts_expected[i]);
-        }
+        ASSERT_NO_FATAL_FAILURE(test_utils::custom_assert_eq(unique_output, unique_expected, runs_count_expected));
+        ASSERT_NO_FATAL_FAILURE(test_utils::custom_assert_eq(counts_output, counts_expected, runs_count_expected));
     }
 }
 
@@ -398,12 +403,11 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, NonTrivialRuns)
 
         // Validating results
 
-        ASSERT_EQ(runs_count_output[0], static_cast<count_type>(runs_count_expected));
+        std::vector<count_type> runs_count_expected_2;
+        runs_count_expected_2.push_back(static_cast<count_type>(runs_count_expected));
+        test_utils::custom_assert_eq(runs_count_output, runs_count_expected_2, 1);
 
-        for(size_t i = 0; i < runs_count_expected; i++)
-        {
-            ASSERT_EQ(offsets_output[i], offsets_expected[i]);
-            ASSERT_EQ(counts_output[i], counts_expected[i]);
-        }
+        ASSERT_NO_FATAL_FAILURE(test_utils::custom_assert_eq(offsets_output, offsets_expected, runs_count_expected));
+        ASSERT_NO_FATAL_FAILURE(test_utils::custom_assert_eq(counts_output, counts_expected, runs_count_expected));
     }
 }

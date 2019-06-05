@@ -72,6 +72,9 @@ typedef ::testing::Types<
     DeviceSortParams<test_utils::custom_test_type<int>>,
     DeviceSortParams<unsigned long>,
     DeviceSortParams<float, double>,
+    DeviceSortParams<int8_t, int8_t>,
+    DeviceSortParams<uint8_t, uint8_t>,
+    DeviceSortParams<rocprim::half, rocprim::half, test_utils::half_less>,
     DeviceSortParams<int, float, ::rocprim::greater<int>>,
     DeviceSortParams<short, test_utils::custom_test_type<int>>,
     DeviceSortParams<double, test_utils::custom_test_type<double>>,
@@ -186,10 +189,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
         HIP_CHECK(hipDeviceSynchronize());
 
         // Check if output values are as expected
-        for(size_t i = 0; i < output.size(); i++)
-        {
-            ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
-        }
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
 
         hipFree(d_input);
         if(!in_place)
@@ -332,11 +332,15 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
         HIP_CHECK(hipDeviceSynchronize());
 
         // Check if output values are as expected
-        for(size_t i = 0; i < keys_output.size(); i++)
+        std::vector<key_type> expected_key(expected.size());
+        std::vector<value_type> expected_value(expected.size());
+        for(size_t i = 0; i < expected.size(); i++)
         {
-            ASSERT_EQ(keys_output[i], expected[i].first) << "where index = " << i;
-            ASSERT_EQ(values_output[i], expected[i].second) << "where index = " << i;
+            expected_key[i] = expected[i].first;
+            expected_value[i] = expected[i].second;
         }
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected_key));
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, expected_value));
 
         hipFree(d_keys_input);
         hipFree(d_values_input);

@@ -845,6 +845,11 @@ auto assert_near(const T& result, const T& expected, const float percent)
     ASSERT_EQ(result, expected);
 }
 
+void assert_near(const rocprim::half& result, const rocprim::half& expected, float percent)
+{
+    auto diff = std::max<float>(std::abs(percent * static_cast<float>(expected)), percent);
+    ASSERT_NEAR(static_cast<float>(result), static_cast<float>(expected), diff);
+}
 
 template<class T>
 auto assert_near(const custom_test_type<T>& result, const custom_test_type<T>& expected, const float percent)
@@ -874,6 +879,35 @@ void assert_eq(const std::vector<rocprim::half>& result, const std::vector<rocpr
         ASSERT_EQ(half_to_native(result[i]), half_to_native(expected[i])) << "where index = " << i;
     }
 }
+
+template<class T>
+void custom_assert_eq(const std::vector<T>& result, const std::vector<T>& expected, size_t size)
+{
+    for(size_t i = 0; i < size; i++)
+    {
+        ASSERT_EQ(result[i], expected[i]) << "where index = " << i;
+    }
+}
+
+void custom_assert_eq(const std::vector<rocprim::half>& result, const std::vector<rocprim::half>& expected, size_t size)
+{
+    for(size_t i = 0; i < size; i++)
+    {
+        ASSERT_EQ(half_to_native(result[i]), half_to_native(expected[i])) << "where index = " << i;
+    }
+}
+
+template<class T>
+void assert_eq(const T& result, const T& expected)
+{
+    ASSERT_EQ(result, expected);
+}
+
+void assert_eq(const rocprim::half& result, const rocprim::half& expected)
+{
+    ASSERT_EQ(half_to_native(result), half_to_native(expected));
+}
+
 
 } // end test_utils namespace
 

@@ -1443,7 +1443,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScan)
     using T = typename TestFixture::type;
     constexpr size_t block_size = TestFixture::block_size;
 
-    static_for_input_array<0, n_items, T, 0, block_size>::run();
+    static_for_input_array<0, 2, T, 0, block_size>::run();
 }
 
 TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScanReduce)
@@ -1451,7 +1451,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScanReduce)
     using T = typename TestFixture::type;
     constexpr size_t block_size = TestFixture::block_size;
 
-    static_for_input_array<0, n_items, T, 1, block_size>::run();
+    static_for_input_array<0, 2, T, 1, block_size>::run();
 }
 
 TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScanPrefixCallback)
@@ -1459,7 +1459,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, InclusiveScanPrefixCallback)
     using T = typename TestFixture::type;
     constexpr size_t block_size = TestFixture::block_size;
 
-    static_for_input_array<0, n_items, T, 2, block_size>::run();
+    static_for_input_array<0, 2, T, 2, block_size>::run();
 }
 
 TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScan)
@@ -1467,7 +1467,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScan)
     using T = typename TestFixture::type;
     constexpr size_t block_size = TestFixture::block_size;
 
-    static_for_input_array<0, n_items, T, 3, block_size>::run();
+    static_for_input_array<0, 2, T, 3, block_size>::run();
 }
 
 TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScanReduce)
@@ -1475,7 +1475,7 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScanReduce)
     using T = typename TestFixture::type;
     constexpr size_t block_size = TestFixture::block_size;
 
-    static_for_input_array<0, n_items, T, 4, block_size>::run();
+    static_for_input_array<0, 2, T, 4, block_size>::run();
 }
 
 TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScanPrefixCallback)
@@ -1483,5 +1483,5 @@ TYPED_TEST(RocprimBlockScanInputArrayTests, ExclusiveScanPrefixCallback)
     using T = typename TestFixture::type;
     constexpr size_t block_size = TestFixture::block_size;
 
-    static_for_input_array<0, n_items, T, 5, block_size>::run();
+    static_for_input_array<0, 2, T, 5, block_size>::run();
 }

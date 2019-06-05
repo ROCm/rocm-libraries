@@ -504,6 +504,6 @@ TYPED_TEST(RocprimBlockReduceInputArrayTests, Reduce)
     using T = typename TestFixture::input_type;
     constexpr size_t block_size = TestFixture::block_size;
 
-    static_for_input_array<0, n_items, T, block_size, rp::block_reduce_algorithm::using_warp_reduce>::run();
-    static_for_input_array<0, n_items, T, block_size, rp::block_reduce_algorithm::raking_reduce>::run();
+    static_for_input_array<0, 2, T, block_size, rp::block_reduce_algorithm::using_warp_reduce>::run();
+    static_for_input_array<0, 2, T, block_size, rp::block_reduce_algorithm::raking_reduce>::run();
 }

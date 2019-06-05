@@ -104,6 +104,8 @@ typedef ::testing::Types<
     params<float, long long, rp::maximum<unsigned long long>, 100, 400, long long, custom_key_compare_op1<float>>,
     params<unsigned int, unsigned char, rp::plus<unsigned char>, 200, 600>,
     params<double, int, rp::plus<int>, 100, 2000, double, custom_key_compare_op1<double>>,
+    params<int8_t, int8_t, rp::maximum<int8_t>, 20, 100>,
+    params<uint8_t, uint8_t, rp::maximum<uint8_t>, 20, 100>,
     params<char, rp::half, test_utils::half_maximum, 123, 1234>,
     params<custom_int2, unsigned int, rp::plus<unsigned int>, 1000, 5000>,
     params<unsigned int, int, rp::plus<int>, 2048, 2048>,
