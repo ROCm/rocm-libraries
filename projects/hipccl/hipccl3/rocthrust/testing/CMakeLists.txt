@@ -20,8 +20,9 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-function(add_thrust_test TEST_TARGET)
-    set(TEST_SOURCE "${TEST_TARGET}.cu")
+function(add_thrust_test TEST)
+    set(TEST_SOURCE "${TEST}.cu")
+    set(TEST_TARGET "test_thrust_${TEST}")
     set_source_files_properties(${TEST_SOURCE} PROPERTIES LANGUAGE CXX COMPILE_FLAGS "-x c++")
     add_executable(${TEST_TARGET} ${TEST_SOURCE} testframework.cpp)
     target_include_directories(${TEST_TARGET} SYSTEM BEFORE
@@ -45,7 +46,7 @@ function(add_thrust_test TEST_TARGET)
         PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/testing/"
     )
-    add_test("thrust.${TEST_TARGET}" ${TEST_TARGET})
+    add_test("thrust.${TEST}" ${TEST_TARGET})
 endfunction()
 
 # ****************************************************************************
@@ -81,12 +82,12 @@ add_thrust_test("functional_arithmetic")
 add_thrust_test("functional_bitwise")
 add_thrust_test("functional")
 add_thrust_test("functional_logical")
-# add_thrust_test("functional_placeholders_arithmetic")
-# add_thrust_test("functional_placeholders_bitwise")
-# add_thrust_test("functional_placeholders_compound_assignment")
-# add_thrust_test("functional_placeholders_logical")
-# add_thrust_test("functional_placeholders_miscellaneous")
-# add_thrust_test("functional_placeholders_relational")
+add_thrust_test("functional_placeholders_arithmetic")
+add_thrust_test("functional_placeholders_bitwise")
+add_thrust_test("functional_placeholders_compound_assignment")
+add_thrust_test("functional_placeholders_logical")
+add_thrust_test("functional_placeholders_miscellaneous")
+add_thrust_test("functional_placeholders_relational")
 add_thrust_test("gather")
 add_thrust_test("generate")
 add_thrust_test("inner_product")
