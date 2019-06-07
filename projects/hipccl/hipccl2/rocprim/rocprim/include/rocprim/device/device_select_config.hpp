@@ -74,7 +74,7 @@ struct select_config_803
         ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
 
     using type = select_config<
-        256,
+        limit_block_size<256U, sizeof(Value)>::value,
         ::rocprim::max(1u, 13u / item_scale),
         ::rocprim::block_load_method::block_load_transpose,
         ::rocprim::block_load_method::block_load_transpose,
@@ -89,7 +89,7 @@ struct select_config_900
         ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
 
     using type = select_config<
-        256,
+        limit_block_size<256U, sizeof(Value)>::value,
         ::rocprim::max(1u, 15u / item_scale),
         ::rocprim::block_load_method::block_load_transpose,
         ::rocprim::block_load_method::block_load_transpose,
