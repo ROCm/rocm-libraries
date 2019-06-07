@@ -20,7 +20,7 @@ template<typename T>
 template<typename Vector>
   struct TestFunctionalPlaceholdersValue
 {
-  void operator()(const size_t dummy)
+  void operator()(const size_t)
   {
     const size_t n = 10000;
     typedef typename Vector::value_type T;
@@ -45,7 +45,7 @@ VectorUnitTest<TestFunctionalPlaceholdersValue, ThirtyTwoBitTypes, thrust::host_
 template<typename Vector>
   struct TestFunctionalPlaceholdersTransformIterator
 {
-  void operator()(const size_t dummy)
+  void operator()(const size_t)
   {
     const size_t n = 10000;
     typedef typename Vector::value_type T;
@@ -70,4 +70,3 @@ template<typename Vector>
 };
 VectorUnitTest<TestFunctionalPlaceholdersTransformIterator, ThirtyTwoBitTypes, thrust::device_vector, thrust::device_malloc_allocator> TestFunctionalPlaceholdersTransformIteratorInstanceDevice;
 VectorUnitTest<TestFunctionalPlaceholdersTransformIterator, ThirtyTwoBitTypes, thrust::host_vector, std::allocator> TestFunctionalPlaceholdersTransformIteratorInstanceHost;
-
