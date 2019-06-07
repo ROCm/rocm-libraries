@@ -15,11 +15,11 @@
  *  limitations under the License.
  */
 
-#include <thrust/set_operations.h>
-#include <thrust/functional.h>
-#include <thrust/sort.h>
 #include <thrust/extrema.h>
+#include <thrust/functional.h>
 #include <thrust/iterator/retag.h>
+#include <thrust/set_operations.h>
+#include <thrust/sort.h>
 
 #include "test_header.hpp"
 
@@ -245,49 +245,48 @@ TYPED_TEST(SetSymmetricDifferencePrimitiveTests, TestSetSymmetricDifferenceMulti
 TYPED_TEST(SetSymmetricDifferenceIntegerTests, TestSetSymmetricDifferenceKeyValue)
 {
     using U = typename TestFixture::input_type;
-    typedef key_value<U,U> T;
+    typedef key_value<U, U> T;
 
     const std::vector<size_t> sizes = get_sizes();
-    
+
     //STREAMHPC: This fails even with small sizes
     for(int i = 0; i < static_cast<int>(sizes.size()) - 12; i++)
     {
         auto size = sizes[i];
 
-        thrust::host_vector<U> h_keys_a   = get_random_data<U>(
+        thrust::host_vector<U> h_keys_a = get_random_data<U>(
             size, std::numeric_limits<U>::min(), std::numeric_limits<U>::max());
         thrust::host_vector<U> h_values_a = get_random_data<U>(
             size, std::numeric_limits<U>::min(), std::numeric_limits<U>::max());
 
-        thrust::host_vector<U> h_keys_b   = get_random_data<U>(
+        thrust::host_vector<U> h_keys_b = get_random_data<U>(
             size, std::numeric_limits<U>::min(), std::numeric_limits<U>::max());
         thrust::host_vector<U> h_values_b = get_random_data<U>(
             size, std::numeric_limits<U>::min(), std::numeric_limits<U>::max());
-        
+
         thrust::host_vector<T> h_a(size), h_b(size);
         for(size_t i = 0; i < size; ++i)
         {
             h_a[i] = T(h_keys_a[i], h_values_a[i]);
             h_b[i] = T(h_keys_b[i], h_values_b[i]);
         }
-        
+
         thrust::stable_sort(h_a.begin(), h_a.end());
         thrust::stable_sort(h_b.begin(), h_b.end());
 
         thrust::device_vector<T> d_a = h_a;
         thrust::device_vector<T> d_b = h_b;
-        
-        thrust::host_vector<T> h_result(h_a.size() + h_b.size());
-        thrust::device_vector<T> d_result(h_result.size());
-        
-        typename thrust::host_vector<T>::iterator h_end;
-        typename thrust::device_vector<T>::iterator d_end;
-        
-        h_end = thrust::set_symmetric_difference(h_a.begin(), h_a.end(),
-                                                h_b.begin(), h_b.end(),
-                                                h_result.begin());
 
-        //The offending line is this one below                           
+        thrust::host_vector<T>   h_result(h_a.size() + h_b.size());
+        thrust::device_vector<T> d_result(h_result.size());
+
+        typename thrust::host_vector<T>::iterator   h_end;
+        typename thrust::device_vector<T>::iterator d_end;
+
+        h_end = thrust::set_symmetric_difference(
+            h_a.begin(), h_a.end(), h_b.begin(), h_b.end(), h_result.begin());
+
+        //The offending line is this one below
         h_result.erase(h_end, h_result.begin());
         EXPECT_EQ(1, 1);
         /*

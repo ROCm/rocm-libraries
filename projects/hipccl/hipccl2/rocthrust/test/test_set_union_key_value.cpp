@@ -15,8 +15,8 @@
  *  limitations under the License.
  */
 
-#include <thrust/set_operations.h>
 #include <thrust/functional.h>
+#include <thrust/set_operations.h>
 #include <thrust/sort.h>
 
 #include "test_header.hpp"
@@ -27,109 +27,100 @@ TESTS_DEFINE(SetUnionKeyValuePrimitiveTests, NumericalTestsParams);
 TYPED_TEST(SetUnionKeyValuePrimitiveTests, TestSetUnionKeyValue)
 {
     using U = typename TestFixture::input_type;
-    typedef key_value<U,U> T;
+    using T = key_value<U, U>;
 
     const std::vector<size_t> sizes = get_sizes();
 
     for(auto size : sizes)
     {
-      thrust::host_vector<U> h_keys_a   = get_random_data<U>(
+        thrust::host_vector<U> h_keys_a = get_random_data<U>(
             size, std::numeric_limits<U>::min(), std::numeric_limits<U>::max());
-      thrust::host_vector<U> h_values_a = get_random_data<U>(
-            size, std::numeric_limits<U>::min(), std::numeric_limits<U>::max());
-
-      thrust::host_vector<U> h_keys_b   = get_random_data<U>(
-            size, std::numeric_limits<U>::min(), std::numeric_limits<U>::max());
-      thrust::host_vector<U> h_values_b = get_random_data<U>(
+        thrust::host_vector<U> h_values_a = get_random_data<U>(
             size, std::numeric_limits<U>::min(), std::numeric_limits<U>::max());
 
-      thrust::host_vector<T> h_a(size), h_b(size);
-      for(size_t i = 0; i < size; ++i)
-      {
-        h_a[i] = T(h_keys_a[i], h_values_a[i]);
-        h_b[i] = T(h_keys_b[i], h_values_b[i]);
-      }
+        thrust::host_vector<U> h_keys_b = get_random_data<U>(
+            size, std::numeric_limits<U>::min(), std::numeric_limits<U>::max());
+        thrust::host_vector<U> h_values_b = get_random_data<U>(
+            size, std::numeric_limits<U>::min(), std::numeric_limits<U>::max());
 
-      thrust::stable_sort(h_a.begin(), h_a.end());
-      thrust::stable_sort(h_b.begin(), h_b.end());
+        thrust::host_vector<T> h_a(size), h_b(size);
+        for(size_t i = 0; i < size; ++i)
+        {
+            h_a[i] = T(h_keys_a[i], h_values_a[i]);
+            h_b[i] = T(h_keys_b[i], h_values_b[i]);
+        }
 
-      thrust::device_vector<T> d_a = h_a;
-      thrust::device_vector<T> d_b = h_b;
+        thrust::stable_sort(h_a.begin(), h_a.end());
+        thrust::stable_sort(h_b.begin(), h_b.end());
 
-      thrust::host_vector<T>   h_result(h_a.size() + h_b.size());
-      thrust::device_vector<T> d_result(d_a.size() + d_b.size());
+        thrust::device_vector<T> d_a = h_a;
+        thrust::device_vector<T> d_b = h_b;
 
-      typename thrust::host_vector<T>::iterator   h_end;
-      typename thrust::device_vector<T>::iterator d_end;
-      
-      h_end = thrust::set_union(h_a.begin(), h_a.end(),
-                                h_b.begin(), h_b.end(),
-                                h_result.begin());
-      h_result.erase(h_end, h_result.end());
+        thrust::host_vector<T>   h_result(h_a.size() + h_b.size());
+        thrust::device_vector<T> d_result(d_a.size() + d_b.size());
 
-      d_end = thrust::set_union(d_a.begin(), d_a.end(),
-                                d_b.begin(), d_b.end(),
-                                d_result.begin());
-      d_result.erase(d_end, d_result.end());
+        typename thrust::host_vector<T>::iterator   h_end;
+        typename thrust::device_vector<T>::iterator d_end;
 
-      thrust::host_vector<T>  d_result_h(d_result);
-      EXPECT_EQ(h_result, d_result_h);
+        h_end = thrust::set_union(h_a.begin(), h_a.end(), h_b.begin(), h_b.end(), h_result.begin());
+        h_result.erase(h_end, h_result.end());
+
+        d_end = thrust::set_union(d_a.begin(), d_a.end(), d_b.begin(), d_b.end(), d_result.begin());
+        d_result.erase(d_end, d_result.end());
+
+        thrust::host_vector<T> d_result_h(d_result);
+        EXPECT_EQ(h_result, d_result_h);
     }
 }
-
 
 TYPED_TEST(SetUnionKeyValuePrimitiveTests, TestSetUnionKeyValueDescending)
 {
     using U = typename TestFixture::input_type;
-    typedef key_value<U,U> T;
+    typedef key_value<U, U> T;
 
     const std::vector<size_t> sizes = get_sizes();
 
     for(auto size : sizes)
     {
-      thrust::host_vector<U> h_keys_a   = get_random_data<U>(
+        thrust::host_vector<U> h_keys_a = get_random_data<U>(
             size, std::numeric_limits<U>::min(), std::numeric_limits<U>::max());
-      thrust::host_vector<U> h_values_a = get_random_data<U>(
-            size, std::numeric_limits<U>::min(), std::numeric_limits<U>::max());
-
-      thrust::host_vector<U> h_keys_b   = get_random_data<U>(
-            size, std::numeric_limits<U>::min(), std::numeric_limits<U>::max());
-      thrust::host_vector<U> h_values_b = get_random_data<U>(
+        thrust::host_vector<U> h_values_a = get_random_data<U>(
             size, std::numeric_limits<U>::min(), std::numeric_limits<U>::max());
 
-      thrust::host_vector<T> h_a(size), h_b(size);
-      for(size_t i = 0; i < size; ++i)
-      {
-        h_a[i] = T(h_keys_a[i], h_values_a[i]);
-        h_b[i] = T(h_keys_b[i], h_values_b[i]);
-      }
+        thrust::host_vector<U> h_keys_b = get_random_data<U>(
+            size, std::numeric_limits<U>::min(), std::numeric_limits<U>::max());
+        thrust::host_vector<U> h_values_b = get_random_data<U>(
+            size, std::numeric_limits<U>::min(), std::numeric_limits<U>::max());
 
-      thrust::stable_sort(h_a.begin(), h_a.end(), thrust::greater<T>());
-      thrust::stable_sort(h_b.begin(), h_b.end(), thrust::greater<T>());
+        thrust::host_vector<T> h_a(size), h_b(size);
+        for(size_t i = 0; i < size; ++i)
+        {
+            h_a[i] = T(h_keys_a[i], h_values_a[i]);
+            h_b[i] = T(h_keys_b[i], h_values_b[i]);
+        }
 
-      thrust::device_vector<T> d_a = h_a;
-      thrust::device_vector<T> d_b = h_b;
+        thrust::stable_sort(h_a.begin(), h_a.end(), thrust::greater<T>());
+        thrust::stable_sort(h_b.begin(), h_b.end(), thrust::greater<T>());
 
-      thrust::host_vector<T>   h_result(h_a.size() + h_b.size());
-      thrust::device_vector<T> d_result(d_a.size() + d_b.size());
+        thrust::device_vector<T> d_a = h_a;
+        thrust::device_vector<T> d_b = h_b;
 
-      typename thrust::host_vector<T>::iterator   h_end;
-      typename thrust::device_vector<T>::iterator d_end;
-      
-      h_end = thrust::set_union(h_a.begin(), h_a.end(),
-                                h_b.begin(), h_b.end(),
-                                h_result.begin(),
-                                thrust::greater<T>());
-      h_result.erase(h_end, h_result.end());
+        thrust::host_vector<T>   h_result(h_a.size() + h_b.size());
+        thrust::device_vector<T> d_result(d_a.size() + d_b.size());
 
-      d_end = thrust::set_union(d_a.begin(), d_a.end(),
-                                d_b.begin(), d_b.end(),
-                                d_result.begin(),
-                                thrust::greater<T>());
-      d_result.erase(d_end, d_result.end());
+        typename thrust::host_vector<T>::iterator   h_end;
+        typename thrust::device_vector<T>::iterator d_end;
 
-      thrust::host_vector<T>  d_result_h(d_result);
-      EXPECT_EQ(h_result, d_result_h);
+        h_end = thrust::set_union(
+            h_a.begin(), h_a.end(), h_b.begin(), h_b.end(), h_result.begin(), thrust::greater<T>());
+        h_result.erase(h_end, h_result.end());
+
+        d_end = thrust::set_union(
+            d_a.begin(), d_a.end(), d_b.begin(), d_b.end(), d_result.begin(), thrust::greater<T>());
+        d_result.erase(d_end, d_result.end());
+
+        thrust::host_vector<T> d_result_h(d_result);
+        EXPECT_EQ(h_result, d_result_h);
     }
 }
 /*

@@ -15,8 +15,8 @@
  *  limitations under the License.
  */
 
-#include <thrust/set_operations.h>
 #include <thrust/functional.h>
+#include <thrust/set_operations.h>
 #include <thrust/sort.h>
 
 #include "test_header.hpp"
@@ -27,26 +27,35 @@ TESTS_DEFINE(SetSymmetricDifferenceDescendingPrimitiveTests, NumericalTestsParam
 TYPED_TEST(SetSymmetricDifferenceDescendingTests, TestSetSymmetricDifferenceDescendingSimple)
 {
     using Vector   = typename TestFixture::input_type;
-    using T = typename Vector::value_type;
+    using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
 
-  Vector a(4), b(5);
+    Vector a(4), b(5);
 
-  a[0] = 6; a[1] = 4; a[2] = 2; a[3] = 0;
-  b[0] = 7; b[1] = 4; b[2] = 3; b[3] = 3; b[4] = 0;
+    a[0] = 6;
+    a[1] = 4;
+    a[2] = 2;
+    a[3] = 0;
+    b[0] = 7;
+    b[1] = 4;
+    b[2] = 3;
+    b[3] = 3;
+    b[4] = 0;
 
-  Vector ref(5);
-  ref[0] = 7; ref[1] = 6; ref[2] = 3; ref[3] = 3; ref[4] = 2;
+    Vector ref(5);
+    ref[0] = 7;
+    ref[1] = 6;
+    ref[2] = 3;
+    ref[3] = 3;
+    ref[4] = 2;
 
-  Vector result(5);
+    Vector result(5);
 
-  Iterator end = thrust::set_symmetric_difference(a.begin(), a.end(),
-                                                  b.begin(), b.end(),
-                                                  result.begin(),
-                                                  thrust::greater<T>());
+    Iterator end = thrust::set_symmetric_difference(
+        a.begin(), a.end(), b.begin(), b.end(), result.begin(), thrust::greater<T>());
 
-  EXPECT_EQ(result.end(), end);
-  ASSERT_EQ(ref, result);
+    EXPECT_EQ(result.end(), end);
+    ASSERT_EQ(ref, result);
 }
 
 TYPED_TEST(SetSymmetricDifferenceDescendingPrimitiveTests, TestSetSymmetricDifferenceDescending)
@@ -69,22 +78,18 @@ TYPED_TEST(SetSymmetricDifferenceDescendingPrimitiveTests, TestSetSymmetricDiffe
         thrust::device_vector<T> d_a = h_a;
         thrust::device_vector<T> d_b = h_b;
 
-        thrust::host_vector<T> h_result(h_a.size() + h_b.size());
+        thrust::host_vector<T>   h_result(h_a.size() + h_b.size());
         thrust::device_vector<T> d_result(h_result.size());
 
-        typename thrust::host_vector<T>::iterator h_end;
+        typename thrust::host_vector<T>::iterator   h_end;
         typename thrust::device_vector<T>::iterator d_end;
-        
-        h_end = thrust::set_symmetric_difference(h_a.begin(), h_a.end(),
-                                                h_b.begin(), h_b.end(),
-                                                h_result.begin(),
-                                                thrust::greater<T>());
+
+        h_end = thrust::set_symmetric_difference(
+            h_a.begin(), h_a.end(), h_b.begin(), h_b.end(), h_result.begin(), thrust::greater<T>());
         h_result.erase(h_end, h_result.end());
 
-        d_end = thrust::set_symmetric_difference(d_a.begin(), d_a.end(),
-                                                d_b.begin(), d_b.end(),
-                                                d_result.begin(),
-                                                thrust::greater<T>());
+        d_end = thrust::set_symmetric_difference(
+            d_a.begin(), d_a.end(), d_b.begin(), d_b.end(), d_result.begin(), thrust::greater<T>());
 
         d_result.erase(d_end, d_result.end());
 
