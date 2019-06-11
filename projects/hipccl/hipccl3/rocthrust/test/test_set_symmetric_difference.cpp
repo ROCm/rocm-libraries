@@ -21,12 +21,14 @@
 #include <thrust/set_operations.h>
 #include <thrust/sort.h>
 
+#include <iostream>
+
 #include "test_header.hpp"
 
 TESTS_DEFINE(SetSymmetricDifferenceTests, FullTestsParams);
 TESTS_DEFINE(SetSymmetricDifferencePrimitiveTests, NumericalTestsParams);
 TESTS_DEFINE(SetSymmetricDifferenceIntegerTests, IntegerTestsParams);
-/*
+
 template<typename InputIterator1,
          typename InputIterator2,
          typename OutputIterator>
@@ -106,7 +108,7 @@ TYPED_TEST(SetSymmetricDifferenceTests, TestSetSymmetricDifferenceSimple)
   EXPECT_EQ(result.end(), end);
   ASSERT_EQ(ref, result);
 }
-  
+
 TYPED_TEST(SetSymmetricDifferencePrimitiveTests, TestSetSymmetricDifference)
 {
     using T = typename TestFixture::input_type;
@@ -126,20 +128,20 @@ TYPED_TEST(SetSymmetricDifferencePrimitiveTests, TestSetSymmetricDifference)
 
         thrust::stable_sort(h_a.begin(), h_a.end());
         thrust::stable_sort(h_b.begin(), h_b.end());
-        
+
         thrust::device_vector<T> d_a = h_a;
         thrust::device_vector<T> d_b = h_b;
 
         for (size_t i = 0; i < num_expanded_sizes; i++)
         {
             size_t expanded_size = expanded_sizes[i];
-            
+
             thrust::host_vector<T>   h_result(size + expanded_size);
             thrust::device_vector<T> d_result(size + expanded_size);
 
             typename thrust::host_vector<T>::iterator   h_end;
             typename thrust::device_vector<T>::iterator d_end;
-            
+
             h_end = thrust::set_symmetric_difference(h_a.begin(), h_a.end(),
                                                     h_b.begin(), h_b.begin() + expanded_size,
                                                     h_result.begin());
@@ -177,7 +179,7 @@ TYPED_TEST(SetSymmetricDifferencePrimitiveTests, TestSetSymmetricDifferenceEquiv
 
         typename thrust::host_vector<T>::iterator   h_end;
         typename thrust::device_vector<T>::iterator d_end;
-        
+
         h_end = thrust::set_symmetric_difference(h_a.begin(), h_a.end(),
                                                 h_b.begin(), h_b.end(),
                                                 h_result.begin());
@@ -227,7 +229,7 @@ TYPED_TEST(SetSymmetricDifferencePrimitiveTests, TestSetSymmetricDifferenceMulti
 
         typename thrust::host_vector<T>::iterator h_end;
         typename thrust::device_vector<T>::iterator d_end;
-        
+
         h_end = thrust::set_difference(h_a.begin(), h_a.end(),
                                         h_b.begin(), h_b.end(),
                                         h_result.begin());
@@ -238,21 +240,19 @@ TYPED_TEST(SetSymmetricDifferencePrimitiveTests, TestSetSymmetricDifferenceMulti
                                         d_result.begin());
         d_result.erase(d_end, d_result.end());
 
-        ASSERT_EQ(h_result, d_result);
+        ASSERT_EQ_QUIET(h_result, d_result);
     }
 }
-*/
+
 TYPED_TEST(SetSymmetricDifferenceIntegerTests, TestSetSymmetricDifferenceKeyValue)
 {
     using U = typename TestFixture::input_type;
     typedef key_value<U, U> T;
 
     const std::vector<size_t> sizes = get_sizes();
-
-    //STREAMHPC: This fails even with small sizes
-    for(int i = 0; i < static_cast<int>(sizes.size()) - 12; i++)
+    for(auto size : sizes)
     {
-        auto size = sizes[i];
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
 
         thrust::host_vector<U> h_keys_a = get_random_data<U>(
             size, std::numeric_limits<U>::min(), std::numeric_limits<U>::max());
@@ -268,7 +268,11 @@ TYPED_TEST(SetSymmetricDifferenceIntegerTests, TestSetSymmetricDifferenceKeyValu
         for(size_t i = 0; i < size; ++i)
         {
             h_a[i] = T(h_keys_a[i], h_values_a[i]);
-            h_b[i] = T(h_keys_b[i], h_values_b[i]);
+
+            if( i % 2 == 1 )
+                h_b[i] = T(h_keys_b[i], h_values_b[i]);
+            else
+                h_b[i] = T(h_keys_a[i], h_values_a[i]);
         }
 
         thrust::stable_sort(h_a.begin(), h_a.end());
@@ -283,22 +287,17 @@ TYPED_TEST(SetSymmetricDifferenceIntegerTests, TestSetSymmetricDifferenceKeyValu
         typename thrust::host_vector<T>::iterator   h_end;
         typename thrust::device_vector<T>::iterator d_end;
 
-        h_end = thrust::set_symmetric_difference(
-            h_a.begin(), h_a.end(), h_b.begin(), h_b.end(), h_result.begin());
+        h_end = thrust::set_symmetric_difference(h_a.begin(), h_a.end(),
+                                                 h_b.begin(), h_b.end(),
+                                                 h_result.begin());
+        h_result.erase(h_end, h_result.end());
 
-        //The offending line is this one below
-        h_result.erase(h_end, h_result.begin());
-        EXPECT_EQ(1, 1);
-        /*
         d_end = thrust::set_symmetric_difference(d_a.begin(), d_a.end(),
-                                                d_b.begin(), d_b.end(),
-                                                d_result.begin());
+                                                 d_b.begin(), d_b.end(),
+                                                 d_result.begin());
 
-        
-        d_result.erase(d_end, d_result.begin());
+        d_result.erase(d_end, d_result.end());
 
-        thrust::host_vector<T> d_result_h(d_result);
-        
-        EXPECT_EQ(h_result, d_result_h);*/
+        ASSERT_EQ_QUIET(h_result, d_result);
     }
 }
