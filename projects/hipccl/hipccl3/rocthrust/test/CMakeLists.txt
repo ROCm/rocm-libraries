@@ -33,8 +33,6 @@ endfunction()
 # Tests
 # ****************************************************************************
 
-add_rocthrust_test("thrust.hip.set_symmetric_difference" test_set_symmetric_difference.cpp)
-if(FALSE)
 add_rocthrust_test("thrust.hip.adjacent_difference" test_adjacent_difference.cpp)
 add_rocthrust_test("thrust.hip.advance" test_advance.cpp)
 add_rocthrust_test("thrust.hip.allocator" test_allocator.cpp)
@@ -95,6 +93,7 @@ add_rocthrust_test("thrust.hip.set_intersection_by_key" test_set_intersection_by
 add_rocthrust_test("thrust.hip.set_intersection_by_key_descending" test_set_intersection_by_key_descending.cpp)
 add_rocthrust_test("thrust.hip.set_intersection_descending" test_set_intersection_descending.cpp)
 add_rocthrust_test("thrust.hip.set_intersection_key_value" test_set_intersection_key_value.cpp)
+add_rocthrust_test("thrust.hip.set_symmetric_difference" test_set_symmetric_difference.cpp)
 add_rocthrust_test("thrust.hip.set_symmetric_difference_by_key_descending" test_set_symmetric_difference_by_key_descending.cpp)
 add_rocthrust_test("thrust.hip.set_symmetric_difference_by_key" test_set_symmetric_difference_by_key.cpp)
 add_rocthrust_test("thrust.hip.scan" test_scan.cpp)
@@ -133,4 +132,3 @@ add_rocthrust_test("thrust.hip.zip_iterator_scan" test_zip_iterator_scan.cpp)
 add_rocthrust_test("thrust.hip.zip_iterator_sort" test_zip_iterator_sort.cpp)
 add_rocthrust_test("thrust.hip.zip_iterator_sort_by_key" test_zip_iterator_sort_by_key.cpp)
 add_rocthrust_test("thrust.hip.zip_iterator_reduce_by_key" test_zip_iterator_reduce_by_key.cpp)
-endif()
