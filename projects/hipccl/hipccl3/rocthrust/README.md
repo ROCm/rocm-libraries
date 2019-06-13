@@ -92,16 +92,7 @@ ctest
 
 ## Documentation
 
-```sh
-# go to rocThrust doc directory
-cd rocThrust
-
-# run doxygen
-doxygen doc/thrust.dox
-
-# open html/index.html
-
-```
+Documentation is available [here](https://rocthrust.readthedocs.io/en/latest/).
 
 ## Support
 
