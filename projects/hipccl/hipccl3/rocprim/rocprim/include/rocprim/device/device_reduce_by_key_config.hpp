@@ -65,7 +65,7 @@ struct reduce_by_key_config_803
             (sizeof(Key) <= 8 && sizeof(Value) <= 8),
             reduce_by_key_config<scan, kernel_config<256, 7> >
         >,
-        reduce_by_key_config<scan, kernel_config<256, ::rocprim::max(1u, 15u / item_scale)> >
+        reduce_by_key_config<scan, kernel_config<limit_block_size<256U, sizeof(Key) + sizeof(Value)>::value, ::rocprim::max(1u, 15u / item_scale)> >
     >;
 };
 
@@ -82,7 +82,7 @@ struct reduce_by_key_config_900
             (sizeof(Key) <= 8 && sizeof(Value) <= 8),
             reduce_by_key_config<scan, kernel_config<256, 10> >
         >,
-        reduce_by_key_config<scan, kernel_config<256, ::rocprim::max(1u, 15u / item_scale)> >
+        reduce_by_key_config<scan, kernel_config<limit_block_size<256U, sizeof(Key) + sizeof(Value)>::value, ::rocprim::max(1u, 15u / item_scale)> >
     >;
 };
 
