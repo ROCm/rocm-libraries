@@ -56,12 +56,26 @@ rocThrustCI:
     {
         platform, project->
 
-        def command = """#!/usr/bin/env bash
-                set -x
-                cd ${project.paths.project_build_prefix}/build/release
-                make -j4
-                ctest --output-on-failure
-            """
+        def command
+        
+        if(platform.jenkinsLabel.contains('centos'))
+        {
+            command = """#!/usr/bin/env bash
+                    set -x
+                    cd ${project.paths.project_build_prefix}/build/release
+                    make -j4
+                    sudo ctest --output-on-failure
+                """
+        }
+        else
+        {
+            command = """#!/usr/bin/env bash
+                    set -x
+                    cd ${project.paths.project_build_prefix}/build/release
+                    make -j4
+                    ctest --output-on-failure
+                """
+        }
 
         platform.runCommand(this, command)
     }
