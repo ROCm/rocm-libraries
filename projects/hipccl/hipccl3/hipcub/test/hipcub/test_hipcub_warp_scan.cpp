@@ -228,7 +228,7 @@ void warp_inclusive_scan_reduce_kernel(
 
     using wscan_t = hipcub::WarpScan<T, LogicalWarpSize>;
     __shared__ typename wscan_t::TempStorage storage[warps_no];
-    if(warp_id%2 == 0)
+    if(hipBlockIdx_x%2 == 0)
     {
         auto scan_op = hipcub::Sum();
         wscan_t(storage[warp_id]).InclusiveScan(value, value, scan_op, reduction);
