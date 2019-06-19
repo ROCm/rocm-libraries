@@ -69,10 +69,6 @@ set(INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_INCLUDEDIR})
 # does not support header-only libraries (INTERFACE targets)
 rocm_install_targets(
   TARGETS hipcub
-  EXPORT hipcub-targets
-#   INCLUDE
-#   ${CMAKE_SOURCE_DIR}/hipcub/include
-#   ${CMAKE_BINARY_DIR}/hipcub/include
   PREFIX hipcub
 )
 install(
@@ -88,8 +84,7 @@ install(
 
 # Export targets
 rocm_export_targets(
-  TARGETS hipcub-targets
-  NAME hipcub
+  TARGETS hip::hipcub
   PREFIX hipcub
   NAMESPACE hip::
 )
