@@ -15,7 +15,6 @@ function display_help()
     #    echo "    [-d|--dependencies] install build dependencies"
     echo "    [-c|--clients] build library clients too (combines with -i & -d)"
     echo "    [-g|--debug] -DCMAKE_BUILD_TYPE=Debug (default is =Release)"
-    echo "    [--hip-clang] build library for amdgpu backend using hip-clang"
 }
 
 
@@ -26,7 +25,6 @@ install_package=false
 build_package=false
 build_clients=false
 build_release=true
-build_hip_clang=false
 run_tests=false
 rocm_path=/opt/rocm/bin
 # #################################################
@@ -36,7 +34,7 @@ rocm_path=/opt/rocm/bin
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ $? -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,debug,hip-clang,test,package --options hicdtp -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,debug,test,package --options hicdtp -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -71,9 +69,6 @@ while true; do
 	-t|--test)
 	    run_tests=true
 	    shift ;;
-	--hip-clang)
-	    build_hip_clang=true
-	    shift ;;
 	--) shift ; break ;;
 	*)  echo "Unexpected command line parameter received; aborting";
 	    exit 1
@@ -105,12 +100,28 @@ fi
 # before 'cmake' or setting cmake option 'CMAKE_CXX_COMPILER' to path to the HCC compiler.
 #
 
+# Set compiler
 compiler="hcc"
 if [[ "${build_hip_clang}" == true ]]; then
     compiler="hipcc"
 fi
 
-CXX=$rocm_path/${compiler} cmake -DBUILD_BENCHMARK=ON ../../. # or cmake-gui ../.
+# Detect Linux distribution and store result in variable '$distro'
+if [ -e /etc/redhat-release ] ; then
+    distro='centos'
+else
+    distro='ubuntu'
+fi
+
+# now do different things depending on distro
+case "$distro" in
+    centos)
+            CXX=$rocm_path/$compiler cmake3 -DBUILD_BENCHMARK=ON ../../.
+        ;;
+    ubuntu)
+            CXX=$rocm_path/$compiler cmake -DBUILD_BENCHMARK=ON ../../. # or cmake-gui ../.
+        ;;
+esac 
 
 # Build
 make -j$(nproc)
@@ -121,11 +132,9 @@ ctest --output-on-failure
 fi
 
 if ($install_package); then
-# Install
 make install
 fi
 
 if ($build_package); then
-# Install
 make package -j$(nproc)
 fi
