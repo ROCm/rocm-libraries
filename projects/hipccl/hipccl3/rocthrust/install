@@ -100,8 +100,28 @@ fi
 # before 'cmake' or setting cmake option 'CMAKE_CXX_COMPILER' to path to the HCC compiler.
 #
 
+# Set compiler
+compiler="hcc"
+if [[ "${build_hip_clang}" == true ]]; then
+    compiler="hipcc"
+fi
 
-CXX=$rocm_path/hcc cmake -DBUILD_BENCHMARK=ON ../../. # or cmake-gui ../.
+# Detect Linux distribution and store result in variable '$distro'
+if [ -e /etc/redhat-release ] ; then
+    distro='centos'
+else
+    distro='ubuntu'
+fi
+
+# now do different things depending on distro
+case "$distro" in
+    centos)
+            CXX=$rocm_path/$compiler cmake3 -DBUILD_BENCHMARK=ON ../../.
+        ;;
+    ubuntu)
+            CXX=$rocm_path/$compiler cmake -DBUILD_BENCHMARK=ON ../../. # or cmake-gui ../.
+        ;;
+esac 
 
 # Build
 make -j$(nproc)
@@ -112,11 +132,9 @@ ctest --output-on-failure
 fi
 
 if ($install_package); then
-# Install
 make install
 fi
 
 if ($build_package); then
-# Install
 make package -j$(nproc)
 fi

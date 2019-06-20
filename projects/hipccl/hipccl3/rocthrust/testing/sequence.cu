@@ -22,6 +22,7 @@
 
 
 template<typename ForwardIterator>
+__host__ __device__
 void sequence(my_system &system, ForwardIterator, ForwardIterator)
 {
     system.validate_dispatch();
@@ -40,6 +41,7 @@ DECLARE_UNITTEST(TestSequenceDispatchExplicit);
 
 
 template<typename ForwardIterator>
+__host__ __device__
 void sequence(my_tag, ForwardIterator first, ForwardIterator)
 {
     *first = 13;

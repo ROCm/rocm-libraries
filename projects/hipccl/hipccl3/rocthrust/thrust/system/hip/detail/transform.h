@@ -33,14 +33,9 @@
 // not having a value_type member when passing to a rocPRIM function
 #include <thrust/system/hip/pointer.h>
 
-#include <thrust/detail/type_traits/iterator/is_output_iterator.h>
-#include <thrust/detail/type_traits/result_of_adaptable_function.h>
 #include <thrust/distance.h>
 #include <thrust/system/hip/detail/parallel_for.h>
 #include <thrust/system/hip/detail/util.h>
-
-// rocPRIM include
-#include <rocprim/rocprim.hpp>
 
 BEGIN_NS_THRUST
 namespace hip_rocprim
@@ -49,6 +44,15 @@ namespace __transform
 {
     struct no_stencil_tag
     {
+    };
+
+    struct always_true_predicate
+    {
+        template <class T>
+        bool THRUST_HIP_DEVICE_FUNCTION operator()(T const &) const
+        {
+            return true;
+        }
     };
 
     template <class InputIt,
@@ -313,61 +317,8 @@ transform(execution_policy<Derived>& policy,
           OutputIt                   result,
           TransformOp                transform_op)
 {
-    typedef typename iterator_traits<InputIt>::difference_type size_type;
-    size_type num_items = static_cast<size_type>(thrust::distance(first, last));
-
-    if(num_items == 0)
-        return result;
-
-    // struct workaround is required for HIP-clang
-    // THRUST_HIP_PRESERVE_KERNELS_WORKAROUND is required for HCC
-    struct workaround
-    {
-        __host__
-        static OutputIt par(execution_policy<Derived>& policy,
-                            InputIt                    first,
-                            InputIt                    last,
-                            OutputIt                   result,
-                            TransformOp                transform_op)
-        {
-            size_type num_items    = static_cast<size_type>(thrust::distance(first, last));
-#if __HCC__ && __HIP_DEVICE_COMPILE__
-            THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-                (rocprim::transform<rocprim::default_config, InputIt, OutputIt, TransformOp>)
-            );
-            (void)policy;
-            (void)transform_op;
-#else
-            hipStream_t stream     = hip_rocprim::stream(policy);
-            bool        debug_sync = THRUST_HIP_DEBUG_SYNC_FLAG;
-            hipError_t  status
-                = rocprim::transform(first, result, num_items, transform_op, stream, debug_sync);
-            hip_rocprim::throw_on_error(status, "transform failed");
-#endif
-            return result + num_items;
-        }
-
-        __device__
-        static OutputIt seq(execution_policy<Derived>& policy,
-                            InputIt                    first,
-                            InputIt                    last,
-                            OutputIt                   result,
-                            TransformOp                transform_op)
-        {
-            (void)policy;
-            while(first != last)
-            {
-                *result++ = transform_op(raw_reference_cast(*first++));
-            }
-            return result;
-        }
-    };
-
-#if __THRUST_HAS_HIPRT__
-    return workaround::par(policy, first, last, result, transform_op);
-#else
-    return workaround::seq(policy, first, last, result, transform_op);
-#endif
+    return hip_rocprim::transform_if(
+        policy, first, last, result, transform_op, __transform::always_true_predicate());
 } // func transform
 
 //-------------------------
@@ -407,40 +358,14 @@ transform(execution_policy<Derived>& policy,
           OutputIt                   result,
           TransformOp                transform_op)
 {
-    typedef typename iterator_traits<InputIt1>::difference_type size_type;
-    size_type num_items = static_cast<size_type>(thrust::distance(first1, last1));
-
-    if(num_items == 0)
-        return result;
-
-    THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-        (rocprim::transform<rocprim::default_config,
-                            InputIt1,
-                            InputIt2,
-                            OutputIt,
-                            TransformOp>)
-    );
-#if __THRUST_HAS_HIPRT__
-    {
-        hipStream_t stream     = hip_rocprim::stream(policy);
-        bool        debug_sync = THRUST_HIP_DEBUG_SYNC_FLAG;
-        hipError_t  status     = rocprim::transform(
-            first1, first2, result, num_items, transform_op, stream, debug_sync);
-        hip_rocprim::throw_on_error(status, "transform failed");
-
-        return result + num_items;
-    }
-#else
-    {
-        (void)policy;
-        while(first1 != last1)
-        {
-            *result++
-                = transform_op(raw_reference_cast(*first1++), raw_reference_cast(*first2++));
-        }
-        return result;
-    }
-#endif
+    return hip_rocprim::transform_if(policy,
+                                     first1,
+                                     last1,
+                                     first2,
+                                     __transform::no_stencil_tag(),
+                                     result,
+                                     transform_op,
+                                     __transform::always_true_predicate());
 } // func transform
 
 } // namespace hip_rocprim
