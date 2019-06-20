@@ -55,20 +55,21 @@ build:rocm:
   script:
     - mkdir build
     - cd build
-    # CXX=hcc cmake -DBUILD_TEST=ON -DBUILD_EXAMPLE=ON -DBUILD_BENCHMARK=ON ../.
     - CXX=hcc cmake -DBUILD_TEST=ON ../.
-    - make -j16
+    - make -j $(nproc)
     - make package
   artifacts:
     paths:
-    - build/library/
-    - build/test/test_*
-    - build/test/CTestTestfile.cmake
-    - build/gtest/
-    - build/CMakeCache.txt
-    - build/CTestTestfile.cmake
-    - build/rocthrust*.deb
-    - build/rocthrust*.zip
+      - build/thrust/
+      - build/test/test_*
+      - build/test/CTestTestfile.cmake
+      - build/testing/test_thrust_*
+      - build/testing/CTestTestfile.cmake
+      - build/gtest/
+      - build/CMakeCache.txt
+      - build/CTestTestfile.cmake
+      - build/rocthrust*.deb
+      - build/rocthrust*.zip
     expire_in: 2 weeks
 
 .test:
@@ -79,7 +80,7 @@ build:rocm:
     - build:rocm
   script:
     - cd build
-    - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 2
+    - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 1
 
 include: '.gitlab-ci-gputest.yml'
 
@@ -109,7 +110,7 @@ test:rocm_package:
     - mkdir ../package_test && cd ../package_test
     - CXX=hcc cmake ../extra/. -Drocprim_DIR="/opt/rocm/rocprim"
     - make VERBOSE=1
-    - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 2
+    - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 1
     - $SUDO_CMD dpkg -r rocthrust
     - $SUDO_CMD dpkg -r rocprim
 
@@ -119,6 +120,7 @@ test:rocm_install:
     - rocm
   variables:
     SUDO_CMD: "sudo -E"
+  dependencies: []
   script:
     - mkdir build_only_install
     - cd build_only_install
@@ -127,4 +129,4 @@ test:rocm_install:
     - mkdir ../install_test && cd ../install_test
     - CXX=hcc cmake ../extra/.
     - make VERBOSE=1
-    - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 2
+    - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 1
