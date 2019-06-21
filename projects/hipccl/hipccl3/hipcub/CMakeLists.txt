@@ -59,7 +59,7 @@ option(BUILD_TEST "Build tests (requires googletest)" ON)
 include(cmake/Dependencies.cmake)
 
 # Setup VERSION
-set(VERSION_STRING "2.5.0.")
+set(VERSION_STRING "2.6.0.")
 
 # Check if BUILD_NUMBER is defined in a Jenkins environment
 if($ENV{BUILD_NUMBER})
