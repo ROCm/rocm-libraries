@@ -49,10 +49,16 @@ rocprimCI:
         platform, project->
 
         def command = """
-                      echo "rocPRIM is a header only library and does not need packaging"
+                      set -x
+                      cd ${project.paths.project_build_prefix}/build
+                      make package
+                      rm -rf package && mkdir -p package
+                      mv *.deb package/
+                      dpkg -c package/*.deb
                       """
 
         platform.runCommand(this, command)
+        platform.archiveArtifacts(this, """${project.paths.project_build_prefix}/build/package/*.deb""")
     }
 
     buildProject(rocprim, formatCheck, nodes.dockerArray, compileCommand, testCommand, packageCommand)

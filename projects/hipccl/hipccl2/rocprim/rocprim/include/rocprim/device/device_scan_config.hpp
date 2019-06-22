@@ -79,7 +79,7 @@ struct scan_config_803
         ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
 
     using type = scan_config<
-        256,
+        limit_block_size<256U, sizeof(Value)>::value,
         ::rocprim::max(1u, 16u / item_scale),
         ROCPRIM_DETAIL_USE_LOOKBACK_SCAN,
         ::rocprim::block_load_method::block_load_transpose,
@@ -95,7 +95,7 @@ struct scan_config_900
         ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
 
     using type = scan_config<
-        256,
+        limit_block_size<256U, sizeof(Value)>::value,
         ::rocprim::max(1u, 16u / item_scale),
         ROCPRIM_DETAIL_USE_LOOKBACK_SCAN,
         ::rocprim::block_load_method::block_load_transpose,
