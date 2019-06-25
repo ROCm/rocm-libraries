@@ -107,12 +107,12 @@ if(HIP_PLATFORM STREQUAL "hcc")
   rocm_create_package(
     NAME hipcub
     DESCRIPTION "hipCUB (rocPRIM backend)"
-    MAINTAINER "Saad Rahim <saad.rahim@amd.com>"
+    MAINTAINER "hipcub-maintainer@amd.com"
   )
 else()
   rocm_create_package(
     NAME hipcub_nvcc
     DESCRIPTION "hipCUB (CUB backend)"
-    MAINTAINER "Saad Rahim <saad.rahim@amd.com>"
+    MAINTAINER "hipcub-maintainer@amd.com"
   )
 endif()
