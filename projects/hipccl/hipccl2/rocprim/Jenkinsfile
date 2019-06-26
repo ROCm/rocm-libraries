@@ -11,7 +11,8 @@ rocprimCI:
 
     def rocprim = new rocProject('rocprim')
 
-    def nodes = new dockerNodes(['gfx803', 'gfx900', 'gfx906'], rocprim)
+    def nodes = new dockerNodes(['gfx803 && ubuntu', 'gfx900 && ubuntu', 'gfx906 && ubuntu', 'gfx900 && centos7', 
+                'gfx803 && ubuntu && hip-clang', 'gfx900 && ubuntu && hip-clang', 'gfx906 && ubuntu && hip-clang'], rocprim)
 
     boolean formatCheck = false
      
@@ -20,11 +21,26 @@ rocprimCI:
         platform, project->
 
         project.paths.construct_build_prefix()
-        def command = """#!/usr/bin/env bash
-                  set -x
-                  cd ${project.paths.project_build_prefix}
-                  LD_LIBRARY_PATH=/opt/rocm/hcc/lib CXX=${project.compiler.compiler_path} ${project.paths.build_command}
+        
+        def command 
+        
+        if(platform.jenkinsLabel.contains('hip-clang'))
+        {
+            command = """#!/usr/bin/env bash
+                    set -x
+                    cd ${project.paths.project_build_prefix}
+                    LD_LIBRARY_PATH=/opt/rocm/hcc/lib CXX=/opt/rocm/bin/hipcc ${project.paths.build_command} --hip-clang
                 """
+        }
+        else
+        {
+            command = """#!/usr/bin/env bash
+                    set -x
+                    cd ${project.paths.project_build_prefix}
+                    LD_LIBRARY_PATH=/opt/rocm/hcc/lib CXX=/opt/rocm/bin/hcc ${project.paths.build_command}
+                """
+        }
+        
         platform.runCommand(this, command)
     }
 
@@ -34,12 +50,26 @@ rocprimCI:
 
         def testCommand = 'ctest --output-on-failure -E rocprim.hip.device_merge_sort'
 
-        def command = """#!/usr/bin/env bash
-                        set -x
-                        cd ${project.paths.project_build_prefix}
-                        cd ${project.testDirectory}
-                        LD_LIBRARY_PATH=/opt/rocm/hcc/lib ${testCommand}
-                  """
+        def command 
+
+        if(platform.jenkinsLabel.contains('centos'))
+        {
+            command = """#!/usr/bin/env bash
+                    set -x
+                    cd ${project.paths.project_build_prefix}
+                    cd ${project.testDirectory}
+                    LD_LIBRARY_PATH=/opt/rocm/hcc/lib sudo ${testCommand}
+                """
+        }
+        else
+        {
+            command = """#!/usr/bin/env bash
+                    set -x
+                    cd ${project.paths.project_build_prefix}
+                    cd ${project.testDirectory}
+                    LD_LIBRARY_PATH=/opt/rocm/hcc/lib ${testCommand}
+                """
+        }
 
         platform.runCommand(this, command)
     }
@@ -48,21 +78,43 @@ rocprimCI:
     {
         platform, project->
 
-        def command = """
-                      set -x
-                      cd ${project.paths.project_build_prefix}/build
-                      make package
-                      rm -rf package && mkdir -p package
-                      mv *.deb package/
-                      dpkg -c package/*.deb
-                      """
+        def command
 
-        platform.runCommand(this, command)
-        platform.archiveArtifacts(this, """${project.paths.project_build_prefix}/build/package/*.deb""")
+        if(platform.jenkinsLabel.contains('centos'))
+        {
+            command = """
+                    set -x
+                    cd ${project.paths.project_build_prefix}/${project.testDirectory}
+                    sudo make package
+                    rm -rf package && mkdir -p package
+                    mv *.rpm package/
+                    rpm -qlp package/*.rpm
+                """
+
+            platform.runCommand(this, command)
+            platform.archiveArtifacts(this, """${project.paths.project_build_prefix}/${project.testDirectory}/package/*.rpm""")
+        }
+        else if(platform.jenkinsLabel.contains('hip-clang'))
+        {
+            packageCommand = null
+        }
+        else
+        {
+            command = """
+                    set -x
+                    cd ${project.paths.project_build_prefix}/${project.testDirectory}
+                    make package
+                    rm -rf package && mkdir -p package
+                    mv *.deb package/
+                    dpkg -c package/*.deb
+                """
+
+            platform.runCommand(this, command)
+            platform.archiveArtifacts(this, """${project.paths.project_build_prefix}/${project.testDirectory}/package/*.deb""")
+        }
     }
 
     buildProject(rocprim, formatCheck, nodes.dockerArray, compileCommand, testCommand, packageCommand)
 
 }
-
 
