@@ -1,8 +1,8 @@
-# Parameters related to building hip
+# Parameters related to building rocPRIM
 ARG base_image
 
 FROM ${base_image}
-LABEL maintainer="kent.knox@amd"
+LABEL maintainer="rocprim-maintainer@amd.com"
 
 ARG user_uid
 
