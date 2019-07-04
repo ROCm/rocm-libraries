@@ -174,6 +174,14 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
         stream, size \
     )
 
+#define BENCHMARK_TYPE(type, block) \
+    CREATE_BENCHMARK(type, block, 1), \
+    CREATE_BENCHMARK(type, block, 2), \
+    CREATE_BENCHMARK(type, block, 3), \
+    CREATE_BENCHMARK(type, block, 4), \
+    CREATE_BENCHMARK(type, block, 8), \
+    CREATE_BENCHMARK(type, block, 16)
+
 template<class Benchmark>
 void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                     const std::string& method_name,
@@ -183,21 +191,12 @@ void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
 {
     std::vector<benchmark::internal::Benchmark*> new_benchmarks =
     {
-        CREATE_BENCHMARK(int, 256, 1),
-        CREATE_BENCHMARK(int, 256, 2),
-        CREATE_BENCHMARK(int, 256, 3),
-        CREATE_BENCHMARK(int, 256, 4),
-        CREATE_BENCHMARK(int, 256, 8),
-        CREATE_BENCHMARK(int, 256, 11),
-        CREATE_BENCHMARK(int, 256, 16),
+        BENCHMARK_TYPE(int, 256),
+        BENCHMARK_TYPE(int, 320),
+        BENCHMARK_TYPE(int, 512),
 
-        CREATE_BENCHMARK(int, 320, 1),
-        CREATE_BENCHMARK(int, 320, 2),
-        CREATE_BENCHMARK(int, 320, 3),
-        CREATE_BENCHMARK(int, 320, 4),
-        CREATE_BENCHMARK(int, 320, 8),
-        CREATE_BENCHMARK(int, 320, 11),
-        CREATE_BENCHMARK(int, 320, 16)
+        BENCHMARK_TYPE(unsigned long long, 256),
+        BENCHMARK_TYPE(unsigned long long, 320)
     };
     benchmarks.insert(benchmarks.end(), new_benchmarks.begin(), new_benchmarks.end());
 }

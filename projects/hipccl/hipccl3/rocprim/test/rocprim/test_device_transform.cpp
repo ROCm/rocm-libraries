@@ -71,6 +71,9 @@ using custom_double2 = test_utils::custom_test_type<double>;
 
 typedef ::testing::Types<
     DeviceTransformParams<int, int, true>,
+    DeviceTransformParams<int8_t, int8_t>,
+    DeviceTransformParams<uint8_t, uint8_t>,
+    DeviceTransformParams<rp::half, rp::half>,
     DeviceTransformParams<unsigned long>,
     DeviceTransformParams<short, int, true>,
     DeviceTransformParams<custom_short2, custom_int2, true>,
@@ -97,11 +100,26 @@ template<class T>
 struct transform
 {
     __device__ __host__ inline
-    constexpr T operator()(const T& a) const
+    T operator()(const T& a) const
     {
         return a + 5;
     }
 };
+
+template<>
+struct transform<rp::half>
+{
+    __device__ __host__ inline
+    rp::half operator()(const rp::half& a) const
+    {
+        #if __HIP_DEVICE_COMPILE__
+        return a + rp::half(5);
+        #else
+        return test_utils::half_plus()(a, rp::half(5));
+        #endif
+    }
+};
+
 
 TYPED_TEST(RocprimDeviceTransformTests, Transform)
 {
@@ -174,6 +192,20 @@ struct binary_transform
     constexpr U operator()(const T1& a, const T2& b) const
     {
         return a + b;
+    }
+};
+
+template<>
+struct binary_transform<rp::half, rp::half, rp::half>
+{
+    __device__ __host__ inline
+    rp::half operator()(const rp::half& a, const rp::half& b) const
+    {
+        #if __HIP_DEVICE_COMPILE__
+        return a + b;
+        #else
+        return test_utils::half_plus()(a, b);
+        #endif
     }
 };
 

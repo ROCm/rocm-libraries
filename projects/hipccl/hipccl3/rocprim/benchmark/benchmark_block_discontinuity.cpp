@@ -258,6 +258,14 @@ benchmark::RegisterBenchmark( \
     stream, size \
 )
 
+#define BENCHMARK_TYPE(type, block, bool) \
+    CREATE_BENCHMARK(type, block, 1, bool), \
+    CREATE_BENCHMARK(type, block, 2, bool), \
+    CREATE_BENCHMARK(type, block, 3, bool), \
+    CREATE_BENCHMARK(type, block, 4, bool), \
+    CREATE_BENCHMARK(type, block, 8, bool)
+
+
 template<class Benchmark>
 void add_benchmarks(const std::string& name,
                     std::vector<benchmark::internal::Benchmark*>& benchmarks,
@@ -266,34 +274,16 @@ void add_benchmarks(const std::string& name,
 {
     std::vector<benchmark::internal::Benchmark*> bs =
     {
-        CREATE_BENCHMARK(int, 256, 1, false),
-        CREATE_BENCHMARK(int, 256, 2, false),
-        CREATE_BENCHMARK(int, 256, 3, false),
-        CREATE_BENCHMARK(int, 256, 4, false),
-        CREATE_BENCHMARK(int, 256, 6, false),
-        CREATE_BENCHMARK(int, 256, 7, false),
-        CREATE_BENCHMARK(int, 256, 8, false),
-        CREATE_BENCHMARK(int, 256, 1, true),
-        CREATE_BENCHMARK(int, 256, 2, true),
-        CREATE_BENCHMARK(int, 256, 3, true),
-        CREATE_BENCHMARK(int, 256, 4, true),
-        CREATE_BENCHMARK(int, 256, 6, true),
-        CREATE_BENCHMARK(int, 256, 7, true),
-        CREATE_BENCHMARK(int, 256, 8, true),
-        CREATE_BENCHMARK(long long, 256, 1, false),
-        CREATE_BENCHMARK(long long, 256, 2, false),
-        CREATE_BENCHMARK(long long, 256, 3, false),
-        CREATE_BENCHMARK(long long, 256, 4, false),
-        CREATE_BENCHMARK(long long, 256, 6, false),
-        CREATE_BENCHMARK(long long, 256, 7, false),
-        CREATE_BENCHMARK(long long, 256, 8, false),
-        CREATE_BENCHMARK(long long, 256, 1, true),
-        CREATE_BENCHMARK(long long, 256, 2, true),
-        CREATE_BENCHMARK(long long, 256, 3, true),
-        CREATE_BENCHMARK(long long, 256, 4, true),
-        CREATE_BENCHMARK(long long, 256, 6, true),
-        CREATE_BENCHMARK(long long, 256, 7, true),
-        CREATE_BENCHMARK(long long, 256, 8, true),
+        BENCHMARK_TYPE(int, 256, false),
+        BENCHMARK_TYPE(int, 256, true),
+        BENCHMARK_TYPE(int8_t, 256, false),
+        BENCHMARK_TYPE(int8_t, 256, true),
+        BENCHMARK_TYPE(uint8_t, 256, false),
+        BENCHMARK_TYPE(uint8_t, 256, true),
+        BENCHMARK_TYPE(rocprim::half, 256, false),
+        BENCHMARK_TYPE(rocprim::half, 256, true),
+        BENCHMARK_TYPE(long long, 256, false),
+        BENCHMARK_TYPE(long long, 256, true),
     };
 
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());

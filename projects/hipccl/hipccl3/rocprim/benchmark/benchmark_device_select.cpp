@@ -277,6 +277,9 @@ void run_unique_benchmark(benchmark::State& state,
                           const hipStream_t stream,
                           float discontinuity_probability)
 {
+    using op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, half_plus, rocprim::plus<T>>::type;
+    op_type op;
+
     std::vector<T> input(size);
     {
         auto input01 = get_random_data01<T>(size, discontinuity_probability);
@@ -284,7 +287,7 @@ void run_unique_benchmark(benchmark::State& state,
         input[0] = acc;
         for(size_t i = 1; i < input01.size(); i++)
         {
-            input[i] = acc + input01[i];
+            input[i] = op(acc, input01[i]);
         }
     }
     std::vector<unsigned int> selected_count_output(1);
@@ -393,6 +396,24 @@ benchmark::RegisterBenchmark( \
     run_unique_benchmark<T>, size, stream, p \
 )
 
+#define BENCHMARK_FLAGGED_TYPE(type, value) \
+    CREATE_SELECT_FLAGGED_BENCHMARK(type, value, 0.05f), \
+    CREATE_SELECT_FLAGGED_BENCHMARK(type, value, 0.25f), \
+    CREATE_SELECT_FLAGGED_BENCHMARK(type, value, 0.5f), \
+    CREATE_SELECT_FLAGGED_BENCHMARK(type, value, 0.75f)
+
+#define BENCHMARK_IF_TYPE(type) \
+    CREATE_SELECT_IF_BENCHMARK(type, 0.05f), \
+    CREATE_SELECT_IF_BENCHMARK(type, 0.25f), \
+    CREATE_SELECT_IF_BENCHMARK(type, 0.5f), \
+    CREATE_SELECT_IF_BENCHMARK(type, 0.75f)
+
+#define BENCHMARK_UNIQUE_TYPE(type) \
+    CREATE_UNIQUE_BENCHMARK(type, 0.05f), \
+    CREATE_UNIQUE_BENCHMARK(type, 0.25f), \
+    CREATE_UNIQUE_BENCHMARK(type, 0.5f), \
+    CREATE_UNIQUE_BENCHMARK(type, 0.75f)
+
 int main(int argc, char *argv[])
 {
     cli::Parser parser(argc, argv);
@@ -419,41 +440,29 @@ int main(int argc, char *argv[])
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks =
     {
-        CREATE_SELECT_FLAGGED_BENCHMARK(int, unsigned char, 0.95f),
-        CREATE_SELECT_FLAGGED_BENCHMARK(int, unsigned char, 0.75f),
-        CREATE_SELECT_FLAGGED_BENCHMARK(int, unsigned char, 0.5f),
-        CREATE_SELECT_FLAGGED_BENCHMARK(int, unsigned char, 0.25f),
-        CREATE_SELECT_FLAGGED_BENCHMARK(int, unsigned char, 0.10f),
+        BENCHMARK_FLAGGED_TYPE(int, unsigned char),
+        BENCHMARK_FLAGGED_TYPE(float, unsigned char),
+        BENCHMARK_FLAGGED_TYPE(double, unsigned char),
+        BENCHMARK_FLAGGED_TYPE(uint8_t, uint8_t),
+        BENCHMARK_FLAGGED_TYPE(int8_t, int8_t),
+        BENCHMARK_FLAGGED_TYPE(rocprim::half, int8_t),
+        BENCHMARK_FLAGGED_TYPE(custom_double2, unsigned char),
 
-        CREATE_SELECT_FLAGGED_BENCHMARK(float, unsigned char, 0.5f),
-        CREATE_SELECT_FLAGGED_BENCHMARK(double, unsigned char, 0.5f),
-        CREATE_SELECT_FLAGGED_BENCHMARK(custom_double2, unsigned char, 0.5f),
-        CREATE_SELECT_FLAGGED_BENCHMARK(custom_int_double, unsigned char, 0.5f),
+        BENCHMARK_IF_TYPE(int),
+        BENCHMARK_IF_TYPE(float),
+        BENCHMARK_IF_TYPE(double),
+        BENCHMARK_IF_TYPE(uint8_t),
+        BENCHMARK_IF_TYPE(int8_t),
+        BENCHMARK_IF_TYPE(rocprim::half),
+        BENCHMARK_IF_TYPE(custom_int_double),
 
-        CREATE_SELECT_IF_BENCHMARK(int, 0.95f),
-        CREATE_SELECT_IF_BENCHMARK(int, 0.75f),
-        CREATE_SELECT_IF_BENCHMARK(int, 0.5f),
-        CREATE_SELECT_IF_BENCHMARK(int, 0.25f),
-        CREATE_SELECT_IF_BENCHMARK(int, 0.10f),
-
-        CREATE_SELECT_IF_BENCHMARK(unsigned char, 0.5f),
-        CREATE_SELECT_IF_BENCHMARK(float, 0.5f),
-        CREATE_SELECT_IF_BENCHMARK(double, 0.5f),
-        CREATE_SELECT_IF_BENCHMARK(custom_double2, 0.5f),
-        CREATE_SELECT_IF_BENCHMARK(custom_int_double, 0.5f),
-
-        CREATE_UNIQUE_BENCHMARK(int, 0.75f),
-        CREATE_UNIQUE_BENCHMARK(int, 0.5f),
-        CREATE_UNIQUE_BENCHMARK(int, 0.1f),
-        CREATE_UNIQUE_BENCHMARK(int, 0.05f),
-        CREATE_UNIQUE_BENCHMARK(int, 0.01f),
-        CREATE_UNIQUE_BENCHMARK(int, 0.005f),
-
-        CREATE_UNIQUE_BENCHMARK(unsigned char, 0.1f),
-        CREATE_UNIQUE_BENCHMARK(float, 0.1f),
-        CREATE_UNIQUE_BENCHMARK(double, 0.1f),
-        CREATE_UNIQUE_BENCHMARK(custom_double2, 0.1f),
-        CREATE_UNIQUE_BENCHMARK(custom_int_double, 0.1f)
+        BENCHMARK_UNIQUE_TYPE(int),
+        BENCHMARK_UNIQUE_TYPE(float),
+        BENCHMARK_UNIQUE_TYPE(double),
+        BENCHMARK_UNIQUE_TYPE(uint8_t),
+        BENCHMARK_UNIQUE_TYPE(int8_t),
+        BENCHMARK_UNIQUE_TYPE(rocprim::half),
+        BENCHMARK_UNIQUE_TYPE(custom_int_double)
     };
 
     // Use manual timing

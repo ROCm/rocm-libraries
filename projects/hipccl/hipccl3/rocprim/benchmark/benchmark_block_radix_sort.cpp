@@ -103,7 +103,7 @@ void sort_pairs_kernel(const T * input, T * output)
     rp::block_load_direct_striped<BlockSize>(lid, input + block_offset, keys);
     for(unsigned int i = 0; i < ItemsPerThread; i++)
     {
-        values[i] = keys[i] + 1;
+        values[i] = keys[i] + T(1);
     }
 
     #pragma nounroll
@@ -199,6 +199,13 @@ benchmark::RegisterBenchmark( \
     benchmark_kind, stream, size \
 )
 
+#define BENCHMARK_TYPE(type, block) \
+    CREATE_BENCHMARK(type, block, 1), \
+    CREATE_BENCHMARK(type, block, 2), \
+    CREATE_BENCHMARK(type, block, 3), \
+    CREATE_BENCHMARK(type, block, 4), \
+    CREATE_BENCHMARK(type, block, 8)
+
 void add_benchmarks(benchmark_kinds benchmark_kind,
                     const std::string& name,
                     std::vector<benchmark::internal::Benchmark*>& benchmarks,
@@ -207,84 +214,40 @@ void add_benchmarks(benchmark_kinds benchmark_kind,
 {
     std::vector<benchmark::internal::Benchmark*> bs =
     {
-        CREATE_BENCHMARK(int, 64, 1),
-        CREATE_BENCHMARK(int, 64, 2),
-        CREATE_BENCHMARK(int, 64, 4),
-        CREATE_BENCHMARK(int, 64, 7),
-        CREATE_BENCHMARK(int, 64, 8),
-        CREATE_BENCHMARK(int, 64, 11),
-        CREATE_BENCHMARK(int, 64, 15),
-        CREATE_BENCHMARK(int, 64, 19),
-        CREATE_BENCHMARK(int, 64, 25),
+        BENCHMARK_TYPE(int, 64),
+        BENCHMARK_TYPE(int, 128),
+        BENCHMARK_TYPE(int, 192),
+        BENCHMARK_TYPE(int, 256),
+        BENCHMARK_TYPE(int, 320),
+        BENCHMARK_TYPE(int, 512),
 
-        CREATE_BENCHMARK(int, 128, 1),
-        CREATE_BENCHMARK(int, 128, 2),
-        CREATE_BENCHMARK(int, 128, 4),
-        CREATE_BENCHMARK(int, 128, 7),
-        CREATE_BENCHMARK(int, 128, 8),
-        CREATE_BENCHMARK(int, 128, 11),
-        CREATE_BENCHMARK(int, 128, 15),
-        CREATE_BENCHMARK(int, 128, 19),
-        CREATE_BENCHMARK(int, 128, 25),
+        BENCHMARK_TYPE(int8_t, 64),
+        BENCHMARK_TYPE(int8_t, 128),
+        BENCHMARK_TYPE(int8_t, 192),
+        BENCHMARK_TYPE(int8_t, 256),
+        BENCHMARK_TYPE(int8_t, 320),
+        BENCHMARK_TYPE(int8_t, 512),
 
-        CREATE_BENCHMARK(int, 256, 1),
-        CREATE_BENCHMARK(int, 256, 2),
-        CREATE_BENCHMARK(int, 256, 4),
-        CREATE_BENCHMARK(int, 256, 7),
-        CREATE_BENCHMARK(int, 256, 8),
-        CREATE_BENCHMARK(int, 256, 11),
-        CREATE_BENCHMARK(int, 256, 15),
-        CREATE_BENCHMARK(int, 256, 19),
-        CREATE_BENCHMARK(int, 256, 25),
+        BENCHMARK_TYPE(uint8_t, 64),
+        BENCHMARK_TYPE(uint8_t, 128),
+        BENCHMARK_TYPE(uint8_t, 192),
+        BENCHMARK_TYPE(uint8_t, 256),
+        BENCHMARK_TYPE(uint8_t, 320),
+        BENCHMARK_TYPE(uint8_t, 512),
 
-        CREATE_BENCHMARK(int, 512, 1),
-        CREATE_BENCHMARK(int, 512, 2),
-        CREATE_BENCHMARK(int, 512, 4),
-        CREATE_BENCHMARK(int, 512, 7),
-        CREATE_BENCHMARK(int, 512, 8),
+        BENCHMARK_TYPE(rocprim::half, 64),
+        BENCHMARK_TYPE(rocprim::half, 128),
+        BENCHMARK_TYPE(rocprim::half, 192),
+        BENCHMARK_TYPE(rocprim::half, 256),
+        BENCHMARK_TYPE(rocprim::half, 320),
+        BENCHMARK_TYPE(rocprim::half, 512),
 
-        CREATE_BENCHMARK(int, 1024, 1),
-        CREATE_BENCHMARK(int, 1024, 2),
-        CREATE_BENCHMARK(int, 1024, 4),
-
-        CREATE_BENCHMARK(long long, 64, 1),
-        CREATE_BENCHMARK(long long, 64, 2),
-        CREATE_BENCHMARK(long long, 64, 4),
-        CREATE_BENCHMARK(long long, 64, 7),
-        CREATE_BENCHMARK(long long, 64, 8),
-        CREATE_BENCHMARK(long long, 64, 11),
-        CREATE_BENCHMARK(long long, 64, 15),
-        CREATE_BENCHMARK(long long, 64, 19),
-        CREATE_BENCHMARK(long long, 64, 25),
-
-        CREATE_BENCHMARK(long long, 128, 1),
-        CREATE_BENCHMARK(long long, 128, 2),
-        CREATE_BENCHMARK(long long, 128, 4),
-        CREATE_BENCHMARK(long long, 128, 7),
-        CREATE_BENCHMARK(long long, 128, 8),
-        CREATE_BENCHMARK(long long, 128, 11),
-        CREATE_BENCHMARK(long long, 128, 15),
-        CREATE_BENCHMARK(long long, 128, 19),
-        CREATE_BENCHMARK(long long, 128, 25),
-
-        CREATE_BENCHMARK(long long, 256, 1),
-        CREATE_BENCHMARK(long long, 256, 2),
-        CREATE_BENCHMARK(long long, 256, 4),
-        CREATE_BENCHMARK(long long, 256, 7),
-        CREATE_BENCHMARK(long long, 256, 8),
-        CREATE_BENCHMARK(long long, 256, 11),
-        CREATE_BENCHMARK(long long, 256, 15),
-        CREATE_BENCHMARK(long long, 256, 19),
-
-        CREATE_BENCHMARK(long long, 512, 1),
-        CREATE_BENCHMARK(long long, 512, 2),
-        CREATE_BENCHMARK(long long, 512, 4),
-        CREATE_BENCHMARK(long long, 512, 7),
-        CREATE_BENCHMARK(long long, 512, 8),
-
-        CREATE_BENCHMARK(long long, 1024, 1),
-        CREATE_BENCHMARK(long long, 1024, 2),
-        CREATE_BENCHMARK(long long, 1024, 4),
+        BENCHMARK_TYPE(long long, 64),
+        BENCHMARK_TYPE(long long, 128),
+        BENCHMARK_TYPE(long long, 192),
+        BENCHMARK_TYPE(long long, 256),
+        BENCHMARK_TYPE(long long, 320),
+        BENCHMARK_TYPE(long long, 512),
     };
 
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
