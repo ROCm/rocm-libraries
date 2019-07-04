@@ -94,7 +94,7 @@ void sort_pairs_kernel(const T * input, T * output)
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
 
     T key = input[index];
-    T value = key + 1;
+    T value = key + T(1);
 
     #pragma nounroll
     for(unsigned int trial = 0; trial < Trials; trial++)
@@ -199,6 +199,30 @@ void add_benchmarks(benchmark_kinds benchmark_kind,
         CREATE_BENCHMARK(int, 320),
         CREATE_BENCHMARK(int, 512),
         CREATE_BENCHMARK(int, 1024),
+
+        CREATE_BENCHMARK(int8_t, 64),
+        CREATE_BENCHMARK(int8_t, 128),
+        CREATE_BENCHMARK(int8_t, 192),
+        CREATE_BENCHMARK(int8_t, 256),
+        CREATE_BENCHMARK(int8_t, 320),
+        CREATE_BENCHMARK(int8_t, 512),
+        CREATE_BENCHMARK(int8_t, 1024),
+
+        CREATE_BENCHMARK(uint8_t, 64),
+        CREATE_BENCHMARK(uint8_t, 128),
+        CREATE_BENCHMARK(uint8_t, 192),
+        CREATE_BENCHMARK(uint8_t, 256),
+        CREATE_BENCHMARK(uint8_t, 320),
+        CREATE_BENCHMARK(uint8_t, 512),
+        CREATE_BENCHMARK(uint8_t, 1024),
+
+        CREATE_BENCHMARK(rocprim::half, 64),
+        CREATE_BENCHMARK(rocprim::half, 128),
+        CREATE_BENCHMARK(rocprim::half, 192),
+        CREATE_BENCHMARK(rocprim::half, 256),
+        CREATE_BENCHMARK(rocprim::half, 320),
+        CREATE_BENCHMARK(rocprim::half, 512),
+        CREATE_BENCHMARK(rocprim::half, 1024),
 
         CREATE_BENCHMARK(long long, 64),
         CREATE_BENCHMARK(long long, 128),

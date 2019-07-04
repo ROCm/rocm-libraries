@@ -67,6 +67,9 @@ typedef ::testing::Types<
     DeviceMergeParams<unsigned long, unsigned int, ::rocprim::greater<unsigned long> >,
     DeviceMergeParams<float, custom_double2>,
     DeviceMergeParams<int, float>,
+    DeviceMergeParams<int8_t, int8_t>,
+    DeviceMergeParams<uint8_t, uint8_t>,
+    DeviceMergeParams<rocprim::half, rocprim::half, test_utils::half_less>,
     DeviceMergeParams<custom_double2, custom_int2, ::rocprim::greater<custom_double2> >,
     DeviceMergeParams<custom_int2, char>
 > RocprimDeviceMergeTestsParams;
@@ -206,10 +209,7 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
         );
 
         // Check if keys_output values are as expected
-        for(size_t i = 0; i < keys_output.size(); i++)
-        {
-            ASSERT_EQ(keys_output[i], expected[i]);
-        }
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
 
         hipFree(d_keys_input1);
         hipFree(d_keys_input2);
@@ -386,11 +386,15 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKeyValue)
         );
 
         // Check if keys_output values are as expected
-        for(size_t i = 0; i < keys_output.size(); i++)
+        std::vector<key_type> expected_key(expected.size());
+        std::vector<value_type> expected_value(expected.size());
+        for(size_t i = 0; i < expected.size(); i++)
         {
-            ASSERT_EQ(keys_output[i], expected[i].first);
-            ASSERT_EQ(values_output[i], expected[i].second);
+            expected_key[i] = expected[i].first;
+            expected_value[i] = expected[i].second;
         }
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected_key));
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, expected_value));
 
         hipFree(d_keys_input1);
         hipFree(d_keys_input2);

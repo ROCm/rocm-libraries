@@ -64,6 +64,9 @@ public:
 
 typedef ::testing::Types<
     DeviceSelectParams<int, long>,
+    DeviceSelectParams<int8_t, int8_t>,
+    DeviceSelectParams<uint8_t, uint8_t>,
+    DeviceSelectParams<rocprim::half, rocprim::half>,
     DeviceSelectParams<unsigned char, float, int, true>,
     DeviceSelectParams<double, double, int, true>,
     DeviceSelectParams<test_utils::custom_test_type<double>, test_utils::custom_test_type<double>, int, true>
@@ -203,10 +206,7 @@ TYPED_TEST(RocprimDeviceSelectTests, Flagged)
             )
         );
         HIP_CHECK(hipDeviceSynchronize());
-        for(size_t i = 0; i < expected.size(); i++)
-        {
-            ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
-        }
+        ASSERT_NO_FATAL_FAILURE(test_utils::custom_assert_eq(output, expected, expected.size()));
 
         hipFree(d_input);
         hipFree(d_flags);
@@ -216,6 +216,33 @@ TYPED_TEST(RocprimDeviceSelectTests, Flagged)
     }
 }
 
+template<class T>
+struct select_op
+{
+    __device__ __host__ inline
+    bool operator()(const T& value) const
+    {
+        if(value < T(50)) return true;
+        return false;
+    }
+};
+
+template<>
+struct select_op<rocprim::half>
+{
+    __device__ __host__ inline
+    bool operator()(const rocprim::half& value) const
+    {
+        #if __HIP_DEVICE_COMPILE__
+        if(value < rocprim::half(50)) return true;
+        #else
+        if(test_utils::half_less()(value, rocprim::half(50))) return true;
+        #endif
+        return false;
+    }
+};
+
+
 TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
 {
     using T = typename TestFixture::input_type;
@@ -224,12 +251,6 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
     hipStream_t stream = 0; // default stream
-
-    auto select_op = [] __host__ __device__ (const T& value) -> bool
-        {
-            if(value < T(50)) return true;
-            return false;
-        };
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -259,7 +280,7 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
         expected.reserve(input.size());
         for(size_t i = 0; i < input.size(); i++)
         {
-            if(select_op(input[i]))
+            if(select_op<T>()(input[i]))
             {
                 expected.push_back(input[i]);
             }
@@ -276,7 +297,7 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
                 test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
                 d_selected_count_output,
                 input.size(),
-                select_op,
+                select_op<T>(),
                 stream,
                 debug_synchronous
             )
@@ -300,7 +321,7 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
                 test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
                 d_selected_count_output,
                 input.size(),
-                select_op,
+                select_op<T>(),
                 stream,
                 debug_synchronous
             )
@@ -329,10 +350,7 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
             )
         );
         HIP_CHECK(hipDeviceSynchronize());
-        for(size_t i = 0; i < expected.size(); i++)
-        {
-            ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
-        }
+        ASSERT_NO_FATAL_FAILURE(test_utils::custom_assert_eq(output, expected, expected.size()));
 
         hipFree(d_input);
         hipFree(d_output);
@@ -352,6 +370,7 @@ std::vector<float> get_discontinuity_probabilities()
 TYPED_TEST(RocprimDeviceSelectTests, UniqueEmptyInput)
 {
     using T = typename TestFixture::input_type;
+    using op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_equal_to, rocprim::equal_to<T>>::type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
     hipStream_t stream = 0; // default stream
@@ -370,7 +389,7 @@ TYPED_TEST(RocprimDeviceSelectTests, UniqueEmptyInput)
             rocprim::make_discard_iterator(),
             d_selected_count_output,
             0,
-            ::rocprim::equal_to<T>(),
+            op_type(),
             stream,
             debug_synchronous
         )
@@ -388,7 +407,7 @@ TYPED_TEST(RocprimDeviceSelectTests, UniqueEmptyInput)
             rocprim::make_discard_iterator(),
             d_selected_count_output,
             0,
-            ::rocprim::equal_to<T>(),
+            op_type(),
             stream,
             debug_synchronous
         )
@@ -414,6 +433,8 @@ TYPED_TEST(RocprimDeviceSelectTests, Unique)
 {
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
+    using op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_equal_to, rocprim::equal_to<T>>::type;
+    using scan_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
@@ -433,7 +454,7 @@ TYPED_TEST(RocprimDeviceSelectTests, Unique)
             {
                 std::vector<T> input01 = test_utils::get_random_data01<T>(size, p);
                 test_utils::host_inclusive_scan(
-                    input01.begin(), input01.end(), input.begin(), rocprim::plus<T>()
+                    input01.begin(), input01.end(), input.begin(), scan_op_type()
                 );
             }
 
@@ -459,7 +480,7 @@ TYPED_TEST(RocprimDeviceSelectTests, Unique)
             expected.push_back(input[0]);
             for(size_t i = 1; i < input.size(); i++)
             {
-                if(!(input[i-1] == input[i]))
+                if(!op_type()(input[i-1], input[i]))
                 {
                     expected.push_back(input[i]);
                 }
@@ -476,7 +497,7 @@ TYPED_TEST(RocprimDeviceSelectTests, Unique)
                     test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
                     d_selected_count_output,
                     input.size(),
-                    ::rocprim::equal_to<T>(),
+                    op_type(),
                     stream,
                     debug_synchronous
                 )
@@ -500,7 +521,7 @@ TYPED_TEST(RocprimDeviceSelectTests, Unique)
                     test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
                     d_selected_count_output,
                     input.size(),
-                    ::rocprim::equal_to<T>(),
+                    op_type(),
                     stream,
                     debug_synchronous
                 )
@@ -529,10 +550,7 @@ TYPED_TEST(RocprimDeviceSelectTests, Unique)
                 )
             );
             HIP_CHECK(hipDeviceSynchronize());
-            for(size_t i = 0; i < expected.size(); i++)
-            {
-                ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
-            }
+            ASSERT_NO_FATAL_FAILURE(test_utils::custom_assert_eq(output, expected, expected.size()));
 
             hipFree(d_input);
             hipFree(d_output);

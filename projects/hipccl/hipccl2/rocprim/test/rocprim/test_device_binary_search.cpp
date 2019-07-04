@@ -67,6 +67,9 @@ typedef ::testing::Types<
     params<unsigned long long, unsigned long long, size_t, rocprim::greater<unsigned long long> >,
     params<float, double, unsigned int, rocprim::greater<double> >,
     params<double, int>,
+    params<int8_t, int8_t>,
+    params<uint8_t, uint8_t>,
+    params<rocprim::half, rocprim::half, size_t, test_utils::half_less>,
     params<custom_int2, custom_int2>,
     params<custom_double2, custom_double2, unsigned int, rocprim::greater<custom_double2> >
 > Params;

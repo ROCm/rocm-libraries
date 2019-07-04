@@ -175,6 +175,10 @@ int main(int argc, char *argv[])
         CREATE_BENCHMARK(float, rocprim::plus<float>),
         CREATE_BENCHMARK(double, rocprim::plus<double>),
 
+        CREATE_BENCHMARK(int8_t, rocprim::plus<int8_t>),
+        CREATE_BENCHMARK(uint8_t, rocprim::plus<uint8_t>),
+        CREATE_BENCHMARK(rocprim::half, rocprim::plus<rocprim::half>),
+
         CREATE_BENCHMARK(custom_float2, rocprim::plus<custom_float2>),
         CREATE_BENCHMARK(custom_double2, rocprim::plus<custom_double2>),
     };

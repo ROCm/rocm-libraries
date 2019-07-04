@@ -402,6 +402,14 @@ benchmark::RegisterBenchmark( \
         run_even_benchmark<T>(state, BINS, SCALE, entropy_reduction, stream, size); } \
 )
 
+#define BENCHMARK_TYPE(type) \
+    CREATE_EVEN_BENCHMARK(type, 10, 1234), \
+    CREATE_EVEN_BENCHMARK(type, 100, 1234), \
+    CREATE_EVEN_BENCHMARK(type, 1000, 1234), \
+    CREATE_EVEN_BENCHMARK(type, 16, 10), \
+    CREATE_EVEN_BENCHMARK(type, 256, 10), \
+    CREATE_EVEN_BENCHMARK(type, 65536, 1)
+
 void add_even_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                          hipStream_t stream,
                          size_t size)
@@ -410,19 +418,11 @@ void add_even_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmark
     {
         std::vector<benchmark::internal::Benchmark*> bs =
         {
-            CREATE_EVEN_BENCHMARK(int, 10, 1234),
-            CREATE_EVEN_BENCHMARK(int, 100, 1234),
-            CREATE_EVEN_BENCHMARK(int, 1000, 1234),
-            CREATE_EVEN_BENCHMARK(int, 10000, 1234),
-            CREATE_EVEN_BENCHMARK(int, 100000, 1234),
-            CREATE_EVEN_BENCHMARK(int, 1000000, 1234),
-
-            CREATE_EVEN_BENCHMARK(unsigned char, 16, 10),
-            CREATE_EVEN_BENCHMARK(unsigned char, 256, 1),
-
-            CREATE_EVEN_BENCHMARK(unsigned short, 16, 10),
-            CREATE_EVEN_BENCHMARK(unsigned short, 256, 10),
-            CREATE_EVEN_BENCHMARK(unsigned short, 65536, 1),
+            BENCHMARK_TYPE(int),
+            BENCHMARK_TYPE(int8_t),
+            BENCHMARK_TYPE(uint8_t),
+            BENCHMARK_TYPE(unsigned short),
+            BENCHMARK_TYPE(rocprim::half)
         };
         benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
     };
