@@ -109,7 +109,20 @@ if [[ "${build_hip_clang}" == true ]]; then
     compiler="hipcc"
 fi
 
-CXX=$rocm_path/${compiler} cmake -DBUILD_BENCHMARK=ON ../../. # or cmake-gui ../.
+if [ -e /etc/redhat-release ] ; then
+    distro='centos'
+else
+    distro='ubuntu'
+fi
+
+case "$distro" in
+    centos)    
+        CXX=$rocm_path/${compiler} cmake3 -DBUILD_BENCHMARK=ON ../../. # or cmake-gui ../.
+    ;;
+    ubuntu)
+        CXX=$rocm_path/${compiler} cmake -DBUILD_BENCHMARK=ON ../../. # or cmake-gui ../.
+    ;;
+esac
 
 # Build
 make -j$(nproc)
