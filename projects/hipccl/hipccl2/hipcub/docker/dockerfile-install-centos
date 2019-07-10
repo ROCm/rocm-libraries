@@ -2,17 +2,15 @@
 ARG base_image
 
 FROM ${base_image}
+LABEL maintainer="hipcub.maintainer@amd.com"
 
-LABEL maintainer="hipcub-maintainer@amd.com"
+# Copy the rpm package of hipcub into the container from host
+COPY *.rpm /tmp/
 
-# Copy the debian package of hipcub into the container from host
-COPY *.deb /tmp/
-
-# Install the debian package, and print out contents of expected changed locations
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends --allow-unauthenticated -y \
-    /tmp/hipcub-*.deb \
-  && rm -f /tmp/*.deb \
-  && apt-get clean \
+# Install the rpm package, and print out contents of expected changed locations
+RUN yum -y install \
+    /tmp/hipcub-*.rpm \
+  && rm -f /tmp/*.rpm \
   && rm -rf /var/lib/apt/lists/* \
   && printf "ls -la /etc/ld.so.conf.d/\n" && ls -la /etc/ld.so.conf.d/ \
   && printf "ls -la /opt/rocm/include\n" && ls -la /opt/rocm/include \
