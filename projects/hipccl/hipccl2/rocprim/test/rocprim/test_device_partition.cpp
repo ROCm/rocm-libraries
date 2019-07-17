@@ -66,6 +66,9 @@ typedef ::testing::Types<
     DevicePartitionParams<int, int, unsigned char, true>,
     DevicePartitionParams<unsigned int, unsigned long>,
     DevicePartitionParams<unsigned char, float>,
+    DevicePartitionParams<int8_t, int8_t>,
+    DevicePartitionParams<uint8_t, uint8_t>,
+    DevicePartitionParams<rocprim::half, rocprim::half>,
     DevicePartitionParams<test_utils::custom_test_type<long long>>
 > RocprimDevicePartitionTestsParams;
 
@@ -212,15 +215,14 @@ TYPED_TEST(RocprimDevicePartitionTests, Flagged)
         );
         HIP_CHECK(hipDeviceSynchronize());
 
-        for(size_t i = 0; i < expected_selected.size(); i++)
-        {
-            ASSERT_EQ(output[i], expected_selected[i]) << "where index = " << i;
-        }
+        std::vector<U> output_rejected;
         for(size_t i = 0; i < expected_rejected.size(); i++)
         {
             auto j = i + expected_selected.size();
-            ASSERT_EQ(output[j], expected_rejected[i]) << "where index = " << j;
+            output_rejected.push_back(output[j]);
         }
+        ASSERT_NO_FATAL_FAILURE(test_utils::custom_assert_eq(output, expected_selected, expected_selected.size()));
+        ASSERT_NO_FATAL_FAILURE(test_utils::custom_assert_eq(output_rejected, expected_rejected, expected_rejected.size()));
 
         hipFree(d_input);
         hipFree(d_flags);
@@ -321,7 +323,8 @@ TYPED_TEST(RocprimDevicePartitionTests, PredicateEmptyInput)
 
 TYPED_TEST(RocprimDevicePartitionTests, Predicate)
 {
-    using T = typename TestFixture::input_type;
+    using O = typename TestFixture::input_type;
+    using T = typename std::conditional<std::is_same<O, rocprim::half>::value, int, O>::type;//typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
     const bool debug_synchronous = TestFixture::debug_synchronous;
@@ -440,15 +443,14 @@ TYPED_TEST(RocprimDevicePartitionTests, Predicate)
         );
         HIP_CHECK(hipDeviceSynchronize());
 
-        for(size_t i = 0; i < expected_selected.size(); i++)
-        {
-            ASSERT_EQ(output[i], expected_selected[i]) << "where index = " << i;
-        }
+        std::vector<U> output_rejected;
         for(size_t i = 0; i < expected_rejected.size(); i++)
         {
             auto j = i + expected_selected.size();
-            ASSERT_EQ(output[j], expected_rejected[i]) << "where index = " << j;
+            output_rejected.push_back(output[j]);
         }
+        ASSERT_NO_FATAL_FAILURE(test_utils::custom_assert_eq(output, expected_selected, expected_selected.size()));
+        ASSERT_NO_FATAL_FAILURE(test_utils::custom_assert_eq(output_rejected, expected_rejected, expected_rejected.size()));
 
         hipFree(d_input);
         hipFree(d_output);

@@ -33,27 +33,12 @@
 #include <rocprim/rocprim.hpp>
 
 #include "test_utils.hpp"
+#include "test_utils_types.hpp"
 
 #define HIP_CHECK(error)         \
     ASSERT_EQ(static_cast<hipError_t>(error),hipSuccess)
 
 namespace rp = rocprim;
-
-template<
-    class T,
-    class Flag,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    class FlagOp
->
-struct params
-{
-    using type = T;
-    using flag_type = Flag;
-    static constexpr unsigned int block_size = BlockSize;
-    static constexpr unsigned int items_per_thread = ItemsPerThread;
-    using flag_op_type = FlagOp;
-};
 
 template<class Params>
 class RocprimBlockDiscontinuity : public ::testing::Test {
@@ -113,41 +98,16 @@ TEST(RocprimBlockDiscontinuity, Traits)
     ASSERT_FALSE((rp::detail::with_b_index_arg<int, decltype(f4)>::value));
 }
 
-using custom_int2 = test_utils::custom_test_type<int>;
-using custom_double2 = test_utils::custom_test_type<double>;
-
 typedef ::testing::Types<
-    // Power of 2 BlockSize
-    params<unsigned int, int, 64U, 1, rocprim::equal_to<unsigned int> >,
-    params<custom_int2, bool, 128U, 1, rocprim::not_equal_to<custom_int2> >,
-    params<float, int, 256U, 1, rocprim::less<float> >,
-    params<char, char, 1024U, 1, rocprim::less_equal<char> >,
-    params<int, bool, 256U, 1, custom_flag_op1<int> >,
-    params<rp::half, bool, 128U, 1, test_utils::half_greater>,
+    block_param_type(test_utils::custom_test_type<int>, int),
+    block_param_type(float, char),
+    block_param_type(double, unsigned int),
+    block_param_type(uint8_t, bool),
+    block_param_type(int8_t, bool),
+    block_param_type(rocprim::half, int)
+> BlockDiscParams;
 
-    // Non-power of 2 BlockSize
-    params<double, unsigned int, 65U, 1, rocprim::greater<double> >,
-    params<float, int, 37U, 1, custom_flag_op1<float> >,
-    params<long long, char, 510U, 1, rocprim::greater_equal<long long> >,
-    params<unsigned int, long long, 162U, 1, rocprim::not_equal_to<unsigned int> >,
-    params<unsigned char, bool, 255U, 1, rocprim::equal_to<unsigned char> >,
-
-    // Power of 2 BlockSize and ItemsPerThread > 1
-    params<int, char, 64U, 2, custom_flag_op2>,
-    params<custom_int2, short, 128U, 4, rocprim::less<custom_int2> >,
-    params<unsigned short, unsigned char, 256U, 7, custom_flag_op2>,
-    params<short, short, 512U, 8, rocprim::equal_to<short> >,
-    params<rp::half, unsigned char, 256U, 3, test_utils::half_less_equal>,
-
-    // Non-power of 2 BlockSize and ItemsPerThread > 1
-    params<double, int, 33U, 5, custom_flag_op2>,
-    params<custom_double2, unsigned int, 464U, 2, rocprim::equal_to<custom_double2> >,
-    params<unsigned short, int, 100U, 3, rocprim::greater<unsigned short> >,
-    params<short, bool, 234U, 9, custom_flag_op1<short> >,
-    params<rp::half, int, 111U, 2, test_utils::half_less>
-> Params;
-
-TYPED_TEST_CASE(RocprimBlockDiscontinuity, Params);
+TYPED_TEST_CASE(RocprimBlockDiscontinuity, BlockDiscParams);
 
 template<
     class Type,
@@ -182,22 +142,110 @@ void flag_heads_kernel(Type* device_input, long long* device_heads)
     rp::block_store_direct_blocked(lid, device_heads + block_offset, head_flags);
 }
 
-TYPED_TEST(RocprimBlockDiscontinuity, FlagHeads)
+template<
+    class Type,
+    class FlagType,
+    class FlagOpType,
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread
+>
+__global__
+void flag_tails_kernel(Type* device_input, long long* device_tails)
 {
-    using type = typename TestFixture::params::type;
+    const unsigned int lid = hipThreadIdx_x;
+    const unsigned int items_per_block = BlockSize * ItemsPerThread;
+    const unsigned int block_offset = hipBlockIdx_x * items_per_block;
+
+    Type input[ItemsPerThread];
+    rp::block_load_direct_blocked(lid, device_input + block_offset, input);
+
+    rp::block_discontinuity<Type, BlockSize> bdiscontinuity;
+
+    FlagType tail_flags[ItemsPerThread];
+    if(hipBlockIdx_x % 2 == 0)
+    {
+        const Type tile_successor_item = device_input[block_offset + items_per_block];
+        bdiscontinuity.flag_tails(tail_flags, tile_successor_item, input, FlagOpType());
+    }
+    else
+    {
+        bdiscontinuity.flag_tails(tail_flags, input, FlagOpType());
+    }
+
+    rp::block_store_direct_blocked(lid, device_tails + block_offset, tail_flags);
+}
+
+template<
+    class Type,
+    class FlagType,
+    class FlagOpType,
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread
+>
+__global__
+void flag_heads_and_tails_kernel(Type* device_input, long long* device_heads, long long* device_tails)
+{
+    const unsigned int lid = hipThreadIdx_x;
+    const unsigned int items_per_block = BlockSize * ItemsPerThread;
+    const unsigned int block_offset = hipBlockIdx_x * items_per_block;
+
+    Type input[ItemsPerThread];
+    rp::block_load_direct_blocked(lid, device_input + block_offset, input);
+
+    rp::block_discontinuity<Type, BlockSize> bdiscontinuity;
+
+    FlagType head_flags[ItemsPerThread];
+    FlagType tail_flags[ItemsPerThread];
+    if(hipBlockIdx_x % 4 == 0)
+    {
+        const Type tile_successor_item = device_input[block_offset + items_per_block];
+        bdiscontinuity.flag_heads_and_tails(head_flags, tail_flags, tile_successor_item, input, FlagOpType());
+    }
+    else if(hipBlockIdx_x % 4 == 1)
+    {
+        const Type tile_predecessor_item = device_input[block_offset - 1];
+        const Type tile_successor_item = device_input[block_offset + items_per_block];
+        bdiscontinuity.flag_heads_and_tails(head_flags, tile_predecessor_item, tail_flags, tile_successor_item, input, FlagOpType());
+    }
+    else if(hipBlockIdx_x % 4 == 2)
+    {
+        const Type tile_predecessor_item = device_input[block_offset - 1];
+        bdiscontinuity.flag_heads_and_tails(head_flags, tile_predecessor_item, tail_flags, input, FlagOpType());
+    }
+    else if(hipBlockIdx_x % 4 == 3)
+    {
+        bdiscontinuity.flag_heads_and_tails(head_flags, tail_flags, input, FlagOpType());
+    }
+
+    rp::block_store_direct_blocked(lid, device_heads + block_offset, head_flags);
+    rp::block_store_direct_blocked(lid, device_tails + block_offset, tail_flags);
+}
+
+template<
+    class Type,
+    class FlagType,
+    class FlagOpType,
+    unsigned int Method,
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread
+>
+auto test_block_discontinuity()
+-> typename std::enable_if<Method == 0>::type
+{
+    using type = Type;
     // std::vector<bool> is a special case that will cause an error in hipMemcpy
     // http://en.cppreference.com/w/cpp/container/vector_bool
     using stored_flag_type = typename std::conditional<
-                               std::is_same<bool, typename TestFixture::params::flag_type>::value,
+                               std::is_same<bool, FlagType>::value,
                                int,
-                               typename TestFixture::params::flag_type
+                               FlagType
                            >::type;
-    using flag_type = typename TestFixture::params::flag_type;
-    using flag_op_type = typename TestFixture::params::flag_op_type;
-    constexpr size_t block_size = TestFixture::params::block_size;
-    constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
+    using flag_type = FlagType;
+    using flag_op_type = FlagOpType;
+    constexpr size_t block_size = BlockSize;
+    constexpr size_t items_per_thread = ItemsPerThread;
     constexpr size_t items_per_block = block_size * items_per_thread;
-    const size_t size = items_per_block * 2048;
+    const size_t size = items_per_block * 20;
     constexpr size_t grid_size = size / items_per_block;
 
     // Given block size not supported
@@ -282,51 +330,27 @@ template<
     class Type,
     class FlagType,
     class FlagOpType,
+    unsigned int Method,
     unsigned int BlockSize,
     unsigned int ItemsPerThread
 >
-__global__
-void flag_tails_kernel(Type* device_input, long long* device_tails)
+auto test_block_discontinuity()
+-> typename std::enable_if<Method == 1>::type
 {
-    const unsigned int lid = hipThreadIdx_x;
-    const unsigned int items_per_block = BlockSize * ItemsPerThread;
-    const unsigned int block_offset = hipBlockIdx_x * items_per_block;
-
-    Type input[ItemsPerThread];
-    rp::block_load_direct_blocked(lid, device_input + block_offset, input);
-
-    rp::block_discontinuity<Type, BlockSize> bdiscontinuity;
-
-    FlagType tail_flags[ItemsPerThread];
-    if(hipBlockIdx_x % 2 == 0)
-    {
-        const Type tile_successor_item = device_input[block_offset + items_per_block];
-        bdiscontinuity.flag_tails(tail_flags, tile_successor_item, input, FlagOpType());
-    }
-    else
-    {
-        bdiscontinuity.flag_tails(tail_flags, input, FlagOpType());
-    }
-
-    rp::block_store_direct_blocked(lid, device_tails + block_offset, tail_flags);
-}
-
-TYPED_TEST(RocprimBlockDiscontinuity, FlagTails)
-{
-    using type = typename TestFixture::params::type;
+    using type = Type;
     // std::vector<bool> is a special case that will cause an error in hipMemcpy
     // http://en.cppreference.com/w/cpp/container/vector_bool
     using stored_flag_type = typename std::conditional<
-                               std::is_same<bool, typename TestFixture::params::flag_type>::value,
+                               std::is_same<bool, FlagType>::value,
                                int,
-                               typename TestFixture::params::flag_type
+                               FlagType
                            >::type;
-    using flag_type = typename TestFixture::params::flag_type;
-    using flag_op_type = typename TestFixture::params::flag_op_type;
-    constexpr size_t block_size = TestFixture::params::block_size;
-    constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
+    using flag_type = FlagType;
+    using flag_op_type = FlagOpType;
+    constexpr size_t block_size = BlockSize;
+    constexpr size_t items_per_thread = ItemsPerThread;
     constexpr size_t items_per_block = block_size * items_per_thread;
-    const size_t size = items_per_block * 2048;
+    const size_t size = items_per_block * 20;
     constexpr size_t grid_size = size / items_per_block;
 
     // Given block size not supported
@@ -411,64 +435,27 @@ template<
     class Type,
     class FlagType,
     class FlagOpType,
+    unsigned int Method,
     unsigned int BlockSize,
     unsigned int ItemsPerThread
 >
-__global__
-void flag_heads_and_tails_kernel(Type* device_input, long long* device_heads, long long* device_tails)
+auto test_block_discontinuity()
+-> typename std::enable_if<Method == 2>::type
 {
-    const unsigned int lid = hipThreadIdx_x;
-    const unsigned int items_per_block = BlockSize * ItemsPerThread;
-    const unsigned int block_offset = hipBlockIdx_x * items_per_block;
-
-    Type input[ItemsPerThread];
-    rp::block_load_direct_blocked(lid, device_input + block_offset, input);
-
-    rp::block_discontinuity<Type, BlockSize> bdiscontinuity;
-
-    FlagType head_flags[ItemsPerThread];
-    FlagType tail_flags[ItemsPerThread];
-    if(hipBlockIdx_x % 4 == 0)
-    {
-        const Type tile_successor_item = device_input[block_offset + items_per_block];
-        bdiscontinuity.flag_heads_and_tails(head_flags, tail_flags, tile_successor_item, input, FlagOpType());
-    }
-    else if(hipBlockIdx_x % 4 == 1)
-    {
-        const Type tile_predecessor_item = device_input[block_offset - 1];
-        const Type tile_successor_item = device_input[block_offset + items_per_block];
-        bdiscontinuity.flag_heads_and_tails(head_flags, tile_predecessor_item, tail_flags, tile_successor_item, input, FlagOpType());
-    }
-    else if(hipBlockIdx_x % 4 == 2)
-    {
-        const Type tile_predecessor_item = device_input[block_offset - 1];
-        bdiscontinuity.flag_heads_and_tails(head_flags, tile_predecessor_item, tail_flags, input, FlagOpType());
-    }
-    else if(hipBlockIdx_x % 4 == 3)
-    {
-        bdiscontinuity.flag_heads_and_tails(head_flags, tail_flags, input, FlagOpType());
-    }
-
-    rp::block_store_direct_blocked(lid, device_heads + block_offset, head_flags);
-    rp::block_store_direct_blocked(lid, device_tails + block_offset, tail_flags);
-}
-
-TYPED_TEST(RocprimBlockDiscontinuity, FlagHeadsAndTails)
-{
-    using type = typename TestFixture::params::type;
+    using type = Type;
     // std::vector<bool> is a special case that will cause an error in hipMemcpy
     // http://en.cppreference.com/w/cpp/container/vector_bool
     using stored_flag_type = typename std::conditional<
-                               std::is_same<bool, typename TestFixture::params::flag_type>::value,
+                               std::is_same<bool, FlagType>::value,
                                int,
-                               typename TestFixture::params::flag_type
+                               FlagType
                            >::type;
-    using flag_type = typename TestFixture::params::flag_type;
-    using flag_op_type = typename TestFixture::params::flag_op_type;
-    constexpr size_t block_size = TestFixture::params::block_size;
-    constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
+    using flag_type = FlagType;
+    using flag_op_type = FlagOpType;
+    constexpr size_t block_size = BlockSize;
+    constexpr size_t items_per_thread = ItemsPerThread;
     constexpr size_t items_per_block = block_size * items_per_thread;
-    const size_t size = items_per_block * 2048;
+    const size_t size = items_per_block * 20;
     constexpr size_t grid_size = size / items_per_block;
 
     // Given block size not supported
@@ -571,4 +558,86 @@ TYPED_TEST(RocprimBlockDiscontinuity, FlagHeadsAndTails)
     HIP_CHECK(hipFree(device_input));
     HIP_CHECK(hipFree(device_heads));
     HIP_CHECK(hipFree(device_tails));
+}
+
+// Static for-loop
+template <
+    unsigned int First,
+    unsigned int Last,
+    class Type,
+    class FlagType,
+    class FlagOpType,
+    unsigned int Method,
+    unsigned int BlockSize = 256U
+>
+struct static_for
+{
+    static void run()
+    {
+        test_block_discontinuity<Type, FlagType, FlagOpType, Method, BlockSize, items[First]>();
+        static_for<First + 1, Last, Type, FlagType, FlagOpType, Method, BlockSize>::run();
+    }
+};
+
+template <
+    unsigned int N,
+    class Type,
+    class FlagType,
+    class FlagOpType,
+    unsigned int Method,
+    unsigned int BlockSize
+>
+struct static_for<N, N, Type, FlagType, FlagOpType, Method, BlockSize>
+{
+    static void run()
+    {
+    }
+};
+
+TYPED_TEST(RocprimBlockDiscontinuity, FlagHeads)
+{
+    using type = typename TestFixture::params::input_type;
+    using flag_type = typename TestFixture::params::output_type;
+    using flag_op_type_1 = typename std::conditional<std::is_same<type, rp::half>::value, test_utils::half_less, rp::less<type>>::type;
+    using flag_op_type_2 = typename std::conditional<std::is_same<type, rp::half>::value, test_utils::half_equal_to, rp::equal_to<type>>::type;
+    using flag_op_type_3 = typename std::conditional<std::is_same<type, rp::half>::value, test_utils::half_greater, rp::greater<type>>::type;
+    using flag_op_type_4 = typename std::conditional<std::is_same<type, rp::half>::value, test_utils::half_not_equal_to, rp::not_equal_to<type>>::type;
+    constexpr size_t block_size = TestFixture::params::block_size;
+
+    static_for<0, 2, type, flag_type, flag_op_type_1, 0, block_size>::run();
+    static_for<2, 4, type, flag_type, flag_op_type_2, 0, block_size>::run();
+    static_for<4, 6, type, flag_type, flag_op_type_3, 0, block_size>::run();
+    static_for<6, n_items, type, flag_type, flag_op_type_4, 0, block_size>::run();
+}
+
+TYPED_TEST(RocprimBlockDiscontinuity, FlagTails)
+{
+    using type = typename TestFixture::params::input_type;
+    using flag_type = typename TestFixture::params::output_type;
+    using flag_op_type_1 = typename std::conditional<std::is_same<type, rp::half>::value, test_utils::half_less, rp::less<type>>::type;
+    using flag_op_type_2 = typename std::conditional<std::is_same<type, rp::half>::value, test_utils::half_equal_to, rp::equal_to<type>>::type;
+    using flag_op_type_3 = typename std::conditional<std::is_same<type, rp::half>::value, test_utils::half_greater, rp::greater<type>>::type;
+    using flag_op_type_4 = typename std::conditional<std::is_same<type, rp::half>::value, test_utils::half_not_equal_to, rp::not_equal_to<type>>::type;
+    constexpr size_t block_size = TestFixture::params::block_size;
+
+    static_for<0, 2, type, flag_type, flag_op_type_1, 1, block_size>::run();
+    static_for<2, 4, type, flag_type, flag_op_type_2, 1, block_size>::run();
+    static_for<4, 6, type, flag_type, flag_op_type_3, 1, block_size>::run();
+    static_for<6, n_items, type, flag_type, flag_op_type_4, 1, block_size>::run();
+}
+
+TYPED_TEST(RocprimBlockDiscontinuity, FlagHeadsAndTails)
+{
+    using type = typename TestFixture::params::input_type;
+    using flag_type = typename TestFixture::params::output_type;
+    using flag_op_type_1 = typename std::conditional<std::is_same<type, rp::half>::value, test_utils::half_less, rp::less<type>>::type;
+    using flag_op_type_2 = typename std::conditional<std::is_same<type, rp::half>::value, test_utils::half_equal_to, rp::equal_to<type>>::type;
+    using flag_op_type_3 = typename std::conditional<std::is_same<type, rp::half>::value, test_utils::half_greater, rp::greater<type>>::type;
+    using flag_op_type_4 = typename std::conditional<std::is_same<type, rp::half>::value, test_utils::half_not_equal_to, rp::not_equal_to<type>>::type;
+    constexpr size_t block_size = TestFixture::params::block_size;
+
+    static_for<0, 2, type, flag_type, flag_op_type_1, 2, block_size>::run();
+    static_for<2, 4, type, flag_type, flag_op_type_2, 2, block_size>::run();
+    static_for<4, 6, type, flag_type, flag_op_type_3, 2, block_size>::run();
+    static_for<6, n_items, type, flag_type, flag_op_type_4, 2, block_size>::run();
 }

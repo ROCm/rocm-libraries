@@ -234,6 +234,15 @@ int main(int argc, char *argv[])
         CREATE_INCLUSIVE_BENCHMARK(int, rocprim::plus<int>),
         CREATE_EXCLUSIVE_BENCHMARK(int, rocprim::plus<int>),
 
+        CREATE_INCLUSIVE_BENCHMARK(int8_t, rocprim::plus<int8_t>),
+        CREATE_EXCLUSIVE_BENCHMARK(int8_t, rocprim::plus<int8_t>),
+
+        CREATE_INCLUSIVE_BENCHMARK(uint8_t, rocprim::plus<uint8_t>),
+        CREATE_EXCLUSIVE_BENCHMARK(uint8_t, rocprim::plus<uint8_t>),
+
+        CREATE_INCLUSIVE_BENCHMARK(rocprim::half, rocprim::plus<rocprim::half>),
+        CREATE_EXCLUSIVE_BENCHMARK(rocprim::half, rocprim::plus<rocprim::half>),
+
         CREATE_INCLUSIVE_BENCHMARK(float, rocprim::plus<float>),
         CREATE_EXCLUSIVE_BENCHMARK(float, rocprim::plus<float>),
 
