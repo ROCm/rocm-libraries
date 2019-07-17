@@ -72,6 +72,9 @@ typedef ::testing::Types<
     DeviceReduceParams<long, long, true>,
     DeviceReduceParams<short, int>,
     DeviceReduceParams<int, float>,
+    DeviceReduceParams<int8_t, int8_t>,
+    DeviceReduceParams<uint8_t, uint8_t>,
+    DeviceReduceParams<rp::half, rp::half>,
     DeviceReduceParams<test_utils::custom_test_type<float>, test_utils::custom_test_type<float>>,
     DeviceReduceParams<test_utils::custom_test_type<int>, test_utils::custom_test_type<float>>
 > RocprimDeviceReduceTestsParams;
@@ -139,7 +142,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceEmptyInput)
             hipMemcpyDeviceToHost
         )
     );
-    ASSERT_EQ(output, initial_value);
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, initial_value));
 
     hipFree(d_output);
     hipFree(d_temp_storage);
@@ -149,6 +152,7 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
 {
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
+    using binary_op_type = typename std::conditional<std::is_same<U, rp::half>::value, test_utils::half_plus, rp::plus<U>>::type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
 
@@ -159,12 +163,18 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
 
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
+        // precision of half differs between host and device with large plus reductions
+        if(std::is_same<U, rp::half>::value && size >= 1024)
+        {
+            break;
+        }
+
         // Generate data
         std::vector<T> input = test_utils::get_random_data<T>(size, 1, 100);
         std::vector<U> output(1, 0);
 
         // reduce function
-        ::rocprim::plus<U> plus_op;
+        binary_op_type plus_op;
 
         T * d_input;
         U * d_output;
@@ -195,7 +205,7 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
                 d_temp_storage, temp_storage_size_bytes,
                 d_input,
                 test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
-                input.size(), plus_op, stream, debug_synchronous
+                input.size(), rp::plus<U>(), stream, debug_synchronous
             )
         );
 
@@ -212,7 +222,7 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
                 d_temp_storage, temp_storage_size_bytes,
                 d_input,
                 test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
-                input.size(), plus_op, stream, debug_synchronous
+                input.size(), rp::plus<U>(), stream, debug_synchronous
             )
         );
         HIP_CHECK(hipPeekAtLastError());
@@ -241,6 +251,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
 {
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
+    using binary_op_type = typename std::conditional<std::is_same<U, rp::half>::value, test_utils::half_minimum, rp::minimum<U>>::type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
 
@@ -269,7 +280,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
         HIP_CHECK(hipDeviceSynchronize());
 
         // reduce function
-        ::rocprim::minimum<U> min_op;
+        binary_op_type min_op;
 
         // Calculate expected results on host
         U expected = U(test_utils::numeric_limits<U>::max());
@@ -287,7 +298,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
                 d_temp_storage, temp_storage_size_bytes,
                 d_input,
                 test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
-                test_utils::numeric_limits<U>::max(), input.size(), min_op, stream, debug_synchronous
+                test_utils::numeric_limits<U>::max(), input.size(), rp::minimum<U>(), stream, debug_synchronous
             )
         );
 
@@ -304,7 +315,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
                 d_temp_storage, temp_storage_size_bytes,
                 d_input,
                 test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
-                test_utils::numeric_limits<U>::max(), input.size(), min_op, stream, debug_synchronous
+                test_utils::numeric_limits<U>::max(), input.size(), rp::minimum<U>(), stream, debug_synchronous
             )
         );
         HIP_CHECK(hipPeekAtLastError());
@@ -321,7 +332,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
         HIP_CHECK(hipDeviceSynchronize());
 
         // Check if output values are as expected
-        ASSERT_NO_FATAL_FAILURE(test_utils::assert_near<U>(output[0], expected, 0.01f));
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output[0], expected, 0.01f));
 
         hipFree(d_input);
         hipFree(d_output);
@@ -336,13 +347,30 @@ template<
 struct arg_min
 {
     ROCPRIM_HOST_DEVICE inline
-    constexpr rocprim::key_value_pair<Key, Value>
+    rocprim::key_value_pair<Key, Value>
     operator()(const rocprim::key_value_pair<Key, Value>& a,
                const rocprim::key_value_pair<Key, Value>& b) const
     {
         return ((b.value < a.value) || ((a.value == b.value) && (b.key < a.key))) ? b : a;
     }
 };
+
+template<>
+struct arg_min<int, rp::half>
+{
+    ROCPRIM_HOST_DEVICE inline
+    rocprim::key_value_pair<int, rp::half>
+    operator()(const rocprim::key_value_pair<int, rp::half>& a,
+               const rocprim::key_value_pair<int, rp::half>& b) const
+    {
+        #if __HIP_DEVICE_COMPILE__
+        return ((b.value < a.value) || ((a.value == b.value) && (b.key < a.key))) ? b : a;
+        #else
+        return (test_utils::half_less()(b.value, a.value) || (test_utils::half_equal_to()(a.value, b.value) && (b.key < a.key))) ? b : a;
+        #endif
+    }
+};
+
 
 TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
 {

@@ -27,59 +27,28 @@
 
 // Google Test
 #include <gtest/gtest.h>
-// HIP API
+// HC API
 #include <hip/hip_runtime.h>
+#include <hip/hip_hcc.h>
 // rocPRIM API
 #include <rocprim/rocprim.hpp>
 
 #include "test_utils.hpp"
+#include "test_utils_types.hpp"
 
 #define HIP_CHECK(error) ASSERT_EQ(static_cast<hipError_t>(error), hipSuccess)
 
 namespace rp = rocprim;
 
-template<
-    class Key,
-    class Value,
-    unsigned int BlockSize
->
-struct params
-{
-    using key_type = Key;
-    using value_type = Value;
-    static constexpr unsigned int block_size = BlockSize;
-};
-
 template<typename Params>
 class RocprimBlockSortTests : public ::testing::Test {
 public:
-    using key_type = typename Params::key_type;
-    using value_type = typename Params::value_type;
+    using key_type = typename Params::input_type;
+    using value_type = typename Params::output_type;
     static constexpr unsigned int block_size = Params::block_size;
 };
 
-using custom_int2 = test_utils::custom_test_type<int>;
-using custom_double2 = test_utils::custom_test_type<double>;
-
-typedef ::testing::Types<
-    // Power of 2 BlockSize
-    params<unsigned int, int, 64U>,
-    params<int, int, 128U>,
-    params<custom_int2, int, 256U>,
-    params<unsigned short, char, 1024U>,
-    params<custom_double2, custom_double2, 128U>,
-    params<int, custom_int2, 1024U>,
-
-    // Non-power of 2 BlockSize
-    params<double, unsigned int, 65U>,
-    params<float, int, 37U>,
-    params<long long, char, 510U>,
-    params<unsigned int, long long, 162U>,
-    params<unsigned char, float, 255U>,
-    params<custom_int2, custom_double2, 255U>
-> BlockSizes;
-
-TYPED_TEST_CASE(RocprimBlockSortTests, BlockSizes);
+TYPED_TEST_CASE(RocprimBlockSortTests, BlockParams);
 
 template<
     unsigned int BlockSize,
@@ -98,6 +67,7 @@ void sort_key_kernel(key_type * device_key_output)
 TYPED_TEST(RocprimBlockSortTests, SortKey)
 {
     using key_type = typename TestFixture::key_type;
+    using binary_op_type = typename std::conditional<std::is_same<key_type, rp::half>::value, test_utils::half_less, rp::less<key_type>>::type;
     const size_t block_size = TestFixture::block_size;
     const size_t size = block_size * 1134;
     const size_t grid_size = size / block_size;
@@ -107,12 +77,13 @@ TYPED_TEST(RocprimBlockSortTests, SortKey)
 
     // Calculate expected results on host
     std::vector<key_type> expected(output);
-
+    binary_op_type binary_op;
     for(size_t i = 0; i < output.size() / block_size; i++)
     {
         std::sort(
             expected.begin() + (i * block_size),
-            expected.begin() + ((i + 1) * block_size)
+            expected.begin() + ((i + 1) * block_size),
+            binary_op
         );
     }
 
@@ -144,13 +115,23 @@ TYPED_TEST(RocprimBlockSortTests, SortKey)
         )
     );
 
-    for(size_t i = 0; i < output.size(); i++)
-    {
-        ASSERT_EQ(output[i], expected[i]);
-    }
+    test_utils::assert_eq(output, expected);
 
     HIP_CHECK(hipFree(device_key_output));
 }
+
+template<class Key, class Value>
+struct pair_comparator
+{
+    using less_key = typename std::conditional<std::is_same<Key, rp::half>::value, test_utils::half_less, rp::less<Key>>::type;
+    using eq_key = typename std::conditional<std::is_same<Key, rp::half>::value, test_utils::half_equal_to, rp::equal_to<Key>>::type;
+    using less_value = typename std::conditional<std::is_same<Value, rp::half>::value, test_utils::half_less, rp::less<Value>>::type;
+
+    bool operator()(const std::pair<Key, Value>& lhs, const std::pair<Key, Value>& rhs)
+    {
+        return (less_key()(lhs.first, rhs.first) || (eq_key()(lhs.first, rhs.first) && less_value()(lhs.second, rhs.second)));
+    }
+};
 
 template<
     unsigned int BlockSize,
@@ -207,7 +188,8 @@ TYPED_TEST(RocprimBlockSortTests, SortKeyValue)
     {
         std::sort(
             expected.begin() + (i * block_size),
-            expected.begin() + ((i + 1) * block_size)
+            expected.begin() + ((i + 1) * block_size),
+            pair_comparator<key_type, value_type>()
         );
     }
 
@@ -257,19 +239,24 @@ TYPED_TEST(RocprimBlockSortTests, SortKeyValue)
         )
     );
 
+    std::vector<key_type> expected_key(expected.size());
+    std::vector<value_type> expected_value(expected.size());
     for(size_t i = 0; i < expected.size(); i++)
     {
-        ASSERT_EQ(output_key[i], expected[i].first);
-        ASSERT_EQ(output_value[i], expected[i].second);
+        expected_key[i] = expected[i].first;
+        expected_value[i] = expected[i].second;
     }
+    test_utils::assert_eq(output_key, expected_key);
+    test_utils::assert_eq(output_value, expected_value);
 }
 
 template<class Key, class Value>
 struct key_value_comparator
 {
+    using greater_key = typename std::conditional<std::is_same<Key, rp::half>::value, test_utils::half_greater, rp::greater<Key>>::type;
     bool operator()(const std::pair<Key, Value>& lhs, const std::pair<Key, Value>& rhs)
     {
-        return lhs.first > rhs.first;
+        return greater_key()(lhs.first, rhs.first);
     }
 };
 
@@ -379,9 +366,13 @@ TYPED_TEST(RocprimBlockSortTests, CustomSortKeyValue)
         )
     );
 
+    std::vector<key_type> expected_key(expected.size());
+    std::vector<value_type> expected_value(expected.size());
     for(size_t i = 0; i < expected.size(); i++)
     {
-        ASSERT_EQ(output_key[i], expected[i].first);
-        ASSERT_EQ(output_value[i], expected[i].second);
+        expected_key[i] = expected[i].first;
+        expected_value[i] = expected[i].second;
     }
+    test_utils::assert_eq(output_key, expected_key);
+    test_utils::assert_eq(output_value, expected_value);
 }

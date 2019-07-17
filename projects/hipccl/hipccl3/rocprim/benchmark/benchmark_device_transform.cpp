@@ -164,6 +164,10 @@ int main(int argc, char *argv[])
         CREATE_BENCHMARK(int, transform<int>),
         CREATE_BENCHMARK(long long, transform<long long>),
 
+        CREATE_BENCHMARK(int8_t, transform<int8_t>),
+        CREATE_BENCHMARK(uint8_t, transform<uint8_t>),
+        CREATE_BENCHMARK(rocprim::half, transform<rocprim::half>),
+
         CREATE_BENCHMARK(float, transform<float>),
         CREATE_BENCHMARK(double, transform<double>),
 

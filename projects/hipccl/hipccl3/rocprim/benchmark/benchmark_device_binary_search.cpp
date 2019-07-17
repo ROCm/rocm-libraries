@@ -64,7 +64,9 @@ void run_lower_bound_benchmark(benchmark::State& state, hipStream_t stream,
     using haystack_type = T;
     using needle_type = T;
     using output_type = size_t;
+    using compare_op_type = typename std::conditional<std::is_same<needle_type, rocprim::half>::value, half_less, rocprim::less<needle_type>>::type;
 
+    compare_op_type compare_op;
     // Generate data
     std::vector<haystack_type> haystack(haystack_size);
     std::iota(haystack.begin(), haystack.end(), 0);
@@ -74,7 +76,7 @@ void run_lower_bound_benchmark(benchmark::State& state, hipStream_t stream,
     );
     if(sorted_needles)
     {
-        std::sort(needles.begin(), needles.end());
+        std::sort(needles.begin(), needles.end(), compare_op);
     }
 
     haystack_type * d_haystack;
@@ -105,7 +107,7 @@ void run_lower_bound_benchmark(benchmark::State& state, hipStream_t stream,
             d_temporary_storage, temporary_storage_bytes,
             d_haystack, d_needles, d_output,
             haystack_size, needles_size,
-            rocprim::less<>(),
+            compare_op,
             stream
         )
     );
@@ -120,7 +122,7 @@ void run_lower_bound_benchmark(benchmark::State& state, hipStream_t stream,
                 d_temporary_storage, temporary_storage_bytes,
                 d_haystack, d_needles, d_output,
                 haystack_size, needles_size,
-                rocprim::less<>(),
+                compare_op,
                 stream
             )
         );
@@ -138,7 +140,7 @@ void run_lower_bound_benchmark(benchmark::State& state, hipStream_t stream,
                     d_temporary_storage, temporary_storage_bytes,
                     d_haystack, d_needles, d_output,
                     haystack_size, needles_size,
-                    rocprim::less<>(),
+                    compare_op,
                     stream
                 )
             );
@@ -168,6 +170,10 @@ benchmark::RegisterBenchmark( \
     [=](benchmark::State& state) { run_lower_bound_benchmark<T>(state, stream, size, size * K / 100, SORTED); } \
 )
 
+#define BENCHMARK_TYPE(type) \
+    CREATE_LOWER_BOUND_BENCHMARK(type, 10, false), \
+    CREATE_LOWER_BOUND_BENCHMARK(type, 10, true)
+
 int main(int argc, char *argv[])
 {
     cli::Parser parser(argc, argv);
@@ -194,15 +200,13 @@ int main(int argc, char *argv[])
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks =
     {
-        CREATE_LOWER_BOUND_BENCHMARK(float, 10, false),
-        CREATE_LOWER_BOUND_BENCHMARK(double, 10, false),
-        CREATE_LOWER_BOUND_BENCHMARK(custom_float2, 10, false),
-        CREATE_LOWER_BOUND_BENCHMARK(custom_double2, 10, false),
-
-        CREATE_LOWER_BOUND_BENCHMARK(float, 10, true),
-        CREATE_LOWER_BOUND_BENCHMARK(double, 10, true),
-        CREATE_LOWER_BOUND_BENCHMARK(custom_float2, 10, true),
-        CREATE_LOWER_BOUND_BENCHMARK(custom_double2, 10, true),
+        BENCHMARK_TYPE(float),
+        BENCHMARK_TYPE(double),
+        BENCHMARK_TYPE(int8_t),
+        BENCHMARK_TYPE(uint8_t),
+        BENCHMARK_TYPE(rocprim::half),
+        BENCHMARK_TYPE(custom_float2),
+        BENCHMARK_TYPE(custom_double2)
     };
 
     // Use manual timing

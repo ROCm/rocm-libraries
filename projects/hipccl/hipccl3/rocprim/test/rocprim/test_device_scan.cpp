@@ -77,6 +77,8 @@ typedef ::testing::Types<
     DeviceScanParams<short, int>,
     DeviceScanParams<int>,
     DeviceScanParams<float, float, rp::maximum<float> >,
+    DeviceScanParams<int8_t, int8_t, rp::maximum<int8_t>>,
+    DeviceScanParams<uint8_t, uint8_t, rp::maximum<uint8_t>>,
 #ifndef __HIP__
     // hip-clang does provide host comparison operators
     DeviceScanParams<rp::half, rp::half, test_utils::half_maximum>,

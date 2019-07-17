@@ -28,11 +28,64 @@
 
 #include <rocprim/rocprim.hpp>
 
+// Support half operators on host side
+
+ROCPRIM_HOST inline
+_Float16 half_to_native(const rocprim::half& x)
+{
+    return *reinterpret_cast<const _Float16 *>(&x);
+}
+
+ROCPRIM_HOST inline
+rocprim::half native_to_half(const _Float16& x)
+{
+    return *reinterpret_cast<const rocprim::half *>(&x);
+}
+
+struct half_less
+{
+    ROCPRIM_HOST_DEVICE inline
+    bool operator()(const rocprim::half& a, const rocprim::half& b) const
+    {
+        #if __HIP_DEVICE_COMPILE__
+        return a < b;
+        #else
+        return half_to_native(a) < half_to_native(b);
+        #endif
+    }
+};
+
+struct half_plus
+{
+    ROCPRIM_HOST_DEVICE inline
+    rocprim::half operator()(const rocprim::half& a, const rocprim::half& b) const
+    {
+        #if __HIP_DEVICE_COMPILE__
+        return a + b;
+        #else
+        return native_to_half(half_to_native(a) + half_to_native(b));
+        #endif
+    }
+};
+
+struct half_equal_to
+{
+    ROCPRIM_HOST_DEVICE inline
+    bool operator()(const rocprim::half& a, const rocprim::half& b) const
+    {
+        #if __HIP_DEVICE_COMPILE__
+        return a == b;
+        #else
+        return half_to_native(a) == half_to_native(b);
+        #endif
+    }
+};
+
 // get_random_data() generates only part of sequence and replicates it,
 // because benchmarks usually do not need "true" random sequence.
 template<class T>
 inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 1024 * 1024)
-    -> typename std::enable_if<std::is_integral<T>::value, std::vector<T>>::type
+    -> typename std::enable_if<rocprim::is_integral<T>::value, std::vector<T>>::type
 {
     std::random_device rd;
     std::default_random_engine gen(rd());
@@ -51,11 +104,12 @@ inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 
 
 template<class T>
 inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 1024 * 1024)
-    -> typename std::enable_if<std::is_floating_point<T>::value, std::vector<T>>::type
+    -> typename std::enable_if<rocprim::is_floating_point<T>::value, std::vector<T>>::type
 {
     std::random_device rd;
     std::default_random_engine gen(rd());
-    std::uniform_real_distribution<T> distribution(min, max);
+    using dis_type = typename std::conditional<std::is_same<rocprim::half, T>::value, float, T>::type;
+    std::uniform_real_distribution<dis_type> distribution(min, max);
     std::vector<T> data(size);
     std::generate(
         data.begin(), data.begin() + std::min(size, max_random_size),

@@ -281,6 +281,10 @@ void add_encode_benchmarks(size_t max_length,
         CREATE_ENCODE_BENCHMARK(int),
         CREATE_ENCODE_BENCHMARK(long long),
 
+        CREATE_ENCODE_BENCHMARK(int8_t),
+        CREATE_ENCODE_BENCHMARK(uint8_t),
+        CREATE_ENCODE_BENCHMARK(rocprim::half),
+
         CREATE_ENCODE_BENCHMARK(custom_float2),
         CREATE_ENCODE_BENCHMARK(custom_double2),
     };
@@ -309,6 +313,10 @@ void add_non_trivial_runs_benchmarks(size_t max_length,
     {
         CREATE_NON_TRIVIAL_RUNS_BENCHMARK(int),
         CREATE_NON_TRIVIAL_RUNS_BENCHMARK(long long),
+
+        CREATE_NON_TRIVIAL_RUNS_BENCHMARK(int8_t),
+        CREATE_NON_TRIVIAL_RUNS_BENCHMARK(uint8_t),
+        CREATE_NON_TRIVIAL_RUNS_BENCHMARK(rocprim::half),
 
         CREATE_NON_TRIVIAL_RUNS_BENCHMARK(custom_float2),
         CREATE_NON_TRIVIAL_RUNS_BENCHMARK(custom_double2),

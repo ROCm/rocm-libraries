@@ -271,7 +271,9 @@ void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark*>& benc
         CREATE_SORT_KEYS_BENCHMARK(int),
         CREATE_SORT_KEYS_BENCHMARK(long long),
 
-        CREATE_SORT_KEYS_BENCHMARK(char),
+        CREATE_SORT_KEYS_BENCHMARK(int8_t),
+        CREATE_SORT_KEYS_BENCHMARK(uint8_t),
+        CREATE_SORT_KEYS_BENCHMARK(rocprim::half),
         CREATE_SORT_KEYS_BENCHMARK(short),
     };
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
@@ -295,7 +297,9 @@ void add_sort_pairs_benchmarks(std::vector<benchmark::internal::Benchmark*>& ben
         CREATE_SORT_PAIRS_BENCHMARK(int, float),
         CREATE_SORT_PAIRS_BENCHMARK(long long, double),
 
-        CREATE_SORT_PAIRS_BENCHMARK(char, char),
+        CREATE_SORT_PAIRS_BENCHMARK(int8_t, int8_t),
+        CREATE_SORT_PAIRS_BENCHMARK(uint8_t, uint8_t),
+        CREATE_SORT_PAIRS_BENCHMARK(rocprim::half, rocprim::half),
         CREATE_SORT_PAIRS_BENCHMARK(short, short),
 
         CREATE_SORT_PAIRS_BENCHMARK(int, custom_float2),
