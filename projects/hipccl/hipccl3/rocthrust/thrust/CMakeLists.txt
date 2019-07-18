@@ -68,8 +68,9 @@ install(
   PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ
 )
 
+include(ROCMExportTargetsHeaderOnly)
 # Export targets
-rocm_export_targets(
+rocm_export_targets_header_only(
   TARGETS rocthrust
   PREFIX rocthrust
 )
