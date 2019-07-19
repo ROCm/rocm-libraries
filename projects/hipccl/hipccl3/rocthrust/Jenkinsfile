@@ -29,7 +29,7 @@ import java.nio.file.Path;
 rocThrustCI:
 {
 
-    def rocthrust = new rocProject('rocthrust')
+    def rocthrust = new rocProject('rocThrust')
     // customize for project
     rocthrust.paths.build_command = './install'
 
@@ -116,7 +116,7 @@ rocThrustCI:
         }
         else if(platform.jenkinsLabel.contains('hip-clang'))
         {
-            platform.runCommand(this, null)
+            packageCommand = null
         }
         else
         {
