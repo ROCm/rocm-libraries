@@ -9,7 +9,7 @@ import java.nio.file.Path;
 rocprimCI:
 {
 
-    def rocprim = new rocProject('rocprim')
+    def rocprim = new rocProject('rocPRIM')
 
     def nodes = new dockerNodes(['gfx803 && ubuntu', 'gfx900 && ubuntu', 'gfx906 && ubuntu', 'gfx900 && centos7', 
                 'gfx803 && ubuntu && hip-clang', 'gfx900 && ubuntu && hip-clang', 'gfx906 && ubuntu && hip-clang'], rocprim)
