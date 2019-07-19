@@ -2,7 +2,7 @@
 ARG base_image
 
 FROM ${base_image}
-MAINTAINER saad.rahim@amd.com
+MAINTAINER rocthrust-maintainer@amd.com
 
 # Copy the debian package of rocthrust into the container from host
 COPY *.deb /tmp/

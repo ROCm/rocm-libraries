@@ -1,22 +1,6 @@
-# Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
-# 
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-# 
-#     http://www.apache.org/licenses/LICENSE-2.0
-# 
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# 
-
-# Find HIP package and verify that correct C++ compiler was selected for available
-# platfrom. On ROCm platform host and device code is compiled by the same compiler:
-# hcc. On CUDA host can be compiled by any C++ compiler while device code is compiled
-# by nvcc compiler (CMake's CUDA package handles this).
+# ########################################################################
+# Copyright 2019 Advanced Micro Devices, Inc.
+# ########################################################################
 
 # Find HIP package
 find_package(HIP REQUIRED)

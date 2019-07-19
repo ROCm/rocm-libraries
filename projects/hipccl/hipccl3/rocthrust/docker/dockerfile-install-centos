@@ -2,7 +2,7 @@
 ARG base_image
 
 FROM ${base_image}
-LABEL maintainer="saad.rahim@amd.com"
+LABEL maintainer="rocthrust-maintainer@amd.com"
 
 # Copy the rpm package of rocthrust into the container from host
 COPY *.rpm /tmp/
