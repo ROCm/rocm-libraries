@@ -62,11 +62,12 @@ template<class Key>
 void run_merge_keys_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
 {
     using key_type = Key;
+    using compare_op_type = typename std::conditional<std::is_same<key_type, rocprim::half>::value, half_less, rocprim::less<key_type>>::type;
 
     const size_t size1 = size / 2;
     const size_t size2 = size - size1;
 
-    ::rocprim::less<key_type> compare_op;
+    compare_op_type compare_op;
 
     // Generate data
     std::vector<key_type> keys_input1 = get_random_data<key_type>(size1, 0, size);
@@ -155,11 +156,12 @@ void run_merge_pairs_benchmark(benchmark::State& state, hipStream_t stream, size
 {
     using key_type = Key;
     using value_type = Value;
+    using compare_op_type = typename std::conditional<std::is_same<key_type, rocprim::half>::value, half_less, rocprim::less<key_type>>::type;
 
     const size_t size1 = size / 2;
     const size_t size2 = size - size1;
 
-    ::rocprim::less<key_type> compare_op;
+    compare_op_type compare_op;
 
     // Generate data
     std::vector<key_type> keys_input1 = get_random_data<key_type>(size1, 0, size);
@@ -303,14 +305,18 @@ int main(int argc, char *argv[])
     {
         CREATE_MERGE_KEYS_BENCHMARK(int),
         CREATE_MERGE_KEYS_BENCHMARK(long long),
-        CREATE_MERGE_KEYS_BENCHMARK(char),
+        CREATE_MERGE_KEYS_BENCHMARK(int8_t),
+        CREATE_MERGE_KEYS_BENCHMARK(uint8_t),
+        CREATE_MERGE_KEYS_BENCHMARK(rocprim::half),
         CREATE_MERGE_KEYS_BENCHMARK(short),
         CREATE_MERGE_KEYS_BENCHMARK(custom_int2),
         CREATE_MERGE_KEYS_BENCHMARK(custom_double2),
 
         CREATE_MERGE_PAIRS_BENCHMARK(int, int),
         CREATE_MERGE_PAIRS_BENCHMARK(long long, long long),
-        CREATE_MERGE_PAIRS_BENCHMARK(char, char),
+        CREATE_MERGE_PAIRS_BENCHMARK(int8_t, int8_t),
+        CREATE_MERGE_PAIRS_BENCHMARK(uint8_t, uint8_t),
+        CREATE_MERGE_PAIRS_BENCHMARK(rocprim::half, rocprim::half),
         CREATE_MERGE_PAIRS_BENCHMARK(short, short),
         CREATE_MERGE_PAIRS_BENCHMARK(custom_int2, custom_int2),
         CREATE_MERGE_PAIRS_BENCHMARK(custom_double2, custom_double2),

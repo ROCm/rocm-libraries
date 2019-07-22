@@ -279,6 +279,18 @@ benchmark::RegisterBenchmark( \
     run_if_benchmark<T>, size, stream, p \
 )
 
+#define BENCHMARK_FLAGGED_TYPE(type, value) \
+    CREATE_PARTITION_FLAGGED_BENCHMARK(type, value, 0.05f), \
+    CREATE_PARTITION_FLAGGED_BENCHMARK(type, value, 0.25f), \
+    CREATE_PARTITION_FLAGGED_BENCHMARK(type, value, 0.5f), \
+    CREATE_PARTITION_FLAGGED_BENCHMARK(type, value, 0.75f)
+
+#define BENCHMARK_IF_TYPE(type) \
+    CREATE_PARTITION_IF_BENCHMARK(type, 0.05f), \
+    CREATE_PARTITION_IF_BENCHMARK(type, 0.25f), \
+    CREATE_PARTITION_IF_BENCHMARK(type, 0.5f), \
+    CREATE_PARTITION_IF_BENCHMARK(type, 0.75f)
+
 int main(int argc, char *argv[])
 {
     cli::Parser parser(argc, argv);
@@ -305,23 +317,21 @@ int main(int argc, char *argv[])
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks =
     {
-        CREATE_PARTITION_FLAGGED_BENCHMARK(int, unsigned char, 0.75f),
-        CREATE_PARTITION_FLAGGED_BENCHMARK(int, unsigned char, 0.5f),
-        CREATE_PARTITION_FLAGGED_BENCHMARK(int, unsigned char, 0.25f),
-        CREATE_PARTITION_FLAGGED_BENCHMARK(int, unsigned char, 0.05f),
-        CREATE_PARTITION_FLAGGED_BENCHMARK(float, unsigned char, 0.5f),
-        CREATE_PARTITION_FLAGGED_BENCHMARK(double, unsigned char, 0.5f),
-        CREATE_PARTITION_FLAGGED_BENCHMARK(custom_double2, unsigned char, 0.5f),
-        CREATE_PARTITION_FLAGGED_BENCHMARK(custom_int_double, unsigned char, 0.5f),
+        BENCHMARK_FLAGGED_TYPE(int, unsigned char),
+        BENCHMARK_FLAGGED_TYPE(float, unsigned char),
+        BENCHMARK_FLAGGED_TYPE(double, unsigned char),
+        BENCHMARK_FLAGGED_TYPE(uint8_t, uint8_t),
+        BENCHMARK_FLAGGED_TYPE(int8_t, int8_t),
+        BENCHMARK_FLAGGED_TYPE(rocprim::half, int8_t),
+        BENCHMARK_FLAGGED_TYPE(custom_double2, unsigned char),
 
-        CREATE_PARTITION_IF_BENCHMARK(int, 0.75f),
-        CREATE_PARTITION_IF_BENCHMARK(int, 0.5f),
-        CREATE_PARTITION_IF_BENCHMARK(int, 0.25f),
-        CREATE_PARTITION_IF_BENCHMARK(int, 0.05f),
-        CREATE_PARTITION_IF_BENCHMARK(float, 0.5f),
-        CREATE_PARTITION_IF_BENCHMARK(double, 0.5f),
-        CREATE_PARTITION_IF_BENCHMARK(custom_double2, 0.5f),
-        CREATE_PARTITION_IF_BENCHMARK(custom_int_double, 0.5f),
+        BENCHMARK_IF_TYPE(int),
+        BENCHMARK_IF_TYPE(float),
+        BENCHMARK_IF_TYPE(double),
+        BENCHMARK_IF_TYPE(uint8_t),
+        BENCHMARK_IF_TYPE(int8_t),
+        BENCHMARK_IF_TYPE(rocprim::half),
+        BENCHMARK_IF_TYPE(custom_int_double)
     };
 
     // Use manual timing

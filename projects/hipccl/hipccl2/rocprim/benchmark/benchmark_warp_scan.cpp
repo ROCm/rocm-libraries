@@ -158,6 +158,16 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
         stream, size \
     )
 
+#define BENCHMARK_TYPE(type) \
+    CREATE_BENCHMARK(type, 64, 64, Inclusive), \
+    CREATE_BENCHMARK(type, 128, 64, Inclusive), \
+    CREATE_BENCHMARK(type, 256, 64, Inclusive), \
+    CREATE_BENCHMARK(type, 256, 32, Inclusive), \
+    CREATE_BENCHMARK(type, 256, 16, Inclusive), \
+    CREATE_BENCHMARK(type, 63, 63, Inclusive), \
+    CREATE_BENCHMARK(type, 62, 31, Inclusive), \
+    CREATE_BENCHMARK(type, 60, 15, Inclusive)
+
 template<bool Inclusive>
 void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                     const std::string& method_name,
@@ -169,26 +179,14 @@ void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
 
     std::vector<benchmark::internal::Benchmark*> new_benchmarks =
     {
-        CREATE_BENCHMARK(float, 64, 64, Inclusive),
-        CREATE_BENCHMARK(float, 128, 64, Inclusive),
-        CREATE_BENCHMARK(float, 256, 64, Inclusive),
-        CREATE_BENCHMARK(float, 256, 32, Inclusive),
-        CREATE_BENCHMARK(float, 256, 16, Inclusive),
-        // force using shared memory version
-        CREATE_BENCHMARK(float, 63, 63, Inclusive),
-        CREATE_BENCHMARK(float, 62, 31, Inclusive),
-        CREATE_BENCHMARK(float, 60, 15, Inclusive),
-
-        CREATE_BENCHMARK(int, 64, 64, Inclusive),
-        CREATE_BENCHMARK(int, 128, 64, Inclusive),
-        CREATE_BENCHMARK(int, 256, 64, Inclusive),
-
-        CREATE_BENCHMARK(double, 64, 64, Inclusive),
-        CREATE_BENCHMARK(double, 128, 64, Inclusive),
-        CREATE_BENCHMARK(double, 256, 64, Inclusive),
-
-        CREATE_BENCHMARK(custom_double2, 64, 64, Inclusive),
-        CREATE_BENCHMARK(custom_int_double, 64, 64, Inclusive)
+        BENCHMARK_TYPE(int),
+        BENCHMARK_TYPE(float),
+        BENCHMARK_TYPE(double),
+        BENCHMARK_TYPE(int8_t),
+        BENCHMARK_TYPE(uint8_t),
+        BENCHMARK_TYPE(rocprim::half),
+        BENCHMARK_TYPE(custom_double2),
+        BENCHMARK_TYPE(custom_int_double)
     };
     benchmarks.insert(benchmarks.end(), new_benchmarks.begin(), new_benchmarks.end());
 }

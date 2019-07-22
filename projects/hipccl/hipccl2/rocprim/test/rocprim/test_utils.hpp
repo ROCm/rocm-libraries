@@ -446,6 +446,82 @@ struct custom_test_type
     }
 };
 
+//Overload for rocprim::half
+template<>
+struct custom_test_type<rocprim::half>
+{
+    using value_type = rocprim::half;
+
+    rocprim::half x;
+    rocprim::half y;
+
+    // Non-zero values in default constructor for checking reduce and scan:
+    // ensure that scan_op(custom_test_type(), value) != value
+    ROCPRIM_HOST_DEVICE inline
+    custom_test_type() : x(12), y(34) {}
+
+    ROCPRIM_HOST_DEVICE inline
+    custom_test_type(rocprim::half x, rocprim::half y) : x(x), y(y) {}
+
+    ROCPRIM_HOST_DEVICE inline
+    custom_test_type(rocprim::half xy) : x(xy), y(xy) {}
+
+    template<class U>
+    ROCPRIM_HOST_DEVICE inline
+    custom_test_type(const custom_test_type<U>& other)
+    {
+        x = other.x;
+        y = other.y;
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    ~custom_test_type() {}
+
+    ROCPRIM_HOST_DEVICE inline
+    custom_test_type& operator=(const custom_test_type& other)
+    {
+        x = other.x;
+        y = other.y;
+        return *this;
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    custom_test_type operator+(const custom_test_type& other) const
+    {
+        return custom_test_type(half_plus()(x, other.x), half_plus()(y, other.y));
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    custom_test_type operator-(const custom_test_type& other) const
+    {
+        return custom_test_type(half_minus()(x, other.x), half_minus()(y, other.y));
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    bool operator<(const custom_test_type& other) const
+    {
+        return (half_less()(x, other.x) || (half_equal_to()(x, other.x) && half_less()(y, other.y)));
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    bool operator>(const custom_test_type& other) const
+    {
+        return (half_greater()(x, other.x) || (half_equal_to()(x, other.x) && half_greater()(y, other.y)));
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    bool operator==(const custom_test_type& other) const
+    {
+        return (half_equal_to()(x, other.x) && half_equal_to()(y, other.y));
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    bool operator!=(const custom_test_type& other) const
+    {
+        return !(*this == other);
+    }
+};
+
 // Custom type used in tests
 template<class T, size_t N>
 struct custom_test_array_type
@@ -727,6 +803,18 @@ void assert_near(const std::vector<rocprim::half>& result, const std::vector<roc
     }
 }
 
+void assert_near(const std::vector<custom_test_type<rocprim::half>>& result, const std::vector<custom_test_type<rocprim::half>>& expected, const float percent)
+{
+    ASSERT_EQ(result.size(), expected.size());
+    for(size_t i = 0; i < result.size(); i++)
+    {
+        auto diff1 = std::max<float>(std::abs(percent * static_cast<float>(expected[i].x)), percent);
+        auto diff2 = std::max<float>(std::abs(percent * static_cast<float>(expected[i].y)), percent);
+        ASSERT_NEAR(static_cast<float>(result[i].x), static_cast<float>(expected[i].x), diff1) << "where index = " << i;
+        ASSERT_NEAR(static_cast<float>(result[i].y), static_cast<float>(expected[i].y), diff2) << "where index = " << i;
+    }
+}
+
 template<class T>
 auto assert_near(const std::vector<custom_test_type<T>>& result, const std::vector<custom_test_type<T>>& expected, const float percent)
     -> typename std::enable_if<std::is_floating_point<T>::value>::type
@@ -757,6 +845,11 @@ auto assert_near(const T& result, const T& expected, const float percent)
     ASSERT_EQ(result, expected);
 }
 
+void assert_near(const rocprim::half& result, const rocprim::half& expected, float percent)
+{
+    auto diff = std::max<float>(std::abs(percent * static_cast<float>(expected)), percent);
+    ASSERT_NEAR(static_cast<float>(result), static_cast<float>(expected), diff);
+}
 
 template<class T>
 auto assert_near(const custom_test_type<T>& result, const custom_test_type<T>& expected, const float percent)
@@ -786,6 +879,35 @@ void assert_eq(const std::vector<rocprim::half>& result, const std::vector<rocpr
         ASSERT_EQ(half_to_native(result[i]), half_to_native(expected[i])) << "where index = " << i;
     }
 }
+
+template<class T>
+void custom_assert_eq(const std::vector<T>& result, const std::vector<T>& expected, size_t size)
+{
+    for(size_t i = 0; i < size; i++)
+    {
+        ASSERT_EQ(result[i], expected[i]) << "where index = " << i;
+    }
+}
+
+void custom_assert_eq(const std::vector<rocprim::half>& result, const std::vector<rocprim::half>& expected, size_t size)
+{
+    for(size_t i = 0; i < size; i++)
+    {
+        ASSERT_EQ(half_to_native(result[i]), half_to_native(expected[i])) << "where index = " << i;
+    }
+}
+
+template<class T>
+void assert_eq(const T& result, const T& expected)
+{
+    ASSERT_EQ(result, expected);
+}
+
+void assert_eq(const rocprim::half& result, const rocprim::half& expected)
+{
+    ASSERT_EQ(half_to_native(result), half_to_native(expected));
+}
+
 
 } // end test_utils namespace
 

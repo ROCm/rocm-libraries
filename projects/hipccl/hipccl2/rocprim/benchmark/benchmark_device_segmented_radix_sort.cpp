@@ -339,27 +339,25 @@ benchmark::RegisterBenchmark( \
     [=](benchmark::State& state) { run_sort_keys_benchmark<Key>(state, SEGMENTS, stream, size); } \
 )
 
+#define BENCHMARK_KEY_TYPE(type) \
+    CREATE_SORT_KEYS_BENCHMARK(type, 1), \
+    CREATE_SORT_KEYS_BENCHMARK(type, 10), \
+    CREATE_SORT_KEYS_BENCHMARK(type, 100), \
+    CREATE_SORT_KEYS_BENCHMARK(type, 1000), \
+    CREATE_SORT_KEYS_BENCHMARK(type, 10000)
+
 void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                               hipStream_t stream,
                               size_t size)
 {
     std::vector<benchmark::internal::Benchmark*> bs =
     {
-        CREATE_SORT_KEYS_BENCHMARK(int, 1),
-        CREATE_SORT_KEYS_BENCHMARK(int, 10),
-        CREATE_SORT_KEYS_BENCHMARK(int, 100),
-        CREATE_SORT_KEYS_BENCHMARK(int, 1000),
-        CREATE_SORT_KEYS_BENCHMARK(int, 10000),
-        CREATE_SORT_KEYS_BENCHMARK(int, 100000),
-        CREATE_SORT_KEYS_BENCHMARK(int, 1000000),
-
-        CREATE_SORT_KEYS_BENCHMARK(long long, 1),
-        CREATE_SORT_KEYS_BENCHMARK(long long, 10),
-        CREATE_SORT_KEYS_BENCHMARK(long long, 100),
-        CREATE_SORT_KEYS_BENCHMARK(long long, 1000),
-        CREATE_SORT_KEYS_BENCHMARK(long long, 10000),
-        CREATE_SORT_KEYS_BENCHMARK(long long, 100000),
-        CREATE_SORT_KEYS_BENCHMARK(long long, 1000000),
+        BENCHMARK_KEY_TYPE(float),
+        BENCHMARK_KEY_TYPE(double),
+        BENCHMARK_KEY_TYPE(int8_t),
+        BENCHMARK_KEY_TYPE(uint8_t),
+        BENCHMARK_KEY_TYPE(rocprim::half),
+        BENCHMARK_KEY_TYPE(int),
     };
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
@@ -372,6 +370,13 @@ benchmark::RegisterBenchmark( \
     [=](benchmark::State& state) { run_sort_pairs_benchmark<Key, Value>(state, SEGMENTS, stream, size); } \
 )
 
+#define BENCHMARK_PAIR_TYPE(type, value) \
+    CREATE_SORT_PAIRS_BENCHMARK(type, value, 1), \
+    CREATE_SORT_PAIRS_BENCHMARK(type, value, 10), \
+    CREATE_SORT_PAIRS_BENCHMARK(type, value, 100), \
+    CREATE_SORT_PAIRS_BENCHMARK(type, value, 1000), \
+    CREATE_SORT_PAIRS_BENCHMARK(type, value, 10000)
+
 void add_sort_pairs_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                                hipStream_t stream,
                                size_t size)
@@ -381,37 +386,13 @@ void add_sort_pairs_benchmarks(std::vector<benchmark::internal::Benchmark*>& ben
 
     std::vector<benchmark::internal::Benchmark*> bs =
     {
-        CREATE_SORT_PAIRS_BENCHMARK(int, float, 1),
-        CREATE_SORT_PAIRS_BENCHMARK(int, float, 10),
-        CREATE_SORT_PAIRS_BENCHMARK(int, float, 100),
-        CREATE_SORT_PAIRS_BENCHMARK(int, float, 1000),
-        CREATE_SORT_PAIRS_BENCHMARK(int, float, 10000),
-        CREATE_SORT_PAIRS_BENCHMARK(int, float, 100000),
-        CREATE_SORT_PAIRS_BENCHMARK(int, float, 1000000),
-
-        CREATE_SORT_PAIRS_BENCHMARK(long long, double, 1),
-        CREATE_SORT_PAIRS_BENCHMARK(long long, double, 10),
-        CREATE_SORT_PAIRS_BENCHMARK(long long, double, 100),
-        CREATE_SORT_PAIRS_BENCHMARK(long long, double, 1000),
-        CREATE_SORT_PAIRS_BENCHMARK(long long, double, 10000),
-        CREATE_SORT_PAIRS_BENCHMARK(long long, double, 100000),
-        CREATE_SORT_PAIRS_BENCHMARK(long long, double, 1000000),
-
-        CREATE_SORT_PAIRS_BENCHMARK(int, custom_float2, 1),
-        CREATE_SORT_PAIRS_BENCHMARK(int, custom_float2, 10),
-        CREATE_SORT_PAIRS_BENCHMARK(int, custom_float2, 100),
-        CREATE_SORT_PAIRS_BENCHMARK(int, custom_float2, 1000),
-        CREATE_SORT_PAIRS_BENCHMARK(int, custom_float2, 10000),
-        CREATE_SORT_PAIRS_BENCHMARK(int, custom_float2, 100000),
-        CREATE_SORT_PAIRS_BENCHMARK(int, custom_float2, 1000000),
-
-        CREATE_SORT_PAIRS_BENCHMARK(long long, custom_double2, 1),
-        CREATE_SORT_PAIRS_BENCHMARK(long long, custom_double2, 10),
-        CREATE_SORT_PAIRS_BENCHMARK(long long, custom_double2, 100),
-        CREATE_SORT_PAIRS_BENCHMARK(long long, custom_double2, 1000),
-        CREATE_SORT_PAIRS_BENCHMARK(long long, custom_double2, 10000),
-        CREATE_SORT_PAIRS_BENCHMARK(long long, custom_double2, 100000),
-        CREATE_SORT_PAIRS_BENCHMARK(long long, custom_double2, 1000000),
+        BENCHMARK_PAIR_TYPE(int, float),
+        BENCHMARK_PAIR_TYPE(long long, double),
+        BENCHMARK_PAIR_TYPE(int8_t, int8_t),
+        BENCHMARK_PAIR_TYPE(uint8_t, uint8_t),
+        BENCHMARK_PAIR_TYPE(rocprim::half, rocprim::half),
+        BENCHMARK_PAIR_TYPE(int, custom_float2),
+        BENCHMARK_PAIR_TYPE(long long, custom_double2),
     };
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
