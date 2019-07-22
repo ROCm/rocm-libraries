@@ -74,14 +74,20 @@ typedef ::testing::Types<
     params<double, int, true>,
     params<float, int>,
     params<rp::half, long long>,
+    params<int8_t, int8_t>,
+    params<uint8_t, uint8_t>,
+    params<rp::half, rp::half>,
     params<int, test_utils::custom_test_type<float>>,
 
     // start_bit and end_bit
     params<unsigned char, int, true, 0, 7>,
     params<unsigned short, int, true, 4, 10>,
     params<unsigned int, short, false, 3, 22>,
+    params<uint8_t, int8_t, true, 0, 7>,
+    params<uint8_t, uint8_t, true, 4, 10>,
     params<unsigned int, double, true, 4, 21>,
     params<unsigned int, rp::half, true, 0, 15>,
+    params<unsigned short, rp::half, false, 3, 22>,
     params<unsigned long long, char, false, 8, 20>,
     params<unsigned short, test_utils::custom_test_type<double>, false, 8, 11>,
 

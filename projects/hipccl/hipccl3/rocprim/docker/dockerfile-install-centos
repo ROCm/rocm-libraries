@@ -1,0 +1,19 @@
+# Parameters related to building rocprim
+ARG base_image
+
+FROM ${base_image}
+LABEL maintainer="saad.rahim@amd.com"
+
+# Copy the rpm package of rocprim into the container from host
+COPY *.rpm /tmp/
+
+# Install the rpm package, and print out contents of expected changed locations
+RUN yum -y update && yum install -y\
+    /tmp/rocprim-*.rpm \
+  && rm -f /tmp/*.rpm \
+  && yum -y clean all \
+  && rm -rf /var/lib/apt/lists/* \
+  && printf "ls -la /etc/ld.so.conf.d/\n" && ls -la /etc/ld.so.conf.d/ \
+  && printf "ls -la /opt/rocm/include\n" && ls -la /opt/rocm/include \
+  && printf "ls -la /opt/rocm/lib\n" && ls -la /opt/rocm/lib \
+  && printf "ls -la /opt/rocm/lib/cmake\n" && ls -la /opt/rocm/lib/cmake

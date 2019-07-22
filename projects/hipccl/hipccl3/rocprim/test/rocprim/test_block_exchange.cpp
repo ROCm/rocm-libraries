@@ -32,25 +32,12 @@
 #include <rocprim/rocprim.hpp>
 
 #include "test_utils.hpp"
+#include "test_utils_types.hpp"
 
 #define HIP_CHECK(error)         \
     ASSERT_EQ(static_cast<hipError_t>(error),hipSuccess)
 
 namespace rp = rocprim;
-
-template<
-    class T,
-    class U,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread
->
-struct params
-{
-    using type = T;
-    using output_type = U;
-    static constexpr unsigned int block_size = BlockSize;
-    static constexpr unsigned int items_per_thread = ItemsPerThread;
-};
 
 template<class Params>
 class RocprimBlockExchangeTests : public ::testing::Test {
@@ -58,40 +45,7 @@ public:
     using params = Params;
 };
 
-using custom_short2 = test_utils::custom_test_type<short>;
-using custom_int2 = test_utils::custom_test_type<int>;
-using custom_double2 = test_utils::custom_test_type<double>;
-
-typedef ::testing::Types<
-    // Power of 2 BlockSize and ItemsPerThread = 1 (no rearrangement)
-    params<int, int, 128, 4>,
-    params<int, long long, 64, 1>,
-    params<unsigned long long, unsigned long long, 128, 1>,
-    params<short, custom_int2, 256, 1>,
-    params<long long, long long, 512, 1>,
-    params<rp::half, rp::half, 256, 1>,
-
-    // Power of 2 BlockSize and ItemsPerThread > 1
-    params<int, int, 64, 2>,
-    params<long long, long long, 256, 4>,
-    params<int, int, 512, 5>,
-    params<custom_short2, custom_double2, 128, 7>,
-    params<int, unsigned char, 128, 3>,
-    params<unsigned long long, unsigned long long, 64, 3>,
-#ifndef __HIP__
-    // hip-clang does not allow to convert half to float
-    params<rp::half, float, 256, 4>,
-#endif
-
-    // Non-power of 2 BlockSize and ItemsPerThread > 1
-    params<int, double, 33U, 5>,
-    params<char, custom_double2, 464U, 2>,
-    params<unsigned short, unsigned int, 100U, 3>,
-    params<short, int, 234U, 9>,
-    params<rp::half, rp::half, 190, 7>
-> Params;
-
-TYPED_TEST_CASE(RocprimBlockExchangeTests, Params);
+TYPED_TEST_CASE(RocprimBlockExchangeTests, BlockParams);
 
 template<
     class Type,
@@ -116,12 +70,140 @@ void blocked_to_striped_kernel(Type* device_input, OutputType* device_output)
     rp::block_store_direct_blocked(lid, device_output + block_offset, output);
 }
 
-TYPED_TEST(RocprimBlockExchangeTests, BlockedToStriped)
+template<
+    class Type,
+    class OutputType,
+    unsigned int ItemsPerBlock,
+    unsigned int ItemsPerThread
+>
+__global__
+void striped_to_blocked_kernel(Type* device_input, OutputType* device_output)
 {
-    using type = typename TestFixture::params::type;
-    using output_type = typename TestFixture::params::output_type;
-    constexpr size_t block_size = TestFixture::params::block_size;
-    constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
+    constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
+    const unsigned int lid = hipThreadIdx_x;
+    const unsigned int block_offset = hipBlockIdx_x * ItemsPerBlock;
+
+    Type input[ItemsPerThread];
+    OutputType output[ItemsPerThread];
+    rp::block_load_direct_blocked(lid, device_input + block_offset, input);
+
+    rp::block_exchange<Type, block_size, ItemsPerThread> exchange;
+    exchange.striped_to_blocked(input, output);
+
+    rp::block_store_direct_blocked(lid, device_output + block_offset, output);
+}
+
+template<
+    class Type,
+    class OutputType,
+    unsigned int ItemsPerBlock,
+    unsigned int ItemsPerThread
+>
+__global__
+void blocked_to_warp_striped_kernel(Type* device_input, OutputType* device_output)
+{
+    constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
+    const unsigned int lid = hipThreadIdx_x;
+    const unsigned int block_offset = hipBlockIdx_x * ItemsPerBlock;
+
+    Type input[ItemsPerThread];
+    OutputType output[ItemsPerThread];
+    rp::block_load_direct_blocked(lid, device_input + block_offset, input);
+
+    rp::block_exchange<Type, block_size, ItemsPerThread> exchange;
+    exchange.blocked_to_warp_striped(input, output);
+
+    rp::block_store_direct_blocked(lid, device_output + block_offset, output);
+}
+
+template<
+    class Type,
+    class OutputType,
+    unsigned int ItemsPerBlock,
+    unsigned int ItemsPerThread
+>
+__global__
+void warp_striped_to_blocked_kernel(Type* device_input, OutputType* device_output)
+{
+    constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
+    const unsigned int lid = hipThreadIdx_x;
+    const unsigned int block_offset = hipBlockIdx_x * ItemsPerBlock;
+
+    Type input[ItemsPerThread];
+    OutputType output[ItemsPerThread];
+    rp::block_load_direct_blocked(lid, device_input + block_offset, input);
+
+    rp::block_exchange<Type, block_size, ItemsPerThread> exchange;
+    exchange.warp_striped_to_blocked(input, output);
+
+    rp::block_store_direct_blocked(lid, device_output + block_offset, output);
+}
+
+template<
+    class Type,
+    class OutputType,
+    unsigned int ItemsPerBlock,
+    unsigned int ItemsPerThread
+>
+__global__
+void scatter_to_blocked_kernel(Type* device_input, OutputType* device_output, unsigned int* device_ranks)
+{
+    constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
+    const unsigned int lid = hipThreadIdx_x;
+    const unsigned int block_offset = hipBlockIdx_x * ItemsPerBlock;
+
+    Type input[ItemsPerThread];
+    OutputType output[ItemsPerThread];
+    unsigned int ranks[ItemsPerThread];
+    rp::block_load_direct_blocked(lid, device_input + block_offset, input);
+    rp::block_load_direct_blocked(lid, device_ranks + block_offset, ranks);
+
+    rp::block_exchange<Type, block_size, ItemsPerThread> exchange;
+    exchange.scatter_to_blocked(input, output, ranks);
+
+    rp::block_store_direct_blocked(lid, device_output + block_offset, output);
+}
+
+template<
+    class Type,
+    class OutputType,
+    unsigned int ItemsPerBlock,
+    unsigned int ItemsPerThread
+>
+__global__
+void scatter_to_striped_kernel(Type* device_input, OutputType* device_output, unsigned int* device_ranks)
+{
+    constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
+    const unsigned int lid = hipThreadIdx_x;
+    const unsigned int block_offset = hipBlockIdx_x * ItemsPerBlock;
+
+    Type input[ItemsPerThread];
+    OutputType output[ItemsPerThread];
+    unsigned int ranks[ItemsPerThread];
+    rp::block_load_direct_blocked(lid, device_input + block_offset, input);
+    rp::block_load_direct_blocked(lid, device_ranks + block_offset, ranks);
+
+    rp::block_exchange<Type, block_size, ItemsPerThread> exchange;
+    exchange.scatter_to_striped(input, output, ranks);
+
+    rp::block_store_direct_blocked(lid, device_output + block_offset, output);
+}
+
+// Test for exchange
+template<
+    class T,
+    class U,
+    int Method,
+    unsigned int BlockSize = 256U,
+    unsigned int ItemsPerThread = 1U
+>
+auto test_block_exchange()
+-> typename std::enable_if<Method == 0>::type
+{
+    using type = T;
+    using output_type = U;
+    constexpr size_t block_size = BlockSize;
+    constexpr size_t items_per_thread = ItemsPerThread;
     constexpr size_t items_per_block = block_size * items_per_thread;
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
@@ -133,7 +215,7 @@ TYPED_TEST(RocprimBlockExchangeTests, BlockedToStriped)
     // Generate data
     std::vector<type> input(size);
     std::vector<output_type> expected(size);
-    std::vector<output_type> output(size, output_type(0));
+    std::vector<output_type> output(size, 0);
 
     // Calculate input and expected results on host
     std::vector<type> values(size);
@@ -193,34 +275,19 @@ TYPED_TEST(RocprimBlockExchangeTests, BlockedToStriped)
 }
 
 template<
-    class Type,
-    class OutputType,
-    unsigned int ItemsPerBlock,
-    unsigned int ItemsPerThread
+    class T,
+    class U,
+    int Method,
+    unsigned int BlockSize = 256U,
+    unsigned int ItemsPerThread = 1U
 >
-__global__
-void striped_to_blocked_kernel(Type* device_input, OutputType* device_output)
+auto test_block_exchange()
+-> typename std::enable_if<Method == 1>::type
 {
-    constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
-    const unsigned int lid = hipThreadIdx_x;
-    const unsigned int block_offset = hipBlockIdx_x * ItemsPerBlock;
-
-    Type input[ItemsPerThread];
-    OutputType output[ItemsPerThread];
-    rp::block_load_direct_blocked(lid, device_input + block_offset, input);
-
-    rp::block_exchange<Type, block_size, ItemsPerThread> exchange;
-    exchange.striped_to_blocked(input, output);
-
-    rp::block_store_direct_blocked(lid, device_output + block_offset, output);
-}
-
-TYPED_TEST(RocprimBlockExchangeTests, StripedToBlocked)
-{
-    using type = typename TestFixture::params::type;
-    using output_type = typename TestFixture::params::output_type;
-    constexpr size_t block_size = TestFixture::params::block_size;
-    constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
+    using type = T;
+    using output_type = U;
+    constexpr size_t block_size = BlockSize;
+    constexpr size_t items_per_thread = ItemsPerThread;
     constexpr size_t items_per_block = block_size * items_per_thread;
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
@@ -292,34 +359,19 @@ TYPED_TEST(RocprimBlockExchangeTests, StripedToBlocked)
 }
 
 template<
-    class Type,
-    class OutputType,
-    unsigned int ItemsPerBlock,
-    unsigned int ItemsPerThread
+    class T,
+    class U,
+    int Method,
+    unsigned int BlockSize = 256U,
+    unsigned int ItemsPerThread = 1U
 >
-__global__
-void blocked_to_warp_striped_kernel(Type* device_input, OutputType* device_output)
+auto test_block_exchange()
+-> typename std::enable_if<Method == 2>::type
 {
-    constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
-    const unsigned int lid = hipThreadIdx_x;
-    const unsigned int block_offset = hipBlockIdx_x * ItemsPerBlock;
-
-    Type input[ItemsPerThread];
-    OutputType output[ItemsPerThread];
-    rp::block_load_direct_blocked(lid, device_input + block_offset, input);
-
-    rp::block_exchange<Type, block_size, ItemsPerThread> exchange;
-    exchange.blocked_to_warp_striped(input, output);
-
-    rp::block_store_direct_blocked(lid, device_output + block_offset, output);
-}
-
-TYPED_TEST(RocprimBlockExchangeTests, BlockedToWarpStriped)
-{
-    using type = typename TestFixture::params::type;
-    using output_type = typename TestFixture::params::output_type;
-    constexpr size_t block_size = TestFixture::params::block_size;
-    constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
+    using type = T;
+    using output_type = U;
+    constexpr size_t block_size = BlockSize;
+    constexpr size_t items_per_thread = ItemsPerThread;
     constexpr size_t items_per_block = block_size * items_per_thread;
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
@@ -404,34 +456,19 @@ TYPED_TEST(RocprimBlockExchangeTests, BlockedToWarpStriped)
 }
 
 template<
-    class Type,
-    class OutputType,
-    unsigned int ItemsPerBlock,
-    unsigned int ItemsPerThread
+    class T,
+    class U,
+    int Method,
+    unsigned int BlockSize = 256U,
+    unsigned int ItemsPerThread = 1U
 >
-__global__
-void warp_striped_to_blocked_kernel(Type* device_input, OutputType* device_output)
+auto test_block_exchange()
+-> typename std::enable_if<Method == 3>::type
 {
-    constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
-    const unsigned int lid = hipThreadIdx_x;
-    const unsigned int block_offset = hipBlockIdx_x * ItemsPerBlock;
-
-    Type input[ItemsPerThread];
-    OutputType output[ItemsPerThread];
-    rp::block_load_direct_blocked(lid, device_input + block_offset, input);
-
-    rp::block_exchange<Type, block_size, ItemsPerThread> exchange;
-    exchange.warp_striped_to_blocked(input, output);
-
-    rp::block_store_direct_blocked(lid, device_output + block_offset, output);
-}
-
-TYPED_TEST(RocprimBlockExchangeTests, WarpStripedToBlocked)
-{
-    using type = typename TestFixture::params::type;
-    using output_type = typename TestFixture::params::output_type;
-    constexpr size_t block_size = TestFixture::params::block_size;
-    constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
+    using type = T;
+    using output_type = U;
+    constexpr size_t block_size = BlockSize;
+    constexpr size_t items_per_thread = ItemsPerThread;
     constexpr size_t items_per_block = block_size * items_per_thread;
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
@@ -514,36 +551,19 @@ TYPED_TEST(RocprimBlockExchangeTests, WarpStripedToBlocked)
 }
 
 template<
-    class Type,
-    class OutputType,
-    unsigned int ItemsPerBlock,
-    unsigned int ItemsPerThread
+    class T,
+    class U,
+    int Method,
+    unsigned int BlockSize = 256U,
+    unsigned int ItemsPerThread = 1U
 >
-__global__
-void scatter_to_blocked_kernel(Type* device_input, OutputType* device_output, unsigned int* device_ranks)
+auto test_block_exchange()
+-> typename std::enable_if<Method == 4>::type
 {
-    constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
-    const unsigned int lid = hipThreadIdx_x;
-    const unsigned int block_offset = hipBlockIdx_x * ItemsPerBlock;
-
-    Type input[ItemsPerThread];
-    OutputType output[ItemsPerThread];
-    unsigned int ranks[ItemsPerThread];
-    rp::block_load_direct_blocked(lid, device_input + block_offset, input);
-    rp::block_load_direct_blocked(lid, device_ranks + block_offset, ranks);
-
-    rp::block_exchange<Type, block_size, ItemsPerThread> exchange;
-    exchange.scatter_to_blocked(input, output, ranks);
-
-    rp::block_store_direct_blocked(lid, device_output + block_offset, output);
-}
-
-TYPED_TEST(RocprimBlockExchangeTests, ScatterToBlocked)
-{
-    using type = typename TestFixture::params::type;
-    using output_type = typename TestFixture::params::output_type;
-    constexpr size_t block_size = TestFixture::params::block_size;
-    constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
+    using type = T;
+    using output_type = U;
+    constexpr size_t block_size = BlockSize;
+    constexpr size_t items_per_thread = ItemsPerThread;
     constexpr size_t items_per_block = block_size * items_per_thread;
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
@@ -633,36 +653,19 @@ TYPED_TEST(RocprimBlockExchangeTests, ScatterToBlocked)
 }
 
 template<
-    class Type,
-    class OutputType,
-    unsigned int ItemsPerBlock,
-    unsigned int ItemsPerThread
+    class T,
+    class U,
+    int Method,
+    unsigned int BlockSize = 256U,
+    unsigned int ItemsPerThread = 1U
 >
-__global__
-void scatter_to_striped_kernel(Type* device_input, OutputType* device_output, unsigned int* device_ranks)
+auto test_block_exchange()
+-> typename std::enable_if<Method == 5>::type
 {
-    constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
-    const unsigned int lid = hipThreadIdx_x;
-    const unsigned int block_offset = hipBlockIdx_x * ItemsPerBlock;
-
-    Type input[ItemsPerThread];
-    OutputType output[ItemsPerThread];
-    unsigned int ranks[ItemsPerThread];
-    rp::block_load_direct_blocked(lid, device_input + block_offset, input);
-    rp::block_load_direct_blocked(lid, device_ranks + block_offset, ranks);
-
-    rp::block_exchange<Type, block_size, ItemsPerThread> exchange;
-    exchange.scatter_to_striped(input, output, ranks);
-
-    rp::block_store_direct_blocked(lid, device_output + block_offset, output);
-}
-
-TYPED_TEST(RocprimBlockExchangeTests, ScatterToStriped)
-{
-    using type = typename TestFixture::params::type;
-    using output_type = typename TestFixture::params::output_type;
-    constexpr size_t block_size = TestFixture::params::block_size;
-    constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
+    using type = T;
+    using output_type = U;
+    constexpr size_t block_size = BlockSize;
+    constexpr size_t items_per_thread = ItemsPerThread;
     constexpr size_t items_per_block = block_size * items_per_thread;
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
@@ -751,4 +754,90 @@ TYPED_TEST(RocprimBlockExchangeTests, ScatterToStriped)
     HIP_CHECK(hipFree(device_input));
     HIP_CHECK(hipFree(device_output));
     HIP_CHECK(hipFree(device_ranks));
+}
+
+// Static for-loop
+template <
+    unsigned int First,
+    unsigned int Last,
+    class T,
+    class U,
+    int Method,
+    unsigned int BlockSize = 256U
+>
+struct static_for
+{
+    static void run()
+    {
+        test_block_exchange<T, U, Method, BlockSize, items[First]>();
+        static_for<First + 1, Last, T, U, Method, BlockSize>::run();
+    }
+};
+
+template <
+    unsigned int N,
+    class T,
+    class U,
+    int Method,
+    unsigned int BlockSize
+>
+struct static_for<N, N, T, U, Method, BlockSize>
+{
+    static void run()
+    {
+    }
+};
+
+TYPED_TEST(RocprimBlockExchangeTests, BlockedToStriped)
+{
+    using type = typename TestFixture::params::input_type;
+    using output_type = typename TestFixture::params::output_type;
+    constexpr size_t block_size = TestFixture::params::block_size;
+
+    static_for<0, 4, type, output_type, 0, block_size>::run();
+}
+
+TYPED_TEST(RocprimBlockExchangeTests, StripedToBlocked)
+{
+    using type = typename TestFixture::params::input_type;
+    using output_type = typename TestFixture::params::output_type;
+    constexpr size_t block_size = TestFixture::params::block_size;
+
+    static_for<0, 4, type, output_type, 1, block_size>::run();
+}
+
+TYPED_TEST(RocprimBlockExchangeTests, BlockedToWarpStriped)
+{
+    using type = typename TestFixture::params::input_type;
+    using output_type = typename TestFixture::params::output_type;
+    constexpr size_t block_size = TestFixture::params::block_size;
+
+    static_for<0, 4, type, output_type, 2, block_size>::run();
+}
+
+TYPED_TEST(RocprimBlockExchangeTests, WarpStripedToBlocked)
+{
+    using type = typename TestFixture::params::input_type;
+    using output_type = typename TestFixture::params::output_type;
+    constexpr size_t block_size = TestFixture::params::block_size;
+
+    static_for<0, 4, type, output_type, 3, block_size>::run();
+}
+
+TYPED_TEST(RocprimBlockExchangeTests, ScatterToBlocked)
+{
+    using type = typename TestFixture::params::input_type;
+    using output_type = typename TestFixture::params::output_type;
+    constexpr size_t block_size = TestFixture::params::block_size;
+
+    static_for<0, 4, type, output_type, 4, block_size>::run();
+}
+
+TYPED_TEST(RocprimBlockExchangeTests, ScatterToStriped)
+{
+    using type = typename TestFixture::params::input_type;
+    using output_type = typename TestFixture::params::output_type;
+    constexpr size_t block_size = TestFixture::params::block_size;
+
+    static_for<0, 4, type, output_type, 5, block_size>::run();
 }

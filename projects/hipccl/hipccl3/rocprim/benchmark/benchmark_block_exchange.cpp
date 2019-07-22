@@ -305,6 +305,13 @@ benchmark::RegisterBenchmark( \
     stream, size \
 )
 
+#define BENCHMARK_TYPE(type, block) \
+    CREATE_BENCHMARK(type, block, 1), \
+    CREATE_BENCHMARK(type, block, 2), \
+    CREATE_BENCHMARK(type, block, 3), \
+    CREATE_BENCHMARK(type, block, 4), \
+    CREATE_BENCHMARK(type, block, 8)
+
 template<class Benchmark>
 void add_benchmarks(const std::string& name,
                     std::vector<benchmark::internal::Benchmark*>& benchmarks,
@@ -313,20 +320,11 @@ void add_benchmarks(const std::string& name,
 {
     std::vector<benchmark::internal::Benchmark*> bs =
     {
-        CREATE_BENCHMARK(int, 256, 1),
-        CREATE_BENCHMARK(int, 256, 2),
-        CREATE_BENCHMARK(int, 256, 3),
-        CREATE_BENCHMARK(int, 256, 4),
-        CREATE_BENCHMARK(int, 256, 6),
-        CREATE_BENCHMARK(int, 256, 7),
-        CREATE_BENCHMARK(int, 256, 8),
-        CREATE_BENCHMARK(long long, 256, 1),
-        CREATE_BENCHMARK(long long, 256, 2),
-        CREATE_BENCHMARK(long long, 256, 3),
-        CREATE_BENCHMARK(long long, 256, 4),
-        CREATE_BENCHMARK(long long, 256, 6),
-        CREATE_BENCHMARK(long long, 256, 7),
-        CREATE_BENCHMARK(long long, 256, 8),
+        BENCHMARK_TYPE(int, 256),
+        BENCHMARK_TYPE(int8_t, 256),
+        BENCHMARK_TYPE(uint8_t, 256),
+        BENCHMARK_TYPE(rocprim::half, 256),
+        BENCHMARK_TYPE(long long, 256),
     };
 
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
