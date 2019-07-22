@@ -48,7 +48,7 @@ include(cmake/Dependencies.cmake)
 set(AMDGPU_TARGETS gfx803;gfx900;gfx906 CACHE STRING "List of specific machine types for library to target")
 
 # Setup VERSION
-set ( VERSION_STRING "2.6.0" )
+set ( VERSION_STRING "2.7.0" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
 # Print configuration summary
