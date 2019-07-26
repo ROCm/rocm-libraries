@@ -36,7 +36,7 @@
 
 // pass
 // ----------------
-//#include <thrust/system/hip/detail/adjacent_difference.h>
+#include <thrust/system/hip/detail/adjacent_difference.h>
 #include <thrust/system/hip/detail/copy.h>
 #include <thrust/system/hip/detail/copy_if.h>
 #include <thrust/system/hip/detail/count.h>
@@ -78,7 +78,7 @@
 #include <thrust/system/hip/detail/binary_search.h>
 #include <thrust/system/hip/detail/merge.h>
 #include <thrust/system/hip/detail/scan_by_key.h>
-// #include <thrust/system/hip/detail/set_operations.h>
+#include <thrust/system/hip/detail/set_operations.h>
 #include <thrust/system/hip/detail/sort.h>
 
 /*! \file thrust/system/hip/execution_policy.h
