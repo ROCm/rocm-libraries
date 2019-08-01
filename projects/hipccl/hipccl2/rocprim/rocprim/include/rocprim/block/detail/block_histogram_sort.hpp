@@ -94,6 +94,7 @@ public:
         storage_type_& storage_ = storage.get();
 
         radix_sort().sort(input, storage_.sort);
+        ::rocprim::syncthreads(); // Fix race condition that appeared on Vega10 hardware, storage LDS is reused below.
 
         #pragma unroll
         for(unsigned int offset = 0; offset < Bins; offset += BlockSize)
