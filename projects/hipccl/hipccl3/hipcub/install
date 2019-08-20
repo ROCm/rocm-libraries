@@ -115,12 +115,19 @@ else
     distro='ubuntu'
 fi
 
+if [[ "${build_clients}" == true ]]; then
+    build_tests="-DBUILD_TEST=ON"
+else
+    build_tests="-DBUILD_TEST=OFF"
+fi
+
+
 case "$distro" in
     centos)    
-        CXX=$rocm_path/${compiler} cmake3 -DBUILD_BENCHMARK=ON ../../. # or cmake-gui ../.
+        CXX=$rocm_path/${compiler} cmake3 ${build_tests} ../../. # or cmake-gui ../.
     ;;
     ubuntu)
-        CXX=$rocm_path/${compiler} cmake -DBUILD_BENCHMARK=ON ../../. # or cmake-gui ../.
+        CXX=$rocm_path/${compiler} cmake ${build_tests} ../../. # or cmake-gui ../.
     ;;
 esac
 
