@@ -29,6 +29,7 @@ BEGIN_ROCPRIM_NAMESPACE
 #if defined(__cpp_lib_integer_sequence) && !defined(DOXYGEN_SHOULD_SKIP_THIS)
 // For C++14 or newer we just use standard implementation
 using std::integer_sequence;
+using std::index_sequence;
 using std::make_integer_sequence;
 using std::make_index_sequence;
 using std::index_sequence_for;
