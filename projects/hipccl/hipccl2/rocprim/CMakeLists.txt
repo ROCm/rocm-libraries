@@ -50,7 +50,7 @@ include(cmake/VerifyCompiler.cmake)
 option(DISABLE_WERROR "Disable building with Werror" ON)
 
 # Set CXX flags
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 if(DISABLE_WERROR)

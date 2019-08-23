@@ -53,11 +53,11 @@ template<
     int Method,
     unsigned int BlockSize,
     rocprim::block_scan_algorithm Algorithm,
-    class T
+    class T,
+    typename std::enable_if<Method == 0>::type* = nullptr
 >
 __global__
-auto scan_kernel(T* device_output, T* device_output_b, T init)
--> typename std::enable_if<Method == 0>::type
+void scan_kernel(T* device_output, T* device_output_b, T init)
 {
     (void)init;
     (void)device_output_b;
@@ -72,11 +72,11 @@ template<
     int Method,
     unsigned int BlockSize,
     rocprim::block_scan_algorithm Algorithm,
-    class T
+    class T,
+    typename std::enable_if<Method == 1>::type* = nullptr
 >
 __global__
-auto scan_kernel(T* device_output, T* device_output_b, T init)
--> typename std::enable_if<Method == 1>::type
+void scan_kernel(T* device_output, T* device_output_b, T init)
 {
     (void)init;
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
@@ -95,11 +95,11 @@ template<
     int Method,
     unsigned int BlockSize,
     rocprim::block_scan_algorithm Algorithm,
-    class T
+    class T,
+    typename std::enable_if<Method == 2>::type* = nullptr
 >
 __global__
-auto scan_kernel(T* device_output, T* device_output_b, T init)
--> typename std::enable_if<Method == 2>::type
+void scan_kernel(T* device_output, T* device_output_b, T init)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
     T prefix_value = init;
@@ -127,11 +127,11 @@ template<
     int Method,
     unsigned int BlockSize,
     rocprim::block_scan_algorithm Algorithm,
-    class T
+    class T,
+    typename std::enable_if<Method == 3>::type* = nullptr
 >
 __global__
-auto scan_kernel(T* device_output, T* device_output_b, T init)
--> typename std::enable_if<Method == 3>::type
+void scan_kernel(T* device_output, T* device_output_b, T init)
 {
     (void)device_output_b;
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
@@ -145,11 +145,11 @@ template<
     int Method,
     unsigned int BlockSize,
     rocprim::block_scan_algorithm Algorithm,
-    class T
+    class T,
+    typename std::enable_if<Method == 4>::type* = nullptr
 >
 __global__
-auto scan_kernel(T* device_output, T* device_output_b, T init)
--> typename std::enable_if<Method == 4>::type
+void scan_kernel(T* device_output, T* device_output_b, T init)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
     T value = device_output[index];
@@ -167,11 +167,11 @@ template<
     int Method,
     unsigned int BlockSize,
     rocprim::block_scan_algorithm Algorithm,
-    class T
+    class T,
+    typename std::enable_if<Method == 5>::type* = nullptr
 >
 __global__
-auto scan_kernel(T* device_output, T* device_output_b, T init)
--> typename std::enable_if<Method == 5>::type
+void scan_kernel(T* device_output, T* device_output_b, T init)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
     T prefix_value = init;
