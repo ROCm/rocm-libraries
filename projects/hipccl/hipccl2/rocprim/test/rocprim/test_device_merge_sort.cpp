@@ -114,7 +114,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
         in_place = !in_place;
 
         // Generate data
-        std::vector<key_type> input = test_utils::get_random_data<key_type>(size, 0, size);
+        std::vector<key_type> input = test_utils::get_random_data<key_type>(size, -100, 100); // float16 can't exceed 65504
         std::vector<key_type> output(size);
 
         key_type * d_input;
@@ -218,7 +218,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
         in_place = !in_place;
 
         // Generate data
-        std::vector<key_type> keys_input = test_utils::get_random_data<key_type>(size, 0, size);
+        std::vector<key_type> keys_input = test_utils::get_random_data<key_type>(size, -100, 100); // float16 can't exceed 65504
 
         std::vector<value_type> values_input(size);
         std::iota(values_input.begin(), values_input.end(), 0);
