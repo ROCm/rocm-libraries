@@ -163,8 +163,8 @@ private:
     {
         storage_type_<Key, Value>& storage_ = storage.get();
         Key next_key = storage_.key[next_id];
-        bool compare = compare_function(next_key, key);
-        bool swap = compare ^ (next_id < flat_tid) ^ dir;
+        bool compare = (next_id < flat_tid) ? compare_function(key, next_key) : compare_function(next_key, key);
+        bool swap = compare ^ dir;
         if(swap)
         {
             key = next_key;
@@ -184,8 +184,8 @@ private:
         storage_type_<Key, Value>& storage_ = storage.get();
         Key next_key = storage_.key[next_id];
         Value next_value = storage_.value[next_id];
-        bool compare = compare_function(next_key, key);
-        bool swap = compare ^ (next_id < flat_tid) ^ dir;
+        bool compare = (next_id < flat_tid) ? compare_function(key, next_key) : compare_function(next_key, key);
+        bool swap = compare ^ dir;
         if(swap)
         {
             key = next_key;
