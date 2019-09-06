@@ -11,7 +11,7 @@ rocprimCI:
 
     def rocprim = new rocProject('rocPRIM')
 
-    def nodes = new dockerNodes(['gfx803 && ubuntu', 'gfx900 && ubuntu', 'gfx906 && ubuntu', 'gfx900 && centos7', 'gfx906 && centos7'], rocprim)
+    def nodes = new dockerNodes(['gfx803 && centos7', 'ubuntu', 'gfx900 && centos7', 'gfx906 && centos7', 'sles'], rocprim)
 
     boolean formatCheck = false
      
@@ -51,7 +51,7 @@ rocprimCI:
 
         def command 
 
-        if(platform.jenkinsLabel.contains('centos'))
+        if(platform.jenkinsLabel.contains('centos') || platform.jenkinsLabel.contains('sles'))
         {
             command = """#!/usr/bin/env bash
                     set -x
