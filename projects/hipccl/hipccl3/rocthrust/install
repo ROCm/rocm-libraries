@@ -113,17 +113,17 @@ fi
 
 # Detect Linux distribution and store result in variable '$distro'
 if [ -e /etc/redhat-release ] ; then
-    distro='centos'
+    distro='redhat'
 else
-    distro='ubuntu'
+    distro='other'
 fi
 
 # now do different things depending on distro
 case "$distro" in
-    centos)
+    redhat)
             CXX=$rocm_path/$compiler cmake3 -DBUILD_BENCHMARK=ON ../../.
         ;;
-    ubuntu)
+    other)
             CXX=$rocm_path/$compiler cmake -DBUILD_BENCHMARK=ON ../../. # or cmake-gui ../.
         ;;
 esac 

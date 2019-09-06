@@ -1,4 +1,4 @@
-# Parameters related to building hip
+# Parameters related to building rocthrust
 ARG base_image
 
 FROM ${base_image}
@@ -9,9 +9,6 @@ ARG user_uid
 # Install dependent packages
 # Dependencies:
 # * hcc-config.cmake: pkg-config
-# * tensile: python2.7, python-yaml
-# * rocblas-test: gfortran, googletest
-# * rocblas-bench: libboost-program-options-dev
 # * libhsakmt.so: libnuma1
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     rock-dkms \

@@ -2,4 +2,4 @@
 ARG base_image
 
 FROM ${base_image}
-MAINTAINER rocthrust-maintainer@amd.com
+LABEL maintainer="rocthrust.maintainer@amd.com"
