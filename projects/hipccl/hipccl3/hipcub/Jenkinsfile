@@ -15,7 +15,7 @@ hipCUBCI:
     def hipcub = new rocProject('hipCUB')
 
     // Define test architectures, optional rocm version argument is available
-    def nodes = new dockerNodes(['gfx900 && ubuntu', 'gfx906 && ubuntu', 'gfx900 && centos7', 'gfx906 && centos7'], hipcub)
+    def nodes = new dockerNodes(['ubuntu', 'sles', 'gfx900 && centos7', 'gfx906 && centos7'], hipcub)
 
     boolean formatCheck = false
 
@@ -53,7 +53,7 @@ hipCUBCI:
 
         def command
 
-        if(platform.jenkinsLabel.contains('centos'))
+        if(platform.jenkinsLabel.contains('centos') || platform.jenkinsLabel.contains('sles'))
         {
             command = """#!/usr/bin/env bash
                     set -x
@@ -81,25 +81,11 @@ hipCUBCI:
 
         def command
         
-        if(platform.jenkinsLabel.contains('centos'))
-        {
-            command = """
-                    set -x
-                    cd ${project.paths.project_build_prefix}/build/release
-                    make package
-                    rm -rf package && mkdir -p package
-                    mv *.rpm package/
-                    rpm -qlp package/*.rpm
-                  """
-            
-            platform.runCommand(this, command)
-            platform.archiveArtifacts(this, """${project.paths.project_build_prefix}/build/release/package/*.rpm""")
-        }
-        else if(platform.jenkinsLabel.contains('hip-clang'))
+        if(platform.jenkinsLabel.contains('hip-clang'))
         {
             packageCommand = null
         }
-        else
+        else if(platform.jenkinsLabel.contains('ubuntu'))
         {
             command = """
                     set -x
@@ -112,6 +98,20 @@ hipCUBCI:
             
             platform.runCommand(this, command)
             platform.archiveArtifacts(this, """${project.paths.project_build_prefix}/build/release/package/*.deb""")
+        }
+        else
+        {
+            command = """
+                    set -x
+                    cd ${project.paths.project_build_prefix}/build/release
+                    make package
+                    rm -rf package && mkdir -p package
+                    mv *.rpm package/
+                    rpm -qlp package/*.rpm
+                  """
+            
+            platform.runCommand(this, command)
+            platform.archiveArtifacts(this, """${project.paths.project_build_prefix}/build/release/package/*.rpm""")
         }
     }
 
