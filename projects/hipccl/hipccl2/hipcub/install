@@ -110,9 +110,9 @@ if [[ "${build_hip_clang}" == true ]]; then
 fi
 
 if [ -e /etc/redhat-release ] ; then
-    distro='centos'
+    distro='redhat'
 else
-    distro='ubuntu'
+    distro='other'
 fi
 
 if [[ "${build_clients}" == true ]]; then
@@ -123,10 +123,10 @@ fi
 
 
 case "$distro" in
-    centos)    
+    redhat)    
         CXX=$rocm_path/${compiler} cmake3 ${build_tests} ../../. # or cmake-gui ../.
     ;;
-    ubuntu)
+    other)
         CXX=$rocm_path/${compiler} cmake ${build_tests} ../../. # or cmake-gui ../.
     ;;
 esac

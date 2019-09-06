@@ -1,4 +1,4 @@
-# Parameters related to building hipcub
+# Parameters related to building hipCUB
 ARG base_image
 
 FROM ${base_image}
