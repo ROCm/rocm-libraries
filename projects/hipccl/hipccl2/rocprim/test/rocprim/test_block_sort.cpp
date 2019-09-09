@@ -55,7 +55,7 @@ template<
     class key_type
 >
 __global__
-void sort_key_kernel(key_type * device_key_output)
+void sort_key_kernel(key_type * device_key_output) 
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
     key_type key = device_key_output[index];
@@ -139,7 +139,7 @@ template<
     class value_type
 >
 __global__
-void sort_key_value_kernel(key_type * device_key_output, value_type * device_value_output)
+void sort_key_value_kernel(key_type * device_key_output, value_type * device_value_output) 
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
     key_type key = device_key_output[index];
@@ -154,26 +154,14 @@ TYPED_TEST(RocprimBlockSortTests, SortKeyValue)
 {
     using key_type = typename TestFixture::key_type;
     using value_type = typename TestFixture::value_type;
+    using value_op_type = typename std::conditional<std::is_same<value_type, rp::half>::value, test_utils::half_less, rp::less<value_type>>::type;
+    using eq_op_type = typename std::conditional<std::is_same<key_type, rp::half>::value, test_utils::half_equal_to, rp::equal_to<key_type>>::type;
     const size_t block_size = TestFixture::block_size;
     const size_t size = block_size * 1134;
     const size_t grid_size = size / block_size;
 
     // Generate data
-    std::vector<key_type> output_key(size);
-    for(size_t i = 0; i < output_key.size() / block_size; i++)
-    {
-        std::iota(
-            output_key.begin() + (i * block_size),
-            output_key.begin() + ((i + 1) * block_size),
-            0
-        );
-
-        std::shuffle(
-            output_key.begin() + (i * block_size),
-            output_key.begin() + ((i + 1) * block_size),
-            std::mt19937{std::random_device{}()}
-        );
-    }
+    std::vector<key_type> output_key = test_utils::get_random_data<key_type>(size, 0, 100);
     std::vector<value_type> output_value = test_utils::get_random_data<value_type>(size, -100, 100);
 
     // Combine vectors to form pairs with key and value
@@ -182,8 +170,8 @@ TYPED_TEST(RocprimBlockSortTests, SortKeyValue)
         target[i] = std::make_pair(output_key[i], output_value[i]);
 
     // Calculate expected results on host
-    std::vector<std::pair<key_type, value_type>> expected(target);
-
+    using key_value = std::pair<key_type, value_type>;
+    std::vector<key_value> expected(target);
     for(size_t i = 0; i < expected.size() / block_size; i++)
     {
         std::sort(
@@ -246,6 +234,20 @@ TYPED_TEST(RocprimBlockSortTests, SortKeyValue)
         expected_key[i] = expected[i].first;
         expected_value[i] = expected[i].second;
     }
+
+    // Keys are sorted, Values order not guaranteed
+    // Sort subsets where key was the same to make sure all values are still present
+    value_op_type value_op;
+    eq_op_type eq_op;
+    for (size_t i = 0; i < output_key.size();)
+    {
+        auto j = i;
+        for (; j < output_key.size() && eq_op(output_key[j], output_key[i]); ++j) { }
+        std::sort(output_value.begin() + i, output_value.begin() + j, value_op);
+        std::sort(expected_value.begin() + i, expected_value.begin() + j, value_op);
+        i = j;
+    }
+    
     test_utils::assert_eq(output_key, expected_key);
     test_utils::assert_eq(output_value, expected_value);
 }
@@ -281,26 +283,14 @@ TYPED_TEST(RocprimBlockSortTests, CustomSortKeyValue)
 {
     using key_type = typename TestFixture::key_type;
     using value_type = typename TestFixture::value_type;
+    using value_op_type = typename std::conditional<std::is_same<value_type, rp::half>::value, test_utils::half_less, rp::less<value_type>>::type;
+    using eq_op_type = typename std::conditional<std::is_same<key_type, rp::half>::value, test_utils::half_equal_to, rp::equal_to<key_type>>::type;
     const size_t block_size = TestFixture::block_size;
     const size_t size = block_size * 1134;
     const size_t grid_size = size / block_size;
 
     // Generate data
-    std::vector<key_type> output_key(size);
-    for(size_t i = 0; i < output_key.size() / block_size; i++)
-    {
-        std::iota(
-            output_key.begin() + (i * block_size),
-            output_key.begin() + ((i + 1) * block_size),
-            0
-        );
-
-        std::shuffle(
-            output_key.begin() + (i * block_size),
-            output_key.begin() + ((i + 1) * block_size),
-            std::mt19937{std::random_device{}()}
-        );
-    }
+    std::vector<key_type> output_key = test_utils::get_random_data<key_type>(size, 0, 100);
     std::vector<value_type> output_value = test_utils::get_random_data<value_type>(size, -100, 100);
 
     // Combine vectors to form pairs with key and value
@@ -309,8 +299,8 @@ TYPED_TEST(RocprimBlockSortTests, CustomSortKeyValue)
         target[i] = std::make_pair(output_key[i], output_value[i]);
 
     // Calculate expected results on host
-    std::vector<std::pair<key_type, value_type>> expected(target);
-
+    using key_value = std::pair<key_type, value_type>;
+    std::vector<key_value> expected(target);
     for(size_t i = 0; i < expected.size() / block_size; i++)
     {
         std::sort(
@@ -373,6 +363,20 @@ TYPED_TEST(RocprimBlockSortTests, CustomSortKeyValue)
         expected_key[i] = expected[i].first;
         expected_value[i] = expected[i].second;
     }
+
+    // Keys are sorted, Values order not guaranteed
+    // Sort subsets where key was the same to make sure all values are still present
+    value_op_type value_op;
+    eq_op_type eq_op;
+    for (size_t i = 0; i < output_key.size();)
+    {
+        auto j = i;
+        for (; j < output_key.size() && eq_op(output_key[j], output_key[i]); ++j) { }
+        std::sort(output_value.begin() + i, output_value.begin() + j, value_op);
+        std::sort(expected_value.begin() + i, expected_value.begin() + j, value_op);
+        i = j;
+    }
+
     test_utils::assert_eq(output_key, expected_key);
     test_utils::assert_eq(output_value, expected_value);
 }

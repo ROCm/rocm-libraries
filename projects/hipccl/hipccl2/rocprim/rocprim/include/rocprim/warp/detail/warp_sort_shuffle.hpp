@@ -61,8 +61,8 @@ private:
     {
         Key k1 = warp_shuffle_xor(k, mask, WarpSize);
         Value v1 = warp_shuffle_xor(v, mask, WarpSize);
-        const bool k_is_less_than_k1 = compare_function(k, k1);
-        if(k_is_less_than_k1 == dir)
+        bool swap = dir == 0 ? compare_function(k1, k) : compare_function(k, k1);
+        if (swap)
         {
             k = k1;
             v = v1;
@@ -86,7 +86,8 @@ private:
     swap(Key& k, int mask, int dir, BinaryFunction compare_function)
     {
         Key k1 = warp_shuffle_xor(k, mask, WarpSize);
-        if(compare_function(k, k1) == dir)
+        bool swap = dir == 0 ? compare_function(k1, k) : compare_function(k, k1);
+        if (swap)
         {
             k = k1;
         }
