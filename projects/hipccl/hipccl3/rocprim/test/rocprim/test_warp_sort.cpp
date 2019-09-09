@@ -161,6 +161,8 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
     // logical warp side for warp primitive, execution warp size is always rp::warp_size()
     using T = typename TestFixture::params::type;
     using pair = test_utils::custom_test_type<T>;
+    using value_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_less, rp::less<T>>::type;
+    using eq_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_equal_to, rp::equal_to<T>>::type;
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
     const size_t block_size = std::max<size_t>(rp::warp_size(), 4 * logical_warp_size);
     constexpr size_t grid_size = 4;
@@ -173,12 +175,7 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
     }
 
     // Generate data
-    std::vector<T> output_key(size);
-    for(size_t i = 0; i < output_key.size() / logical_warp_size; i++)
-    {
-        std::iota(output_key.begin() + (i * logical_warp_size), output_key.begin() + ((i + 1) * logical_warp_size), 0);
-        std::shuffle(output_key.begin() + (i * logical_warp_size), output_key.begin() + ((i + 1) * logical_warp_size), std::mt19937{std::random_device{}()});
-    }
+    std::vector<T> output_key = test_utils::get_random_data<T>(size, 0, 100);
     std::vector<T> output_value = test_utils::get_random_data<T>(size, 0, 100);
 
     // Combine vectors to form pairs with key and value
@@ -193,7 +190,9 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
     std::vector<pair> expected(target);
     for(size_t i = 0; i < expected.size() / logical_warp_size; i++)
     {
-        std::sort(expected.begin() + (i * logical_warp_size), expected.begin() + ((i + 1) * logical_warp_size));
+        std::sort(expected.begin() + (i * logical_warp_size),
+                  expected.begin() + ((i + 1) * logical_warp_size)
+        );
     }
 
     // Writing to device memory
@@ -256,6 +255,20 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
         expected_key[i] = expected[i].x;
         expected_value[i] = expected[i].y;
     }
+
+    // Keys are sorted, Values order not guaranteed
+    // Sort subsets where key was the same to make sure all values are still present
+    value_op_type value_op;
+    eq_op_type eq_op;
+    for (size_t i = 0; i < output_key.size();)
+    {
+        auto j = i;
+        for (; j < output_key.size() && eq_op(output_key[j], output_key[i]); ++j) { }
+        std::sort(output_value.begin() + i, output_value.begin() + j, value_op);
+        std::sort(expected_value.begin() + i, expected_value.begin() + j, value_op);
+        i = j;
+    }
+
     test_utils::assert_near(output_key, expected_key, 0.01);
     test_utils::assert_near(output_value, expected_value, 0.01);
 }
