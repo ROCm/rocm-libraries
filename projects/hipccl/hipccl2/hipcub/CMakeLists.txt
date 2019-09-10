@@ -59,7 +59,7 @@ option(BUILD_TEST "Build tests (requires googletest)" ON)
 include(cmake/Dependencies.cmake)
 
 # Setup VERSION
-set(VERSION_STRING "2.7.0")
+set(VERSION_STRING "2.8.0")
 
 rocm_setup_version(VERSION ${VERSION_STRING})
 
