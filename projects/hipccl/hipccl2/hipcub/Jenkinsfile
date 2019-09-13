@@ -15,7 +15,7 @@ hipCUBCI:
     def hipcub = new rocProject('hipCUB')
 
     // Define test architectures, optional rocm version argument is available
-    def nodes = new dockerNodes(['ubuntu', 'sles', 'gfx900 && centos7', 'gfx906 && centos7'], hipcub)
+    def nodes = new dockerNodes(['ubuntu && gfx803', 'sles && gfx906', 'gfx900 && centos7', 'gfx906 && centos7'], hipcub)
 
     boolean formatCheck = false
 
