@@ -21,7 +21,7 @@
 #include <thrust/system/detail/bad_alloc.h>
 #include <cassert>
 
-#ifdef __CUDACC__
+#if defined(__CUDA_ARCH__) && THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #include <thrust/system/cuda/detail/terminate.h>
 #endif
 
