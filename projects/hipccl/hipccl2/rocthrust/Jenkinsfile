@@ -17,7 +17,7 @@ rocThrustCI:
     rocthrust.paths.build_command = './install'
 
     // Define test architectures, optional rocm version argument is available
-    def nodes = new dockerNodes(['ubuntu', 'sles', 'gfx900 && centos7', 'gfx906 && centos7'], rocthrust)
+    def nodes = new dockerNodes(['ubuntu && gfx803', 'sles && gfx906', 'gfx900 && centos7', 'gfx906 && centos7'], rocthrust)
 
     boolean formatCheck = false
 
