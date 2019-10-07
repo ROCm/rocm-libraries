@@ -20,13 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// This is compatiblity code for hip-clang and will be removed in the future
-// Please see https://github.com/ROCmSoftwarePlatform/rocPRIM/issues/100
-#if defined(__HIPCC__) && __HIP_DEVICE_COMPILE__
-#undef _GLIBCXX14_CONSTEXPR
-#define _GLIBCXX14_CONSTEXPR
-#endif // defined(__HIPCC__) && __HIP_DEVICE_COMPILE__
-
 #include <algorithm>
 #include <functional>
 #include <iostream>
