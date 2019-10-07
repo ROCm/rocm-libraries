@@ -47,28 +47,15 @@ rocprimCI:
     {
         platform, project->
 
+        String sudo = auxiliary.sudo(platform.jenkinsLabel)
         def testCommand = 'ctest --output-on-failure -E rocprim.hip.device_merge_sort'
 
-        def command 
-
-        if(platform.jenkinsLabel.contains('centos') || platform.jenkinsLabel.contains('sles'))
-        {
-            command = """#!/usr/bin/env bash
+        def command = """#!/usr/bin/env bash
                     set -x
                     cd ${project.paths.project_build_prefix}
                     cd ${project.testDirectory}
-                    LD_LIBRARY_PATH=/opt/rocm/hcc/lib sudo ${testCommand}
+                    ${sudo} LD_LIBRARY_PATH=/opt/rocm/lib ${testCommand}
                 """
-        }
-        else
-        {
-            command = """#!/usr/bin/env bash
-                    set -x
-                    cd ${project.paths.project_build_prefix}
-                    cd ${project.testDirectory}
-                    LD_LIBRARY_PATH=/opt/rocm/hcc/lib ${testCommand}
-                """
-        }
 
         platform.runCommand(this, command)
     }
