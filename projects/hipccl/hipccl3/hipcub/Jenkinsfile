@@ -51,26 +51,14 @@ hipCUBCI:
     {
         platform, project->
 
-        def command
+        String sudo = auxiliary.sudo(platform.jenkinsLabel)
 
-        if(platform.jenkinsLabel.contains('centos') || platform.jenkinsLabel.contains('sles'))
-        {
-            command = """#!/usr/bin/env bash
+	def command = """#!/usr/bin/env bash
                     set -x
                     cd ${project.paths.project_build_prefix}/build/release
                     make -j4
-                    sudo ctest --output-on-failure
+                    ${sudo} LD_LIBRARY_PATH=/opt/rocm/lib/ ctest --output-on-failure
                 """
-        }
-        else
-        {
-            command = """#!/usr/bin/env bash
-                    set -x
-                    cd ${project.paths.project_build_prefix}/build/release
-                    make -j4
-                    ctest --output-on-failure
-                """
-        }
 
         platform.runCommand(this, command)
     }
