@@ -48,7 +48,7 @@ rocprimCI:
         platform, project->
 
         String sudo = auxiliary.sudo(platform.jenkinsLabel)
-        def testCommand = 'ctest --output-on-failure -E rocprim.hip.device_merge_sort'
+        def testCommand = 'ctest --output-on-failure'
 
         def command = """#!/usr/bin/env bash
                     set -x
