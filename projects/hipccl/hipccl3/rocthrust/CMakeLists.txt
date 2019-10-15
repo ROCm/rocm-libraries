@@ -240,7 +240,7 @@ foreach (THRUST_TEST_SOURCE IN LISTS THRUST_TESTS)
 
   target_include_directories(
     ${THRUST_TEST}
-    PUBLIC ${PROJECT_SOURCE_DIR}
+    PUBLIC ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/dependencies/cub/cub
     PRIVATE ${PROJECT_SOURCE_DIR}/testing
   )
 
