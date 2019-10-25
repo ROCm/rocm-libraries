@@ -438,7 +438,7 @@ void TestVectorEraseRange(void)
 
     v.erase(v.begin(), v.end());
 
-    ASSERT_EQUAL(v.size(), 0lu); 
+    ASSERT_EQUAL(v.size(), 0lu);
 }
 DECLARE_VECTOR_UNITTEST(TestVectorEraseRange);
 
@@ -616,7 +616,7 @@ void TestVectorResizing(void)
       // reset the CUDA error
       cudaGetLastError();
     } // end catch
-#endif // defined(__CUDACC__) && CUDA_VERSION==3000
+#endif // defined(__CUDACC__) && CUDART_VERSION==3000
 
     ASSERT_EQUAL(v.size(), 0lu);
 }
@@ -647,7 +647,7 @@ void TestVectorReserving(void)
     }
     catch(std::length_error e) {}
     catch(std::bad_alloc e) {}
-#endif // defined(__CUDACC__) && CUDA_VERSION==3000
+#endif // defined(__CUDACC__) && CUDART_VERSION==3000
 
     ASSERT_EQUAL(v.capacity(), old_capacity);
 }
