@@ -13,7 +13,7 @@ ARG user_uid
 # * rocfft-test: gfortran, googletest
 # * rocfft-bench: libboost-program-options-dev
 # * libhsakmt.so: libnuma1
-RUN zypper -n update && zypper -n install\
+RUN zypper refresh && zypper -n install\
     rock-dkms \
     sudo \
     ca-certificates \
