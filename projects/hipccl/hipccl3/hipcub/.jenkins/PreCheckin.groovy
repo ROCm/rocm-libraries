@@ -11,8 +11,7 @@ import java.nio.file.Path;
 
 hipCUBCI:
 {
-
-    def hipcub = new rocProject('hipCUB')
+    def hipcub = new rocProject('hipCUB', 'PreCheckin')
 
     // Define test architectures, optional rocm version argument is available
     def nodes = new dockerNodes(['ubuntu && gfx803', 'sles && gfx906', 'gfx900 && centos7', 'gfx906 && centos7'], hipcub)
@@ -24,7 +23,7 @@ hipCUBCI:
     def compileCommand =
     {
         platform, project->
-  
+
         commonGroovy = load "${project.paths.project_src_prefix}/.jenkins/Common.groovy"
         commonGroovy.runCompileCommand(platform, project)
     }
