@@ -78,7 +78,5 @@ def runPackageCommand(platform, project)
     }
 }
 
-echo "Common Groovy Loaded"
-
 return this
 
