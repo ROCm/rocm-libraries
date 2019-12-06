@@ -101,8 +101,8 @@ endif()
 
 # Package
 
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "hip_hcc (>= 1.5.18263)") # 1.5.18263 is HIP version in ROCm 1.8.2
-set(CPACK_RPM_PACKAGE_REQUIRES "hip_hcc >= 1.5.18263")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "rocm-dev (>=  2.5.27)") # 1.5.18263 is HIP version in ROCm 1.8.2
+set(CPACK_RPM_PACKAGE_REQUIRES "rocm-dev (>=  2.5.27)")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt")
 if(NOT CPACK_PACKAGING_INSTALL_PREFIX)
   set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
@@ -113,5 +113,5 @@ set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PR
 rocm_create_package(
   NAME rocprim
   DESCRIPTION "Radeon Open Compute Parallel Primitives Library"
-  MAINTAINER "Saad Rahim <saad.rahim@amd.com>"
+  MAINTAINER "rocPRIM Maintainer <rocprim-maintainer@amd.com>"
 )
