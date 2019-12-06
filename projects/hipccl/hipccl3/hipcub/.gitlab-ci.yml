@@ -163,10 +163,10 @@ test:rocm_install:
     - wget -qO - http://repo.radeon.com/rocm/apt/debian/rocm.gpg.key | $SUDO_CMD apt-key add -
     - echo 'deb [arch=amd64] http://repo.radeon.com/rocm/apt/debian/ xenial main' | $SUDO_CMD tee /etc/apt/sources.list.d/rocm.list
     - $SUDO_CMD apt-get update -qq
-    - $SUDO_CMD apt-get install -y hip_base
-    # Install hip_nvcc ignoring dependencies because it depends on cuda metapackage
+    - $SUDO_CMD apt-get install -y hip-base
+    # Install hip-nvcc ignoring dependencies because it depends on cuda metapackage
     # (with heavy libraries, tools etc. that also require GUI and other packages)
-    - apt-get download hip_nvcc
+    - apt-get download hip-nvcc
     - $SUDO_CMD dpkg -i --ignore-depends=cuda hip*.deb
     - export PATH=$PATH:/opt/rocm/bin
     - hipconfig
