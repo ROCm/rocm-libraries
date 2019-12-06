@@ -67,10 +67,10 @@ endif()
 # Package
 set(CPACK_DEBIAN_ARCHIVE_TYPE "gnutar")
 
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "hip_hcc (>= 1.5.18263), rocprim (>= 2.5)") # 1.5.18263 is HIP version in ROCm 1.8.2
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "rocm-dev (>= 2.5.27), rocprim (>= 2.5)") # 1.5.18263 is HIP version in ROCm 1.8.2
 set(CPACK_DEBIAN_PACKAGE_CONFLICTS "hip-thrust, thrust")
 set(CPACK_RPM_PACKAGE_CONFLICTS "hip-thrust, thrust")
-set(CPACK_RPM_PACKAGE_REQUIRES "hip_hcc >= 1.5.18263, rocprim >= 2.5")
+set(CPACK_RPM_PACKAGE_REQUIRES "rocm-dev >= 2.5.27, rocprim >= 2.5")
 
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 
