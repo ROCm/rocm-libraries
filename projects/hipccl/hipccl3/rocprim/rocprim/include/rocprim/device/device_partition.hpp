@@ -143,7 +143,9 @@ hipError_t partition_impl(void * temporary_storage,
     >;
 
     using offset_scan_state_type = detail::lookback_scan_state<offset_type>;
+    using offset_scan_state_with_sleep_type = detail::lookback_scan_state<offset_type, true>;
     using ordered_block_id_type = detail::ordered_block_id<unsigned int>;
+    
 
     constexpr unsigned int block_size = config::block_size;
     constexpr unsigned int items_per_thread = config::items_per_thread;
@@ -153,6 +155,7 @@ hipError_t partition_impl(void * temporary_storage,
 
     // Calculate required temporary storage
     size_t offset_scan_state_bytes = ::rocprim::detail::align_size(
+        // This is valid even with offset_scan_state_with_sleep_type
         offset_scan_state_type::get_storage_size(number_of_blocks)
     );
     size_t ordered_block_id_bytes = ordered_block_id_type::get_storage_size();
@@ -177,6 +180,9 @@ hipError_t partition_impl(void * temporary_storage,
     auto offset_scan_state = offset_scan_state_type::create(
         temporary_storage, number_of_blocks
     );
+    auto offset_scan_state_with_sleep = offset_scan_state_with_sleep_type::create(
+        temporary_storage, number_of_blocks
+    );
     // Create ad initialize ordered_block_id obj
     auto ptr = reinterpret_cast<char*>(temporary_storage);
     auto ordered_bid = ordered_block_id_type::create(
@@ -185,25 +191,58 @@ hipError_t partition_impl(void * temporary_storage,
 
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
     auto grid_size = (number_of_blocks + block_size - 1)/block_size;
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(init_offset_scan_state_kernel<offset_scan_state_type>),
-        dim3(grid_size), dim3(block_size), 0, stream,
-        offset_scan_state, number_of_blocks, ordered_bid
-    );
+    
+    hipDeviceProp_t prop;
+    int deviceId;
+    hipGetDevice(&deviceId);
+    hipGetDeviceProperties(&prop, deviceId);
+
+    if (prop.gcnArch == 908) 
+    {
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(init_offset_scan_state_kernel<offset_scan_state_with_sleep_type>),
+            dim3(grid_size), dim3(block_size), 0, stream,
+            offset_scan_state_with_sleep, number_of_blocks, ordered_bid
+        );    
+    } else
+    {
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(init_offset_scan_state_kernel<offset_scan_state_type>),
+            dim3(grid_size), dim3(block_size), 0, stream,
+            offset_scan_state, number_of_blocks, ordered_bid
+        );    
+    }
+    
+
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_offset_scan_state_kernel", size, start)
 
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
     grid_size = number_of_blocks;
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(partition_kernel<
-            SelectMethod, OnlySelected, config,
-            InputIterator, FlagIterator, OutputIterator, SelectedCountOutputIterator,
-            UnaryPredicate, decltype(inequality_op), offset_scan_state_type
-        >),
-        dim3(grid_size), dim3(block_size), 0, stream,
-        input, flags, output, selected_count_output, size, predicate,
-        inequality_op, offset_scan_state, number_of_blocks, ordered_bid
-    );
+    if (prop.gcnArch == 908) 
+    {
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(partition_kernel<
+                SelectMethod, OnlySelected, config,
+                InputIterator, FlagIterator, OutputIterator, SelectedCountOutputIterator,
+                UnaryPredicate, decltype(inequality_op), offset_scan_state_with_sleep_type
+            >),
+            dim3(grid_size), dim3(block_size), 0, stream,
+            input, flags, output, selected_count_output, size, predicate,
+            inequality_op, offset_scan_state_with_sleep, number_of_blocks, ordered_bid
+        );
+    } else 
+    {
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(partition_kernel<
+                SelectMethod, OnlySelected, config,
+                InputIterator, FlagIterator, OutputIterator, SelectedCountOutputIterator,
+                UnaryPredicate, decltype(inequality_op), offset_scan_state_type
+            >),
+            dim3(grid_size), dim3(block_size), 0, stream,
+            input, flags, output, selected_count_output, size, predicate,
+            inequality_op, offset_scan_state, number_of_blocks, ordered_bid
+        );
+    }
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("partition_kernel", size, start)
 
     return hipSuccess;
