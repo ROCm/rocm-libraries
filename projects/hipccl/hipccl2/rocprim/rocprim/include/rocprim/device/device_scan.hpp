@@ -325,6 +325,7 @@ auto scan_impl(void * temporary_storage,
     using config = Config;
 
     using scan_state_type = detail::lookback_scan_state<result_type>;
+    using scan_state_with_sleep_type = detail::lookback_scan_state<result_type, true>;
     using ordered_block_id_type = detail::ordered_block_id<unsigned int>;
 
     constexpr unsigned int block_size = config::block_size;
@@ -334,6 +335,7 @@ auto scan_impl(void * temporary_storage,
 
     // Calculate required temporary storage
     size_t scan_state_bytes = ::rocprim::detail::align_size(
+        // This is valid even with scan_state_with_sleep_type
         scan_state_type::get_storage_size(number_of_blocks)
     );
     size_t ordered_block_id_bytes = ordered_block_id_type::get_storage_size();
@@ -358,34 +360,66 @@ auto scan_impl(void * temporary_storage,
     {
         // Create and initialize lookback_scan_state obj
         auto scan_state = scan_state_type::create(temporary_storage, number_of_blocks);
+        auto scan_state_with_sleep = scan_state_with_sleep_type::create(temporary_storage, number_of_blocks);
         // Create ad initialize ordered_block_id obj
         auto ptr = reinterpret_cast<char*>(temporary_storage);
         auto ordered_bid = ordered_block_id_type::create(
             reinterpret_cast<ordered_block_id_type::id_type*>(ptr + scan_state_bytes)
         );
 
+        hipDeviceProp_t prop;
+        int deviceId;
+        hipGetDevice(&deviceId);
+        hipGetDeviceProperties(&prop, deviceId);
+
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         auto grid_size = (number_of_blocks + block_size - 1)/block_size;
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(init_lookback_scan_state_kernel<scan_state_type>),
-            dim3(grid_size), dim3(block_size), 0, stream,
-            scan_state, number_of_blocks, ordered_bid
-        );
+        if (prop.gcnArch == 908) 
+        {
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(init_lookback_scan_state_kernel<scan_state_with_sleep_type>),
+                dim3(grid_size), dim3(block_size), 0, stream,
+                scan_state_with_sleep, number_of_blocks, ordered_bid
+            );
+        } else
+        {
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(init_lookback_scan_state_kernel<scan_state_type>),
+                dim3(grid_size), dim3(block_size), 0, stream,
+                scan_state, number_of_blocks, ordered_bid
+            );
+        }
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_lookback_scan_state_kernel", size, start)
 
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         grid_size = number_of_blocks;
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(lookback_scan_kernel<
-                Exclusive, // flag for exclusive scan operation
-                config, // kernel configuration (block size, ipt)
-                InputIterator, OutputIterator,
-                BinaryFunction, result_type, scan_state_type
-            >),
-            dim3(grid_size), dim3(block_size), 0, stream,
-            input, output, size, static_cast<result_type>(initial_value),
-            scan_op, scan_state, number_of_blocks, ordered_bid
-        );
+        if (prop.gcnArch == 908) 
+        {
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(lookback_scan_kernel<
+                    Exclusive, // flag for exclusive scan operation
+                    config, // kernel configuration (block size, ipt)
+                    InputIterator, OutputIterator,
+                    BinaryFunction, result_type, scan_state_with_sleep_type
+                >),
+                dim3(grid_size), dim3(block_size), 0, stream,
+                input, output, size, static_cast<result_type>(initial_value),
+                scan_op, scan_state_with_sleep, number_of_blocks, ordered_bid
+            );
+        } else 
+        {
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(lookback_scan_kernel<
+                    Exclusive, // flag for exclusive scan operation
+                    config, // kernel configuration (block size, ipt)
+                    InputIterator, OutputIterator,
+                    BinaryFunction, result_type, scan_state_type
+                >),
+                dim3(grid_size), dim3(block_size), 0, stream,
+                input, output, size, static_cast<result_type>(initial_value),
+                scan_op, scan_state, number_of_blocks, ordered_bid
+            );
+        }
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("lookback_scan_kernel", size, start)
     }
     else
