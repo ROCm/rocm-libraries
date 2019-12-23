@@ -24,7 +24,7 @@ set(ROCPRIM_ROOT ${CMAKE_CURRENT_BINARY_DIR}/rocPRIM CACHE PATH "")
 download_project(
   PROJ                rocPRIM
   GIT_REPOSITORY      https://github.com/ROCmSoftwarePlatform/rocPRIM.git
-  GIT_TAG             master
+  GIT_TAG             develop
   INSTALL_DIR         ${ROCPRIM_ROOT}
   CMAKE_ARGS          -DBUILD_TEST=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm
   LOG_DOWNLOAD        TRUE
