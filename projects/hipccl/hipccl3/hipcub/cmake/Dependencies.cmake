@@ -73,7 +73,7 @@ if(HIP_PLATFORM STREQUAL "hcc")
     download_project(
       PROJ                rocprim
       GIT_REPOSITORY      https://github.com/ROCmSoftwarePlatform/rocPRIM.git
-      GIT_TAG             develop
+      GIT_TAG             88b03e36e13d17a7d3e07d954f59ba31b02f032d
       INSTALL_DIR         ${rocprim_DIR}
       CMAKE_ARGS          -DBUILD_TEST=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm
       LOG_DOWNLOAD        TRUE
