@@ -11,6 +11,7 @@ function display_help()
     echo "    [-h|--help] prints this help message"
     echo "    [-i|--install] install after build"
     echo "    [-p|--package] build package"
+    echo "    [-r]--relocatable] create a package to support relocatable ROCm"
     #Not implemented yet
     #    echo "    [-d|--dependencies] install build dependencies"
     echo "    [-c|--clients] build library clients too (combines with -i & -d)"
@@ -28,7 +29,9 @@ build_clients=false
 build_release=true
 build_hip_clang=false
 run_tests=false
-rocm_path=/opt/rocm/bin
+rocm_path=/opt/rocm
+build_relocatable=false
+
 # #################################################
 # Parameter parsing
 # #################################################
@@ -36,7 +39,7 @@ rocm_path=/opt/rocm/bin
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ $? -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,debug,hip-clang,test,package --options hicdtp -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,debug,hip-clang,test,package,relocatable --options hicdtpr -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -65,6 +68,9 @@ while true; do
 	-c|--clients)
 	    build_clients=true
 	    shift ;;
+        -r|--relocatable)
+            build_relocatable=true
+            shift ;;
 	-g|--debug)
 	    build_release=false
 	    shift ;;
@@ -81,6 +87,11 @@ while true; do
     esac
     done
 
+if [[ "${build_relocatable}" == true ]]; then
+    if ! [ -z ${ROCM_PATH+x} ]; then
+        rocm_path=${ROCM_PATH}
+    fi
+fi
 
 # Instal the pre-commit hook
 #bash .githooks/install
@@ -111,22 +122,22 @@ if [[ "${build_hip_clang}" == true ]]; then
     compiler="hipcc"
 fi
 
-# Detect Linux distribution and store result in variable '$distro'
 if [ -e /etc/redhat-release ] ; then
-    distro='redhat'
+    cmake_executable="cmake3"
 else
-    distro='other'
+    cmake_executable="cmake"
 fi
 
-# now do different things depending on distro
-case "$distro" in
-    redhat)
-            CXX=$rocm_path/$compiler cmake3 -DBUILD_BENCHMARK=ON ../../.
-        ;;
-    other)
-            CXX=$rocm_path/$compiler cmake -DBUILD_BENCHMARK=ON ../../. # or cmake-gui ../.
-        ;;
-esac 
+if [[ "${build_relocatable}" == true ]]; then
+    CXX=$rocm_path/bin/${compiler} ${cmake_executable} -DBUILD_BENCHMARK=ON -DBUILD_TEST=ON \
+        -DCMAKE_INSTALL_PREFIX=${rocm_path} \
+        -DCMAKE_PREFIX_PATH="${rocm_path} ${rocm_path}/hcc ${rocm_path}/hip" \
+        -DCMAKE_MODULE_PATH="${rocm_path}/hip/cmake" \
+        -DROCPRIM_ROOT=${rocm_path}/rocprim \
+         ../../. # or cmake-gui ../.
+else
+    CXX=$rocm_path/bin/${compiler} ${cmake_executable} -DBUILD_BENCHMARK=ON ../../. # or cmake-gui ../.
+fi
 
 # Build
 make -j$(nproc)
