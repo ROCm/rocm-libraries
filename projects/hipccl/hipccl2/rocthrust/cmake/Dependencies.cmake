@@ -21,7 +21,7 @@ endif()
 # rocPRIM (https://github.com/ROCmSoftwarePlatform/rocPRIM)
 if(NOT DEFINED ROCPRIM_ROOT)
   message(STATUS "Downloading and building rocPRIM.")
-  set(rocprim_DIR ${CMAKE_CURRENT_BINARY_DIR}/rocPRIM CACHE PATH "")
+  set(ROCPRIM_ROOT ${CMAKE_CURRENT_BINARY_DIR}/rocPRIM CACHE PATH "")
   download_project(
     PROJ                rocPRIM
     GIT_REPOSITORY      https://github.com/ROCmSoftwarePlatform/rocPRIM.git
