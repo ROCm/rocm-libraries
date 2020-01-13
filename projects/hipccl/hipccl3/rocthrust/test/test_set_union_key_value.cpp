@@ -123,7 +123,7 @@ TYPED_TEST(SetUnionKeyValuePrimitiveTests, TestSetUnionKeyValueDescending)
         EXPECT_EQ(h_result, d_result_h);
     }
 }
-/*
+
 TYPED_TEST(SetUnionKeyValueTests, TestSetUnionKeyValueSimple)
 {
     using Vector   = typename TestFixture::input_type;
@@ -266,4 +266,4 @@ TYPED_TEST(SetUnionKeyValuePrimitiveTests, TestSetUnionKeyValueToDiscardIterator
         EXPECT_EQ(reference, d_result);
     }
 }
-*/
+
