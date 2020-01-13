@@ -45,8 +45,6 @@ build:rocm:
       - build/thrust/
       - build/test/test_*
       - build/test/CTestTestfile.cmake
-      - build/testing/test_thrust_*
-      - build/testing/CTestTestfile.cmake
       - build/gtest/
       - build/CMakeCache.txt
       - build/CTestTestfile.cmake
