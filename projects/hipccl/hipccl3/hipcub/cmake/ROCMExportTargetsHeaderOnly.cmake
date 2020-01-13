@@ -100,7 +100,7 @@ function(rocm_export_targets_header_only)
                 rocm_write_package_template_function(${CONFIG_TEMPLATE} set ${NAME}_LIBRARIES ${PARSE_TARGETS})
                 rocm_write_package_template_function(${CONFIG_TEMPLATE} set ${NAME}_LIBRARY ${PARSE_TARGETS})
             endforeach()
-        endif(()
+        endif()
     endif()
 
     rocm_configure_package_config_file(
