@@ -58,7 +58,7 @@ build:rocm:
   script:
     - mkdir build
     - cd build
-    - CXX=hcc cmake -DBUILD_TEST=ON -DROCM_EXPORT_PARSE_TARGETS_LIBRARY=ON ../.
+    - CXX=hcc cmake -DBUILD_TEST=ON ../.
     - make -j16
     - make package
   artifacts:
@@ -142,7 +142,7 @@ test:rocm_install:
   script:
     - mkdir build_only_install
     - cd build_only_install
-    - CXX=hcc cmake -DBUILD_TEST=OFF -DROCM_EXPORT_PARSE_TARGETS_LIBRARY=ON ../.
+    - CXX=hcc cmake -DBUILD_TEST=OFF ../.
     - $SUDO_CMD make install
     - mkdir ../install_test && cd ../install_test
     - CXX=hcc cmake ../test/extra/.
