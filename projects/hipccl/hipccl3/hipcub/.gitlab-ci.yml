@@ -95,6 +95,7 @@ test:rocm_s9300:
   script:
     - cd build
     - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 2
+  allow_failure: true
 
 test:rocm_mi25:
   extends: .rocm

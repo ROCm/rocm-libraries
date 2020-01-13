@@ -95,7 +95,7 @@ function(rocm_export_targets_header_only)
 
     if(PARSE_TARGETS)
         rocm_write_package_template_function(${CONFIG_TEMPLATE} include "\${${PACKAGE_NAME}_TARGET_FILE}")
-        if(ROCM_EXPORT_PARSE_TARGETS_LIBRARY)
+        if(NOT (DEFINED PYTORCH_FOUND_HIP AND PYTORCH_FOUND_HIP) )
             foreach(NAME ${PACKAGE_NAME} ${PACKAGE_NAME_UPPER} ${PACKAGE_NAME_LOWER})
                 rocm_write_package_template_function(${CONFIG_TEMPLATE} set ${NAME}_LIBRARIES ${PARSE_TARGETS})
                 rocm_write_package_template_function(${CONFIG_TEMPLATE} set ${NAME}_LIBRARY ${PARSE_TARGETS})
