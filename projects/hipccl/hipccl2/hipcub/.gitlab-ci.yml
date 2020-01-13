@@ -116,7 +116,7 @@ test:rocm_package:
     # Install rocPRIM package
     - echo ${ROCPRIM_GIT_URL}
     - echo $ROCPRIM_GIT_URL
-    - git clone -b master https://gitlab-ci-token:${CI_JOB_TOKEN}@${ROCPRIM_GIT_URL}
+    - git clone -b develop_stream https://gitlab-ci-token:${CI_JOB_TOKEN}@${ROCPRIM_GIT_URL}
     - cd rocPRIM
     - mkdir build
     - cd build
