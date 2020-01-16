@@ -9,6 +9,8 @@ import com.amd.project.*
 import com.amd.docker.*
 import java.nio.file.Path;
 
+properties(auxiliary.setProperties())
+
 hipCUBCI:
 {
     def hipcub = new rocProject('hipCUB', 'NPI')
