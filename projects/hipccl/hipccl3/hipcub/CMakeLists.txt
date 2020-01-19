@@ -53,7 +53,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
 
 # Build options
-option(BUILD_TEST "Build tests (requires googletest)" ON)
+option(BUILD_TEST "Build tests (requires googletest)" OFF)
 
 # Get dependencies
 include(cmake/Dependencies.cmake)
