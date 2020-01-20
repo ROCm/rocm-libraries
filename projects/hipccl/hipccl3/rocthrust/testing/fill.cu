@@ -209,15 +209,15 @@ void TestFillNMixedTypes(void)
     Vector v(4);
 
     typename Vector::iterator iter = thrust::fill_n(v.begin(), v.size(), bool(true));
-    
+
     ASSERT_EQUAL(v[0], 1);
     ASSERT_EQUAL(v[1], 1);
     ASSERT_EQUAL(v[2], 1);
     ASSERT_EQUAL(v[3], 1);
     ASSERT_EQUAL_QUIET(v.end(), iter);
-    
+
     iter = thrust::fill_n(v.begin(), v.size(), char(20));
-    
+
     ASSERT_EQUAL(v[0], 20);
     ASSERT_EQUAL(v[1], 20);
     ASSERT_EQUAL(v[2], 20);
