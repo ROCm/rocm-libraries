@@ -33,6 +33,10 @@ template<typename T>
   uninitialized_allocator & operator=(const uninitialized_allocator &) = default;
 #endif
 
+#if THRUST_CPP_DIALECT >= 2011
+  uninitialized_allocator & operator=(const uninitialized_allocator &) = default;
+#endif
+
   // for correctness, you should also redefine rebind when you inherit
   // from an allocator type; this way, if the allocator is rebound somewhere,
   // it's going to be rebound to the correct type - and not to its base
