@@ -139,7 +139,7 @@ struct key_value_comparator
     }
 };
 
-std::vector<size_t> get_sizes()
+std::vector<size_t> get_sizes(int seed_value)
 {
     std::vector<size_t> sizes = {
         1024, 2048, 4096, 1792,
@@ -148,7 +148,7 @@ std::vector<size_t> get_sizes()
         1000000,
         (1 << 16) - 1220
     };
-    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(5, 1, 100000);
+    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(5, 1, 100000, seed_value);
     sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
     return sizes;
 }
@@ -174,127 +174,135 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeys)
         TestFixture::params::max_segment_length
     );
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(size_t size : sizes)
+    for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
     {
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
+        unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
 
-        // Generate data
-        std::vector<key_type> keys_input;
-        if(rp::is_floating_point<key_type>::value)
+        const std::vector<size_t> sizes = get_sizes(seed_value);
+        for(size_t size : sizes)
         {
-            keys_input = test_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
-        }
-        else
-        {
-            keys_input = test_utils::get_random_data<key_type>(
-                size,
-                std::numeric_limits<key_type>::min(),
-                std::numeric_limits<key_type>::max()
-            );
-        }
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
 
-        std::vector<offset_type> offsets;
-        unsigned int segments_count = 0;
-        size_t offset = 0;
-        while(offset < size)
-        {
-            const size_t segment_length = segment_length_dis(gen);
-            offsets.push_back(offset);
-            segments_count++;
-            offset += segment_length;
-        }
-        offsets.push_back(size);
+            // Generate data
+            std::vector<key_type> keys_input;
+            if(rp::is_floating_point<key_type>::value)
+            {
+                keys_input = test_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000, seed_value);
+            }
+            else
+            {
+                keys_input = test_utils::get_random_data<key_type>(
+                    size,
+                    std::numeric_limits<key_type>::min(),
+                    std::numeric_limits<key_type>::max(), 
+                    seed_index
+                );
+            }
 
-        key_type * d_keys_input;
-        key_type * d_keys_output;
-        HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
-        HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
-        HIP_CHECK(
-            hipMemcpy(
-                d_keys_input, keys_input.data(),
-                size * sizeof(key_type),
-                hipMemcpyHostToDevice
-            )
-        );
+            std::vector<offset_type> offsets;
+            unsigned int segments_count = 0;
+            size_t offset = 0;
+            while(offset < size)
+            {
+                const size_t segment_length = segment_length_dis(gen);
+                offsets.push_back(offset);
+                segments_count++;
+                offset += segment_length;
+            }
+            offsets.push_back(size);
 
-        offset_type * d_offsets;
-        HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
-        HIP_CHECK(
-            hipMemcpy(
-                d_offsets, offsets.data(),
-                (segments_count + 1) * sizeof(offset_type),
-                hipMemcpyHostToDevice
-            )
-        );
-
-        // Calculate expected results on host
-        std::vector<key_type> expected(keys_input);
-        for(size_t i = 0; i < segments_count; i++)
-        {
-            std::stable_sort(
-                expected.begin() + offsets[i],
-                expected.begin() + offsets[i + 1],
-                key_comparator<key_type, descending, start_bit, end_bit>()
-            );
-        }
-
-        size_t temporary_storage_bytes = 0;
-        HIP_CHECK(
-            rp::segmented_radix_sort_keys(
-                nullptr, temporary_storage_bytes,
-                d_keys_input, d_keys_output, size,
-                segments_count, d_offsets, d_offsets + 1,
-                start_bit, end_bit
-            )
-        );
-
-        ASSERT_GT(temporary_storage_bytes, 0U);
-
-        void * d_temporary_storage;
-        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
-
-        if(descending)
-        {
+            key_type * d_keys_input;
+            key_type * d_keys_output;
+            HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
+            HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
             HIP_CHECK(
-                rp::segmented_radix_sort_keys_desc(
-                    d_temporary_storage, temporary_storage_bytes,
-                    d_keys_input, d_keys_output, size,
-                    segments_count, d_offsets, d_offsets + 1,
-                    start_bit, end_bit,
-                    stream, debug_synchronous
+                hipMemcpy(
+                    d_keys_input, keys_input.data(),
+                    size * sizeof(key_type),
+                    hipMemcpyHostToDevice
                 )
             );
-        }
-        else
-        {
+
+            offset_type * d_offsets;
+            HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
+            HIP_CHECK(
+                hipMemcpy(
+                    d_offsets, offsets.data(),
+                    (segments_count + 1) * sizeof(offset_type),
+                    hipMemcpyHostToDevice
+                )
+            );
+
+            // Calculate expected results on host
+            std::vector<key_type> expected(keys_input);
+            for(size_t i = 0; i < segments_count; i++)
+            {
+                std::stable_sort(
+                    expected.begin() + offsets[i],
+                    expected.begin() + offsets[i + 1],
+                    key_comparator<key_type, descending, start_bit, end_bit>()
+                );
+            }
+
+            size_t temporary_storage_bytes = 0;
             HIP_CHECK(
                 rp::segmented_radix_sort_keys(
-                    d_temporary_storage, temporary_storage_bytes,
+                    nullptr, temporary_storage_bytes,
                     d_keys_input, d_keys_output, size,
                     segments_count, d_offsets, d_offsets + 1,
-                    start_bit, end_bit,
-                    stream, debug_synchronous
+                    start_bit, end_bit
                 )
             );
+
+            ASSERT_GT(temporary_storage_bytes, 0U);
+
+            void * d_temporary_storage;
+            HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+
+            if(descending)
+            {
+                HIP_CHECK(
+                    rp::segmented_radix_sort_keys_desc(
+                        d_temporary_storage, temporary_storage_bytes,
+                        d_keys_input, d_keys_output, size,
+                        segments_count, d_offsets, d_offsets + 1,
+                        start_bit, end_bit,
+                        stream, debug_synchronous
+                    )
+                );
+            }
+            else
+            {
+                HIP_CHECK(
+                    rp::segmented_radix_sort_keys(
+                        d_temporary_storage, temporary_storage_bytes,
+                        d_keys_input, d_keys_output, size,
+                        segments_count, d_offsets, d_offsets + 1,
+                        start_bit, end_bit,
+                        stream, debug_synchronous
+                    )
+                );
+            }
+
+            std::vector<key_type> keys_output(size);
+            HIP_CHECK(
+                hipMemcpy(
+                    keys_output.data(), d_keys_output,
+                    size * sizeof(key_type),
+                    hipMemcpyDeviceToHost
+                )
+            );
+
+            HIP_CHECK(hipFree(d_temporary_storage));
+            HIP_CHECK(hipFree(d_keys_input));
+            HIP_CHECK(hipFree(d_keys_output));
+            HIP_CHECK(hipFree(d_offsets));
+
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
         }
-
-        std::vector<key_type> keys_output(size);
-        HIP_CHECK(
-            hipMemcpy(
-                keys_output.data(), d_keys_output,
-                size * sizeof(key_type),
-                hipMemcpyDeviceToHost
-            )
-        );
-
-        HIP_CHECK(hipFree(d_temporary_storage));
-        HIP_CHECK(hipFree(d_keys_input));
-        HIP_CHECK(hipFree(d_keys_output));
-        HIP_CHECK(hipFree(d_offsets));
-
-        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
     }
+    
 }
 
 TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairs)
@@ -319,167 +327,175 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairs)
         TestFixture::params::max_segment_length
     );
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(size_t size : sizes)
+    for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
     {
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
+        unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
 
-        // Generate data
-        std::vector<key_type> keys_input;
-        if(rp::is_floating_point<key_type>::value)
+        const std::vector<size_t> sizes = get_sizes(seed_value);
+        for(size_t size : sizes)
         {
-            keys_input = test_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
-        }
-        else
-        {
-            keys_input = test_utils::get_random_data<key_type>(
-                size,
-                std::numeric_limits<key_type>::min(),
-                std::numeric_limits<key_type>::max()
-            );
-        }
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
 
-        std::vector<offset_type> offsets;
-        unsigned int segments_count = 0;
-        size_t offset = 0;
-        while(offset < size)
-        {
-            const size_t segment_length = segment_length_dis(gen);
-            offsets.push_back(offset);
-            segments_count++;
-            offset += segment_length;
-        }
-        offsets.push_back(size);
+            // Generate data
+            std::vector<key_type> keys_input;
+            if(rp::is_floating_point<key_type>::value)
+            {
+                keys_input = test_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000, seed_value);
+            }
+            else
+            {
+                keys_input = test_utils::get_random_data<key_type>(
+                    size,
+                    std::numeric_limits<key_type>::min(),
+                    std::numeric_limits<key_type>::max(), 
+                    seed_index
+                );
+            }
 
-        std::vector<value_type> values_input(size);
-        std::iota(values_input.begin(), values_input.end(), 0);
+            std::vector<offset_type> offsets;
+            unsigned int segments_count = 0;
+            size_t offset = 0;
+            while(offset < size)
+            {
+                const size_t segment_length = segment_length_dis(gen);
+                offsets.push_back(offset);
+                segments_count++;
+                offset += segment_length;
+            }
+            offsets.push_back(size);
 
-        key_type * d_keys_input;
-        key_type * d_keys_output;
-        HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
-        HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
-        HIP_CHECK(
-            hipMemcpy(
-                d_keys_input, keys_input.data(),
-                size * sizeof(key_type),
-                hipMemcpyHostToDevice
-            )
-        );
+            std::vector<value_type> values_input(size);
+            std::iota(values_input.begin(), values_input.end(), 0);
 
-        value_type * d_values_input;
-        value_type * d_values_output;
-        HIP_CHECK(hipMalloc(&d_values_input, size * sizeof(value_type)));
-        HIP_CHECK(hipMalloc(&d_values_output, size * sizeof(value_type)));
-        HIP_CHECK(
-            hipMemcpy(
-                d_values_input, values_input.data(),
-                size * sizeof(value_type),
-                hipMemcpyHostToDevice
-            )
-        );
-
-        offset_type * d_offsets;
-        HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
-        HIP_CHECK(
-            hipMemcpy(
-                d_offsets, offsets.data(),
-                (segments_count + 1) * sizeof(offset_type),
-                hipMemcpyHostToDevice
-            )
-        );
-
-        using key_value = std::pair<key_type, value_type>;
-
-        // Calculate expected results on host
-        std::vector<key_value> expected(size);
-        for(size_t i = 0; i < size; i++)
-        {
-            expected[i] = key_value(keys_input[i], values_input[i]);
-        }
-        for(size_t i = 0; i < segments_count; i++)
-        {
-            std::stable_sort(
-                expected.begin() + offsets[i],
-                expected.begin() + offsets[i + 1],
-                key_value_comparator<key_type, value_type, descending, start_bit, end_bit>()
-            );
-        }
-        std::vector<key_type> keys_expected(size);
-        std::vector<value_type> values_expected(size);
-        for(size_t i = 0; i < size; i++)
-        {
-            keys_expected[i] = expected[i].first;
-            values_expected[i] = expected[i].second;
-        }
-
-        void * d_temporary_storage = nullptr;
-        size_t temporary_storage_bytes = 0;
-        HIP_CHECK(
-            rp::segmented_radix_sort_pairs(
-                d_temporary_storage, temporary_storage_bytes,
-                d_keys_input, d_keys_output, d_values_input, d_values_output, size,
-                segments_count, d_offsets, d_offsets + 1,
-                start_bit, end_bit
-            )
-        );
-
-        ASSERT_GT(temporary_storage_bytes, 0U);
-
-        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
-
-        if(descending)
-        {
+            key_type * d_keys_input;
+            key_type * d_keys_output;
+            HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
+            HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
             HIP_CHECK(
-                rp::segmented_radix_sort_pairs_desc(
-                    d_temporary_storage, temporary_storage_bytes,
-                    d_keys_input, d_keys_output, d_values_input, d_values_output, size,
-                    segments_count, d_offsets, d_offsets + 1,
-                    start_bit, end_bit,
-                    stream, debug_synchronous
+                hipMemcpy(
+                    d_keys_input, keys_input.data(),
+                    size * sizeof(key_type),
+                    hipMemcpyHostToDevice
                 )
             );
-        }
-        else
-        {
+
+            value_type * d_values_input;
+            value_type * d_values_output;
+            HIP_CHECK(hipMalloc(&d_values_input, size * sizeof(value_type)));
+            HIP_CHECK(hipMalloc(&d_values_output, size * sizeof(value_type)));
+            HIP_CHECK(
+                hipMemcpy(
+                    d_values_input, values_input.data(),
+                    size * sizeof(value_type),
+                    hipMemcpyHostToDevice
+                )
+            );
+
+            offset_type * d_offsets;
+            HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
+            HIP_CHECK(
+                hipMemcpy(
+                    d_offsets, offsets.data(),
+                    (segments_count + 1) * sizeof(offset_type),
+                    hipMemcpyHostToDevice
+                )
+            );
+
+            using key_value = std::pair<key_type, value_type>;
+
+            // Calculate expected results on host
+            std::vector<key_value> expected(size);
+            for(size_t i = 0; i < size; i++)
+            {
+                expected[i] = key_value(keys_input[i], values_input[i]);
+            }
+            for(size_t i = 0; i < segments_count; i++)
+            {
+                std::stable_sort(
+                    expected.begin() + offsets[i],
+                    expected.begin() + offsets[i + 1],
+                    key_value_comparator<key_type, value_type, descending, start_bit, end_bit>()
+                );
+            }
+            std::vector<key_type> keys_expected(size);
+            std::vector<value_type> values_expected(size);
+            for(size_t i = 0; i < size; i++)
+            {
+                keys_expected[i] = expected[i].first;
+                values_expected[i] = expected[i].second;
+            }
+
+            void * d_temporary_storage = nullptr;
+            size_t temporary_storage_bytes = 0;
             HIP_CHECK(
                 rp::segmented_radix_sort_pairs(
                     d_temporary_storage, temporary_storage_bytes,
                     d_keys_input, d_keys_output, d_values_input, d_values_output, size,
                     segments_count, d_offsets, d_offsets + 1,
-                    start_bit, end_bit,
-                    stream, debug_synchronous
+                    start_bit, end_bit
                 )
             );
+
+            ASSERT_GT(temporary_storage_bytes, 0U);
+
+            HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+
+            if(descending)
+            {
+                HIP_CHECK(
+                    rp::segmented_radix_sort_pairs_desc(
+                        d_temporary_storage, temporary_storage_bytes,
+                        d_keys_input, d_keys_output, d_values_input, d_values_output, size,
+                        segments_count, d_offsets, d_offsets + 1,
+                        start_bit, end_bit,
+                        stream, debug_synchronous
+                    )
+                );
+            }
+            else
+            {
+                HIP_CHECK(
+                    rp::segmented_radix_sort_pairs(
+                        d_temporary_storage, temporary_storage_bytes,
+                        d_keys_input, d_keys_output, d_values_input, d_values_output, size,
+                        segments_count, d_offsets, d_offsets + 1,
+                        start_bit, end_bit,
+                        stream, debug_synchronous
+                    )
+                );
+            }
+
+            std::vector<key_type> keys_output(size);
+            HIP_CHECK(
+                hipMemcpy(
+                    keys_output.data(), d_keys_output,
+                    size * sizeof(key_type),
+                    hipMemcpyDeviceToHost
+                )
+            );
+
+            std::vector<value_type> values_output(size);
+            HIP_CHECK(
+                hipMemcpy(
+                    values_output.data(), d_values_output,
+                    size * sizeof(value_type),
+                    hipMemcpyDeviceToHost
+                )
+            );
+
+            HIP_CHECK(hipFree(d_temporary_storage));
+            HIP_CHECK(hipFree(d_keys_input));
+            HIP_CHECK(hipFree(d_values_input));
+            HIP_CHECK(hipFree(d_keys_output));
+            HIP_CHECK(hipFree(d_values_output));
+            HIP_CHECK(hipFree(d_offsets));
+
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, keys_expected));
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, values_expected));
         }
-
-        std::vector<key_type> keys_output(size);
-        HIP_CHECK(
-            hipMemcpy(
-                keys_output.data(), d_keys_output,
-                size * sizeof(key_type),
-                hipMemcpyDeviceToHost
-            )
-        );
-
-        std::vector<value_type> values_output(size);
-        HIP_CHECK(
-            hipMemcpy(
-                values_output.data(), d_values_output,
-                size * sizeof(value_type),
-                hipMemcpyDeviceToHost
-            )
-        );
-
-        HIP_CHECK(hipFree(d_temporary_storage));
-        HIP_CHECK(hipFree(d_keys_input));
-        HIP_CHECK(hipFree(d_values_input));
-        HIP_CHECK(hipFree(d_keys_output));
-        HIP_CHECK(hipFree(d_values_output));
-        HIP_CHECK(hipFree(d_offsets));
-
-        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, keys_expected));
-        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, values_expected));
     }
+    
 }
 
 TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
@@ -503,132 +519,140 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
         TestFixture::params::max_segment_length
     );
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(size_t size : sizes)
+    for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
     {
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
+        unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
 
-        // Generate data
-        std::vector<key_type> keys_input;
-        if(rp::is_floating_point<key_type>::value)
+        const std::vector<size_t> sizes = get_sizes(seed_value);
+        for(size_t size : sizes)
         {
-            keys_input = test_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
-        }
-        else
-        {
-            keys_input = test_utils::get_random_data<key_type>(
-                size,
-                std::numeric_limits<key_type>::min(),
-                std::numeric_limits<key_type>::max()
-            );
-        }
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
 
-        std::vector<offset_type> offsets;
-        unsigned int segments_count = 0;
-        size_t offset = 0;
-        while(offset < size)
-        {
-            const size_t segment_length = segment_length_dis(gen);
-            offsets.push_back(offset);
-            segments_count++;
-            offset += segment_length;
-        }
-        offsets.push_back(size);
+            // Generate data
+            std::vector<key_type> keys_input;
+            if(rp::is_floating_point<key_type>::value)
+            {
+                keys_input = test_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000, seed_value);
+            }
+            else
+            {
+                keys_input = test_utils::get_random_data<key_type>(
+                    size,
+                    std::numeric_limits<key_type>::min(),
+                    std::numeric_limits<key_type>::max(), 
+                    seed_index
+                );
+            }
 
-        key_type * d_keys_input;
-        key_type * d_keys_output;
-        HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
-        HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
-        HIP_CHECK(
-            hipMemcpy(
-                d_keys_input, keys_input.data(),
-                size * sizeof(key_type),
-                hipMemcpyHostToDevice
-            )
-        );
+            std::vector<offset_type> offsets;
+            unsigned int segments_count = 0;
+            size_t offset = 0;
+            while(offset < size)
+            {
+                const size_t segment_length = segment_length_dis(gen);
+                offsets.push_back(offset);
+                segments_count++;
+                offset += segment_length;
+            }
+            offsets.push_back(size);
 
-        offset_type * d_offsets;
-        HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
-        HIP_CHECK(
-            hipMemcpy(
-                d_offsets, offsets.data(),
-                (segments_count + 1) * sizeof(offset_type),
-                hipMemcpyHostToDevice
-            )
-        );
-
-        // Calculate expected results on host
-        std::vector<key_type> expected(keys_input);
-        for(size_t i = 0; i < segments_count; i++)
-        {
-            std::stable_sort(
-                expected.begin() + offsets[i],
-                expected.begin() + offsets[i + 1],
-                key_comparator<key_type, descending, start_bit, end_bit>()
-            );
-        }
-
-        rp::double_buffer<key_type> d_keys(d_keys_input, d_keys_output);
-
-        // Use custom config
-        using config = rp::segmented_radix_sort_config<7, 4, rp::kernel_config<192, 5>>;
-
-        size_t temporary_storage_bytes = 0;
-        HIP_CHECK(
-            rp::segmented_radix_sort_keys<config>(
-                nullptr, temporary_storage_bytes,
-                d_keys, size,
-                segments_count, d_offsets, d_offsets + 1,
-                start_bit, end_bit
-            )
-        );
-
-        ASSERT_GT(temporary_storage_bytes, 0U);
-
-        void * d_temporary_storage;
-        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
-
-        if(descending)
-        {
+            key_type * d_keys_input;
+            key_type * d_keys_output;
+            HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
+            HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
             HIP_CHECK(
-                rp::segmented_radix_sort_keys_desc<config>(
-                    d_temporary_storage, temporary_storage_bytes,
-                    d_keys, size,
-                    segments_count, d_offsets, d_offsets + 1,
-                    start_bit, end_bit,
-                    stream, debug_synchronous
+                hipMemcpy(
+                    d_keys_input, keys_input.data(),
+                    size * sizeof(key_type),
+                    hipMemcpyHostToDevice
                 )
             );
-        }
-        else
-        {
+
+            offset_type * d_offsets;
+            HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
+            HIP_CHECK(
+                hipMemcpy(
+                    d_offsets, offsets.data(),
+                    (segments_count + 1) * sizeof(offset_type),
+                    hipMemcpyHostToDevice
+                )
+            );
+
+            // Calculate expected results on host
+            std::vector<key_type> expected(keys_input);
+            for(size_t i = 0; i < segments_count; i++)
+            {
+                std::stable_sort(
+                    expected.begin() + offsets[i],
+                    expected.begin() + offsets[i + 1],
+                    key_comparator<key_type, descending, start_bit, end_bit>()
+                );
+            }
+
+            rp::double_buffer<key_type> d_keys(d_keys_input, d_keys_output);
+
+            // Use custom config
+            using config = rp::segmented_radix_sort_config<7, 4, rp::kernel_config<192, 5>>;
+
+            size_t temporary_storage_bytes = 0;
             HIP_CHECK(
                 rp::segmented_radix_sort_keys<config>(
-                    d_temporary_storage, temporary_storage_bytes,
+                    nullptr, temporary_storage_bytes,
                     d_keys, size,
                     segments_count, d_offsets, d_offsets + 1,
-                    start_bit, end_bit,
-                    stream, debug_synchronous
+                    start_bit, end_bit
                 )
             );
+
+            ASSERT_GT(temporary_storage_bytes, 0U);
+
+            void * d_temporary_storage;
+            HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+
+            if(descending)
+            {
+                HIP_CHECK(
+                    rp::segmented_radix_sort_keys_desc<config>(
+                        d_temporary_storage, temporary_storage_bytes,
+                        d_keys, size,
+                        segments_count, d_offsets, d_offsets + 1,
+                        start_bit, end_bit,
+                        stream, debug_synchronous
+                    )
+                );
+            }
+            else
+            {
+                HIP_CHECK(
+                    rp::segmented_radix_sort_keys<config>(
+                        d_temporary_storage, temporary_storage_bytes,
+                        d_keys, size,
+                        segments_count, d_offsets, d_offsets + 1,
+                        start_bit, end_bit,
+                        stream, debug_synchronous
+                    )
+                );
+            }
+
+            std::vector<key_type> keys_output(size);
+            HIP_CHECK(
+                hipMemcpy(
+                    keys_output.data(), d_keys.current(),
+                    size * sizeof(key_type),
+                    hipMemcpyDeviceToHost
+                )
+            );
+
+            HIP_CHECK(hipFree(d_temporary_storage));
+            HIP_CHECK(hipFree(d_keys_input));
+            HIP_CHECK(hipFree(d_keys_output));
+            HIP_CHECK(hipFree(d_offsets));
+
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
         }
-
-        std::vector<key_type> keys_output(size);
-        HIP_CHECK(
-            hipMemcpy(
-                keys_output.data(), d_keys.current(),
-                size * sizeof(key_type),
-                hipMemcpyDeviceToHost
-            )
-        );
-
-        HIP_CHECK(hipFree(d_temporary_storage));
-        HIP_CHECK(hipFree(d_keys_input));
-        HIP_CHECK(hipFree(d_keys_output));
-        HIP_CHECK(hipFree(d_offsets));
-
-        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
     }
+    
 }
 
 TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
@@ -653,168 +677,176 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
         TestFixture::params::max_segment_length
     );
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(size_t size : sizes)
+    for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
     {
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
+        unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
 
-        // Generate data
-        std::vector<key_type> keys_input;
-        if(rp::is_floating_point<key_type>::value)
+        const std::vector<size_t> sizes = get_sizes(seed_value);
+        for(size_t size : sizes)
         {
-            keys_input = test_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
-        }
-        else
-        {
-            keys_input = test_utils::get_random_data<key_type>(
-                size,
-                std::numeric_limits<key_type>::min(),
-                std::numeric_limits<key_type>::max()
-            );
-        }
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
 
-        std::vector<offset_type> offsets;
-        unsigned int segments_count = 0;
-        size_t offset = 0;
-        while(offset < size)
-        {
-            const size_t segment_length = segment_length_dis(gen);
-            offsets.push_back(offset);
-            segments_count++;
-            offset += segment_length;
-        }
-        offsets.push_back(size);
+            // Generate data
+            std::vector<key_type> keys_input;
+            if(rp::is_floating_point<key_type>::value)
+            {
+                keys_input = test_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000, seed_value);
+            }
+            else
+            {
+                keys_input = test_utils::get_random_data<key_type>(
+                    size,
+                    std::numeric_limits<key_type>::min(),
+                    std::numeric_limits<key_type>::max(), 
+                    seed_index
+                );
+            }
 
-        std::vector<value_type> values_input(size);
-        std::iota(values_input.begin(), values_input.end(), 0);
+            std::vector<offset_type> offsets;
+            unsigned int segments_count = 0;
+            size_t offset = 0;
+            while(offset < size)
+            {
+                const size_t segment_length = segment_length_dis(gen);
+                offsets.push_back(offset);
+                segments_count++;
+                offset += segment_length;
+            }
+            offsets.push_back(size);
 
-        key_type * d_keys_input;
-        key_type * d_keys_output;
-        HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
-        HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
-        HIP_CHECK(
-            hipMemcpy(
-                d_keys_input, keys_input.data(),
-                size * sizeof(key_type),
-                hipMemcpyHostToDevice
-            )
-        );
+            std::vector<value_type> values_input(size);
+            std::iota(values_input.begin(), values_input.end(), 0);
 
-        value_type * d_values_input;
-        value_type * d_values_output;
-        HIP_CHECK(hipMalloc(&d_values_input, size * sizeof(value_type)));
-        HIP_CHECK(hipMalloc(&d_values_output, size * sizeof(value_type)));
-        HIP_CHECK(
-            hipMemcpy(
-                d_values_input, values_input.data(),
-                size * sizeof(value_type),
-                hipMemcpyHostToDevice
-            )
-        );
-
-        offset_type * d_offsets;
-        HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
-        HIP_CHECK(
-            hipMemcpy(
-                d_offsets, offsets.data(),
-                (segments_count + 1) * sizeof(offset_type),
-                hipMemcpyHostToDevice
-            )
-        );
-
-        using key_value = std::pair<key_type, value_type>;
-
-        // Calculate expected results on host
-        std::vector<key_value> expected(size);
-        for(size_t i = 0; i < size; i++)
-        {
-            expected[i] = key_value(keys_input[i], values_input[i]);
-        }
-        for(size_t i = 0; i < segments_count; i++)
-        {
-            std::stable_sort(
-                expected.begin() + offsets[i],
-                expected.begin() + offsets[i + 1],
-                key_value_comparator<key_type, value_type, descending, start_bit, end_bit>()
-            );
-        }
-        std::vector<key_type> keys_expected(size);
-        std::vector<value_type> values_expected(size);
-        for(size_t i = 0; i < size; i++)
-        {
-            keys_expected[i] = expected[i].first;
-            values_expected[i] = expected[i].second;
-        }
-
-        rp::double_buffer<key_type> d_keys(d_keys_input, d_keys_output);
-        rp::double_buffer<value_type> d_values(d_values_input, d_values_output);
-
-        void * d_temporary_storage = nullptr;
-        size_t temporary_storage_bytes = 0;
-        HIP_CHECK(
-            rp::segmented_radix_sort_pairs(
-                d_temporary_storage, temporary_storage_bytes,
-                d_keys, d_values, size,
-                segments_count, d_offsets, d_offsets + 1,
-                start_bit, end_bit
-            )
-        );
-
-        ASSERT_GT(temporary_storage_bytes, 0U);
-
-        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
-
-        if(descending)
-        {
+            key_type * d_keys_input;
+            key_type * d_keys_output;
+            HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
+            HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
             HIP_CHECK(
-                rp::segmented_radix_sort_pairs_desc(
-                    d_temporary_storage, temporary_storage_bytes,
-                    d_keys, d_values, size,
-                    segments_count, d_offsets, d_offsets + 1,
-                    start_bit, end_bit,
-                    stream, debug_synchronous
+                hipMemcpy(
+                    d_keys_input, keys_input.data(),
+                    size * sizeof(key_type),
+                    hipMemcpyHostToDevice
                 )
             );
-        }
-        else
-        {
+
+            value_type * d_values_input;
+            value_type * d_values_output;
+            HIP_CHECK(hipMalloc(&d_values_input, size * sizeof(value_type)));
+            HIP_CHECK(hipMalloc(&d_values_output, size * sizeof(value_type)));
+            HIP_CHECK(
+                hipMemcpy(
+                    d_values_input, values_input.data(),
+                    size * sizeof(value_type),
+                    hipMemcpyHostToDevice
+                )
+            );
+
+            offset_type * d_offsets;
+            HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
+            HIP_CHECK(
+                hipMemcpy(
+                    d_offsets, offsets.data(),
+                    (segments_count + 1) * sizeof(offset_type),
+                    hipMemcpyHostToDevice
+                )
+            );
+
+            using key_value = std::pair<key_type, value_type>;
+
+            // Calculate expected results on host
+            std::vector<key_value> expected(size);
+            for(size_t i = 0; i < size; i++)
+            {
+                expected[i] = key_value(keys_input[i], values_input[i]);
+            }
+            for(size_t i = 0; i < segments_count; i++)
+            {
+                std::stable_sort(
+                    expected.begin() + offsets[i],
+                    expected.begin() + offsets[i + 1],
+                    key_value_comparator<key_type, value_type, descending, start_bit, end_bit>()
+                );
+            }
+            std::vector<key_type> keys_expected(size);
+            std::vector<value_type> values_expected(size);
+            for(size_t i = 0; i < size; i++)
+            {
+                keys_expected[i] = expected[i].first;
+                values_expected[i] = expected[i].second;
+            }
+
+            rp::double_buffer<key_type> d_keys(d_keys_input, d_keys_output);
+            rp::double_buffer<value_type> d_values(d_values_input, d_values_output);
+
+            void * d_temporary_storage = nullptr;
+            size_t temporary_storage_bytes = 0;
             HIP_CHECK(
                 rp::segmented_radix_sort_pairs(
                     d_temporary_storage, temporary_storage_bytes,
                     d_keys, d_values, size,
                     segments_count, d_offsets, d_offsets + 1,
-                    start_bit, end_bit,
-                    stream, debug_synchronous
+                    start_bit, end_bit
                 )
             );
+
+            ASSERT_GT(temporary_storage_bytes, 0U);
+
+            HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+
+            if(descending)
+            {
+                HIP_CHECK(
+                    rp::segmented_radix_sort_pairs_desc(
+                        d_temporary_storage, temporary_storage_bytes,
+                        d_keys, d_values, size,
+                        segments_count, d_offsets, d_offsets + 1,
+                        start_bit, end_bit,
+                        stream, debug_synchronous
+                    )
+                );
+            }
+            else
+            {
+                HIP_CHECK(
+                    rp::segmented_radix_sort_pairs(
+                        d_temporary_storage, temporary_storage_bytes,
+                        d_keys, d_values, size,
+                        segments_count, d_offsets, d_offsets + 1,
+                        start_bit, end_bit,
+                        stream, debug_synchronous
+                    )
+                );
+            }
+
+            std::vector<key_type> keys_output(size);
+            HIP_CHECK(
+                hipMemcpy(
+                    keys_output.data(), d_keys.current(),
+                    size * sizeof(key_type),
+                    hipMemcpyDeviceToHost
+                )
+            );
+
+            std::vector<value_type> values_output(size);
+            HIP_CHECK(
+                hipMemcpy(
+                    values_output.data(), d_values.current(),
+                    size * sizeof(value_type),
+                    hipMemcpyDeviceToHost
+                )
+            );
+
+            HIP_CHECK(hipFree(d_temporary_storage));
+            HIP_CHECK(hipFree(d_keys_input));
+            HIP_CHECK(hipFree(d_keys_output));
+            HIP_CHECK(hipFree(d_values_input));
+            HIP_CHECK(hipFree(d_values_output));
+            HIP_CHECK(hipFree(d_offsets));
+
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, keys_expected));
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, values_expected));
         }
-
-        std::vector<key_type> keys_output(size);
-        HIP_CHECK(
-            hipMemcpy(
-                keys_output.data(), d_keys.current(),
-                size * sizeof(key_type),
-                hipMemcpyDeviceToHost
-            )
-        );
-
-        std::vector<value_type> values_output(size);
-        HIP_CHECK(
-            hipMemcpy(
-                values_output.data(), d_values.current(),
-                size * sizeof(value_type),
-                hipMemcpyDeviceToHost
-            )
-        );
-
-        HIP_CHECK(hipFree(d_temporary_storage));
-        HIP_CHECK(hipFree(d_keys_input));
-        HIP_CHECK(hipFree(d_keys_output));
-        HIP_CHECK(hipFree(d_values_input));
-        HIP_CHECK(hipFree(d_values_output));
-        HIP_CHECK(hipFree(d_offsets));
-
-        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, keys_expected));
-        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, values_expected));
     }
+    
 }

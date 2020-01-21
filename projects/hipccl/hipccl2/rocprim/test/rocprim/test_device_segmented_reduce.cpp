@@ -95,7 +95,7 @@ typedef ::testing::Types<
 
 TYPED_TEST_CASE(RocprimDeviceSegmentedReduce, Params);
 
-std::vector<size_t> get_sizes()
+std::vector<size_t> get_sizes(int seed_value)
 {
     std::vector<size_t> sizes = {
         1024, 2048, 4096, 1792,
@@ -104,7 +104,7 @@ std::vector<size_t> get_sizes()
         100000,
         (1 << 16) - 1220
     };
-    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(5, 1, 1000000);
+    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(5, 1, 1000000, seed_value);
     sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
     return sizes;
 }
@@ -130,106 +130,113 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
         TestFixture::params::max_segment_length
     );
 
-    for(size_t size : get_sizes())
+    for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
     {
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
-
-        hipStream_t stream = 0; // default
-
-        // Generate data and calculate expected results
-        std::vector<output_type> aggregates_expected;
-
-        std::vector<input_type> values_input = test_utils::get_random_data<input_type>(size, 0, 100);
-
-        std::vector<offset_type> offsets;
-        unsigned int segments_count = 0;
-        size_t offset = 0;
-        while(offset < size)
+        unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+     
+        for(size_t size : get_sizes(seed_value))
         {
-            const size_t segment_length = segment_length_dis(gen);
-            offsets.push_back(offset);
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
 
-            const size_t end = std::min(size, offset + segment_length);
-            result_type aggregate = init;
-            for(size_t i = offset; i < end; i++)
+            hipStream_t stream = 0; // default
+
+            // Generate data and calculate expected results
+            std::vector<output_type> aggregates_expected;
+
+            std::vector<input_type> values_input = test_utils::get_random_data<input_type>(size, 0, 100, seed_value);
+
+            std::vector<offset_type> offsets;
+            unsigned int segments_count = 0;
+            size_t offset = 0;
+            while(offset < size)
             {
-                aggregate = reduce_op(aggregate, values_input[i]);
+                const size_t segment_length = segment_length_dis(gen);
+                offsets.push_back(offset);
+
+                const size_t end = std::min(size, offset + segment_length);
+                result_type aggregate = init;
+                for(size_t i = offset; i < end; i++)
+                {
+                    aggregate = reduce_op(aggregate, values_input[i]);
+                }
+                aggregates_expected.push_back(aggregate);
+
+                segments_count++;
+                offset += segment_length;
             }
-            aggregates_expected.push_back(aggregate);
+            offsets.push_back(size);
 
-            segments_count++;
-            offset += segment_length;
+            input_type * d_values_input;
+            HIP_CHECK(hipMalloc(&d_values_input, size * sizeof(input_type)));
+            HIP_CHECK(
+                hipMemcpy(
+                    d_values_input, values_input.data(),
+                    size * sizeof(input_type),
+                    hipMemcpyHostToDevice
+                )
+            );
+
+            offset_type * d_offsets;
+            HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
+            HIP_CHECK(
+                hipMemcpy(
+                    d_offsets, offsets.data(),
+                    (segments_count + 1) * sizeof(offset_type),
+                    hipMemcpyHostToDevice
+                )
+            );
+
+            output_type * d_aggregates_output;
+            HIP_CHECK(hipMalloc(&d_aggregates_output, segments_count * sizeof(output_type)));
+
+            size_t temporary_storage_bytes;
+
+            HIP_CHECK(
+                rp::segmented_reduce(
+                    nullptr, temporary_storage_bytes,
+                    d_values_input, d_aggregates_output,
+                    segments_count,
+                    d_offsets, d_offsets + 1,
+                    reduce_op, init,
+                    stream, debug_synchronous
+                )
+            );
+
+            ASSERT_GT(temporary_storage_bytes, 0);
+
+            void * d_temporary_storage;
+            HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+
+            HIP_CHECK(
+                rp::segmented_reduce(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_values_input,
+                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_aggregates_output),
+                    segments_count,
+                    d_offsets, d_offsets + 1,
+                    reduce_op, init,
+                    stream, debug_synchronous
+                )
+            );
+
+            HIP_CHECK(hipFree(d_temporary_storage));
+
+            std::vector<output_type> aggregates_output(segments_count);
+            HIP_CHECK(
+                hipMemcpy(
+                    aggregates_output.data(), d_aggregates_output,
+                    segments_count * sizeof(output_type),
+                    hipMemcpyDeviceToHost
+                )
+            );
+
+            HIP_CHECK(hipFree(d_values_input));
+            HIP_CHECK(hipFree(d_offsets));
+            HIP_CHECK(hipFree(d_aggregates_output));
+
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(aggregates_output, aggregates_expected, 0.01f));
         }
-        offsets.push_back(size);
-
-        input_type * d_values_input;
-        HIP_CHECK(hipMalloc(&d_values_input, size * sizeof(input_type)));
-        HIP_CHECK(
-            hipMemcpy(
-                d_values_input, values_input.data(),
-                size * sizeof(input_type),
-                hipMemcpyHostToDevice
-            )
-        );
-
-        offset_type * d_offsets;
-        HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
-        HIP_CHECK(
-            hipMemcpy(
-                d_offsets, offsets.data(),
-                (segments_count + 1) * sizeof(offset_type),
-                hipMemcpyHostToDevice
-            )
-        );
-
-        output_type * d_aggregates_output;
-        HIP_CHECK(hipMalloc(&d_aggregates_output, segments_count * sizeof(output_type)));
-
-        size_t temporary_storage_bytes;
-
-        HIP_CHECK(
-            rp::segmented_reduce(
-                nullptr, temporary_storage_bytes,
-                d_values_input, d_aggregates_output,
-                segments_count,
-                d_offsets, d_offsets + 1,
-                reduce_op, init,
-                stream, debug_synchronous
-            )
-        );
-
-        ASSERT_GT(temporary_storage_bytes, 0);
-
-        void * d_temporary_storage;
-        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
-
-        HIP_CHECK(
-            rp::segmented_reduce(
-                d_temporary_storage, temporary_storage_bytes,
-                d_values_input,
-                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_aggregates_output),
-                segments_count,
-                d_offsets, d_offsets + 1,
-                reduce_op, init,
-                stream, debug_synchronous
-            )
-        );
-
-        HIP_CHECK(hipFree(d_temporary_storage));
-
-        std::vector<output_type> aggregates_output(segments_count);
-        HIP_CHECK(
-            hipMemcpy(
-                aggregates_output.data(), d_aggregates_output,
-                segments_count * sizeof(output_type),
-                hipMemcpyDeviceToHost
-            )
-        );
-
-        HIP_CHECK(hipFree(d_values_input));
-        HIP_CHECK(hipFree(d_offsets));
-        HIP_CHECK(hipFree(d_aggregates_output));
-
-        ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(aggregates_output, aggregates_expected, 0.01f));
     }
+    
 }

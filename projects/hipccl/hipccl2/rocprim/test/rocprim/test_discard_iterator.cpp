@@ -40,35 +40,47 @@ TEST(RocprimDiscardIteratorTests, Equal)
 {
     using Iterator = typename rocprim::discard_iterator;
 
-    Iterator x(test_utils::get_random_value<size_t>(0, 200));
-    Iterator y = x;
-    ASSERT_EQ(x, y);
-
-    x += 100;
-    for(size_t i = 0; i < 100; i++)
+    for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
     {
-        y++;
-    }
-    ASSERT_EQ(x, y);
+        unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
 
-    y--;
-    ASSERT_NE(x, y);
+        Iterator x(test_utils::get_random_value<size_t>(0, 200, seed_value));
+            Iterator y = x;
+            ASSERT_EQ(x, y);
+
+            x += 100;
+            for(size_t i = 0; i < 100; i++)
+            {
+                y++;
+            }
+            ASSERT_EQ(x, y);
+
+            y--;
+            ASSERT_NE(x, y);
+    }
 }
 
 TEST(RocprimDiscardIteratorTests, Less)
 {
     using Iterator = typename rocprim::discard_iterator;
 
-    Iterator x(test_utils::get_random_value<size_t>(0, 200));
-    Iterator y = x + 1;
-    ASSERT_LT(x, y);
-
-    x += 100;
-    for(size_t i = 0; i < 100; i++)
+    for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
     {
-        y++;
+        unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+
+        Iterator x(test_utils::get_random_value<size_t>(0, 200, seed_value));
+        Iterator y = x + 1;
+        ASSERT_LT(x, y);
+
+        x += 100;
+        for(size_t i = 0; i < 100; i++)
+        {
+            y++;
+        }
+        ASSERT_LT(x, y);
     }
-    ASSERT_LT(x, y);
 }
 
 TEST(RocprimDiscardIteratorTests, ReduceByKey)

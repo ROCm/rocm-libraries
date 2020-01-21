@@ -86,64 +86,70 @@ TYPED_TEST(RocprimTextureCacheIteratorTests, Transform)
 
     std::vector<T> input(size);
 
-    for(size_t i = 0; i < size; i++)
+    for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
     {
-        input[i] = T(test_utils::get_random_value(1, 200));
+        unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+
+        for(size_t i = 0; i < size; i++)
+        {
+            input[i] = T(test_utils::get_random_value(1, 200, seed_value));
+        }
+
+        std::vector<T> output(size);
+        T * d_input;
+        T * d_output;
+        HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
+        HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(T)));
+        HIP_CHECK(
+            hipMemcpy(
+                d_input, input.data(),
+                input.size() * sizeof(T),
+                hipMemcpyHostToDevice
+            )
+        );
+        HIP_CHECK(hipDeviceSynchronize());
+
+        Iterator x;
+        x.bind_texture(d_input, sizeof(T) * input.size());
+
+        // Calculate expected results on host
+        std::vector<T> expected(size);
+        std::transform(
+            input.begin(),
+            input.end(),
+            expected.begin(),
+            transform<T>()
+        );
+
+        // Run
+        HIP_CHECK(
+            rocprim::transform(
+                x, d_output, size,
+                transform<T>(), stream, debug_synchronous
+            )
+        );
+        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Copy output to host
+        HIP_CHECK(
+            hipMemcpy(
+                output.data(), d_output,
+                output.size() * sizeof(T),
+                hipMemcpyDeviceToHost
+            )
+        );
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Validating results
+        for(size_t i = 0; i < output.size(); i++)
+        {
+            ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
+        }
+
+        x.unbind_texture();
+        hipFree(d_input);
+        hipFree(d_output);
     }
-
-    std::vector<T> output(size);
-    T * d_input;
-    T * d_output;
-    HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
-    HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(T)));
-    HIP_CHECK(
-        hipMemcpy(
-            d_input, input.data(),
-            input.size() * sizeof(T),
-            hipMemcpyHostToDevice
-        )
-    );
-    HIP_CHECK(hipDeviceSynchronize());
-
-    Iterator x;
-    x.bind_texture(d_input, sizeof(T) * input.size());
-
-    // Calculate expected results on host
-    std::vector<T> expected(size);
-    std::transform(
-        input.begin(),
-        input.end(),
-        expected.begin(),
-        transform<T>()
-    );
-
-    // Run
-    HIP_CHECK(
-        rocprim::transform(
-            x, d_output, size,
-            transform<T>(), stream, debug_synchronous
-        )
-    );
-    HIP_CHECK(hipPeekAtLastError());
-    HIP_CHECK(hipDeviceSynchronize());
-
-    // Copy output to host
-    HIP_CHECK(
-        hipMemcpy(
-            output.data(), d_output,
-            output.size() * sizeof(T),
-            hipMemcpyDeviceToHost
-        )
-    );
-    HIP_CHECK(hipDeviceSynchronize());
-
-    // Validating results
-    for(size_t i = 0; i < output.size(); i++)
-    {
-        ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
-    }
-
-    x.unbind_texture();
-    hipFree(d_input);
-    hipFree(d_output);
 }
