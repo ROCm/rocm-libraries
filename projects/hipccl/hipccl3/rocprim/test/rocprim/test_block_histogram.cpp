@@ -137,66 +137,74 @@ void test_block_histogram_input_arrays()
     const size_t size = items_per_block * 37;
     const size_t bin_sizes = bin * 37;
     const size_t grid_size = size / items_per_block;
-    // Generate data
-    std::vector<T> output = test_utils::get_random_data<T>(size, 0, bin - 1);
 
-    // Output histogram results
-    std::vector<T> output_bin(bin_sizes, 0);
-
-    // Calculate expected results on host
-    std::vector<T> expected_bin(output_bin.size(), 0);
-    for(size_t i = 0; i < output.size() / items_per_block; i++)
+    for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
     {
-        for(size_t j = 0; j < items_per_block; j++)
+        unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+
+        // Generate data
+        std::vector<T> output = test_utils::get_random_data<T>(size, 0, bin - 1, seed_value);
+
+        // Output histogram results
+        std::vector<T> output_bin(bin_sizes, 0);
+
+        // Calculate expected results on host
+        std::vector<T> expected_bin(output_bin.size(), 0);
+        for(size_t i = 0; i < output.size() / items_per_block; i++)
         {
-            auto bin_idx = i * bin;
-            auto idx = i * items_per_block + j;
-            expected_bin[bin_idx + static_cast<unsigned int>(output[idx])]++;
+            for(size_t j = 0; j < items_per_block; j++)
+            {
+                auto bin_idx = i * bin;
+                auto idx = i * items_per_block + j;
+                expected_bin[bin_idx + static_cast<unsigned int>(output[idx])]++;
+            }
         }
+
+        // Preparing device
+        T* device_output;
+        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(T)));
+        T* device_output_bin;
+        HIP_CHECK(hipMalloc(&device_output_bin, output_bin.size() * sizeof(T)));
+
+        HIP_CHECK(
+            hipMemcpy(
+                device_output, output.data(),
+                output.size() * sizeof(T),
+                hipMemcpyHostToDevice
+            )
+        );
+
+        HIP_CHECK(
+            hipMemcpy(
+                device_output_bin, output_bin.data(),
+                output_bin.size() * sizeof(T),
+                hipMemcpyHostToDevice
+            )
+        );
+
+        // Running kernel
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(histogram_kernel<block_size, items_per_thread, bin, algorithm, T, BinType>),
+            dim3(grid_size), dim3(block_size), 0, 0,
+            device_output, device_output_bin
+        );
+
+        // Reading results back
+        HIP_CHECK(
+            hipMemcpy(
+                output_bin.data(), device_output_bin,
+                output_bin.size() * sizeof(T),
+                hipMemcpyDeviceToHost
+            )
+        );
+
+        test_utils::assert_eq(output_bin, expected_bin);
+
+        HIP_CHECK(hipFree(device_output));
+        HIP_CHECK(hipFree(device_output_bin));
     }
-
-    // Preparing device
-    T* device_output;
-    HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(T)));
-    T* device_output_bin;
-    HIP_CHECK(hipMalloc(&device_output_bin, output_bin.size() * sizeof(T)));
-
-    HIP_CHECK(
-        hipMemcpy(
-            device_output, output.data(),
-            output.size() * sizeof(T),
-            hipMemcpyHostToDevice
-        )
-    );
-
-    HIP_CHECK(
-        hipMemcpy(
-            device_output_bin, output_bin.data(),
-            output_bin.size() * sizeof(T),
-            hipMemcpyHostToDevice
-        )
-    );
-
-    // Running kernel
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(histogram_kernel<block_size, items_per_thread, bin, algorithm, T, BinType>),
-        dim3(grid_size), dim3(block_size), 0, 0,
-        device_output, device_output_bin
-    );
-
-    // Reading results back
-    HIP_CHECK(
-        hipMemcpy(
-            output_bin.data(), device_output_bin,
-            output_bin.size() * sizeof(T),
-            hipMemcpyDeviceToHost
-        )
-    );
-
-    test_utils::assert_eq(output_bin, expected_bin);
-
-    HIP_CHECK(hipFree(device_output));
-    HIP_CHECK(hipFree(device_output_bin));
+    
 }
 
 // Static for-loop

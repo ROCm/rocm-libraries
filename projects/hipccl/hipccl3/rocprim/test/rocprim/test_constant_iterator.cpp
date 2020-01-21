@@ -83,51 +83,58 @@ TYPED_TEST(RocprimConstantIteratorTests, Transform)
 
     hipStream_t stream = 0; // default
 
-    // Create constant_iterator<U> with random starting point
-    const auto value = test_utils::get_random_value<T>(0, 200);
-    Iterator input_begin(value);
-
-    std::vector<T> output(size);
-    T * d_output;
-    HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(T)));
-    HIP_CHECK(hipDeviceSynchronize());
-
-    // Calculate expected results on host
-    std::vector<T> expected(size, transform<T>()(value));
-
-    // Run
-    HIP_CHECK(
-        rocprim::transform(
-            input_begin, d_output, size,
-            transform<T>(), stream, debug_synchronous
-        )
-    );
-    HIP_CHECK(hipPeekAtLastError());
-    HIP_CHECK(hipDeviceSynchronize());
-
-    // Copy output to host
-    HIP_CHECK(
-        hipMemcpy(
-            output.data(), d_output,
-            output.size() * sizeof(T),
-            hipMemcpyDeviceToHost
-        )
-    );
-    HIP_CHECK(hipDeviceSynchronize());
-
-    // Validating results
-    for(size_t i = 0; i < output.size(); i++)
+    for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
     {
-        if(std::is_integral<T>::value)
-        {
-            ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
-        }
-        else if(std::is_floating_point<T>::value)
-        {
-            auto tolerance = std::max<T>(std::abs(0.1f * expected[i]), T(0.01f));
-            ASSERT_NEAR(output[i], expected[i], tolerance) << "where index = " << i;
-        }
-    }
+        unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
 
-    hipFree(d_output);
+        // Create constant_iterator<U> with random starting point
+        const auto value = test_utils::get_random_value<T>(0, 200, seed_value);
+        Iterator input_begin(value);
+
+        std::vector<T> output(size);
+        T * d_output;
+        HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(T)));
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Calculate expected results on host
+        std::vector<T> expected(size, transform<T>()(value));
+
+        // Run
+        HIP_CHECK(
+            rocprim::transform(
+                input_begin, d_output, size,
+                transform<T>(), stream, debug_synchronous
+            )
+        );
+        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Copy output to host
+        HIP_CHECK(
+            hipMemcpy(
+                output.data(), d_output,
+                output.size() * sizeof(T),
+                hipMemcpyDeviceToHost
+            )
+        );
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Validating results
+        for(size_t i = 0; i < output.size(); i++)
+        {
+            if(std::is_integral<T>::value)
+            {
+                ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
+            }
+            else if(std::is_floating_point<T>::value)
+            {
+                auto tolerance = std::max<T>(std::abs(0.1f * expected[i]), T(0.01f));
+                ASSERT_NEAR(output[i], expected[i], tolerance) << "where index = " << i;
+            }
+        }
+
+        hipFree(d_output);
+    }
+    
 }

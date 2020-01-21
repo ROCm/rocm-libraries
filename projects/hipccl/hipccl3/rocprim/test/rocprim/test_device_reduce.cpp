@@ -79,14 +79,14 @@ typedef ::testing::Types<
     DeviceReduceParams<test_utils::custom_test_type<int>, test_utils::custom_test_type<float>>
 > RocprimDeviceReduceTestsParams;
 
-std::vector<size_t> get_sizes()
+std::vector<size_t> get_sizes(int seed_value)
 {
     std::vector<size_t> sizes = {
         1, 10, 53, 211,
         1024, 2048, 5096,
         34567, (1 << 17) - 1220
     };
-    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(2, 1, 16384);
+    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(2, 1, 16384, seed_value);
     sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
     std::sort(sizes.begin(), sizes.end());
     return sizes;
@@ -156,95 +156,102 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
     const bool debug_synchronous = TestFixture::debug_synchronous;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
     {
-        hipStream_t stream = 0; // default
+        unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
 
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
-
-        // precision of half differs between host and device with large plus reductions
-        if(std::is_same<U, rp::half>::value && size >= 1024)
+        const std::vector<size_t> sizes = get_sizes(seed_value);
+        for(auto size : sizes)
         {
-            break;
+            hipStream_t stream = 0; // default
+
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            // precision of half differs between host and device with large plus reductions
+            if(std::is_same<U, rp::half>::value && size >= 1024)
+            {
+                break;
+            }
+
+            // Generate data
+            std::vector<T> input = test_utils::get_random_data<T>(size, 1, 100, seed_value);
+            std::vector<U> output(1, 0);
+
+            // reduce function
+            binary_op_type plus_op;
+
+            T * d_input;
+            U * d_output;
+            HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
+            HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(U)));
+            HIP_CHECK(
+                hipMemcpy(
+                    d_input, input.data(),
+                    input.size() * sizeof(T),
+                    hipMemcpyHostToDevice
+                )
+            );
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Calculate expected results on host
+            U expected = U(0);
+            for(unsigned int i = 0; i < input.size(); i++)
+            {
+                expected = plus_op(expected, input[i]);
+            }
+
+            // temp storage
+            size_t temp_storage_size_bytes;
+            void * d_temp_storage = nullptr;
+            // Get size of d_temp_storage
+            HIP_CHECK(
+                rocprim::reduce(
+                    d_temp_storage, temp_storage_size_bytes,
+                    d_input,
+                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
+                    input.size(), rp::plus<U>(), stream, debug_synchronous
+                )
+            );
+
+            // temp_storage_size_bytes must be >0
+            ASSERT_GT(temp_storage_size_bytes, 0);
+
+            // allocate temporary storage
+            HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Run
+            HIP_CHECK(
+                rocprim::reduce(
+                    d_temp_storage, temp_storage_size_bytes,
+                    d_input,
+                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
+                    input.size(), rp::plus<U>(), stream, debug_synchronous
+                )
+            );
+            HIP_CHECK(hipPeekAtLastError());
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Copy output to host
+            HIP_CHECK(
+                hipMemcpy(
+                    output.data(), d_output,
+                    output.size() * sizeof(U),
+                    hipMemcpyDeviceToHost
+                )
+            );
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Check if output values are as expected
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output[0], expected, 0.01f));
+
+            hipFree(d_input);
+            hipFree(d_output);
+            hipFree(d_temp_storage);
         }
-
-        // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, 1, 100);
-        std::vector<U> output(1, 0);
-
-        // reduce function
-        binary_op_type plus_op;
-
-        T * d_input;
-        U * d_output;
-        HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
-        HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(U)));
-        HIP_CHECK(
-            hipMemcpy(
-                d_input, input.data(),
-                input.size() * sizeof(T),
-                hipMemcpyHostToDevice
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // Calculate expected results on host
-        U expected = U(0);
-        for(unsigned int i = 0; i < input.size(); i++)
-        {
-            expected = plus_op(expected, input[i]);
-        }
-
-        // temp storage
-        size_t temp_storage_size_bytes;
-        void * d_temp_storage = nullptr;
-        // Get size of d_temp_storage
-        HIP_CHECK(
-            rocprim::reduce(
-                d_temp_storage, temp_storage_size_bytes,
-                d_input,
-                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
-                input.size(), rp::plus<U>(), stream, debug_synchronous
-            )
-        );
-
-        // temp_storage_size_bytes must be >0
-        ASSERT_GT(temp_storage_size_bytes, 0);
-
-        // allocate temporary storage
-        HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // Run
-        HIP_CHECK(
-            rocprim::reduce(
-                d_temp_storage, temp_storage_size_bytes,
-                d_input,
-                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
-                input.size(), rp::plus<U>(), stream, debug_synchronous
-            )
-        );
-        HIP_CHECK(hipPeekAtLastError());
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // Copy output to host
-        HIP_CHECK(
-            hipMemcpy(
-                output.data(), d_output,
-                output.size() * sizeof(U),
-                hipMemcpyDeviceToHost
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // Check if output values are as expected
-        ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output[0], expected, 0.01f));
-
-        hipFree(d_input);
-        hipFree(d_output);
-        hipFree(d_temp_storage);
     }
+    
 }
 
 TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
@@ -255,89 +262,96 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
     const bool debug_synchronous = TestFixture::debug_synchronous;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
     {
-        hipStream_t stream = 0; // default
+        unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
 
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
-
-        // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, 1, 100);
-        std::vector<U> output(1, 0);
-
-        T * d_input;
-        U * d_output;
-        HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
-        HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(U)));
-        HIP_CHECK(
-            hipMemcpy(
-                d_input, input.data(),
-                input.size() * sizeof(T),
-                hipMemcpyHostToDevice
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // reduce function
-        binary_op_type min_op;
-
-        // Calculate expected results on host
-        U expected = U(test_utils::numeric_limits<U>::max());
-        for(unsigned int i = 0; i < input.size(); i++)
+        const std::vector<size_t> sizes = get_sizes(seed_value);
+        for(auto size : sizes)
         {
-            expected = min_op(expected, input[i]);
+            hipStream_t stream = 0; // default
+
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            // Generate data
+            std::vector<T> input = test_utils::get_random_data<T>(size, 1, 100, seed_value);
+            std::vector<U> output(1, 0);
+
+            T * d_input;
+            U * d_output;
+            HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
+            HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(U)));
+            HIP_CHECK(
+                hipMemcpy(
+                    d_input, input.data(),
+                    input.size() * sizeof(T),
+                    hipMemcpyHostToDevice
+                )
+            );
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // reduce function
+            binary_op_type min_op;
+
+            // Calculate expected results on host
+            U expected = U(test_utils::numeric_limits<U>::max());
+            for(unsigned int i = 0; i < input.size(); i++)
+            {
+                expected = min_op(expected, input[i]);
+            }
+
+            // temp storage
+            size_t temp_storage_size_bytes;
+            void * d_temp_storage = nullptr;
+            // Get size of d_temp_storage
+            HIP_CHECK(
+                rocprim::reduce(
+                    d_temp_storage, temp_storage_size_bytes,
+                    d_input,
+                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
+                    test_utils::numeric_limits<U>::max(), input.size(), rp::minimum<U>(), stream, debug_synchronous
+                )
+            );
+
+            // temp_storage_size_bytes must be >0
+            ASSERT_GT(temp_storage_size_bytes, 0);
+
+            // allocate temporary storage
+            HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Run
+            HIP_CHECK(
+                rocprim::reduce(
+                    d_temp_storage, temp_storage_size_bytes,
+                    d_input,
+                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
+                    test_utils::numeric_limits<U>::max(), input.size(), rp::minimum<U>(), stream, debug_synchronous
+                )
+            );
+            HIP_CHECK(hipPeekAtLastError());
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Copy output to host
+            HIP_CHECK(
+                hipMemcpy(
+                    output.data(), d_output,
+                    output.size() * sizeof(U),
+                    hipMemcpyDeviceToHost
+                )
+            );
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Check if output values are as expected
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output[0], expected, 0.01f));
+
+            hipFree(d_input);
+            hipFree(d_output);
+            hipFree(d_temp_storage);
         }
-
-        // temp storage
-        size_t temp_storage_size_bytes;
-        void * d_temp_storage = nullptr;
-        // Get size of d_temp_storage
-        HIP_CHECK(
-            rocprim::reduce(
-                d_temp_storage, temp_storage_size_bytes,
-                d_input,
-                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
-                test_utils::numeric_limits<U>::max(), input.size(), rp::minimum<U>(), stream, debug_synchronous
-            )
-        );
-
-        // temp_storage_size_bytes must be >0
-        ASSERT_GT(temp_storage_size_bytes, 0);
-
-        // allocate temporary storage
-        HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // Run
-        HIP_CHECK(
-            rocprim::reduce(
-                d_temp_storage, temp_storage_size_bytes,
-                d_input,
-                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
-                test_utils::numeric_limits<U>::max(), input.size(), rp::minimum<U>(), stream, debug_synchronous
-            )
-        );
-        HIP_CHECK(hipPeekAtLastError());
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // Copy output to host
-        HIP_CHECK(
-            hipMemcpy(
-                output.data(), d_output,
-                output.size() * sizeof(U),
-                hipMemcpyDeviceToHost
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // Check if output values are as expected
-        ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output[0], expected, 0.01f));
-
-        hipFree(d_input);
-        hipFree(d_output);
-        hipFree(d_temp_storage);
     }
+    
 }
 
 template<
@@ -379,93 +393,100 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
     const bool debug_synchronous = TestFixture::debug_synchronous;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
     {
-        hipStream_t stream = 0; // default
+        unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
 
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
-
-        // Generate data
-        std::vector<key_value> input(size);
-        for (size_t i = 0; i < size; i++)
+        const std::vector<size_t> sizes = get_sizes(seed_value);
+        for(auto size : sizes)
         {
-            input[i].key = i;
-            input[i].value = test_utils::get_random_value<T>(1, 100);
+            hipStream_t stream = 0; // default
+
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            // Generate data
+            std::vector<key_value> input(size);
+            for (size_t i = 0; i < size; i++)
+            {
+                input[i].key = i;
+                input[i].value = test_utils::get_random_value<T>(1, 100, seed_value);
+            }
+            std::vector<key_value> output(1);
+
+            key_value * d_input;
+            key_value * d_output;
+            HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(key_value)));
+            HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(key_value)));
+            HIP_CHECK(
+                hipMemcpy(
+                    d_input, input.data(),
+                    input.size() * sizeof(key_value),
+                    hipMemcpyHostToDevice
+                )
+            );
+            HIP_CHECK(hipDeviceSynchronize());
+
+            arg_min<int, T> reduce_op;
+            const key_value max(std::numeric_limits<int>::max(), test_utils::numeric_limits<T>::max());
+
+            // Calculate expected results on host
+            key_value expected = max;
+            for(unsigned int i = 0; i < input.size(); i++)
+            {
+                expected = reduce_op(expected, input[i]);
+            }
+
+            // temp storage
+            size_t temp_storage_size_bytes;
+            void * d_temp_storage = nullptr;
+            // Get size of d_temp_storage
+            HIP_CHECK(
+                rocprim::reduce(
+                    d_temp_storage, temp_storage_size_bytes,
+                    d_input,
+                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
+                    max, input.size(), reduce_op, stream, debug_synchronous
+                )
+            );
+
+            // temp_storage_size_bytes must be >0
+            ASSERT_GT(temp_storage_size_bytes, 0);
+
+            // allocate temporary storage
+            HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Run
+            HIP_CHECK(
+                rocprim::reduce(
+                    d_temp_storage, temp_storage_size_bytes,
+                    d_input,
+                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
+                    max, input.size(), reduce_op, stream, debug_synchronous
+                )
+            );
+            HIP_CHECK(hipPeekAtLastError());
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Copy output to host
+            HIP_CHECK(
+                hipMemcpy(
+                    output.data(), d_output,
+                    output.size() * sizeof(key_value),
+                    hipMemcpyDeviceToHost
+                )
+            );
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Check if output values are as expected
+            ASSERT_EQ(output[0].key, expected.key);
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output[0].value, expected.value, 0.01f));
+
+            hipFree(d_input);
+            hipFree(d_output);
+            hipFree(d_temp_storage);
         }
-        std::vector<key_value> output(1);
-
-        key_value * d_input;
-        key_value * d_output;
-        HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(key_value)));
-        HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(key_value)));
-        HIP_CHECK(
-            hipMemcpy(
-                d_input, input.data(),
-                input.size() * sizeof(key_value),
-                hipMemcpyHostToDevice
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
-
-        arg_min<int, T> reduce_op;
-        const key_value max(std::numeric_limits<int>::max(), test_utils::numeric_limits<T>::max());
-
-        // Calculate expected results on host
-        key_value expected = max;
-        for(unsigned int i = 0; i < input.size(); i++)
-        {
-            expected = reduce_op(expected, input[i]);
-        }
-
-        // temp storage
-        size_t temp_storage_size_bytes;
-        void * d_temp_storage = nullptr;
-        // Get size of d_temp_storage
-        HIP_CHECK(
-            rocprim::reduce(
-                d_temp_storage, temp_storage_size_bytes,
-                d_input,
-                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
-                max, input.size(), reduce_op, stream, debug_synchronous
-            )
-        );
-
-        // temp_storage_size_bytes must be >0
-        ASSERT_GT(temp_storage_size_bytes, 0);
-
-        // allocate temporary storage
-        HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // Run
-        HIP_CHECK(
-            rocprim::reduce(
-                d_temp_storage, temp_storage_size_bytes,
-                d_input,
-                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
-                max, input.size(), reduce_op, stream, debug_synchronous
-            )
-        );
-        HIP_CHECK(hipPeekAtLastError());
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // Copy output to host
-        HIP_CHECK(
-            hipMemcpy(
-                output.data(), d_output,
-                output.size() * sizeof(key_value),
-                hipMemcpyDeviceToHost
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // Check if output values are as expected
-        ASSERT_EQ(output[0].key, expected.key);
-        ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output[0].value, expected.value, 0.01f));
-
-        hipFree(d_input);
-        hipFree(d_output);
-        hipFree(d_temp_storage);
     }
+    
 }

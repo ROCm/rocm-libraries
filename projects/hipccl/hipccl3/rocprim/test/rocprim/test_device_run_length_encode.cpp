@@ -89,7 +89,7 @@ typedef ::testing::Types<
 
 TYPED_TEST_CASE(RocprimDeviceRunLengthEncode, Params);
 
-std::vector<size_t> get_sizes()
+std::vector<size_t> get_sizes(int seed_value)
 {
     std::vector<size_t> sizes = {
         1024, 2048, 4096, 1792,
@@ -98,7 +98,7 @@ std::vector<size_t> get_sizes()
         100000,
         (1 << 16) - 1220, (1 << 21) - 76543
     };
-    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(5, 1, 100000);
+    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(5, 1, 100000, seed_value);
     sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
     return sizes;
 }
@@ -120,133 +120,140 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, Encode)
     const unsigned int seed = 123;
     std::default_random_engine gen(seed);
 
-    for(size_t size : get_sizes())
+    for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
     {
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
+        unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
 
-        hipStream_t stream = 0; // default
-
-        // Generate data and calculate expected results
-        std::vector<key_type> unique_expected;
-        std::vector<count_type> counts_expected;
-        size_t runs_count_expected = 0;
-
-        std::vector<key_type> input(size);
-        key_distribution_type key_delta_dis(1, 5);
-        std::uniform_int_distribution<size_t> key_count_dis(
-            TestFixture::params::min_segment_length,
-            TestFixture::params::max_segment_length
-        );
-        std::vector<count_type> values_input = test_utils::get_random_data<count_type>(size, 0, 100);
-
-        size_t offset = 0;
-        key_type current_key = key_distribution_type(0, 100)(gen);
-        while(offset < size)
+        for(size_t size : get_sizes(seed_value))
         {
-            size_t key_count = key_count_dis(gen);
-            current_key = current_key + key_delta_dis(gen);
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
 
-            const size_t end = std::min(size, offset + key_count);
-            key_count = end - offset;
-            for(size_t i = offset; i < end; i++)
+            hipStream_t stream = 0; // default
+
+            // Generate data and calculate expected results
+            std::vector<key_type> unique_expected;
+            std::vector<count_type> counts_expected;
+            size_t runs_count_expected = 0;
+
+            std::vector<key_type> input(size);
+            key_distribution_type key_delta_dis(1, 5);
+            std::uniform_int_distribution<size_t> key_count_dis(
+                TestFixture::params::min_segment_length,
+                TestFixture::params::max_segment_length
+            );
+            std::vector<count_type> values_input = test_utils::get_random_data<count_type>(size, 0, 100, seed_value);
+
+            size_t offset = 0;
+            key_type current_key = key_distribution_type(0, 100)(gen);
+            while(offset < size)
             {
-                input[i] = current_key;
+                size_t key_count = key_count_dis(gen);
+                current_key = current_key + key_delta_dis(gen);
+
+                const size_t end = std::min(size, offset + key_count);
+                key_count = end - offset;
+                for(size_t i = offset; i < end; i++)
+                {
+                    input[i] = current_key;
+                }
+
+                unique_expected.push_back(current_key);
+                runs_count_expected++;
+                counts_expected.push_back(key_count);
+
+                offset += key_count;
             }
 
-            unique_expected.push_back(current_key);
-            runs_count_expected++;
-            counts_expected.push_back(key_count);
+            key_type * d_input;
+            HIP_CHECK(hipMalloc(&d_input, size * sizeof(key_type)));
+            HIP_CHECK(
+                hipMemcpy(
+                    d_input, input.data(),
+                    size * sizeof(key_type),
+                    hipMemcpyHostToDevice
+                )
+            );
 
-            offset += key_count;
+            key_type * d_unique_output;
+            count_type * d_counts_output;
+            count_type * d_runs_count_output;
+            HIP_CHECK(hipMalloc(&d_unique_output, runs_count_expected * sizeof(key_type)));
+            HIP_CHECK(hipMalloc(&d_counts_output, runs_count_expected * sizeof(count_type)));
+            HIP_CHECK(hipMalloc(&d_runs_count_output, sizeof(count_type)));
+
+            size_t temporary_storage_bytes = 0;
+
+            HIP_CHECK(
+                rocprim::run_length_encode(
+                    nullptr, temporary_storage_bytes,
+                    d_input, size,
+                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_unique_output),
+                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_counts_output),
+                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_runs_count_output),
+                    stream, debug_synchronous
+                )
+            );
+
+            ASSERT_GT(temporary_storage_bytes, 0U);
+
+            void * d_temporary_storage;
+            HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+
+            HIP_CHECK(
+                rocprim::run_length_encode(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_input, size,
+                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_unique_output),
+                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_counts_output),
+                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_runs_count_output),
+                    stream, debug_synchronous
+                )
+            );
+
+            HIP_CHECK(hipFree(d_temporary_storage));
+
+            std::vector<key_type> unique_output(runs_count_expected);
+            std::vector<count_type> counts_output(runs_count_expected);
+            std::vector<count_type> runs_count_output(1);
+            HIP_CHECK(
+                hipMemcpy(
+                    unique_output.data(), d_unique_output,
+                    runs_count_expected * sizeof(key_type),
+                    hipMemcpyDeviceToHost
+                )
+            );
+            HIP_CHECK(
+                hipMemcpy(
+                    counts_output.data(), d_counts_output,
+                    runs_count_expected * sizeof(count_type),
+                    hipMemcpyDeviceToHost
+                )
+            );
+            HIP_CHECK(
+                hipMemcpy(
+                    runs_count_output.data(), d_runs_count_output,
+                    sizeof(count_type),
+                    hipMemcpyDeviceToHost
+                )
+            );
+
+            HIP_CHECK(hipFree(d_input));
+            HIP_CHECK(hipFree(d_unique_output));
+            HIP_CHECK(hipFree(d_counts_output));
+            HIP_CHECK(hipFree(d_runs_count_output));
+
+            // Validating results
+
+            std::vector<count_type> runs_count_expected_2;
+            runs_count_expected_2.push_back(static_cast<count_type>(runs_count_expected));
+            test_utils::custom_assert_eq(runs_count_output, runs_count_expected_2, 1);
+
+            ASSERT_NO_FATAL_FAILURE(test_utils::custom_assert_eq(unique_output, unique_expected, runs_count_expected));
+            ASSERT_NO_FATAL_FAILURE(test_utils::custom_assert_eq(counts_output, counts_expected, runs_count_expected));
         }
-
-        key_type * d_input;
-        HIP_CHECK(hipMalloc(&d_input, size * sizeof(key_type)));
-        HIP_CHECK(
-            hipMemcpy(
-                d_input, input.data(),
-                size * sizeof(key_type),
-                hipMemcpyHostToDevice
-            )
-        );
-
-        key_type * d_unique_output;
-        count_type * d_counts_output;
-        count_type * d_runs_count_output;
-        HIP_CHECK(hipMalloc(&d_unique_output, runs_count_expected * sizeof(key_type)));
-        HIP_CHECK(hipMalloc(&d_counts_output, runs_count_expected * sizeof(count_type)));
-        HIP_CHECK(hipMalloc(&d_runs_count_output, sizeof(count_type)));
-
-        size_t temporary_storage_bytes = 0;
-
-        HIP_CHECK(
-            rocprim::run_length_encode(
-                nullptr, temporary_storage_bytes,
-                d_input, size,
-                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_unique_output),
-                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_counts_output),
-                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_runs_count_output),
-                stream, debug_synchronous
-            )
-        );
-
-        ASSERT_GT(temporary_storage_bytes, 0U);
-
-        void * d_temporary_storage;
-        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
-
-        HIP_CHECK(
-            rocprim::run_length_encode(
-                d_temporary_storage, temporary_storage_bytes,
-                d_input, size,
-                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_unique_output),
-                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_counts_output),
-                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_runs_count_output),
-                stream, debug_synchronous
-            )
-        );
-
-        HIP_CHECK(hipFree(d_temporary_storage));
-
-        std::vector<key_type> unique_output(runs_count_expected);
-        std::vector<count_type> counts_output(runs_count_expected);
-        std::vector<count_type> runs_count_output(1);
-        HIP_CHECK(
-            hipMemcpy(
-                unique_output.data(), d_unique_output,
-                runs_count_expected * sizeof(key_type),
-                hipMemcpyDeviceToHost
-            )
-        );
-        HIP_CHECK(
-            hipMemcpy(
-                counts_output.data(), d_counts_output,
-                runs_count_expected * sizeof(count_type),
-                hipMemcpyDeviceToHost
-            )
-        );
-        HIP_CHECK(
-            hipMemcpy(
-                runs_count_output.data(), d_runs_count_output,
-                sizeof(count_type),
-                hipMemcpyDeviceToHost
-            )
-        );
-
-        HIP_CHECK(hipFree(d_input));
-        HIP_CHECK(hipFree(d_unique_output));
-        HIP_CHECK(hipFree(d_counts_output));
-        HIP_CHECK(hipFree(d_runs_count_output));
-
-        // Validating results
-
-        std::vector<count_type> runs_count_expected_2;
-        runs_count_expected_2.push_back(static_cast<count_type>(runs_count_expected));
-        test_utils::custom_assert_eq(runs_count_output, runs_count_expected_2, 1);
-
-        ASSERT_NO_FATAL_FAILURE(test_utils::custom_assert_eq(unique_output, unique_expected, runs_count_expected));
-        ASSERT_NO_FATAL_FAILURE(test_utils::custom_assert_eq(counts_output, counts_expected, runs_count_expected));
     }
+    
 }
 
 TYPED_TEST(RocprimDeviceRunLengthEncode, NonTrivialRuns)
@@ -267,147 +274,154 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, NonTrivialRuns)
     const unsigned int seed = 123;
     std::default_random_engine gen(seed);
 
-    for(size_t size : get_sizes())
+    for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
     {
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
+        unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
 
-        hipStream_t stream = 0; // default
-
-        // Generate data and calculate expected results
-        std::vector<offset_type> offsets_expected;
-        std::vector<count_type> counts_expected;
-        size_t runs_count_expected = 0;
-
-        std::vector<key_type> input(size);
-        key_distribution_type key_delta_dis(1, 5);
-        std::uniform_int_distribution<size_t> key_count_dis(
-            TestFixture::params::min_segment_length,
-            TestFixture::params::max_segment_length
-        );
-        std::bernoulli_distribution is_trivial_dis(0.1);
-        std::vector<count_type> values_input = test_utils::get_random_data<count_type>(size, 0, 100);
-
-        size_t offset = 0;
-        key_type current_key = key_distribution_type(0, 100)(gen);
-        while(offset < size)
+        for(size_t size : get_sizes(seed_value))
         {
-            size_t key_count;
-            if(TestFixture::params::min_segment_length == 1 && is_trivial_dis(gen))
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            hipStream_t stream = 0; // default
+
+            // Generate data and calculate expected results
+            std::vector<offset_type> offsets_expected;
+            std::vector<count_type> counts_expected;
+            size_t runs_count_expected = 0;
+
+            std::vector<key_type> input(size);
+            key_distribution_type key_delta_dis(1, 5);
+            std::uniform_int_distribution<size_t> key_count_dis(
+                TestFixture::params::min_segment_length,
+                TestFixture::params::max_segment_length
+            );
+            std::bernoulli_distribution is_trivial_dis(0.1);
+            std::vector<count_type> values_input = test_utils::get_random_data<count_type>(size, 0, 100, seed_value);
+
+            size_t offset = 0;
+            key_type current_key = key_distribution_type(0, 100)(gen);
+            while(offset < size)
             {
-                // Increased probability of trivial runs for long segments
-                key_count = 1;
+                size_t key_count;
+                if(TestFixture::params::min_segment_length == 1 && is_trivial_dis(gen))
+                {
+                    // Increased probability of trivial runs for long segments
+                    key_count = 1;
+                }
+                else
+                {
+                    key_count = key_count_dis(gen);
+                }
+                current_key = current_key + key_delta_dis(gen);
+
+                const size_t end = std::min(size, offset + key_count);
+                key_count = end - offset;
+                for(size_t i = offset; i < end; i++)
+                {
+                    input[i] = current_key;
+                }
+
+                if(key_count > 1)
+                {
+                    offsets_expected.push_back(offset);
+                    runs_count_expected++;
+                    counts_expected.push_back(key_count);
+                }
+
+                offset += key_count;
             }
-            else
-            {
-                key_count = key_count_dis(gen);
-            }
-            current_key = current_key + key_delta_dis(gen);
 
-            const size_t end = std::min(size, offset + key_count);
-            key_count = end - offset;
-            for(size_t i = offset; i < end; i++)
-            {
-                input[i] = current_key;
-            }
-
-            if(key_count > 1)
-            {
-                offsets_expected.push_back(offset);
-                runs_count_expected++;
-                counts_expected.push_back(key_count);
-            }
-
-            offset += key_count;
-        }
-
-        key_type * d_input;
-        HIP_CHECK(hipMalloc(&d_input, size * sizeof(key_type)));
-        HIP_CHECK(
-            hipMemcpy(
-                d_input, input.data(),
-                size * sizeof(key_type),
-                hipMemcpyHostToDevice
-            )
-        );
-
-        offset_type * d_offsets_output;
-        count_type * d_counts_output;
-        count_type * d_runs_count_output;
-        HIP_CHECK(hipMalloc(&d_offsets_output, std::max<size_t>(1, runs_count_expected) * sizeof(offset_type)));
-        HIP_CHECK(hipMalloc(&d_counts_output, std::max<size_t>(1, runs_count_expected) * sizeof(count_type)));
-        HIP_CHECK(hipMalloc(&d_runs_count_output, sizeof(count_type)));
-
-        size_t temporary_storage_bytes = 0;
-
-        HIP_CHECK(
-            rocprim::run_length_encode_non_trivial_runs(
-                nullptr, temporary_storage_bytes,
-                d_input, size,
-                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_offsets_output),
-                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_counts_output),
-                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_runs_count_output),
-                stream, debug_synchronous
-            )
-        );
-
-        ASSERT_GT(temporary_storage_bytes, 0U);
-
-        void * d_temporary_storage;
-        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
-
-        HIP_CHECK(
-            rocprim::run_length_encode_non_trivial_runs(
-                d_temporary_storage, temporary_storage_bytes,
-                d_input, size,
-                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_offsets_output),
-                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_counts_output),
-                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_runs_count_output),
-                stream, debug_synchronous
-            )
-        );
-
-        HIP_CHECK(hipFree(d_temporary_storage));
-
-        std::vector<offset_type> offsets_output(runs_count_expected);
-        std::vector<count_type> counts_output(runs_count_expected);
-        std::vector<count_type> runs_count_output(1);
-        if(runs_count_expected > 0)
-        {
+            key_type * d_input;
+            HIP_CHECK(hipMalloc(&d_input, size * sizeof(key_type)));
             HIP_CHECK(
                 hipMemcpy(
-                    offsets_output.data(), d_offsets_output,
-                    runs_count_expected * sizeof(offset_type),
+                    d_input, input.data(),
+                    size * sizeof(key_type),
+                    hipMemcpyHostToDevice
+                )
+            );
+
+            offset_type * d_offsets_output;
+            count_type * d_counts_output;
+            count_type * d_runs_count_output;
+            HIP_CHECK(hipMalloc(&d_offsets_output, std::max<size_t>(1, runs_count_expected) * sizeof(offset_type)));
+            HIP_CHECK(hipMalloc(&d_counts_output, std::max<size_t>(1, runs_count_expected) * sizeof(count_type)));
+            HIP_CHECK(hipMalloc(&d_runs_count_output, sizeof(count_type)));
+
+            size_t temporary_storage_bytes = 0;
+
+            HIP_CHECK(
+                rocprim::run_length_encode_non_trivial_runs(
+                    nullptr, temporary_storage_bytes,
+                    d_input, size,
+                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_offsets_output),
+                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_counts_output),
+                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_runs_count_output),
+                    stream, debug_synchronous
+                )
+            );
+
+            ASSERT_GT(temporary_storage_bytes, 0U);
+
+            void * d_temporary_storage;
+            HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+
+            HIP_CHECK(
+                rocprim::run_length_encode_non_trivial_runs(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_input, size,
+                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_offsets_output),
+                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_counts_output),
+                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_runs_count_output),
+                    stream, debug_synchronous
+                )
+            );
+
+            HIP_CHECK(hipFree(d_temporary_storage));
+
+            std::vector<offset_type> offsets_output(runs_count_expected);
+            std::vector<count_type> counts_output(runs_count_expected);
+            std::vector<count_type> runs_count_output(1);
+            if(runs_count_expected > 0)
+            {
+                HIP_CHECK(
+                    hipMemcpy(
+                        offsets_output.data(), d_offsets_output,
+                        runs_count_expected * sizeof(offset_type),
+                        hipMemcpyDeviceToHost
+                    )
+                );
+                HIP_CHECK(
+                    hipMemcpy(
+                        counts_output.data(), d_counts_output,
+                        runs_count_expected * sizeof(count_type),
+                        hipMemcpyDeviceToHost
+                    )
+                );
+            }
+            HIP_CHECK(
+                hipMemcpy(
+                    runs_count_output.data(), d_runs_count_output,
+                    sizeof(count_type),
                     hipMemcpyDeviceToHost
                 )
             );
-            HIP_CHECK(
-                hipMemcpy(
-                    counts_output.data(), d_counts_output,
-                    runs_count_expected * sizeof(count_type),
-                    hipMemcpyDeviceToHost
-                )
-            );
+
+            HIP_CHECK(hipFree(d_input));
+            HIP_CHECK(hipFree(d_offsets_output));
+            HIP_CHECK(hipFree(d_counts_output));
+            HIP_CHECK(hipFree(d_runs_count_output));
+
+            // Validating results
+
+            std::vector<count_type> runs_count_expected_2;
+            runs_count_expected_2.push_back(static_cast<count_type>(runs_count_expected));
+            test_utils::custom_assert_eq(runs_count_output, runs_count_expected_2, 1);
+
+            ASSERT_NO_FATAL_FAILURE(test_utils::custom_assert_eq(offsets_output, offsets_expected, runs_count_expected));
+            ASSERT_NO_FATAL_FAILURE(test_utils::custom_assert_eq(counts_output, counts_expected, runs_count_expected));
         }
-        HIP_CHECK(
-            hipMemcpy(
-                runs_count_output.data(), d_runs_count_output,
-                sizeof(count_type),
-                hipMemcpyDeviceToHost
-            )
-        );
-
-        HIP_CHECK(hipFree(d_input));
-        HIP_CHECK(hipFree(d_offsets_output));
-        HIP_CHECK(hipFree(d_counts_output));
-        HIP_CHECK(hipFree(d_runs_count_output));
-
-        // Validating results
-
-        std::vector<count_type> runs_count_expected_2;
-        runs_count_expected_2.push_back(static_cast<count_type>(runs_count_expected));
-        test_utils::custom_assert_eq(runs_count_output, runs_count_expected_2, 1);
-
-        ASSERT_NO_FATAL_FAILURE(test_utils::custom_assert_eq(offsets_output, offsets_expected, runs_count_expected));
-        ASSERT_NO_FATAL_FAILURE(test_utils::custom_assert_eq(counts_output, counts_expected, runs_count_expected));
     }
+    
 }
