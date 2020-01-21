@@ -162,7 +162,7 @@ public:
         {
             if (UseSleep)
             {
-                for (int j = 0; j < times_through; j++)
+                for (uint j = 0; j < times_through; j++)
                     __builtin_amdgcn_s_sleep(1);
                 if (times_through < SLEEP_MAX)
                     times_through++;
@@ -273,7 +273,7 @@ public:
         {
             if (UseSleep)
             {
-                for (int j = 0; j < times_through; j++)
+                for (uint j = 0; j < times_through; j++)
                     __builtin_amdgcn_s_sleep(1);
                 if (times_through < SLEEP_MAX)
                     times_through++;
