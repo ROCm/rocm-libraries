@@ -117,9 +117,9 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
         // compare function
         compare_op_type compare_op;
 
-        for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
+        for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {
-            unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+            unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
             SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
             // Generate data
@@ -250,9 +250,9 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKeyValue)
         // compare function
         compare_op_type compare_op;
 
-        for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
+        for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {
-            unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+            unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
             SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
             // Generate data

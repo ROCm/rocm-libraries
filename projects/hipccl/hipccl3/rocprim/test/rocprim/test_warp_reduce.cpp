@@ -87,9 +87,9 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSum)
         return;
     }
 
-    for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
 
         // Generate data
@@ -189,9 +189,9 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSum)
         return;
     }
 
-    for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
 
         // Generate data
@@ -299,9 +299,9 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumValid)
         return;
     }
 
-    for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
 
         // Generate data
@@ -402,9 +402,9 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSumValid)
         return;
     }
 
-    for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
 
         // Generate data
@@ -488,9 +488,9 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumCustomStruct)
         return;
     }
 
-    for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
 
         // Generate data
@@ -601,9 +601,9 @@ TYPED_TEST(RocprimWarpReduceTests, HeadSegmentedReduceSum)
         return;
     }
 
-    for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
 
         // Generate data
@@ -739,9 +739,9 @@ TYPED_TEST(RocprimWarpReduceTests, TailSegmentedReduceSum)
         return;
     }
 
-    for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
 
         // Generate data

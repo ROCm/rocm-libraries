@@ -195,9 +195,9 @@ TYPED_TEST(RocprimDeviceHistogramEven, Even)
         const size_t row_stride_bytes = row_stride * sizeof(sample_type);
         const size_t size = std::max<size_t>(1, rows * row_stride);
 
-        for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
+        for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {   
-            unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+            unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
             SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
             // Generate data
@@ -411,9 +411,9 @@ TYPED_TEST(RocprimDeviceHistogramRange, Range)
         }
         levels.push_back(level);
 
-        for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
+        for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {   
-            unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+            unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
             SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
             std::vector<sample_type> input = get_random_samples<sample_type>(size, levels[0], levels[bins], seed_value);
@@ -627,9 +627,9 @@ TYPED_TEST(RocprimDeviceHistogramMultiEven, MultiEven)
         const size_t size = std::max<size_t>(1, rows * row_stride);
 
 
-        for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
+        for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {
-            unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+            unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
             SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
             // Generate data
@@ -877,9 +877,9 @@ TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
         const size_t row_stride_bytes = row_stride * sizeof(sample_type);
         const size_t size = std::max<size_t>(1, rows * row_stride);
 
-        for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
+        for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {
-            unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+            unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
             SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
             
             // Generate data

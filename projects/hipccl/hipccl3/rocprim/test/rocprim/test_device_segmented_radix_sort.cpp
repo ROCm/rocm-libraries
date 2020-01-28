@@ -174,9 +174,9 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeys)
         TestFixture::params::max_segment_length
     );
 
-    for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
 
         const std::vector<size_t> sizes = get_sizes(seed_value);
@@ -327,9 +327,9 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairs)
         TestFixture::params::max_segment_length
     );
 
-    for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
 
         const std::vector<size_t> sizes = get_sizes(seed_value);
@@ -519,9 +519,9 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
         TestFixture::params::max_segment_length
     );
 
-    for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
 
         const std::vector<size_t> sizes = get_sizes(seed_value);
@@ -677,9 +677,9 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
         TestFixture::params::max_segment_length
     );
 
-    for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
 
         const std::vector<size_t> sizes = get_sizes(seed_value);
