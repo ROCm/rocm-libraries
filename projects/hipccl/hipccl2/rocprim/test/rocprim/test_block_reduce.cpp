@@ -134,9 +134,9 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, Reduce)
     const size_t size = block_size * 58;
     const size_t grid_size = size / block_size;
 
-    for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
 
         // Generate data
@@ -193,9 +193,9 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceMultiplies)
     const size_t size = block_size * 58;
     const size_t grid_size = size / block_size;
 
-    for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
 
         // Generate data
@@ -312,9 +312,9 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceValid)
     using binary_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_plus, rp::plus<T>>::type;
     constexpr size_t block_size = TestFixture::block_size;
 
-    for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
 
         const unsigned int valid_items = test_utils::get_random_value(block_size - 10, block_size, seed_value);
@@ -429,9 +429,9 @@ void test_block_reduce_input_arrays()
     const size_t size = items_per_block * 19;
     const size_t grid_size = size / items_per_block;
 
-    for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
 
         // Generate data

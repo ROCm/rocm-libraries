@@ -156,9 +156,9 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
     const bool debug_synchronous = TestFixture::debug_synchronous;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
 
-    for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
 
         const std::vector<size_t> sizes = get_sizes(seed_value);
@@ -262,9 +262,9 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
     const bool debug_synchronous = TestFixture::debug_synchronous;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
 
-    for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
 
         const std::vector<size_t> sizes = get_sizes(seed_value);
@@ -393,9 +393,9 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
     const bool debug_synchronous = TestFixture::debug_synchronous;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
 
-    for (size_t seed_index = 0; seed_index < seed_size; seed_index++)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        unsigned int seed_value = use_seed  ? seeds[seed_index] : rand();
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
 
         const std::vector<size_t> sizes = get_sizes(seed_value);
