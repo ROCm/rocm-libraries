@@ -72,52 +72,59 @@ TYPED_TEST(RocprimBlockSortTests, SortKey)
     const size_t size = block_size * 1134;
     const size_t grid_size = size / block_size;
 
-    // Generate data
-    std::vector<key_type> output = test_utils::get_random_data<key_type>(size, -100, 100);
-
-    // Calculate expected results on host
-    std::vector<key_type> expected(output);
-    binary_op_type binary_op;
-    for(size_t i = 0; i < output.size() / block_size; i++)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        std::sort(
-            expected.begin() + (i * block_size),
-            expected.begin() + ((i + 1) * block_size),
-            binary_op
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+
+        // Generate data
+        std::vector<key_type> output = test_utils::get_random_data<key_type>(size, -100, 100, seed_value);
+
+        // Calculate expected results on host
+        std::vector<key_type> expected(output);
+        binary_op_type binary_op;
+        for(size_t i = 0; i < output.size() / block_size; i++)
+        {
+            std::sort(
+                expected.begin() + (i * block_size),
+                expected.begin() + ((i + 1) * block_size),
+                binary_op
+            );
+        }
+
+        // Preparing device
+        key_type * device_key_output;
+        HIP_CHECK(hipMalloc(&device_key_output, output.size() * sizeof(key_type)));
+
+        HIP_CHECK(
+            hipMemcpy(
+                device_key_output, output.data(),
+                output.size() * sizeof(key_type),
+                hipMemcpyHostToDevice
+            )
         );
+
+        // Running kernel
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(sort_key_kernel<block_size, key_type>),
+            dim3(grid_size), dim3(block_size), 0, 0,
+            device_key_output
+        );
+
+        // Reading results back
+        HIP_CHECK(
+            hipMemcpy(
+                output.data(), device_key_output,
+                output.size() * sizeof(key_type),
+                hipMemcpyDeviceToHost
+            )
+        );
+
+        test_utils::assert_eq(output, expected);
+
+        HIP_CHECK(hipFree(device_key_output));
     }
-
-    // Preparing device
-    key_type * device_key_output;
-    HIP_CHECK(hipMalloc(&device_key_output, output.size() * sizeof(key_type)));
-
-    HIP_CHECK(
-        hipMemcpy(
-            device_key_output, output.data(),
-            output.size() * sizeof(key_type),
-            hipMemcpyHostToDevice
-        )
-    );
-
-    // Running kernel
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(sort_key_kernel<block_size, key_type>),
-        dim3(grid_size), dim3(block_size), 0, 0,
-        device_key_output
-    );
-
-    // Reading results back
-    HIP_CHECK(
-        hipMemcpy(
-            output.data(), device_key_output,
-            output.size() * sizeof(key_type),
-            hipMemcpyDeviceToHost
-        )
-    );
-
-    test_utils::assert_eq(output, expected);
-
-    HIP_CHECK(hipFree(device_key_output));
+    
 }
 
 template<class Key, class Value>
@@ -160,96 +167,103 @@ TYPED_TEST(RocprimBlockSortTests, SortKeyValue)
     const size_t size = block_size * 1134;
     const size_t grid_size = size / block_size;
 
-    // Generate data
-    std::vector<key_type> output_key = test_utils::get_random_data<key_type>(size, 0, 100);
-    std::vector<value_type> output_value = test_utils::get_random_data<value_type>(size, -100, 100);
-
-    // Combine vectors to form pairs with key and value
-    std::vector<std::pair<key_type, value_type>> target(size);
-    for (unsigned i = 0; i < target.size(); i++)
-        target[i] = std::make_pair(output_key[i], output_value[i]);
-
-    // Calculate expected results on host
-    using key_value = std::pair<key_type, value_type>;
-    std::vector<key_value> expected(target);
-    for(size_t i = 0; i < expected.size() / block_size; i++)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        std::sort(
-            expected.begin() + (i * block_size),
-            expected.begin() + ((i + 1) * block_size),
-            pair_comparator<key_type, value_type>()
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+
+        // Generate data
+        std::vector<key_type> output_key = test_utils::get_random_data<key_type>(size, 0, 100, seed_value);
+        std::vector<value_type> output_value = test_utils::get_random_data<value_type>(size, -100, 100, seed_value);
+
+        // Combine vectors to form pairs with key and value
+        std::vector<std::pair<key_type, value_type>> target(size);
+        for (unsigned i = 0; i < target.size(); i++)
+            target[i] = std::make_pair(output_key[i], output_value[i]);
+
+        // Calculate expected results on host
+        using key_value = std::pair<key_type, value_type>;
+        std::vector<key_value> expected(target);
+        for(size_t i = 0; i < expected.size() / block_size; i++)
+        {
+            std::sort(
+                expected.begin() + (i * block_size),
+                expected.begin() + ((i + 1) * block_size),
+                pair_comparator<key_type, value_type>()
+            );
+        }
+
+        // Preparing device
+        key_type * device_key_output;
+        HIP_CHECK(hipMalloc(&device_key_output, output_key.size() * sizeof(key_type)));
+        value_type * device_value_output;
+        HIP_CHECK(hipMalloc(&device_value_output, output_value.size() * sizeof(value_type)));
+
+        HIP_CHECK(
+            hipMemcpy(
+                device_key_output, output_key.data(),
+                output_key.size() * sizeof(key_type),
+                hipMemcpyHostToDevice
+            )
         );
-    }
 
-    // Preparing device
-    key_type * device_key_output;
-    HIP_CHECK(hipMalloc(&device_key_output, output_key.size() * sizeof(key_type)));
-    value_type * device_value_output;
-    HIP_CHECK(hipMalloc(&device_value_output, output_value.size() * sizeof(value_type)));
+        HIP_CHECK(
+            hipMemcpy(
+                device_value_output, output_value.data(),
+                output_value.size() * sizeof(value_type),
+                hipMemcpyHostToDevice
+            )
+        );
 
-    HIP_CHECK(
-        hipMemcpy(
-            device_key_output, output_key.data(),
-            output_key.size() * sizeof(key_type),
-            hipMemcpyHostToDevice
-        )
-    );
+        // Running kernel
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(sort_key_value_kernel<block_size, key_type, value_type>),
+            dim3(grid_size), dim3(block_size), 0, 0,
+            device_key_output, device_value_output
+        );
 
-    HIP_CHECK(
-        hipMemcpy(
-            device_value_output, output_value.data(),
-            output_value.size() * sizeof(value_type),
-            hipMemcpyHostToDevice
-        )
-    );
+        // Reading results back
+        HIP_CHECK(
+            hipMemcpy(
+                output_key.data(), device_key_output,
+                output_key.size() * sizeof(key_type),
+                hipMemcpyDeviceToHost
+            )
+        );
 
-    // Running kernel
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(sort_key_value_kernel<block_size, key_type, value_type>),
-        dim3(grid_size), dim3(block_size), 0, 0,
-        device_key_output, device_value_output
-    );
+        HIP_CHECK(
+            hipMemcpy(
+                output_value.data(), device_value_output,
+                output_value.size() * sizeof(value_type),
+                hipMemcpyDeviceToHost
+            )
+        );
 
-    // Reading results back
-    HIP_CHECK(
-        hipMemcpy(
-            output_key.data(), device_key_output,
-            output_key.size() * sizeof(key_type),
-            hipMemcpyDeviceToHost
-        )
-    );
+        std::vector<key_type> expected_key(expected.size());
+        std::vector<value_type> expected_value(expected.size());
+        for(size_t i = 0; i < expected.size(); i++)
+        {
+            expected_key[i] = expected[i].first;
+            expected_value[i] = expected[i].second;
+        }
 
-    HIP_CHECK(
-        hipMemcpy(
-            output_value.data(), device_value_output,
-            output_value.size() * sizeof(value_type),
-            hipMemcpyDeviceToHost
-        )
-    );
-
-    std::vector<key_type> expected_key(expected.size());
-    std::vector<value_type> expected_value(expected.size());
-    for(size_t i = 0; i < expected.size(); i++)
-    {
-        expected_key[i] = expected[i].first;
-        expected_value[i] = expected[i].second;
-    }
-
-    // Keys are sorted, Values order not guaranteed
-    // Sort subsets where key was the same to make sure all values are still present
-    value_op_type value_op;
-    eq_op_type eq_op;
-    for (size_t i = 0; i < output_key.size();)
-    {
-        auto j = i;
-        for (; j < output_key.size() && eq_op(output_key[j], output_key[i]); ++j) { }
-        std::sort(output_value.begin() + i, output_value.begin() + j, value_op);
-        std::sort(expected_value.begin() + i, expected_value.begin() + j, value_op);
-        i = j;
+        // Keys are sorted, Values order not guaranteed
+        // Sort subsets where key was the same to make sure all values are still present
+        value_op_type value_op;
+        eq_op_type eq_op;
+        for (size_t i = 0; i < output_key.size();)
+        {
+            auto j = i;
+            for (; j < output_key.size() && eq_op(output_key[j], output_key[i]); ++j) { }
+            std::sort(output_value.begin() + i, output_value.begin() + j, value_op);
+            std::sort(expected_value.begin() + i, expected_value.begin() + j, value_op);
+            i = j;
+        }
+        
+        test_utils::assert_eq(output_key, expected_key);
+        test_utils::assert_eq(output_value, expected_value);
     }
     
-    test_utils::assert_eq(output_key, expected_key);
-    test_utils::assert_eq(output_value, expected_value);
 }
 
 template<class Key, class Value>
@@ -289,94 +303,101 @@ TYPED_TEST(RocprimBlockSortTests, CustomSortKeyValue)
     const size_t size = block_size * 1134;
     const size_t grid_size = size / block_size;
 
-    // Generate data
-    std::vector<key_type> output_key = test_utils::get_random_data<key_type>(size, 0, 100);
-    std::vector<value_type> output_value = test_utils::get_random_data<value_type>(size, -100, 100);
-
-    // Combine vectors to form pairs with key and value
-    std::vector<std::pair<key_type, value_type>> target(size);
-    for (unsigned i = 0; i < target.size(); i++)
-        target[i] = std::make_pair(output_key[i], output_value[i]);
-
-    // Calculate expected results on host
-    using key_value = std::pair<key_type, value_type>;
-    std::vector<key_value> expected(target);
-    for(size_t i = 0; i < expected.size() / block_size; i++)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        std::sort(
-            expected.begin() + (i * block_size),
-            expected.begin() + ((i + 1) * block_size),
-            key_value_comparator<key_type, value_type>()
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+
+        // Generate data
+        std::vector<key_type> output_key = test_utils::get_random_data<key_type>(size, 0, 100, seed_value);
+        std::vector<value_type> output_value = test_utils::get_random_data<value_type>(size, -100, 100, seed_value);
+
+        // Combine vectors to form pairs with key and value
+        std::vector<std::pair<key_type, value_type>> target(size);
+        for (unsigned i = 0; i < target.size(); i++)
+            target[i] = std::make_pair(output_key[i], output_value[i]);
+
+        // Calculate expected results on host
+        using key_value = std::pair<key_type, value_type>;
+        std::vector<key_value> expected(target);
+        for(size_t i = 0; i < expected.size() / block_size; i++)
+        {
+            std::sort(
+                expected.begin() + (i * block_size),
+                expected.begin() + ((i + 1) * block_size),
+                key_value_comparator<key_type, value_type>()
+            );
+        }
+
+        // Preparing device
+        key_type * device_key_output;
+        HIP_CHECK(hipMalloc(&device_key_output, output_key.size() * sizeof(key_type)));
+        value_type * device_value_output;
+        HIP_CHECK(hipMalloc(&device_value_output, output_value.size() * sizeof(value_type)));
+
+        HIP_CHECK(
+            hipMemcpy(
+                device_key_output, output_key.data(),
+                output_key.size() * sizeof(key_type),
+                hipMemcpyHostToDevice
+            )
         );
+
+        HIP_CHECK(
+            hipMemcpy(
+                device_value_output, output_value.data(),
+                output_value.size() * sizeof(value_type),
+                hipMemcpyHostToDevice
+            )
+        );
+
+        // Running kernel
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(custom_sort_key_value_kernel<block_size, key_type, value_type>),
+            dim3(grid_size), dim3(block_size), 0, 0,
+            device_key_output, device_value_output
+        );
+
+        // Reading results back
+        HIP_CHECK(
+            hipMemcpy(
+                output_key.data(), device_key_output,
+                output_key.size() * sizeof(key_type),
+                hipMemcpyDeviceToHost
+            )
+        );
+
+        HIP_CHECK(
+            hipMemcpy(
+                output_value.data(), device_value_output,
+                output_value.size() * sizeof(value_type),
+                hipMemcpyDeviceToHost
+            )
+        );
+
+        std::vector<key_type> expected_key(expected.size());
+        std::vector<value_type> expected_value(expected.size());
+        for(size_t i = 0; i < expected.size(); i++)
+        {
+            expected_key[i] = expected[i].first;
+            expected_value[i] = expected[i].second;
+        }
+
+        // Keys are sorted, Values order not guaranteed
+        // Sort subsets where key was the same to make sure all values are still present
+        value_op_type value_op;
+        eq_op_type eq_op;
+        for (size_t i = 0; i < output_key.size();)
+        {
+            auto j = i;
+            for (; j < output_key.size() && eq_op(output_key[j], output_key[i]); ++j) { }
+            std::sort(output_value.begin() + i, output_value.begin() + j, value_op);
+            std::sort(expected_value.begin() + i, expected_value.begin() + j, value_op);
+            i = j;
+        }
+
+        test_utils::assert_eq(output_key, expected_key);
+        test_utils::assert_eq(output_value, expected_value);
     }
-
-    // Preparing device
-    key_type * device_key_output;
-    HIP_CHECK(hipMalloc(&device_key_output, output_key.size() * sizeof(key_type)));
-    value_type * device_value_output;
-    HIP_CHECK(hipMalloc(&device_value_output, output_value.size() * sizeof(value_type)));
-
-    HIP_CHECK(
-        hipMemcpy(
-            device_key_output, output_key.data(),
-            output_key.size() * sizeof(key_type),
-            hipMemcpyHostToDevice
-        )
-    );
-
-    HIP_CHECK(
-        hipMemcpy(
-            device_value_output, output_value.data(),
-            output_value.size() * sizeof(value_type),
-            hipMemcpyHostToDevice
-        )
-    );
-
-    // Running kernel
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(custom_sort_key_value_kernel<block_size, key_type, value_type>),
-        dim3(grid_size), dim3(block_size), 0, 0,
-        device_key_output, device_value_output
-    );
-
-    // Reading results back
-    HIP_CHECK(
-        hipMemcpy(
-            output_key.data(), device_key_output,
-            output_key.size() * sizeof(key_type),
-            hipMemcpyDeviceToHost
-        )
-    );
-
-    HIP_CHECK(
-        hipMemcpy(
-            output_value.data(), device_value_output,
-            output_value.size() * sizeof(value_type),
-            hipMemcpyDeviceToHost
-        )
-    );
-
-    std::vector<key_type> expected_key(expected.size());
-    std::vector<value_type> expected_value(expected.size());
-    for(size_t i = 0; i < expected.size(); i++)
-    {
-        expected_key[i] = expected[i].first;
-        expected_value[i] = expected[i].second;
-    }
-
-    // Keys are sorted, Values order not guaranteed
-    // Sort subsets where key was the same to make sure all values are still present
-    value_op_type value_op;
-    eq_op_type eq_op;
-    for (size_t i = 0; i < output_key.size();)
-    {
-        auto j = i;
-        for (; j < output_key.size() && eq_op(output_key[j], output_key[i]); ++j) { }
-        std::sort(output_value.begin() + i, output_value.begin() + j, value_op);
-        std::sort(expected_value.begin() + i, expected_value.begin() + j, value_op);
-        i = j;
-    }
-
-    test_utils::assert_eq(output_key, expected_key);
-    test_utils::assert_eq(output_value, expected_value);
+    
 }

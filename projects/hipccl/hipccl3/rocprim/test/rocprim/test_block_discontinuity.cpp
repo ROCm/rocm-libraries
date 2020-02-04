@@ -254,76 +254,83 @@ auto test_block_discontinuity()
         return;
     }
 
-    // Generate data
-    std::vector<type> input = test_utils::get_random_data<type>(size, 0, 10);
-    std::vector<long long> heads(size);
-
-    // Calculate expected results on host
-    std::vector<stored_flag_type> expected_heads(size);
-    flag_op_type flag_op;
-    for(size_t bi = 0; bi < size / items_per_block; bi++)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        for(size_t ii = 0; ii < items_per_block; ii++)
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+
+        // Generate data
+        std::vector<type> input = test_utils::get_random_data<type>(size, 0, 10, seed_value);
+        std::vector<long long> heads(size);
+
+        // Calculate expected results on host
+        std::vector<stored_flag_type> expected_heads(size);
+        flag_op_type flag_op;
+        for(size_t bi = 0; bi < size / items_per_block; bi++)
         {
-            const size_t i = bi * items_per_block + ii;
-            if(ii == 0)
+            for(size_t ii = 0; ii < items_per_block; ii++)
             {
-                expected_heads[i] = bi % 2 == 1
-                    ? apply(flag_op, input[i - 1], input[i], ii)
-                    : flag_type(true);
-            }
-            else
-            {
-                expected_heads[i] = apply(flag_op, input[i - 1], input[i], ii);
+                const size_t i = bi * items_per_block + ii;
+                if(ii == 0)
+                {
+                    expected_heads[i] = bi % 2 == 1
+                        ? apply(flag_op, input[i - 1], input[i], ii)
+                        : flag_type(true);
+                }
+                else
+                {
+                    expected_heads[i] = apply(flag_op, input[i - 1], input[i], ii);
+                }
             }
         }
+
+        // Preparing Device
+        type* device_input;
+        HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
+        long long* device_heads;
+        HIP_CHECK(hipMalloc(&device_heads, heads.size() * sizeof(typename decltype(heads)::value_type)));
+
+        HIP_CHECK(
+            hipMemcpy(
+                device_input, input.data(),
+                input.size() * sizeof(type),
+                hipMemcpyHostToDevice
+            )
+        );
+
+        // Running kernel
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(
+                flag_heads_kernel<
+                    type, flag_type, flag_op_type,
+                    block_size, items_per_thread
+                >
+            ),
+            dim3(grid_size), dim3(block_size), 0, 0,
+            device_input, device_heads
+        );
+        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Reading results
+        HIP_CHECK(
+            hipMemcpy(
+                heads.data(), device_heads,
+                heads.size() * sizeof(typename decltype(heads)::value_type),
+                hipMemcpyDeviceToHost
+            )
+        );
+
+        // Validating results
+        for(size_t i = 0; i < size; i++)
+        {
+            ASSERT_EQ(heads[i], expected_heads[i]);
+        }
+
+        HIP_CHECK(hipFree(device_input));
+        HIP_CHECK(hipFree(device_heads));
     }
-
-    // Preparing Device
-    type* device_input;
-    HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
-    long long* device_heads;
-    HIP_CHECK(hipMalloc(&device_heads, heads.size() * sizeof(typename decltype(heads)::value_type)));
-
-    HIP_CHECK(
-        hipMemcpy(
-            device_input, input.data(),
-            input.size() * sizeof(type),
-            hipMemcpyHostToDevice
-        )
-    );
-
-    // Running kernel
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(
-            flag_heads_kernel<
-                type, flag_type, flag_op_type,
-                block_size, items_per_thread
-            >
-        ),
-        dim3(grid_size), dim3(block_size), 0, 0,
-        device_input, device_heads
-    );
-    HIP_CHECK(hipPeekAtLastError());
-    HIP_CHECK(hipDeviceSynchronize());
-
-    // Reading results
-    HIP_CHECK(
-        hipMemcpy(
-            heads.data(), device_heads,
-            heads.size() * sizeof(typename decltype(heads)::value_type),
-            hipMemcpyDeviceToHost
-        )
-    );
-
-    // Validating results
-    for(size_t i = 0; i < size; i++)
-    {
-        ASSERT_EQ(heads[i], expected_heads[i]);
-    }
-
-    HIP_CHECK(hipFree(device_input));
-    HIP_CHECK(hipFree(device_heads));
+    
 }
 
 template<
@@ -359,76 +366,83 @@ auto test_block_discontinuity()
         return;
     }
 
-    // Generate data
-    std::vector<type> input = test_utils::get_random_data<type>(size, 0, 10);
-    std::vector<long long> tails(size);
-
-    // Calculate expected results on host
-    std::vector<stored_flag_type> expected_tails(size);
-    flag_op_type flag_op;
-    for(size_t bi = 0; bi < size / items_per_block; bi++)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        for(size_t ii = 0; ii < items_per_block; ii++)
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+
+        // Generate data
+        std::vector<type> input = test_utils::get_random_data<type>(size, 0, 10, seed_value);
+        std::vector<long long> tails(size);
+
+        // Calculate expected results on host
+        std::vector<stored_flag_type> expected_tails(size);
+        flag_op_type flag_op;
+        for(size_t bi = 0; bi < size / items_per_block; bi++)
         {
-            const size_t i = bi * items_per_block + ii;
-            if(ii == items_per_block - 1)
+            for(size_t ii = 0; ii < items_per_block; ii++)
             {
-                expected_tails[i] = bi % 2 == 0
-                    ? apply(flag_op, input[i], input[i + 1], ii + 1)
-                    : flag_type(true);
-            }
-            else
-            {
-                expected_tails[i] = apply(flag_op, input[i], input[i + 1], ii + 1);
+                const size_t i = bi * items_per_block + ii;
+                if(ii == items_per_block - 1)
+                {
+                    expected_tails[i] = bi % 2 == 0
+                        ? apply(flag_op, input[i], input[i + 1], ii + 1)
+                        : flag_type(true);
+                }
+                else
+                {
+                    expected_tails[i] = apply(flag_op, input[i], input[i + 1], ii + 1);
+                }
             }
         }
+
+        // Preparing Device
+        type* device_input;
+        HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
+        long long* device_tails;
+        HIP_CHECK(hipMalloc(&device_tails, tails.size() * sizeof(typename decltype(tails)::value_type)));
+
+        HIP_CHECK(
+            hipMemcpy(
+                device_input, input.data(),
+                input.size() * sizeof(type),
+                hipMemcpyHostToDevice
+            )
+        );
+
+        // Running kernel
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(
+                flag_tails_kernel<
+                    type, flag_type, flag_op_type,
+                    block_size, items_per_thread
+                >
+            ),
+            dim3(grid_size), dim3(block_size), 0, 0,
+            device_input, device_tails
+        );
+        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Reading results
+        HIP_CHECK(
+            hipMemcpy(
+                tails.data(), device_tails,
+                tails.size() * sizeof(typename decltype(tails)::value_type),
+                hipMemcpyDeviceToHost
+            )
+        );
+
+        // Validating results
+        for(size_t i = 0; i < size; i++)
+        {
+            ASSERT_EQ(tails[i], expected_tails[i]);
+        }
+
+        HIP_CHECK(hipFree(device_input));
+        HIP_CHECK(hipFree(device_tails));
     }
-
-    // Preparing Device
-    type* device_input;
-    HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
-    long long* device_tails;
-    HIP_CHECK(hipMalloc(&device_tails, tails.size() * sizeof(typename decltype(tails)::value_type)));
-
-    HIP_CHECK(
-        hipMemcpy(
-            device_input, input.data(),
-            input.size() * sizeof(type),
-            hipMemcpyHostToDevice
-        )
-    );
-
-    // Running kernel
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(
-            flag_tails_kernel<
-                type, flag_type, flag_op_type,
-                block_size, items_per_thread
-            >
-        ),
-        dim3(grid_size), dim3(block_size), 0, 0,
-        device_input, device_tails
-    );
-    HIP_CHECK(hipPeekAtLastError());
-    HIP_CHECK(hipDeviceSynchronize());
-
-    // Reading results
-    HIP_CHECK(
-        hipMemcpy(
-            tails.data(), device_tails,
-            tails.size() * sizeof(typename decltype(tails)::value_type),
-            hipMemcpyDeviceToHost
-        )
-    );
-
-    // Validating results
-    for(size_t i = 0; i < size; i++)
-    {
-        ASSERT_EQ(tails[i], expected_tails[i]);
-    }
-
-    HIP_CHECK(hipFree(device_input));
-    HIP_CHECK(hipFree(device_tails));
+    
 }
 
 template<
@@ -464,100 +478,107 @@ auto test_block_discontinuity()
         return;
     }
 
-    // Generate data
-    std::vector<type> input = test_utils::get_random_data<type>(size, 0, 10);
-    std::vector<long long> heads(size);
-    std::vector<long long> tails(size);
-
-    // Calculate expected results on host
-    std::vector<stored_flag_type> expected_heads(size);
-    std::vector<stored_flag_type> expected_tails(size);
-    flag_op_type flag_op;
-    for(size_t bi = 0; bi < size / items_per_block; bi++)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        for(size_t ii = 0; ii < items_per_block; ii++)
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+
+        // Generate data
+        std::vector<type> input = test_utils::get_random_data<type>(size, 0, 10, seed_value);
+        std::vector<long long> heads(size);
+        std::vector<long long> tails(size);
+
+        // Calculate expected results on host
+        std::vector<stored_flag_type> expected_heads(size);
+        std::vector<stored_flag_type> expected_tails(size);
+        flag_op_type flag_op;
+        for(size_t bi = 0; bi < size / items_per_block; bi++)
         {
-            const size_t i = bi * items_per_block + ii;
-            if(ii == 0)
+            for(size_t ii = 0; ii < items_per_block; ii++)
             {
-                expected_heads[i] = (bi % 4 == 1 || bi % 4 == 2)
-                    ? apply(flag_op, input[i - 1], input[i], ii)
-                    : flag_type(true);
-            }
-            else
-            {
-                expected_heads[i] = apply(flag_op, input[i - 1], input[i], ii);
-            }
-            if(ii == items_per_block - 1)
-            {
-                expected_tails[i] = (bi % 4 == 0 || bi % 4 == 1)
-                    ? apply(flag_op, input[i], input[i + 1], ii + 1)
-                    : flag_type(true);
-            }
-            else
-            {
-                expected_tails[i] = apply(flag_op, input[i], input[i + 1], ii + 1);
+                const size_t i = bi * items_per_block + ii;
+                if(ii == 0)
+                {
+                    expected_heads[i] = (bi % 4 == 1 || bi % 4 == 2)
+                        ? apply(flag_op, input[i - 1], input[i], ii)
+                        : flag_type(true);
+                }
+                else
+                {
+                    expected_heads[i] = apply(flag_op, input[i - 1], input[i], ii);
+                }
+                if(ii == items_per_block - 1)
+                {
+                    expected_tails[i] = (bi % 4 == 0 || bi % 4 == 1)
+                        ? apply(flag_op, input[i], input[i + 1], ii + 1)
+                        : flag_type(true);
+                }
+                else
+                {
+                    expected_tails[i] = apply(flag_op, input[i], input[i + 1], ii + 1);
+                }
             }
         }
+
+        // Preparing Device
+        type* device_input;
+        HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
+        long long* device_heads;
+        HIP_CHECK(hipMalloc(&device_heads, tails.size() * sizeof(typename decltype(heads)::value_type)));
+        long long* device_tails;
+        HIP_CHECK(hipMalloc(&device_tails, tails.size() * sizeof(typename decltype(tails)::value_type)));
+
+        HIP_CHECK(
+            hipMemcpy(
+                device_input, input.data(),
+                input.size() * sizeof(type),
+                hipMemcpyHostToDevice
+            )
+        );
+
+        // Running kernel
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(
+                flag_heads_and_tails_kernel<
+                    type, flag_type, flag_op_type,
+                    block_size, items_per_thread
+                >
+            ),
+            dim3(grid_size), dim3(block_size), 0, 0,
+            device_input, device_heads, device_tails
+        );
+        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Reading results
+        HIP_CHECK(
+            hipMemcpy(
+                heads.data(), device_heads,
+                heads.size() * sizeof(typename decltype(heads)::value_type),
+                hipMemcpyDeviceToHost
+            )
+        );
+
+        HIP_CHECK(
+            hipMemcpy(
+                tails.data(), device_tails,
+                tails.size() * sizeof(typename decltype(tails)::value_type),
+                hipMemcpyDeviceToHost
+            )
+        );
+
+        // Validating results
+        for(size_t i = 0; i < size; i++)
+        {
+            ASSERT_EQ(heads[i], expected_heads[i]);
+            ASSERT_EQ(tails[i], expected_tails[i]);
+        }
+
+        HIP_CHECK(hipFree(device_input));
+        HIP_CHECK(hipFree(device_heads));
+        HIP_CHECK(hipFree(device_tails));
     }
-
-    // Preparing Device
-    type* device_input;
-    HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
-    long long* device_heads;
-    HIP_CHECK(hipMalloc(&device_heads, tails.size() * sizeof(typename decltype(heads)::value_type)));
-    long long* device_tails;
-    HIP_CHECK(hipMalloc(&device_tails, tails.size() * sizeof(typename decltype(tails)::value_type)));
-
-    HIP_CHECK(
-        hipMemcpy(
-            device_input, input.data(),
-            input.size() * sizeof(type),
-            hipMemcpyHostToDevice
-        )
-    );
-
-    // Running kernel
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(
-            flag_heads_and_tails_kernel<
-                type, flag_type, flag_op_type,
-                block_size, items_per_thread
-            >
-        ),
-        dim3(grid_size), dim3(block_size), 0, 0,
-        device_input, device_heads, device_tails
-    );
-    HIP_CHECK(hipPeekAtLastError());
-    HIP_CHECK(hipDeviceSynchronize());
-
-    // Reading results
-    HIP_CHECK(
-        hipMemcpy(
-            heads.data(), device_heads,
-            heads.size() * sizeof(typename decltype(heads)::value_type),
-            hipMemcpyDeviceToHost
-        )
-    );
-
-    HIP_CHECK(
-        hipMemcpy(
-            tails.data(), device_tails,
-            tails.size() * sizeof(typename decltype(tails)::value_type),
-            hipMemcpyDeviceToHost
-        )
-    );
-
-    // Validating results
-    for(size_t i = 0; i < size; i++)
-    {
-        ASSERT_EQ(heads[i], expected_heads[i]);
-        ASSERT_EQ(tails[i], expected_tails[i]);
-    }
-
-    HIP_CHECK(hipFree(device_input));
-    HIP_CHECK(hipFree(device_heads));
-    HIP_CHECK(hipFree(device_tails));
+   
 }
 
 // Static for-loop

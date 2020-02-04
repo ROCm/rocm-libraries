@@ -280,61 +280,68 @@ TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClass)
         return;
     }
 
-    // Generate data
-    std::vector<Type> input = test_utils::get_random_data<Type>(size, -100, 100);
-    std::vector<Type> output(input.size(), 0);
-
-    // Calculate expected results on host
-    std::vector<Type> expected(input.size(), 0);
-    for (size_t i = 0; i < 113; i++)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        size_t block_offset = i * items_per_block;
-        for (size_t j = 0; j < items_per_block; j++)
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+
+        // Generate data
+        std::vector<Type> input = test_utils::get_random_data<Type>(size, -100, 100, seed_value);
+        std::vector<Type> output(input.size(), 0);
+
+        // Calculate expected results on host
+        std::vector<Type> expected(input.size(), 0);
+        for (size_t i = 0; i < 113; i++)
         {
-            expected[j + block_offset] = input[j + block_offset];
+            size_t block_offset = i * items_per_block;
+            for (size_t j = 0; j < items_per_block; j++)
+            {
+                expected[j + block_offset] = input[j + block_offset];
+            }
         }
+
+        // Preparing device
+        Type* device_input;
+        HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
+        Type* device_output;
+        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
+
+        HIP_CHECK(
+            hipMemcpy(
+                device_input, input.data(),
+                input.size() * sizeof(typename decltype(input)::value_type),
+                hipMemcpyHostToDevice
+            )
+        );
+
+        // Running kernel
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(
+                load_store_kernel<
+                    Type, load_method, store_method,
+                    block_size, items_per_thread
+                >
+            ),
+            dim3(grid_size), dim3(block_size), 0, 0,
+            device_input, device_output
+        );
+
+        // Reading results from device
+        HIP_CHECK(
+            hipMemcpy(
+                output.data(), device_output,
+                output.size() * sizeof(typename decltype(output)::value_type),
+                hipMemcpyDeviceToHost
+            )
+        );
+
+        // Validating results
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
+
+        HIP_CHECK(hipFree(device_input));
+        HIP_CHECK(hipFree(device_output));
     }
 
-    // Preparing device
-    Type* device_input;
-    HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
-    Type* device_output;
-    HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
-
-    HIP_CHECK(
-        hipMemcpy(
-            device_input, input.data(),
-            input.size() * sizeof(typename decltype(input)::value_type),
-            hipMemcpyHostToDevice
-        )
-    );
-
-    // Running kernel
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(
-            load_store_kernel<
-                Type, load_method, store_method,
-                block_size, items_per_thread
-            >
-        ),
-        dim3(grid_size), dim3(block_size), 0, 0,
-        device_input, device_output
-    );
-
-    // Reading results from device
-    HIP_CHECK(
-        hipMemcpy(
-            output.data(), device_output,
-            output.size() * sizeof(typename decltype(output)::value_type),
-            hipMemcpyDeviceToHost
-        )
-    );
-
-    // Validating results
-    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
-
-    HIP_CHECK(hipFree(device_input));
-    HIP_CHECK(hipFree(device_output));
 }
 
 template<
@@ -372,73 +379,81 @@ TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClassValid)
     }
 
     const size_t valid = items_per_block - 32;
-    // Generate data
-    std::vector<Type> input = test_utils::get_random_data<Type>(size, -100, 100);
-    std::vector<Type> output(input.size(), 0);
-
-    // Calculate expected results on host
-    std::vector<Type> expected(input.size(), 0);
-    for (size_t i = 0; i < 113; i++)
+    
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        size_t block_offset = i * items_per_block;
-        for (size_t j = 0; j < items_per_block; j++)
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+
+        // Generate data
+        std::vector<Type> input = test_utils::get_random_data<Type>(size, -100, 100, seed_value);
+        std::vector<Type> output(input.size(), 0);
+
+        // Calculate expected results on host
+        std::vector<Type> expected(input.size(), 0);
+        for (size_t i = 0; i < 113; i++)
         {
-            if (j < valid)
+            size_t block_offset = i * items_per_block;
+            for (size_t j = 0; j < items_per_block; j++)
             {
-                expected[j + block_offset] = input[j + block_offset];
+                if (j < valid)
+                {
+                    expected[j + block_offset] = input[j + block_offset];
+                }
             }
         }
+
+        // Preparing device
+        Type* device_input;
+        HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
+        Type* device_output;
+        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
+
+        HIP_CHECK(
+            hipMemcpy(
+                device_input, input.data(),
+                input.size() * sizeof(typename decltype(input)::value_type),
+                hipMemcpyHostToDevice
+            )
+        );
+
+        // Have to initialize output for unvalid data to make sure they are not changed
+        HIP_CHECK(
+            hipMemcpy(
+                device_output, output.data(),
+                output.size() * sizeof(typename decltype(output)::value_type),
+                hipMemcpyHostToDevice
+            )
+        );
+
+        // Running kernel
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(
+                load_store_valid_kernel<
+                    Type, load_method, store_method,
+                    block_size, items_per_thread
+                >
+            ),
+            dim3(grid_size), dim3(block_size), 0, 0,
+            device_input, device_output, valid
+        );
+
+        // Reading results from device
+        HIP_CHECK(
+            hipMemcpy(
+                output.data(), device_output,
+                output.size() * sizeof(typename decltype(output)::value_type),
+                hipMemcpyDeviceToHost
+            )
+        );
+
+        // Validating results
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
+
+        HIP_CHECK(hipFree(device_input));
+        HIP_CHECK(hipFree(device_output));
     }
-
-    // Preparing device
-    Type* device_input;
-    HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
-    Type* device_output;
-    HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
-
-    HIP_CHECK(
-        hipMemcpy(
-            device_input, input.data(),
-            input.size() * sizeof(typename decltype(input)::value_type),
-            hipMemcpyHostToDevice
-        )
-    );
-
-    // Have to initialize output for unvalid data to make sure they are not changed
-    HIP_CHECK(
-        hipMemcpy(
-            device_output, output.data(),
-            output.size() * sizeof(typename decltype(output)::value_type),
-            hipMemcpyHostToDevice
-        )
-    );
-
-    // Running kernel
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(
-            load_store_valid_kernel<
-                Type, load_method, store_method,
-                block_size, items_per_thread
-            >
-        ),
-        dim3(grid_size), dim3(block_size), 0, 0,
-        device_input, device_output, valid
-    );
-
-    // Reading results from device
-    HIP_CHECK(
-        hipMemcpy(
-            output.data(), device_output,
-            output.size() * sizeof(typename decltype(output)::value_type),
-            hipMemcpyDeviceToHost
-        )
-    );
-
-    // Validating results
-    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
-
-    HIP_CHECK(hipFree(device_input));
-    HIP_CHECK(hipFree(device_output));
+    
 }
 
 template<
@@ -477,64 +492,71 @@ TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClassDefault)
 
     const size_t valid = items_per_thread + 1;
     int _default = -1;
-    // Generate data
-    std::vector<Type> input = test_utils::get_random_data<Type>(size, -100, 100);
-    std::vector<Type> output(input.size(), 0);
-
-    // Calculate expected results on host
-    std::vector<Type> expected(input.size(), _default);
-    for (size_t i = 0; i < 113; i++)
+    
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        size_t block_offset = i * items_per_block;
-        for (size_t j = 0; j < items_per_block; j++)
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+
+        // Generate data
+        std::vector<Type> input = test_utils::get_random_data<Type>(size, -100, 100, seed_value);
+        std::vector<Type> output(input.size(), 0);
+
+        // Calculate expected results on host
+        std::vector<Type> expected(input.size(), _default);
+        for (size_t i = 0; i < 113; i++)
         {
-            if (j < valid)
+            size_t block_offset = i * items_per_block;
+            for (size_t j = 0; j < items_per_block; j++)
             {
-                expected[j + block_offset] = input[j + block_offset];
+                if (j < valid)
+                {
+                    expected[j + block_offset] = input[j + block_offset];
+                }
             }
         }
-    }
 
-    // Preparing device
-    Type* device_input;
-    HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
-    Type* device_output;
-    HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
+        // Preparing device
+        Type* device_input;
+        HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
+        Type* device_output;
+        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
 
-    HIP_CHECK(
-        hipMemcpy(
-            device_input, input.data(),
-            input.size() * sizeof(typename decltype(input)::value_type),
-            hipMemcpyHostToDevice
-        )
-    );
+        HIP_CHECK(
+            hipMemcpy(
+                device_input, input.data(),
+                input.size() * sizeof(typename decltype(input)::value_type),
+                hipMemcpyHostToDevice
+            )
+        );
 
-    // Running kernel
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(
-            load_store_valid_default_kernel<
-                Type, load_method, store_method,
-                block_size, items_per_thread
-            >
-        ),
-        dim3(grid_size), dim3(block_size), 0, 0,
-        device_input, device_output, valid, _default
-    );
+        // Running kernel
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(
+                load_store_valid_default_kernel<
+                    Type, load_method, store_method,
+                    block_size, items_per_thread
+                >
+            ),
+            dim3(grid_size), dim3(block_size), 0, 0,
+            device_input, device_output, valid, _default
+        );
 
-    // Reading results from device
-    HIP_CHECK(
-        hipMemcpy(
-            output.data(), device_output,
-            output.size() * sizeof(typename decltype(output)::value_type),
-            hipMemcpyDeviceToHost
-        )
-    );
+        // Reading results from device
+        HIP_CHECK(
+            hipMemcpy(
+                output.data(), device_output,
+                output.size() * sizeof(typename decltype(output)::value_type),
+                hipMemcpyDeviceToHost
+            )
+        );
 
-    // Validating results
-    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
+        // Validating results
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
 
-    HIP_CHECK(hipFree(device_input));
-    HIP_CHECK(hipFree(device_output));
+        HIP_CHECK(hipFree(device_input));
+        HIP_CHECK(hipFree(device_output));        
+    }  
 }
 
 TYPED_TEST(RocprimVectorizationTests, IsVectorizable)
