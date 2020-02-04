@@ -6,7 +6,7 @@ LABEL maintainer="hipcub-maintainer@amd.com"
 
 ARG user_uid
 
-RUN yum install -y \
+RUN yum install -y --nogpgcheck\
     sudo \
     rock-dkms \
     centos-release-scl \
