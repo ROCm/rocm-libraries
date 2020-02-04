@@ -31,6 +31,15 @@ include(ROCMInstallTargets)
 
 set(ROCM_INSTALL_LIBDIR lib)
 
+function(rocm_write_package_template_function_if FILENAME NAME CHECK_VARIABLE)
+    string(REPLACE ";" " " ARGS "${ARGN}")
+    file(APPEND ${FILENAME}
+"
+if(NOT (DEFINED ${CHECK_VARIABLE} AND ${CHECK_VARIABLE}) )
+    ${NAME}(${ARGS})
+endif()
+")
+endfunction()
 
 function(rocm_export_targets_header_only)
     set(options)
@@ -95,11 +104,10 @@ function(rocm_export_targets_header_only)
 
     if(PARSE_TARGETS)
         rocm_write_package_template_function(${CONFIG_TEMPLATE} include "\${${PACKAGE_NAME}_TARGET_FILE}")
-# Disabled for PyTorch
-#        foreach(NAME ${PACKAGE_NAME} ${PACKAGE_NAME_UPPER} ${PACKAGE_NAME_LOWER})
-#            rocm_write_package_template_function(${CONFIG_TEMPLATE} set ${NAME}_LIBRARIES ${PARSE_TARGETS})
-#            rocm_write_package_template_function(${CONFIG_TEMPLATE} set ${NAME}_LIBRARY ${PARSE_TARGETS})
-#        endforeach()
+        foreach(NAME ${PACKAGE_NAME} ${PACKAGE_NAME_UPPER} ${PACKAGE_NAME_LOWER})
+            rocm_write_package_template_function_if(${CONFIG_TEMPLATE} set PYTORCH_FOUND_HIP ${NAME}_LIBRARIES ${PARSE_TARGETS})
+            rocm_write_package_template_function_if(${CONFIG_TEMPLATE} set PYTORCH_FOUND_HIP ${NAME}_LIBRARY ${PARSE_TARGETS})
+        endforeach()
     endif()
 
     rocm_configure_package_config_file(
