@@ -180,6 +180,12 @@ auto store_volatile(T * output, T value)
     }
 }
 
+ROCPRIM_DEVICE inline
+void store_volatile(half * output, half value)
+{
+    *reinterpret_cast<volatile _Float16*>(output) = value;
+}
+
 template<class T>
 ROCPRIM_DEVICE inline
 auto load_volatile(T * input)
@@ -206,6 +212,13 @@ auto load_volatile(T * input)
     {
         output_ptr[i] = input_ptr[i];
     }
+    return retval;
+}
+
+ROCPRIM_DEVICE inline
+half load_volatile(half * input)
+{
+    half retval = *reinterpret_cast<volatile _Float16*>(input);
     return retval;
 }
 
