@@ -343,3 +343,38 @@ TEST(SortTests, TestSortBoolDescending)
 
     ASSERT_EQ(h_data, d_data);
 }
+
+//TODO: refactor this test into a different set of tests
+__global__ void SortKernel(int const N, int * array)
+{
+    if (threadIdx.x == 0)
+    {
+        thrust::device_ptr<int> begin(array);
+        thrust::device_ptr<int> end(array + N);
+        thrust::sort(thrust::hip::par, begin, end);
+    }
+}
+
+TEST(SortTests, TestSortDevice)
+{
+    std::vector<size_t> sizes = {
+        0, 1, 2, 4, 6, 12, 16, 24, 32,
+        64, 84, 128, 160, 256
+    };
+
+    for(auto size : sizes)
+    {
+        thrust::host_vector<int> h_data = get_random_data<int>(
+            size, 0, size);
+
+        thrust::device_vector<int> d_data = h_data;
+
+        thrust::sort(h_data.begin(), h_data.end());
+        hipLaunchKernelGGL(
+            SortKernel, dim3(1, 1, 1), dim3(128, 1, 1),
+            0, 0, size, thrust::raw_pointer_cast(&d_data[0])
+        );
+
+        ASSERT_EQ(h_data, d_data);
+    }
+}

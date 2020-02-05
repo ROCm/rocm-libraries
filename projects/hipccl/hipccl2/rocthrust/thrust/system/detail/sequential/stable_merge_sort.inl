@@ -209,35 +209,44 @@ void iterative_stable_merge_sort(sequential::execution_policy<DerivedPolicy> &ex
   typedef typename thrust::iterator_difference<RandomAccessIterator>::type difference_type;
 
   difference_type n = last - first;
-
-  thrust::detail::temporary_array<value_type, DerivedPolicy> temp(exec, n);
-
-  // insertion sort each 32 element partition
   difference_type partition_size = 32;
-  insertion_sort_each(first, last, partition_size, comp);
 
-  // ping indicates whether or not the latest data is in the source range [first, last)
-  bool ping = true;
+  // WORKAROUND: Memory access fault occurs on HIP when the size of the temp array is less than 16.
+  // This workaround is based on the check that's used in the recursive version.
+  if(n <= partition_size)
+  {
+    insertion_sort_each(first, last, partition_size, comp);
+  }
+  else
+  {
+    thrust::detail::temporary_array<value_type, DerivedPolicy> temp(exec, n);
 
-  // merge adjacent partitions until the partition size covers the entire range
-  for(;
+    // insertion sort each 32 element partition
+    insertion_sort_each(first, last, partition_size, comp);
+
+    // ping indicates whether or not the latest data is in the source range [first, last)
+    bool ping = true;
+
+    // merge adjacent partitions until the partition size covers the entire range
+    for(;
       partition_size < n;
       partition_size *= 2, ping = !ping)
-  {
-    if(ping)
     {
-      merge_adjacent_partitions(exec, first, last, partition_size, temp.begin(), comp);
-    } // end if
-    else
-    {
-      merge_adjacent_partitions(exec, temp.begin(), temp.end(), partition_size, first, comp);
-    } // end else
-  } // end for m
+      if(ping)
+      {
+        merge_adjacent_partitions(exec, first, last, partition_size, temp.begin(), comp);
+      } // end if
+      else
+      {
+        merge_adjacent_partitions(exec, temp.begin(), temp.end(), partition_size, first, comp);
+      } // end else
+    } // end for m
 
-  if(!ping)
-  {
-    thrust::copy(exec, temp.begin(), temp.end(), first);
-  } // end if
+    if(!ping)
+    {
+      thrust::copy(exec, temp.begin(), temp.end(), first);
+    } // end if
+  }
 } // end iterative_stable_merge_sort()
 
 
@@ -257,37 +266,47 @@ void iterative_stable_merge_sort_by_key(sequential::execution_policy<DerivedPoli
   typedef typename thrust::iterator_difference<RandomAccessIterator1>::type difference_type;
 
   difference_type n = keys_last - keys_first;
-
-  thrust::detail::temporary_array<value_type1, DerivedPolicy> keys_temp(exec, n);
-  thrust::detail::temporary_array<value_type2, DerivedPolicy> values_temp(exec, n);
-
-  // insertion sort each 32 element partition
   difference_type partition_size = 32;
-  insertion_sort_each_by_key(keys_first, keys_last, values_first, partition_size, comp);
 
-  // ping indicates whether or not the latest data is in the source range [first, last)
-  bool ping = true;
-
-  // merge adjacent partitions until the partition size covers the entire range
-  for(;
-      partition_size < n;
-      partition_size *= 2, ping = !ping)
+  // WORKAROUND: Memory access fault occurs on HIP when the size of the temp array is less than 16.
+  // This workaround is based on the check that's used in the recursive version.
+  if(n <= partition_size)
   {
-    if(ping)
+    // insertion sort each 32 element partition
+    insertion_sort_each_by_key(keys_first, keys_last, values_first, partition_size, comp);
+  }
+  else
+  {
+    thrust::detail::temporary_array<value_type1, DerivedPolicy> keys_temp(exec, n);
+    thrust::detail::temporary_array<value_type2, DerivedPolicy> values_temp(exec, n);
+
+    // insertion sort each 32 element partition
+    insertion_sort_each_by_key(keys_first, keys_last, values_first, partition_size, comp);
+
+    // ping indicates whether or not the latest data is in the source range [first, last)
+    bool ping = true;
+
+    // merge adjacent partitions until the partition size covers the entire range
+    for(;
+        partition_size < n;
+        partition_size *= 2, ping = !ping)
     {
-      merge_adjacent_partitions_by_key(exec, keys_first, keys_last, values_first, partition_size, keys_temp.begin(), values_temp.begin(), comp);
+      if(ping)
+      {
+        merge_adjacent_partitions_by_key(exec, keys_first, keys_last, values_first, partition_size, keys_temp.begin(), values_temp.begin(), comp);
+      } // end if
+      else
+      {
+        merge_adjacent_partitions_by_key(exec, keys_temp.begin(), keys_temp.end(), values_temp.begin(), partition_size, keys_first, values_first, comp);
+      } // end else
+    } // end for m
+
+    if(!ping)
+    {
+      thrust::copy(exec, keys_temp.begin(), keys_temp.end(), keys_first);
+      thrust::copy(exec, values_temp.begin(), values_temp.end(), values_first);
     } // end if
-    else
-    {
-      merge_adjacent_partitions_by_key(exec, keys_temp.begin(), keys_temp.end(), values_temp.begin(), partition_size, keys_first, values_first, comp);
-    } // end else
-  } // end for m
-
-  if(!ping)
-  {
-    thrust::copy(exec, keys_temp.begin(), keys_temp.end(), keys_first);
-    thrust::copy(exec, values_temp.begin(), values_temp.end(), values_first);
-  } // end if
+  }
 } // end iterative_stable_merge_sort()
 
 
