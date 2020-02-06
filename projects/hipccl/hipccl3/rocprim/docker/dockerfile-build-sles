@@ -27,7 +27,8 @@ RUN zypper refresh && zypper -n install\
     python2-PyYAML \
     libboost_program_options1_66_0-devel\
     libcxxtools9 \
-    libnuma1 
+    libnuma1 \
+    dkms
 
 # docker pipeline runs containers with particular uid
 # create a jenkins user with this specific uid so it can use sudo priviledges
