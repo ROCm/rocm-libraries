@@ -106,9 +106,9 @@ else
     mkdir -p debug; cd debug
 fi
 
-# Configure hipCUB, setup options for your system.
+# Configure rocThrust, setup options for your system.
 # Build options:
-#   BUILD_TEST - on by default,
+#   BUILD_TEST - off by default,
 #   BUILD_BENCHMARK - off by default.
 #
 # ! IMPORTANT !
@@ -127,17 +127,21 @@ if [ -e /etc/redhat-release ] ; then
 else
     cmake_executable="cmake"
 fi
+if [[ "${build_clients}" == true ]]; then
+    build_test="-DBUILD_TEST=ON"
+fi
 
 if [[ "${build_relocatable}" == true ]]; then
-    CXX=$rocm_path/bin/${compiler} ${cmake_executable} -DBUILD_BENCHMARK=ON -DBUILD_TEST=ON \
+    CXX=$rocm_path/bin/${compiler} ${cmake_executable} \
         -DCMAKE_INSTALL_PREFIX=${rocm_path} \
         -DCMAKE_PREFIX_PATH="${rocm_path} ${rocm_path}/hcc ${rocm_path}/hip" \
         -DCMAKE_MODULE_PATH="${rocm_path}/hip/cmake" \
-        -DROCPRIM_ROOT=${rocm_path}/rocprim \
+        -DROCPRIM_ROOT=${rocm_path}/rocprim ${build_test}\
          ../../. # or cmake-gui ../.
 else
-    CXX=$rocm_path/bin/${compiler} ${cmake_executable} -DBUILD_BENCHMARK=ON ../../. # or cmake-gui ../.
+    CXX=$rocm_path/bin/${compiler} ${cmake_executable} ${build_test} ../../. # or cmake-gui ../.
 fi
+
 
 # Build
 make -j$(nproc)
