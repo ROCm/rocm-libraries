@@ -206,3 +206,46 @@ TEST(SortByKeyTests, TestSortByKeyBoolDescending)
     ASSERT_EQ(h_keys, d_keys);
     ASSERT_EQ(h_values, d_values);
 }
+
+//TODO: refactor this test into a different set of tests
+__global__ void SortByKeyKernel(int const N, int * keys, short * values)
+{
+    if (threadIdx.x == 0)
+    {
+        thrust::device_ptr<int> keys_begin(keys);
+        thrust::device_ptr<int> keys_end(keys + N);
+        thrust::device_ptr<short> val(values);
+        thrust::sort_by_key(thrust::hip::par, keys_begin, keys_end, val);
+    }
+}
+
+TEST(SortByKeyTests, TestSortByKeyDevice)
+{
+    std::vector<size_t> sizes = {
+        0, 1, 2, 4, 6, 12, 16, 24, 32,
+        64, 84, 128, 160, 256
+    };
+
+    for(auto size : sizes)
+    {
+        thrust::host_vector<int> h_keys = get_random_data<int>(
+            size, 0, size);
+
+        thrust::host_vector<short> h_values = get_random_data<short>(
+            size, std::numeric_limits<short>::min(), std::numeric_limits<short>::max());
+
+        thrust::device_vector<int> d_keys   = h_keys;
+        thrust::device_vector<short>  d_values = h_values;
+
+        thrust::sort_by_key(h_keys.begin(), h_keys.end(), h_values.begin());
+        hipLaunchKernelGGL(
+            SortByKeyKernel, dim3(1, 1, 1), dim3(128, 1, 1),
+            0, 0, size, thrust::raw_pointer_cast(&d_keys[0]),
+            thrust::raw_pointer_cast(&d_values[0])
+        );
+
+        ASSERT_EQ(h_keys, d_keys);
+        // Only keys are compared here, the sequential stable_merge_sort that's used in
+        // CUDA and HIP don't generate the correct value sorting
+    }
+}
