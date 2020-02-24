@@ -35,7 +35,7 @@ cd hipCUB; mkdir build; cd build
 
 # Configure hipCUB, setup options for your system.
 # Build options:
-#   BUILD_TEST - ON by default,
+#   BUILD_TEST - OFF by default,
 #
 # ! IMPORTANT !
 # On ROCm platform set C++ compiler to HCC. You can do it by adding 'CXX=<path-to-hcc>'
@@ -94,6 +94,30 @@ ctest
 # To run unit tests for hipCUB
 ./test/hipcub/<unit-test-name>
 ```
+
+## Using custom seeds for the tests
+
+Go to the `hipCUB/test/hipcub/test_seed.hpp` file.
+```cpp
+//(1)
+static constexpr int random_seeds_count = 10;
+
+//(2)
+static constexpr unsigned int seeds [] = {0, 2, 10, 1000};
+
+//(3)
+static constexpr size_t seed_size = sizeof(seeds) / sizeof(seeds[0]);
+```
+
+(1) defines a constant that sets how many passes over the tests will be done with runtime-generated seeds. Modify at will.
+
+(2) defines the user generated seeds. Each of the elements of the array will be used as seed for all tests. Modify at will. If no static seeds are desired, the array should be left empty.
+
+```cpp
+static constexpr unsigned int seeds [] = {};
+```
+
+(3) this line should never be modified.
 
 ## Documentation
 

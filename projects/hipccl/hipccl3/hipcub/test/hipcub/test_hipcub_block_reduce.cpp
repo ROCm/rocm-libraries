@@ -135,61 +135,68 @@ TYPED_TEST(HipcubBlockReduceSingleValueTests, Reduce)
 
     const size_t size = block_size * 113;
     const size_t grid_size = size / block_size;
-    // Generate data
-    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200);
-    std::vector<T> output_reductions(size / block_size);
 
-    // Calculate expected results on host
-    std::vector<T> expected_reductions(output_reductions.size(), 0);
-    for(size_t i = 0; i < output.size() / block_size; i++)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        T value = 0;
-        for(size_t j = 0; j < block_size; j++)
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+        // Generate data
+        std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200, seed_value);
+        std::vector<T> output_reductions(size / block_size);
+
+        // Calculate expected results on host
+        std::vector<T> expected_reductions(output_reductions.size(), 0);
+        for(size_t i = 0; i < output.size() / block_size; i++)
         {
-            auto idx = i * block_size + j;
-            value += output[idx];
+            T value = 0;
+            for(size_t j = 0; j < block_size; j++)
+            {
+                auto idx = i * block_size + j;
+                value += output[idx];
+            }
+            expected_reductions[i] = value;
         }
-        expected_reductions[i] = value;
+
+        // Preparing device
+        T* device_output;
+        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(T)));
+        T* device_output_reductions;
+        HIP_CHECK(hipMalloc(&device_output_reductions, output_reductions.size() * sizeof(T)));
+
+        HIP_CHECK(
+            hipMemcpy(
+                device_output, output.data(),
+                output.size() * sizeof(T),
+                hipMemcpyHostToDevice
+            )
+        );
+
+        // Running kernel
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(reduce_kernel<block_size, algorithm, T>),
+            dim3(grid_size), dim3(block_size), 0, 0,
+            device_output, device_output_reductions
+        );
+
+        // Reading results back
+        HIP_CHECK(
+            hipMemcpy(
+                output_reductions.data(), device_output_reductions,
+                output_reductions.size() * sizeof(T),
+                hipMemcpyDeviceToHost
+            )
+        );
+
+        // Verifying results
+        for(size_t i = 0; i < output_reductions.size(); i++)
+        {
+            ASSERT_EQ(output_reductions[i], expected_reductions[i]);
+        }
+
+        HIP_CHECK(hipFree(device_output));
+        HIP_CHECK(hipFree(device_output_reductions));
     }
-
-    // Preparing device
-    T* device_output;
-    HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(T)));
-    T* device_output_reductions;
-    HIP_CHECK(hipMalloc(&device_output_reductions, output_reductions.size() * sizeof(T)));
-
-    HIP_CHECK(
-        hipMemcpy(
-            device_output, output.data(),
-            output.size() * sizeof(T),
-            hipMemcpyHostToDevice
-        )
-    );
-
-    // Running kernel
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(reduce_kernel<block_size, algorithm, T>),
-        dim3(grid_size), dim3(block_size), 0, 0,
-        device_output, device_output_reductions
-    );
-
-    // Reading results back
-    HIP_CHECK(
-        hipMemcpy(
-            output_reductions.data(), device_output_reductions,
-            output_reductions.size() * sizeof(T),
-            hipMemcpyDeviceToHost
-        )
-    );
-
-    // Verifying results
-    for(size_t i = 0; i < output_reductions.size(); i++)
-    {
-        ASSERT_EQ(output_reductions[i], expected_reductions[i]);
-    }
-
-    HIP_CHECK(hipFree(device_output));
-    HIP_CHECK(hipFree(device_output_reductions));
 }
 
 TYPED_TEST_CASE(HipcubBlockReduceSingleValueTests, SingleValueTestParams);
@@ -217,8 +224,10 @@ TYPED_TEST(HipcubBlockReduceSingleValueTests, ReduceValid)
 {
     using T = typename TestFixture::type;
     constexpr auto algorithm = TestFixture::algorithm;
+
     constexpr size_t block_size = TestFixture::block_size;
-    const unsigned int valid_items = test_utils::get_random_value(block_size - 10, block_size);
+    const size_t size = block_size * 113;
+    const size_t grid_size = size / block_size;
 
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
@@ -226,63 +235,78 @@ TYPED_TEST(HipcubBlockReduceSingleValueTests, ReduceValid)
         return;
     }
 
-    const size_t size = block_size * 113;
-    const size_t grid_size = size / block_size;
-    // Generate data
-    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200);
-    std::vector<T> output_reductions(size / block_size);
-
-    // Calculate expected results on host
-    std::vector<T> expected_reductions(output_reductions.size(), 0);
-    for(size_t i = 0; i < output.size() / block_size; i++)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        T value = 0;
-        for(size_t j = 0; j < valid_items; j++)
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+        const unsigned int valid_items = test_utils::get_random_value(
+            block_size - 10,
+            block_size,
+            seed_value
+        );
+
+        // Generate data
+        std::vector<T> output = test_utils::get_random_data<T>(
+            size,
+            2,
+            200,
+            seed_value + seed_value_addition
+        );
+        std::vector<T> output_reductions(size / block_size);
+
+        // Calculate expected results on host
+        std::vector<T> expected_reductions(output_reductions.size(), 0);
+        for(size_t i = 0; i < output.size() / block_size; i++)
         {
-            auto idx = i * block_size + j;
-            value += output[idx];
+            T value = 0;
+            for(size_t j = 0; j < valid_items; j++)
+            {
+                auto idx = i * block_size + j;
+                value += output[idx];
+            }
+            expected_reductions[i] = value;
         }
-        expected_reductions[i] = value;
+
+        // Preparing device
+        T* device_output;
+        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(T)));
+        T* device_output_reductions;
+        HIP_CHECK(hipMalloc(&device_output_reductions, output_reductions.size() * sizeof(T)));
+
+        HIP_CHECK(
+            hipMemcpy(
+                device_output, output.data(),
+                output.size() * sizeof(T),
+                hipMemcpyHostToDevice
+            )
+        );
+
+        // Running kernel
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(reduce_valid_kernel<block_size, algorithm, T>),
+            dim3(grid_size), dim3(block_size), 0, 0,
+            device_output, device_output_reductions, valid_items
+        );
+
+        // Reading results back
+        HIP_CHECK(
+            hipMemcpy(
+                output_reductions.data(), device_output_reductions,
+                output_reductions.size() * sizeof(T),
+                hipMemcpyDeviceToHost
+            )
+        );
+
+        // Verifying results
+        for(size_t i = 0; i < output_reductions.size(); i++)
+        {
+            ASSERT_EQ(output_reductions[i], expected_reductions[i]);
+        }
+
+        HIP_CHECK(hipFree(device_output));
+        HIP_CHECK(hipFree(device_output_reductions));
     }
-
-    // Preparing device
-    T* device_output;
-    HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(T)));
-    T* device_output_reductions;
-    HIP_CHECK(hipMalloc(&device_output_reductions, output_reductions.size() * sizeof(T)));
-
-    HIP_CHECK(
-        hipMemcpy(
-            device_output, output.data(),
-            output.size() * sizeof(T),
-            hipMemcpyHostToDevice
-        )
-    );
-
-    // Running kernel
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(reduce_valid_kernel<block_size, algorithm, T>),
-        dim3(grid_size), dim3(block_size), 0, 0,
-        device_output, device_output_reductions, valid_items
-    );
-
-    // Reading results back
-    HIP_CHECK(
-        hipMemcpy(
-            output_reductions.data(), device_output_reductions,
-            output_reductions.size() * sizeof(T),
-            hipMemcpyDeviceToHost
-        )
-    );
-
-    // Verifying results
-    for(size_t i = 0; i < output_reductions.size(); i++)
-    {
-        ASSERT_EQ(output_reductions[i], expected_reductions[i]);
-    }
-
-    HIP_CHECK(hipFree(device_output));
-    HIP_CHECK(hipFree(device_output_reductions));
 }
 
 
@@ -370,73 +394,79 @@ TYPED_TEST(HipcubBlockReduceInputArrayTests, Reduce)
     const size_t items_per_block = block_size * items_per_thread;
     const size_t size = items_per_block * 37;
     const size_t grid_size = size / items_per_block;
-    // Generate data
-    std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200);
 
-    // Output reduce results
-    std::vector<T> output_reductions(size / block_size, 0);
-
-    // Calculate expected results on host
-    std::vector<T> expected_reductions(output_reductions.size(), 0);
-    for(size_t i = 0; i < output.size() / items_per_block; i++)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        T value = 0;
-        for(size_t j = 0; j < items_per_block; j++)
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+        // Generate data
+        std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200, seed_value);
+
+        // Output reduce results
+        std::vector<T> output_reductions(size / block_size, 0);
+
+        // Calculate expected results on host
+        std::vector<T> expected_reductions(output_reductions.size(), 0);
+        for(size_t i = 0; i < output.size() / items_per_block; i++)
         {
-            auto idx = i * items_per_block + j;
-            value += output[idx];
+            T value = 0;
+            for(size_t j = 0; j < items_per_block; j++)
+            {
+                auto idx = i * items_per_block + j;
+                value += output[idx];
+            }
+            expected_reductions[i] = value;
         }
-        expected_reductions[i] = value;
-    }
 
-    // Preparing device
-    T* device_output;
-    HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(T)));
-    T* device_output_reductions;
-    HIP_CHECK(hipMalloc(&device_output_reductions, output_reductions.size() * sizeof(T)));
+        // Preparing device
+        T* device_output;
+        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(T)));
+        T* device_output_reductions;
+        HIP_CHECK(hipMalloc(&device_output_reductions, output_reductions.size() * sizeof(T)));
 
-    HIP_CHECK(
-        hipMemcpy(
-            device_output, output.data(),
-            output.size() * sizeof(T),
-            hipMemcpyHostToDevice
-        )
-    );
-
-    HIP_CHECK(
-        hipMemcpy(
-            device_output_reductions, output_reductions.data(),
-            output_reductions.size() * sizeof(T),
-            hipMemcpyHostToDevice
-        )
-    );
-
-    // Running kernel
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(reduce_array_kernel<block_size, items_per_thread, algorithm, T>),
-        dim3(grid_size), dim3(block_size), 0, 0,
-        device_output, device_output_reductions
-    );
-
-    // Reading results back
-    HIP_CHECK(
-        hipMemcpy(
-            output_reductions.data(), device_output_reductions,
-            output_reductions.size() * sizeof(T),
-            hipMemcpyDeviceToHost
-        )
-    );
-
-    // Verifying results
-    for(size_t i = 0; i < output_reductions.size(); i++)
-    {
-        ASSERT_NEAR(
-            output_reductions[i], expected_reductions[i],
-            static_cast<T>(0.05) * expected_reductions[i]
+        HIP_CHECK(
+            hipMemcpy(
+                device_output, output.data(),
+                output.size() * sizeof(T),
+                hipMemcpyHostToDevice
+            )
         );
+
+        HIP_CHECK(
+            hipMemcpy(
+                device_output_reductions, output_reductions.data(),
+                output_reductions.size() * sizeof(T),
+                hipMemcpyHostToDevice
+            )
+        );
+
+        // Running kernel
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(reduce_array_kernel<block_size, items_per_thread, algorithm, T>),
+            dim3(grid_size), dim3(block_size), 0, 0,
+            device_output, device_output_reductions
+        );
+
+        // Reading results back
+        HIP_CHECK(
+            hipMemcpy(
+                output_reductions.data(), device_output_reductions,
+                output_reductions.size() * sizeof(T),
+                hipMemcpyDeviceToHost
+            )
+        );
+
+        // Verifying results
+        for(size_t i = 0; i < output_reductions.size(); i++)
+        {
+            ASSERT_NEAR(
+                output_reductions[i], expected_reductions[i],
+                static_cast<T>(0.05) * expected_reductions[i]
+            );
+        }
+
+        HIP_CHECK(hipFree(device_output));
+        HIP_CHECK(hipFree(device_output_reductions));
     }
-
-    HIP_CHECK(hipFree(device_output));
-    HIP_CHECK(hipFree(device_output_reductions));
 }
-
