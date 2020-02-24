@@ -62,13 +62,110 @@ if (NOT THRUST_HOST_SYSTEM IN_LIST THRUST_HOST_SYSTEM_OPTIONS)
   )
 endif ()
 
-# Set CXX flags
-set(CMAKE_CXX_STANDARD 11)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
+add_definitions(-DTHRUST_HOST_SYSTEM=THRUST_HOST_SYSTEM_${THRUST_HOST_SYSTEM})
+
+set(THRUST_DEVICE_SYSTEM_OPTIONS CUDA CPP OMP TBB)
+set(THRUST_DEVICE_SYSTEM CUDA CACHE STRING "The device backend to target.")
+set_property(
+  CACHE THRUST_DEVICE_SYSTEM
+  PROPERTY STRINGS ${THRUST_DEVICE_SYSTEM_OPTIONS}
+)
+if (NOT THRUST_DEVICE_SYSTEM IN_LIST THRUST_DEVICE_SYSTEM_OPTIONS)
+  message(
+    FATAL_ERROR
+    "THRUST_DEVICE_SYSTEM must be one of ${THRUST_DEVICE_SYSTEM_OPTIONS}"
+  )
+endif ()
+
+add_definitions(-DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_${THRUST_DEVICE_SYSTEM})
+
+# Please note this also sets the default for the CUDA C++ version; see the comment below.
+set(CMAKE_CXX_STANDARD 14 CACHE STRING "The C++ version to be used.")
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Get dependencies
-include(cmake/Dependencies.cmake)
+message("-- C++ Standard version: ${CMAKE_CXX_STANDARD}")
+
+set(CUB_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/dependencies/cub")
+
+if ("CUDA" STREQUAL "${THRUST_DEVICE_SYSTEM}")
+  if (NOT "${CMAKE_CUDA_HOST_COMPILER}" STREQUAL "")
+    unset(CMAKE_CUDA_HOST_COMPILER CACHE)
+    message(FATAL_ERROR "Thrust tests and examples require the C++ compiler"
+        " and the CUDA host compiler to be the same; to set this compiler, please"
+        " use the CMAKE_CXX_COMPILER variable, not the CMAKE_CUDA_HOST_COMPILER"
+        " variable.")
+  endif ()
+  set(CMAKE_CUDA_HOST_COMPILER ${CMAKE_CXX_COMPILER})
+
+  enable_language(CUDA)
+
+  # Force CUDA C++ standard to be the same as the C++ standard used.
+  #
+  # Now, CMake is unaligned with reality on standard versions: https://gitlab.kitware.com/cmake/cmake/issues/18597
+  # which means that using standard CMake methods, it's impossible to actually sync the CXX and CUDA versions for pre-11
+  # versions of C++; CUDA accepts 98 but translates that to 03, while CXX doesn't accept 03 (and doesn't translate that to 03).
+  # In case this gives You, dear user, any trouble, please escalate the above CMake bug, so we can support reality properly.
+  if (DEFINED CMAKE_CUDA_STANDARD)
+      message(WARNING "You've set CMAKE_CUDA_STANDARD; please note that this variable is ignored, and CMAKE_CXX_STANDARD"
+          " is used as the C++ standard version for both C++ and CUDA.")
+  endif()
+  unset(CMAKE_CUDA_STANDARD CACHE)
+  set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
+
+  set(THRUST_HIGHEST_COMPUTE_ARCH 75)
+  set(THRUST_KNOWN_COMPUTE_ARCHS 30 32 35 50 52 53 60 61 62 70 72 75)
+
+  option(THRUST_DISABLE_ARCH_BY_DEFAULT "If ON, then all CUDA architectures are disabled on the initial CMake run." OFF)
+  set(OPTION_INIT ON)
+  if (THRUST_DISABLE_ARCH_BY_DEFAULT)
+    set(OPTION_INIT OFF)
+  endif ()
+
+  if (NOT ${THRUST_HIGHEST_COMPUTE_ARCH} IN_LIST THRUST_KNOWN_COMPUTE_ARCHS)
+    message(FATAL_ERROR "When changing the highest compute version, don't forget to add it to the list!")
+  endif ()
+
+  foreach (COMPUTE_ARCH IN LISTS THRUST_KNOWN_COMPUTE_ARCHS)
+    option(THRUST_ENABLE_COMPUTE_${COMPUTE_ARCH} "Enable code generation for tests for sm_${COMPUTE_ARCH}" ${OPTION_INIT})
+    if (THRUST_ENABLE_COMPUTE_${COMPUTE_ARCH})
+      set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -gencode arch=compute_${COMPUTE_ARCH},code=sm_${COMPUTE_ARCH}")
+      set(COMPUTE_MESSAGE "${COMPUTE_MESSAGE} sm_${COMPUTE_ARCH}")
+    endif ()
+  endforeach ()
+
+  option(THRUST_ENABLE_COMPUTE_FUTURE "Enable code generation for tests for compute_${THRUST_HIGHEST_COMPUTE_ARCH}" ${OPTION_INIT})
+  if (THRUST_ENABLE_COMPUTE_FUTURE)
+    set(CMAKE_CUDA_FLAGS
+      "${CMAKE_CUDA_FLAGS} -gencode arch=compute_${THRUST_HIGHEST_COMPUTE_ARCH},code=compute_${THRUST_HIGHEST_COMPUTE_ARCH}")
+    set(COMPUTE_MESSAGE "${COMPUTE_MESSAGE} compute_${THRUST_HIGHEST_COMPUTE_ARCH}")
+  endif ()
+
+  message("-- Enabled CUDA architectures:${COMPUTE_MESSAGE}")
+endif ()
+
+if ("OMP" STREQUAL "${THRUST_DEVICE_SYSTEM}")
+  find_package(OpenMP REQUIRED)
+  if (OPENMP_FOUND)
+    set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
+    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+    set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
+  endif()
+endif ()
+
+if ("TBB" STREQUAL "${THRUST_DEVICE_SYSTEM}")
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(TBB tbb REQUIRED)
+  if (TBB_FOUND)
+    set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${TDD_CFLAGS}")
+    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TDD_CFLAGS}")
+    set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${TBB_LD_FLAGS}")
+    set (THRUST_ADDITIONAL_LIBRARIES "${TBB_LIBRARIES}")
+  endif ()
+
+  # There's a ton of these in the TBB backend, even though the code is correct.
+  # TODO: silence these warnings in code instead
+  append_option_if_available("-Wno-unused-parameter" THRUST_CXX_WARNINGS)
+endif ()
 
 # Setup VERSION
 rocm_setup_version(VERSION "2.10.7")
@@ -98,8 +195,35 @@ if(BUILD_BENCHMARKS)
   add_subdirectory(internal/benchmark)
 endif()
 
-set(THRUST_OPTIONS_DEBUG ${THRUST_OPTIONS_WARNINGS})
-set(THRUST_OPTIONS_RELEASE ${THRUST_OPTIONS_WARNINGS})
+  # MSVC STL assumes that `allocator_traits`'s allocator will use raw pointers,
+  # and the `__DECLSPEC_ALLOCATOR` macro causes issues with thrust's universal
+  # allocators:
+  #   warning C4494: 'std::allocator_traits<_Alloc>::allocate' :
+  #      Ignoring __declspec(allocator) because the function return type is not
+  #      a pointer or reference
+  # See https://github.com/microsoft/STL/issues/696
+  append_option_if_available("/wd4494" THRUST_CXX_WARNINGS)
+
+  # Some of the async tests require /bigobj to fit all their sections into the
+  # object files:
+  append_option_if_available("/bigobj" THRUST_CXX_WARNINGS)
+
+  set(THRUST_TREAT_FILE_AS_CXX "/TP")
+else ()
+  append_option_if_available("-Werror" THRUST_CXX_WARNINGS)
+  append_option_if_available("-Wall" THRUST_CXX_WARNINGS)
+  append_option_if_available("-Wextra" THRUST_CXX_WARNINGS)
+  append_option_if_available("-Winit-self" THRUST_CXX_WARNINGS)
+  append_option_if_available("-Woverloaded-virtual" THRUST_CXX_WARNINGS)
+  append_option_if_available("-Wcast-qual" THRUST_CXX_WARNINGS)
+  append_option_if_available("-Wno-cast-align" THRUST_CXX_WARNINGS)
+  append_option_if_available("-Wno-long-long" THRUST_CXX_WARNINGS)
+  append_option_if_available("-Wno-variadic-macros" THRUST_CXX_WARNINGS)
+  append_option_if_available("-Wno-unused-function" THRUST_CXX_WARNINGS)
+  append_option_if_available("-Wno-unused-variable" THRUST_CXX_WARNINGS)
+
+  set(THRUST_TREAT_FILE_AS_CXX "-x c++")
+endif ()
 
 # Package
 set(CPACK_DEBIAN_ARCHIVE_TYPE "gnutar")
@@ -115,7 +239,186 @@ if(NOT CPACK_PACKAGING_INSTALL_PREFIX)
   set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
 endif()
 
-set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" "\${CPACK_PACKAGING_INSTALL_PREFIX}/include")
+if (("Clang" STREQUAL "${CMAKE_CXX_COMPILER_ID}") OR
+    ("XL" STREQUAL "${CMAKE_CXX_COMPILER_ID}"))
+  # xlC and Clang warn about unused parameters in uninstantiated templates.
+  # This causes xlC to choke on the OMP backend, which is mostly #ifdef'd out
+  # (and thus has unused parameters) when you aren't using it.
+  append_option_if_available("-Wno-unused-parameters" THRUST_CXX_WARNINGS)
+endif ()
+
+if ("Clang" STREQUAL "${CMAKE_CXX_COMPILER_ID}")
+  # -Wunneeded-internal-declaration misfires in the unit test framework
+  # on older versions of Clang.
+  append_option_if_available("-Wno-unneeded-internal-declaration" THRUST_CXX_WARNINGS)
+endif ()
+
+foreach (CXX_OPTION IN LISTS THRUST_CXX_WARNINGS)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CXX_OPTION}")
+endforeach ()
+
+if ("CUDA" STREQUAL "${THRUST_DEVICE_SYSTEM}")
+  foreach (CXX_OPTION IN LISTS THRUST_CXX_WARNINGS)
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler=${CXX_OPTION}")
+  endforeach ()
+  set(CMAKE_CUDA_FLAGS
+    "${CMAKE_CUDA_FLAGS} -Werror all-warnings -Xcudafe --display_error_number")
+endif ()
+
+# For every public header, build a translation unit containing `#include <header>`
+# to let the compiler try to figure out warnings in that header if it is not otherwise
+# included in tests, and also to verify if the headers are modular enough.
+# .inl files are not globbed for, because they are not supposed to be used as public
+# entrypoints.
+list(APPEND THRUST_HEADER_GLOBS thrust/*.h)
+list(APPEND THRUST_HEADER_EXCLUDE_SYSTEMS_GLOBS thrust/system/*/*)
+
+string(TOLOWER ${THRUST_HOST_SYSTEM} THRUST_HOST_SYSTEM_LOWERCASE)
+list(APPEND THRUST_HEADER_SYSTEMS_GLOBS thrust/system/${THRUST_HOST_SYSTEM_LOWERCASE}/*)
+
+string(TOLOWER ${THRUST_DEVICE_SYSTEM} THRUST_DEVICE_SYSTEM_LOWERCASE)
+list(APPEND THRUST_HEADER_SYSTEMS_GLOBS thrust/system/${THRUST_DEVICE_SYSTEM_LOWERCASE}/*)
+
+list(APPEND THRUST_HEADER_EXCLUDE_DETAILS_GLOBS thrust/detail/*)
+list(APPEND THRUST_HEADER_EXCLUDE_DETAILS_GLOBS thrust/*/detail/*)
+list(APPEND THRUST_HEADER_EXCLUDE_DETAILS_GLOBS thrust/*/*/detail/*)
+
+# Get all .h files...
+file(
+  GLOB_RECURSE THRUST_HEADERS
+  RELATIVE ${PROJECT_SOURCE_DIR}/thrust
+  ${CMAKE_CONFIGURE_DEPENDS}
+  ${THRUST_HEADER_GLOBS}
+)
+
+# ...then remove all system specific headers...
+file(
+  GLOB_RECURSE THRUST_HEADER_EXCLUDE_SYSTEMS
+  RELATIVE ${PROJECT_SOURCE_DIR}/thrust
+  ${CMAKE_CONFIGURE_DEPENDS}
+  ${THRUST_HEADER_EXCLUDE_SYSTEMS_GLOBS}
+)
+list(REMOVE_ITEM THRUST_HEADERS ${THRUST_HEADER_EXCLUDE_SYSTEMS})
+
+# ...then add all headers specific to the selected host and device systems back again...
+file(
+  GLOB_RECURSE THRUST_SYSTEMS_HEADERS
+  RELATIVE ${PROJECT_SOURCE_DIR}/thrust
+  ${CMAKE_CONFIGURE_DEPENDS}
+  ${THRUST_HEADER_SYSTEMS_GLOBS}
+)
+list(APPEND THRUST_HEADERS ${THRUST_SYSTEMS_HEADERS})
+
+# ...and remove all the detail headers (also removing the detail headers from the selected systems).
+file(
+  GLOB_RECURSE THRUST_HEADER_EXCLUDE_DETAILS
+  RELATIVE ${PROJECT_SOURCE_DIR}/thrust
+  ${CMAKE_CONFIGURE_DEPENDS}
+  ${THRUST_HEADER_EXCLUDE_DETAILS_GLOBS}
+)
+list(REMOVE_ITEM THRUST_HEADERS ${THRUST_HEADER_EXCLUDE_DETAILS})
+
+# List of headers that aren't implemented for all backends, but are implemented for CUDA.
+set(THRUST_PARTIALLY_IMPLEMENTED_HEADERS_CUDA
+  async/copy.h
+  async/for_each.h
+  async/reduce.h
+  async/sort.h
+  async/transform.h
+  event.h
+  future.h
+)
+
+# List of headers that aren't implemented for all backends, but are implemented for CPP.
+set(THRUST_PARTIALLY_IMPLEMENTED_HEADERS_CPP
+)
+
+# List of headers that aren't implemented for all backends, but are implemented for TBB.
+set(THRUST_PARTIALLY_IMPLEMENTED_HEADERS_TBB
+)
+
+# List of headers that aren't implemented for all backends, but are implemented for OMP.
+set(THRUST_PARTIALLY_IMPLEMENTED_HEADERS_OMP
+)
+
+# List of all partially implemented headers.
+set(THRUST_PARTIALLY_IMPLEMENTED_HEADERS
+  emptylistguard
+  ${THRUST_PARTIALLY_IMPLEMENTED_HEADERS_CUDA}
+  ${THRUST_PARTIALLY_IMPLEMENTED_HEADERS_CPP}
+  ${THRUST_PARTIALLY_IMPLEMENTED_HEADERS_TBB}
+  ${THRUST_PARTIALLY_IMPLEMENTED_HEADERS_OMP}
+)
+
+list(REMOVE_DUPLICATES THRUST_PARTIALLY_IMPLEMENTED_HEADERS)
+
+foreach (THRUST_HEADER IN LISTS THRUST_HEADERS)
+  if ("${THRUST_HEADER}" IN_LIST THRUST_PARTIALLY_IMPLEMENTED_HEADERS)
+    # This header is partially implemented on _some_ backends...
+    if (NOT "${THRUST_HEADER}" IN_LIST THRUST_PARTIALLY_IMPLEMENTED_HEADERS_${THRUST_DEVICE_SYSTEM})
+      # ...but not on the selected one.
+      continue()
+    endif ()
+  endif ()
+
+  set(THRUST_HEADER_TEST_EXT .cpp)
+  if ("CUDA" STREQUAL "${THRUST_DEVICE_SYSTEM}")
+    set(THRUST_HEADER_TEST_EXT .cu)
+  endif ()
+
+  set(SOURCE_NAME headers/${THRUST_HEADER}${THRUST_HEADER_TEST_EXT})
+  configure_file(cmake/header_test.in ${SOURCE_NAME})
+
+  list(APPEND THRUST_HEADER_TEST_SOURCES ${SOURCE_NAME})
+endforeach ()
+
+add_library(header-test OBJECT ${THRUST_HEADER_TEST_SOURCES})
+target_include_directories(
+  header-test
+  PUBLIC ${PROJECT_SOURCE_DIR} ${CUB_INCLUDE_DIR}
+)
+
+include(CTest)
+enable_testing()
+
+# Handle tests.
+
+option(THRUST_ENABLE_TESTS_WITH_RDC "Also build all tests with RDC." OFF)
+
+set(THRUST_TEST_RUN_ARGUMENTS
+  -DTHRUST_SOURCE=${CMAKE_SOURCE_DIR}
+  -P "${CMAKE_SOURCE_DIR}/cmake/run_test.cmake")
+
+list(APPEND THRUST_TESTFRAMEWORK_FILES testing/unittest/testframework.cu)
+if ("CUDA" STREQUAL "${THRUST_DEVICE_SYSTEM}")
+  list(APPEND THRUST_TESTFRAMEWORK_FILES testing/unittest/cuda/testframework.cu)
+else ()
+  # When CUDA is disabled, explain to CMake that testframework.cu is actually a C++ file.
+  set_source_files_properties(testing/unittest/testframework.cu
+    PROPERTIES
+      LANGUAGE CXX
+      COMPILE_FLAGS "${THRUST_TREAT_FILE_AS_CXX}")
+endif ()
+
+add_library(thrust_testframework STATIC ${THRUST_TESTFRAMEWORK_FILES})
+target_include_directories(
+  thrust_testframework
+  PUBLIC ${PROJECT_SOURCE_DIR} ${CUB_INCLUDE_DIR}
+  PRIVATE ${PROJECT_SOURCE_DIR}/testing
+)
+
+list(APPEND THRUST_TEST_GLOBS testing/*.cu)
+list(APPEND THRUST_TEST_GLOBS testing/*.cpp)
+
+if     ("CUDA" STREQUAL "${THRUST_DEVICE_SYSTEM}")
+  list(APPEND THRUST_TEST_GLOBS testing/cuda/*.cu)
+elseif ("CPP" STREQUAL "${THRUST_DEVICE_SYSTEM}")
+  list(APPEND THRUST_TEST_GLOBS testing/cpp/*.cu)
+  list(APPEND THRUST_TEST_GLOBS testing/cpp/*.cpp)
+elseif ("OMP" STREQUAL "${THRUST_DEVICE_SYSTEM}")
+  list(APPEND THRUST_TEST_GLOBS testing/omp/*.cu)
+  list(APPEND THRUST_TEST_GLOBS testing/omp/*.cpp)
+endif ()
 
 rocm_create_package(
   NAME rocthrust
@@ -207,7 +510,7 @@ foreach (THRUST_TEST_SOURCE IN LISTS THRUST_TESTS)
 
   target_include_directories(
     ${THRUST_TEST}
-    PUBLIC ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/dependencies/cub
+    PUBLIC ${PROJECT_SOURCE_DIR} ${CUB_INCLUDE_DIR}
     PRIVATE ${PROJECT_SOURCE_DIR}/testing
   )
 
@@ -234,7 +537,7 @@ foreach (THRUST_TEST_SOURCE IN LISTS THRUST_TESTS)
 
     target_include_directories(
       ${THRUST_TEST_RDC}
-      PUBLIC ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/dependencies/cub
+      PUBLIC ${PROJECT_SOURCE_DIR} ${CUB_INCLUDE_DIR}
       PRIVATE ${PROJECT_SOURCE_DIR}/testing
     )
 
@@ -333,7 +636,7 @@ foreach (THRUST_EXAMPLE_SOURCE IN LISTS THRUST_EXAMPLES)
 
   target_include_directories(
     ${THRUST_EXAMPLE}
-    PUBLIC ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/dependencies/cub
+    PUBLIC ${PROJECT_SOURCE_DIR} ${CUB_INCLUDE_DIR}
     PRIVATE ${PROJECT_SOURCE_DIR}/examples
   )
 
@@ -356,7 +659,7 @@ foreach (THRUST_EXAMPLE_SOURCE IN LISTS THRUST_EXAMPLES)
 
     target_include_directories(
       ${THRUST_EXAMPLE_RDC}
-      PUBLIC ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/dependencies/cub
+      PUBLIC ${PROJECT_SOURCE_DIR} ${CUB_INCLUDE_DIR}
       PRIVATE ${PROJECT_SOURCE_DIR}/examples
     )
 
