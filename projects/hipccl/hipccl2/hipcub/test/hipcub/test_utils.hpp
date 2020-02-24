@@ -29,16 +29,19 @@
 
 // hipCUB
 #include <hipcub/hipcub.hpp>
+// Seed values
+#include "test_seed.hpp"
 
 namespace test_utils
 {
 
 template<class T>
-inline auto get_random_data(size_t size, T min, T max)
+inline auto get_random_data(size_t size, T min, T max, int seed_value)
     -> typename std::enable_if<std::is_integral<T>::value, std::vector<T>>::type
 {
     std::random_device rd;
     std::default_random_engine gen(rd());
+    gen.seed(seed_value);
     std::uniform_int_distribution<T> distribution(min, max);
     std::vector<T> data(size);
     std::generate(data.begin(), data.end(), [&]() { return distribution(gen); });
@@ -46,11 +49,12 @@ inline auto get_random_data(size_t size, T min, T max)
 }
 
 template<class T>
-inline auto get_random_data(size_t size, T min, T max)
+inline auto get_random_data(size_t size, T min, T max, int seed_value)
     -> typename std::enable_if<std::is_floating_point<T>::value, std::vector<T>>::type
 {
     std::random_device rd;
     std::default_random_engine gen(rd());
+    gen.seed(seed_value);
     std::uniform_real_distribution<T> distribution(min, max);
     std::vector<T> data(size);
     std::generate(data.begin(), data.end(), [&]() { return distribution(gen); });
@@ -58,11 +62,12 @@ inline auto get_random_data(size_t size, T min, T max)
 }
 
 template<class T>
-inline std::vector<T> get_random_data01(size_t size, float p)
+inline std::vector<T> get_random_data01(size_t size, float p, int seed_value)
 {
     const size_t max_random_size = 1024 * 1024;
     std::random_device rd;
     std::default_random_engine gen(rd());
+    gen.seed(seed_value);
     std::bernoulli_distribution distribution(p);
     std::vector<T> data(size);
     std::generate(
@@ -77,10 +82,10 @@ inline std::vector<T> get_random_data01(size_t size, float p)
 }
 
 template<class T>
-inline auto get_random_value(T min, T max)
+inline auto get_random_value(T min, T max, int seed_value)
     -> typename std::enable_if<std::is_arithmetic<T>::value, T>::type
 {
-    return get_random_data(1, min, max)[0];
+    return get_random_data(1, min, max, seed_value)[0];
 }
 
 // Can't use std::prefix_sum for inclusive/exclusive scan, because
@@ -354,9 +359,8 @@ template<class T>
 struct is_custom_test_type<custom_test_type<T>> : std::true_type
 {
 };
-
 template<class T>
-inline auto get_random_data(size_t size, typename T::value_type min, typename T::value_type max)
+inline auto get_random_data(size_t size, typename T::value_type min, typename T::value_type max, int seed_value)
     -> typename std::enable_if<
            is_custom_test_type<T>::value && std::is_integral<typename T::value_type>::value,
            std::vector<T>
@@ -364,6 +368,7 @@ inline auto get_random_data(size_t size, typename T::value_type min, typename T:
 {
     std::random_device rd;
     std::default_random_engine gen(rd());
+    gen.seed(seed_value);
     std::uniform_int_distribution<typename T::value_type> distribution(min, max);
     std::vector<T> data(size);
     std::generate(data.begin(), data.end(), [&]() { return T(distribution(gen), distribution(gen)); });
@@ -371,7 +376,7 @@ inline auto get_random_data(size_t size, typename T::value_type min, typename T:
 }
 
 template<class T>
-inline auto get_random_data(size_t size, typename T::value_type min, typename T::value_type max)
+inline auto get_random_data(size_t size, typename T::value_type min, typename T::value_type max, int seed_value)
     -> typename std::enable_if<
            is_custom_test_type<T>::value && std::is_floating_point<typename T::value_type>::value,
            std::vector<T>
@@ -379,6 +384,7 @@ inline auto get_random_data(size_t size, typename T::value_type min, typename T:
 {
     std::random_device rd;
     std::default_random_engine gen(rd());
+    gen.seed(seed_value);
     std::uniform_real_distribution<typename T::value_type> distribution(min, max);
     std::vector<T> data(size);
     std::generate(data.begin(), data.end(), [&]() { return T(distribution(gen), distribution(gen)); });
