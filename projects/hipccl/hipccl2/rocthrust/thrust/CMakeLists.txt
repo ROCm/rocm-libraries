@@ -60,8 +60,9 @@ install(
 include(ROCMExportTargetsHeaderOnly)
 # Export targets
 rocm_export_targets_header_only(
-  TARGETS rocthrust
+  TARGETS roc::rocthrust
   PREFIX rocthrust
+  NAMESPACE roc::
 )
 
 # Create symlinks
