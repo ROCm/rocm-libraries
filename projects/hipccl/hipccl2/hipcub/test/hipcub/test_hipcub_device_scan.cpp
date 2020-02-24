@@ -77,7 +77,7 @@ std::vector<size_t> get_sizes()
         1024, 2048, 5096,
         34567, (1 << 18) - 1220
     };
-    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(2, 1, 16384);
+    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(2, 1, 16384, rand());
     sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
     std::sort(sizes.begin(), sizes.end());
     return sizes;
@@ -95,114 +95,119 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScan)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        hipStream_t stream = 0; // default
+      for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+      {
+          unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+          SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+          SCOPED_TRACE(testing::Message() << "with size = " << size);
 
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
+            hipStream_t stream = 0; // default
 
-        // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, 1, 10);
-        std::vector<U> output(input.size(), 0);
+            // Generate data
+            std::vector<T> input = test_utils::get_random_data<T>(size, 1, 10, seed_value);
+            std::vector<U> output(input.size(), 0);
 
-        T * d_input;
-        U * d_output;
-        HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
-        HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(U)));
-        HIP_CHECK(
-            hipMemcpy(
-                d_input, input.data(),
-                input.size() * sizeof(T),
-                hipMemcpyHostToDevice
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // scan function
-        scan_op_type scan_op;
-
-        // Calculate expected results on host
-        std::vector<U> expected(input.size());
-        test_utils::host_inclusive_scan(
-            input.begin(), input.end(),
-            expected.begin(), scan_op
-        );
-
-        // temp storage
-        size_t temp_storage_size_bytes;
-        void * d_temp_storage = nullptr;
-        // Get size of d_temp_storage
-        if(std::is_same<scan_op_type, hipcub::Sum>::value)
-        {
+            T * d_input;
+            U * d_output;
+            HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
+            HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(U)));
             HIP_CHECK(
-                hipcub::DeviceScan::InclusiveSum(
-                    d_temp_storage, temp_storage_size_bytes,
-                    d_input, d_output, input.size(),
-                    stream, debug_synchronous
+                hipMemcpy(
+                    d_input, input.data(),
+                    input.size() * sizeof(T),
+                    hipMemcpyHostToDevice
                 )
             );
-        }
-        else
-        {
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // scan function
+            scan_op_type scan_op;
+
+            // Calculate expected results on host
+            std::vector<U> expected(input.size());
+            test_utils::host_inclusive_scan(
+                input.begin(), input.end(),
+                expected.begin(), scan_op
+            );
+
+            // temp storage
+            size_t temp_storage_size_bytes;
+            void * d_temp_storage = nullptr;
+            // Get size of d_temp_storage
+            if(std::is_same<scan_op_type, hipcub::Sum>::value)
+            {
+                HIP_CHECK(
+                    hipcub::DeviceScan::InclusiveSum(
+                        d_temp_storage, temp_storage_size_bytes,
+                        d_input, d_output, input.size(),
+                        stream, debug_synchronous
+                    )
+                );
+            }
+            else
+            {
+                HIP_CHECK(
+                    hipcub::DeviceScan::InclusiveScan(
+                        d_temp_storage, temp_storage_size_bytes,
+                        d_input, d_output, scan_op, input.size(),
+                        stream, debug_synchronous
+                    )
+                );
+            }
+
+            // temp_storage_size_bytes must be >0
+            ASSERT_GT(temp_storage_size_bytes, 0U);
+
+            // allocate temporary storage
+            HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Run
+            if(std::is_same<scan_op_type, hipcub::Sum>::value)
+            {
+                HIP_CHECK(
+                    hipcub::DeviceScan::InclusiveSum(
+                        d_temp_storage, temp_storage_size_bytes,
+                        d_input, d_output, input.size(),
+                        stream, debug_synchronous
+                    )
+                );
+            }
+            else
+            {
+                HIP_CHECK(
+                    hipcub::DeviceScan::InclusiveScan(
+                        d_temp_storage, temp_storage_size_bytes,
+                        d_input, d_output, scan_op, input.size(),
+                        stream, debug_synchronous
+                    )
+                );
+            }
+            HIP_CHECK(hipPeekAtLastError());
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Copy output to host
             HIP_CHECK(
-                hipcub::DeviceScan::InclusiveScan(
-                    d_temp_storage, temp_storage_size_bytes,
-                    d_input, d_output, scan_op, input.size(),
-                    stream, debug_synchronous
+                hipMemcpy(
+                    output.data(), d_output,
+                    output.size() * sizeof(U),
+                    hipMemcpyDeviceToHost
                 )
             );
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Check if output values are as expected
+            for(size_t i = 0; i < output.size(); i++)
+            {
+                auto diff = std::max<U>(std::abs(0.01f * expected[i]), U(0.01f));
+                if(std::is_integral<U>::value) diff = 0;
+                ASSERT_NEAR(output[i], expected[i], diff) << "where index = " << i;
+            }
+
+            hipFree(d_input);
+            hipFree(d_output);
+            hipFree(d_temp_storage);
         }
-
-        // temp_storage_size_bytes must be >0
-        ASSERT_GT(temp_storage_size_bytes, 0U);
-
-        // allocate temporary storage
-        HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // Run
-        if(std::is_same<scan_op_type, hipcub::Sum>::value)
-        {
-            HIP_CHECK(
-                hipcub::DeviceScan::InclusiveSum(
-                    d_temp_storage, temp_storage_size_bytes,
-                    d_input, d_output, input.size(),
-                    stream, debug_synchronous
-                )
-            );
-        }
-        else
-        {
-            HIP_CHECK(
-                hipcub::DeviceScan::InclusiveScan(
-                    d_temp_storage, temp_storage_size_bytes,
-                    d_input, d_output, scan_op, input.size(),
-                    stream, debug_synchronous
-                )
-            );
-        }
-        HIP_CHECK(hipPeekAtLastError());
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // Copy output to host
-        HIP_CHECK(
-            hipMemcpy(
-                output.data(), d_output,
-                output.size() * sizeof(U),
-                hipMemcpyDeviceToHost
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // Check if output values are as expected
-        for(size_t i = 0; i < output.size(); i++)
-        {
-            auto diff = std::max<U>(std::abs(0.01f * expected[i]), U(0.01f));
-            if(std::is_integral<U>::value) diff = 0;
-            ASSERT_NEAR(output[i], expected[i], diff) << "where index = " << i;
-        }
-
-        hipFree(d_input);
-        hipFree(d_output);
-        hipFree(d_temp_storage);
     }
 }
 
@@ -216,118 +221,123 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScan)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        hipStream_t stream = 0; // default
-
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
-
-        // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, 1, 10);
-        std::vector<U> output(input.size());
-
-        T * d_input;
-        U * d_output;
-        HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
-        HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(U)));
-        HIP_CHECK(
-            hipMemcpy(
-                d_input, input.data(),
-                input.size() * sizeof(T),
-                hipMemcpyHostToDevice
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // scan function
-        scan_op_type scan_op;
-
-        // Calculate expected results on host
-        std::vector<U> expected(input.size());
-        const T initial_value =
-            std::is_same<scan_op_type, hipcub::Sum>::value
-            ? T(0)
-            : test_utils::get_random_value<T>(1, 100);
-        test_utils::host_exclusive_scan(
-            input.begin(), input.end(),
-            initial_value, expected.begin(),
-            scan_op
-        );
-
-        // temp storage
-        size_t temp_storage_size_bytes;
-        void * d_temp_storage = nullptr;
-        // Get size of d_temp_storage
-        if(std::is_same<scan_op_type, hipcub::Sum>::value)
+        for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {
+            unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            hipStream_t stream = 0; // default
+
+            // Generate data
+            std::vector<T> input = test_utils::get_random_data<T>(size, 1, 10, seed_value);
+            std::vector<U> output(input.size());
+
+            T * d_input;
+            U * d_output;
+            HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
+            HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(U)));
             HIP_CHECK(
-                hipcub::DeviceScan::ExclusiveSum(
-                    d_temp_storage, temp_storage_size_bytes,
-                    d_input, d_output, input.size(),
-                    stream, debug_synchronous
+                hipMemcpy(
+                    d_input, input.data(),
+                    input.size() * sizeof(T),
+                    hipMemcpyHostToDevice
                 )
             );
-        }
-        else
-        {
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // scan function
+            scan_op_type scan_op;
+
+            // Calculate expected results on host
+            std::vector<U> expected(input.size());
+            const T initial_value =
+                std::is_same<scan_op_type, hipcub::Sum>::value
+                ? T(0)
+                : test_utils::get_random_value<T>(1, 100, seed_value + seed_value_addition);
+            test_utils::host_exclusive_scan(
+                input.begin(), input.end(),
+                initial_value, expected.begin(),
+                scan_op
+            );
+
+            // temp storage
+            size_t temp_storage_size_bytes;
+            void * d_temp_storage = nullptr;
+            // Get size of d_temp_storage
+            if(std::is_same<scan_op_type, hipcub::Sum>::value)
+            {
+                HIP_CHECK(
+                    hipcub::DeviceScan::ExclusiveSum(
+                        d_temp_storage, temp_storage_size_bytes,
+                        d_input, d_output, input.size(),
+                        stream, debug_synchronous
+                    )
+                );
+            }
+            else
+            {
+                HIP_CHECK(
+                    hipcub::DeviceScan::ExclusiveScan(
+                        d_temp_storage, temp_storage_size_bytes,
+                        d_input, d_output, scan_op, initial_value, input.size(),
+                        stream, debug_synchronous
+                    )
+                );
+            }
+
+            // temp_storage_size_bytes must be >0
+            ASSERT_GT(temp_storage_size_bytes, 0U);
+
+            // allocate temporary storage
+            HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Run
+            if(std::is_same<scan_op_type, hipcub::Sum>::value)
+            {
+                HIP_CHECK(
+                    hipcub::DeviceScan::ExclusiveSum(
+                        d_temp_storage, temp_storage_size_bytes,
+                        d_input, d_output, input.size(),
+                        stream, debug_synchronous
+                    )
+                );
+            }
+            else
+            {
+                HIP_CHECK(
+                    hipcub::DeviceScan::ExclusiveScan(
+                        d_temp_storage, temp_storage_size_bytes,
+                        d_input, d_output, scan_op, initial_value, input.size(),
+                        stream, debug_synchronous
+                    )
+                );
+            }
+            HIP_CHECK(hipPeekAtLastError());
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Copy output to host
             HIP_CHECK(
-                hipcub::DeviceScan::ExclusiveScan(
-                    d_temp_storage, temp_storage_size_bytes,
-                    d_input, d_output, scan_op, initial_value, input.size(),
-                    stream, debug_synchronous
+                hipMemcpy(
+                    output.data(), d_output,
+                    output.size() * sizeof(U),
+                    hipMemcpyDeviceToHost
                 )
             );
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Check if output values are as expected
+            for(size_t i = 0; i < output.size(); i++)
+            {
+                auto diff = std::max<U>(std::abs(0.01f * expected[i]), U(0.01f));
+                if(std::is_integral<U>::value) diff = 0;
+                ASSERT_NEAR(output[i], expected[i], diff) << "where index = " << i;
+            }
+
+            hipFree(d_input);
+            hipFree(d_output);
+            hipFree(d_temp_storage);
         }
-
-        // temp_storage_size_bytes must be >0
-        ASSERT_GT(temp_storage_size_bytes, 0U);
-
-        // allocate temporary storage
-        HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // Run
-        if(std::is_same<scan_op_type, hipcub::Sum>::value)
-        {
-            HIP_CHECK(
-                hipcub::DeviceScan::ExclusiveSum(
-                    d_temp_storage, temp_storage_size_bytes,
-                    d_input, d_output, input.size(),
-                    stream, debug_synchronous
-                )
-            );
-        }
-        else
-        {
-            HIP_CHECK(
-                hipcub::DeviceScan::ExclusiveScan(
-                    d_temp_storage, temp_storage_size_bytes,
-                    d_input, d_output, scan_op, initial_value, input.size(),
-                    stream, debug_synchronous
-                )
-            );
-        }
-        HIP_CHECK(hipPeekAtLastError());
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // Copy output to host
-        HIP_CHECK(
-            hipMemcpy(
-                output.data(), d_output,
-                output.size() * sizeof(U),
-                hipMemcpyDeviceToHost
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // Check if output values are as expected
-        for(size_t i = 0; i < output.size(); i++)
-        {
-            auto diff = std::max<U>(std::abs(0.01f * expected[i]), U(0.01f));
-            if(std::is_integral<U>::value) diff = 0;
-            ASSERT_NEAR(output[i], expected[i], diff) << "where index = " << i;
-        }
-
-        hipFree(d_input);
-        hipFree(d_output);
-        hipFree(d_temp_storage);
     }
 }
