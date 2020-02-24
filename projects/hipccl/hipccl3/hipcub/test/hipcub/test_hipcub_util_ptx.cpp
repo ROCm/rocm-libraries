@@ -128,72 +128,79 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleUp)
     const size_t hardware_warp_size = HIPCUB_WARP_THREADS;
     const size_t size = hardware_warp_size;
 
-    // Generate input
-    auto input = test_utils::get_random_data<T>(size, T(-100), T(100));
-    std::vector<T> output(input.size());
-
-    auto src_offsets = test_utils::get_random_data<unsigned int>(
-        std::max<size_t>(1, logical_warp_size/2),
-        1U,
-        std::max<unsigned int>(1, logical_warp_size - 1)
-    );
-
-    T* device_data;
-    HIP_CHECK(
-        hipMalloc(
-            &device_data,
-            input.size() * sizeof(typename decltype(input)::value_type)
-        )
-    );
-
-    for(auto src_offset : src_offsets)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        SCOPED_TRACE(testing::Message() << "where src_offset = " << src_offset);
-        // Calculate expected results on host
-        std::vector<T> expected(size, 0);
-        for(size_t i = 0; i < input.size()/logical_warp_size; i++)
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+        // Generate input
+        auto input = test_utils::get_random_data<T>(size, T(-100), T(100), seed_value);
+        std::vector<T> output(input.size());
+
+        auto src_offsets = test_utils::get_random_data<unsigned int>(
+            std::max<size_t>(1, logical_warp_size/2),
+            1U,
+            std::max<unsigned int>(1, logical_warp_size - 1),
+            seed_value + seed_value_addition
+        );
+
+        T* device_data;
+        HIP_CHECK(
+            hipMalloc(
+                &device_data,
+                input.size() * sizeof(typename decltype(input)::value_type)
+            )
+        );
+
+        for(auto src_offset : src_offsets)
         {
-            for(size_t j = 0; j < logical_warp_size; j++)
+            SCOPED_TRACE(testing::Message() << "where src_offset = " << src_offset);
+            // Calculate expected results on host
+            std::vector<T> expected(size, 0);
+            for(size_t i = 0; i < input.size()/logical_warp_size; i++)
             {
-                size_t index = j + logical_warp_size * i;
-                auto up_index = j > src_offset-1 ? index-src_offset : index;
-                expected[index] = input[up_index];
+                for(size_t j = 0; j < logical_warp_size; j++)
+                {
+                    size_t index = j + logical_warp_size * i;
+                    auto up_index = j > src_offset-1 ? index-src_offset : index;
+                    expected[index] = input[up_index];
+                }
+            }
+
+            // Writing to device memory
+            HIP_CHECK(
+                hipMemcpy(
+                    device_data, input.data(),
+                    input.size() * sizeof(T),
+                    hipMemcpyHostToDevice
+                )
+            );
+
+            // Launching kernel
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(shuffle_up_kernel<logical_warp_size, T>),
+                dim3(1), dim3(hardware_warp_size), 0, 0,
+                device_data, src_offset
+            );
+            HIP_CHECK(hipPeekAtLastError());
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Read from device memory
+            HIP_CHECK(
+                hipMemcpy(
+                    output.data(), device_data,
+                    output.size() * sizeof(T),
+                    hipMemcpyDeviceToHost
+                )
+            );
+
+            for(size_t i = 0; i < output.size(); i++)
+            {
+                ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
             }
         }
-
-        // Writing to device memory
-        HIP_CHECK(
-            hipMemcpy(
-                device_data, input.data(),
-                input.size() * sizeof(T),
-                hipMemcpyHostToDevice
-            )
-        );
-
-        // Launching kernel
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(shuffle_up_kernel<logical_warp_size, T>),
-            dim3(1), dim3(hardware_warp_size), 0, 0,
-            device_data, src_offset
-        );
-        HIP_CHECK(hipPeekAtLastError());
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // Read from device memory
-        HIP_CHECK(
-            hipMemcpy(
-                output.data(), device_data,
-                output.size() * sizeof(T),
-                hipMemcpyDeviceToHost
-            )
-        );
-
-        for(size_t i = 0; i < output.size(); i++)
-        {
-            ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
-        }
+        hipFree(device_data);
     }
-    hipFree(device_data);
 }
 
 template<unsigned int LOGICAL_WARP_THREADS, class T>
@@ -221,72 +228,79 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleDown)
     const size_t hardware_warp_size = HIPCUB_WARP_THREADS;
     const size_t size = hardware_warp_size;
 
-    // Generate input
-    auto input = test_utils::get_random_data<T>(size, T(-100), T(100));
-    std::vector<T> output(input.size());
-
-    auto src_offsets = test_utils::get_random_data<unsigned int>(
-        std::max<size_t>(1, logical_warp_size/2),
-        1U,
-        std::max<unsigned int>(1, logical_warp_size - 1)
-    );
-
-    T * device_data;
-    HIP_CHECK(
-        hipMalloc(
-            &device_data,
-            input.size() * sizeof(typename decltype(input)::value_type)
-        )
-    );
-
-    for(auto src_offset : src_offsets)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        SCOPED_TRACE(testing::Message() << "where src_offset = " << src_offset);
-        // Calculate expected results on host
-        std::vector<T> expected(size, 0);
-        for(size_t i = 0; i < input.size()/logical_warp_size; i++)
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+        // Generate input
+        auto input = test_utils::get_random_data<T>(size, T(-100), T(100), seed_value);
+        std::vector<T> output(input.size());
+
+        auto src_offsets = test_utils::get_random_data<unsigned int>(
+            std::max<size_t>(1, logical_warp_size/2),
+            1U,
+            std::max<unsigned int>(1, logical_warp_size - 1),
+            seed_value + seed_value_addition
+        );
+
+        T * device_data;
+        HIP_CHECK(
+            hipMalloc(
+                &device_data,
+                input.size() * sizeof(typename decltype(input)::value_type)
+            )
+        );
+
+        for(auto src_offset : src_offsets)
         {
-            for(size_t j = 0; j < logical_warp_size; j++)
+            SCOPED_TRACE(testing::Message() << "where src_offset = " << src_offset);
+            // Calculate expected results on host
+            std::vector<T> expected(size, 0);
+            for(size_t i = 0; i < input.size()/logical_warp_size; i++)
             {
-                size_t index = j + logical_warp_size * i;
-                auto down_index = j+src_offset < logical_warp_size ? index+src_offset : index;
-                expected[index] = input[down_index];
+                for(size_t j = 0; j < logical_warp_size; j++)
+                {
+                    size_t index = j + logical_warp_size * i;
+                    auto down_index = j+src_offset < logical_warp_size ? index+src_offset : index;
+                    expected[index] = input[down_index];
+                }
+            }
+
+            // Writing to device memory
+            HIP_CHECK(
+                hipMemcpy(
+                    device_data, input.data(),
+                    input.size() * sizeof(T),
+                    hipMemcpyHostToDevice
+                )
+            );
+
+            // Launching kernel
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(shuffle_down_kernel<logical_warp_size, T>),
+                dim3(1), dim3(hardware_warp_size), 0, 0,
+                device_data, src_offset
+            );
+            HIP_CHECK(hipPeekAtLastError());
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Read from device memory
+            HIP_CHECK(
+                hipMemcpy(
+                    output.data(), device_data,
+                    output.size() * sizeof(T),
+                    hipMemcpyDeviceToHost
+                )
+            );
+
+            for(size_t i = 0; i < output.size(); i++)
+            {
+                ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
             }
         }
-
-        // Writing to device memory
-        HIP_CHECK(
-            hipMemcpy(
-                device_data, input.data(),
-                input.size() * sizeof(T),
-                hipMemcpyHostToDevice
-            )
-        );
-
-        // Launching kernel
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(shuffle_down_kernel<logical_warp_size, T>),
-            dim3(1), dim3(hardware_warp_size), 0, 0,
-            device_data, src_offset
-        );
-        HIP_CHECK(hipPeekAtLastError());
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // Read from device memory
-        HIP_CHECK(
-            hipMemcpy(
-                output.data(), device_data,
-                output.size() * sizeof(T),
-                hipMemcpyDeviceToHost
-            )
-        );
-
-        for(size_t i = 0; i < output.size(); i++)
-        {
-            ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
-        }
+        hipFree(device_data);
     }
-    hipFree(device_data);
 }
 
 template<unsigned int LOGICAL_WARP_THREADS, class T>
@@ -312,82 +326,91 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleIndex)
     const size_t hardware_warp_size = HIPCUB_WARP_THREADS;
     const size_t size = hardware_warp_size;
 
-    // Generate input
-    auto input = test_utils::get_random_data<T>(size, T(-100), T(100));
-    std::vector<T> output(input.size());
-
-    auto src_offsets = test_utils::get_random_data<int>(
-        hardware_warp_size/logical_warp_size, 0, std::max<int>(1, logical_warp_size - 1)
-    );
-
-    // Calculate expected results on host
-    std::vector<T> expected(size, 0);
-    for(size_t i = 0; i < input.size()/logical_warp_size; i++)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        int src_index = src_offsets[i];
-        for(size_t j = 0; j < logical_warp_size; j++)
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+        // Generate input
+        auto input = test_utils::get_random_data<T>(size, T(-100), T(100), seed_value);
+        std::vector<T> output(input.size());
+
+        auto src_offsets = test_utils::get_random_data<int>(
+            hardware_warp_size/logical_warp_size,
+            0,
+            std::max<int>(1, logical_warp_size - 1),
+            seed_value + seed_value_addition
+        );
+
+        // Calculate expected results on host
+        std::vector<T> expected(size, 0);
+        for(size_t i = 0; i < input.size()/logical_warp_size; i++)
         {
-            size_t index = j + logical_warp_size * i;
-            if(src_index >= int(logical_warp_size) || src_index < 0) src_index = index;
-            expected[index] = input[src_index + logical_warp_size * i];
+            int src_index = src_offsets[i];
+            for(size_t j = 0; j < logical_warp_size; j++)
+            {
+                size_t index = j + logical_warp_size * i;
+                if(src_index >= int(logical_warp_size) || src_index < 0) src_index = index;
+                expected[index] = input[src_index + logical_warp_size * i];
+            }
         }
+
+        // Writing to device memory
+        T* device_data;
+        int * device_src_offsets;
+        HIP_CHECK(
+            hipMalloc(
+                &device_data,
+                input.size() * sizeof(typename decltype(input)::value_type)
+            )
+        );
+        HIP_CHECK(
+            hipMalloc(
+                &device_src_offsets,
+                src_offsets.size() * sizeof(typename decltype(src_offsets)::value_type)
+            )
+        );
+        HIP_CHECK(
+            hipMemcpy(
+                device_data, input.data(),
+                input.size() * sizeof(typename decltype(input)::value_type),
+                hipMemcpyHostToDevice
+            )
+        );
+        HIP_CHECK(
+            hipMemcpy(
+                device_src_offsets, src_offsets.data(),
+                src_offsets.size() * sizeof(typename decltype(src_offsets)::value_type),
+                hipMemcpyHostToDevice
+            )
+        );
+
+        // Launching kernel
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(shuffle_index_kernel<logical_warp_size, T>),
+            dim3(1), dim3(hardware_warp_size), 0, 0,
+            device_data, device_src_offsets
+        );
+        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Read from device memory
+        HIP_CHECK(
+            hipMemcpy(
+                output.data(), device_data,
+                output.size() * sizeof(T),
+                hipMemcpyDeviceToHost
+            )
+        );
+
+        for(size_t i = 0; i < output.size(); i++)
+        {
+            ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
+        }
+
+        hipFree(device_data);
+        hipFree(device_src_offsets);
     }
-
-    // Writing to device memory
-    T* device_data;
-    int * device_src_offsets;
-    HIP_CHECK(
-        hipMalloc(
-            &device_data,
-            input.size() * sizeof(typename decltype(input)::value_type)
-        )
-    );
-    HIP_CHECK(
-        hipMalloc(
-            &device_src_offsets,
-            src_offsets.size() * sizeof(typename decltype(src_offsets)::value_type)
-        )
-    );
-    HIP_CHECK(
-        hipMemcpy(
-            device_data, input.data(),
-            input.size() * sizeof(typename decltype(input)::value_type),
-            hipMemcpyHostToDevice
-        )
-    );
-    HIP_CHECK(
-        hipMemcpy(
-            device_src_offsets, src_offsets.data(),
-            src_offsets.size() * sizeof(typename decltype(src_offsets)::value_type),
-            hipMemcpyHostToDevice
-        )
-    );
-
-    // Launching kernel
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(shuffle_index_kernel<logical_warp_size, T>),
-        dim3(1), dim3(hardware_warp_size), 0, 0,
-        device_data, device_src_offsets
-    );
-    HIP_CHECK(hipPeekAtLastError());
-    HIP_CHECK(hipDeviceSynchronize());
-
-    // Read from device memory
-    HIP_CHECK(
-        hipMemcpy(
-            output.data(), device_data,
-            output.size() * sizeof(T),
-            hipMemcpyDeviceToHost
-        )
-    );
-
-    for(size_t i = 0; i < output.size(); i++)
-    {
-        ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
-    }
-
-    hipFree(device_data);
-    hipFree(device_src_offsets);
 }
 
 TEST(HipcubUtilPtxTests, ShuffleUpCustomStruct)
@@ -397,79 +420,91 @@ TEST(HipcubUtilPtxTests, ShuffleUpCustomStruct)
     constexpr unsigned int logical_warp_size = hardware_warp_size;
     const size_t size = logical_warp_size;
 
-    // Generate data
-    std::vector<double> random_data = test_utils::get_random_data<double>(4 * size, -100, 100);
-    std::vector<T> input(size);
-    std::vector<T> output(input.size());
-    for(size_t i = 0; i < 4 * input.size(); i+=4)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        input[i/4].i = random_data[i];
-        input[i/4].d = random_data[i+1];
-        input[i/4].f = random_data[i+2];
-        input[i/4].u = random_data[i+3];
-    }
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-    auto src_offsets = test_utils::get_random_data<unsigned int>(
-        std::max<size_t>(1, logical_warp_size/2),
-        1U,
-        std::max<unsigned int>(1, logical_warp_size - 1)
-    );
-
-    T* device_data;
-    HIP_CHECK(
-        hipMalloc(
-            &device_data,
-            input.size() * sizeof(typename decltype(input)::value_type)
-        )
-    );
-
-    for(auto src_offset : src_offsets)
-    {
-        // Calculate expected results on host
-        std::vector<T> expected(size);
-        for(size_t i = 0; i < input.size()/logical_warp_size; i++)
+        // Generate data
+        std::vector<double> random_data = test_utils::get_random_data<double>(
+            4 * size,
+            -100,
+            100,
+            seed_value
+        );
+        std::vector<T> input(size);
+        std::vector<T> output(input.size());
+        for(size_t i = 0; i < 4 * input.size(); i+=4)
         {
-            for(size_t j = 0; j < logical_warp_size; j++)
+            input[i/4].i = random_data[i];
+            input[i/4].d = random_data[i+1];
+            input[i/4].f = random_data[i+2];
+            input[i/4].u = random_data[i+3];
+        }
+
+        auto src_offsets = test_utils::get_random_data<unsigned int>(
+            std::max<size_t>(1, logical_warp_size/2),
+            1U,
+            std::max<unsigned int>(1, logical_warp_size - 1),
+            seed_value + seed_value_addition
+        );
+
+        T* device_data;
+        HIP_CHECK(
+            hipMalloc(
+                &device_data,
+                input.size() * sizeof(typename decltype(input)::value_type)
+            )
+        );
+
+        for(auto src_offset : src_offsets)
+        {
+            // Calculate expected results on host
+            std::vector<T> expected(size);
+            for(size_t i = 0; i < input.size()/logical_warp_size; i++)
             {
-                size_t index = j + logical_warp_size * i;
-                auto up_index = j > src_offset-1 ? index-src_offset : index;
-                expected[index] = input[up_index];
+                for(size_t j = 0; j < logical_warp_size; j++)
+                {
+                    size_t index = j + logical_warp_size * i;
+                    auto up_index = j > src_offset-1 ? index-src_offset : index;
+                    expected[index] = input[up_index];
+                }
+            }
+
+            // Writing to device memory
+            HIP_CHECK(
+                hipMemcpy(
+                    device_data, input.data(),
+                    input.size() * sizeof(T),
+                    hipMemcpyHostToDevice
+                )
+            );
+
+            // Launching kernel
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(shuffle_up_kernel<logical_warp_size, T>),
+                dim3(1), dim3(hardware_warp_size), 0, 0,
+                device_data, src_offset
+            );
+            HIP_CHECK(hipPeekAtLastError());
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Read from device memory
+            HIP_CHECK(
+                hipMemcpy(
+                    output.data(), device_data,
+                    output.size() * sizeof(T),
+                    hipMemcpyDeviceToHost
+                )
+            );
+
+            for(size_t i = 0; i < output.size(); i++)
+            {
+                ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
             }
         }
-
-        // Writing to device memory
-        HIP_CHECK(
-            hipMemcpy(
-                device_data, input.data(),
-                input.size() * sizeof(T),
-                hipMemcpyHostToDevice
-            )
-        );
-
-        // Launching kernel
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(shuffle_up_kernel<logical_warp_size, T>),
-            dim3(1), dim3(hardware_warp_size), 0, 0,
-            device_data, src_offset
-        );
-        HIP_CHECK(hipPeekAtLastError());
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // Read from device memory
-        HIP_CHECK(
-            hipMemcpy(
-                output.data(), device_data,
-                output.size() * sizeof(T),
-                hipMemcpyDeviceToHost
-            )
-        );
-
-        for(size_t i = 0; i < output.size(); i++)
-        {
-            ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
-        }
+        hipFree(device_data);
     }
-    hipFree(device_data);
 }
 
 TEST(HipcubUtilPtxTests, ShuffleUpCustomAlignedStruct)
@@ -479,78 +514,90 @@ TEST(HipcubUtilPtxTests, ShuffleUpCustomAlignedStruct)
     constexpr unsigned int logical_warp_size = hardware_warp_size;
     const size_t size = logical_warp_size;
 
-    // Generate data
-    std::vector<double> random_data = test_utils::get_random_data<double>(3 * size, -100, 100);
-    std::vector<T> input(size);
-    std::vector<T> output(input.size());
-    for(size_t i = 0; i < 3 * input.size(); i+=3)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        input[i/3].i = random_data[i];
-        input[i/3].u = random_data[i+1];
-        input[i/3].f = random_data[i+2];
-    }
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-    auto src_offsets = test_utils::get_random_data<unsigned int>(
-        std::max<size_t>(1, logical_warp_size/2),
-        1U,
-        std::max<unsigned int>(1, logical_warp_size - 1)
-    );
-
-    T* device_data;
-    HIP_CHECK(
-        hipMalloc(
-            &device_data,
-            input.size() * sizeof(typename decltype(input)::value_type)
-        )
-    );
-
-    for(auto src_offset : src_offsets)
-    {
-        // Calculate expected results on host
-        std::vector<T> expected(size);
-        for(size_t i = 0; i < input.size()/logical_warp_size; i++)
+        // Generate data
+        std::vector<double> random_data = test_utils::get_random_data<double>(
+            3 * size,
+            -100,
+            100,
+            seed_value
+        );
+        std::vector<T> input(size);
+        std::vector<T> output(input.size());
+        for(size_t i = 0; i < 3 * input.size(); i+=3)
         {
-            for(size_t j = 0; j < logical_warp_size; j++)
+            input[i/3].i = random_data[i];
+            input[i/3].u = random_data[i+1];
+            input[i/3].f = random_data[i+2];
+        }
+
+        auto src_offsets = test_utils::get_random_data<unsigned int>(
+            std::max<size_t>(1, logical_warp_size/2),
+            1U,
+            std::max<unsigned int>(1, logical_warp_size - 1),
+            seed_value + seed_value_addition
+        );
+
+        T* device_data;
+        HIP_CHECK(
+            hipMalloc(
+                &device_data,
+                input.size() * sizeof(typename decltype(input)::value_type)
+            )
+        );
+
+        for(auto src_offset : src_offsets)
+        {
+            // Calculate expected results on host
+            std::vector<T> expected(size);
+            for(size_t i = 0; i < input.size()/logical_warp_size; i++)
             {
-                size_t index = j + logical_warp_size * i;
-                auto up_index = j > src_offset-1 ? index-src_offset : index;
-                expected[index] = input[up_index];
+                for(size_t j = 0; j < logical_warp_size; j++)
+                {
+                    size_t index = j + logical_warp_size * i;
+                    auto up_index = j > src_offset-1 ? index-src_offset : index;
+                    expected[index] = input[up_index];
+                }
+            }
+
+            // Writing to device memory
+            HIP_CHECK(
+                hipMemcpy(
+                    device_data, input.data(),
+                    input.size() * sizeof(T),
+                    hipMemcpyHostToDevice
+                )
+            );
+
+            // Launching kernel
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(shuffle_up_kernel<logical_warp_size, T>),
+                dim3(1), dim3(hardware_warp_size), 0, 0,
+                device_data, src_offset
+            );
+            HIP_CHECK(hipPeekAtLastError());
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Read from device memory
+            HIP_CHECK(
+                hipMemcpy(
+                    output.data(), device_data,
+                    output.size() * sizeof(T),
+                    hipMemcpyDeviceToHost
+                )
+            );
+
+            for(size_t i = 0; i < output.size(); i++)
+            {
+                ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
             }
         }
-
-        // Writing to device memory
-        HIP_CHECK(
-            hipMemcpy(
-                device_data, input.data(),
-                input.size() * sizeof(T),
-                hipMemcpyHostToDevice
-            )
-        );
-
-        // Launching kernel
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(shuffle_up_kernel<logical_warp_size, T>),
-            dim3(1), dim3(hardware_warp_size), 0, 0,
-            device_data, src_offset
-        );
-        HIP_CHECK(hipPeekAtLastError());
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // Read from device memory
-        HIP_CHECK(
-            hipMemcpy(
-                output.data(), device_data,
-                output.size() * sizeof(T),
-                hipMemcpyDeviceToHost
-            )
-        );
-
-        for(size_t i = 0; i < output.size(); i++)
-        {
-            ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
-        }
+        hipFree(device_data);
     }
-    hipFree(device_data);
 }
 
 __global__
