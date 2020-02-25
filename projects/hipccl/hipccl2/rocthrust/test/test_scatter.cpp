@@ -110,28 +110,38 @@ TYPED_TEST(ScatterPrimitiveTests, TestScatter)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
         const size_t output_size = std::min((size_t)10, 2 * size);
 
         thrust::host_vector<T>   h_input(size, (T)1);
         thrust::device_vector<T> d_input(size, (T)1);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::host_vector<unsigned int> h_map
-            = get_random_data<unsigned int>(size,
-                                            std::numeric_limits<unsigned int>::min(),
-                                            std::numeric_limits<unsigned int>::max());
 
-        for(size_t i = 0; i < size; i++)
-            h_map[i] = h_map[i] % output_size;
+            thrust::host_vector<unsigned int> h_map
+                = get_random_data<unsigned int>(size,
+                                                std::numeric_limits<unsigned int>::min(),
+                                                std::numeric_limits<unsigned int>::max(),
+                                                seed_value);
 
-        thrust::device_vector<unsigned int> d_map = h_map;
+            for(size_t i = 0; i < size; i++)
+                h_map[i] = h_map[i] % output_size;
 
-        thrust::host_vector<T>   h_output(output_size, T(0));
-        thrust::device_vector<T> d_output(output_size, T(0));
+            thrust::device_vector<unsigned int> d_map = h_map;
 
-        thrust::scatter(h_input.begin(), h_input.end(), h_map.begin(), h_output.begin());
-        thrust::scatter(d_input.begin(), d_input.end(), d_map.begin(), d_output.begin());
+            thrust::host_vector<T>   h_output(output_size, T(0));
+            thrust::device_vector<T> d_output(output_size, T(0));
 
-        ASSERT_EQ(h_output, d_output);
+            thrust::scatter(h_input.begin(), h_input.end(), h_map.begin(), h_output.begin());
+            thrust::scatter(d_input.begin(), d_input.end(), d_map.begin(), d_output.begin());
+
+            ASSERT_EQ(h_output, d_output);
+        }
     }
 }
 
@@ -142,27 +152,37 @@ TYPED_TEST(ScatterPrimitiveTests, TestScatterToDiscardIterator)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
         const size_t output_size = std::min((size_t)10, 2 * size);
 
         thrust::host_vector<T>   h_input(size, (T)1);
         thrust::device_vector<T> d_input(size, (T)1);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::host_vector<unsigned int> h_map
-            = get_random_data<unsigned int>(size,
-                                            std::numeric_limits<unsigned int>::min(),
-                                            std::numeric_limits<unsigned int>::max());
 
-        for(size_t i = 0; i < size; i++)
-            h_map[i] = h_map[i] % output_size;
+            thrust::host_vector<unsigned int> h_map
+                = get_random_data<unsigned int>(size,
+                                                std::numeric_limits<unsigned int>::min(),
+                                                std::numeric_limits<unsigned int>::max(),
+                                                seed_value);
 
-        thrust::device_vector<unsigned int> d_map = h_map;
+            for(size_t i = 0; i < size; i++)
+                h_map[i] = h_map[i] % output_size;
 
-        thrust::scatter(
-            h_input.begin(), h_input.end(), h_map.begin(), thrust::make_discard_iterator());
-        thrust::scatter(
-            d_input.begin(), d_input.end(), d_map.begin(), thrust::make_discard_iterator());
+            thrust::device_vector<unsigned int> d_map = h_map;
 
-        // there's nothing to check -- just make sure it compiles
+            thrust::scatter(
+                h_input.begin(), h_input.end(), h_map.begin(), thrust::make_discard_iterator());
+            thrust::scatter(
+                d_input.begin(), d_input.end(), d_map.begin(), thrust::make_discard_iterator());
+
+            // there's nothing to check -- just make sure it compiles
+        }
     }
 }
 
@@ -284,34 +304,42 @@ TYPED_TEST(ScatterPrimitiveTests, TestScatterIf)
 
         thrust::host_vector<T>   h_input(size, T(1));
         thrust::device_vector<T> d_input(size, T(1));
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::host_vector<unsigned int> h_map
-            = get_random_data<unsigned int>(size,
-                                            std::numeric_limits<unsigned int>::min(),
-                                            std::numeric_limits<unsigned int>::max());
 
-        for(size_t i = 0; i < size; i++)
-            h_map[i] = h_map[i] % output_size;
+            thrust::host_vector<unsigned int> h_map
+                = get_random_data<unsigned int>(size,
+                                                std::numeric_limits<unsigned int>::min(),
+                                                std::numeric_limits<unsigned int>::max(),
+                                                seed_value);
 
-        thrust::device_vector<unsigned int> d_map = h_map;
+            for(size_t i = 0; i < size; i++)
+                h_map[i] = h_map[i] % output_size;
 
-        thrust::host_vector<T>   h_output(output_size, T(0));
-        thrust::device_vector<T> d_output(output_size, T(0));
+            thrust::device_vector<unsigned int> d_map = h_map;
 
-        thrust::scatter_if(h_input.begin(),
-                           h_input.end(),
-                           h_map.begin(),
-                           h_map.begin(),
-                           h_output.begin(),
-                           is_even_scatter_if<unsigned int>());
-        thrust::scatter_if(d_input.begin(),
-                           d_input.end(),
-                           d_map.begin(),
-                           d_map.begin(),
-                           d_output.begin(),
-                           is_even_scatter_if<unsigned int>());
+            thrust::host_vector<T>   h_output(output_size, T(0));
+            thrust::device_vector<T> d_output(output_size, T(0));
 
-        ASSERT_EQ(h_output, d_output);
+            thrust::scatter_if(h_input.begin(),
+                               h_input.end(),
+                               h_map.begin(),
+                               h_map.begin(),
+                               h_output.begin(),
+                               is_even_scatter_if<unsigned int>());
+            thrust::scatter_if(d_input.begin(),
+                               d_input.end(),
+                               d_map.begin(),
+                               d_map.begin(),
+                               d_output.begin(),
+                               is_even_scatter_if<unsigned int>());
+
+            ASSERT_EQ(h_output, d_output);
+        }
     }
 }
 
@@ -322,33 +350,43 @@ TYPED_TEST(ScatterPrimitiveTests, TestScatterIfToDiscardIterator)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        
         const size_t output_size = std::min((size_t)10, 2 * size);
 
         thrust::host_vector<T>   h_input(size, T(1));
         thrust::device_vector<T> d_input(size, T(1));
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::host_vector<unsigned int> h_map
-            = get_random_data<unsigned int>(size,
-                                            std::numeric_limits<unsigned int>::min(),
-                                            std::numeric_limits<unsigned int>::max());
 
-        for(size_t i = 0; i < size; i++)
-            h_map[i] = h_map[i] % output_size;
+            thrust::host_vector<unsigned int> h_map
+                = get_random_data<unsigned int>(size,
+                                                std::numeric_limits<unsigned int>::min(),
+                                                std::numeric_limits<unsigned int>::max(),
+                                                seed_value);
 
-        thrust::device_vector<unsigned int> d_map = h_map;
+            for(size_t i = 0; i < size; i++)
+                h_map[i] = h_map[i] % output_size;
 
-        thrust::scatter_if(h_input.begin(),
-                           h_input.end(),
-                           h_map.begin(),
-                           h_map.begin(),
-                           thrust::make_discard_iterator(),
-                           is_even_scatter_if<unsigned int>());
-        thrust::scatter_if(d_input.begin(),
-                           d_input.end(),
-                           d_map.begin(),
-                           d_map.begin(),
-                           thrust::make_discard_iterator(),
-                           is_even_scatter_if<unsigned int>());
+            thrust::device_vector<unsigned int> d_map = h_map;
+
+            thrust::scatter_if(h_input.begin(),
+                               h_input.end(),
+                               h_map.begin(),
+                               h_map.begin(),
+                               thrust::make_discard_iterator(),
+                               is_even_scatter_if<unsigned int>());
+            thrust::scatter_if(d_input.begin(),
+                               d_input.end(),
+                               d_map.begin(),
+                               d_map.begin(),
+                               thrust::make_discard_iterator(),
+                               is_even_scatter_if<unsigned int>());
+        }
     }
 }
 

@@ -160,40 +160,146 @@ TYPED_TEST(SetUnionByKeyPrimitiveTests, TestSetUnionByKey)
 
     for(auto size : sizes)
     {
-        thrust::host_vector<T> temp = get_random_data<unsigned short int>(size, 0, 255);
-
-        thrust::host_vector<T> random_keys = get_random_data<unsigned short int>(size, 0, 255);
-        thrust::host_vector<T> random_vals = get_random_data<unsigned short int>(size, 0, 255);
-
-        size_t denominators[]   = {1, 2, 3, 4, 5, 6, 7, 8, 9};
-        size_t num_denominators = sizeof(denominators) / sizeof(size_t);
-
-        for(size_t i = 0; i < num_denominators; ++i)
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {
-            size_t size_a = size / denominators[i];
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-            thrust::host_vector<T> h_a_keys(random_keys.begin(), random_keys.begin() + size_a);
-            thrust::host_vector<T> h_b_keys(random_keys.begin() + size_a, random_keys.end());
+            thrust::host_vector<T> temp = get_random_data<unsigned short int>(
+                size,
+                0,
+                255,
+                seed_value
+            );
 
-            thrust::host_vector<T> h_a_vals(random_vals.begin(), random_vals.begin() + size_a);
-            thrust::host_vector<T> h_b_vals(random_vals.begin() + size_a, random_vals.end());
+            thrust::host_vector<T> random_keys = get_random_data<unsigned short int>(
+                size,
+                0,
+                255,
+                seed_value + seed_value_addition
+            );
+            thrust::host_vector<T> random_vals = get_random_data<unsigned short int>(
+                size,
+                0,
+                255,
+                seed_value + 2 * seed_value_addition
+            );
 
-            thrust::stable_sort(h_a_keys.begin(), h_a_keys.end());
-            thrust::stable_sort(h_b_keys.begin(), h_b_keys.end());
+            size_t denominators[]   = {1, 2, 3, 4, 5, 6, 7, 8, 9};
+            size_t num_denominators = sizeof(denominators) / sizeof(size_t);
 
-            thrust::device_vector<T> d_a_keys = h_a_keys;
-            thrust::device_vector<T> d_b_keys = h_b_keys;
+            for(size_t i = 0; i < num_denominators; ++i)
+            {
+                size_t size_a = size / denominators[i];
 
-            thrust::device_vector<T> d_a_vals = h_a_vals;
-            thrust::device_vector<T> d_b_vals = h_b_vals;
+                thrust::host_vector<T> h_a_keys(random_keys.begin(), random_keys.begin() + size_a);
+                thrust::host_vector<T> h_b_keys(random_keys.begin() + size_a, random_keys.end());
 
-            size_t max_size = h_a_keys.size() + h_b_keys.size();
+                thrust::host_vector<T> h_a_vals(random_vals.begin(), random_vals.begin() + size_a);
+                thrust::host_vector<T> h_b_vals(random_vals.begin() + size_a, random_vals.end());
 
-            thrust::host_vector<T> h_result_keys(max_size);
-            thrust::host_vector<T> h_result_vals(max_size);
+                thrust::stable_sort(h_a_keys.begin(), h_a_keys.end());
+                thrust::stable_sort(h_b_keys.begin(), h_b_keys.end());
 
-            thrust::device_vector<T> d_result_keys(max_size);
-            thrust::device_vector<T> d_result_vals(max_size);
+                thrust::device_vector<T> d_a_keys = h_a_keys;
+                thrust::device_vector<T> d_b_keys = h_b_keys;
+
+                thrust::device_vector<T> d_a_vals = h_a_vals;
+                thrust::device_vector<T> d_b_vals = h_b_vals;
+
+                size_t max_size = h_a_keys.size() + h_b_keys.size();
+
+                thrust::host_vector<T> h_result_keys(max_size);
+                thrust::host_vector<T> h_result_vals(max_size);
+
+                thrust::device_vector<T> d_result_keys(max_size);
+                thrust::device_vector<T> d_result_vals(max_size);
+
+                thrust::pair<typename thrust::host_vector<T>::iterator,
+                             typename thrust::host_vector<T>::iterator>
+                    h_end;
+
+                thrust::pair<typename thrust::device_vector<T>::iterator,
+                             typename thrust::device_vector<T>::iterator>
+                    d_end;
+
+                h_end = thrust::set_union_by_key(h_a_keys.begin(),
+                                                 h_a_keys.end(),
+                                                 h_b_keys.begin(),
+                                                 h_b_keys.end(),
+                                                 h_a_vals.begin(),
+                                                 h_b_vals.begin(),
+                                                 h_result_keys.begin(),
+                                                 h_result_vals.begin());
+                h_result_keys.erase(h_end.first, h_result_keys.end());
+                h_result_vals.erase(h_end.second, h_result_vals.end());
+
+                d_end = thrust::set_union_by_key(d_a_keys.begin(),
+                                                 d_a_keys.end(),
+                                                 d_b_keys.begin(),
+                                                 d_b_keys.end(),
+                                                 d_a_vals.begin(),
+                                                 d_b_vals.begin(),
+                                                 d_result_keys.begin(),
+                                                 d_result_vals.begin());
+                d_result_keys.erase(d_end.first, d_result_keys.end());
+                d_result_vals.erase(d_end.second, d_result_vals.end());
+
+                ASSERT_EQ(h_result_keys, d_result_keys);
+                ASSERT_EQ(h_result_vals, d_result_vals);
+            }
+        }
+    }
+}
+
+TYPED_TEST(SetUnionByKeyPrimitiveTests, + seed_value_addition TestSetUnionByKeyEquivalentRanges)
+{
+    using T = typename TestFixture::input_type;
+
+    const std::vector<size_t> sizes = get_sizes();
+
+    for(auto size : sizes)
+    {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+            thrust::host_vector<T> temp = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+
+            thrust::host_vector<T> h_a_key = temp;
+            thrust::sort(h_a_key.begin(), h_a_key.end());
+            thrust::host_vector<T> h_b_key = h_a_key;
+
+            thrust::host_vector<T> h_a_val = get_random_data<T>(
+                size,
+                std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value + seed_value_addition
+            );
+
+            thrust::host_vector<T> h_b_val = get_random_data<T>(
+                size,
+                std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value + 2 * seed_value_addition
+            );
+
+            thrust::device_vector<T> d_a_key = h_a_key;
+            thrust::device_vector<T> d_b_key = h_b_key;
+
+            thrust::device_vector<T> d_a_val = h_a_val;
+            thrust::device_vector<T> d_b_val = h_b_val;
+
+            size_t max_size = h_a_key.size() + h_b_key.size();
+
+            thrust::host_vector<T>   h_result_key(max_size), h_result_val(max_size);
+            thrust::device_vector<T> d_result_key(max_size), d_result_val(max_size);
 
             thrust::pair<typename thrust::host_vector<T>::iterator,
                          typename thrust::host_vector<T>::iterator>
@@ -203,98 +309,31 @@ TYPED_TEST(SetUnionByKeyPrimitiveTests, TestSetUnionByKey)
                          typename thrust::device_vector<T>::iterator>
                 d_end;
 
-            h_end = thrust::set_union_by_key(h_a_keys.begin(),
-                                             h_a_keys.end(),
-                                             h_b_keys.begin(),
-                                             h_b_keys.end(),
-                                             h_a_vals.begin(),
-                                             h_b_vals.begin(),
-                                             h_result_keys.begin(),
-                                             h_result_vals.begin());
-            h_result_keys.erase(h_end.first, h_result_keys.end());
-            h_result_vals.erase(h_end.second, h_result_vals.end());
+            h_end = thrust::set_union_by_key(h_a_key.begin(),
+                                             h_a_key.end(),
+                                             h_b_key.begin(),
+                                             h_b_key.end(),
+                                             h_a_val.begin(),
+                                             h_b_val.begin(),
+                                             h_result_key.begin(),
+                                             h_result_val.begin());
+            h_result_key.erase(h_end.first, h_result_key.end());
+            h_result_val.erase(h_end.second, h_result_val.end());
 
-            d_end = thrust::set_union_by_key(d_a_keys.begin(),
-                                             d_a_keys.end(),
-                                             d_b_keys.begin(),
-                                             d_b_keys.end(),
-                                             d_a_vals.begin(),
-                                             d_b_vals.begin(),
-                                             d_result_keys.begin(),
-                                             d_result_vals.begin());
-            d_result_keys.erase(d_end.first, d_result_keys.end());
-            d_result_vals.erase(d_end.second, d_result_vals.end());
+            d_end = thrust::set_union_by_key(d_a_key.begin(),
+                                             d_a_key.end(),
+                                             d_b_key.begin(),
+                                             d_b_key.end(),
+                                             d_a_val.begin(),
+                                             d_b_val.begin(),
+                                             d_result_key.begin(),
+                                             d_result_val.begin());
+            d_result_key.erase(d_end.first, d_result_key.end());
+            d_result_val.erase(d_end.second, d_result_val.end());
 
-            ASSERT_EQ(h_result_keys, d_result_keys);
-            ASSERT_EQ(h_result_vals, d_result_vals);
+            ASSERT_EQ(h_result_key, d_result_key);
+            ASSERT_EQ(h_result_val, d_result_val);
         }
-    }
-}
-
-TYPED_TEST(SetUnionByKeyPrimitiveTests, TestSetUnionByKeyEquivalentRanges)
-{
-    using T = typename TestFixture::input_type;
-
-    const std::vector<size_t> sizes = get_sizes();
-
-    for(auto size : sizes)
-    {
-        thrust::host_vector<T> temp = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-
-        thrust::host_vector<T> h_a_key = temp;
-        thrust::sort(h_a_key.begin(), h_a_key.end());
-        thrust::host_vector<T> h_b_key = h_a_key;
-
-        thrust::host_vector<T> h_a_val = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-
-        thrust::host_vector<T> h_b_val = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-
-        thrust::device_vector<T> d_a_key = h_a_key;
-        thrust::device_vector<T> d_b_key = h_b_key;
-
-        thrust::device_vector<T> d_a_val = h_a_val;
-        thrust::device_vector<T> d_b_val = h_b_val;
-
-        size_t max_size = h_a_key.size() + h_b_key.size();
-
-        thrust::host_vector<T>   h_result_key(max_size), h_result_val(max_size);
-        thrust::device_vector<T> d_result_key(max_size), d_result_val(max_size);
-
-        thrust::pair<typename thrust::host_vector<T>::iterator,
-                     typename thrust::host_vector<T>::iterator>
-            h_end;
-
-        thrust::pair<typename thrust::device_vector<T>::iterator,
-                     typename thrust::device_vector<T>::iterator>
-            d_end;
-
-        h_end = thrust::set_union_by_key(h_a_key.begin(),
-                                         h_a_key.end(),
-                                         h_b_key.begin(),
-                                         h_b_key.end(),
-                                         h_a_val.begin(),
-                                         h_b_val.begin(),
-                                         h_result_key.begin(),
-                                         h_result_val.begin());
-        h_result_key.erase(h_end.first, h_result_key.end());
-        h_result_val.erase(h_end.second, h_result_val.end());
-
-        d_end = thrust::set_union_by_key(d_a_key.begin(),
-                                         d_a_key.end(),
-                                         d_b_key.begin(),
-                                         d_b_key.end(),
-                                         d_a_val.begin(),
-                                         d_b_val.begin(),
-                                         d_result_key.begin(),
-                                         d_result_val.begin());
-        d_result_key.erase(d_end.first, d_result_key.end());
-        d_result_val.erase(d_end.second, d_result_val.end());
-
-        ASSERT_EQ(h_result_key, d_result_key);
-        ASSERT_EQ(h_result_val, d_result_val);
     }
 }
 
@@ -306,69 +345,85 @@ TYPED_TEST(SetUnionByKeyPrimitiveTests, TestSetUnionByKeyMultiset)
 
     for(auto size : sizes)
     {
-        thrust::host_vector<T> temp = get_random_data<T>(
-            2 * size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-
-        // restrict elements to [min,13)
-        for(typename thrust::host_vector<T>::iterator i = temp.begin(); i != temp.end(); ++i)
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {
-            int temp = static_cast<int>(*i);
-            temp %= 13;
-            *i = temp;
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+            thrust::host_vector<T> temp = get_random_data<T>(
+                2 * size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+
+            // restrict elements to [min,13)
+            for(typename thrust::host_vector<T>::iterator i = temp.begin(); i != temp.end(); ++i)
+            {
+                int temp = static_cast<int>(*i);
+                temp %= 13;
+                *i = temp;
+            }
+
+            thrust::host_vector<T> h_a_key(temp.begin(), temp.begin() + size);
+            thrust::host_vector<T> h_b_key(temp.begin() + size, temp.end());
+
+            thrust::sort(h_a_key.begin(), h_a_key.end());
+            thrust::sort(h_b_key.begin(), h_b_key.end());
+
+            thrust::host_vector<T> h_a_val = get_random_data<T>(
+                size,
+                std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value + seed_value_addition
+            );
+            thrust::host_vector<T> h_b_val = get_random_data<T>(
+                size,
+                std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value + 2 * seed_value_addition
+            );
+
+            thrust::device_vector<T> d_a_key = h_a_key;
+            thrust::device_vector<T> d_b_key = h_b_key;
+
+            thrust::device_vector<T> d_a_val = h_a_val;
+            thrust::device_vector<T> d_b_val = h_b_val;
+
+            size_t                   max_size = h_a_key.size() + h_b_key.size();
+            thrust::host_vector<T>   h_result_key(max_size), h_result_val(max_size);
+            thrust::device_vector<T> d_result_key(max_size), d_result_val(max_size);
+
+            thrust::pair<typename thrust::host_vector<T>::iterator,
+                         typename thrust::host_vector<T>::iterator>
+                h_end;
+
+            thrust::pair<typename thrust::device_vector<T>::iterator,
+                         typename thrust::device_vector<T>::iterator>
+                d_end;
+
+            h_end = thrust::set_union_by_key(h_a_key.begin(),
+                                             h_a_key.end(),
+                                             h_b_key.begin(),
+                                             h_b_key.end(),
+                                             h_a_val.begin(),
+                                             h_b_val.begin(),
+                                             h_result_key.begin(),
+                                             h_result_val.begin());
+            h_result_key.erase(h_end.first, h_result_key.end());
+            h_result_val.erase(h_end.second, h_result_val.end());
+
+            d_end = thrust::set_union_by_key(d_a_key.begin(),
+                                             d_a_key.end(),
+                                             d_b_key.begin(),
+                                             d_b_key.end(),
+                                             d_a_val.begin(),
+                                             d_b_val.begin(),
+                                             d_result_key.begin(),
+                                             d_result_val.begin());
+            d_result_key.erase(d_end.first, d_result_key.end());
+            d_result_val.erase(d_end.second, d_result_val.end());
+
+            ASSERT_EQ(h_result_key, d_result_key);
+            ASSERT_EQ(h_result_val, d_result_val);
         }
-
-        thrust::host_vector<T> h_a_key(temp.begin(), temp.begin() + size);
-        thrust::host_vector<T> h_b_key(temp.begin() + size, temp.end());
-
-        thrust::sort(h_a_key.begin(), h_a_key.end());
-        thrust::sort(h_b_key.begin(), h_b_key.end());
-
-        thrust::host_vector<T> h_a_val = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::host_vector<T> h_b_val = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-
-        thrust::device_vector<T> d_a_key = h_a_key;
-        thrust::device_vector<T> d_b_key = h_b_key;
-
-        thrust::device_vector<T> d_a_val = h_a_val;
-        thrust::device_vector<T> d_b_val = h_b_val;
-
-        size_t                   max_size = h_a_key.size() + h_b_key.size();
-        thrust::host_vector<T>   h_result_key(max_size), h_result_val(max_size);
-        thrust::device_vector<T> d_result_key(max_size), d_result_val(max_size);
-
-        thrust::pair<typename thrust::host_vector<T>::iterator,
-                     typename thrust::host_vector<T>::iterator>
-            h_end;
-
-        thrust::pair<typename thrust::device_vector<T>::iterator,
-                     typename thrust::device_vector<T>::iterator>
-            d_end;
-
-        h_end = thrust::set_union_by_key(h_a_key.begin(),
-                                         h_a_key.end(),
-                                         h_b_key.begin(),
-                                         h_b_key.end(),
-                                         h_a_val.begin(),
-                                         h_b_val.begin(),
-                                         h_result_key.begin(),
-                                         h_result_val.begin());
-        h_result_key.erase(h_end.first, h_result_key.end());
-        h_result_val.erase(h_end.second, h_result_val.end());
-
-        d_end = thrust::set_union_by_key(d_a_key.begin(),
-                                         d_a_key.end(),
-                                         d_b_key.begin(),
-                                         d_b_key.end(),
-                                         d_a_val.begin(),
-                                         d_b_val.begin(),
-                                         d_result_key.begin(),
-                                         d_result_val.begin());
-        d_result_key.erase(d_end.first, d_result_key.end());
-        d_result_val.erase(d_end.second, d_result_val.end());
-
-        ASSERT_EQ(h_result_key, d_result_key);
-        ASSERT_EQ(h_result_val, d_result_val);
     }
 }

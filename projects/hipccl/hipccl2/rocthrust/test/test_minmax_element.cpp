@@ -77,36 +77,47 @@ TYPED_TEST(MinMaxElementPrimitiveTests, TestMinmaxElement)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        thrust::host_vector<T> h_data = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::device_vector<T> d_data = h_data;
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        typename thrust::host_vector<T>::iterator   h_min;
-        typename thrust::host_vector<T>::iterator   h_max;
-        typename thrust::device_vector<T>::iterator d_min;
-        typename thrust::device_vector<T>::iterator d_max;
+            thrust::host_vector<T> h_data = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::device_vector<T> d_data = h_data;
 
-        h_min = thrust::minmax_element(h_data.begin(), h_data.end()).first;
-        d_min = thrust::minmax_element(d_data.begin(), d_data.end()).first;
-        h_max = thrust::minmax_element(h_data.begin(), h_data.end()).second;
-        d_max = thrust::minmax_element(d_data.begin(), d_data.end()).second;
+            typename thrust::host_vector<T>::iterator   h_min;
+            typename thrust::host_vector<T>::iterator   h_max;
+            typename thrust::device_vector<T>::iterator d_min;
+            typename thrust::device_vector<T>::iterator d_max;
 
-        ASSERT_EQ(h_min - h_data.begin(), d_min - d_data.begin());
-        ASSERT_EQ(h_max - h_data.begin(), d_max - d_data.begin());
+            h_min = thrust::minmax_element(h_data.begin(), h_data.end()).first;
+            d_min = thrust::minmax_element(d_data.begin(), d_data.end()).first;
+            h_max = thrust::minmax_element(h_data.begin(), h_data.end()).second;
+            d_max = thrust::minmax_element(d_data.begin(), d_data.end()).second;
 
-        h_max = thrust::minmax_element(h_data.begin(), h_data.end(), thrust::greater<T>()).first;
-        d_max = thrust::minmax_element(d_data.begin(), d_data.end(), thrust::greater<T>()).first;
-        h_min = thrust::minmax_element(h_data.begin(), h_data.end(), thrust::greater<T>()).second;
-        d_min = thrust::minmax_element(d_data.begin(), d_data.end(), thrust::greater<T>()).second;
+            ASSERT_EQ(h_min - h_data.begin(), d_min - d_data.begin());
+            ASSERT_EQ(h_max - h_data.begin(), d_max - d_data.begin());
 
-        ASSERT_EQ(h_min - h_data.begin(), d_min - d_data.begin());
-        ASSERT_EQ(h_max - h_data.begin(), d_max - d_data.begin());
+            h_max
+                = thrust::minmax_element(h_data.begin(), h_data.end(), thrust::greater<T>()).first;
+            d_max
+                = thrust::minmax_element(d_data.begin(), d_data.end(), thrust::greater<T>()).first;
+            h_min
+                = thrust::minmax_element(h_data.begin(), h_data.end(), thrust::greater<T>()).second;
+            d_min
+                = thrust::minmax_element(d_data.begin(), d_data.end(), thrust::greater<T>()).second;
+
+            ASSERT_EQ(h_min - h_data.begin(), d_min - d_data.begin());
+            ASSERT_EQ(h_max - h_data.begin(), d_max - d_data.begin());
+        }
     }
 }
 
 template <typename ForwardIterator>
 thrust::pair<ForwardIterator, ForwardIterator>
-    minmax_element(my_system& system, ForwardIterator first, ForwardIterator)
+minmax_element(my_system& system, ForwardIterator first, ForwardIterator)
 {
     system.validate_dispatch();
     return thrust::make_pair(first, first);
@@ -124,7 +135,7 @@ TEST(MinmaxElementTests, TestMinmaxElementDispatchExplicit)
 
 template <typename ForwardIterator>
 thrust::pair<ForwardIterator, ForwardIterator>
-    minmax_element(my_tag, ForwardIterator first, ForwardIterator)
+minmax_element(my_tag, ForwardIterator first, ForwardIterator)
 {
     *first = 13;
     return thrust::make_pair(first, first);
@@ -137,4 +148,4 @@ TEST(MinmaxElementTests, TestMinmaxElementDispatchImplicit)
     thrust::minmax_element(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()));
 
     ASSERT_EQ(13, vec.front());
-}
+} 

@@ -70,42 +70,52 @@ TYPED_TEST(AdjacentDifferenceVariableTests, TestAdjacentDifference)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        thrust::host_vector<T> h_input = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::device_vector<T> d_input = h_input;
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::host_vector<T>   h_output(size);
-        thrust::device_vector<T> d_output(size);
+            thrust::host_vector<T> h_input = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::device_vector<T> d_input = h_input;
 
-        typename thrust::host_vector<T>::iterator   h_result;
-        typename thrust::device_vector<T>::iterator d_result;
+            thrust::host_vector<T>   h_output(size);
+            thrust::device_vector<T> d_output(size);
 
-        h_result = thrust::adjacent_difference(h_input.begin(), h_input.end(), h_output.begin());
-        d_result = thrust::adjacent_difference(d_input.begin(), d_input.end(), d_output.begin());
+            typename thrust::host_vector<T>::iterator   h_result;
+            typename thrust::device_vector<T>::iterator d_result;
 
-        ASSERT_EQ(h_result - h_output.begin(), size);
-        ASSERT_EQ(d_result - d_output.begin(), size);
-        ASSERT_EQ_QUIET(h_output, d_output);
+            h_result
+                = thrust::adjacent_difference(h_input.begin(), h_input.end(), h_output.begin());
+            d_result
+                = thrust::adjacent_difference(d_input.begin(), d_input.end(), d_output.begin());
 
-        h_result = thrust::adjacent_difference(
-            h_input.begin(), h_input.end(), h_output.begin(), thrust::plus<T>());
-        d_result = thrust::adjacent_difference(
-            d_input.begin(), d_input.end(), d_output.begin(), thrust::plus<T>());
+            ASSERT_EQ(h_result - h_output.begin(), size);
+            ASSERT_EQ(d_result - d_output.begin(), size);
+            ASSERT_EQ_QUIET(h_output, d_output);
 
-        ASSERT_EQ(h_result - h_output.begin(), size);
-        ASSERT_EQ(d_result - d_output.begin(), size);
-        ASSERT_EQ_QUIET(h_output, d_output);
+            h_result = thrust::adjacent_difference(
+                h_input.begin(), h_input.end(), h_output.begin(), thrust::plus<T>());
+            d_result = thrust::adjacent_difference(
+                d_input.begin(), d_input.end(), d_output.begin(), thrust::plus<T>());
 
-        // in-place operation
-        h_result = thrust::adjacent_difference(
-            h_input.begin(), h_input.end(), h_input.begin(), thrust::plus<T>());
-        d_result = thrust::adjacent_difference(
-            d_input.begin(), d_input.end(), d_input.begin(), thrust::plus<T>());
+            ASSERT_EQ(h_result - h_output.begin(), size);
+            ASSERT_EQ(d_result - d_output.begin(), size);
+            ASSERT_EQ_QUIET(h_output, d_output);
 
-        ASSERT_EQ(h_result - h_input.begin(), size);
-        ASSERT_EQ(d_result - d_input.begin(), size);
-        ASSERT_EQ_QUIET(h_input, h_output); //computed previously
-        ASSERT_EQ_QUIET(d_input, d_output); //computed previously
+            // in-place operation
+            h_result = thrust::adjacent_difference(
+                h_input.begin(), h_input.end(), h_input.begin(), thrust::plus<T>());
+            d_result = thrust::adjacent_difference(
+                d_input.begin(), d_input.end(), d_input.begin(), thrust::plus<T>());
+
+            ASSERT_EQ(h_result - h_input.begin(), size);
+            ASSERT_EQ(d_result - d_input.begin(), size);
+            ASSERT_EQ_QUIET(h_input, h_output); //computed previously
+            ASSERT_EQ_QUIET(d_input, d_output); //computed previously
+        }
     }
 }
 
@@ -116,31 +126,39 @@ TYPED_TEST(AdjacentDifferenceVariableTests, TestAdjacentDifferenceInPlaceWithRel
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        thrust::host_vector<T> h_input = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::device_vector<T> d_input = h_input;
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::host_vector<T>   h_output(size);
-        thrust::device_vector<T> d_output(size);
+            thrust::host_vector<T> h_input = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::device_vector<T> d_input = h_input;
 
-        typename thrust::host_vector<T>::iterator   h_result;
-        typename thrust::device_vector<T>::iterator d_result;
+            thrust::host_vector<T>   h_output(size);
+            thrust::device_vector<T> d_output(size);
 
-        h_result = thrust::adjacent_difference(
-            h_input.begin(), h_input.end(), h_output.begin(), thrust::plus<T>());
-        d_result = thrust::adjacent_difference(
-            d_input.begin(), d_input.end(), d_output.begin(), thrust::plus<T>());
+            typename thrust::host_vector<T>::iterator   h_result;
+            typename thrust::device_vector<T>::iterator d_result;
 
-        // in-place operation with different iterator types
-        h_result = thrust::adjacent_difference(
-            h_input.cbegin(), h_input.cend(), h_input.begin(), thrust::plus<T>());
-        d_result = thrust::adjacent_difference(
-            d_input.cbegin(), d_input.cend(), d_input.begin(), thrust::plus<T>());
+            h_result = thrust::adjacent_difference(
+                h_input.begin(), h_input.end(), h_output.begin(), thrust::plus<T>());
+            d_result = thrust::adjacent_difference(
+                d_input.begin(), d_input.end(), d_output.begin(), thrust::plus<T>());
 
-        ASSERT_EQ(h_result - h_input.begin(), size);
-        ASSERT_EQ(d_result - d_input.begin(), size);
-        ASSERT_EQ_QUIET(h_output, h_input); // reference computed previously
-        ASSERT_EQ_QUIET(d_output, d_input); // reference computed previously
+            // in-place operation with different iterator types
+            h_result = thrust::adjacent_difference(
+                h_input.cbegin(), h_input.cend(), h_input.begin(), thrust::plus<T>());
+            d_result = thrust::adjacent_difference(
+                d_input.cbegin(), d_input.cend(), d_input.begin(), thrust::plus<T>());
+
+            ASSERT_EQ(h_result - h_input.begin(), size);
+            ASSERT_EQ(d_result - d_input.begin(), size);
+            ASSERT_EQ_QUIET(h_output, h_input); // reference computed previously
+            ASSERT_EQ_QUIET(d_output, d_input); // reference computed previously
+        }
     }
 }
 
@@ -151,28 +169,36 @@ TYPED_TEST(AdjacentDifferenceVariableTests, TestAdjacentDifferenceDiscardIterato
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        thrust::host_vector<T> h_input = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::device_vector<T> d_input = h_input;
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::discard_iterator<> h_result;
-        thrust::discard_iterator<> d_result;
+            thrust::host_vector<T> h_input = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::device_vector<T> d_input = h_input;
 
-        h_result = thrust::adjacent_difference(
-            h_input.begin(), h_input.end(), thrust::make_discard_iterator());
-        d_result = thrust::adjacent_difference(
-            d_input.begin(), d_input.end(), thrust::make_discard_iterator());
+            thrust::discard_iterator<> h_result;
+            thrust::discard_iterator<> d_result;
 
-        thrust::discard_iterator<> reference(size);
+            h_result = thrust::adjacent_difference(
+                h_input.begin(), h_input.end(), thrust::make_discard_iterator());
+            d_result = thrust::adjacent_difference(
+                d_input.begin(), d_input.end(), thrust::make_discard_iterator());
 
-        ASSERT_EQ_QUIET(reference, h_result);
-        ASSERT_EQ_QUIET(reference, d_result);
+            thrust::discard_iterator<> reference(size);
+
+            ASSERT_EQ_QUIET(reference, h_result);
+            ASSERT_EQ_QUIET(reference, d_result);
+        }
     }
 }
 
 template <typename InputIterator, typename OutputIterator>
 OutputIterator
-    adjacent_difference(my_system& system, InputIterator, InputIterator, OutputIterator result)
+adjacent_difference(my_system& system, InputIterator, InputIterator, OutputIterator result)
 {
     system.validate_dispatch();
     return result;

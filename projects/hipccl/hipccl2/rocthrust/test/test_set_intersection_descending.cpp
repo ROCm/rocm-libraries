@@ -61,33 +61,49 @@ TYPED_TEST(SetIntersectionDescendingPrimitiveTests, TestSetIntersectionDescendin
 
     for(auto size : sizes)
     {
-        thrust::host_vector<T> temp = get_random_data<T>(
-            2 * size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::host_vector<T> h_a(temp.begin(), temp.begin() + size);
-        thrust::host_vector<T> h_b(temp.begin() + size, temp.end());
+            thrust::host_vector<T> temp = get_random_data<T>(
+                2 * size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
 
-        thrust::sort(h_a.begin(), h_a.end(), thrust::greater<T>());
-        thrust::sort(h_b.begin(), h_b.end(), thrust::greater<T>());
+            thrust::host_vector<T> h_a(temp.begin(), temp.begin() + size);
+            thrust::host_vector<T> h_b(temp.begin() + size, temp.end());
 
-        thrust::device_vector<T> d_a = h_a;
-        thrust::device_vector<T> d_b = h_b;
+            thrust::sort(h_a.begin(), h_a.end(), thrust::greater<T>());
+            thrust::sort(h_b.begin(), h_b.end(), thrust::greater<T>());
 
-        thrust::host_vector<T>   h_result(size);
-        thrust::device_vector<T> d_result(size);
+            thrust::device_vector<T> d_a = h_a;
+            thrust::device_vector<T> d_b = h_b;
 
-        typename thrust::host_vector<T>::iterator   h_end;
-        typename thrust::device_vector<T>::iterator d_end;
+            thrust::host_vector<T>   h_result(size);
+            thrust::device_vector<T> d_result(size);
 
-        h_end = thrust::set_intersection(
-            h_a.begin(), h_a.end(), h_b.begin(), h_b.end(), h_result.begin(), thrust::greater<T>());
-        h_result.resize(h_end - h_result.begin());
+            typename thrust::host_vector<T>::iterator   h_end;
+            typename thrust::device_vector<T>::iterator d_end;
 
-        d_end = thrust::set_intersection(
-            d_a.begin(), d_a.end(), d_b.begin(), d_b.end(), d_result.begin(), thrust::greater<T>());
+            h_end = thrust::set_intersection(h_a.begin(),
+                                             h_a.end(),
+                                             h_b.begin(),
+                                             h_b.end(),
+                                             h_result.begin(),
+                                             thrust::greater<T>());
+            h_result.resize(h_end - h_result.begin());
 
-        d_result.resize(d_end - d_result.begin());
+            d_end = thrust::set_intersection(d_a.begin(),
+                                             d_a.end(),
+                                             d_b.begin(),
+                                             d_b.end(),
+                                             d_result.begin(),
+                                             thrust::greater<T>());
 
-        ASSERT_EQ(h_result, d_result);
+            d_result.resize(d_end - d_result.begin());
+
+            ASSERT_EQ(h_result, d_result);
+        }
     }
 }

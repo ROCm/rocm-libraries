@@ -129,17 +129,29 @@ TYPED_TEST(PrimitiveInnerProductTests, InnerProductWithRandomData)
         T min          = (T)std::numeric_limits<T>::min() / (size + 1);
         T max          = (T)std::numeric_limits<T>::max() / (size + 1);
 
-        thrust::host_vector<T> h_v1 = get_random_data<T>(size, min, max);
-        thrust::host_vector<T> h_v2 = get_random_data<T>(size, min, max);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::device_vector<T> d_v1 = h_v1;
-        thrust::device_vector<T> d_v2 = h_v2;
+            thrust::host_vector<T> h_v1 = get_random_data<T>(size, min, max, seed_value);
+            thrust::host_vector<T> h_v2 = get_random_data<T>(
+                size,
+                min,
+                max,
+                seed_value + seed_value_addition
+            );
 
-        T init = 13;
+            thrust::device_vector<T> d_v1 = h_v1;
+            thrust::device_vector<T> d_v2 = h_v2;
 
-        T expected = thrust::inner_product(h_v1.begin(), h_v1.end(), h_v2.begin(), init);
-        T result   = thrust::inner_product(d_v1.begin(), d_v1.end(), d_v2.begin(), init);
+            T init = 13;
 
-        ASSERT_NEAR(clip_infinity(expected), clip_infinity(result), error_margin);
+            T expected = thrust::inner_product(h_v1.begin(), h_v1.end(), h_v2.begin(), init);
+            T result   = thrust::inner_product(d_v1.begin(), d_v1.end(), d_v2.begin(), init);
+
+            ASSERT_NEAR(clip_infinity(expected), clip_infinity(result), error_margin);
+        }
     }
 };

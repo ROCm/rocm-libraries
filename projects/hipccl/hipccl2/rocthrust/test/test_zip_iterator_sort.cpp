@@ -31,23 +31,35 @@ TYPED_TEST(ZipIteratorStableSortTests, TestZipIteratorStableSort)
 
     for(auto size : sizes)
     {
-        thrust::host_vector<T> h1 = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::host_vector<T> h2 = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        device_vector<T> d1 = h1;
-        device_vector<T> d2 = h2;
+            thrust::host_vector<T> h1 = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::host_vector<T> h2 = get_random_data<T>(
+                size,
+                std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value + seed_value_addition
+            );
 
-        // sort on host
-        stable_sort(make_zip_iterator(make_tuple(h1.begin(), h2.begin())),
-                    make_zip_iterator(make_tuple(h1.end(), h2.end())));
+            device_vector<T> d1 = h1;
+            device_vector<T> d2 = h2;
 
-        // sort on device
-        stable_sort(make_zip_iterator(make_tuple(d1.begin(), d2.begin())),
-                    make_zip_iterator(make_tuple(d1.end(), d2.end())));
+            // sort on host
+            stable_sort(make_zip_iterator(make_tuple(h1.begin(), h2.begin())),
+                        make_zip_iterator(make_tuple(h1.end(), h2.end())));
 
-        ASSERT_EQ_QUIET(h1, d1);
-        ASSERT_EQ_QUIET(h2, d2);
+            // sort on device
+            stable_sort(make_zip_iterator(make_tuple(d1.begin(), d2.begin())),
+                        make_zip_iterator(make_tuple(d1.end(), d2.end())));
+
+            ASSERT_EQ_QUIET(h1, d1);
+            ASSERT_EQ_QUIET(h2, d2);
+        }
     }
 }

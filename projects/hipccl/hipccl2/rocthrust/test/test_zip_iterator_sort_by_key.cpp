@@ -33,51 +33,70 @@ TYPED_TEST(ZipIteratorStableSortByKeyTests, TestZipIteratorStableSort)
     for(auto size : sizes)
     {
         using namespace thrust;
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::host_vector<T> h1 = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::host_vector<T> h2 = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::host_vector<T> h3 = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::host_vector<T> h4 = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+            thrust::host_vector<T> h1 = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::host_vector<T> h2 = get_random_data<T>(
+                size,
+                std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value + seed_value_addition
+            );
+            thrust::host_vector<T> h3 = get_random_data<T>(
+                size,
+                std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value + 2 * seed_value_addition
+            );
+            thrust::host_vector<T> h4 = get_random_data<T>(
+                size,
+                std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value + 3 *  + seed_value_addition
+            );
 
-        device_vector<T> d1 = h1;
-        device_vector<T> d2 = h2;
-        device_vector<T> d3 = h3;
-        device_vector<T> d4 = h4;
+            device_vector<T> d1 = h1;
+            device_vector<T> d2 = h2;
+            device_vector<T> d3 = h3;
+            device_vector<T> d4 = h4;
 
-        // sort with (tuple, scalar)
-        stable_sort_by_key(make_zip_iterator(make_tuple(h1.begin(), h2.begin())),
-                           make_zip_iterator(make_tuple(h1.end(), h2.end())),
-                           h3.begin());
-        stable_sort_by_key(make_zip_iterator(make_tuple(d1.begin(), d2.begin())),
-                           make_zip_iterator(make_tuple(d1.end(), d2.end())),
-                           d3.begin());
+            // sort with (tuple, scalar)
+            stable_sort_by_key(make_zip_iterator(make_tuple(h1.begin(), h2.begin())),
+                               make_zip_iterator(make_tuple(h1.end(), h2.end())),
+                               h3.begin());
+            stable_sort_by_key(make_zip_iterator(make_tuple(d1.begin(), d2.begin())),
+                               make_zip_iterator(make_tuple(d1.end(), d2.end())),
+                               d3.begin());
 
-        ASSERT_EQ_QUIET(h1, d1);
-        ASSERT_EQ_QUIET(h2, d2);
-        ASSERT_EQ_QUIET(h3, d3);
-        ASSERT_EQ_QUIET(h4, d4);
+            ASSERT_EQ_QUIET(h1, d1);
+            ASSERT_EQ_QUIET(h2, d2);
+            ASSERT_EQ_QUIET(h3, d3);
+            ASSERT_EQ_QUIET(h4, d4);
 
-        // sort with (scalar, tuple)
-        stable_sort_by_key(
-            h1.begin(), h1.end(), make_zip_iterator(make_tuple(h3.begin(), h4.begin())));
-        stable_sort_by_key(
-            d1.begin(), d1.end(), make_zip_iterator(make_tuple(d3.begin(), d4.begin())));
+            // sort with (scalar, tuple)
+            stable_sort_by_key(
+                h1.begin(), h1.end(), make_zip_iterator(make_tuple(h3.begin(), h4.begin())));
+            stable_sort_by_key(
+                d1.begin(), d1.end(), make_zip_iterator(make_tuple(d3.begin(), d4.begin())));
 
-        // sort with (tuple, tuple)
-        stable_sort_by_key(make_zip_iterator(make_tuple(h1.begin(), h2.begin())),
-                           make_zip_iterator(make_tuple(h1.end(), h2.end())),
-                           make_zip_iterator(make_tuple(h3.begin(), h4.begin())));
-        stable_sort_by_key(make_zip_iterator(make_tuple(d1.begin(), d2.begin())),
-                           make_zip_iterator(make_tuple(d1.end(), d2.end())),
-                           make_zip_iterator(make_tuple(d3.begin(), d4.begin())));
+            // sort with (tuple, tuple)
+            stable_sort_by_key(make_zip_iterator(make_tuple(h1.begin(), h2.begin())),
+                               make_zip_iterator(make_tuple(h1.end(), h2.end())),
+                               make_zip_iterator(make_tuple(h3.begin(), h4.begin())));
+            stable_sort_by_key(make_zip_iterator(make_tuple(d1.begin(), d2.begin())),
+                               make_zip_iterator(make_tuple(d1.end(), d2.end())),
+                               make_zip_iterator(make_tuple(d3.begin(), d4.begin())));
 
-        ASSERT_EQ_QUIET(h1, d1);
-        ASSERT_EQ_QUIET(h2, d2);
-        ASSERT_EQ_QUIET(h3, d3);
-        ASSERT_EQ_QUIET(h4, d4);
+            ASSERT_EQ_QUIET(h1, d1);
+            ASSERT_EQ_QUIET(h2, d2);
+            ASSERT_EQ_QUIET(h3, d3);
+            ASSERT_EQ_QUIET(h4, d4);
+        }
     }
 }

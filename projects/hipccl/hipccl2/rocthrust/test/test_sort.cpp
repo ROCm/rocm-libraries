@@ -65,12 +65,31 @@ TYPED_TEST(SortTests, Sort)
         thrust::host_vector<key_type> h_keys;
         if(std::is_floating_point<key_type>::value)
         {
-            h_keys = get_random_data<key_type>(size, (key_type)-1000, (key_type) + 1000);
+            for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+            {
+                unsigned int seed_value = seed_index < random_seeds_count
+                                              ? rand()
+                                              : seeds[seed_index - random_seeds_count];
+                SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+                h_keys = get_random_data<key_type>(
+                    size, (key_type)-1000, (key_type) + 1000, seed_value);
+            }
         }
         else
         {
-            h_keys = get_random_data<key_type>(
-                size, std::numeric_limits<key_type>::min(), std::numeric_limits<key_type>::max());
+            for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+            {
+                unsigned int seed_value = seed_index < random_seeds_count
+                                              ? rand()
+                                              : seeds[seed_index - random_seeds_count];
+                SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+                h_keys = get_random_data<key_type>(size,
+                                                   std::numeric_limits<key_type>::min(),
+                                                   std::numeric_limits<key_type>::max(),
+                                                   seed_value);
+            }
         }
 
         // Calculate expected results on host
@@ -105,7 +124,7 @@ TYPED_TEST(SortTests, SortByKey)
         thrust::host_vector<key_type> h_keys(size);
         std::iota(h_keys.begin(), h_keys.end(), 0);
         std::shuffle(
-            h_keys.begin(), h_keys.end(), std::default_random_engine(std::random_device {}()));
+            h_keys.begin(), h_keys.end(), std::default_random_engine(std::random_device{}()));
 
         thrust::host_vector<value_type> h_values(size);
         std::iota(h_values.begin(), h_values.end(), 0);
@@ -144,12 +163,31 @@ TYPED_TEST(SortTests, StableSort)
         thrust::host_vector<key_type> h_keys;
         if(std::is_floating_point<key_type>::value)
         {
-            h_keys = get_random_data<key_type>(size, (key_type)-1000, (key_type) + 1000);
+            for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+            {
+                unsigned int seed_value = seed_index < random_seeds_count
+                                              ? rand()
+                                              : seeds[seed_index - random_seeds_count];
+                SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+                h_keys = get_random_data<key_type>(
+                    size, (key_type)-1000, (key_type) + 1000, seed_value);
+            }
         }
         else
         {
-            h_keys = get_random_data<key_type>(
-                size, std::numeric_limits<key_type>::min(), std::numeric_limits<key_type>::max());
+            for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+            {
+                unsigned int seed_value = seed_index < random_seeds_count
+                                              ? rand()
+                                              : seeds[seed_index - random_seeds_count];
+                SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+                h_keys = get_random_data<key_type>(size,
+                                                   std::numeric_limits<key_type>::min(),
+                                                   std::numeric_limits<key_type>::max(),
+                                                   seed_value);
+            }
         }
 
         // Calculate expected results on host
@@ -180,12 +218,31 @@ TYPED_TEST(SortTests, StableSortByKey)
         thrust::host_vector<key_type> h_keys;
         if(std::is_floating_point<key_type>::value)
         {
-            h_keys = get_random_data<key_type>(size, (key_type)-1000, (key_type) + 1000);
+            for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+            {
+                unsigned int seed_value = seed_index < random_seeds_count
+                                              ? rand()
+                                              : seeds[seed_index - random_seeds_count];
+                SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+                h_keys = get_random_data<key_type>(
+                    size, (key_type)-1000, (key_type) + 1000, seed_value);
+            }
         }
         else
         {
-            h_keys = get_random_data<key_type>(
-                size, std::numeric_limits<key_type>::min(), std::numeric_limits<key_type>::max());
+            for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+            {
+                unsigned int seed_value = seed_index < random_seeds_count
+                                              ? rand()
+                                              : seeds[seed_index - random_seeds_count];
+                SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+                h_keys = get_random_data<key_type>(size,
+                                                   std::numeric_limits<key_type>::min(),
+                                                   std::numeric_limits<key_type>::max(),
+                                                   seed_value);
+            }
         }
 
         thrust::host_vector<value_type> h_values(size);
@@ -289,14 +346,22 @@ TYPED_TEST(SortVectorPrimitives, TestSortAscendingKey)
 
     for(auto size : get_sizes())
     {
-        thrust::host_vector<T> h_data = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::device_vector<T> d_data = h_data;
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::sort(h_data.begin(), h_data.end(), thrust::less<T>());
-        thrust::sort(d_data.begin(), d_data.end(), thrust::less<T>());
+            thrust::host_vector<T> h_data = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::device_vector<T> d_data = h_data;
 
-        ASSERT_EQ(h_data, d_data);
+            thrust::sort(h_data.begin(), h_data.end(), thrust::less<T>());
+            thrust::sort(d_data.begin(), d_data.end(), thrust::less<T>());
+
+            ASSERT_EQ(h_data, d_data);
+        }
     }
 }
 
@@ -304,50 +369,71 @@ TEST(SortTests, TestSortDescendingKey)
 {
     const size_t size = 10027;
 
-    thrust::host_vector<int> h_data = get_random_data<int>(
-        size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max());
-    thrust::device_vector<int> d_data = h_data;
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-    thrust::sort(h_data.begin(), h_data.end(), thrust::greater<int>());
-    thrust::sort(d_data.begin(), d_data.end(), thrust::greater<int>());
+        thrust::host_vector<int> h_data = get_random_data<int>(
+            size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed_value);
+        thrust::device_vector<int> d_data = h_data;
 
-    ASSERT_EQ(h_data, d_data);
+        thrust::sort(h_data.begin(), h_data.end(), thrust::greater<int>());
+        thrust::sort(d_data.begin(), d_data.end(), thrust::greater<int>());
+
+        ASSERT_EQ(h_data, d_data);
+    }
 }
 
 TEST(SortTests, TestSortBool)
 {
     const size_t size = 10027;
 
-    thrust::host_vector<bool> h_data = get_random_data<bool>(
-        size, std::numeric_limits<bool>::min(), std::numeric_limits<bool>::max());
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-    thrust::device_vector<bool> d_data = h_data;
+        thrust::host_vector<bool> h_data = get_random_data<bool>(
+            size, std::numeric_limits<bool>::min(), std::numeric_limits<bool>::max(), seed_value);
 
-    thrust::sort(h_data.begin(), h_data.end());
-    thrust::sort(d_data.begin(), d_data.end());
+        thrust::device_vector<bool> d_data = h_data;
 
-    ASSERT_EQ(h_data, d_data);
+        thrust::sort(h_data.begin(), h_data.end());
+        thrust::sort(d_data.begin(), d_data.end());
+
+        ASSERT_EQ(h_data, d_data);
+    }
 }
 
 TEST(SortTests, TestSortBoolDescending)
 {
     const size_t size = 10027;
 
-    thrust::host_vector<bool> h_data = get_random_data<bool>(
-        size, std::numeric_limits<bool>::min(), std::numeric_limits<bool>::max());
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-    thrust::device_vector<bool> d_data = h_data;
+        thrust::host_vector<bool> h_data = get_random_data<bool>(
+            size, std::numeric_limits<bool>::min(), std::numeric_limits<bool>::max(), seed_value);
 
-    thrust::sort(h_data.begin(), h_data.end(), thrust::greater<bool>());
-    thrust::sort(d_data.begin(), d_data.end(), thrust::greater<bool>());
+        thrust::device_vector<bool> d_data = h_data;
 
-    ASSERT_EQ(h_data, d_data);
+        thrust::sort(h_data.begin(), h_data.end(), thrust::greater<bool>());
+        thrust::sort(d_data.begin(), d_data.end(), thrust::greater<bool>());
+
+        ASSERT_EQ(h_data, d_data);
+    }
 }
 
 //TODO: refactor this test into a different set of tests
-__global__ void SortKernel(int const N, int * array)
+__global__ void SortKernel(int const N, int* array)
 {
-    if (threadIdx.x == 0)
+    if(threadIdx.x == 0)
     {
         thrust::device_ptr<int> begin(array);
         thrust::device_ptr<int> end(array + N);
@@ -357,24 +443,31 @@ __global__ void SortKernel(int const N, int * array)
 
 TEST(SortTests, TestSortDevice)
 {
-    std::vector<size_t> sizes = {
-        0, 1, 2, 4, 6, 12, 16, 24, 32,
-        64, 84, 128, 160, 256
-    };
+    std::vector<size_t> sizes = {0, 1, 2, 4, 6, 12, 16, 24, 32, 64, 84, 128, 160, 256};
 
     for(auto size : sizes)
     {
-        thrust::host_vector<int> h_data = get_random_data<int>(
-            size, 0, size);
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::device_vector<int> d_data = h_data;
+            thrust::host_vector<int> h_data = get_random_data<int>(size, 0, size, seed_value);
 
-        thrust::sort(h_data.begin(), h_data.end());
-        hipLaunchKernelGGL(
-            SortKernel, dim3(1, 1, 1), dim3(128, 1, 1),
-            0, 0, size, thrust::raw_pointer_cast(&d_data[0])
-        );
+            thrust::device_vector<int> d_data = h_data;
 
-        ASSERT_EQ(h_data, d_data);
+            thrust::sort(h_data.begin(), h_data.end());
+            hipLaunchKernelGGL(SortKernel,
+                               dim3(1, 1, 1),
+                               dim3(128, 1, 1),
+                               0,
+                               0,
+                               size,
+                               thrust::raw_pointer_cast(&d_data[0]));
+
+            ASSERT_EQ(h_data, d_data);
+        }
     }
 }
