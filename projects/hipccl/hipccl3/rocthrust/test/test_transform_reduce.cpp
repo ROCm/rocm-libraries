@@ -93,19 +93,27 @@ TYPED_TEST(TransformReduceIntegerPrimitiveTests, TestTransformReduce)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        thrust::host_vector<T> h_data = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::device_vector<T> d_data = h_data;
+            thrust::host_vector<T> h_data = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
 
-        T init = T(13);
+            thrust::device_vector<T> d_data = h_data;
 
-        T cpu_result = thrust::transform_reduce(
-            h_data.begin(), h_data.end(), thrust::negate<T>(), init, thrust::plus<T>());
-        T gpu_result = thrust::transform_reduce(
-            d_data.begin(), d_data.end(), thrust::negate<T>(), init, thrust::plus<T>());
+            T init = T(13);
 
-        ASSERT_EQ(cpu_result, gpu_result);
+            T cpu_result = thrust::transform_reduce(
+                h_data.begin(), h_data.end(), thrust::negate<T>(), init, thrust::plus<T>());
+            T gpu_result = thrust::transform_reduce(
+                d_data.begin(), d_data.end(), thrust::negate<T>(), init, thrust::plus<T>());
+
+            ASSERT_EQ(cpu_result, gpu_result);
+        }
     }
 }
 
@@ -116,19 +124,27 @@ TYPED_TEST(TransformReduceIntegerPrimitiveTests, TestTransformReduceFromConst)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        thrust::host_vector<T> h_data = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::device_vector<T> d_data = h_data;
+            thrust::host_vector<T> h_data = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
 
-        T init = T(13);
+            thrust::device_vector<T> d_data = h_data;
 
-        T cpu_result = thrust::transform_reduce(
-            h_data.cbegin(), h_data.cend(), thrust::negate<T>(), init, thrust::plus<T>());
-        T gpu_result = thrust::transform_reduce(
-            d_data.cbegin(), d_data.cend(), thrust::negate<T>(), init, thrust::plus<T>());
+            T init = T(13);
 
-        ASSERT_EQ(cpu_result, gpu_result);
+            T cpu_result = thrust::transform_reduce(
+                h_data.cbegin(), h_data.cend(), thrust::negate<T>(), init, thrust::plus<T>());
+            T gpu_result = thrust::transform_reduce(
+                d_data.cbegin(), d_data.cend(), thrust::negate<T>(), init, thrust::plus<T>());
+
+            ASSERT_EQ(cpu_result, gpu_result);
+        }
     }
 }
 

@@ -33,7 +33,7 @@ TEST(SwapRangesTests, UsingHip)
 
 template <typename ForwardIterator1, typename ForwardIterator2>
 ForwardIterator2
-    swap_ranges(my_system& system, ForwardIterator1, ForwardIterator1, ForwardIterator2 first2)
+swap_ranges(my_system& system, ForwardIterator1, ForwardIterator1, ForwardIterator2 first2)
 {
     system.validate_dispatch();
     return first2;
@@ -108,28 +108,44 @@ TYPED_TEST(PrimitiveSwapRangesTests, SwapRanges)
     T                         error_margin = T(0.01);
     for(auto size : sizes)
     {
-        thrust::host_vector<T> a1 = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::host_vector<T> a2 = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-
-        thrust::host_vector<T>   h1 = a1;
-        thrust::host_vector<T>   h2 = a2;
-        thrust::device_vector<T> d1 = a1;
-        thrust::device_vector<T> d2 = a2;
-
-        thrust::swap_ranges(h1.begin(), h1.end(), h2.begin());
-        thrust::swap_ranges(d1.begin(), d1.end(), d2.begin());
-
-        thrust::host_vector<T> d1_h = d1;
-        thrust::host_vector<T> d2_h = d2;
-
-        for(size_t i = 0; i < size; i++)
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {
-            ASSERT_NEAR(h1[i], a2[i], error_margin);
-            ASSERT_NEAR(d1_h[i], a2[i], error_margin);
-            ASSERT_NEAR(h2[i], a1[i], error_margin);
-            ASSERT_NEAR(d2_h[i], a1[i], error_margin);
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+            thrust::host_vector<T> a1 = get_random_data<T>(
+                size,
+                std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value
+            );
+            thrust::host_vector<T> a2 = get_random_data<T>(
+                size,
+                std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value + seed_value_addition
+            );
+
+            thrust::host_vector<T>   h1 = a1;
+            thrust::host_vector<T>   h2 = a2;
+            thrust::device_vector<T> d1 = a1;
+            thrust::device_vector<T> d2 = a2;
+
+            thrust::swap_ranges(h1.begin(), h1.end(), h2.begin());
+            thrust::swap_ranges(d1.begin(), d1.end(), d2.begin());
+
+            thrust::host_vector<T> d1_h = d1;
+            thrust::host_vector<T> d2_h = d2;
+
+            for(size_t i = 0; i < size; i++)
+            {
+                ASSERT_NEAR(h1[i], a2[i], error_margin);
+                ASSERT_NEAR(d1_h[i], a2[i], error_margin);
+                ASSERT_NEAR(h2[i], a1[i], error_margin);
+                ASSERT_NEAR(d2_h[i], a1[i], error_margin);
+            }
         }
     }
 }

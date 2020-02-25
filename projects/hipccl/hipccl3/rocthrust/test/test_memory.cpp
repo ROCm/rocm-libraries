@@ -232,7 +232,7 @@ TEST(MemoryTests, TestFreeDispatchExplicit)
 
 template <typename T>
 thrust::pair<thrust::pointer<T, my_memory_system>, std::ptrdiff_t>
-    get_temporary_buffer(my_memory_system& system, std::ptrdiff_t size)
+get_temporary_buffer(my_memory_system& system, std::ptrdiff_t size)
 {
     system.validate_dispatch();
 

@@ -64,48 +64,62 @@ TYPED_TEST(EqualsPrimitiveTests, TestEqual)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        thrust::host_vector<T> h_data1 = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::host_vector<T> h_data2 = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-
-        thrust::device_vector<T> d_data1 = h_data1;
-        thrust::device_vector<T> d_data2 = h_data2;
-
-        //empty ranges
-        ASSERT_EQ(thrust::equal(h_data1.begin(), h_data1.begin(), h_data1.begin()), true);
-        ASSERT_EQ(thrust::equal(d_data1.begin(), d_data1.begin(), d_data1.begin()), true);
-
-        //symmetric cases
-        ASSERT_EQ(thrust::equal(h_data1.begin(), h_data1.end(), h_data1.begin()), true);
-        ASSERT_EQ(thrust::equal(d_data1.begin(), d_data1.end(), d_data1.begin()), true);
-
-        if(size > 0)
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {
-            h_data1[0] = 0;
-            h_data2[0] = 1;
-            d_data1[0] = 0;
-            d_data2[0] = 1;
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-            //different vectors
-            ASSERT_EQ(thrust::equal(h_data1.begin(), h_data1.end(), h_data2.begin()), false);
-            ASSERT_EQ(thrust::equal(d_data1.begin(), d_data1.end(), d_data2.begin()), false);
+            thrust::host_vector<T> h_data1 = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::host_vector<T> h_data2 = get_random_data<T>(
+                size, std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value + seed_value_addition
+            );
 
-            //different predicates
-            ASSERT_EQ(thrust::equal(
-                          h_data1.begin(), h_data1.begin() + 1, h_data2.begin(), thrust::less<T>()),
-                      true);
-            ASSERT_EQ(thrust::equal(
-                          d_data1.begin(), d_data1.begin() + 1, d_data2.begin(), thrust::less<T>()),
-                      true);
-            ASSERT_EQ(
-                thrust::equal(
-                    h_data1.begin(), h_data1.begin() + 1, h_data2.begin(), thrust::greater<T>()),
-                false);
-            ASSERT_EQ(
-                thrust::equal(
-                    d_data1.begin(), d_data1.begin() + 1, d_data2.begin(), thrust::greater<T>()),
-                false);
+            thrust::device_vector<T> d_data1 = h_data1;
+            thrust::device_vector<T> d_data2 = h_data2;
+
+            //empty ranges
+            ASSERT_EQ(thrust::equal(h_data1.begin(), h_data1.begin(), h_data1.begin()), true);
+            ASSERT_EQ(thrust::equal(d_data1.begin(), d_data1.begin(), d_data1.begin()), true);
+
+            //symmetric cases
+            ASSERT_EQ(thrust::equal(h_data1.begin(), h_data1.end(), h_data1.begin()), true);
+            ASSERT_EQ(thrust::equal(d_data1.begin(), d_data1.end(), d_data1.begin()), true);
+
+            if(size > 0)
+            {
+                h_data1[0] = 0;
+                h_data2[0] = 1;
+                d_data1[0] = 0;
+                d_data2[0] = 1;
+
+                //different vectors
+                ASSERT_EQ(thrust::equal(h_data1.begin(), h_data1.end(), h_data2.begin()), false);
+                ASSERT_EQ(thrust::equal(d_data1.begin(), d_data1.end(), d_data2.begin()), false);
+
+                //different predicates
+                ASSERT_EQ(
+                    thrust::equal(
+                        h_data1.begin(), h_data1.begin() + 1, h_data2.begin(), thrust::less<T>()),
+                    true);
+                ASSERT_EQ(
+                    thrust::equal(
+                        d_data1.begin(), d_data1.begin() + 1, d_data2.begin(), thrust::less<T>()),
+                    true);
+                ASSERT_EQ(thrust::equal(h_data1.begin(),
+                                        h_data1.begin() + 1,
+                                        h_data2.begin(),
+                                        thrust::greater<T>()),
+                          false);
+                ASSERT_EQ(thrust::equal(d_data1.begin(),
+                                        d_data1.begin() + 1,
+                                        d_data2.begin(),
+                                        thrust::greater<T>()),
+                          false);
+            }
         }
     }
 }

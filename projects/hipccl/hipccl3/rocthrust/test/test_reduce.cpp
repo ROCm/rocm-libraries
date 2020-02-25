@@ -91,16 +91,24 @@ TYPED_TEST(ReducePrimitiveTests, TestReduce)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        thrust::host_vector<T> h_data = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::device_vector<T> d_data = h_data;
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        T init = T(13);
+            thrust::host_vector<T> h_data = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::device_vector<T> d_data = h_data;
 
-        T h_result = thrust::reduce(h_data.begin(), h_data.end(), init);
-        T d_result = thrust::reduce(d_data.begin(), d_data.end(), init);
+            T init = T(13);
 
-        ASSERT_EQ(h_result, d_result);
+            T h_result = thrust::reduce(h_data.begin(), h_data.end(), init);
+            T d_result = thrust::reduce(d_data.begin(), d_data.end(), init);
+
+            ASSERT_EQ(h_result, d_result);
+        }
     }
 }
 
@@ -140,17 +148,25 @@ TYPED_TEST(ReduceIntegerTests, TestReduceWithOperator)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        thrust::host_vector<T> h_data = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::device_vector<T> d_data = h_data;
+            thrust::host_vector<T> h_data = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
 
-        T init = T(3);
+            thrust::device_vector<T> d_data = h_data;
 
-        T cpu_result = thrust::reduce(h_data.begin(), h_data.end(), init, plus_mod_10<T>());
-        T gpu_result = thrust::reduce(d_data.begin(), d_data.end(), init, plus_mod_10<T>());
+            T init = T(3);
 
-        ASSERT_EQ(cpu_result, gpu_result);
+            T cpu_result = thrust::reduce(h_data.begin(), h_data.end(), init, plus_mod_10<T>());
+            T gpu_result = thrust::reduce(d_data.begin(), d_data.end(), init, plus_mod_10<T>());
+
+            ASSERT_EQ(cpu_result, gpu_result);
+        }
     }
 }
 

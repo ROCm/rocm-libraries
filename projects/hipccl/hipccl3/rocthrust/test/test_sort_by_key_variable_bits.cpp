@@ -27,33 +27,42 @@ TYPED_TEST(SortByKeyVariableTests, TestSortVariableBits)
 
     for(auto size : get_sizes())
     {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
         for(size_t num_bits = 0; num_bits < 8 * sizeof(T); num_bits += 3)
         {
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
-            thrust::host_vector<T> h_keys = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+            for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+            {
+                unsigned int seed_value = seed_index < random_seeds_count
+                                              ? rand()
+                                              : seeds[seed_index - random_seeds_count];
+                SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-            const T mask = (1 << num_bits) - 1;
-            for(size_t i = 0; i < size; i++)
-                h_keys[i] &= mask;
+                thrust::host_vector<T> h_keys = get_random_data<T>(
+                    size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
 
-            thrust::host_vector<T>   reference = h_keys;
-            thrust::device_vector<T> d_keys    = h_keys;
+                const T mask = (1 << num_bits) - 1;
+                for(size_t i = 0; i < size; i++)
+                    h_keys[i] &= mask;
 
-            thrust::host_vector<T>   h_values = h_keys;
-            thrust::device_vector<T> d_values = d_keys;
+                thrust::host_vector<T>   reference = h_keys;
+                thrust::device_vector<T> d_keys    = h_keys;
 
-            std::sort(reference.begin(), reference.end());
+                thrust::host_vector<T>   h_values = h_keys;
+                thrust::device_vector<T> d_values = d_keys;
 
-            thrust::sort_by_key(h_keys.begin(), h_keys.end(), h_values.begin());
-            thrust::sort_by_key(d_keys.begin(), d_keys.end(), d_values.begin());
+                std::sort(reference.begin(), reference.end());
 
-            ASSERT_EQ(reference, h_keys);
-            ASSERT_EQ(reference, h_values);
+                thrust::sort_by_key(h_keys.begin(), h_keys.end(), h_values.begin());
+                thrust::sort_by_key(d_keys.begin(), d_keys.end(), d_values.begin());
 
-            ASSERT_EQ(h_keys, d_keys);
-            ASSERT_EQ(h_values, d_values);
+                ASSERT_EQ(reference, h_keys);
+                ASSERT_EQ(reference, h_values);
+
+                ASSERT_EQ(h_keys, d_keys);
+                ASSERT_EQ(h_values, d_values);
+            }
         }
     }
 }

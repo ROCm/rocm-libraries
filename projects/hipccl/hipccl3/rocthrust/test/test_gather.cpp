@@ -69,8 +69,8 @@ TYPED_TEST(GatherTests, GatherSimple)
 }
 
 template <typename InputIterator, typename RandomAccessIterator, typename OutputIterator>
-OutputIterator gather(
-    my_system& system, InputIterator, InputIterator, RandomAccessIterator, OutputIterator result)
+OutputIterator
+gather(my_system& system, InputIterator, InputIterator, RandomAccessIterator, OutputIterator result)
 {
     system.validate_dispatch();
     return result;
@@ -88,7 +88,7 @@ TEST(GatherTests, GatherDispatchExplicit)
 
 template <typename InputIterator, typename RandomAccessIterator, typename OutputIterator>
 OutputIterator
-    gather(my_tag, InputIterator, InputIterator, RandomAccessIterator, OutputIterator result)
+gather(my_tag, InputIterator, InputIterator, RandomAccessIterator, OutputIterator result)
 {
     *result = 13;
     return result;
@@ -119,26 +119,38 @@ TYPED_TEST(PrimitiveGatherTests, Gather)
         const size_t source_size = std::min((size_t)10, 2 * size);
 
         // source vectors to gather from
-        thrust::host_vector<T>   h_source = get_random_data<T>(source_size, min, max);
-        thrust::device_vector<T> d_source = h_source;
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        // gather indices
-        thrust::host_vector<unsigned int> h_map = get_random_data<unsigned int>(size, min, max);
+            thrust::host_vector<T> h_source = get_random_data<T>(source_size, min, max, seed_value);
+            thrust::device_vector<T> d_source = h_source;
 
-        for(size_t i = 0; i < size; i++)
-            h_map[i] = h_map[i] % source_size;
+            // gather indices
+            thrust::host_vector<unsigned int> h_map = get_random_data<unsigned int>(
+                size,
+                min,
+                max,
+                seed_value + seed_value_addition
+            );
 
-        thrust::device_vector<unsigned int> d_map = h_map;
+            for(size_t i = 0; i < size; i++)
+                h_map[i] = h_map[i] % source_size;
 
-        // gather destination
-        thrust::host_vector<T>   h_output(size);
-        thrust::device_vector<T> d_output(size);
+            thrust::device_vector<unsigned int> d_map = h_map;
 
-        thrust::gather(h_map.begin(), h_map.end(), h_source.begin(), h_output.begin());
-        thrust::gather(d_map.begin(), d_map.end(), d_source.begin(), d_output.begin());
+            // gather destination
+            thrust::host_vector<T>   h_output(size);
+            thrust::device_vector<T> d_output(size);
 
-        thrust::host_vector<T> d_output_h = d_output;
-        ASSERT_EQ(h_output, d_output_h);
+            thrust::gather(h_map.begin(), h_map.end(), h_source.begin(), h_output.begin());
+            thrust::gather(d_map.begin(), d_map.end(), d_source.begin(), d_output.begin());
+
+            thrust::host_vector<T> d_output_h = d_output;
+            ASSERT_EQ(h_output, d_output_h);
+        }
     }
 }
 
@@ -155,27 +167,39 @@ TYPED_TEST(PrimitiveGatherTests, GatherToDiscardIterator)
         const size_t source_size = std::min((size_t)10, 2 * size);
 
         // source vectors to gather from
-        thrust::host_vector<T>   h_source = get_random_data<T>(source_size, min, max);
-        thrust::device_vector<T> d_source = h_source;
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        // gather indices
-        thrust::host_vector<unsigned int> h_map = get_random_data<unsigned int>(size, min, max);
+            thrust::host_vector<T> h_source = get_random_data<T>(source_size, min, max, seed_value);
+            thrust::device_vector<T> d_source = h_source;
 
-        for(size_t i = 0; i < size; i++)
-            h_map[i] = h_map[i] % source_size;
+            // gather indices
+            thrust::host_vector<unsigned int> h_map = get_random_data<unsigned int>(
+                size,
+                min,
+                max,
+                seed_value + seed_value_addition
+            );
 
-        thrust::device_vector<unsigned int> d_map = h_map;
+            for(size_t i = 0; i < size; i++)
+                h_map[i] = h_map[i] % source_size;
 
-        thrust::discard_iterator<> h_result = thrust::gather(
-            h_map.begin(), h_map.end(), h_source.begin(), thrust::make_discard_iterator());
+            thrust::device_vector<unsigned int> d_map = h_map;
 
-        thrust::discard_iterator<> d_result = thrust::gather(
-            d_map.begin(), d_map.end(), d_source.begin(), thrust::make_discard_iterator());
+            thrust::discard_iterator<> h_result = thrust::gather(
+                h_map.begin(), h_map.end(), h_source.begin(), thrust::make_discard_iterator());
 
-        thrust::discard_iterator<> reference(size);
+            thrust::discard_iterator<> d_result = thrust::gather(
+                d_map.begin(), d_map.end(), d_source.begin(), thrust::make_discard_iterator());
 
-        ASSERT_EQ(reference, h_result);
-        ASSERT_EQ(reference, d_result);
+            thrust::discard_iterator<> reference(size);
+
+            ASSERT_EQ(reference, h_result);
+            ASSERT_EQ(reference, d_result);
+        }
     }
 }
 
@@ -296,44 +320,61 @@ TYPED_TEST(PrimitiveGatherTests, GatherIf)
         const size_t source_size = std::min((size_t)10, 2 * size);
 
         // source vectors to gather from
-        thrust::host_vector<T>   h_source = get_random_data<T>(source_size, min, max);
-        thrust::device_vector<T> d_source = h_source;
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        // gather indices
-        thrust::host_vector<unsigned int> h_map = get_random_data<unsigned int>(size, min, max);
+            thrust::host_vector<T> h_source = get_random_data<T>(source_size, min, max, seed_value);
+            thrust::device_vector<T> d_source = h_source;
 
-        for(size_t i = 0; i < size; i++)
-            h_map[i] = h_map[i] % source_size;
+            // gather indices
+            thrust::host_vector<unsigned int> h_map = get_random_data<unsigned int>(
+                size,
+                min,
+                max,
+                seed_value + seed_value_addition
+            );
 
-        thrust::device_vector<unsigned int> d_map = h_map;
+            for(size_t i = 0; i < size; i++)
+                h_map[i] = h_map[i] % source_size;
 
-        // gather stencil
-        thrust::host_vector<unsigned int> h_stencil = get_random_data<unsigned int>(size, min, max);
+            thrust::device_vector<unsigned int> d_map = h_map;
 
-        for(size_t i = 0; i < size; i++)
-            h_stencil[i] = h_stencil[i] % 2;
+            // gather stencil
+            thrust::host_vector<unsigned int> h_stencil = get_random_data<unsigned int>(
+                size,
+                min,
+                max,
+                seed_value + 2 * seed_value_addition
+            );
 
-        thrust::device_vector<unsigned int> d_stencil = h_stencil;
+            for(size_t i = 0; i < size; i++)
+                h_stencil[i] = h_stencil[i] % 2;
 
-        // gather destination
-        thrust::host_vector<T>   h_output(size);
-        thrust::device_vector<T> d_output(size);
+            thrust::device_vector<unsigned int> d_stencil = h_stencil;
 
-        thrust::gather_if(h_map.begin(),
-                          h_map.end(),
-                          h_stencil.begin(),
-                          h_source.begin(),
-                          h_output.begin(),
-                          is_even_gather_if<unsigned int>());
-        thrust::gather_if(d_map.begin(),
-                          d_map.end(),
-                          d_stencil.begin(),
-                          d_source.begin(),
-                          d_output.begin(),
-                          is_even_gather_if<unsigned int>());
+            // gather destination
+            thrust::host_vector<T>   h_output(size);
+            thrust::device_vector<T> d_output(size);
 
-        thrust::host_vector<T> d_output_h = d_output;
-        ASSERT_EQ(h_output, d_output_h);
+            thrust::gather_if(h_map.begin(),
+                              h_map.end(),
+                              h_stencil.begin(),
+                              h_source.begin(),
+                              h_output.begin(),
+                              is_even_gather_if<unsigned int>());
+            thrust::gather_if(d_map.begin(),
+                              d_map.end(),
+                              d_stencil.begin(),
+                              d_source.begin(),
+                              d_output.begin(),
+                              is_even_gather_if<unsigned int>());
+
+            thrust::host_vector<T> d_output_h = d_output;
+            ASSERT_EQ(h_output, d_output_h);
+        }
     }
 }
 
@@ -350,43 +391,62 @@ TYPED_TEST(PrimitiveGatherTests, GatherIfToDiscardIterator)
         const size_t source_size = std::min((size_t)10, 2 * size);
 
         // source vectors to gather from
-        thrust::host_vector<T>   h_source = get_random_data<T>(source_size, min, max);
-        thrust::device_vector<T> d_source = h_source;
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        // gather indices
-        thrust::host_vector<unsigned int> h_map = get_random_data<unsigned int>(size, min, max);
+            thrust::host_vector<T> h_source = get_random_data<T>(source_size, min, max, seed_value);
+            thrust::device_vector<T> d_source = h_source;
 
-        for(size_t i = 0; i < size; i++)
-            h_map[i] = h_map[i] % source_size;
+            // gather indices
+            thrust::host_vector<unsigned int> h_map = get_random_data<unsigned int>(
+                size,
+                min,
+                max,
+                seed_value + seed_value_addition
+            );
 
-        thrust::device_vector<unsigned int> d_map = h_map;
+            for(size_t i = 0; i < size; i++)
+                h_map[i] = h_map[i] % source_size;
 
-        // gather stencil
-        thrust::host_vector<unsigned int> h_stencil = get_random_data<unsigned int>(size, min, max);
+            thrust::device_vector<unsigned int> d_map = h_map;
 
-        for(size_t i = 0; i < size; i++)
-            h_stencil[i] = h_stencil[i] % 2;
+            // gather stencil
+            thrust::host_vector<unsigned int> h_stencil = get_random_data<unsigned int>(
+                size,
+                min,
+                max,
+                seed_value + seed_value_addition
+            );
 
-        thrust::device_vector<unsigned int> d_stencil = h_stencil;
+            for(size_t i = 0; i < size; i++)
+                h_stencil[i] = h_stencil[i] % 2;
 
-        thrust::discard_iterator<> h_result = thrust::gather_if(h_map.begin(),
-                                                                h_map.end(),
-                                                                h_stencil.begin(),
-                                                                h_source.begin(),
-                                                                thrust::make_discard_iterator(),
-                                                                is_even_gather_if<unsigned int>());
+            thrust::device_vector<unsigned int> d_stencil = h_stencil;
 
-        thrust::discard_iterator<> d_result = thrust::gather_if(d_map.begin(),
-                                                                d_map.end(),
-                                                                d_stencil.begin(),
-                                                                d_source.begin(),
-                                                                thrust::make_discard_iterator(),
-                                                                is_even_gather_if<unsigned int>());
+            thrust::discard_iterator<> h_result
+                = thrust::gather_if(h_map.begin(),
+                                    h_map.end(),
+                                    h_stencil.begin(),
+                                    h_source.begin(),
+                                    thrust::make_discard_iterator(),
+                                    is_even_gather_if<unsigned int>());
 
-        thrust::discard_iterator<> reference(size);
+            thrust::discard_iterator<> d_result
+                = thrust::gather_if(d_map.begin(),
+                                    d_map.end(),
+                                    d_stencil.begin(),
+                                    d_source.begin(),
+                                    thrust::make_discard_iterator(),
+                                    is_even_gather_if<unsigned int>());
 
-        ASSERT_EQ(reference, h_result);
-        ASSERT_EQ(reference, d_result);
+            thrust::discard_iterator<> reference(size);
+
+            ASSERT_EQ(reference, h_result);
+            ASSERT_EQ(reference, d_result);
+        }
     }
 }
 

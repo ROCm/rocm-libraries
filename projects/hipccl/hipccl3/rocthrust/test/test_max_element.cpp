@@ -79,23 +79,30 @@ TYPED_TEST(MaxElementPrimitiveTests, TestMaxElement)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        thrust::host_vector<T> h_data = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::device_vector<T> d_data = h_data;
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        typename thrust::host_vector<T>::iterator h_max
-            = thrust::max_element(h_data.begin(), h_data.end());
-        typename thrust::device_vector<T>::iterator d_max
-            = thrust::max_element(d_data.begin(), d_data.end());
+            thrust::host_vector<T> h_data = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::device_vector<T> d_data = h_data;
 
-        ASSERT_EQ(h_max - h_data.begin(), d_max - d_data.begin());
+            typename thrust::host_vector<T>::iterator h_max
+                = thrust::max_element(h_data.begin(), h_data.end());
+            typename thrust::device_vector<T>::iterator d_max
+                = thrust::max_element(d_data.begin(), d_data.end());
 
-        typename thrust::host_vector<T>::iterator h_min
-            = thrust::max_element(h_data.begin(), h_data.end(), thrust::less<T>());
-        typename thrust::device_vector<T>::iterator d_min
-            = thrust::max_element(d_data.begin(), d_data.end(), thrust::less<T>());
+            ASSERT_EQ(h_max - h_data.begin(), d_max - d_data.begin());
 
-        ASSERT_EQ(h_min - h_data.begin(), d_min - d_data.begin());
+            typename thrust::host_vector<T>::iterator h_min
+                = thrust::max_element(h_data.begin(), h_data.end(), thrust::less<T>());
+            typename thrust::device_vector<T>::iterator d_min
+                = thrust::max_element(d_data.begin(), d_data.end(), thrust::less<T>());
+
+            ASSERT_EQ(h_min - h_data.begin(), d_min - d_data.begin());
+        }
     }
 }
 
@@ -130,4 +137,4 @@ TEST(MaxElementTests, TestMaxElementDispatchImplicit)
     thrust::max_element(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()));
 
     ASSERT_EQ(13, vec.front());
-}
+} 

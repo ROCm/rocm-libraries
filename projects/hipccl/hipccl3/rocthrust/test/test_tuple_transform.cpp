@@ -50,31 +50,43 @@ TYPED_TEST(TupleTransformTests, TestTupleTransform)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        thrust::host_vector<T> h_t1 = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::host_vector<T> h_t2 = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+            thrust::host_vector<T> h_t1 = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
 
-        // zip up the data
-        thrust::host_vector<thrust::tuple<T, T>> h_tuples(size);
-        thrust::transform(
-            h_t1.begin(), h_t1.end(), h_t2.begin(), h_tuples.begin(), MakeTupleFunctor());
+            thrust::host_vector<T> h_t2 = get_random_data<T>(
+                size,
+                std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value + seed_value_addition
+              );
 
-        // copy to device
-        thrust::device_vector<thrust::tuple<T, T>> d_tuples = h_tuples;
+            // zip up the data
+            thrust::host_vector<thrust::tuple<T, T>> h_tuples(size);
+            thrust::transform(
+                h_t1.begin(), h_t1.end(), h_t2.begin(), h_tuples.begin(), MakeTupleFunctor());
 
-        thrust::device_vector<T> d_t1(size), d_t2(size);
+            // copy to device
+            thrust::device_vector<thrust::tuple<T, T>> d_tuples = h_tuples;
 
-        // select 0th
-        thrust::transform(d_tuples.begin(), d_tuples.end(), d_t1.begin(), GetFunctor<0>());
+            thrust::device_vector<T> d_t1(size), d_t2(size);
 
-        // select 1st
-        thrust::transform(d_tuples.begin(), d_tuples.end(), d_t2.begin(), GetFunctor<1>());
+            // select 0th
+            thrust::transform(d_tuples.begin(), d_tuples.end(), d_t1.begin(), GetFunctor<0>());
 
-        ASSERT_EQ(h_t1, d_t1);
-        ASSERT_EQ(h_t2, d_t2);
+            // select 1st
+            thrust::transform(d_tuples.begin(), d_tuples.end(), d_t2.begin(), GetFunctor<1>());
 
-        ASSERT_EQ_QUIET(h_tuples, d_tuples);
+            ASSERT_EQ(h_t1, d_t1);
+            ASSERT_EQ(h_t2, d_t2);
+
+            ASSERT_EQ_QUIET(h_tuples, d_tuples);
+        }
     }
 }

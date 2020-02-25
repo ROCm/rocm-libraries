@@ -19,6 +19,7 @@
 
 #include <thrust/execution_policy.h>
 #include <thrust/host_vector.h>
+#include "test_seed.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -37,11 +38,12 @@ std::vector<size_t> get_sizes()
 }
 
 template <class T>
-inline auto get_random_data(size_t size, T, T) ->
+inline auto get_random_data(size_t size, T, T, int seed_value) ->
     typename std::enable_if<std::is_same<T, bool>::value, thrust::host_vector<T>>::type
 {
     std::random_device          rd;
     std::default_random_engine  gen(rd());
+    gen.seed(seed_value);
     std::bernoulli_distribution distribution(0.5);
     thrust::host_vector<T>      data(size);
     std::generate(data.begin(), data.end(), [&]() { return distribution(gen); });
@@ -49,12 +51,13 @@ inline auto get_random_data(size_t size, T, T) ->
 }
 
 template <class T>
-inline auto get_random_data(size_t size, T min, T max) ->
+inline auto get_random_data(size_t size, T min, T max, int seed_value) ->
     typename std::enable_if<rocprim::is_integral<T>::value && !std::is_same<T, bool>::value,
                             thrust::host_vector<T>>::type
 {
     std::random_device               rd;
     std::default_random_engine       gen(rd());
+    gen.seed(seed_value);
     std::uniform_int_distribution<T> distribution(min, max);
     thrust::host_vector<T>           data(size);
     std::generate(data.begin(), data.end(), [&]() { return distribution(gen); });
@@ -62,11 +65,12 @@ inline auto get_random_data(size_t size, T min, T max) ->
 }
 
 template <class T>
-inline auto get_random_data(size_t size, T min, T max) ->
+inline auto get_random_data(size_t size, T min, T max, int seed_value) ->
     typename std::enable_if<rocprim::is_floating_point<T>::value, thrust::host_vector<T>>::type
 {
     std::random_device                rd;
     std::default_random_engine        gen(rd());
+    gen.seed(seed_value);
     std::uniform_real_distribution<T> distribution(min, max);
     thrust::host_vector<T>            data(size);
     std::generate(data.begin(), data.end(), [&]() { return distribution(gen); });

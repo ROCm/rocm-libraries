@@ -105,42 +105,57 @@ TYPED_TEST(SetDifferencePrimitiveTests, TestSetDifference)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
         size_t expanded_sizes[]   = {0, 1, size / 2, size, size + 1, 2 * size};
         size_t num_expanded_sizes = sizeof(expanded_sizes) / sizeof(size_t);
 
-        thrust::host_vector<T> random = get_random_data<unsigned short int>(
-            size + *thrust::max_element(expanded_sizes, expanded_sizes + num_expanded_sizes),
-            0,
-            255);
-
-        thrust::host_vector<T> h_a(random.begin(), random.begin() + size);
-        thrust::host_vector<T> h_b(random.begin() + size, random.end());
-
-        thrust::stable_sort(h_a.begin(), h_a.end());
-        thrust::stable_sort(h_b.begin(), h_b.end());
-
-        thrust::device_vector<T> d_a = h_a;
-        thrust::device_vector<T> d_b = h_b;
-
-        for(size_t i = 0; i < num_expanded_sizes; i++)
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {
-            size_t expanded_size = expanded_sizes[i];
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-            thrust::host_vector<T>   h_result(size + expanded_size);
-            thrust::device_vector<T> d_result(size + expanded_size);
+            thrust::host_vector<T> random = get_random_data<unsigned short int>(
+                size + *thrust::max_element(expanded_sizes, expanded_sizes + num_expanded_sizes),
+                0,
+                255,
+                seed_value);
 
-            typename thrust::host_vector<T>::iterator   h_end;
-            typename thrust::device_vector<T>::iterator d_end;
+            thrust::host_vector<T> h_a(random.begin(), random.begin() + size);
+            thrust::host_vector<T> h_b(random.begin() + size, random.end());
 
-            h_end = thrust::set_difference(
-                h_a.begin(), h_a.end(), h_b.begin(), h_b.begin() + expanded_size, h_result.begin());
-            h_result.resize(h_end - h_result.begin());
+            thrust::stable_sort(h_a.begin(), h_a.end());
+            thrust::stable_sort(h_b.begin(), h_b.end());
 
-            d_end = thrust::set_difference(
-                d_a.begin(), d_a.end(), d_b.begin(), d_b.begin() + expanded_size, d_result.begin());
-            d_result.resize(d_end - d_result.begin());
+            thrust::device_vector<T> d_a = h_a;
+            thrust::device_vector<T> d_b = h_b;
 
-            ASSERT_EQ(h_result, d_result);
+            for(size_t i = 0; i < num_expanded_sizes; i++)
+            {
+                size_t expanded_size = expanded_sizes[i];
+
+                thrust::host_vector<T>   h_result(size + expanded_size);
+                thrust::device_vector<T> d_result(size + expanded_size);
+
+                typename thrust::host_vector<T>::iterator   h_end;
+                typename thrust::device_vector<T>::iterator d_end;
+
+                h_end = thrust::set_difference(h_a.begin(),
+                                               h_a.end(),
+                                               h_b.begin(),
+                                               h_b.begin() + expanded_size,
+                                               h_result.begin());
+                h_result.resize(h_end - h_result.begin());
+
+                d_end = thrust::set_difference(d_a.begin(),
+                                               d_a.end(),
+                                               d_b.begin(),
+                                               d_b.begin() + expanded_size,
+                                               d_result.begin());
+                d_result.resize(d_end - d_result.begin());
+
+                ASSERT_EQ(h_result, d_result);
+            }
         }
     }
 }
@@ -153,32 +168,39 @@ TYPED_TEST(SetDifferencePrimitiveTests, TestSetDifferenceEquivalentRanges)
 
     for(auto size : sizes)
     {
-        thrust::host_vector<T> temp = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::host_vector<T> h_a = temp;
-        thrust::sort(h_a.begin(), h_a.end());
-        thrust::host_vector<T> h_b = h_a;
+            thrust::host_vector<T> temp = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
 
-        thrust::device_vector<T> d_a = h_a;
-        thrust::device_vector<T> d_b = h_b;
+            thrust::host_vector<T> h_a = temp;
+            thrust::sort(h_a.begin(), h_a.end());
+            thrust::host_vector<T> h_b = h_a;
 
-        thrust::host_vector<T>   h_result(size);
-        thrust::device_vector<T> d_result(size);
+            thrust::device_vector<T> d_a = h_a;
+            thrust::device_vector<T> d_b = h_b;
 
-        typename thrust::host_vector<T>::iterator   h_end;
-        typename thrust::device_vector<T>::iterator d_end;
+            thrust::host_vector<T>   h_result(size);
+            thrust::device_vector<T> d_result(size);
 
-        h_end = thrust::set_difference(
-            h_a.begin(), h_a.end(), h_b.begin(), h_b.end(), h_result.begin());
-        h_result.resize(h_end - h_result.begin());
+            typename thrust::host_vector<T>::iterator   h_end;
+            typename thrust::device_vector<T>::iterator d_end;
 
-        d_end = thrust::set_difference(
-            d_a.begin(), d_a.end(), d_b.begin(), d_b.end(), d_result.begin());
+            h_end = thrust::set_difference(
+                h_a.begin(), h_a.end(), h_b.begin(), h_b.end(), h_result.begin());
+            h_result.resize(h_end - h_result.begin());
 
-        d_result.resize(d_end - d_result.begin());
+            d_end = thrust::set_difference(
+                d_a.begin(), d_a.end(), d_b.begin(), d_b.end(), d_result.begin());
 
-        ASSERT_EQ(h_result, d_result);
+            d_result.resize(d_end - d_result.begin());
+
+            ASSERT_EQ(h_result, d_result);
+        }
     }
 }
 
@@ -190,41 +212,49 @@ TYPED_TEST(SetDifferencePrimitiveTests, TestSetDifferenceMultiset)
 
     for(auto size : sizes)
     {
-        thrust::host_vector<T> temp = get_random_data<T>(
-            2 * size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-
-        // restrict elements to [min,13)
-        for(typename thrust::host_vector<T>::iterator i = temp.begin(); i != temp.end(); ++i)
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {
-            int temp = static_cast<int>(*i);
-            temp %= 13;
-            *i = temp;
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+            thrust::host_vector<T> temp = get_random_data<T>(
+                2 * size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+
+            // restrict elements to [min,13)
+            for(typename thrust::host_vector<T>::iterator i = temp.begin(); i != temp.end(); ++i)
+            {
+                int temp = static_cast<int>(*i);
+                temp %= 13;
+                *i = temp;
+            }
+
+            thrust::host_vector<T> h_a(temp.begin(), temp.begin() + size);
+            thrust::host_vector<T> h_b(temp.begin() + size, temp.end());
+
+            thrust::sort(h_a.begin(), h_a.end());
+            thrust::sort(h_b.begin(), h_b.end());
+
+            thrust::device_vector<T> d_a = h_a;
+            thrust::device_vector<T> d_b = h_b;
+
+            thrust::host_vector<T>   h_result(size);
+            thrust::device_vector<T> d_result(size);
+
+            typename thrust::host_vector<T>::iterator   h_end;
+            typename thrust::device_vector<T>::iterator d_end;
+
+            h_end = thrust::set_difference(
+                h_a.begin(), h_a.end(), h_b.begin(), h_b.end(), h_result.begin());
+            h_result.resize(h_end - h_result.begin());
+
+            d_end = thrust::set_difference(
+                d_a.begin(), d_a.end(), d_b.begin(), d_b.end(), d_result.begin());
+
+            d_result.resize(d_end - d_result.begin());
+
+            ASSERT_EQ(h_result, d_result);
         }
-
-        thrust::host_vector<T> h_a(temp.begin(), temp.begin() + size);
-        thrust::host_vector<T> h_b(temp.begin() + size, temp.end());
-
-        thrust::sort(h_a.begin(), h_a.end());
-        thrust::sort(h_b.begin(), h_b.end());
-
-        thrust::device_vector<T> d_a = h_a;
-        thrust::device_vector<T> d_b = h_b;
-
-        thrust::host_vector<T>   h_result(size);
-        thrust::device_vector<T> d_result(size);
-
-        typename thrust::host_vector<T>::iterator   h_end;
-        typename thrust::device_vector<T>::iterator d_end;
-
-        h_end = thrust::set_difference(
-            h_a.begin(), h_a.end(), h_b.begin(), h_b.end(), h_result.begin());
-        h_result.resize(h_end - h_result.begin());
-
-        d_end = thrust::set_difference(
-            d_a.begin(), d_a.end(), d_b.begin(), d_b.end(), d_result.begin());
-
-        d_result.resize(d_end - d_result.begin());
-
-        ASSERT_EQ(h_result, d_result);
     }
 }
