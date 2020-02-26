@@ -90,6 +90,30 @@ ctest
 ./test/<unit-test-name>
 ```
 
+## Using custom seeds for the tests
+
+Go to the `rocPRIM/test/rocprim/test_seed.hpp` file. 
+```cpp
+//(1)
+static constexpr int random_seeds_count = 10;
+
+//(2)
+static constexpr unsigned int seeds [] = {0, 2, 10, 1000}; 
+
+//(3)
+static constexpr size_t seed_size = sizeof(seeds) / sizeof(seeds[0]);
+```
+
+(1) defines a constant that sets how many passes over the tests will be done with runtime-generated seeds. Modify at will.
+
+(2) defines the user generated seeds. Each of the elements of the array will be used as seed for all tests. Modify at will. If no static seeds are desired, the array should be left empty. 
+
+```cpp
+static constexpr unsigned int seeds [] = {}; 
+```
+
+(3) this line should never be modified.
+
 ## Documentation
 
 Documentation is available [here](https://rocthrust.readthedocs.io/en/latest/).
