@@ -40,34 +40,44 @@ TYPED_TEST(PairSortTests, TestPairStableSortByKey)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        thrust::host_vector<T> h_p1 = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        ;
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::host_vector<T> h_p2 = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        ;
+            thrust::host_vector<T> h_p1 = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
 
-        thrust::host_vector<P> h_pairs(size);
+            thrust::host_vector<T> h_p2 = get_random_data<T>(
+                size,
+                std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value + seed_value_addition
+            );
 
-        thrust::host_vector<int> h_values(size);
-        thrust::sequence(h_values.begin(), h_values.end());
+            thrust::host_vector<P> h_pairs(size);
 
-        // zip up pairs on the host
-        thrust::transform(
-            h_p1.begin(), h_p1.end(), h_p2.begin(), h_pairs.begin(), make_pair_functor());
+            thrust::host_vector<int> h_values(size);
+            thrust::sequence(h_values.begin(), h_values.end());
 
-        // device arrays
-        thrust::device_vector<P>   d_pairs  = h_pairs;
-        thrust::device_vector<int> d_values = h_values;
+            // zip up pairs on the host
+            thrust::transform(
+                h_p1.begin(), h_p1.end(), h_p2.begin(), h_pairs.begin(), make_pair_functor());
 
-        // sort on the host
-        thrust::stable_sort_by_key(h_pairs.begin(), h_pairs.end(), h_values.begin());
+            // device arrays
+            thrust::device_vector<P>   d_pairs  = h_pairs;
+            thrust::device_vector<int> d_values = h_values;
 
-        // sort on the device
-        thrust::stable_sort_by_key(d_pairs.begin(), d_pairs.end(), d_values.begin());
+            // sort on the host
+            thrust::stable_sort_by_key(h_pairs.begin(), h_pairs.end(), h_values.begin());
 
-        ASSERT_EQ_QUIET(h_pairs, d_pairs);
-        ASSERT_EQ_QUIET(h_values, d_values);
+            // sort on the device
+            thrust::stable_sort_by_key(d_pairs.begin(), d_pairs.end(), d_values.begin());
+
+            ASSERT_EQ_QUIET(h_pairs, d_pairs);
+            ASSERT_EQ_QUIET(h_values, d_values);
+        }
     }
 }

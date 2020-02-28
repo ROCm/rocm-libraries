@@ -29,8 +29,7 @@ struct Foo
     {
     }
 
-    __host__ __device__
-    ~Foo(void)
+    __host__ __device__ ~Foo(void)
     {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
         // __device__ overload

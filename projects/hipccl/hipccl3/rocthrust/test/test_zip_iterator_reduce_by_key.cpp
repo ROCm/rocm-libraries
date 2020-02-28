@@ -51,98 +51,113 @@ TYPED_TEST(ZipIteratorReduceByKeyTests, TestZipIteratorReduceByKey)
     for(auto size : sizes)
     {
         using namespace thrust;
-
-        thrust::host_vector<T> h_data0 = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::host_vector<T> h_data1 = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::host_vector<T> h_data2 = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-
-        device_vector<T> d_data0 = h_data0;
-        device_vector<T> d_data1 = h_data1;
-        device_vector<T> d_data2 = h_data2;
-
-        typedef tuple<T, T> Tuple;
-
-        // integer key, tuple value
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {
-            host_vector<T>   h_data3(size, 0);
-            host_vector<T>   h_data4(size, 0);
-            host_vector<T>   h_data5(size, 0);
-            device_vector<T> d_data3(size, 0);
-            device_vector<T> d_data4(size, 0);
-            device_vector<T> d_data5(size, 0);
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-            // run on host
-            reduce_by_key(h_data0.begin(),
-                          h_data0.end(),
-                          make_zip_iterator(make_tuple(h_data1.begin(), h_data2.begin())),
-                          h_data3.begin(),
-                          make_zip_iterator(make_tuple(h_data4.begin(), h_data5.begin())),
-                          equal_to<T>(),
-                          TuplePlus<Tuple>());
+            thrust::host_vector<T> h_data0 = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::host_vector<T> h_data1 = get_random_data<T>(
+                size,
+                std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value + seed_value_addition
+            );
+            thrust::host_vector<T> h_data2 = get_random_data<T>(
+                size,
+                std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value + 2 * seed_value_addition
+            );
 
-            // run on device
-            reduce_by_key(d_data0.begin(),
-                          d_data0.end(),
-                          make_zip_iterator(make_tuple(d_data1.begin(), d_data2.begin())),
-                          d_data3.begin(),
-                          make_zip_iterator(make_tuple(d_data4.begin(), d_data5.begin())),
-                          equal_to<T>(),
-                          TuplePlus<Tuple>());
+            device_vector<T> d_data0 = h_data0;
+            device_vector<T> d_data1 = h_data1;
+            device_vector<T> d_data2 = h_data2;
 
-            ASSERT_EQ(h_data3, d_data3);
-            ASSERT_EQ(h_data4, d_data4);
-            ASSERT_EQ(h_data5, d_data5);
-        }
-        // The tests below get miscompiled on Tesla hw for 8b types
+            typedef tuple<T, T> Tuple;
+
+            // integer key, tuple value
+            {
+                host_vector<T>   h_data3(size, 0);
+                host_vector<T>   h_data4(size, 0);
+                host_vector<T>   h_data5(size, 0);
+                device_vector<T> d_data3(size, 0);
+                device_vector<T> d_data4(size, 0);
+                device_vector<T> d_data5(size, 0);
+
+                // run on host
+                reduce_by_key(h_data0.begin(),
+                              h_data0.end(),
+                              make_zip_iterator(make_tuple(h_data1.begin(), h_data2.begin())),
+                              h_data3.begin(),
+                              make_zip_iterator(make_tuple(h_data4.begin(), h_data5.begin())),
+                              equal_to<T>(),
+                              TuplePlus<Tuple>());
+
+                // run on device
+                reduce_by_key(d_data0.begin(),
+                              d_data0.end(),
+                              make_zip_iterator(make_tuple(d_data1.begin(), d_data2.begin())),
+                              d_data3.begin(),
+                              make_zip_iterator(make_tuple(d_data4.begin(), d_data5.begin())),
+                              equal_to<T>(),
+                              TuplePlus<Tuple>());
+
+                ASSERT_EQ(h_data3, d_data3);
+                ASSERT_EQ(h_data4, d_data4);
+                ASSERT_EQ(h_data5, d_data5);
+            }
+            // The tests below get miscompiled on Tesla hw for 8b types
 
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-        if(const CUDATestDriver* driver
-           = dynamic_cast<const CUDATestDriver*>(&UnitTestDriver::s_driver()))
-        {
-            if(typeid(T) == typeid(unittest::uint8_t)
-               && driver->current_device_architecture() < 200)
+            if(const CUDATestDriver* driver
+               = dynamic_cast<const CUDATestDriver*>(&UnitTestDriver::s_driver()))
             {
-                KNOWN_FAILURE;
+                if(typeid(T) == typeid(unittest::uint8_t)
+                   && driver->current_device_architecture() < 200)
+                {
+                    KNOWN_FAILURE;
+                } // end if
             } // end if
-        } // end if
 #endif
 
-        // tuple key, tuple value
-        {
-            host_vector<T>   h_data3(size, 0);
-            host_vector<T>   h_data4(size, 0);
-            host_vector<T>   h_data5(size, 0);
-            host_vector<T>   h_data6(size, 0);
-            device_vector<T> d_data3(size, 0);
-            device_vector<T> d_data4(size, 0);
-            device_vector<T> d_data5(size, 0);
-            device_vector<T> d_data6(size, 0);
+            // tuple key, tuple value
+            {
+                host_vector<T>   h_data3(size, 0);
+                host_vector<T>   h_data4(size, 0);
+                host_vector<T>   h_data5(size, 0);
+                host_vector<T>   h_data6(size, 0);
+                device_vector<T> d_data3(size, 0);
+                device_vector<T> d_data4(size, 0);
+                device_vector<T> d_data5(size, 0);
+                device_vector<T> d_data6(size, 0);
 
-            // run on host
-            reduce_by_key(make_zip_iterator(make_tuple(h_data0.begin(), h_data0.begin())),
-                          make_zip_iterator(make_tuple(h_data0.end(), h_data0.end())),
-                          make_zip_iterator(make_tuple(h_data1.begin(), h_data2.begin())),
-                          make_zip_iterator(make_tuple(h_data3.begin(), h_data4.begin())),
-                          make_zip_iterator(make_tuple(h_data5.begin(), h_data6.begin())),
-                          equal_to<Tuple>(),
-                          TuplePlus<Tuple>());
+                // run on host
+                reduce_by_key(make_zip_iterator(make_tuple(h_data0.begin(), h_data0.begin())),
+                              make_zip_iterator(make_tuple(h_data0.end(), h_data0.end())),
+                              make_zip_iterator(make_tuple(h_data1.begin(), h_data2.begin())),
+                              make_zip_iterator(make_tuple(h_data3.begin(), h_data4.begin())),
+                              make_zip_iterator(make_tuple(h_data5.begin(), h_data6.begin())),
+                              equal_to<Tuple>(),
+                              TuplePlus<Tuple>());
 
-            // run on device
-            reduce_by_key(make_zip_iterator(make_tuple(d_data0.begin(), d_data0.begin())),
-                          make_zip_iterator(make_tuple(d_data0.end(), d_data0.end())),
-                          make_zip_iterator(make_tuple(d_data1.begin(), d_data2.begin())),
-                          make_zip_iterator(make_tuple(d_data3.begin(), d_data4.begin())),
-                          make_zip_iterator(make_tuple(d_data5.begin(), d_data6.begin())),
-                          equal_to<Tuple>(),
-                          TuplePlus<Tuple>());
+                // run on device
+                reduce_by_key(make_zip_iterator(make_tuple(d_data0.begin(), d_data0.begin())),
+                              make_zip_iterator(make_tuple(d_data0.end(), d_data0.end())),
+                              make_zip_iterator(make_tuple(d_data1.begin(), d_data2.begin())),
+                              make_zip_iterator(make_tuple(d_data3.begin(), d_data4.begin())),
+                              make_zip_iterator(make_tuple(d_data5.begin(), d_data6.begin())),
+                              equal_to<Tuple>(),
+                              TuplePlus<Tuple>());
 
-            ASSERT_EQ(h_data3, d_data3);
-            ASSERT_EQ(h_data4, d_data4);
-            ASSERT_EQ(h_data5, d_data5);
-            ASSERT_EQ(h_data6, d_data6);
+                ASSERT_EQ(h_data3, d_data3);
+                ASSERT_EQ(h_data4, d_data4);
+                ASSERT_EQ(h_data5, d_data5);
+                ASSERT_EQ(h_data6, d_data6);
+            }
         }
     }
 }

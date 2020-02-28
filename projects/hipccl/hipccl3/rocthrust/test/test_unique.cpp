@@ -148,23 +148,29 @@ TYPED_TEST(UniqueIntegralTests, TestUnique)
     for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::host_vector<T> h_data = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::device_vector<T> d_data = h_data;
+            thrust::host_vector<T> h_data = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::device_vector<T> d_data = h_data;
 
-        typename thrust::host_vector<T>::iterator   h_new_last;
-        typename thrust::device_vector<T>::iterator d_new_last;
+            typename thrust::host_vector<T>::iterator   h_new_last;
+            typename thrust::device_vector<T>::iterator d_new_last;
 
-        h_new_last = thrust::unique(h_data.begin(), h_data.end());
-        d_new_last = thrust::unique(d_data.begin(), d_data.end());
+            h_new_last = thrust::unique(h_data.begin(), h_data.end());
+            d_new_last = thrust::unique(d_data.begin(), d_data.end());
 
-        ASSERT_EQ(h_new_last - h_data.begin(), d_new_last - d_data.begin());
+            ASSERT_EQ(h_new_last - h_data.begin(), d_new_last - d_data.begin());
 
-        h_data.resize(h_new_last - h_data.begin());
-        d_data.resize(d_new_last - d_data.begin());
+            h_data.resize(h_new_last - h_data.begin());
+            d_data.resize(d_new_last - d_data.begin());
 
-        ASSERT_EQ(h_data, d_data);
+            ASSERT_EQ(h_data, d_data);
+        }
     }
 }
 
@@ -216,26 +222,32 @@ TYPED_TEST(UniqueIntegralTests, TestUniqueCopy)
     for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::host_vector<T> h_data = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::device_vector<T> d_data = h_data;
+            thrust::host_vector<T> h_data = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::device_vector<T> d_data = h_data;
 
-        thrust::host_vector<T>   h_output(size);
-        thrust::device_vector<T> d_output(size);
+            thrust::host_vector<T>   h_output(size);
+            thrust::device_vector<T> d_output(size);
 
-        typename thrust::host_vector<T>::iterator   h_new_last;
-        typename thrust::device_vector<T>::iterator d_new_last;
+            typename thrust::host_vector<T>::iterator   h_new_last;
+            typename thrust::device_vector<T>::iterator d_new_last;
 
-        h_new_last = thrust::unique_copy(h_data.begin(), h_data.end(), h_output.begin());
-        d_new_last = thrust::unique_copy(d_data.begin(), d_data.end(), d_output.begin());
+            h_new_last = thrust::unique_copy(h_data.begin(), h_data.end(), h_output.begin());
+            d_new_last = thrust::unique_copy(d_data.begin(), d_data.end(), d_output.begin());
 
-        ASSERT_EQ(h_new_last - h_output.begin(), d_new_last - d_output.begin());
+            ASSERT_EQ(h_new_last - h_output.begin(), d_new_last - d_output.begin());
 
-        h_data.resize(h_new_last - h_output.begin());
-        d_data.resize(d_new_last - d_output.begin());
+            h_data.resize(h_new_last - h_output.begin());
+            d_data.resize(d_new_last - d_output.begin());
 
-        ASSERT_EQ(h_output, d_output);
+            ASSERT_EQ(h_output, d_output);
+        }
     }
 }
 
@@ -246,26 +258,32 @@ TYPED_TEST(UniqueIntegralTests, TestUniqueCopyToDiscardIterator)
     for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::host_vector<T> h_data = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::device_vector<T> d_data = h_data;
+            thrust::host_vector<T> h_data = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::device_vector<T> d_data = h_data;
 
-        thrust::host_vector<T> h_unique = h_data;
-        h_unique.erase(thrust::unique(h_unique.begin(), h_unique.end()), h_unique.end());
+            thrust::host_vector<T> h_unique = h_data;
+            h_unique.erase(thrust::unique(h_unique.begin(), h_unique.end()), h_unique.end());
 
-        thrust::discard_iterator<> reference(h_unique.size());
+            thrust::discard_iterator<> reference(h_unique.size());
 
-        typename thrust::host_vector<T>::iterator   h_new_last;
-        typename thrust::device_vector<T>::iterator d_new_last;
+            typename thrust::host_vector<T>::iterator   h_new_last;
+            typename thrust::device_vector<T>::iterator d_new_last;
 
-        thrust::discard_iterator<> h_result
-            = thrust::unique_copy(h_data.begin(), h_data.end(), thrust::make_discard_iterator());
+            thrust::discard_iterator<> h_result = thrust::unique_copy(
+                h_data.begin(), h_data.end(), thrust::make_discard_iterator());
 
-        thrust::discard_iterator<> d_result
-            = thrust::unique_copy(d_data.begin(), d_data.end(), thrust::make_discard_iterator());
+            thrust::discard_iterator<> d_result = thrust::unique_copy(
+                d_data.begin(), d_data.end(), thrust::make_discard_iterator());
 
-        ASSERT_EQ_QUIET(reference, h_result);
-        ASSERT_EQ_QUIET(reference, d_result);
+            ASSERT_EQ_QUIET(reference, h_result);
+            ASSERT_EQ_QUIET(reference, d_result);
+        }
     }
 }

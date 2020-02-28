@@ -239,14 +239,21 @@ TYPED_TEST(PairTests, TestPairComparison)
 TYPED_TEST(PairTests, TestPairGet)
 {
     using T = typename TestFixture::input_type;
-    thrust::host_vector<T> data
-        = get_random_data<T>(2, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-    ;
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-    thrust::pair<T, T> p(data[0], data[1]);
+        thrust::host_vector<T> data = get_random_data<T>(
+            2, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+        ;
 
-    ASSERT_EQ(data[0], thrust::get<0>(p));
-    ASSERT_EQ(data[1], thrust::get<1>(p));
+        thrust::pair<T, T> p(data[0], data[1]);
+
+        ASSERT_EQ(data[0], thrust::get<0>(p));
+        ASSERT_EQ(data[1], thrust::get<1>(p));
+    }
 }
 
 TEST(PairTests, TestPairTupleSize)

@@ -90,8 +90,8 @@ TEST(MergeTests, MergeDispatchExplicit)
 }
 
 template <typename InputIterator1, typename InputIterator2, typename OutputIterator>
-OutputIterator merge(
-    my_tag, InputIterator1, InputIterator1, InputIterator2, InputIterator2, OutputIterator result)
+OutputIterator
+merge(my_tag, InputIterator1, InputIterator1, InputIterator2, InputIterator2, OutputIterator result)
 {
     *result = 13;
     return result;
@@ -117,42 +117,56 @@ TYPED_TEST(PrimitiveMergeTests, MergeWithRandomData)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
         size_t expanded_sizes[]   = {0, 1, size / 2, size, size + 1, 2 * size};
         size_t num_expanded_sizes = sizeof(expanded_sizes) / sizeof(size_t);
-
-        thrust::host_vector<T> random = get_random_data<unsigned short int>(
-            size + *thrust::max_element(expanded_sizes, expanded_sizes + num_expanded_sizes),
-            0,
-            255);
-        thrust::host_vector<T> h_a(random.begin(), random.begin() + size);
-        thrust::host_vector<T> h_b(random.begin() + size, random.end());
-
-        thrust::stable_sort(h_a.begin(), h_a.end());
-        thrust::stable_sort(h_b.begin(), h_b.end());
-
-        thrust::device_vector<T> d_a = h_a;
-        thrust::device_vector<T> d_b = h_b;
-
-        for(size_t i = 0; i < num_expanded_sizes; i++)
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {
-            size_t expanded_size = expanded_sizes[i];
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-            thrust::host_vector<T>   h_result(size + expanded_size);
-            thrust::device_vector<T> d_result(size + expanded_size);
+            thrust::host_vector<T> random = get_random_data<unsigned short int>(
+                size + *thrust::max_element(expanded_sizes, expanded_sizes + num_expanded_sizes),
+                0,
+                255,
+                seed_value);
+            thrust::host_vector<T> h_a(random.begin(), random.begin() + size);
+            thrust::host_vector<T> h_b(random.begin() + size, random.end());
 
-            typename thrust::host_vector<T>::iterator   h_end;
-            typename thrust::device_vector<T>::iterator d_end;
+            thrust::stable_sort(h_a.begin(), h_a.end());
+            thrust::stable_sort(h_b.begin(), h_b.end());
 
-            h_end = thrust::merge(
-                h_a.begin(), h_a.end(), h_b.begin(), h_b.begin() + expanded_size, h_result.begin());
-            h_result.resize(h_end - h_result.begin());
+            thrust::device_vector<T> d_a = h_a;
+            thrust::device_vector<T> d_b = h_b;
 
-            d_end = thrust::merge(
-                d_a.begin(), d_a.end(), d_b.begin(), d_b.begin() + expanded_size, d_result.begin());
-            d_result.resize(d_end - d_result.begin());
+            for(size_t i = 0; i < num_expanded_sizes; i++)
+            {
+                size_t expanded_size = expanded_sizes[i];
 
-            thrust::host_vector<T> d_result_h = d_result;
-            ASSERT_EQ(h_result, d_result_h);
+                thrust::host_vector<T>   h_result(size + expanded_size);
+                thrust::device_vector<T> d_result(size + expanded_size);
+
+                typename thrust::host_vector<T>::iterator   h_end;
+                typename thrust::device_vector<T>::iterator d_end;
+
+                h_end = thrust::merge(h_a.begin(),
+                                      h_a.end(),
+                                      h_b.begin(),
+                                      h_b.begin() + expanded_size,
+                                      h_result.begin());
+                h_result.resize(h_end - h_result.begin());
+
+                d_end = thrust::merge(d_a.begin(),
+                                      d_a.end(),
+                                      d_b.begin(),
+                                      d_b.begin() + expanded_size,
+                                      d_result.begin());
+                d_result.resize(d_end - d_result.begin());
+
+                thrust::host_vector<T> d_result_h = d_result;
+                ASSERT_EQ(h_result, d_result_h);
+            }
         }
     }
 }
@@ -164,27 +178,39 @@ TYPED_TEST(PrimitiveMergeTests, MergeToDiscardIterator)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        thrust::host_vector<T> h_a = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::host_vector<T> h_b = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::stable_sort(h_a.begin(), h_a.end());
-        thrust::stable_sort(h_b.begin(), h_b.end());
+            thrust::host_vector<T> h_a = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::host_vector<T> h_b = get_random_data<T>(
+                size,
+                std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value + seed_value_addition
+            );
 
-        thrust::device_vector<T> d_a = h_a;
-        thrust::device_vector<T> d_b = h_b;
+            thrust::stable_sort(h_a.begin(), h_a.end());
+            thrust::stable_sort(h_b.begin(), h_b.end());
 
-        thrust::discard_iterator<> h_result = thrust::merge(
-            h_a.begin(), h_a.end(), h_b.begin(), h_b.end(), thrust::make_discard_iterator());
+            thrust::device_vector<T> d_a = h_a;
+            thrust::device_vector<T> d_b = h_b;
 
-        thrust::discard_iterator<> d_result = thrust::merge(
-            d_a.begin(), d_a.end(), d_b.begin(), d_b.end(), thrust::make_discard_iterator());
+            thrust::discard_iterator<> h_result = thrust::merge(
+                h_a.begin(), h_a.end(), h_b.begin(), h_b.end(), thrust::make_discard_iterator());
 
-        thrust::discard_iterator<> reference(2 * size);
+            thrust::discard_iterator<> d_result = thrust::merge(
+                d_a.begin(), d_a.end(), d_b.begin(), d_b.end(), thrust::make_discard_iterator());
 
-        ASSERT_EQ(reference, h_result);
-        ASSERT_EQ(reference, d_result);
+            thrust::discard_iterator<> reference(2 * size);
+
+            ASSERT_EQ(reference, h_result);
+            ASSERT_EQ(reference, d_result);
+        }
     }
 }
 
@@ -195,29 +221,49 @@ TYPED_TEST(PrimitiveMergeTests, MergeDescending)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        thrust::host_vector<T> h_a = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::host_vector<T> h_b = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::stable_sort(h_a.begin(), h_a.end(), thrust::greater<T>());
-        thrust::stable_sort(h_b.begin(), h_b.end(), thrust::greater<T>());
+            thrust::host_vector<T> h_a = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::host_vector<T> h_b = get_random_data<T>(
+                size,
+                std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value + seed_value_addition
+            );
 
-        thrust::device_vector<T> d_a = h_a;
-        thrust::device_vector<T> d_b = h_b;
+            thrust::stable_sort(h_a.begin(), h_a.end(), thrust::greater<T>());
+            thrust::stable_sort(h_b.begin(), h_b.end(), thrust::greater<T>());
 
-        thrust::host_vector<T>   h_result(h_a.size() + h_b.size());
-        thrust::device_vector<T> d_result(d_a.size() + d_b.size());
+            thrust::device_vector<T> d_a = h_a;
+            thrust::device_vector<T> d_b = h_b;
 
-        typename thrust::host_vector<T>::iterator   h_end;
-        typename thrust::device_vector<T>::iterator d_end;
+            thrust::host_vector<T>   h_result(h_a.size() + h_b.size());
+            thrust::device_vector<T> d_result(d_a.size() + d_b.size());
 
-        h_end = thrust::merge(
-            h_a.begin(), h_a.end(), h_b.begin(), h_b.end(), h_result.begin(), thrust::greater<T>());
+            typename thrust::host_vector<T>::iterator   h_end;
+            typename thrust::device_vector<T>::iterator d_end;
 
-        d_end = thrust::merge(
-            d_a.begin(), d_a.end(), d_b.begin(), d_b.end(), d_result.begin(), thrust::greater<T>());
+            h_end = thrust::merge(h_a.begin(),
+                                  h_a.end(),
+                                  h_b.begin(),
+                                  h_b.end(),
+                                  h_result.begin(),
+                                  thrust::greater<T>());
 
-        ASSERT_EQ(h_result, d_result);
+            d_end = thrust::merge(d_a.begin(),
+                                  d_a.end(),
+                                  d_b.begin(),
+                                  d_b.end(),
+                                  d_result.begin(),
+                                  thrust::greater<T>());
+
+            ASSERT_EQ(h_result, d_result);
+        }
     }
 }

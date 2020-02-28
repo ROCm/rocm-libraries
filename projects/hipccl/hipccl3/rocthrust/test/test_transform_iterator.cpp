@@ -91,20 +91,28 @@ TYPED_TEST(PrimitiveTransformIteratorTests, TransformIteratorReduce)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        T                        error_margin = (T)0.01 * size;
-        thrust::host_vector<T>   h_data       = get_random_data<T>(size, 0, 10);
-        thrust::device_vector<T> d_data       = h_data;
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        T error_margin = (T)0.01 * size;
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        // run on host
-        T h_result
-            = thrust::reduce(thrust::make_transform_iterator(h_data.begin(), thrust::negate<T>()),
-                             thrust::make_transform_iterator(h_data.end(), thrust::negate<T>()));
+            thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10, seed_value);
+            thrust::device_vector<T> d_data = h_data;
 
-        // run on device
-        T d_result
-            = thrust::reduce(thrust::make_transform_iterator(d_data.begin(), thrust::negate<T>()),
-                             thrust::make_transform_iterator(d_data.end(), thrust::negate<T>()));
+            // run on host
+            T h_result = thrust::reduce(
+                thrust::make_transform_iterator(h_data.begin(), thrust::negate<T>()),
+                thrust::make_transform_iterator(h_data.end(), thrust::negate<T>()));
 
-        ASSERT_NEAR(h_result, d_result, error_margin);
+            // run on device
+            T d_result = thrust::reduce(
+                thrust::make_transform_iterator(d_data.begin(), thrust::negate<T>()),
+                thrust::make_transform_iterator(d_data.end(), thrust::negate<T>()));
+
+            ASSERT_NEAR(h_result, d_result, error_margin);
+        }
     }
 }

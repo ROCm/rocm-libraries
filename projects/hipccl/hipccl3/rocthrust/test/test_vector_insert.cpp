@@ -155,31 +155,42 @@ TYPED_TEST(VectorInsertPrimitiveTests, TestVectorRangeInsert)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        thrust::host_vector<T> h_src = get_random_data<T>(
-            size + 3, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::host_vector<T> h_dst = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+            thrust::host_vector<T> h_src = get_random_data<T>(
+                size + 3, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
 
-        thrust::device_vector<T> d_src = h_src;
-        thrust::device_vector<T> d_dst = h_dst;
+            thrust::host_vector<T> h_dst = get_random_data<T>(
+                size,
+                std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value + seed_value_addition
+            );
 
-        // choose insertion range at random
-        size_t begin = size > 0 ? (size_t)h_src[size] % size : 0;
-        size_t end   = size > 0 ? (size_t)h_src[size + 1] % size : 0;
-        if(end < begin)
-            thrust::swap(begin, end);
+            thrust::device_vector<T> d_src = h_src;
+            thrust::device_vector<T> d_dst = h_dst;
 
-        // choose insertion position at random
-        size_t position = size > 0 ? (size_t)h_src[size + 2] % size : 0;
+            // choose insertion range at random
+            size_t begin = size > 0 ? (size_t)h_src[size] % size : 0;
+            size_t end   = size > 0 ? (size_t)h_src[size + 1] % size : 0;
+            if(end < begin)
+                thrust::swap(begin, end);
 
-        // insert on host
-        h_dst.insert(h_dst.begin() + position, h_src.begin() + begin, h_src.begin() + end);
+            // choose insertion position at random
+            size_t position = size > 0 ? (size_t)h_src[size + 2] % size : 0;
 
-        // insert on device
-        d_dst.insert(d_dst.begin() + position, d_src.begin() + begin, d_src.begin() + end);
+            // insert on host
+            h_dst.insert(h_dst.begin() + position, h_src.begin() + begin, h_src.begin() + end);
 
-        ASSERT_EQ(h_dst, d_dst);
+            // insert on device
+            d_dst.insert(d_dst.begin() + position, d_src.begin() + begin, d_src.begin() + end);
+
+            ASSERT_EQ(h_dst, d_dst);
+        }
     }
 }
 
@@ -310,23 +321,31 @@ TYPED_TEST(VectorInsertPrimitiveTests, TestVectorFillInsert)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        thrust::host_vector<T> h_dst = get_random_data<T>(
-            size + 2, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::device_vector<T> d_dst = h_dst;
+            thrust::host_vector<T> h_dst = get_random_data<T>(
+                size + 2, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
 
-        // choose insertion position at random
-        size_t position = size > 0 ? (size_t)h_dst[size] % size : 0;
+            thrust::device_vector<T> d_dst = h_dst;
 
-        // choose insertion size at random
-        size_t insertion_size = size > 0 ? (size_t)h_dst[size] % size : 13;
+            // choose insertion position at random
+            size_t position = size > 0 ? (size_t)h_dst[size] % size : 0;
 
-        // insert on host
-        h_dst.insert(h_dst.begin() + position, insertion_size, T(13));
+            // choose insertion size at random
+            size_t insertion_size = size > 0 ? (size_t)h_dst[size] % size : 13;
 
-        // insert on device
-        d_dst.insert(d_dst.begin() + position, insertion_size, T(13));
+            // insert on host
+            h_dst.insert(h_dst.begin() + position, insertion_size, T(13));
 
-        ASSERT_EQ(h_dst, d_dst);
+            // insert on device
+            d_dst.insert(d_dst.begin() + position, insertion_size, T(13));
+
+            ASSERT_EQ(h_dst, d_dst);
+        }
     }
 }

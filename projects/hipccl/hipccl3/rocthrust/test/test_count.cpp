@@ -51,14 +51,21 @@ TYPED_TEST(CountPrimitiveTests, TestCount)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        thrust::host_vector<T> h_data = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::device_vector<T> d_data = h_data;
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        size_t cpu_result = thrust::count(h_data.begin(), h_data.end(), T(5));
-        size_t gpu_result = thrust::count(d_data.begin(), d_data.end(), T(5));
+            thrust::host_vector<T> h_data = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::device_vector<T> d_data = h_data;
 
-        ASSERT_EQ(cpu_result, gpu_result);
+            size_t cpu_result = thrust::count(h_data.begin(), h_data.end(), T(5));
+            size_t gpu_result = thrust::count(d_data.begin(), d_data.end(), T(5));
+
+            ASSERT_EQ(cpu_result, gpu_result);
+        }
     }
 }
 
@@ -94,13 +101,22 @@ TYPED_TEST(CountTests, TestCountIf)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        thrust::host_vector<T> h_data = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::device_vector<T> d_data = h_data;
-        size_t cpu_result = thrust::count_if(h_data.begin(), h_data.end(), greater_than_five<T>());
-        size_t gpu_result = thrust::count_if(d_data.begin(), d_data.end(), greater_than_five<T>());
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        ASSERT_EQ(cpu_result, gpu_result);
+            thrust::host_vector<T> h_data = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::device_vector<T> d_data = h_data;
+            size_t                   cpu_result
+                = thrust::count_if(h_data.begin(), h_data.end(), greater_than_five<T>());
+            size_t gpu_result
+                = thrust::count_if(d_data.begin(), d_data.end(), greater_than_five<T>());
+
+            ASSERT_EQ(cpu_result, gpu_result);
+        }
     }
 }
 

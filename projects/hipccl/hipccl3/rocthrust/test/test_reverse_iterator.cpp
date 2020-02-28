@@ -142,24 +142,32 @@ TYPED_TEST(PrimitiveReverseIteratorTests, ReverseIteratorExclusiveScan)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        T                      error_margin = (T)0.01 * size;
-        thrust::host_vector<T> h_data       = get_random_data<T>(size, 0, 10);
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        T error_margin = (T)0.01 * size;
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::device_vector<T> d_data = h_data;
+            thrust::host_vector<T> h_data = get_random_data<T>(size, 0, 10, seed_value);
 
-        thrust::host_vector<T>   h_result(size);
-        thrust::device_vector<T> d_result(size);
+            thrust::device_vector<T> d_data = h_data;
 
-        thrust::exclusive_scan(thrust::make_reverse_iterator(h_data.end()),
-                               thrust::make_reverse_iterator(h_data.begin()),
-                               h_result.begin());
+            thrust::host_vector<T>   h_result(size);
+            thrust::device_vector<T> d_result(size);
 
-        thrust::exclusive_scan(thrust::make_reverse_iterator(d_data.end()),
-                               thrust::make_reverse_iterator(d_data.begin()),
-                               d_result.begin());
+            thrust::exclusive_scan(thrust::make_reverse_iterator(h_data.end()),
+                                   thrust::make_reverse_iterator(h_data.begin()),
+                                   h_result.begin());
 
-        thrust::host_vector<T> h_result_d(d_result);
-        for(size_t i = 0; i < size; i++)
-            ASSERT_NEAR(h_result[i], h_result_d[i], error_margin);
+            thrust::exclusive_scan(thrust::make_reverse_iterator(d_data.end()),
+                                   thrust::make_reverse_iterator(d_data.begin()),
+                                   d_result.begin());
+
+            thrust::host_vector<T> h_result_d(d_result);
+            for(size_t i = 0; i < size; i++)
+                ASSERT_NEAR(h_result[i], h_result_d[i], error_margin);
+        }
     }
 };

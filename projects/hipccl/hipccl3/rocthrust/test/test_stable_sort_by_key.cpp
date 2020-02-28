@@ -146,18 +146,30 @@ TYPED_TEST(StableSortByKeyVectorPrimitiveTests, TestStableSortByKey)
 
     for(auto size : get_sizes())
     {
-        thrust::host_vector<T> h_keys = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::device_vector<T> d_keys = h_keys;
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::host_vector<T> h_values = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::device_vector<T> d_values = h_values;
+            thrust::host_vector<T> h_keys = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::device_vector<T> d_keys = h_keys;
 
-        thrust::stable_sort_by_key(h_keys.begin(), h_keys.end(), h_values.begin());
-        thrust::stable_sort_by_key(d_keys.begin(), d_keys.end(), d_values.begin());
+            thrust::host_vector<T> h_values = get_random_data<T>(
+                size,
+                std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value + seed_value_addition
+            );
+            thrust::device_vector<T> d_values = h_values;
 
-        ASSERT_EQ(h_keys, d_keys);
-        ASSERT_EQ(h_values, d_values);
+            thrust::stable_sort_by_key(h_keys.begin(), h_keys.end(), h_values.begin());
+            thrust::stable_sort_by_key(d_keys.begin(), d_keys.end(), d_values.begin());
+
+            ASSERT_EQ(h_keys, d_keys);
+            ASSERT_EQ(h_values, d_values);
+        }
     }
 }

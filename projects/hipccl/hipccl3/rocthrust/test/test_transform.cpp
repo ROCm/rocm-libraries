@@ -243,8 +243,8 @@ template <typename InputIterator,
           typename ForwardIterator,
           typename UnaryFunction,
           typename Predicate>
-__host__ __device__ ForwardIterator transform_if(
-    my_tag, InputIterator, InputIterator, ForwardIterator result, UnaryFunction, Predicate)
+__host__ __device__ ForwardIterator
+                    transform_if(my_tag, InputIterator, InputIterator, ForwardIterator result, UnaryFunction, Predicate)
 {
     *result = 13;
     return result;
@@ -545,18 +545,27 @@ TYPED_TEST(TransformTests, TestTransformUnary)
     for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
-        thrust::host_vector<T> h_input = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::device_vector<T> d_input = h_input;
+            thrust::host_vector<T> h_input = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
 
-        thrust::host_vector<U>   h_output(size);
-        thrust::device_vector<U> d_output(size);
+            thrust::device_vector<T> d_input = h_input;
 
-        thrust::transform(h_input.begin(), h_input.end(), h_output.begin(), thrust::negate<T>());
-        thrust::transform(d_input.begin(), d_input.end(), d_output.begin(), thrust::negate<T>());
+            thrust::host_vector<U>   h_output(size);
+            thrust::device_vector<U> d_output(size);
 
-        ASSERT_EQ(h_output, d_output);
+            thrust::transform(
+                h_input.begin(), h_input.end(), h_output.begin(), thrust::negate<T>());
+            thrust::transform(
+                d_input.begin(), d_input.end(), d_output.begin(), thrust::negate<T>());
+
+            ASSERT_EQ(h_output, d_output);
+        }
     }
 }
 
@@ -567,21 +576,32 @@ TYPED_TEST(TransformTests, TestTransformUnaryToDiscardIterator)
     for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
-        thrust::host_vector<T> h_input = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::device_vector<T> d_input = h_input;
+            thrust::host_vector<T> h_input = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
 
-        thrust::discard_iterator<> h_result = thrust::transform(
-            h_input.begin(), h_input.end(), thrust::make_discard_iterator(), thrust::negate<T>());
+            thrust::device_vector<T> d_input = h_input;
 
-        thrust::discard_iterator<> d_result = thrust::transform(
-            d_input.begin(), d_input.end(), thrust::make_discard_iterator(), thrust::negate<T>());
+            thrust::discard_iterator<> h_result = thrust::transform(h_input.begin(),
+                                                                    h_input.end(),
+                                                                    thrust::make_discard_iterator(),
+                                                                    thrust::negate<T>());
 
-        thrust::discard_iterator<> reference(size);
+            thrust::discard_iterator<> d_result = thrust::transform(d_input.begin(),
+                                                                    d_input.end(),
+                                                                    thrust::make_discard_iterator(),
+                                                                    thrust::negate<T>());
 
-        ASSERT_EQ_QUIET(reference, h_result);
-        ASSERT_EQ_QUIET(reference, d_result);
+            thrust::discard_iterator<> reference(size);
+
+            ASSERT_EQ_QUIET(reference, h_result);
+            ASSERT_EQ_QUIET(reference, d_result);
+        }
     }
 }
 
@@ -602,36 +622,45 @@ TYPED_TEST(TransformTests, TestTransformUnaryToDiscardIteratorZipped)
     for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
-        thrust::host_vector<T> h_input = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::device_vector<T> d_input = h_input;
+            thrust::host_vector<T> h_input = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
 
-        thrust::host_vector<U>   h_output(size);
-        thrust::device_vector<U> d_output(size);
+            thrust::device_vector<T> d_input = h_input;
 
-        using Iterator1 = typename thrust::host_vector<U>::iterator;
-        using Iterator2 = typename thrust::device_vector<U>::iterator;
+            thrust::host_vector<U>   h_output(size);
+            thrust::device_vector<U> d_output(size);
 
-        using Tuple1 = thrust::tuple<Iterator1, thrust::discard_iterator<>>;
-        using Tuple2 = thrust::tuple<Iterator2, thrust::discard_iterator<>>;
+            using Iterator1 = typename thrust::host_vector<U>::iterator;
+            using Iterator2 = typename thrust::device_vector<U>::iterator;
 
-        using ZipIterator1 = thrust::zip_iterator<Tuple1>;
-        using ZipIterator2 = thrust::zip_iterator<Tuple2>;
+            using Tuple1 = thrust::tuple<Iterator1, thrust::discard_iterator<>>;
+            using Tuple2 = thrust::tuple<Iterator2, thrust::discard_iterator<>>;
 
-        ZipIterator1 z1(thrust::make_tuple(h_output.begin(), thrust::make_discard_iterator()));
-        ZipIterator2 z2(thrust::make_tuple(d_output.begin(), thrust::make_discard_iterator()));
+            using ZipIterator1 = thrust::zip_iterator<Tuple1>;
+            using ZipIterator2 = thrust::zip_iterator<Tuple2>;
 
-        ZipIterator1 h_result = thrust::transform(h_input.begin(), h_input.end(), z1, repeat2());
+            ZipIterator1 z1(thrust::make_tuple(h_output.begin(), thrust::make_discard_iterator()));
+            ZipIterator2 z2(thrust::make_tuple(d_output.begin(), thrust::make_discard_iterator()));
 
-        ZipIterator2 d_result = thrust::transform(d_input.begin(), d_input.end(), z2, repeat2());
+            ZipIterator1 h_result
+                = thrust::transform(h_input.begin(), h_input.end(), z1, repeat2());
 
-        thrust::discard_iterator<> reference(size);
+            ZipIterator2 d_result
+                = thrust::transform(d_input.begin(), d_input.end(), z2, repeat2());
 
-        ASSERT_EQ(h_output, d_output);
+            thrust::discard_iterator<> reference(size);
 
-        ASSERT_EQ_QUIET(reference, thrust::get<1>(h_result.get_iterator_tuple()));
-        ASSERT_EQ_QUIET(reference, thrust::get<1>(d_result.get_iterator_tuple()));
+            ASSERT_EQ(h_output, d_output);
+
+            ASSERT_EQ_QUIET(reference, thrust::get<1>(h_result.get_iterator_tuple()));
+            ASSERT_EQ_QUIET(reference, thrust::get<1>(d_result.get_iterator_tuple()));
+        }
     }
 }
 
@@ -652,22 +681,39 @@ TYPED_TEST(TransformTests, TestTransformIfUnaryNoStencil)
     for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
-        thrust::host_vector<T> h_input = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::host_vector<U> h_output = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+            thrust::host_vector<T> h_input = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
 
-        thrust::device_vector<T> d_input  = h_input;
-        thrust::device_vector<U> d_output = h_output;
+            thrust::host_vector<U> h_output = get_random_data<T>(
+                size,
+                std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value + seed_value_addition
+            );
 
-        thrust::transform_if(
-            h_input.begin(), h_input.end(), h_output.begin(), thrust::negate<T>(), is_positive());
+            thrust::device_vector<T> d_input  = h_input;
+            thrust::device_vector<U> d_output = h_output;
 
-        thrust::transform_if(
-            d_input.begin(), d_input.end(), d_output.begin(), thrust::negate<T>(), is_positive());
+            thrust::transform_if(h_input.begin(),
+                                 h_input.end(),
+                                 h_output.begin(),
+                                 thrust::negate<T>(),
+                                 is_positive());
 
-        ASSERT_EQ(h_output, d_output);
+            thrust::transform_if(d_input.begin(),
+                                 d_input.end(),
+                                 d_output.begin(),
+                                 thrust::negate<T>(),
+                                 is_positive());
+
+            ASSERT_EQ(h_output, d_output);
+        }
     }
 }
 
@@ -679,33 +725,48 @@ TYPED_TEST(TransformTests, TestTransformIfUnary)
     for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
-        thrust::host_vector<T> h_input = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::host_vector<T> h_stencil = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::host_vector<U> h_output = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+            thrust::host_vector<T> h_input = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::host_vector<T> h_stencil = get_random_data<T>(
+                size,
+                std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value + seed_value_addition
+            );
 
-        thrust::device_vector<T> d_input   = h_input;
-        thrust::device_vector<T> d_stencil = h_stencil;
-        thrust::device_vector<U> d_output  = h_output;
+            thrust::host_vector<U> h_output = get_random_data<T>(
+                size,
+                std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value + 2 * seed_value_addition
+            );
 
-        thrust::transform_if(h_input.begin(),
-                             h_input.end(),
-                             h_stencil.begin(),
-                             h_output.begin(),
-                             thrust::negate<T>(),
-                             is_positive());
+            thrust::device_vector<T> d_input   = h_input;
+            thrust::device_vector<T> d_stencil = h_stencil;
+            thrust::device_vector<U> d_output  = h_output;
 
-        thrust::transform_if(d_input.begin(),
-                             d_input.end(),
-                             d_stencil.begin(),
-                             d_output.begin(),
-                             thrust::negate<T>(),
-                             is_positive());
+            thrust::transform_if(h_input.begin(),
+                                 h_input.end(),
+                                 h_stencil.begin(),
+                                 h_output.begin(),
+                                 thrust::negate<T>(),
+                                 is_positive());
 
-        ASSERT_EQ(h_output, d_output);
+            thrust::transform_if(d_input.begin(),
+                                 d_input.end(),
+                                 d_stencil.begin(),
+                                 d_output.begin(),
+                                 thrust::negate<T>(),
+                                 is_positive());
+
+            ASSERT_EQ(h_output, d_output);
+        }
     }
 }
 
@@ -716,32 +777,45 @@ TYPED_TEST(TransformTests, TestTransformIfUnaryToDiscardIterator)
     for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
-        thrust::host_vector<T> h_input = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::host_vector<T> h_stencil = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::device_vector<T> d_input   = h_input;
-        thrust::device_vector<T> d_stencil = h_stencil;
+            thrust::host_vector<T> h_input = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::host_vector<T> h_stencil = get_random_data<T>(
+                size,
+                std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value + seed_value_addition
+            );
 
-        thrust::discard_iterator<> h_result = thrust::transform_if(h_input.begin(),
-                                                                   h_input.end(),
-                                                                   h_stencil.begin(),
-                                                                   thrust::make_discard_iterator(),
-                                                                   thrust::negate<T>(),
-                                                                   is_positive());
+            thrust::device_vector<T> d_input   = h_input;
+            thrust::device_vector<T> d_stencil = h_stencil;
 
-        thrust::discard_iterator<> d_result = thrust::transform_if(d_input.begin(),
-                                                                   d_input.end(),
-                                                                   d_stencil.begin(),
-                                                                   thrust::make_discard_iterator(),
-                                                                   thrust::negate<T>(),
-                                                                   is_positive());
+            thrust::discard_iterator<> h_result
+                = thrust::transform_if(h_input.begin(),
+                                       h_input.end(),
+                                       h_stencil.begin(),
+                                       thrust::make_discard_iterator(),
+                                       thrust::negate<T>(),
+                                       is_positive());
 
-        thrust::discard_iterator<> reference(size);
+            thrust::discard_iterator<> d_result
+                = thrust::transform_if(d_input.begin(),
+                                       d_input.end(),
+                                       d_stencil.begin(),
+                                       thrust::make_discard_iterator(),
+                                       thrust::negate<T>(),
+                                       is_positive());
 
-        ASSERT_EQ_QUIET(reference, h_result);
-        ASSERT_EQ_QUIET(reference, d_result);
+            thrust::discard_iterator<> reference(size);
+
+            ASSERT_EQ_QUIET(reference, h_result);
+            ASSERT_EQ_QUIET(reference, d_result);
+        }
     }
 }
 
@@ -752,42 +826,53 @@ TYPED_TEST(TransformTests, TestTransformBinary)
     for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
-        thrust::host_vector<T> h_input1 = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::host_vector<T> h_input2 = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::device_vector<T> d_input1 = h_input1;
-        thrust::device_vector<T> d_input2 = h_input2;
+            thrust::host_vector<T> h_input1 = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::host_vector<T> h_input2 = get_random_data<T>(
+                size,
+                std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value + seed_value_addition
+            );
 
-        thrust::host_vector<T>   h_output(size);
-        thrust::device_vector<T> d_output(size);
+            thrust::device_vector<T> d_input1 = h_input1;
+            thrust::device_vector<T> d_input2 = h_input2;
 
-        thrust::transform(h_input1.begin(),
-                          h_input1.end(),
-                          h_input2.begin(),
-                          h_output.begin(),
-                          thrust::minus<T>());
-        thrust::transform(d_input1.begin(),
-                          d_input1.end(),
-                          d_input2.begin(),
-                          d_output.begin(),
-                          thrust::minus<T>());
+            thrust::host_vector<T>   h_output(size);
+            thrust::device_vector<T> d_output(size);
 
-        ASSERT_EQ(h_output, d_output);
+            thrust::transform(h_input1.begin(),
+                              h_input1.end(),
+                              h_input2.begin(),
+                              h_output.begin(),
+                              thrust::minus<T>());
+            thrust::transform(d_input1.begin(),
+                              d_input1.end(),
+                              d_input2.begin(),
+                              d_output.begin(),
+                              thrust::minus<T>());
 
-        thrust::transform(h_input1.begin(),
-                          h_input1.end(),
-                          h_input2.begin(),
-                          h_output.begin(),
-                          thrust::multiplies<T>());
-        thrust::transform(d_input1.begin(),
-                          d_input1.end(),
-                          d_input2.begin(),
-                          d_output.begin(),
-                          thrust::multiplies<T>());
+            ASSERT_EQ(h_output, d_output);
 
-        ASSERT_EQ(h_output, d_output);
+            thrust::transform(h_input1.begin(),
+                              h_input1.end(),
+                              h_input2.begin(),
+                              h_output.begin(),
+                              thrust::multiplies<T>());
+            thrust::transform(d_input1.begin(),
+                              d_input1.end(),
+                              d_input2.begin(),
+                              d_output.begin(),
+                              thrust::multiplies<T>());
+
+            ASSERT_EQ(h_output, d_output);
+        }
     }
 }
 
@@ -798,29 +883,40 @@ TYPED_TEST(TransformTests, TestTransformBinaryToDiscardIterator)
     for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
-        thrust::host_vector<T> h_input1 = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::host_vector<T> h_input2 = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::device_vector<T> d_input1 = h_input1;
-        thrust::device_vector<T> d_input2 = h_input2;
+            thrust::host_vector<T> h_input1 = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::host_vector<T> h_input2 = get_random_data<T>(
+                size,
+                std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value + seed_value_addition
+            );
 
-        thrust::discard_iterator<> h_result = thrust::transform(h_input1.begin(),
-                                                                h_input1.end(),
-                                                                h_input2.begin(),
-                                                                thrust::make_discard_iterator(),
-                                                                thrust::minus<T>());
-        thrust::discard_iterator<> d_result = thrust::transform(d_input1.begin(),
-                                                                d_input1.end(),
-                                                                d_input2.begin(),
-                                                                thrust::make_discard_iterator(),
-                                                                thrust::minus<T>());
+            thrust::device_vector<T> d_input1 = h_input1;
+            thrust::device_vector<T> d_input2 = h_input2;
 
-        thrust::discard_iterator<> reference(size);
+            thrust::discard_iterator<> h_result = thrust::transform(h_input1.begin(),
+                                                                    h_input1.end(),
+                                                                    h_input2.begin(),
+                                                                    thrust::make_discard_iterator(),
+                                                                    thrust::minus<T>());
+            thrust::discard_iterator<> d_result = thrust::transform(d_input1.begin(),
+                                                                    d_input1.end(),
+                                                                    d_input2.begin(),
+                                                                    thrust::make_discard_iterator(),
+                                                                    thrust::minus<T>());
 
-        ASSERT_EQ_QUIET(reference, h_result);
-        ASSERT_EQ_QUIET(reference, d_result);
+            thrust::discard_iterator<> reference(size);
+
+            ASSERT_EQ_QUIET(reference, h_result);
+            ASSERT_EQ_QUIET(reference, d_result);
+        }
     }
 }
 
@@ -831,60 +927,83 @@ TYPED_TEST(TransformTests, TestTransformIfBinary)
     for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
-        thrust::host_vector<T> h_input1 = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::host_vector<T> h_input2 = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::host_vector<T> h_stencil = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::host_vector<T> h_output = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+            thrust::host_vector<T> h_input1 = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::host_vector<T> h_input2 = get_random_data<T>(
+                size,
+                std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value + seed_value_addition
+            );
 
-        thrust::device_vector<T> d_input1  = h_input1;
-        thrust::device_vector<T> d_input2  = h_input2;
-        thrust::device_vector<T> d_stencil = h_stencil;
-        thrust::device_vector<T> d_output  = h_output;
+            thrust::host_vector<T> h_stencil = get_random_data<T>(
+                size,
+                std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value + 2 * seed_value_addition
+            );
+            thrust::host_vector<T> h_output = get_random_data<T>(
+                size,
+                std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value + 3 * seed_value_addition
+            );
 
-        thrust::transform_if(h_input1.begin(),
-                             h_input1.end(),
-                             h_input2.begin(),
-                             h_stencil.begin(),
-                             h_output.begin(),
-                             thrust::minus<T>(),
-                             is_positive());
+            thrust::device_vector<T> d_input1  = h_input1;
+            thrust::device_vector<T> d_input2  = h_input2;
+            thrust::device_vector<T> d_stencil = h_stencil;
+            thrust::device_vector<T> d_output  = h_output;
 
-        thrust::transform_if(d_input1.begin(),
-                             d_input1.end(),
-                             d_input2.begin(),
-                             d_stencil.begin(),
-                             d_output.begin(),
-                             thrust::minus<T>(),
-                             is_positive());
+            thrust::transform_if(h_input1.begin(),
+                                 h_input1.end(),
+                                 h_input2.begin(),
+                                 h_stencil.begin(),
+                                 h_output.begin(),
+                                 thrust::minus<T>(),
+                                 is_positive());
 
-        ASSERT_EQ(h_output, d_output);
+            thrust::transform_if(d_input1.begin(),
+                                 d_input1.end(),
+                                 d_input2.begin(),
+                                 d_stencil.begin(),
+                                 d_output.begin(),
+                                 thrust::minus<T>(),
+                                 is_positive());
 
-        h_stencil = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        d_stencil = h_stencil;
+            ASSERT_EQ(h_output, d_output);
 
-        thrust::transform_if(h_input1.begin(),
-                             h_input1.end(),
-                             h_input2.begin(),
-                             h_stencil.begin(),
-                             h_output.begin(),
-                             thrust::multiplies<T>(),
-                             is_positive());
+            h_stencil = get_random_data<T>(
+                size,
+                std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value + 4 * seed_value_addition
+            );
+            d_stencil = h_stencil;
 
-        thrust::transform_if(d_input1.begin(),
-                             d_input1.end(),
-                             d_input2.begin(),
-                             d_stencil.begin(),
-                             d_output.begin(),
-                             thrust::multiplies<T>(),
-                             is_positive());
+            thrust::transform_if(h_input1.begin(),
+                                 h_input1.end(),
+                                 h_input2.begin(),
+                                 h_stencil.begin(),
+                                 h_output.begin(),
+                                 thrust::multiplies<T>(),
+                                 is_positive());
 
-        ASSERT_EQ(h_output, d_output);
+            thrust::transform_if(d_input1.begin(),
+                                 d_input1.end(),
+                                 d_input2.begin(),
+                                 d_stencil.begin(),
+                                 d_output.begin(),
+                                 thrust::multiplies<T>(),
+                                 is_positive());
+
+            ASSERT_EQ(h_output, d_output);
+        }
     }
 }
 
@@ -895,38 +1014,59 @@ TYPED_TEST(TransformTests, TestTransformIfBinaryToDiscardIterator)
     for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
-        thrust::host_vector<T> h_input1 = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::host_vector<T> h_input2 = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::host_vector<T> h_stencil = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+            thrust::host_vector<T> h_input1 = get_random_data<T>(
+                size,
+                std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value
+            );
+            thrust::host_vector<T> h_input2 = get_random_data<T>(
+                size,
+                std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value + seed_value_addition
+            );
 
-        thrust::device_vector<T> d_input1  = h_input1;
-        thrust::device_vector<T> d_input2  = h_input2;
-        thrust::device_vector<T> d_stencil = h_stencil;
+            thrust::host_vector<T> h_stencil = get_random_data<T>(
+                size,
+                std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value + 2 * seed_value_addition
+            );
 
-        thrust::discard_iterator<> h_result = thrust::transform_if(h_input1.begin(),
-                                                                   h_input1.end(),
-                                                                   h_input2.begin(),
-                                                                   h_stencil.begin(),
-                                                                   thrust::make_discard_iterator(),
-                                                                   thrust::minus<T>(),
-                                                                   is_positive());
+            thrust::device_vector<T> d_input1  = h_input1;
+            thrust::device_vector<T> d_input2  = h_input2;
+            thrust::device_vector<T> d_stencil = h_stencil;
 
-        thrust::discard_iterator<> d_result = thrust::transform_if(d_input1.begin(),
-                                                                   d_input1.end(),
-                                                                   d_input2.begin(),
-                                                                   d_stencil.begin(),
-                                                                   thrust::make_discard_iterator(),
-                                                                   thrust::minus<T>(),
-                                                                   is_positive());
+            thrust::discard_iterator<> h_result
+                = thrust::transform_if(h_input1.begin(),
+                                       h_input1.end(),
+                                       h_input2.begin(),
+                                       h_stencil.begin(),
+                                       thrust::make_discard_iterator(),
+                                       thrust::minus<T>(),
+                                       is_positive());
 
-        thrust::discard_iterator<> reference(size);
+            thrust::discard_iterator<> d_result
+                = thrust::transform_if(d_input1.begin(),
+                                       d_input1.end(),
+                                       d_input2.begin(),
+                                       d_stencil.begin(),
+                                       thrust::make_discard_iterator(),
+                                       thrust::minus<T>(),
+                                       is_positive());
 
-        ASSERT_EQ_QUIET(reference, h_result);
-        ASSERT_EQ_QUIET(reference, d_result);
+            thrust::discard_iterator<> reference(size);
+
+            ASSERT_EQ_QUIET(reference, h_result);
+            ASSERT_EQ_QUIET(reference, d_result);
+        }
     }
 }
 

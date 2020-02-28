@@ -106,16 +106,24 @@ TYPED_TEST(IsSortedUntilVectorTests, TestIsSortedUntil)
 
     const size_t n = (1 << 16) + 13;
 
-    Vector v = get_random_data<T>(n, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-    v[0] = 1;
-    v[1] = 0;
+        Vector v = get_random_data<T>(
+            n, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
 
-    ASSERT_EQ_QUIET(v.begin() + 1, thrust::is_sorted_until(v.begin(), v.end()));
+        v[0] = 1;
+        v[1] = 0;
 
-    thrust::sort(v.begin(), v.end());
+        ASSERT_EQ_QUIET(v.begin() + 1, thrust::is_sorted_until(v.begin(), v.end()));
 
-    ASSERT_EQ_QUIET(v.end(), thrust::is_sorted_until(v.begin(), v.end()));
+        thrust::sort(v.begin(), v.end());
+
+        ASSERT_EQ_QUIET(v.end(), thrust::is_sorted_until(v.begin(), v.end()));
+    }
 }
 
 template <typename ForwardIterator>

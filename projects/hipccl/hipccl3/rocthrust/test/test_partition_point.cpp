@@ -63,12 +63,20 @@ TYPED_TEST(PartitionPointVectorTests, TestPartitionPoint)
 
     const size_t n = (1 << 16) + 13;
 
-    Vector v = get_random_data<T>(n, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-    Iterator ref = thrust::stable_partition(v.begin(), v.end(), is_even<T>());
+        Vector v = get_random_data<T>(
+            n, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
 
-    ASSERT_EQ(ref - v.begin(),
-              thrust::partition_point(v.begin(), v.end(), is_even<T>()) - v.begin());
+        Iterator ref = thrust::stable_partition(v.begin(), v.end(), is_even<T>());
+
+        ASSERT_EQ(ref - v.begin(),
+                  thrust::partition_point(v.begin(), v.end(), is_even<T>()) - v.begin());
+    }
 }
 
 template <typename ForwardIterator, typename Predicate>
@@ -105,4 +113,4 @@ TEST(PartitionPointTests, TestPartitionPointDispatchImplicit)
         thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.begin()), 0);
 
     ASSERT_EQ(13, vec.front());
-}
+} 

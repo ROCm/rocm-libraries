@@ -28,78 +28,84 @@ TESTS_DEFINE(TupleTests, NumericalTestsParams);
 TYPED_TEST(TupleTests, TestTupleConstructor)
 {
     using T = typename TestFixture::input_type;
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-    thrust::host_vector<T> data
-        = get_random_data<T>(10, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
 
-    thrust::tuple<T> t1(data[0]);
-    ASSERT_EQ(data[0], thrust::get<0>(t1));
+        thrust::host_vector<T> data = get_random_data<T>(
+            10, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
 
-    thrust::tuple<T, T> t2(data[0], data[1]);
-    ASSERT_EQ(data[0], thrust::get<0>(t2));
-    ASSERT_EQ(data[1], thrust::get<1>(t2));
+        thrust::tuple<T> t1(data[0]);
+        ASSERT_EQ(data[0], thrust::get<0>(t1));
 
-    thrust::tuple<T, T, T> t3(data[0], data[1], data[2]);
-    ASSERT_EQ(data[0], thrust::get<0>(t3));
-    ASSERT_EQ(data[1], thrust::get<1>(t3));
-    ASSERT_EQ(data[2], thrust::get<2>(t3));
+        thrust::tuple<T, T> t2(data[0], data[1]);
+        ASSERT_EQ(data[0], thrust::get<0>(t2));
+        ASSERT_EQ(data[1], thrust::get<1>(t2));
 
-    thrust::tuple<T, T, T, T> t4(data[0], data[1], data[2], data[3]);
-    ASSERT_EQ(data[0], thrust::get<0>(t4));
-    ASSERT_EQ(data[1], thrust::get<1>(t4));
-    ASSERT_EQ(data[2], thrust::get<2>(t4));
-    ASSERT_EQ(data[3], thrust::get<3>(t4));
+        thrust::tuple<T, T, T> t3(data[0], data[1], data[2]);
+        ASSERT_EQ(data[0], thrust::get<0>(t3));
+        ASSERT_EQ(data[1], thrust::get<1>(t3));
+        ASSERT_EQ(data[2], thrust::get<2>(t3));
 
-    thrust::tuple<T, T, T, T, T> t5(data[0], data[1], data[2], data[3], data[4]);
-    ASSERT_EQ(data[0], thrust::get<0>(t5));
-    ASSERT_EQ(data[1], thrust::get<1>(t5));
-    ASSERT_EQ(data[2], thrust::get<2>(t5));
-    ASSERT_EQ(data[3], thrust::get<3>(t5));
-    ASSERT_EQ(data[4], thrust::get<4>(t5));
+        thrust::tuple<T, T, T, T> t4(data[0], data[1], data[2], data[3]);
+        ASSERT_EQ(data[0], thrust::get<0>(t4));
+        ASSERT_EQ(data[1], thrust::get<1>(t4));
+        ASSERT_EQ(data[2], thrust::get<2>(t4));
+        ASSERT_EQ(data[3], thrust::get<3>(t4));
 
-    thrust::tuple<T, T, T, T, T, T> t6(data[0], data[1], data[2], data[3], data[4], data[5]);
-    ASSERT_EQ(data[0], thrust::get<0>(t6));
-    ASSERT_EQ(data[1], thrust::get<1>(t6));
-    ASSERT_EQ(data[2], thrust::get<2>(t6));
-    ASSERT_EQ(data[3], thrust::get<3>(t6));
-    ASSERT_EQ(data[4], thrust::get<4>(t6));
-    ASSERT_EQ(data[5], thrust::get<5>(t6));
+        thrust::tuple<T, T, T, T, T> t5(data[0], data[1], data[2], data[3], data[4]);
+        ASSERT_EQ(data[0], thrust::get<0>(t5));
+        ASSERT_EQ(data[1], thrust::get<1>(t5));
+        ASSERT_EQ(data[2], thrust::get<2>(t5));
+        ASSERT_EQ(data[3], thrust::get<3>(t5));
+        ASSERT_EQ(data[4], thrust::get<4>(t5));
 
-    thrust::tuple<T, T, T, T, T, T, T> t7(
-        data[0], data[1], data[2], data[3], data[4], data[5], data[6]);
-    ASSERT_EQ(data[0], thrust::get<0>(t7));
-    ASSERT_EQ(data[1], thrust::get<1>(t7));
-    ASSERT_EQ(data[2], thrust::get<2>(t7));
-    ASSERT_EQ(data[3], thrust::get<3>(t7));
-    ASSERT_EQ(data[4], thrust::get<4>(t7));
-    ASSERT_EQ(data[5], thrust::get<5>(t7));
-    ASSERT_EQ(data[6], thrust::get<6>(t7));
+        thrust::tuple<T, T, T, T, T, T> t6(data[0], data[1], data[2], data[3], data[4], data[5]);
+        ASSERT_EQ(data[0], thrust::get<0>(t6));
+        ASSERT_EQ(data[1], thrust::get<1>(t6));
+        ASSERT_EQ(data[2], thrust::get<2>(t6));
+        ASSERT_EQ(data[3], thrust::get<3>(t6));
+        ASSERT_EQ(data[4], thrust::get<4>(t6));
+        ASSERT_EQ(data[5], thrust::get<5>(t6));
 
-    thrust::tuple<T, T, T, T, T, T, T, T> t8(
-        data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7]);
-    ASSERT_EQ(data[0], thrust::get<0>(t8));
-    ASSERT_EQ(data[1], thrust::get<1>(t8));
-    ASSERT_EQ(data[2], thrust::get<2>(t8));
-    ASSERT_EQ(data[3], thrust::get<3>(t8));
-    ASSERT_EQ(data[4], thrust::get<4>(t8));
-    ASSERT_EQ(data[5], thrust::get<5>(t8));
-    ASSERT_EQ(data[6], thrust::get<6>(t8));
-    ASSERT_EQ(data[7], thrust::get<7>(t8));
+        thrust::tuple<T, T, T, T, T, T, T> t7(
+            data[0], data[1], data[2], data[3], data[4], data[5], data[6]);
+        ASSERT_EQ(data[0], thrust::get<0>(t7));
+        ASSERT_EQ(data[1], thrust::get<1>(t7));
+        ASSERT_EQ(data[2], thrust::get<2>(t7));
+        ASSERT_EQ(data[3], thrust::get<3>(t7));
+        ASSERT_EQ(data[4], thrust::get<4>(t7));
+        ASSERT_EQ(data[5], thrust::get<5>(t7));
+        ASSERT_EQ(data[6], thrust::get<6>(t7));
 
-    thrust::tuple<T, T, T, T, T, T, T, T, T> t9(
-        data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8]);
-    ASSERT_EQ(data[0], thrust::get<0>(t9));
-    ASSERT_EQ(data[1], thrust::get<1>(t9));
-    ASSERT_EQ(data[2], thrust::get<2>(t9));
-    ASSERT_EQ(data[3], thrust::get<3>(t9));
-    ASSERT_EQ(data[4], thrust::get<4>(t9));
-    ASSERT_EQ(data[5], thrust::get<5>(t9));
-    ASSERT_EQ(data[6], thrust::get<6>(t9));
-    ASSERT_EQ(data[7], thrust::get<7>(t9));
-    ASSERT_EQ(data[8], thrust::get<8>(t9));
+        thrust::tuple<T, T, T, T, T, T, T, T> t8(
+            data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7]);
+        ASSERT_EQ(data[0], thrust::get<0>(t8));
+        ASSERT_EQ(data[1], thrust::get<1>(t8));
+        ASSERT_EQ(data[2], thrust::get<2>(t8));
+        ASSERT_EQ(data[3], thrust::get<3>(t8));
+        ASSERT_EQ(data[4], thrust::get<4>(t8));
+        ASSERT_EQ(data[5], thrust::get<5>(t8));
+        ASSERT_EQ(data[6], thrust::get<6>(t8));
+        ASSERT_EQ(data[7], thrust::get<7>(t8));
 
-    // TODO: tuple cannot handle 10 element
-    /*thrust::tuple<T,T,T,T,T,T,T,T,T,T> t10(data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9]);
+        thrust::tuple<T, T, T, T, T, T, T, T, T> t9(
+            data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8]);
+        ASSERT_EQ(data[0], thrust::get<0>(t9));
+        ASSERT_EQ(data[1], thrust::get<1>(t9));
+        ASSERT_EQ(data[2], thrust::get<2>(t9));
+        ASSERT_EQ(data[3], thrust::get<3>(t9));
+        ASSERT_EQ(data[4], thrust::get<4>(t9));
+        ASSERT_EQ(data[5], thrust::get<5>(t9));
+        ASSERT_EQ(data[6], thrust::get<6>(t9));
+        ASSERT_EQ(data[7], thrust::get<7>(t9));
+        ASSERT_EQ(data[8], thrust::get<8>(t9));
+
+        // TODO: tuple cannot handle 10 element
+        /*thrust::tuple<T,T,T,T,T,T,T,T,T,T> t10(data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9]);
   ASSERT_EQ(data[0], thrust::get<0>(t10));
   ASSERT_EQ(data[1], thrust::get<1>(t10));
   ASSERT_EQ(data[2], thrust::get<2>(t10));
@@ -110,85 +116,95 @@ TYPED_TEST(TupleTests, TestTupleConstructor)
   ASSERT_EQ(data[7], thrust::get<7>(t10));
   ASSERT_EQ(data[8], thrust::get<8>(t10));
   ASSERT_EQ(data[9], thrust::get<9>(t10));*/
+    }
 }
 
 TYPED_TEST(TupleTests, TestMakeTuple)
 {
     using T = typename TestFixture::input_type;
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-    thrust::host_vector<T> data
-        = get_random_data<T>(10, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+        thrust::host_vector<T> data = get_random_data<T>(
+            10,
+            std::numeric_limits<T>::min(),
+            std::numeric_limits<T>::max(),
+            seed_value
+        );
 
-    thrust::tuple<T> t1 = thrust::make_tuple(data[0]);
-    ASSERT_EQ(data[0], thrust::get<0>(t1));
+        thrust::tuple<T> t1 = thrust::make_tuple(data[0]);
+        ASSERT_EQ(data[0], thrust::get<0>(t1));
 
-    thrust::tuple<T, T> t2 = thrust::make_tuple(data[0], data[1]);
-    ASSERT_EQ(data[0], thrust::get<0>(t2));
-    ASSERT_EQ(data[1], thrust::get<1>(t2));
+        thrust::tuple<T, T> t2 = thrust::make_tuple(data[0], data[1]);
+        ASSERT_EQ(data[0], thrust::get<0>(t2));
+        ASSERT_EQ(data[1], thrust::get<1>(t2));
 
-    thrust::tuple<T, T, T> t3 = thrust::make_tuple(data[0], data[1], data[2]);
-    ASSERT_EQ(data[0], thrust::get<0>(t3));
-    ASSERT_EQ(data[1], thrust::get<1>(t3));
-    ASSERT_EQ(data[2], thrust::get<2>(t3));
+        thrust::tuple<T, T, T> t3 = thrust::make_tuple(data[0], data[1], data[2]);
+        ASSERT_EQ(data[0], thrust::get<0>(t3));
+        ASSERT_EQ(data[1], thrust::get<1>(t3));
+        ASSERT_EQ(data[2], thrust::get<2>(t3));
 
-    thrust::tuple<T, T, T, T> t4 = thrust::make_tuple(data[0], data[1], data[2], data[3]);
-    ASSERT_EQ(data[0], thrust::get<0>(t4));
-    ASSERT_EQ(data[1], thrust::get<1>(t4));
-    ASSERT_EQ(data[2], thrust::get<2>(t4));
-    ASSERT_EQ(data[3], thrust::get<3>(t4));
+        thrust::tuple<T, T, T, T> t4 = thrust::make_tuple(data[0], data[1], data[2], data[3]);
+        ASSERT_EQ(data[0], thrust::get<0>(t4));
+        ASSERT_EQ(data[1], thrust::get<1>(t4));
+        ASSERT_EQ(data[2], thrust::get<2>(t4));
+        ASSERT_EQ(data[3], thrust::get<3>(t4));
 
-    thrust::tuple<T, T, T, T, T> t5
-        = thrust::make_tuple(data[0], data[1], data[2], data[3], data[4]);
-    ASSERT_EQ(data[0], thrust::get<0>(t5));
-    ASSERT_EQ(data[1], thrust::get<1>(t5));
-    ASSERT_EQ(data[2], thrust::get<2>(t5));
-    ASSERT_EQ(data[3], thrust::get<3>(t5));
-    ASSERT_EQ(data[4], thrust::get<4>(t5));
+        thrust::tuple<T, T, T, T, T> t5
+            = thrust::make_tuple(data[0], data[1], data[2], data[3], data[4]);
+        ASSERT_EQ(data[0], thrust::get<0>(t5));
+        ASSERT_EQ(data[1], thrust::get<1>(t5));
+        ASSERT_EQ(data[2], thrust::get<2>(t5));
+        ASSERT_EQ(data[3], thrust::get<3>(t5));
+        ASSERT_EQ(data[4], thrust::get<4>(t5));
 
-    thrust::tuple<T, T, T, T, T, T> t6
-        = thrust::make_tuple(data[0], data[1], data[2], data[3], data[4], data[5]);
-    ASSERT_EQ(data[0], thrust::get<0>(t6));
-    ASSERT_EQ(data[1], thrust::get<1>(t6));
-    ASSERT_EQ(data[2], thrust::get<2>(t6));
-    ASSERT_EQ(data[3], thrust::get<3>(t6));
-    ASSERT_EQ(data[4], thrust::get<4>(t6));
-    ASSERT_EQ(data[5], thrust::get<5>(t6));
+        thrust::tuple<T, T, T, T, T, T> t6
+            = thrust::make_tuple(data[0], data[1], data[2], data[3], data[4], data[5]);
+        ASSERT_EQ(data[0], thrust::get<0>(t6));
+        ASSERT_EQ(data[1], thrust::get<1>(t6));
+        ASSERT_EQ(data[2], thrust::get<2>(t6));
+        ASSERT_EQ(data[3], thrust::get<3>(t6));
+        ASSERT_EQ(data[4], thrust::get<4>(t6));
+        ASSERT_EQ(data[5], thrust::get<5>(t6));
 
-    thrust::tuple<T, T, T, T, T, T, T> t7
-        = thrust::make_tuple(data[0], data[1], data[2], data[3], data[4], data[5], data[6]);
-    ASSERT_EQ(data[0], thrust::get<0>(t7));
-    ASSERT_EQ(data[1], thrust::get<1>(t7));
-    ASSERT_EQ(data[2], thrust::get<2>(t7));
-    ASSERT_EQ(data[3], thrust::get<3>(t7));
-    ASSERT_EQ(data[4], thrust::get<4>(t7));
-    ASSERT_EQ(data[5], thrust::get<5>(t7));
-    ASSERT_EQ(data[6], thrust::get<6>(t7));
+        thrust::tuple<T, T, T, T, T, T, T> t7
+            = thrust::make_tuple(data[0], data[1], data[2], data[3], data[4], data[5], data[6]);
+        ASSERT_EQ(data[0], thrust::get<0>(t7));
+        ASSERT_EQ(data[1], thrust::get<1>(t7));
+        ASSERT_EQ(data[2], thrust::get<2>(t7));
+        ASSERT_EQ(data[3], thrust::get<3>(t7));
+        ASSERT_EQ(data[4], thrust::get<4>(t7));
+        ASSERT_EQ(data[5], thrust::get<5>(t7));
+        ASSERT_EQ(data[6], thrust::get<6>(t7));
 
-    thrust::tuple<T, T, T, T, T, T, T, T> t8 = thrust::make_tuple(
-        data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7]);
-    ASSERT_EQ(data[0], thrust::get<0>(t8));
-    ASSERT_EQ(data[1], thrust::get<1>(t8));
-    ASSERT_EQ(data[2], thrust::get<2>(t8));
-    ASSERT_EQ(data[3], thrust::get<3>(t8));
-    ASSERT_EQ(data[4], thrust::get<4>(t8));
-    ASSERT_EQ(data[5], thrust::get<5>(t8));
-    ASSERT_EQ(data[6], thrust::get<6>(t8));
-    ASSERT_EQ(data[7], thrust::get<7>(t8));
+        thrust::tuple<T, T, T, T, T, T, T, T> t8 = thrust::make_tuple(
+            data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7]);
+        ASSERT_EQ(data[0], thrust::get<0>(t8));
+        ASSERT_EQ(data[1], thrust::get<1>(t8));
+        ASSERT_EQ(data[2], thrust::get<2>(t8));
+        ASSERT_EQ(data[3], thrust::get<3>(t8));
+        ASSERT_EQ(data[4], thrust::get<4>(t8));
+        ASSERT_EQ(data[5], thrust::get<5>(t8));
+        ASSERT_EQ(data[6], thrust::get<6>(t8));
+        ASSERT_EQ(data[7], thrust::get<7>(t8));
 
-    thrust::tuple<T, T, T, T, T, T, T, T, T> t9 = thrust::make_tuple(
-        data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8]);
-    ASSERT_EQ(data[0], thrust::get<0>(t9));
-    ASSERT_EQ(data[1], thrust::get<1>(t9));
-    ASSERT_EQ(data[2], thrust::get<2>(t9));
-    ASSERT_EQ(data[3], thrust::get<3>(t9));
-    ASSERT_EQ(data[4], thrust::get<4>(t9));
-    ASSERT_EQ(data[5], thrust::get<5>(t9));
-    ASSERT_EQ(data[6], thrust::get<6>(t9));
-    ASSERT_EQ(data[7], thrust::get<7>(t9));
-    ASSERT_EQ(data[8], thrust::get<8>(t9));
+        thrust::tuple<T, T, T, T, T, T, T, T, T> t9 = thrust::make_tuple(
+            data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8]);
+        ASSERT_EQ(data[0], thrust::get<0>(t9));
+        ASSERT_EQ(data[1], thrust::get<1>(t9));
+        ASSERT_EQ(data[2], thrust::get<2>(t9));
+        ASSERT_EQ(data[3], thrust::get<3>(t9));
+        ASSERT_EQ(data[4], thrust::get<4>(t9));
+        ASSERT_EQ(data[5], thrust::get<5>(t9));
+        ASSERT_EQ(data[6], thrust::get<6>(t9));
+        ASSERT_EQ(data[7], thrust::get<7>(t9));
+        ASSERT_EQ(data[8], thrust::get<8>(t9));
 
-    // TODO: tuple cannot handle 10 element
-    /*thrust::tuple<T,T,T,T,T,T,T,T,T,T> t10 = thrust::make_tuple(data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9]);
+        // TODO: tuple cannot handle 10 element
+        /*thrust::tuple<T,T,T,T,T,T,T,T,T,T> t10 = thrust::make_tuple(data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9]);
   ASSERT_EQ(data[0], thrust::get<0>(t10));
   ASSERT_EQ(data[1], thrust::get<1>(t10));
   ASSERT_EQ(data[2], thrust::get<2>(t10));
@@ -199,85 +215,92 @@ TYPED_TEST(TupleTests, TestMakeTuple)
   ASSERT_EQ(data[7], thrust::get<7>(t10));
   ASSERT_EQ(data[8], thrust::get<8>(t10));
   ASSERT_EQ(data[9], thrust::get<9>(t10));*/
+    }
 }
 
 TYPED_TEST(TupleTests, TestTupleGet)
 {
     using T = typename TestFixture::input_type;
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-    thrust::host_vector<T> data
-        = get_random_data<T>(10, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
 
-    thrust::tuple<T> t1(data[0]);
-    ASSERT_EQ(data[0], thrust::get<0>(t1));
+        thrust::host_vector<T> data = get_random_data<T>(
+            10, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
 
-    thrust::tuple<T, T> t2(data[0], data[1]);
-    ASSERT_EQ(data[0], thrust::get<0>(t2));
-    ASSERT_EQ(data[1], thrust::get<1>(t2));
+        thrust::tuple<T> t1(data[0]);
+        ASSERT_EQ(data[0], thrust::get<0>(t1));
 
-    thrust::tuple<T, T, T> t3 = thrust::make_tuple(data[0], data[1], data[2]);
-    ASSERT_EQ(data[0], thrust::get<0>(t3));
-    ASSERT_EQ(data[1], thrust::get<1>(t3));
-    ASSERT_EQ(data[2], thrust::get<2>(t3));
+        thrust::tuple<T, T> t2(data[0], data[1]);
+        ASSERT_EQ(data[0], thrust::get<0>(t2));
+        ASSERT_EQ(data[1], thrust::get<1>(t2));
 
-    thrust::tuple<T, T, T, T> t4 = thrust::make_tuple(data[0], data[1], data[2], data[3]);
-    ASSERT_EQ(data[0], thrust::get<0>(t4));
-    ASSERT_EQ(data[1], thrust::get<1>(t4));
-    ASSERT_EQ(data[2], thrust::get<2>(t4));
-    ASSERT_EQ(data[3], thrust::get<3>(t4));
+        thrust::tuple<T, T, T> t3 = thrust::make_tuple(data[0], data[1], data[2]);
+        ASSERT_EQ(data[0], thrust::get<0>(t3));
+        ASSERT_EQ(data[1], thrust::get<1>(t3));
+        ASSERT_EQ(data[2], thrust::get<2>(t3));
 
-    thrust::tuple<T, T, T, T, T> t5
-        = thrust::make_tuple(data[0], data[1], data[2], data[3], data[4]);
-    ASSERT_EQ(data[0], thrust::get<0>(t5));
-    ASSERT_EQ(data[1], thrust::get<1>(t5));
-    ASSERT_EQ(data[2], thrust::get<2>(t5));
-    ASSERT_EQ(data[3], thrust::get<3>(t5));
-    ASSERT_EQ(data[4], thrust::get<4>(t5));
+        thrust::tuple<T, T, T, T> t4 = thrust::make_tuple(data[0], data[1], data[2], data[3]);
+        ASSERT_EQ(data[0], thrust::get<0>(t4));
+        ASSERT_EQ(data[1], thrust::get<1>(t4));
+        ASSERT_EQ(data[2], thrust::get<2>(t4));
+        ASSERT_EQ(data[3], thrust::get<3>(t4));
 
-    thrust::tuple<T, T, T, T, T, T> t6
-        = thrust::make_tuple(data[0], data[1], data[2], data[3], data[4], data[5]);
-    ASSERT_EQ(data[0], thrust::get<0>(t6));
-    ASSERT_EQ(data[1], thrust::get<1>(t6));
-    ASSERT_EQ(data[2], thrust::get<2>(t6));
-    ASSERT_EQ(data[3], thrust::get<3>(t6));
-    ASSERT_EQ(data[4], thrust::get<4>(t6));
-    ASSERT_EQ(data[5], thrust::get<5>(t6));
+        thrust::tuple<T, T, T, T, T> t5
+            = thrust::make_tuple(data[0], data[1], data[2], data[3], data[4]);
+        ASSERT_EQ(data[0], thrust::get<0>(t5));
+        ASSERT_EQ(data[1], thrust::get<1>(t5));
+        ASSERT_EQ(data[2], thrust::get<2>(t5));
+        ASSERT_EQ(data[3], thrust::get<3>(t5));
+        ASSERT_EQ(data[4], thrust::get<4>(t5));
 
-    thrust::tuple<T, T, T, T, T, T, T> t7
-        = thrust::make_tuple(data[0], data[1], data[2], data[3], data[4], data[5], data[6]);
-    ASSERT_EQ(data[0], thrust::get<0>(t7));
-    ASSERT_EQ(data[1], thrust::get<1>(t7));
-    ASSERT_EQ(data[2], thrust::get<2>(t7));
-    ASSERT_EQ(data[3], thrust::get<3>(t7));
-    ASSERT_EQ(data[4], thrust::get<4>(t7));
-    ASSERT_EQ(data[5], thrust::get<5>(t7));
-    ASSERT_EQ(data[6], thrust::get<6>(t7));
+        thrust::tuple<T, T, T, T, T, T> t6
+            = thrust::make_tuple(data[0], data[1], data[2], data[3], data[4], data[5]);
+        ASSERT_EQ(data[0], thrust::get<0>(t6));
+        ASSERT_EQ(data[1], thrust::get<1>(t6));
+        ASSERT_EQ(data[2], thrust::get<2>(t6));
+        ASSERT_EQ(data[3], thrust::get<3>(t6));
+        ASSERT_EQ(data[4], thrust::get<4>(t6));
+        ASSERT_EQ(data[5], thrust::get<5>(t6));
 
-    thrust::tuple<T, T, T, T, T, T, T, T> t8 = thrust::make_tuple(
-        data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7]);
-    ASSERT_EQ(data[0], thrust::get<0>(t8));
-    ASSERT_EQ(data[1], thrust::get<1>(t8));
-    ASSERT_EQ(data[2], thrust::get<2>(t8));
-    ASSERT_EQ(data[3], thrust::get<3>(t8));
-    ASSERT_EQ(data[4], thrust::get<4>(t8));
-    ASSERT_EQ(data[5], thrust::get<5>(t8));
-    ASSERT_EQ(data[6], thrust::get<6>(t8));
-    ASSERT_EQ(data[7], thrust::get<7>(t8));
+        thrust::tuple<T, T, T, T, T, T, T> t7
+            = thrust::make_tuple(data[0], data[1], data[2], data[3], data[4], data[5], data[6]);
+        ASSERT_EQ(data[0], thrust::get<0>(t7));
+        ASSERT_EQ(data[1], thrust::get<1>(t7));
+        ASSERT_EQ(data[2], thrust::get<2>(t7));
+        ASSERT_EQ(data[3], thrust::get<3>(t7));
+        ASSERT_EQ(data[4], thrust::get<4>(t7));
+        ASSERT_EQ(data[5], thrust::get<5>(t7));
+        ASSERT_EQ(data[6], thrust::get<6>(t7));
 
-    thrust::tuple<T, T, T, T, T, T, T, T, T> t9 = thrust::make_tuple(
-        data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8]);
-    ASSERT_EQ(data[0], thrust::get<0>(t9));
-    ASSERT_EQ(data[1], thrust::get<1>(t9));
-    ASSERT_EQ(data[2], thrust::get<2>(t9));
-    ASSERT_EQ(data[3], thrust::get<3>(t9));
-    ASSERT_EQ(data[4], thrust::get<4>(t9));
-    ASSERT_EQ(data[5], thrust::get<5>(t9));
-    ASSERT_EQ(data[6], thrust::get<6>(t9));
-    ASSERT_EQ(data[7], thrust::get<7>(t9));
-    ASSERT_EQ(data[8], thrust::get<8>(t9));
+        thrust::tuple<T, T, T, T, T, T, T, T> t8 = thrust::make_tuple(
+            data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7]);
+        ASSERT_EQ(data[0], thrust::get<0>(t8));
+        ASSERT_EQ(data[1], thrust::get<1>(t8));
+        ASSERT_EQ(data[2], thrust::get<2>(t8));
+        ASSERT_EQ(data[3], thrust::get<3>(t8));
+        ASSERT_EQ(data[4], thrust::get<4>(t8));
+        ASSERT_EQ(data[5], thrust::get<5>(t8));
+        ASSERT_EQ(data[6], thrust::get<6>(t8));
+        ASSERT_EQ(data[7], thrust::get<7>(t8));
 
-    // TODO: tuple cannot handle 10 element
-    /*thrust::tuple<T,T,T,T,T,T,T,T,T,T> t10 = thrust::make_tuple(data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9]);
+        thrust::tuple<T, T, T, T, T, T, T, T, T> t9 = thrust::make_tuple(
+            data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8]);
+        ASSERT_EQ(data[0], thrust::get<0>(t9));
+        ASSERT_EQ(data[1], thrust::get<1>(t9));
+        ASSERT_EQ(data[2], thrust::get<2>(t9));
+        ASSERT_EQ(data[3], thrust::get<3>(t9));
+        ASSERT_EQ(data[4], thrust::get<4>(t9));
+        ASSERT_EQ(data[5], thrust::get<5>(t9));
+        ASSERT_EQ(data[6], thrust::get<6>(t9));
+        ASSERT_EQ(data[7], thrust::get<7>(t9));
+        ASSERT_EQ(data[8], thrust::get<8>(t9));
+
+        // TODO: tuple cannot handle 10 element
+        /*thrust::tuple<T,T,T,T,T,T,T,T,T,T> t10 = thrust::make_tuple(data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9]);
   ASSERT_EQ(data[0], thrust::get<0>(t10));
   ASSERT_EQ(data[1], thrust::get<1>(t10));
   ASSERT_EQ(data[2], thrust::get<2>(t10));
@@ -288,6 +311,7 @@ TYPED_TEST(TupleTests, TestTupleGet)
   ASSERT_EQ(data[7], thrust::get<7>(t10));
   ASSERT_EQ(data[8], thrust::get<8>(t10));
   ASSERT_EQ(data[9], thrust::get<9>(t10));*/
+    }
 }
 
 TYPED_TEST(TupleTests, TestTupleComparison)

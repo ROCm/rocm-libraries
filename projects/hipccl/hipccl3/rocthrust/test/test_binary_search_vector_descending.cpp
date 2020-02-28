@@ -181,33 +181,42 @@ TYPED_TEST(BinarySearchVectorDescendingIntegerTests, TestVectorLowerBoundDescend
     for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::host_vector<T> h_vec = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::sort(h_vec.begin(), h_vec.end(), thrust::greater<T>());
-        thrust::device_vector<T> d_vec = h_vec;
+            thrust::host_vector<T> h_vec = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::sort(h_vec.begin(), h_vec.end(), thrust::greater<T>());
+            thrust::device_vector<T> d_vec = h_vec;
 
-        thrust::host_vector<T> h_input = get_random_data<T>(
-            2 * size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::device_vector<T> d_input = h_input;
+            thrust::host_vector<T> h_input = get_random_data<T>(
+                2 * size, std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value + seed_value_addition
+            );
+            thrust::device_vector<T> d_input = h_input;
 
-        thrust::host_vector<int>   h_output(2 * size);
-        thrust::device_vector<int> d_output(2 * size);
+            thrust::host_vector<int>   h_output(2 * size);
+            thrust::device_vector<int> d_output(2 * size);
 
-        thrust::lower_bound(h_vec.begin(),
-                            h_vec.end(),
-                            h_input.begin(),
-                            h_input.end(),
-                            h_output.begin(),
-                            thrust::greater<T>());
-        thrust::lower_bound(d_vec.begin(),
-                            d_vec.end(),
-                            d_input.begin(),
-                            d_input.end(),
-                            d_output.begin(),
-                            thrust::greater<T>());
+            thrust::lower_bound(h_vec.begin(),
+                                h_vec.end(),
+                                h_input.begin(),
+                                h_input.end(),
+                                h_output.begin(),
+                                thrust::greater<T>());
+            thrust::lower_bound(d_vec.begin(),
+                                d_vec.end(),
+                                d_input.begin(),
+                                d_input.end(),
+                                d_output.begin(),
+                                thrust::greater<T>());
 
-        ASSERT_EQ(h_output, d_output);
+            ASSERT_EQ(h_output, d_output);
+        }
     }
 }
 
@@ -218,32 +227,42 @@ TYPED_TEST(BinarySearchVectorDescendingIntegerTests, TestVectorUpperBoundDescend
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
-        thrust::host_vector<T> h_vec = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::sort(h_vec.begin(), h_vec.end(), thrust::greater<T>());
-        thrust::device_vector<T> d_vec = h_vec;
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::host_vector<T> h_input = get_random_data<T>(
-            2 * size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::device_vector<T> d_input = h_input;
+            thrust::host_vector<T> h_vec = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::sort(h_vec.begin(), h_vec.end(), thrust::greater<T>());
+            thrust::device_vector<T> d_vec = h_vec;
 
-        thrust::host_vector<int>   h_output(2 * size);
-        thrust::device_vector<int> d_output(2 * size);
+            thrust::host_vector<T> h_input = get_random_data<T>(
+                2 * size, std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value + seed_value_addition
+            );
+            thrust::device_vector<T> d_input = h_input;
 
-        thrust::upper_bound(h_vec.begin(),
-                            h_vec.end(),
-                            h_input.begin(),
-                            h_input.end(),
-                            h_output.begin(),
-                            thrust::greater<T>());
-        thrust::upper_bound(d_vec.begin(),
-                            d_vec.end(),
-                            d_input.begin(),
-                            d_input.end(),
-                            d_output.begin(),
-                            thrust::greater<T>());
+            thrust::host_vector<int>   h_output(2 * size);
+            thrust::device_vector<int> d_output(2 * size);
 
-        ASSERT_EQ(h_output, d_output);
+            thrust::upper_bound(h_vec.begin(),
+                                h_vec.end(),
+                                h_input.begin(),
+                                h_input.end(),
+                                h_output.begin(),
+                                thrust::greater<T>());
+            thrust::upper_bound(d_vec.begin(),
+                                d_vec.end(),
+                                d_input.begin(),
+                                d_input.end(),
+                                d_output.begin(),
+                                thrust::greater<T>());
+
+            ASSERT_EQ(h_output, d_output);
+        }
     }
 }
 
@@ -253,32 +272,41 @@ TYPED_TEST(BinarySearchVectorDescendingIntegerTests, TestVectorBinarySearchDesce
     for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::host_vector<T> h_vec = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::sort(h_vec.begin(), h_vec.end(), thrust::greater<T>());
-        thrust::device_vector<T> d_vec = h_vec;
+            thrust::host_vector<T> h_vec = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::sort(h_vec.begin(), h_vec.end(), thrust::greater<T>());
+            thrust::device_vector<T> d_vec = h_vec;
 
-        thrust::host_vector<T> h_input = get_random_data<T>(
-            2 * size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::device_vector<T> d_input = h_input;
+            thrust::host_vector<T> h_input = get_random_data<T>(
+                2 * size, std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value + seed_value_addition
+            );
+            thrust::device_vector<T> d_input = h_input;
 
-        thrust::host_vector<int>   h_output(2 * size);
-        thrust::device_vector<int> d_output(2 * size);
+            thrust::host_vector<int>   h_output(2 * size);
+            thrust::device_vector<int> d_output(2 * size);
 
-        thrust::binary_search(h_vec.begin(),
-                              h_vec.end(),
-                              h_input.begin(),
-                              h_input.end(),
-                              h_output.begin(),
-                              thrust::greater<T>());
-        thrust::binary_search(d_vec.begin(),
-                              d_vec.end(),
-                              d_input.begin(),
-                              d_input.end(),
-                              d_output.begin(),
-                              thrust::greater<T>());
+            thrust::binary_search(h_vec.begin(),
+                                  h_vec.end(),
+                                  h_input.begin(),
+                                  h_input.end(),
+                                  h_output.begin(),
+                                  thrust::greater<T>());
+            thrust::binary_search(d_vec.begin(),
+                                  d_vec.end(),
+                                  d_input.begin(),
+                                  d_input.end(),
+                                  d_output.begin(),
+                                  thrust::greater<T>());
 
-        ASSERT_EQ(h_output, d_output);
+            ASSERT_EQ(h_output, d_output);
+        }
     }
 }

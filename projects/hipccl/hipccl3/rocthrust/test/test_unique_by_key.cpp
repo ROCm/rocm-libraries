@@ -47,10 +47,8 @@ TEST(UniqueByKeyTests, TestUniqueByKeyDispatchExplicit)
 }
 
 template <typename ForwardIterator1, typename ForwardIterator2>
-thrust::pair<ForwardIterator1, ForwardIterator2> unique_by_key(my_tag,
-                                                               ForwardIterator1 keys_first,
-                                                               ForwardIterator1,
-                                                               ForwardIterator2 values_first)
+thrust::pair<ForwardIterator1, ForwardIterator2>
+unique_by_key(my_tag, ForwardIterator1 keys_first, ForwardIterator1, ForwardIterator2 values_first)
 {
     *keys_first = 13;
     return thrust::make_pair(keys_first, values_first);
@@ -273,40 +271,50 @@ TYPED_TEST(UniqueByKeyIntegralTests, TestUniqueByKey)
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
-        thrust::host_vector<K> h_keys = get_random_data<K>(
-            size, std::numeric_limits<K>::min(), std::numeric_limits<K>::max());
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::host_vector<V> h_vals = get_random_data<V>(
-            size, std::numeric_limits<V>::min(), std::numeric_limits<V>::max());
-        ;
-        thrust::device_vector<K> d_keys = h_keys;
-        thrust::device_vector<V> d_vals = h_vals;
+            thrust::host_vector<K> h_keys = get_random_data<K>(
+                size, std::numeric_limits<K>::min(), std::numeric_limits<K>::max(), seed_value);
 
-        using HostKeyIterator   = typename thrust::host_vector<K>::iterator;
-        using HostValIterator   = typename thrust::host_vector<V>::iterator;
-        using DeviceKeyIterator = typename thrust::device_vector<K>::iterator;
-        using DeviceValIterator = typename thrust::device_vector<V>::iterator;
+            thrust::host_vector<V> h_vals = get_random_data<V>(
+                size,
+                std::numeric_limits<V>::min(),
+                std::numeric_limits<V>::max(),
+                seed_value + seed_value_addition
+            );
+            thrust::device_vector<K> d_keys = h_keys;
+            thrust::device_vector<V> d_vals = h_vals;
 
-        using HostIteratorPair   = typename thrust::pair<HostKeyIterator, HostValIterator>;
-        using DeviceIteratorPair = typename thrust::pair<DeviceKeyIterator, DeviceValIterator>;
+            using HostKeyIterator   = typename thrust::host_vector<K>::iterator;
+            using HostValIterator   = typename thrust::host_vector<V>::iterator;
+            using DeviceKeyIterator = typename thrust::device_vector<K>::iterator;
+            using DeviceValIterator = typename thrust::device_vector<V>::iterator;
 
-        HostIteratorPair h_last
-            = thrust::unique_by_key(h_keys.begin(), h_keys.end(), h_vals.begin());
-        DeviceIteratorPair d_last
-            = thrust::unique_by_key(d_keys.begin(), d_keys.end(), d_vals.begin());
+            using HostIteratorPair   = typename thrust::pair<HostKeyIterator, HostValIterator>;
+            using DeviceIteratorPair = typename thrust::pair<DeviceKeyIterator, DeviceValIterator>;
 
-        ASSERT_EQ(h_last.first - h_keys.begin(), d_last.first - d_keys.begin());
-        ASSERT_EQ(h_last.second - h_vals.begin(), d_last.second - d_vals.begin());
+            HostIteratorPair h_last
+                = thrust::unique_by_key(h_keys.begin(), h_keys.end(), h_vals.begin());
+            DeviceIteratorPair d_last
+                = thrust::unique_by_key(d_keys.begin(), d_keys.end(), d_vals.begin());
 
-        size_t N = h_last.first - h_keys.begin();
+            ASSERT_EQ(h_last.first - h_keys.begin(), d_last.first - d_keys.begin());
+            ASSERT_EQ(h_last.second - h_vals.begin(), d_last.second - d_vals.begin());
 
-        h_keys.resize(N);
-        h_vals.resize(N);
-        d_keys.resize(N);
-        d_vals.resize(N);
+            size_t N = h_last.first - h_keys.begin();
 
-        ASSERT_EQ(h_keys, d_keys);
-        ASSERT_EQ(h_vals, d_vals);
+            h_keys.resize(N);
+            h_vals.resize(N);
+            d_keys.resize(N);
+            d_vals.resize(N);
+
+            ASSERT_EQ(h_keys, d_keys);
+            ASSERT_EQ(h_vals, d_vals);
+        }
     }
 }
 
@@ -318,52 +326,61 @@ TYPED_TEST(UniqueByKeyIntegralTests, TestUniqueCopyByKey)
     for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::host_vector<K> h_keys = get_random_data<K>(
-            size, std::numeric_limits<K>::min(), std::numeric_limits<K>::max());
+            thrust::host_vector<K> h_keys = get_random_data<K>(
+                size, std::numeric_limits<K>::min(), std::numeric_limits<K>::max(), seed_value);
 
-        thrust::host_vector<V> h_vals = get_random_data<V>(
-            size, std::numeric_limits<V>::min(), std::numeric_limits<V>::max());
-        ;
-        thrust::device_vector<K> d_keys = h_keys;
-        thrust::device_vector<V> d_vals = h_vals;
+            thrust::host_vector<V> h_vals = get_random_data<V>(
+                size,
+                std::numeric_limits<V>::min(),
+                std::numeric_limits<V>::max(),
+                seed_value + seed_value_addition
+            );
+            thrust::device_vector<K> d_keys = h_keys;
+            thrust::device_vector<V> d_vals = h_vals;
 
-        thrust::host_vector<K>   h_keys_output(size);
-        thrust::host_vector<V>   h_vals_output(size);
-        thrust::device_vector<K> d_keys_output(size);
-        thrust::device_vector<V> d_vals_output(size);
+            thrust::host_vector<K>   h_keys_output(size);
+            thrust::host_vector<V>   h_vals_output(size);
+            thrust::device_vector<K> d_keys_output(size);
+            thrust::device_vector<V> d_vals_output(size);
 
-        using HostKeyIterator   = typename thrust::host_vector<K>::iterator;
-        using HostValIterator   = typename thrust::host_vector<V>::iterator;
-        using DeviceKeyIterator = typename thrust::device_vector<K>::iterator;
-        using DeviceValIterator = typename thrust::device_vector<V>::iterator;
+            using HostKeyIterator   = typename thrust::host_vector<K>::iterator;
+            using HostValIterator   = typename thrust::host_vector<V>::iterator;
+            using DeviceKeyIterator = typename thrust::device_vector<K>::iterator;
+            using DeviceValIterator = typename thrust::device_vector<V>::iterator;
 
-        using HostIteratorPair   = typename thrust::pair<HostKeyIterator, HostValIterator>;
-        using DeviceIteratorPair = typename thrust::pair<DeviceKeyIterator, DeviceValIterator>;
+            using HostIteratorPair   = typename thrust::pair<HostKeyIterator, HostValIterator>;
+            using DeviceIteratorPair = typename thrust::pair<DeviceKeyIterator, DeviceValIterator>;
 
-        HostIteratorPair   h_last = thrust::unique_by_key_copy(h_keys.begin(),
-                                                             h_keys.end(),
-                                                             h_vals.begin(),
-                                                             h_keys_output.begin(),
-                                                             h_vals_output.begin());
-        DeviceIteratorPair d_last = thrust::unique_by_key_copy(d_keys.begin(),
-                                                               d_keys.end(),
-                                                               d_vals.begin(),
-                                                               d_keys_output.begin(),
-                                                               d_vals_output.begin());
+            HostIteratorPair   h_last = thrust::unique_by_key_copy(h_keys.begin(),
+                                                                 h_keys.end(),
+                                                                 h_vals.begin(),
+                                                                 h_keys_output.begin(),
+                                                                 h_vals_output.begin());
+            DeviceIteratorPair d_last = thrust::unique_by_key_copy(d_keys.begin(),
+                                                                   d_keys.end(),
+                                                                   d_vals.begin(),
+                                                                   d_keys_output.begin(),
+                                                                   d_vals_output.begin());
 
-        ASSERT_EQ(h_last.first - h_keys_output.begin(), d_last.first - d_keys_output.begin());
-        ASSERT_EQ(h_last.second - h_vals_output.begin(), d_last.second - d_vals_output.begin());
+            ASSERT_EQ(h_last.first - h_keys_output.begin(), d_last.first - d_keys_output.begin());
+            ASSERT_EQ(h_last.second - h_vals_output.begin(), d_last.second - d_vals_output.begin());
 
-        size_t N = h_last.first - h_keys_output.begin();
+            size_t N = h_last.first - h_keys_output.begin();
 
-        h_keys_output.resize(N);
-        h_vals_output.resize(N);
-        d_keys_output.resize(N);
-        d_vals_output.resize(N);
+            h_keys_output.resize(N);
+            h_vals_output.resize(N);
+            d_keys_output.resize(N);
+            d_vals_output.resize(N);
 
-        ASSERT_EQ(h_keys_output, d_keys_output);
-        ASSERT_EQ(h_vals_output, d_vals_output);
+            ASSERT_EQ(h_keys_output, d_keys_output);
+            ASSERT_EQ(h_vals_output, d_vals_output);
+        }
     }
 }
 
@@ -375,102 +392,111 @@ TYPED_TEST(UniqueByKeyIntegralTests, TestUniqueCopyByKeyToDiscardIterator)
     for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::host_vector<K> h_keys = get_random_data<K>(
-            size, std::numeric_limits<K>::min(), std::numeric_limits<K>::max());
+            thrust::host_vector<K> h_keys = get_random_data<K>(
+                size, std::numeric_limits<K>::min(), std::numeric_limits<K>::max(), seed_value);
 
-        thrust::host_vector<V> h_vals = get_random_data<V>(
-            size, std::numeric_limits<V>::min(), std::numeric_limits<V>::max());
-        ;
-        thrust::device_vector<K> d_keys = h_keys;
-        thrust::device_vector<V> d_vals = h_vals;
+            thrust::host_vector<V> h_vals = get_random_data<V>(
+                size,
+                std::numeric_limits<V>::min(),
+                std::numeric_limits<V>::max(),
+                seed_value + seed_value_addition
+            );
+            thrust::device_vector<K> d_keys = h_keys;
+            thrust::device_vector<V> d_vals = h_vals;
 
-        thrust::host_vector<V>   h_vals_output(size);
-        thrust::device_vector<V> d_vals_output(size);
+            thrust::host_vector<V>   h_vals_output(size);
+            thrust::device_vector<V> d_vals_output(size);
 
-        thrust::host_vector<K>   h_keys_output(size);
-        thrust::device_vector<K> d_keys_output(size);
+            thrust::host_vector<K>   h_keys_output(size);
+            thrust::device_vector<K> d_keys_output(size);
 
-        thrust::host_vector<K> h_unique_keys = h_keys;
-        h_unique_keys.erase(thrust::unique(h_unique_keys.begin(), h_unique_keys.end()),
-                            h_unique_keys.end());
+            thrust::host_vector<K> h_unique_keys = h_keys;
+            h_unique_keys.erase(thrust::unique(h_unique_keys.begin(), h_unique_keys.end()),
+                                h_unique_keys.end());
 
-        size_t num_unique_keys = h_unique_keys.size();
+            size_t num_unique_keys = h_unique_keys.size();
 
-        // mask both outputs
-        thrust::pair<thrust::discard_iterator<>, thrust::discard_iterator<>> h_result1
-            = thrust::unique_by_key_copy(h_keys.begin(),
-                                         h_keys.end(),
-                                         h_vals.begin(),
-                                         thrust::make_discard_iterator(),
-                                         thrust::make_discard_iterator());
+            // mask both outputs
+            thrust::pair<thrust::discard_iterator<>, thrust::discard_iterator<>> h_result1
+                = thrust::unique_by_key_copy(h_keys.begin(),
+                                             h_keys.end(),
+                                             h_vals.begin(),
+                                             thrust::make_discard_iterator(),
+                                             thrust::make_discard_iterator());
 
-        thrust::pair<thrust::discard_iterator<>, thrust::discard_iterator<>> d_result1
-            = thrust::unique_by_key_copy(d_keys.begin(),
-                                         d_keys.end(),
-                                         d_vals.begin(),
-                                         thrust::make_discard_iterator(),
-                                         thrust::make_discard_iterator());
+            thrust::pair<thrust::discard_iterator<>, thrust::discard_iterator<>> d_result1
+                = thrust::unique_by_key_copy(d_keys.begin(),
+                                             d_keys.end(),
+                                             d_vals.begin(),
+                                             thrust::make_discard_iterator(),
+                                             thrust::make_discard_iterator());
 
-        thrust::pair<thrust::discard_iterator<>, thrust::discard_iterator<>> reference1
-            = thrust::make_pair(thrust::make_discard_iterator(num_unique_keys),
-                                thrust::make_discard_iterator(num_unique_keys));
+            thrust::pair<thrust::discard_iterator<>, thrust::discard_iterator<>> reference1
+                = thrust::make_pair(thrust::make_discard_iterator(num_unique_keys),
+                                    thrust::make_discard_iterator(num_unique_keys));
 
-        ASSERT_EQ_QUIET(reference1, h_result1);
-        ASSERT_EQ_QUIET(reference1, d_result1);
+            ASSERT_EQ_QUIET(reference1, h_result1);
+            ASSERT_EQ_QUIET(reference1, d_result1);
 
-        // mask values output
-        thrust::pair<typename thrust::host_vector<K>::iterator, thrust::discard_iterator<>>
-            h_result2 = thrust::unique_by_key_copy(h_keys.begin(),
-                                                   h_keys.end(),
-                                                   h_vals.begin(),
-                                                   h_keys_output.begin(),
-                                                   thrust::make_discard_iterator());
+            // mask values output
+            thrust::pair<typename thrust::host_vector<K>::iterator, thrust::discard_iterator<>>
+                h_result2 = thrust::unique_by_key_copy(h_keys.begin(),
+                                                       h_keys.end(),
+                                                       h_vals.begin(),
+                                                       h_keys_output.begin(),
+                                                       thrust::make_discard_iterator());
 
-        thrust::pair<typename thrust::device_vector<K>::iterator, thrust::discard_iterator<>>
-            d_result2 = thrust::unique_by_key_copy(d_keys.begin(),
-                                                   d_keys.end(),
-                                                   d_vals.begin(),
-                                                   d_keys_output.begin(),
-                                                   thrust::make_discard_iterator());
+            thrust::pair<typename thrust::device_vector<K>::iterator, thrust::discard_iterator<>>
+                d_result2 = thrust::unique_by_key_copy(d_keys.begin(),
+                                                       d_keys.end(),
+                                                       d_vals.begin(),
+                                                       d_keys_output.begin(),
+                                                       thrust::make_discard_iterator());
 
-        thrust::pair<typename thrust::host_vector<K>::iterator, thrust::discard_iterator<>>
-            h_reference2 = thrust::make_pair(h_keys_output.begin() + num_unique_keys,
-                                             thrust::make_discard_iterator(num_unique_keys));
+            thrust::pair<typename thrust::host_vector<K>::iterator, thrust::discard_iterator<>>
+                h_reference2 = thrust::make_pair(h_keys_output.begin() + num_unique_keys,
+                                                 thrust::make_discard_iterator(num_unique_keys));
 
-        thrust::pair<typename thrust::device_vector<K>::iterator, thrust::discard_iterator<>>
-            d_reference2 = thrust::make_pair(d_keys_output.begin() + num_unique_keys,
-                                             thrust::make_discard_iterator(num_unique_keys));
+            thrust::pair<typename thrust::device_vector<K>::iterator, thrust::discard_iterator<>>
+                d_reference2 = thrust::make_pair(d_keys_output.begin() + num_unique_keys,
+                                                 thrust::make_discard_iterator(num_unique_keys));
 
-        ASSERT_EQ(h_keys_output, d_keys_output);
-        ASSERT_EQ_QUIET(h_reference2, h_result2);
-        ASSERT_EQ_QUIET(d_reference2, d_result2);
+            ASSERT_EQ(h_keys_output, d_keys_output);
+            ASSERT_EQ_QUIET(h_reference2, h_result2);
+            ASSERT_EQ_QUIET(d_reference2, d_result2);
 
-        // mask keys output
-        thrust::pair<thrust::discard_iterator<>, typename thrust::host_vector<V>::iterator>
-            h_result3 = thrust::unique_by_key_copy(h_keys.begin(),
-                                                   h_keys.end(),
-                                                   h_vals.begin(),
-                                                   thrust::make_discard_iterator(),
-                                                   h_vals_output.begin());
+            // mask keys output
+            thrust::pair<thrust::discard_iterator<>, typename thrust::host_vector<V>::iterator>
+                h_result3 = thrust::unique_by_key_copy(h_keys.begin(),
+                                                       h_keys.end(),
+                                                       h_vals.begin(),
+                                                       thrust::make_discard_iterator(),
+                                                       h_vals_output.begin());
 
-        thrust::pair<thrust::discard_iterator<>, typename thrust::device_vector<V>::iterator>
-            d_result3 = thrust::unique_by_key_copy(d_keys.begin(),
-                                                   d_keys.end(),
-                                                   d_vals.begin(),
-                                                   thrust::make_discard_iterator(),
-                                                   d_vals_output.begin());
+            thrust::pair<thrust::discard_iterator<>, typename thrust::device_vector<V>::iterator>
+                d_result3 = thrust::unique_by_key_copy(d_keys.begin(),
+                                                       d_keys.end(),
+                                                       d_vals.begin(),
+                                                       thrust::make_discard_iterator(),
+                                                       d_vals_output.begin());
 
-        thrust::pair<thrust::discard_iterator<>, typename thrust::host_vector<V>::iterator>
-            h_reference3 = thrust::make_pair(thrust::make_discard_iterator(num_unique_keys),
-                                             h_vals_output.begin() + num_unique_keys);
+            thrust::pair<thrust::discard_iterator<>, typename thrust::host_vector<V>::iterator>
+                h_reference3 = thrust::make_pair(thrust::make_discard_iterator(num_unique_keys),
+                                                 h_vals_output.begin() + num_unique_keys);
 
-        thrust::pair<thrust::discard_iterator<>, typename thrust::device_vector<V>::iterator>
-            d_reference3 = thrust::make_pair(thrust::make_discard_iterator(num_unique_keys),
-                                             d_vals_output.begin() + num_unique_keys);
+            thrust::pair<thrust::discard_iterator<>, typename thrust::device_vector<V>::iterator>
+                d_reference3 = thrust::make_pair(thrust::make_discard_iterator(num_unique_keys),
+                                                 d_vals_output.begin() + num_unique_keys);
 
-        ASSERT_EQ(h_vals_output, d_vals_output);
-        ASSERT_EQ_QUIET(h_reference3, h_result3);
-        ASSERT_EQ_QUIET(d_reference3, d_result3);
+            ASSERT_EQ(h_vals_output, d_vals_output);
+            ASSERT_EQ_QUIET(h_reference3, h_result3);
+            ASSERT_EQ_QUIET(d_reference3, d_result3);
+        }
     }
 }
