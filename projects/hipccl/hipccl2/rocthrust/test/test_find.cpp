@@ -253,23 +253,30 @@ TYPED_TEST(FindTests, TestFind)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        thrust::host_vector<T> h_data = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::device_vector<T> d_data = h_data;
-
-        HostIterator   h_iter;
-        DeviceIterator d_iter;
-
-        h_iter = thrust::find(h_data.begin(), h_data.end(), T(0));
-        d_iter = thrust::find(d_data.begin(), d_data.end(), T(0));
-        ASSERT_EQ(h_iter - h_data.begin(), d_iter - d_data.begin());
-
-        for(size_t i = 1; i < size; i *= 2)
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {
-            T sample = h_data[i];
-            h_iter   = thrust::find(h_data.begin(), h_data.end(), sample);
-            d_iter   = thrust::find(d_data.begin(), d_data.end(), sample);
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+            thrust::host_vector<T> h_data = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::device_vector<T> d_data = h_data;
+
+            HostIterator   h_iter;
+            DeviceIterator d_iter;
+
+            h_iter = thrust::find(h_data.begin(), h_data.end(), T(0));
+            d_iter = thrust::find(d_data.begin(), d_data.end(), T(0));
             ASSERT_EQ(h_iter - h_data.begin(), d_iter - d_data.begin());
+
+            for(size_t i = 1; i < size; i *= 2)
+            {
+                T sample = h_data[i];
+                h_iter   = thrust::find(h_data.begin(), h_data.end(), sample);
+                d_iter   = thrust::find(d_data.begin(), d_data.end(), sample);
+                ASSERT_EQ(h_iter - h_data.begin(), d_iter - d_data.begin());
+            }
         }
     }
 }
@@ -285,23 +292,32 @@ TYPED_TEST(FindTests, TestFindIf)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        thrust::host_vector<T> h_data = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::device_vector<T> d_data = h_data;
-
-        HostIterator   h_iter;
-        DeviceIterator d_iter;
-
-        h_iter = thrust::find_if(h_data.begin(), h_data.end(), equal_to_value_pred<T>(0));
-        d_iter = thrust::find_if(d_data.begin(), d_data.end(), equal_to_value_pred<T>(0));
-        ASSERT_EQ(h_iter - h_data.begin(), d_iter - d_data.begin());
-
-        for(size_t i = 1; i < size; i *= 2)
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {
-            T sample = h_data[i];
-            h_iter = thrust::find_if(h_data.begin(), h_data.end(), equal_to_value_pred<T>(sample));
-            d_iter = thrust::find_if(d_data.begin(), d_data.end(), equal_to_value_pred<T>(sample));
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+            thrust::host_vector<T> h_data = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::device_vector<T> d_data = h_data;
+
+            HostIterator   h_iter;
+            DeviceIterator d_iter;
+
+            h_iter = thrust::find_if(h_data.begin(), h_data.end(), equal_to_value_pred<T>(0));
+            d_iter = thrust::find_if(d_data.begin(), d_data.end(), equal_to_value_pred<T>(0));
             ASSERT_EQ(h_iter - h_data.begin(), d_iter - d_data.begin());
+
+            for(size_t i = 1; i < size; i *= 2)
+            {
+                T sample = h_data[i];
+                h_iter
+                    = thrust::find_if(h_data.begin(), h_data.end(), equal_to_value_pred<T>(sample));
+                d_iter
+                    = thrust::find_if(d_data.begin(), d_data.end(), equal_to_value_pred<T>(sample));
+                ASSERT_EQ(h_iter - h_data.begin(), d_iter - d_data.begin());
+            }
         }
     }
 }
@@ -317,25 +333,34 @@ TYPED_TEST(FindTests, TestFindIfNot)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        thrust::host_vector<T> h_data = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::device_vector<T> d_data = h_data;
-
-        HostIterator   h_iter;
-        DeviceIterator d_iter;
-
-        h_iter = thrust::find_if_not(h_data.begin(), h_data.end(), not_equal_to_value_pred<T>(0));
-        d_iter = thrust::find_if_not(d_data.begin(), d_data.end(), not_equal_to_value_pred<T>(0));
-        ASSERT_EQ(h_iter - h_data.begin(), d_iter - d_data.begin());
-
-        for(size_t i = 1; i < size; i *= 2)
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {
-            T sample = h_data[i];
-            h_iter   = thrust::find_if_not(
-                h_data.begin(), h_data.end(), not_equal_to_value_pred<T>(sample));
-            d_iter = thrust::find_if_not(
-                d_data.begin(), d_data.end(), not_equal_to_value_pred<T>(sample));
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+            thrust::host_vector<T> h_data = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::device_vector<T> d_data = h_data;
+
+            HostIterator   h_iter;
+            DeviceIterator d_iter;
+
+            h_iter
+                = thrust::find_if_not(h_data.begin(), h_data.end(), not_equal_to_value_pred<T>(0));
+            d_iter
+                = thrust::find_if_not(d_data.begin(), d_data.end(), not_equal_to_value_pred<T>(0));
             ASSERT_EQ(h_iter - h_data.begin(), d_iter - d_data.begin());
+
+            for(size_t i = 1; i < size; i *= 2)
+            {
+                T sample = h_data[i];
+                h_iter   = thrust::find_if_not(
+                    h_data.begin(), h_data.end(), not_equal_to_value_pred<T>(sample));
+                d_iter = thrust::find_if_not(
+                    d_data.begin(), d_data.end(), not_equal_to_value_pred<T>(sample));
+                ASSERT_EQ(h_iter - h_data.begin(), d_iter - d_data.begin());
+            }
         }
     }
 }

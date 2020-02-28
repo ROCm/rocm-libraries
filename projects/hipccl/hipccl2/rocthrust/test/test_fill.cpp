@@ -114,47 +114,54 @@ TYPED_TEST(FillPrimitiveTests, TestFill)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        thrust::host_vector<T> h_data = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::device_vector<T> d_data = h_data;
+            thrust::host_vector<T> h_data = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
 
-        thrust::fill(h_data.begin() + std::min((size_t)1, size),
-                     h_data.begin() + std::min((size_t)3, size),
-                     T(0));
-        thrust::fill(d_data.begin() + std::min((size_t)1, size),
-                     d_data.begin() + std::min((size_t)3, size),
-                     T(0));
+            thrust::device_vector<T> d_data = h_data;
 
-        ASSERT_EQ(h_data, d_data);
+            thrust::fill(h_data.begin() + std::min((size_t)1, size),
+                         h_data.begin() + std::min((size_t)3, size),
+                         T(0));
+            thrust::fill(d_data.begin() + std::min((size_t)1, size),
+                         d_data.begin() + std::min((size_t)3, size),
+                         T(0));
 
-        thrust::fill(h_data.begin() + std::min((size_t)117, size),
-                     h_data.begin() + std::min((size_t)367, size),
-                     T(1));
-        thrust::fill(d_data.begin() + std::min((size_t)117, size),
-                     d_data.begin() + std::min((size_t)367, size),
-                     T(1));
+            ASSERT_EQ(h_data, d_data);
 
-        ASSERT_EQ(h_data, d_data);
+            thrust::fill(h_data.begin() + std::min((size_t)117, size),
+                         h_data.begin() + std::min((size_t)367, size),
+                         T(1));
+            thrust::fill(d_data.begin() + std::min((size_t)117, size),
+                         d_data.begin() + std::min((size_t)367, size),
+                         T(1));
 
-        thrust::fill(h_data.begin() + std::min((size_t)8, size),
-                     h_data.begin() + std::min((size_t)259, size),
-                     T(2));
-        thrust::fill(d_data.begin() + std::min((size_t)8, size),
-                     d_data.begin() + std::min((size_t)259, size),
-                     T(2));
+            ASSERT_EQ(h_data, d_data);
 
-        ASSERT_EQ(h_data, d_data);
+            thrust::fill(h_data.begin() + std::min((size_t)8, size),
+                         h_data.begin() + std::min((size_t)259, size),
+                         T(2));
+            thrust::fill(d_data.begin() + std::min((size_t)8, size),
+                         d_data.begin() + std::min((size_t)259, size),
+                         T(2));
 
-        thrust::fill(h_data.begin() + std::min((size_t)3, size), h_data.end(), T(3));
-        thrust::fill(d_data.begin() + std::min((size_t)3, size), d_data.end(), T(3));
+            ASSERT_EQ(h_data, d_data);
 
-        ASSERT_EQ(h_data, d_data);
+            thrust::fill(h_data.begin() + std::min((size_t)3, size), h_data.end(), T(3));
+            thrust::fill(d_data.begin() + std::min((size_t)3, size), d_data.end(), T(3));
 
-        thrust::fill(h_data.begin(), h_data.end(), T(4));
-        thrust::fill(d_data.begin(), d_data.end(), T(4));
+            ASSERT_EQ(h_data, d_data);
 
-        ASSERT_EQ(h_data, d_data);
+            thrust::fill(h_data.begin(), h_data.end(), T(4));
+            thrust::fill(d_data.begin(), d_data.end(), T(4));
+
+            ASSERT_EQ(h_data, d_data);
+        }
     }
 }
 
@@ -254,45 +261,52 @@ TYPED_TEST(FillPrimitiveTests, TestFillN)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        thrust::host_vector<T> h_data = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::device_vector<T> d_data = h_data;
+            thrust::host_vector<T> h_data = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
 
-        size_t begin_offset = std::min<size_t>(1, size);
-        thrust::fill_n(
-            h_data.begin() + begin_offset, std::min((size_t)3, size) - begin_offset, T(0));
-        thrust::fill_n(
-            d_data.begin() + begin_offset, std::min((size_t)3, size) - begin_offset, T(0));
+            thrust::device_vector<T> d_data = h_data;
 
-        ASSERT_EQ(h_data, d_data);
+            size_t begin_offset = std::min<size_t>(1, size);
+            thrust::fill_n(
+                h_data.begin() + begin_offset, std::min((size_t)3, size) - begin_offset, T(0));
+            thrust::fill_n(
+                d_data.begin() + begin_offset, std::min((size_t)3, size) - begin_offset, T(0));
 
-        begin_offset = std::min<size_t>(117, size);
-        thrust::fill_n(
-            h_data.begin() + begin_offset, std::min((size_t)367, size) - begin_offset, T(1));
-        thrust::fill_n(
-            d_data.begin() + begin_offset, std::min((size_t)367, size) - begin_offset, T(1));
+            ASSERT_EQ(h_data, d_data);
 
-        ASSERT_EQ(h_data, d_data);
+            begin_offset = std::min<size_t>(117, size);
+            thrust::fill_n(
+                h_data.begin() + begin_offset, std::min((size_t)367, size) - begin_offset, T(1));
+            thrust::fill_n(
+                d_data.begin() + begin_offset, std::min((size_t)367, size) - begin_offset, T(1));
 
-        begin_offset = std::min<size_t>(8, size);
-        thrust::fill_n(
-            h_data.begin() + begin_offset, std::min((size_t)259, size) - begin_offset, T(2));
-        thrust::fill_n(
-            d_data.begin() + begin_offset, std::min((size_t)259, size) - begin_offset, T(2));
+            ASSERT_EQ(h_data, d_data);
 
-        ASSERT_EQ(h_data, d_data);
+            begin_offset = std::min<size_t>(8, size);
+            thrust::fill_n(
+                h_data.begin() + begin_offset, std::min((size_t)259, size) - begin_offset, T(2));
+            thrust::fill_n(
+                d_data.begin() + begin_offset, std::min((size_t)259, size) - begin_offset, T(2));
 
-        begin_offset = std::min<size_t>(3, size);
-        thrust::fill_n(h_data.begin() + begin_offset, h_data.size() - begin_offset, T(3));
-        thrust::fill_n(d_data.begin() + begin_offset, d_data.size() - begin_offset, T(3));
+            ASSERT_EQ(h_data, d_data);
 
-        ASSERT_EQ(h_data, d_data);
+            begin_offset = std::min<size_t>(3, size);
+            thrust::fill_n(h_data.begin() + begin_offset, h_data.size() - begin_offset, T(3));
+            thrust::fill_n(d_data.begin() + begin_offset, d_data.size() - begin_offset, T(3));
 
-        thrust::fill_n(h_data.begin(), h_data.size(), T(4));
-        thrust::fill_n(d_data.begin(), d_data.size(), T(4));
+            ASSERT_EQ(h_data, d_data);
 
-        ASSERT_EQ(h_data, d_data);
+            thrust::fill_n(h_data.begin(), h_data.size(), T(4));
+            thrust::fill_n(d_data.begin(), d_data.size(), T(4));
+
+            ASSERT_EQ(h_data, d_data);
+        }
     }
 }
 
@@ -486,4 +500,4 @@ TEST(FillTests, TestFillNDispatchImplicit)
     thrust::fill_n(thrust::retag<my_tag>(vec.begin()), vec.size(), 0);
 
     ASSERT_EQ(13, vec.front());
-}
+} 

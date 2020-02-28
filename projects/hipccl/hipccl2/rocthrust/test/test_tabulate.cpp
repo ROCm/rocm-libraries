@@ -92,7 +92,7 @@ TYPED_TEST(TabulateTests, TestTabulateSimple)
     ASSERT_EQ(v[4], T(64));
 }
 
-template<class OutputType>
+template <class OutputType>
 struct nonconst_op
 {
     THRUST_HIP_FUNCTION
@@ -105,7 +105,7 @@ struct nonconst_op
 TYPED_TEST(TabulateTests, TestTabulateSimpleNonConstOP)
 {
     using Vector = typename TestFixture::input_type;
-    using T = typename Vector::value_type;
+    using T      = typename Vector::value_type;
 
     Vector v(5);
 

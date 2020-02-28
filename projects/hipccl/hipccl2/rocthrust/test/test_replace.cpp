@@ -94,22 +94,30 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceWithRandomDataAndDifferentSizes)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10);
-        thrust::device_vector<T> d_data = h_data;
-
-        T new_value = (T)0;
-        T old_value = (T)1;
-
-        thrust::replace(h_data.begin(), h_data.end(), old_value, new_value);
-        thrust::replace(d_data.begin(), d_data.end(), old_value, new_value);
-
-        ASSERT_EQ(h_data.size(), size);
-        ASSERT_EQ(d_data.size(), size);
-
-        thrust::host_vector<T> h_data_d(d_data);
-        for(size_t i = 0; i < size; i++)
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {
-            ASSERT_NEAR(h_data[i], h_data_d[i], T(0.1));
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+            thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10, seed_value);
+            thrust::device_vector<T> d_data = h_data;
+
+            T new_value = (T)0;
+            T old_value = (T)1;
+
+            thrust::replace(h_data.begin(), h_data.end(), old_value, new_value);
+            thrust::replace(d_data.begin(), d_data.end(), old_value, new_value);
+
+            ASSERT_EQ(h_data.size(), size);
+            ASSERT_EQ(d_data.size(), size);
+
+            thrust::host_vector<T> h_data_d(d_data);
+            for(size_t i = 0; i < size; i++)
+            {
+                ASSERT_NEAR(h_data[i], h_data_d[i], T(0.1));
+            }
         }
     }
 }
@@ -167,7 +175,7 @@ TEST(ReplaceTests, ReplaceCopyValidateDispatch)
 
 template <typename InputIterator, typename OutputIterator, typename T>
 OutputIterator
-    replace_copy(my_tag, InputIterator, InputIterator, OutputIterator result, const T&, const T&)
+replace_copy(my_tag, InputIterator, InputIterator, OutputIterator result, const T&, const T&)
 {
     *result = 13;
     return result;
@@ -193,25 +201,34 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceCopyWithRandomData)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-
-        thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10);
-        thrust::device_vector<T> d_data = h_data;
-
-        T old_value = (T)0;
-        T new_value = (T)1;
-
-        thrust::host_vector<T>   h_dest(size);
-        thrust::device_vector<T> d_dest(size);
-
-        thrust::replace_copy(h_data.begin(), h_data.end(), h_dest.begin(), old_value, new_value);
-        thrust::replace_copy(d_data.begin(), d_data.end(), d_dest.begin(), old_value, new_value);
-
-        thrust::host_vector<T> h_data_d(d_data);
-        thrust::host_vector<T> h_dest_d(d_dest);
-        for(size_t i = 0; i < size; i++)
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {
-            ASSERT_NEAR(h_data[i], h_data_d[i], T(0.1));
-            ASSERT_NEAR(h_dest[i], h_dest_d[i], T(0.1));
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+            thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10, seed_value);
+            thrust::device_vector<T> d_data = h_data;
+
+            T old_value = (T)0;
+            T new_value = (T)1;
+
+            thrust::host_vector<T>   h_dest(size);
+            thrust::device_vector<T> d_dest(size);
+
+            thrust::replace_copy(
+                h_data.begin(), h_data.end(), h_dest.begin(), old_value, new_value);
+            thrust::replace_copy(
+                d_data.begin(), d_data.end(), d_dest.begin(), old_value, new_value);
+
+            thrust::host_vector<T> h_data_d(d_data);
+            thrust::host_vector<T> h_dest_d(d_dest);
+            for(size_t i = 0; i < size; i++)
+            {
+                ASSERT_NEAR(h_data[i], h_data_d[i], T(0.1));
+                ASSERT_NEAR(h_dest[i], h_dest_d[i], T(0.1));
+            }
         }
     }
 }
@@ -223,22 +240,38 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceCopyToDiscardIterator)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10);
-        thrust::device_vector<T> d_data = h_data;
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        T old_value = 0;
-        T new_value = 1;
+            thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10, seed_value);
+            thrust::device_vector<T> d_data = h_data;
 
-        thrust::discard_iterator<> h_result = thrust::replace_copy(
-            h_data.begin(), h_data.end(), thrust::make_discard_iterator(), old_value, new_value);
+            T old_value = 0;
+            T new_value = 1;
 
-        thrust::discard_iterator<> d_result = thrust::replace_copy(
-            d_data.begin(), d_data.end(), thrust::make_discard_iterator(), old_value, new_value);
+            thrust::discard_iterator<> h_result
+                = thrust::replace_copy(h_data.begin(),
+                                       h_data.end(),
+                                       thrust::make_discard_iterator(),
+                                       old_value,
+                                       new_value);
 
-        thrust::discard_iterator<> reference(size);
+            thrust::discard_iterator<> d_result
+                = thrust::replace_copy(d_data.begin(),
+                                       d_data.end(),
+                                       thrust::make_discard_iterator(),
+                                       old_value,
+                                       new_value);
 
-        ASSERT_EQ(reference, d_result);
-        ASSERT_EQ(reference, h_result);
+            thrust::discard_iterator<> reference(size);
+
+            ASSERT_EQ(reference, d_result);
+            ASSERT_EQ(reference, h_result);
+        }
     }
 }
 
@@ -404,16 +437,24 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceIfWithRandomData)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10);
-        thrust::device_vector<T> d_data = h_data;
-
-        thrust::replace_if(h_data.begin(), h_data.end(), less_than_five<T>(), (T)0);
-        thrust::replace_if(d_data.begin(), d_data.end(), less_than_five<T>(), (T)0);
-
-        thrust::host_vector<T> h_data_d(d_data);
-        for(size_t i = 0; i < size; i++)
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {
-            ASSERT_NEAR(h_data[i], h_data_d[i], T(0.1));
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+            thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10, seed_value);
+            thrust::device_vector<T> d_data = h_data;
+
+            thrust::replace_if(h_data.begin(), h_data.end(), less_than_five<T>(), (T)0);
+            thrust::replace_if(d_data.begin(), d_data.end(), less_than_five<T>(), (T)0);
+
+            thrust::host_vector<T> h_data_d(d_data);
+            for(size_t i = 0; i < size; i++)
+            {
+                ASSERT_NEAR(h_data[i], h_data_d[i], T(0.1));
+            }
         }
     }
 }
@@ -468,8 +509,8 @@ TEST(ReplaceTests, ReplaceCopyIfDispatchExplicit)
 }
 
 template <typename InputIterator, typename OutputIterator, typename Predicate, typename T>
-OutputIterator replace_copy_if(
-    my_tag, InputIterator, InputIterator, OutputIterator result, Predicate, const T&)
+OutputIterator
+replace_copy_if(my_tag, InputIterator, InputIterator, OutputIterator result, Predicate, const T&)
 {
     *result = 13;
     return result;
@@ -593,24 +634,31 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceCopyIfWithRandomData)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-
-        thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10);
-        thrust::device_vector<T> d_data = h_data;
-
-        thrust::host_vector<T>   h_dest(size);
-        thrust::device_vector<T> d_dest(size);
-
-        thrust::replace_copy_if(
-            h_data.begin(), h_data.end(), h_dest.begin(), less_than_five<T>(), 0);
-        thrust::replace_copy_if(
-            d_data.begin(), d_data.end(), d_dest.begin(), less_than_five<T>(), 0);
-
-        thrust::host_vector<T> h_data_d(d_data);
-        thrust::host_vector<T> h_dest_d(d_dest);
-        for(size_t i = 0; i < size; i++)
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {
-            ASSERT_NEAR(h_data[i], h_data_d[i], T(0.1));
-            ASSERT_NEAR(h_dest[i], h_dest_d[i], T(0.1));
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+            thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10, seed_value);
+            thrust::device_vector<T> d_data = h_data;
+
+            thrust::host_vector<T>   h_dest(size);
+            thrust::device_vector<T> d_dest(size);
+
+            thrust::replace_copy_if(
+                h_data.begin(), h_data.end(), h_dest.begin(), less_than_five<T>(), 0);
+            thrust::replace_copy_if(
+                d_data.begin(), d_data.end(), d_dest.begin(), less_than_five<T>(), 0);
+
+            thrust::host_vector<T> h_data_d(d_data);
+            thrust::host_vector<T> h_dest_d(d_dest);
+            for(size_t i = 0; i < size; i++)
+            {
+                ASSERT_NEAR(h_data[i], h_data_d[i], T(0.1));
+                ASSERT_NEAR(h_dest[i], h_dest_d[i], T(0.1));
+            }
         }
     }
 }
@@ -622,19 +670,35 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceCopyIfToDiscardIteratorRandomData)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10);
-        thrust::device_vector<T> d_data = h_data;
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::discard_iterator<> h_result = thrust::replace_copy_if(
-            h_data.begin(), h_data.end(), thrust::make_discard_iterator(), less_than_five<T>(), 0);
+            thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10, seed_value);
+            thrust::device_vector<T> d_data = h_data;
 
-        thrust::discard_iterator<> d_result = thrust::replace_copy_if(
-            d_data.begin(), d_data.end(), thrust::make_discard_iterator(), less_than_five<T>(), 0);
+            thrust::discard_iterator<> h_result
+                = thrust::replace_copy_if(h_data.begin(),
+                                          h_data.end(),
+                                          thrust::make_discard_iterator(),
+                                          less_than_five<T>(),
+                                          0);
 
-        thrust::discard_iterator<> reference(size);
+            thrust::discard_iterator<> d_result
+                = thrust::replace_copy_if(d_data.begin(),
+                                          d_data.end(),
+                                          thrust::make_discard_iterator(),
+                                          less_than_five<T>(),
+                                          0);
 
-        ASSERT_EQ(reference, h_result);
-        ASSERT_EQ(reference, d_result);
+            thrust::discard_iterator<> reference(size);
+
+            ASSERT_EQ(reference, h_result);
+            ASSERT_EQ(reference, d_result);
+        }
     }
 }
 
@@ -645,34 +709,42 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceCopyIfStencil)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10);
-        thrust::device_vector<T> d_data = h_data;
-
-        thrust::host_vector<T>   h_stencil = get_random_data<T>(size, 0, 10);
-        thrust::device_vector<T> d_stencil = h_stencil;
-
-        thrust::host_vector<T>   h_dest(size);
-        thrust::device_vector<T> d_dest(size);
-
-        thrust::replace_copy_if(h_data.begin(),
-                                h_data.end(),
-                                h_stencil.begin(),
-                                h_dest.begin(),
-                                less_than_five<T>(),
-                                0);
-        thrust::replace_copy_if(d_data.begin(),
-                                d_data.end(),
-                                d_stencil.begin(),
-                                d_dest.begin(),
-                                less_than_five<T>(),
-                                0);
-
-        thrust::host_vector<T> h_data_d(d_data);
-        thrust::host_vector<T> h_dest_d(d_dest);
-        for(size_t i = 0; i < size; i++)
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {
-            ASSERT_NEAR(h_data[i], h_data_d[i], T(0.1));
-            ASSERT_NEAR(h_dest[i], h_dest_d[i], T(0.1));
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+            thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10, seed_value);
+            thrust::device_vector<T> d_data = h_data;
+
+            thrust::host_vector<T>   h_stencil = get_random_data<T>(size, 0, 10, seed_value + seed_value_addition);
+            thrust::device_vector<T> d_stencil = h_stencil;
+
+            thrust::host_vector<T>   h_dest(size);
+            thrust::device_vector<T> d_dest(size);
+
+            thrust::replace_copy_if(h_data.begin(),
+                                    h_data.end(),
+                                    h_stencil.begin(),
+                                    h_dest.begin(),
+                                    less_than_five<T>(),
+                                    0);
+            thrust::replace_copy_if(d_data.begin(),
+                                    d_data.end(),
+                                    d_stencil.begin(),
+                                    d_dest.begin(),
+                                    less_than_five<T>(),
+                                    0);
+
+            thrust::host_vector<T> h_data_d(d_data);
+            thrust::host_vector<T> h_dest_d(d_dest);
+            for(size_t i = 0; i < size; i++)
+            {
+                ASSERT_NEAR(h_data[i], h_data_d[i], T(0.1));
+                ASSERT_NEAR(h_dest[i], h_dest_d[i], T(0.1));
+            }
         }
     }
 }
@@ -684,32 +756,39 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceCopyIfStencilToDiscardIteratorRandomDat
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10);
-        thrust::device_vector<T> d_data = h_data;
+            thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10, seed_value);
+            thrust::device_vector<T> d_data = h_data;
 
-        thrust::host_vector<T>   h_stencil = get_random_data<T>(size, 0, 10);
-        thrust::device_vector<T> d_stencil = h_stencil;
+            thrust::host_vector<T>   h_stencil = get_random_data<T>(size, 0, 10, seed_value + seed_value_addition);
+            thrust::device_vector<T> d_stencil = h_stencil;
 
-        thrust::discard_iterator<> h_result
-            = thrust::replace_copy_if(h_data.begin(),
-                                      h_data.end(),
-                                      h_stencil.begin(),
-                                      thrust::make_discard_iterator(),
-                                      less_than_five<T>(),
-                                      0);
+            thrust::discard_iterator<> h_result
+                = thrust::replace_copy_if(h_data.begin(),
+                                          h_data.end(),
+                                          h_stencil.begin(),
+                                          thrust::make_discard_iterator(),
+                                          less_than_five<T>(),
+                                          0);
 
-        thrust::discard_iterator<> d_result
-            = thrust::replace_copy_if(d_data.begin(),
-                                      d_data.end(),
-                                      d_stencil.begin(),
-                                      thrust::make_discard_iterator(),
-                                      less_than_five<T>(),
-                                      0);
+            thrust::discard_iterator<> d_result
+                = thrust::replace_copy_if(d_data.begin(),
+                                          d_data.end(),
+                                          d_stencil.begin(),
+                                          thrust::make_discard_iterator(),
+                                          less_than_five<T>(),
+                                          0);
 
-        thrust::discard_iterator<> reference(size);
+            thrust::discard_iterator<> reference(size);
 
-        ASSERT_EQ(reference, h_result);
-        ASSERT_EQ(reference, d_result);
+            ASSERT_EQ(reference, h_result);
+            ASSERT_EQ(reference, d_result);
+        }
     }
 }

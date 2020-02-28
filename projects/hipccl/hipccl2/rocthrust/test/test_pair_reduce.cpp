@@ -49,32 +49,43 @@ TYPED_TEST(PairReduceTests, TestPairReduce)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        thrust::host_vector<T> h_p1 = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        ;
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::host_vector<T> h_p2 = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        ;
+            thrust::host_vector<T> h_p1 = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            ;
 
-        thrust::host_vector<P> h_pairs(size);
+            thrust::host_vector<T> h_p2 = get_random_data<T>(
+                size,
+                std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed_value + seed_value_addition);
+            ;
 
-        // zip up pairs on the host
-        thrust::transform(
-            h_p1.begin(), h_p1.end(), h_p2.begin(), h_pairs.begin(), make_pair_functor());
+            thrust::host_vector<P> h_pairs(size);
 
-        thrust::device_vector<T> d_p1    = h_p1;
-        thrust::device_vector<T> d_p2    = h_p2;
-        thrust::device_vector<P> d_pairs = h_pairs;
+            // zip up pairs on the host
+            thrust::transform(
+                h_p1.begin(), h_p1.end(), h_p2.begin(), h_pairs.begin(), make_pair_functor());
 
-        P init = thrust::make_pair(13, 13);
+            thrust::device_vector<T> d_p1    = h_p1;
+            thrust::device_vector<T> d_p2    = h_p2;
+            thrust::device_vector<P> d_pairs = h_pairs;
 
-        // reduce on the host
-        P h_result = thrust::reduce(h_pairs.begin(), h_pairs.end(), init, add_pairs());
+            P init = thrust::make_pair(13, 13);
 
-        // reduce on the device
-        P d_result = thrust::reduce(d_pairs.begin(), d_pairs.end(), init, add_pairs());
+            // reduce on the host
+            P h_result = thrust::reduce(h_pairs.begin(), h_pairs.end(), init, add_pairs());
 
-        ASSERT_EQ_QUIET(h_result, d_result);
+            // reduce on the device
+            P d_result = thrust::reduce(d_pairs.begin(), d_pairs.end(), init, add_pairs());
+
+            ASSERT_EQ_QUIET(h_result, d_result);
+        }
     }
 }

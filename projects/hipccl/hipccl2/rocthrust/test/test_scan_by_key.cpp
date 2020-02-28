@@ -114,8 +114,8 @@ TEST(ScanByKeyTests, TestInclusiveScanByKeyDispatchExplicit)
 }
 
 template <typename InputIterator1, typename InputIterator2, typename OutputIterator>
-OutputIterator inclusive_scan_by_key(
-    my_tag, InputIterator1, InputIterator1, InputIterator2, OutputIterator result)
+OutputIterator
+inclusive_scan_by_key(my_tag, InputIterator1, InputIterator1, InputIterator2, OutputIterator result)
 {
     *result = 13;
     return result;
@@ -229,8 +229,8 @@ TEST(ScanByKeyTests, TestExclusiveScanByKeyDispatchExplicit)
 }
 
 template <typename InputIterator1, typename InputIterator2, typename OutputIterator>
-OutputIterator exclusive_scan_by_key(
-    my_tag, InputIterator1, InputIterator1, InputIterator2, OutputIterator result)
+OutputIterator
+exclusive_scan_by_key(my_tag, InputIterator1, InputIterator1, InputIterator2, OutputIterator result)
 {
     *result = 13;
     return result;
@@ -413,6 +413,7 @@ TYPED_TEST(ScanByKeyVariablesTests, TestInclusiveScanByKey)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
         thrust::host_vector<int>      h_keys(size);
         thrust::default_random_engine rng;
         for(size_t i = 0, k = 0; i < size; i++)
@@ -423,20 +424,27 @@ TYPED_TEST(ScanByKeyVariablesTests, TestInclusiveScanByKey)
         }
         thrust::device_vector<int> d_keys = h_keys;
 
-        thrust::host_vector<int> h_vals = get_random_data<int>(
-            size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max());
-        for(size_t i = 0; i < size; i++)
-            h_vals[i] = i % 10;
-        thrust::device_vector<T> d_vals = h_vals;
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::host_vector<T>   h_output(size);
-        thrust::device_vector<T> d_output(size);
+            thrust::host_vector<int> h_vals = get_random_data<int>(
+                size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed_value);
+            for(size_t i = 0; i < size; i++)
+                h_vals[i] = i % 10;
+            thrust::device_vector<T> d_vals = h_vals;
 
-        thrust::inclusive_scan_by_key(
-            h_keys.begin(), h_keys.end(), h_vals.begin(), h_output.begin());
-        thrust::inclusive_scan_by_key(
-            d_keys.begin(), d_keys.end(), d_vals.begin(), d_output.begin());
-        ASSERT_EQ(d_output, h_output);
+            thrust::host_vector<T>   h_output(size);
+            thrust::device_vector<T> d_output(size);
+
+            thrust::inclusive_scan_by_key(
+                h_keys.begin(), h_keys.end(), h_vals.begin(), h_output.begin());
+            thrust::inclusive_scan_by_key(
+                d_keys.begin(), d_keys.end(), d_vals.begin(), d_output.begin());
+            ASSERT_EQ(d_output, h_output);
+        }
     }
 }
 
@@ -447,6 +455,7 @@ TYPED_TEST(ScanByKeyVariablesTests, TestExclusiveScanByKey)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
         thrust::host_vector<int>      h_keys(size);
         thrust::default_random_engine rng;
         for(size_t i = 0, k = 0; i < size; i++)
@@ -457,28 +466,35 @@ TYPED_TEST(ScanByKeyVariablesTests, TestExclusiveScanByKey)
         }
         thrust::device_vector<int> d_keys = h_keys;
 
-        thrust::host_vector<int> h_vals = get_random_data<int>(
-            size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max());
-        for(size_t i = 0; i < size; i++)
-            h_vals[i] = i % 10;
-        thrust::device_vector<T> d_vals = h_vals;
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::host_vector<T>   h_output(size);
-        thrust::device_vector<T> d_output(size);
+            thrust::host_vector<int> h_vals = get_random_data<int>(
+                size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed_value);
+            for(size_t i = 0; i < size; i++)
+                h_vals[i] = i % 10;
+            thrust::device_vector<T> d_vals = h_vals;
 
-        // without init
-        thrust::exclusive_scan_by_key(
-            h_keys.begin(), h_keys.end(), h_vals.begin(), h_output.begin());
-        thrust::exclusive_scan_by_key(
-            d_keys.begin(), d_keys.end(), d_vals.begin(), d_output.begin());
-        ASSERT_EQ(d_output, h_output);
+            thrust::host_vector<T>   h_output(size);
+            thrust::device_vector<T> d_output(size);
 
-        // with init
-        thrust::exclusive_scan_by_key(
-            h_keys.begin(), h_keys.end(), h_vals.begin(), h_output.begin(), (T)11);
-        thrust::exclusive_scan_by_key(
-            d_keys.begin(), d_keys.end(), d_vals.begin(), d_output.begin(), (T)11);
-        ASSERT_EQ(d_output, h_output);
+            // without init
+            thrust::exclusive_scan_by_key(
+                h_keys.begin(), h_keys.end(), h_vals.begin(), h_output.begin());
+            thrust::exclusive_scan_by_key(
+                d_keys.begin(), d_keys.end(), d_vals.begin(), d_output.begin());
+            ASSERT_EQ(d_output, h_output);
+
+            // with init
+            thrust::exclusive_scan_by_key(
+                h_keys.begin(), h_keys.end(), h_vals.begin(), h_output.begin(), (T)11);
+            thrust::exclusive_scan_by_key(
+                d_keys.begin(), d_keys.end(), d_vals.begin(), d_output.begin(), (T)11);
+            ASSERT_EQ(d_output, h_output);
+        }
     }
 }
 
@@ -497,6 +513,7 @@ TYPED_TEST(ScanByKeyVariablesTests, TestInclusiveScanByKeyInPlace)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
         thrust::host_vector<int>      h_keys(size);
         thrust::default_random_engine rng;
         for(size_t i = 0, k = 0; i < size; i++)
@@ -507,23 +524,30 @@ TYPED_TEST(ScanByKeyVariablesTests, TestInclusiveScanByKeyInPlace)
         }
         thrust::device_vector<int> d_keys = h_keys;
 
-        thrust::host_vector<T> h_vals = get_random_data<int>(
-            size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max());
-        for(size_t i = 0; i < size; i++)
-            h_vals[i] = i % 10;
-        thrust::device_vector<T> d_vals = h_vals;
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::host_vector<T>   h_output(size);
-        thrust::device_vector<T> d_output(size);
+            thrust::host_vector<T> h_vals = get_random_data<int>(
+                size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed_value);
+            for(size_t i = 0; i < size; i++)
+                h_vals[i] = i % 10;
+            thrust::device_vector<T> d_vals = h_vals;
 
-        // in-place scans
-        h_output = h_vals;
-        d_output = d_vals;
-        thrust::inclusive_scan_by_key(
-            h_keys.begin(), h_keys.end(), h_output.begin(), h_output.begin());
-        thrust::inclusive_scan_by_key(
-            d_keys.begin(), d_keys.end(), d_output.begin(), d_output.begin());
-        ASSERT_EQ(d_output, h_output);
+            thrust::host_vector<T>   h_output(size);
+            thrust::device_vector<T> d_output(size);
+
+            // in-place scans
+            h_output = h_vals;
+            d_output = d_vals;
+            thrust::inclusive_scan_by_key(
+                h_keys.begin(), h_keys.end(), h_output.begin(), h_output.begin());
+            thrust::inclusive_scan_by_key(
+                d_keys.begin(), d_keys.end(), d_output.begin(), d_output.begin());
+            ASSERT_EQ(d_output, h_output);
+        }
     }
 }
 
@@ -534,6 +558,7 @@ TYPED_TEST(ScanByKeyVariablesTests, TestExclusiveScanByKeyInPlace)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
         thrust::host_vector<int>      h_keys(size);
         thrust::default_random_engine rng;
         for(size_t i = 0, k = 0; i < size; i++)
@@ -544,19 +569,26 @@ TYPED_TEST(ScanByKeyVariablesTests, TestExclusiveScanByKeyInPlace)
         }
         thrust::device_vector<int> d_keys = h_keys;
 
-        thrust::host_vector<T> h_vals = get_random_data<int>(
-            size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max());
-        for(size_t i = 0; i < size; i++)
-            h_vals[i] = i % 10;
-        thrust::device_vector<T> d_vals = h_vals;
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::host_vector<T>   h_output = h_vals;
-        thrust::device_vector<T> d_output = d_vals;
-        thrust::exclusive_scan_by_key(
-            h_keys.begin(), h_keys.end(), h_output.begin(), h_output.begin(), (T)11);
-        thrust::exclusive_scan_by_key(
-            d_keys.begin(), d_keys.end(), d_output.begin(), d_output.begin(), (T)11);
-        ASSERT_EQ(d_output, h_output);
+            thrust::host_vector<T> h_vals = get_random_data<int>(
+                size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed_value);
+            for(size_t i = 0; i < size; i++)
+                h_vals[i] = i % 10;
+            thrust::device_vector<T> d_vals = h_vals;
+
+            thrust::host_vector<T>   h_output = h_vals;
+            thrust::device_vector<T> d_output = d_vals;
+            thrust::exclusive_scan_by_key(
+                h_keys.begin(), h_keys.end(), h_output.begin(), h_output.begin(), (T)11);
+            thrust::exclusive_scan_by_key(
+                d_keys.begin(), d_keys.end(), d_output.begin(), d_output.begin(), (T)11);
+            ASSERT_EQ(d_output, h_output);
+        }
     }
 }
 
@@ -574,89 +606,107 @@ TEST(ScanByKeyTests, TestScanByKeyMixedTypes)
     }
     thrust::device_vector<int> d_keys = h_keys;
 
-    thrust::host_vector<unsigned int> h_vals = get_random_data<unsigned int>(
-        size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max());
-    for(size_t i = 0; i < size; i++)
-        h_vals[i] %= 10;
-    thrust::device_vector<unsigned int> d_vals = h_vals;
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-    thrust::host_vector<float>   h_float_output(size);
-    thrust::device_vector<float> d_float_output(size);
-    thrust::host_vector<int>     h_int_output(size);
-    thrust::device_vector<int>   d_int_output(size);
+        thrust::host_vector<unsigned int> h_vals = get_random_data<unsigned int>(
+            size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed_value);
+        for(size_t i = 0; i < size; i++)
+            h_vals[i] %= 10;
+        thrust::device_vector<unsigned int> d_vals = h_vals;
 
-    //mixed vals/output types
-    thrust::inclusive_scan_by_key(
-        h_keys.begin(), h_keys.end(), h_vals.begin(), h_float_output.begin());
-    thrust::inclusive_scan_by_key(
-        d_keys.begin(), d_keys.end(), d_vals.begin(), d_float_output.begin());
-    ASSERT_EQ(d_float_output, h_float_output);
+        thrust::host_vector<float>   h_float_output(size);
+        thrust::device_vector<float> d_float_output(size);
+        thrust::host_vector<int>     h_int_output(size);
+        thrust::device_vector<int>   d_int_output(size);
 
-    thrust::exclusive_scan_by_key(
-        h_keys.begin(), h_keys.end(), h_vals.begin(), h_float_output.begin(), (float)3.5);
-    thrust::exclusive_scan_by_key(
-        d_keys.begin(), d_keys.end(), d_vals.begin(), d_float_output.begin(), (float)3.5);
-    ASSERT_EQ(d_float_output, h_float_output);
+        //mixed vals/output types
+        thrust::inclusive_scan_by_key(
+            h_keys.begin(), h_keys.end(), h_vals.begin(), h_float_output.begin());
+        thrust::inclusive_scan_by_key(
+            d_keys.begin(), d_keys.end(), d_vals.begin(), d_float_output.begin());
+        ASSERT_EQ(d_float_output, h_float_output);
 
-    thrust::exclusive_scan_by_key(
-        h_keys.begin(), h_keys.end(), h_vals.begin(), h_float_output.begin(), (int)3);
-    thrust::exclusive_scan_by_key(
-        d_keys.begin(), d_keys.end(), d_vals.begin(), d_float_output.begin(), (int)3);
-    ASSERT_EQ(d_float_output, h_float_output);
+        thrust::exclusive_scan_by_key(
+            h_keys.begin(), h_keys.end(), h_vals.begin(), h_float_output.begin(), (float)3.5);
+        thrust::exclusive_scan_by_key(
+            d_keys.begin(), d_keys.end(), d_vals.begin(), d_float_output.begin(), (float)3.5);
+        ASSERT_EQ(d_float_output, h_float_output);
 
-    thrust::exclusive_scan_by_key(
-        h_keys.begin(), h_keys.end(), h_vals.begin(), h_int_output.begin(), (int)3);
-    thrust::exclusive_scan_by_key(
-        d_keys.begin(), d_keys.end(), d_vals.begin(), d_int_output.begin(), (int)3);
-    ASSERT_EQ(d_int_output, h_int_output);
+        thrust::exclusive_scan_by_key(
+            h_keys.begin(), h_keys.end(), h_vals.begin(), h_float_output.begin(), (int)3);
+        thrust::exclusive_scan_by_key(
+            d_keys.begin(), d_keys.end(), d_vals.begin(), d_float_output.begin(), (int)3);
+        ASSERT_EQ(d_float_output, h_float_output);
 
-    thrust::exclusive_scan_by_key(
-        h_keys.begin(), h_keys.end(), h_vals.begin(), h_int_output.begin(), (float)3.5);
-    thrust::exclusive_scan_by_key(
-        d_keys.begin(), d_keys.end(), d_vals.begin(), d_int_output.begin(), (float)3.5);
-    ASSERT_EQ(d_int_output, h_int_output);
+        thrust::exclusive_scan_by_key(
+            h_keys.begin(), h_keys.end(), h_vals.begin(), h_int_output.begin(), (int)3);
+        thrust::exclusive_scan_by_key(
+            d_keys.begin(), d_keys.end(), d_vals.begin(), d_int_output.begin(), (int)3);
+        ASSERT_EQ(d_int_output, h_int_output);
+
+        thrust::exclusive_scan_by_key(
+            h_keys.begin(), h_keys.end(), h_vals.begin(), h_int_output.begin(), (float)3.5);
+        thrust::exclusive_scan_by_key(
+            d_keys.begin(), d_keys.end(), d_vals.begin(), d_int_output.begin(), (float)3.5);
+        ASSERT_EQ(d_int_output, h_int_output);
+    }
 }
 
 TEST(ScanByKeyTests, TestScanByKeyLargeInput)
 {
     const unsigned int N = 1 << 20;
 
-    thrust::host_vector<int> vals_sizes = get_random_data<int>(
-        10, std::numeric_limits<int>::min(), std::numeric_limits<int>::max());
-
-    thrust::host_vector<int> h_vals
-        = get_random_data<int>(N, std::numeric_limits<int>::min(), std::numeric_limits<int>::max());
-    thrust::device_vector<unsigned int> d_vals = h_vals;
-
-    thrust::host_vector<unsigned int>   h_output(N, 0);
-    thrust::device_vector<unsigned int> d_output(N, 0);
-
-    for(unsigned int i = 0; i < vals_sizes.size(); i++)
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        const unsigned int n = vals_sizes[i] % N;
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        // define segments
-        thrust::host_vector<unsigned int> h_keys(n);
-        thrust::default_random_engine     rng;
-        for(size_t i = 0, k = 0; i < n; i++)
+        thrust::host_vector<int> vals_sizes = get_random_data<int>(
+            10, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed_value);
+
+        thrust::host_vector<int> h_vals = get_random_data<int>(
+            N,
+            std::numeric_limits<int>::min(),
+            std::numeric_limits<int>::max(),
+            seed_value + seed_value_addition
+        );
+        thrust::device_vector<unsigned int> d_vals = h_vals;
+
+        thrust::host_vector<unsigned int>   h_output(N, 0);
+        thrust::device_vector<unsigned int> d_output(N, 0);
+
+        for(unsigned int i = 0; i < vals_sizes.size(); i++)
         {
-            h_keys[i] = k;
-            if(rng() % 100 == 0)
-                k++;
+            const unsigned int n = vals_sizes[i] % N;
+
+            // define segments
+            thrust::host_vector<unsigned int> h_keys(n);
+            thrust::default_random_engine     rng;
+            for(size_t i = 0, k = 0; i < n; i++)
+            {
+                h_keys[i] = k;
+                if(rng() % 100 == 0)
+                    k++;
+            }
+            thrust::device_vector<unsigned int> d_keys = h_keys;
+
+            thrust::inclusive_scan_by_key(
+                h_keys.begin(), h_keys.begin() + n, h_vals.begin(), h_output.begin());
+            thrust::inclusive_scan_by_key(
+                d_keys.begin(), d_keys.begin() + n, d_vals.begin(), d_output.begin());
+            ASSERT_EQ(d_output, h_output);
+
+            thrust::inclusive_scan_by_key(
+                h_keys.begin(), h_keys.begin() + n, h_vals.begin(), h_output.begin());
+            thrust::inclusive_scan_by_key(
+                d_keys.begin(), d_keys.begin() + n, d_vals.begin(), d_output.begin());
+            ASSERT_EQ(d_output, h_output);
         }
-        thrust::device_vector<unsigned int> d_keys = h_keys;
-
-        thrust::inclusive_scan_by_key(
-            h_keys.begin(), h_keys.begin() + n, h_vals.begin(), h_output.begin());
-        thrust::inclusive_scan_by_key(
-            d_keys.begin(), d_keys.begin() + n, d_vals.begin(), d_output.begin());
-        ASSERT_EQ(d_output, h_output);
-
-        thrust::inclusive_scan_by_key(
-            h_keys.begin(), h_keys.begin() + n, h_vals.begin(), h_output.begin());
-        thrust::inclusive_scan_by_key(
-            d_keys.begin(), d_keys.begin() + n, d_vals.begin(), d_output.begin());
-        ASSERT_EQ(d_output, h_output);
     }
 }
 

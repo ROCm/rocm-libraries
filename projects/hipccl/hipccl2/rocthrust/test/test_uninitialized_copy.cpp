@@ -27,7 +27,7 @@ TESTS_DEFINE(UninitializedCopyTests, FullTestsParams);
 
 template <typename InputIterator, typename ForwardIterator>
 ForwardIterator
-    uninitialized_copy(my_system& system, InputIterator, InputIterator, ForwardIterator result)
+uninitialized_copy(my_system& system, InputIterator, InputIterator, ForwardIterator result)
 {
     system.validate_dispatch();
     return result;
@@ -141,8 +141,7 @@ TYPED_TEST(UninitializedCopyTests, TestUninitializedCopyNSimplePOD)
 
 struct CopyConstructTest
 {
-    __host__ __device__
-    CopyConstructTest(void)
+    __host__ __device__ CopyConstructTest(void)
         : copy_constructed_on_host(false)
         , copy_constructed_on_device(false)
     {

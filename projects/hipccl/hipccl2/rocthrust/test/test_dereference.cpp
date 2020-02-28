@@ -45,41 +45,62 @@ void simple_copy(Iterator1 first1, Iterator1 last1, Iterator2 first2)
 
 TEST(DereferenceTests, TestDeviceDereferenceDeviceVectorIterator)
 {
-    thrust::device_vector<int> input = get_random_data<int>(
-        100, std::numeric_limits<int>::min(), std::numeric_limits<int>::max());
-    thrust::device_vector<int> output(input.size(), 0);
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-    simple_copy(input.begin(), input.end(), output.begin());
+        thrust::device_vector<int> input = get_random_data<int>(
+            100, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed_value);
+        thrust::device_vector<int> output(input.size(), 0);
 
-    ASSERT_EQ(input, output);
+        simple_copy(input.begin(), input.end(), output.begin());
+
+        ASSERT_EQ(input, output);
+    }
 }
 
 TEST(DereferenceTests, TestDeviceDereferenceDevicePtr)
 {
-    thrust::device_vector<int> input = get_random_data<int>(
-        100, std::numeric_limits<int>::min(), std::numeric_limits<int>::max());
-    thrust::device_vector<int> output(input.size(), 0);
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-    thrust::device_ptr<int> _first1 = &input[0];
-    thrust::device_ptr<int> _last1  = _first1 + input.size();
-    thrust::device_ptr<int> _first2 = &output[0];
+        thrust::device_vector<int> input = get_random_data<int>(
+            100, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed_value);
+        thrust::device_vector<int> output(input.size(), 0);
 
-    simple_copy(_first1, _last1, _first2);
+        thrust::device_ptr<int> _first1 = &input[0];
+        thrust::device_ptr<int> _last1  = _first1 + input.size();
+        thrust::device_ptr<int> _first2 = &output[0];
 
-    ASSERT_EQ(input, output);
+        simple_copy(_first1, _last1, _first2);
+
+        ASSERT_EQ(input, output);
+    }
 }
 
 TEST(DereferenceTests, TestDeviceDereferenceTransformIterator)
 {
-    thrust::device_vector<int> input = get_random_data<int>(
-        100, std::numeric_limits<int>::min(), std::numeric_limits<int>::max());
-    thrust::device_vector<int> output(input.size(), 0);
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-    simple_copy(thrust::make_transform_iterator(input.begin(), thrust::identity<int>()),
-                thrust::make_transform_iterator(input.end(), thrust::identity<int>()),
-                output.begin());
+        thrust::device_vector<int> input = get_random_data<int>(
+            100, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed_value);
+        thrust::device_vector<int> output(input.size(), 0);
 
-    ASSERT_EQ(input, output);
+        simple_copy(thrust::make_transform_iterator(input.begin(), thrust::identity<int>()),
+                    thrust::make_transform_iterator(input.end(), thrust::identity<int>()),
+                    output.begin());
+
+        ASSERT_EQ(input, output);
+    }
 }
 
 TEST(DereferenceTests, TestDeviceDereferenceCountingIterator)
@@ -114,4 +135,4 @@ TEST(DereferenceTests, TestDeviceDereferenceTransformedCountingIterator)
     ASSERT_EQ(output[2], -3);
     ASSERT_EQ(output[3], -4);
     ASSERT_EQ(output[4], -5);
-}
+} 

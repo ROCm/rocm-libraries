@@ -76,16 +76,24 @@ TYPED_TEST(IsPartitionedVectorTests, TestIsPartitioned)
 
     const size_t n = (1 << 16) + 13;
 
-    Vector v = get_random_data<T>(n, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-    v[0] = 1;
-    v[1] = 0;
+        Vector v = get_random_data<T>(
+            n, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
 
-    ASSERT_EQ(false, thrust::is_partitioned(v.begin(), v.end(), is_even<T>()));
+        v[0] = 1;
+        v[1] = 0;
 
-    thrust::partition(v.begin(), v.end(), is_even<T>());
+        ASSERT_EQ(false, thrust::is_partitioned(v.begin(), v.end(), is_even<T>()));
 
-    ASSERT_EQ(true, thrust::is_partitioned(v.begin(), v.end(), is_even<T>()));
+        thrust::partition(v.begin(), v.end(), is_even<T>());
+
+        ASSERT_EQ(true, thrust::is_partitioned(v.begin(), v.end(), is_even<T>()));
+    }
 }
 
 template <typename InputIterator, typename Predicate>
@@ -119,4 +127,4 @@ TEST(IsPartitionedTests, TestIsPartitionedDispatchImplicit)
     thrust::is_partitioned(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), 0);
 
     ASSERT_EQ(13, vec.front());
-}
+} 

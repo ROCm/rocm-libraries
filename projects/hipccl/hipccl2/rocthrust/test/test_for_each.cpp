@@ -328,31 +328,38 @@ TYPED_TEST(ForEachPrimitiveTests, TestForEach)
     {
         const size_t output_size = std::min((size_t)10, 2 * size);
 
-        thrust::host_vector<T> h_input = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t i = 0; i < size; i++)
-            h_input[i] = ((size_t)h_input[i]) % output_size;
+            thrust::host_vector<T> h_input = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
 
-        thrust::device_vector<T> d_input = h_input;
+            for(size_t i = 0; i < size; i++)
+                h_input[i] = ((size_t)h_input[i]) % output_size;
 
-        thrust::host_vector<T>   h_output(output_size, (T)0);
-        thrust::device_vector<T> d_output(output_size, (T)0);
+            thrust::device_vector<T> d_input = h_input;
 
-        mark_present_for_each<T> h_f;
-        mark_present_for_each<T> d_f;
-        h_f.ptr = &h_output[0];
-        d_f.ptr = (&d_output[0]).get();
+            thrust::host_vector<T>   h_output(output_size, (T)0);
+            thrust::device_vector<T> d_output(output_size, (T)0);
 
-        typename thrust::host_vector<T>::iterator h_result
-            = thrust::for_each(h_input.begin(), h_input.end(), h_f);
+            mark_present_for_each<T> h_f;
+            mark_present_for_each<T> d_f;
+            h_f.ptr = &h_output[0];
+            d_f.ptr = (&d_output[0]).get();
 
-        typename thrust::device_vector<T>::iterator d_result
-            = thrust::for_each(d_input.begin(), d_input.end(), d_f);
+            typename thrust::host_vector<T>::iterator h_result
+                = thrust::for_each(h_input.begin(), h_input.end(), h_f);
 
-        ASSERT_EQ(h_output, d_output);
-        ASSERT_EQ_QUIET(h_result, h_input.end());
-        ASSERT_EQ_QUIET(d_result, d_input.end());
+            typename thrust::device_vector<T>::iterator d_result
+                = thrust::for_each(d_input.begin(), d_input.end(), d_f);
+
+            ASSERT_EQ(h_output, d_output);
+            ASSERT_EQ_QUIET(h_result, h_input.end());
+            ASSERT_EQ_QUIET(d_result, d_input.end());
+        }
     }
 }
 
@@ -364,31 +371,38 @@ TYPED_TEST(ForEachPrimitiveTests, TestForEachN)
     {
         const size_t output_size = std::min((size_t)10, 2 * size);
 
-        thrust::host_vector<T> h_input = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t i = 0; i < size; i++)
-            h_input[i] = ((size_t)h_input[i]) % output_size;
+            thrust::host_vector<T> h_input = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
 
-        thrust::device_vector<T> d_input = h_input;
+            for(size_t i = 0; i < size; i++)
+                h_input[i] = ((size_t)h_input[i]) % output_size;
 
-        thrust::host_vector<T>   h_output(output_size, (T)0);
-        thrust::device_vector<T> d_output(output_size, (T)0);
+            thrust::device_vector<T> d_input = h_input;
 
-        mark_present_for_each<T> h_f;
-        mark_present_for_each<T> d_f;
-        h_f.ptr = &h_output[0];
-        d_f.ptr = (&d_output[0]).get();
+            thrust::host_vector<T>   h_output(output_size, (T)0);
+            thrust::device_vector<T> d_output(output_size, (T)0);
 
-        typename thrust::host_vector<T>::iterator h_result
-            = thrust::for_each_n(h_input.begin(), h_input.size(), h_f);
+            mark_present_for_each<T> h_f;
+            mark_present_for_each<T> d_f;
+            h_f.ptr = &h_output[0];
+            d_f.ptr = (&d_output[0]).get();
 
-        typename thrust::device_vector<T>::iterator d_result
-            = thrust::for_each_n(d_input.begin(), d_input.size(), d_f);
+            typename thrust::host_vector<T>::iterator h_result
+                = thrust::for_each_n(h_input.begin(), h_input.size(), h_f);
 
-        ASSERT_EQ(h_output, d_output);
-        ASSERT_EQ_QUIET(h_result, h_input.end());
-        ASSERT_EQ_QUIET(d_result, d_input.end());
+            typename thrust::device_vector<T>::iterator d_result
+                = thrust::for_each_n(d_input.begin(), d_input.size(), d_f);
+
+            ASSERT_EQ(h_output, d_output);
+            ASSERT_EQ_QUIET(h_result, h_input.end());
+            ASSERT_EQ_QUIET(d_result, d_input.end());
+        }
     }
 }
 
@@ -478,4 +492,4 @@ TEST(ForEachVectorTests, TestForEachNWithLargeTypes)
     _TestForEachNWithLargeTypes<int, 256>();
     _TestForEachNWithLargeTypes<int, 512>();
     _TestForEachNWithLargeTypes<int, 1024>(); // fails on Vista 64 w/ VS2008
-}
+} 

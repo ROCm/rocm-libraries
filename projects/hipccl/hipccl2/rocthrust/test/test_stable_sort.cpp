@@ -111,14 +111,22 @@ TYPED_TEST(StableSortTests, TestStableSort)
 
     for(auto size : get_sizes())
     {
-        thrust::host_vector<T> h_data = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-        thrust::device_vector<T> d_data = h_data;
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        thrust::stable_sort(h_data.begin(), h_data.end(), less_div_10<T>());
-        thrust::stable_sort(d_data.begin(), d_data.end(), less_div_10<T>());
+            thrust::host_vector<T> h_data = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::device_vector<T> d_data = h_data;
 
-        ASSERT_EQ(h_data, d_data);
+            thrust::stable_sort(h_data.begin(), h_data.end(), less_div_10<T>());
+            thrust::stable_sort(d_data.begin(), d_data.end(), less_div_10<T>());
+
+            ASSERT_EQ(h_data, d_data);
+        }
     }
 }
 
