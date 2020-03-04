@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2019 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -73,7 +73,7 @@ include(cmake/Dependencies.cmake)
 set(AMDGPU_TARGETS gfx803;gfx900;gfx906;gfx908 CACHE STRING "List of specific machine types for library to target")
 
 # Setup VERSION
-set(VERSION_STRING "2.9.0")
+set(VERSION_STRING "2.10.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 
 # Print configuration summary
