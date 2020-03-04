@@ -59,8 +59,7 @@ option(BUILD_TEST "Build tests (requires googletest)" OFF)
 include(cmake/Dependencies.cmake)
 
 # Setup VERSION
-set(VERSION_STRING "2.9.0")
-
+set(VERSION_STRING "2.10.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 
 # AMD targets
