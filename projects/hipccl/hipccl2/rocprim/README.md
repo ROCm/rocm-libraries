@@ -8,8 +8,8 @@ performant GPU-accelerated code on AMD ROCm platform.
 * Git
 * CMake (3.5.1 or later)
 * AMD [ROCm](https://rocm.github.io/install.html) platform (1.8.2 or later)
-  * Including [HCC](https://github.com/RadeonOpenCompute/hcc) compiler, which must be
-    set as C++ compiler on ROCm platform.
+  * Including [HCC](https://github.com/RadeonOpenCompute/hcc) compiler
+  * Alternatively [HIP-clang](https://github.com/ROCm-Developer-Tools/HIP/blob/master/INSTALL.md#hip-clang) compiler
 
 Optional:
 
@@ -32,12 +32,17 @@ cd rocPRIM; mkdir build; cd build
 # Build options:
 #   BUILD_TEST - on by default,
 #   BUILD_BENCHMARK - off by default.
+#   AMDGPU_TARGETS - list of AMD architectures, default: gfx803;gfx900;gfx906.
+#     You can make compilation faster if you want to test/benchmark only on one architecture,
+#     for example, add -DAMDGPU_TARGETS=gfx906 to 'cmake' parameters.
 #
 # ! IMPORTANT !
-# On ROCm platform set C++ compiler to HCC. You can do it by adding 'CXX=<path-to-hcc>'
-# before 'cmake' or setting cmake option 'CMAKE_CXX_COMPILER' to path to the HCC compiler.
-#
+# Set C++ compiler to HCC or HIP-clang. You can do it by adding 'CXX=<path-to-compiler>'
+# before 'cmake' or setting cmake option 'CMAKE_CXX_COMPILER' to path to the compiler.
+# Using HCC:
 [CXX=hcc] cmake -DBUILD_BENCHMARK=ON ../. # or cmake-gui ../.
+# or using HIP-clang:
+[CXX=hipcc] cmake -DBUILD_BENCHMARK=ON ../.
 
 # Build
 make -j4
@@ -86,6 +91,30 @@ ctest
 # To run unit tests for rocPRIM
 ./test/rocprim/<unit-test-name>
 ```
+
+## Using custom seeds for the tests
+
+Go to the `rocPRIM/test/rocprim/test_seed.hpp` file. 
+```cpp
+//(1)
+static constexpr int random_seeds_count = 10;
+
+//(2)
+static constexpr unsigned int seeds [] = {0, 2, 10, 1000}; 
+
+//(3)
+static constexpr size_t seed_size = sizeof(seeds) / sizeof(seeds[0]);
+```
+
+(1) defines a constant that sets how many passes over the tests will be done with runtime-generated seeds. Modify at will.
+
+(2) defines the user generated seeds. Each of the elements of the array will be used as seed for all tests. Modify at will. If no static seeds are desired, the array should be left empty. 
+
+```cpp
+static constexpr unsigned int seeds [] = {}; 
+```
+
+(3) this line should never be modified.
 
 ## Running Benchmarks
 

@@ -37,6 +37,9 @@
 #include "identity_iterator.hpp"
 // Bounds checking iterator
 #include "bounds_checking_iterator.hpp"
+// Seed values
+#include "test_seed.hpp"
+
 
 // For better Google Test reporting and debug output of half values
 inline
@@ -207,11 +210,12 @@ struct half_minimum
 };
 
 template<class T>
-inline auto get_random_data(size_t size, T min, T max)
+inline auto get_random_data(size_t size, T min, T max, int seed_value)
     -> typename std::enable_if<rocprim::is_integral<T>::value, std::vector<T>>::type
 {
     std::random_device rd;
     std::default_random_engine gen(rd());
+    gen.seed(seed_value);
     std::uniform_int_distribution<T> distribution(min, max);
     std::vector<T> data(size);
     std::generate(data.begin(), data.end(), [&]() { return distribution(gen); });
@@ -219,11 +223,12 @@ inline auto get_random_data(size_t size, T min, T max)
 }
 
 template<class T>
-inline auto get_random_data(size_t size, T min, T max)
+inline auto get_random_data(size_t size, T min, T max, int seed_value)
     -> typename std::enable_if<rocprim::is_floating_point<T>::value, std::vector<T>>::type
 {
     std::random_device rd;
     std::default_random_engine gen(rd());
+    gen.seed(seed_value);
     // Generate floats when T is half
     using dis_type = typename std::conditional<std::is_same<rocprim::half, T>::value, float, T>::type;
     std::uniform_real_distribution<dis_type> distribution(min, max);
@@ -233,11 +238,12 @@ inline auto get_random_data(size_t size, T min, T max)
 }
 
 template<class T>
-inline std::vector<T> get_random_data01(size_t size, float p)
+inline std::vector<T> get_random_data01(size_t size, float p, int seed_value)
 {
     const size_t max_random_size = 1024 * 1024;
     std::random_device rd;
     std::default_random_engine gen(rd());
+    gen.seed(seed_value);
     std::bernoulli_distribution distribution(p);
     std::vector<T> data(size);
     std::generate(
@@ -252,10 +258,10 @@ inline std::vector<T> get_random_data01(size_t size, float p)
 }
 
 template<class T>
-inline auto get_random_value(T min, T max)
+inline auto get_random_value(T min, T max, int seed_value)
     -> typename std::enable_if<rocprim::is_arithmetic<T>::value, T>::type
 {
-    return get_random_data(1, min, max)[0];
+    return get_random_data(1, min, max, seed_value)[0];
 }
 
 // Can't use std::prefix_sum for inclusive/exclusive scan, because
@@ -707,7 +713,7 @@ struct numeric_limits : public std::conditional<
 };
 
 template<class T>
-inline auto get_random_data(size_t size, typename T::value_type min, typename T::value_type max)
+inline auto get_random_data(size_t size, typename T::value_type min, typename T::value_type max, int seed_value)
     -> typename std::enable_if<
            is_custom_test_type<T>::value && std::is_integral<typename T::value_type>::value,
            std::vector<T>
@@ -715,6 +721,7 @@ inline auto get_random_data(size_t size, typename T::value_type min, typename T:
 {
     std::random_device rd;
     std::default_random_engine gen(rd());
+    gen.seed(seed_value);
     std::uniform_int_distribution<typename T::value_type> distribution(min, max);
     std::vector<T> data(size);
     std::generate(data.begin(), data.end(), [&]() { return T(distribution(gen), distribution(gen)); });
@@ -722,7 +729,7 @@ inline auto get_random_data(size_t size, typename T::value_type min, typename T:
 }
 
 template<class T>
-inline auto get_random_data(size_t size, typename T::value_type min, typename T::value_type max)
+inline auto get_random_data(size_t size, typename T::value_type min, typename T::value_type max, int seed_value)
     -> typename std::enable_if<
            is_custom_test_type<T>::value && std::is_floating_point<typename T::value_type>::value,
            std::vector<T>
@@ -730,6 +737,7 @@ inline auto get_random_data(size_t size, typename T::value_type min, typename T:
 {
     std::random_device rd;
     std::default_random_engine gen(rd());
+    gen.seed(seed_value);
     std::uniform_real_distribution<typename T::value_type> distribution(min, max);
     std::vector<T> data(size);
     std::generate(data.begin(), data.end(), [&]() { return T(distribution(gen), distribution(gen)); });
@@ -737,7 +745,7 @@ inline auto get_random_data(size_t size, typename T::value_type min, typename T:
 }
 
 template<class T>
-inline auto get_random_data(size_t size, typename T::value_type min, typename T::value_type max)
+inline auto get_random_data(size_t size, typename T::value_type min, typename T::value_type max, int seed_value)
     -> typename std::enable_if<
            is_custom_test_array_type<T>::value && std::is_integral<typename T::value_type>::value,
            std::vector<T>
@@ -745,6 +753,7 @@ inline auto get_random_data(size_t size, typename T::value_type min, typename T:
 {
     std::random_device rd;
     std::default_random_engine gen(rd());
+    gen.seed(seed_value);
     std::uniform_int_distribution<typename T::value_type> distribution(min, max);
     std::vector<T> data(size);
     std::generate(
@@ -763,10 +772,10 @@ inline auto get_random_data(size_t size, typename T::value_type min, typename T:
 }
 
 template<class T>
-inline auto get_random_value(typename T::value_type min, typename T::value_type max)
+inline auto get_random_value(typename T::value_type min, typename T::value_type max, int seed_value)
     -> typename std::enable_if<is_custom_test_type<T>::value || is_custom_test_array_type<T>::value, T>::type
 {
-    return get_random_data(1, min, max)[0];
+    return get_random_data(1, min, max, seed_value)[0];
 }
 
 template<class T>
@@ -907,7 +916,6 @@ void assert_eq(const rocprim::half& result, const rocprim::half& expected)
 {
     ASSERT_EQ(half_to_native(result), half_to_native(expected));
 }
-
 
 } // end test_utils namespace
 
