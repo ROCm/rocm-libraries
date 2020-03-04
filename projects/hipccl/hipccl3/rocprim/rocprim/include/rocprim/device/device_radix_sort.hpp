@@ -35,6 +35,7 @@
 #include "../types.hpp"
 
 #include "device_radix_sort_config.hpp"
+#include "device_transform.hpp"
 #include "detail/device_radix_sort.hpp"
 
 /// \addtogroup devicemodule

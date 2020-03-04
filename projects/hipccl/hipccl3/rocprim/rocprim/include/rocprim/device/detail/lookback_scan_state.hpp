@@ -33,6 +33,10 @@
 #include "../../detail/various.hpp"
 #include "../../detail/binary_op_wrappers.hpp"
 
+extern "C"
+{
+    void __builtin_amdgcn_s_sleep(int);
+}
 BEGIN_ROCPRIM_NAMESPACE
 
 // Single pass prefix scan was implemented based on:
@@ -58,12 +62,12 @@ enum prefix_flag
 // a look-back prefix scan. Initially every prefix can be either
 // invalid (padding values) or empty. One thread in a block should
 // later set it to partial, and later to complete.
-template<class T, bool IsSmall = (sizeof(T) <= 4)>
+template<class T, bool UseSleep = false, bool IsSmall = (sizeof(T) <= 4)>
 struct lookback_scan_state;
 
 // Packed flag and prefix value are loaded/stored in one atomic operation.
-template<class T>
-struct lookback_scan_state<T, true>
+template<class T, bool UseSleep>
+struct lookback_scan_state<T, UseSleep, true>
 {
 private:
     using flag_type_ = char;
@@ -148,12 +152,25 @@ public:
     void get(const unsigned int block_id, flag_type& flag, T& value)
     {
         prefix_type prefix;
-        do
+        
+        const uint SLEEP_MAX = 32;
+        uint times_through = 1;
+
+        prefix_underlying_type p = ::rocprim::detail::atomic_add(&prefixes[padding + block_id], 0);
+        __builtin_memcpy(&prefix, &p, sizeof(prefix_type));
+        while(prefix.flag == PREFIX_EMPTY)
         {
+            if (UseSleep)
+            {
+                for (uint j = 0; j < times_through; j++)
+                    __builtin_amdgcn_s_sleep(1);
+                if (times_through < SLEEP_MAX)
+                    times_through++;
+            }
             // atomic_add(..., 0) is used to load values atomically
             prefix_underlying_type p = ::rocprim::detail::atomic_add(&prefixes[padding + block_id], 0);
             __builtin_memcpy(&prefix, &p, sizeof(prefix_type));
-        } while(prefix.flag == PREFIX_EMPTY);
+        }
 
         // return
         flag = prefix.flag;
@@ -175,8 +192,8 @@ private:
 
 // Flag, partial and final prefixes are stored in separate arrays.
 // Consistency ensured by memory fences between flag and prefixes load/store operations.
-template<class T>
-struct lookback_scan_state<T, false>
+template<class T, bool UseSleep>
+struct lookback_scan_state<T, UseSleep, false>
 {
 private:
     static constexpr unsigned int padding = ::rocprim::warp_size();
@@ -247,11 +264,24 @@ public:
     ROCPRIM_DEVICE inline
     void get(const unsigned int block_id, flag_type& flag, T& value)
     {
-        do
+        const uint SLEEP_MAX = 32;
+        uint times_through = 1;
+
+        flag = load_volatile(&prefixes_flags[padding + block_id]);
+        ::rocprim::detail::memory_fence_device();
+        while(flag == PREFIX_EMPTY)
         {
+            if (UseSleep)
+            {
+                for (uint j = 0; j < times_through; j++)
+                    __builtin_amdgcn_s_sleep(1);
+                if (times_through < SLEEP_MAX)
+                    times_through++;
+            }
+
             flag = load_volatile(&prefixes_flags[padding + block_id]);
             ::rocprim::detail::memory_fence_device();
-        } while(flag == PREFIX_EMPTY);
+        } 
 
         if(flag == PREFIX_PARTIAL)
             value = load_volatile(&prefixes_partial_values[padding + block_id]);

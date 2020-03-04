@@ -378,9 +378,7 @@ hipError_t run_length_encode_non_trivial_runs(void * temporary_storage,
 
     // Read count of all runs (including trivial runs)
     count_type all_runs_count;
-    error = hipMemcpyAsync(&all_runs_count, all_runs_count_tmp, sizeof(count_type), hipMemcpyDeviceToHost, stream);
-    if(error != hipSuccess) return error;
-    error = hipStreamSynchronize(stream);
+    error = hipMemcpyWithStream(&all_runs_count, all_runs_count_tmp, sizeof(count_type), hipMemcpyDeviceToHost, stream);
     if(error != hipSuccess) return error;
 
     // Select non-trivial runs

@@ -72,7 +72,7 @@ typedef ::testing::Types<
     DevicePartitionParams<test_utils::custom_test_type<long long>>
 > RocprimDevicePartitionTestsParams;
 
-std::vector<size_t> get_sizes()
+std::vector<size_t> get_sizes(int seed_value)
 {
     std::vector<size_t> sizes = {
         2, 32, 64, 256,
@@ -81,7 +81,7 @@ std::vector<size_t> get_sizes()
         27845, (1 << 18) + 1111,
         1024 * 1024 * 32
     };
-    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(2, 1, 16384);
+    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(2, 1, 16384, seed_value);
     sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
     std::sort(sizes.begin(), sizes.end());
     return sizes;
@@ -99,137 +99,144 @@ TYPED_TEST(RocprimDevicePartitionTests, Flagged)
 
     hipStream_t stream = 0; // default stream
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
 
-        // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, 1, 100);
-        std::vector<F> flags = test_utils::get_random_data01<F>(size, 0.25);
-
-        T * d_input;
-        F * d_flags;
-        U * d_output;
-        unsigned int * d_selected_count_output;
-        HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
-        HIP_CHECK(hipMalloc(&d_flags, flags.size() * sizeof(F)));
-        HIP_CHECK(hipMalloc(&d_output, input.size() * sizeof(U)));
-        HIP_CHECK(hipMalloc(&d_selected_count_output, sizeof(unsigned int)));
-        HIP_CHECK(
-            hipMemcpy(
-                d_input, input.data(),
-                input.size() * sizeof(T),
-                hipMemcpyHostToDevice
-            )
-        );
-        HIP_CHECK(
-            hipMemcpy(
-                d_flags, flags.data(),
-                flags.size() * sizeof(F),
-                hipMemcpyHostToDevice
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // Calculate expected_selected and expected_rejected results on host
-        std::vector<U> expected_selected;
-        std::vector<U> expected_rejected;
-        expected_selected.reserve(input.size()/2);
-        expected_rejected.reserve(input.size()/2);
-        for(size_t i = 0; i < input.size(); i++)
+        const std::vector<size_t> sizes = get_sizes(seed_value);
+        for(auto size : sizes)
         {
-            if(flags[i] != 0)
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            // Generate data
+            std::vector<T> input = test_utils::get_random_data<T>(size, 1, 100, seed_value);
+            std::vector<F> flags = test_utils::get_random_data01<F>(size, 0.25, seed_value);
+
+            T * d_input;
+            F * d_flags;
+            U * d_output;
+            unsigned int * d_selected_count_output;
+            HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
+            HIP_CHECK(hipMalloc(&d_flags, flags.size() * sizeof(F)));
+            HIP_CHECK(hipMalloc(&d_output, input.size() * sizeof(U)));
+            HIP_CHECK(hipMalloc(&d_selected_count_output, sizeof(unsigned int)));
+            HIP_CHECK(
+                hipMemcpy(
+                    d_input, input.data(),
+                    input.size() * sizeof(T),
+                    hipMemcpyHostToDevice
+                )
+            );
+            HIP_CHECK(
+                hipMemcpy(
+                    d_flags, flags.data(),
+                    flags.size() * sizeof(F),
+                    hipMemcpyHostToDevice
+                )
+            );
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Calculate expected_selected and expected_rejected results on host
+            std::vector<U> expected_selected;
+            std::vector<U> expected_rejected;
+            expected_selected.reserve(input.size()/2);
+            expected_rejected.reserve(input.size()/2);
+            for(size_t i = 0; i < input.size(); i++)
             {
-                expected_selected.push_back(input[i]);
+                if(flags[i] != 0)
+                {
+                    expected_selected.push_back(input[i]);
+                }
+                else
+                {
+                    expected_rejected.push_back(input[i]);
+                }
             }
-            else
+            std::reverse(expected_rejected.begin(), expected_rejected.end());
+
+            // temp storage
+            size_t temp_storage_size_bytes;
+            // Get size of d_temp_storage
+            HIP_CHECK(
+                rocprim::partition(
+                    nullptr,
+                    temp_storage_size_bytes,
+                    d_input,
+                    d_flags,
+                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
+                    d_selected_count_output,
+                    input.size(),
+                    stream,
+                    debug_synchronous
+                )
+            );
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // temp_storage_size_bytes must be >0
+            ASSERT_GT(temp_storage_size_bytes, 0);
+
+            // allocate temporary storage
+            void * d_temp_storage = nullptr;
+            HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Run
+            HIP_CHECK(
+                rocprim::partition(
+                    d_temp_storage,
+                    temp_storage_size_bytes,
+                    d_input,
+                    d_flags,
+                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
+                    d_selected_count_output,
+                    input.size(),
+                    stream,
+                    debug_synchronous
+                )
+            );
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Check if number of selected value is as expected_selected
+            unsigned int selected_count_output = 0;
+            HIP_CHECK(
+                hipMemcpy(
+                    &selected_count_output, d_selected_count_output,
+                    sizeof(unsigned int),
+                    hipMemcpyDeviceToHost
+                )
+            );
+            HIP_CHECK(hipDeviceSynchronize());
+            ASSERT_EQ(selected_count_output, expected_selected.size());
+
+            // Check if output values are as expected_selected
+            std::vector<U> output(input.size());
+            HIP_CHECK(
+                hipMemcpy(
+                    output.data(), d_output,
+                    output.size() * sizeof(U),
+                    hipMemcpyDeviceToHost
+                )
+            );
+            HIP_CHECK(hipDeviceSynchronize());
+
+            std::vector<U> output_rejected;
+            for(size_t i = 0; i < expected_rejected.size(); i++)
             {
-                expected_rejected.push_back(input[i]);
+                auto j = i + expected_selected.size();
+                output_rejected.push_back(output[j]);
             }
+            ASSERT_NO_FATAL_FAILURE(test_utils::custom_assert_eq(output, expected_selected, expected_selected.size()));
+            ASSERT_NO_FATAL_FAILURE(test_utils::custom_assert_eq(output_rejected, expected_rejected, expected_rejected.size()));
+
+            hipFree(d_input);
+            hipFree(d_flags);
+            hipFree(d_output);
+            hipFree(d_selected_count_output);
+            hipFree(d_temp_storage);
         }
-        std::reverse(expected_rejected.begin(), expected_rejected.end());
-
-        // temp storage
-        size_t temp_storage_size_bytes;
-        // Get size of d_temp_storage
-        HIP_CHECK(
-            rocprim::partition(
-                nullptr,
-                temp_storage_size_bytes,
-                d_input,
-                d_flags,
-                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
-                d_selected_count_output,
-                input.size(),
-                stream,
-                debug_synchronous
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // temp_storage_size_bytes must be >0
-        ASSERT_GT(temp_storage_size_bytes, 0);
-
-        // allocate temporary storage
-        void * d_temp_storage = nullptr;
-        HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // Run
-        HIP_CHECK(
-            rocprim::partition(
-                d_temp_storage,
-                temp_storage_size_bytes,
-                d_input,
-                d_flags,
-                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
-                d_selected_count_output,
-                input.size(),
-                stream,
-                debug_synchronous
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // Check if number of selected value is as expected_selected
-        unsigned int selected_count_output = 0;
-        HIP_CHECK(
-            hipMemcpy(
-                &selected_count_output, d_selected_count_output,
-                sizeof(unsigned int),
-                hipMemcpyDeviceToHost
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
-        ASSERT_EQ(selected_count_output, expected_selected.size());
-
-        // Check if output values are as expected_selected
-        std::vector<U> output(input.size());
-        HIP_CHECK(
-            hipMemcpy(
-                output.data(), d_output,
-                output.size() * sizeof(U),
-                hipMemcpyDeviceToHost
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
-
-        std::vector<U> output_rejected;
-        for(size_t i = 0; i < expected_rejected.size(); i++)
-        {
-            auto j = i + expected_selected.size();
-            output_rejected.push_back(output[j]);
-        }
-        ASSERT_NO_FATAL_FAILURE(test_utils::custom_assert_eq(output, expected_selected, expected_selected.size()));
-        ASSERT_NO_FATAL_FAILURE(test_utils::custom_assert_eq(output_rejected, expected_rejected, expected_rejected.size()));
-
-        hipFree(d_input);
-        hipFree(d_flags);
-        hipFree(d_output);
-        hipFree(d_selected_count_output);
-        hipFree(d_temp_storage);
     }
+    
 }
 
 TYPED_TEST(RocprimDevicePartitionTests, PredicateEmptyInput)
@@ -337,124 +344,131 @@ TYPED_TEST(RocprimDevicePartitionTests, Predicate)
         return false;
     };
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
 
-        // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, 1, 100);
-
-        T * d_input;
-        U * d_output;
-        unsigned int * d_selected_count_output;
-        HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
-        HIP_CHECK(hipMalloc(&d_output, input.size() * sizeof(U)));
-        HIP_CHECK(hipMalloc(&d_selected_count_output, sizeof(unsigned int)));
-        HIP_CHECK(
-            hipMemcpy(
-                d_input, input.data(),
-                input.size() * sizeof(T),
-                hipMemcpyHostToDevice
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // Calculate expected_selected and expected_rejected results on host
-        std::vector<U> expected_selected;
-        std::vector<U> expected_rejected;
-        expected_selected.reserve(input.size()/2);
-        expected_rejected.reserve(input.size()/2);
-        for(size_t i = 0; i < input.size(); i++)
+        const std::vector<size_t> sizes = get_sizes(seed_value);
+        for(auto size : sizes)
         {
-            if(select_op(input[i]))
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            // Generate data
+            std::vector<T> input = test_utils::get_random_data<T>(size, 1, 100, seed_value);
+
+            T * d_input;
+            U * d_output;
+            unsigned int * d_selected_count_output;
+            HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
+            HIP_CHECK(hipMalloc(&d_output, input.size() * sizeof(U)));
+            HIP_CHECK(hipMalloc(&d_selected_count_output, sizeof(unsigned int)));
+            HIP_CHECK(
+                hipMemcpy(
+                    d_input, input.data(),
+                    input.size() * sizeof(T),
+                    hipMemcpyHostToDevice
+                )
+            );
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Calculate expected_selected and expected_rejected results on host
+            std::vector<U> expected_selected;
+            std::vector<U> expected_rejected;
+            expected_selected.reserve(input.size()/2);
+            expected_rejected.reserve(input.size()/2);
+            for(size_t i = 0; i < input.size(); i++)
             {
-                expected_selected.push_back(input[i]);
+                if(select_op(input[i]))
+                {
+                    expected_selected.push_back(input[i]);
+                }
+                else
+                {
+                    expected_rejected.push_back(input[i]);
+                }
             }
-            else
+            std::reverse(expected_rejected.begin(), expected_rejected.end());
+
+            // temp storage
+            size_t temp_storage_size_bytes;
+            // Get size of d_temp_storage
+            HIP_CHECK(
+                rocprim::partition(
+                    nullptr,
+                    temp_storage_size_bytes,
+                    d_input,
+                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
+                    d_selected_count_output,
+                    input.size(),
+                    select_op,
+                    stream,
+                    debug_synchronous
+                )
+            );
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // temp_storage_size_bytes must be >0
+            ASSERT_GT(temp_storage_size_bytes, 0);
+
+            // allocate temporary storage
+            void * d_temp_storage = nullptr;
+            HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Run
+            HIP_CHECK(
+                rocprim::partition(
+                    d_temp_storage,
+                    temp_storage_size_bytes,
+                    d_input,
+                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
+                    d_selected_count_output,
+                    input.size(),
+                    select_op,
+                    stream,
+                    debug_synchronous
+                )
+            );
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Check if number of selected value is as expected_selected
+            unsigned int selected_count_output = 0;
+            HIP_CHECK(
+                hipMemcpy(
+                    &selected_count_output, d_selected_count_output,
+                    sizeof(unsigned int),
+                    hipMemcpyDeviceToHost
+                )
+            );
+            HIP_CHECK(hipDeviceSynchronize());
+            ASSERT_EQ(selected_count_output, expected_selected.size());
+
+            // Check if output values are as expected_selected
+            std::vector<U> output(input.size());
+            HIP_CHECK(
+                hipMemcpy(
+                    output.data(), d_output,
+                    output.size() * sizeof(U),
+                    hipMemcpyDeviceToHost
+                )
+            );
+            HIP_CHECK(hipDeviceSynchronize());
+
+            std::vector<U> output_rejected;
+            for(size_t i = 0; i < expected_rejected.size(); i++)
             {
-                expected_rejected.push_back(input[i]);
+                auto j = i + expected_selected.size();
+                output_rejected.push_back(output[j]);
             }
+            ASSERT_NO_FATAL_FAILURE(test_utils::custom_assert_eq(output, expected_selected, expected_selected.size()));
+            ASSERT_NO_FATAL_FAILURE(test_utils::custom_assert_eq(output_rejected, expected_rejected, expected_rejected.size()));
+
+            hipFree(d_input);
+            hipFree(d_output);
+            hipFree(d_selected_count_output);
+            hipFree(d_temp_storage);
         }
-        std::reverse(expected_rejected.begin(), expected_rejected.end());
-
-        // temp storage
-        size_t temp_storage_size_bytes;
-        // Get size of d_temp_storage
-        HIP_CHECK(
-            rocprim::partition(
-                nullptr,
-                temp_storage_size_bytes,
-                d_input,
-                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
-                d_selected_count_output,
-                input.size(),
-                select_op,
-                stream,
-                debug_synchronous
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // temp_storage_size_bytes must be >0
-        ASSERT_GT(temp_storage_size_bytes, 0);
-
-        // allocate temporary storage
-        void * d_temp_storage = nullptr;
-        HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // Run
-        HIP_CHECK(
-            rocprim::partition(
-                d_temp_storage,
-                temp_storage_size_bytes,
-                d_input,
-                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
-                d_selected_count_output,
-                input.size(),
-                select_op,
-                stream,
-                debug_synchronous
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // Check if number of selected value is as expected_selected
-        unsigned int selected_count_output = 0;
-        HIP_CHECK(
-            hipMemcpy(
-                &selected_count_output, d_selected_count_output,
-                sizeof(unsigned int),
-                hipMemcpyDeviceToHost
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
-        ASSERT_EQ(selected_count_output, expected_selected.size());
-
-        // Check if output values are as expected_selected
-        std::vector<U> output(input.size());
-        HIP_CHECK(
-            hipMemcpy(
-                output.data(), d_output,
-                output.size() * sizeof(U),
-                hipMemcpyDeviceToHost
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
-
-        std::vector<U> output_rejected;
-        for(size_t i = 0; i < expected_rejected.size(); i++)
-        {
-            auto j = i + expected_selected.size();
-            output_rejected.push_back(output[j]);
-        }
-        ASSERT_NO_FATAL_FAILURE(test_utils::custom_assert_eq(output, expected_selected, expected_selected.size()));
-        ASSERT_NO_FATAL_FAILURE(test_utils::custom_assert_eq(output_rejected, expected_rejected, expected_rejected.size()));
-
-        hipFree(d_input);
-        hipFree(d_output);
-        hipFree(d_selected_count_output);
-        hipFree(d_temp_storage);
     }
+    
 }

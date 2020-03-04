@@ -100,93 +100,101 @@ TYPED_TEST(RocprimTransformIteratorTests, TransformReduce)
     hipStream_t stream = 0; // default
 
     const size_t size = 1024;
-    // Generate data
-    std::vector<input_type> input = test_utils::get_random_data<input_type>(size, 1, 200);
-    std::vector<value_type> output(1);
 
-    input_type * d_input;
-    value_type * d_output;
-    HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(input_type)));
-    HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(value_type)));
-    HIP_CHECK(
-        hipMemcpy(
-            d_input, input.data(),
-            input.size() * sizeof(input_type),
-            hipMemcpyHostToDevice
-        )
-    );
-    HIP_CHECK(hipDeviceSynchronize());
-
-    auto reduce_op = rocprim::plus<value_type>();
-    unary_function transform;
-
-    // Calculate expected results on host
-    iterator_type x(input.data(), transform);
-    value_type expected = std::accumulate(x, x + size, value_type(0), reduce_op);
-
-    auto d_iter = iterator_type(d_input, transform);
-    // temp storage
-    size_t temp_storage_size_bytes;
-    // Get size of d_temp_storage
-    HIP_CHECK(
-        rocprim::reduce(
-            nullptr,
-            temp_storage_size_bytes,
-            d_iter,
-            d_output,
-            value_type(0),
-            input.size(),
-            reduce_op,
-            stream
-        )
-    );
-
-    // temp_storage_size_bytes must be >0
-    ASSERT_GT(temp_storage_size_bytes, 0);
-
-    // allocate temporary storage
-    void * d_temp_storage = nullptr;
-    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
-    HIP_CHECK(hipDeviceSynchronize());
-
-    // Run
-    HIP_CHECK(
-        rocprim::reduce(
-            d_temp_storage,
-            temp_storage_size_bytes,
-            d_iter,
-            d_output,
-            value_type(0),
-            input.size(),
-            reduce_op,
-            stream,
-            TestFixture::debug_synchronous
-        )
-    );
-    HIP_CHECK(hipPeekAtLastError());
-    HIP_CHECK(hipDeviceSynchronize());
-
-    HIP_CHECK(
-        hipMemcpy(
-            output.data(), d_output,
-            output.size() * sizeof(value_type),
-            hipMemcpyDeviceToHost
-        )
-    );
-    HIP_CHECK(hipDeviceSynchronize());
-
-    // Check if output values are as expected
-    if(std::is_integral<value_type>::value)
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        ASSERT_EQ(output[0], expected);
-    }
-    else if(std::is_floating_point<value_type>::value)
-    {
-        auto tolerance = std::max<value_type>(std::abs(0.1f * expected), value_type(0.01f));
-        ASSERT_NEAR(output[0], expected, tolerance);
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+
+        // Generate data
+        std::vector<input_type> input = test_utils::get_random_data<input_type>(size, 1, 200, seed_value);
+        std::vector<value_type> output(1);
+
+        input_type * d_input;
+        value_type * d_output;
+        HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(input_type)));
+        HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(value_type)));
+        HIP_CHECK(
+            hipMemcpy(
+                d_input, input.data(),
+                input.size() * sizeof(input_type),
+                hipMemcpyHostToDevice
+            )
+        );
+        HIP_CHECK(hipDeviceSynchronize());
+
+        auto reduce_op = rocprim::plus<value_type>();
+        unary_function transform;
+
+        // Calculate expected results on host
+        iterator_type x(input.data(), transform);
+        value_type expected = std::accumulate(x, x + size, value_type(0), reduce_op);
+
+        auto d_iter = iterator_type(d_input, transform);
+        // temp storage
+        size_t temp_storage_size_bytes;
+        // Get size of d_temp_storage
+        HIP_CHECK(
+            rocprim::reduce(
+                nullptr,
+                temp_storage_size_bytes,
+                d_iter,
+                d_output,
+                value_type(0),
+                input.size(),
+                reduce_op,
+                stream
+            )
+        );
+
+        // temp_storage_size_bytes must be >0
+        ASSERT_GT(temp_storage_size_bytes, 0);
+
+        // allocate temporary storage
+        void * d_temp_storage = nullptr;
+        HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Run
+        HIP_CHECK(
+            rocprim::reduce(
+                d_temp_storage,
+                temp_storage_size_bytes,
+                d_iter,
+                d_output,
+                value_type(0),
+                input.size(),
+                reduce_op,
+                stream,
+                TestFixture::debug_synchronous
+            )
+        );
+        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipDeviceSynchronize());
+
+        HIP_CHECK(
+            hipMemcpy(
+                output.data(), d_output,
+                output.size() * sizeof(value_type),
+                hipMemcpyDeviceToHost
+            )
+        );
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Check if output values are as expected
+        if(std::is_integral<value_type>::value)
+        {
+            ASSERT_EQ(output[0], expected);
+        }
+        else if(std::is_floating_point<value_type>::value)
+        {
+            auto tolerance = std::max<value_type>(std::abs(0.1f * expected), value_type(0.01f));
+            ASSERT_NEAR(output[0], expected, tolerance);
+        }
+
+        hipFree(d_input);
+        hipFree(d_output);
+        hipFree(d_temp_storage);
     }
 
-    hipFree(d_input);
-    hipFree(d_output);
-    hipFree(d_temp_storage);
 }

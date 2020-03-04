@@ -2,7 +2,7 @@
 ARG base_image
 
 FROM ${base_image}
-LABEL maintainer="saad.rahim@amd.com"
+LABEL maintainer="rocprim-maintainer@amd.com"
 
 # Copy the deb package of rocprim into the container from host
 COPY *.deb /tmp/
