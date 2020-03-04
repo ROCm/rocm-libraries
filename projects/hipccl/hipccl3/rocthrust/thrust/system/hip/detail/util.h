@@ -65,10 +65,7 @@ trivial_copy_from_device(Type* dst, Type const* src, size_t count, hipStream_t s
     if(count == 0)
         return status;
 
-    status = ::hipMemcpyAsync(dst, src, sizeof(Type) * count, hipMemcpyDeviceToHost, stream);
-    if(status != hipSuccess)
-        return status;
-    status = hipStreamSynchronize(stream);
+    status = ::hipMemcpyWithStream(dst, src, sizeof(Type) * count, hipMemcpyDeviceToHost, stream);
     return status;
 }
 
@@ -80,10 +77,7 @@ trivial_copy_to_device(Type* dst, Type const* src, size_t count, hipStream_t str
     if(count == 0)
         return status;
 
-    status = ::hipMemcpyAsync(dst, src, sizeof(Type) * count, hipMemcpyHostToDevice, stream);
-    if(status != hipSuccess)
-        return status;
-    status = hipStreamSynchronize(stream);
+    status = ::hipMemcpyWithStream(dst, src, sizeof(Type) * count, hipMemcpyHostToDevice, stream);
     return status;
 }
 template <class Policy, class Type>
