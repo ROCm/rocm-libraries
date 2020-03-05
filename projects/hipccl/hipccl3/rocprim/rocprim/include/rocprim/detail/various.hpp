@@ -209,6 +209,21 @@ auto load_volatile(T * input)
     return retval;
 }
 
+#if __HCC_OR_HIP_CLANG__
+ROCPRIM_DEVICE inline
+void store_volatile(half * output, half value)
+{
+    *reinterpret_cast<volatile _Float16*>(output) = value;
+}
+
+ROCPRIM_DEVICE inline
+half load_volatile(half * input)
+{
+    half retval = *reinterpret_cast<volatile _Float16*>(input);
+    return retval;
+}
+#endif
+
 // A storage-backing wrapper that allows types with non-trivial constructors to be aliased in unions
 template <typename T>
 struct raw_storage
