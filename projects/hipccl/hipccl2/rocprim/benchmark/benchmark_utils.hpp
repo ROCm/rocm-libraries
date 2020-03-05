@@ -208,7 +208,7 @@ template<class T>
 inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 1024 * 1024)
     -> typename std::enable_if<!is_custom_type<T>::value && !std::is_same<decltype(max.x), void>::value, std::vector<T>>::type
 {
-    using field_type = decltype(max.x);
+    using field_type = decltype(max.x++);
     std::vector<T> data(size);
     auto field_data = get_random_data<field_type>(size, min.x, max.x, max_random_size);
     for(size_t i = 0; i < size; i++)
