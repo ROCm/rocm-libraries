@@ -374,22 +374,12 @@ auto scan_impl(void * temporary_storage,
 
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         auto grid_size = (number_of_blocks + block_size - 1)/block_size;
-        if (prop.gcnArch == 908) 
-        {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(init_lookback_scan_state_kernel<scan_state_with_sleep_type>),
-                dim3(grid_size), dim3(block_size), 0, stream,
-                scan_state_with_sleep, number_of_blocks, ordered_bid
-            );
-        } else
-        {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(init_lookback_scan_state_kernel<scan_state_type>),
-                dim3(grid_size), dim3(block_size), 0, stream,
-                scan_state, number_of_blocks, ordered_bid
-            );
-        }
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_lookback_scan_state_kernel", size, start)
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(init_lookback_scan_state_kernel<scan_state_type>),
+            dim3(grid_size), dim3(block_size), 0, stream,
+            scan_state, number_of_blocks, ordered_bid
+        );
+        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_lookback_scan_state_kernel", number_of_blocks, start)
 
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         grid_size = number_of_blocks;

@@ -50,7 +50,7 @@
   }
 
 #ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 128;
+const size_t DEFAULT_N = 1024 * 1024 * 32;
 #endif
 
 namespace rp = rocprim;
@@ -63,9 +63,9 @@ template<
     unsigned int Trials
 >
 __global__
-void kernel(const T * d_input, T * d_output)
+void kernel(const T * d_input, const unsigned int * d_ranks, T * d_output)
 {
-    Runner::template run<T, BlockSize, ItemsPerThread, Trials>(d_input, d_output);
+    Runner::template run<T, BlockSize, ItemsPerThread, Trials>(d_input, d_ranks, d_output);
 }
 
 struct blocked_to_striped
@@ -77,7 +77,7 @@ struct blocked_to_striped
         unsigned int Trials
     >
     __device__
-    static void run(const T * d_input, T * d_output)
+    static void run(const T * d_input, const unsigned int *, T * d_output)
     {
         const unsigned int lid = hipThreadIdx_x;
         const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
@@ -90,6 +90,7 @@ struct blocked_to_striped
         {
             rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
             exchange.blocked_to_striped(input, input);
+            ::rocprim::syncthreads();
         }
 
         rp::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, input);
@@ -105,7 +106,7 @@ struct striped_to_blocked
         unsigned int Trials
     >
     __device__
-    static void run(const T * d_input, T * d_output)
+    static void run(const T * d_input, const unsigned int *, T * d_output)
     {
         const unsigned int lid = hipThreadIdx_x;
         const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
@@ -118,6 +119,7 @@ struct striped_to_blocked
         {
             rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
             exchange.striped_to_blocked(input, input);
+            ::rocprim::syncthreads();
         }
 
         rp::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, input);
@@ -133,7 +135,7 @@ struct blocked_to_warp_striped
         unsigned int Trials
     >
     __device__
-    static void run(const T * d_input, T * d_output)
+    static void run(const T * d_input, const unsigned int *, T * d_output)
     {
         const unsigned int lid = hipThreadIdx_x;
         const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
@@ -146,6 +148,7 @@ struct blocked_to_warp_striped
         {
             rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
             exchange.blocked_to_warp_striped(input, input);
+            ::rocprim::syncthreads();
         }
 
         rp::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, input);
@@ -161,7 +164,7 @@ struct warp_striped_to_blocked
         unsigned int Trials
     >
     __device__
-    static void run(const T * d_input, T * d_output)
+    static void run(const T * d_input, const unsigned int *, T * d_output)
     {
         const unsigned int lid = hipThreadIdx_x;
         const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
@@ -174,6 +177,7 @@ struct warp_striped_to_blocked
         {
             rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
             exchange.warp_striped_to_blocked(input, input);
+            ::rocprim::syncthreads();
         }
 
         rp::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, input);
@@ -189,7 +193,7 @@ struct scatter_to_blocked
         unsigned int Trials
     >
     __device__
-    static void run(const T * d_input, T * d_output)
+    static void run(const T * d_input, const unsigned int * d_ranks, T * d_output)
     {
         const unsigned int lid = hipThreadIdx_x;
         const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
@@ -197,13 +201,14 @@ struct scatter_to_blocked
         T input[ItemsPerThread];
         unsigned int ranks[ItemsPerThread];
         rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
-        rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, ranks);
+        rp::block_load_direct_striped<BlockSize>(lid, d_ranks + block_offset, ranks);
 
         #pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
             exchange.scatter_to_blocked(input, input, ranks);
+            ::rocprim::syncthreads();
         }
 
         rp::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, input);
@@ -219,7 +224,7 @@ struct scatter_to_striped
         unsigned int Trials
     >
     __device__
-    static void run(const T * d_input, T * d_output)
+    static void run(const T * d_input, const unsigned int * d_ranks, T * d_output)
     {
         const unsigned int lid = hipThreadIdx_x;
         const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
@@ -227,13 +232,14 @@ struct scatter_to_striped
         T input[ItemsPerThread];
         unsigned int ranks[ItemsPerThread];
         rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
-        rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, ranks);
+        rp::block_load_direct_striped<BlockSize>(lid, d_ranks + block_offset, ranks);
 
         #pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
             exchange.scatter_to_striped(input, input, ranks);
+            ::rocprim::syncthreads();
         }
 
         rp::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, input);
@@ -253,22 +259,37 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     const auto size = items_per_block * ((N + items_per_block - 1)/items_per_block);
 
     std::vector<T> input(size);
-    // Fill input with ranks (for scatter operations)
+    // Fill input
+    for(size_t i = 0; i < size; i++)
+    {
+        input[i] = T(i);
+    }
+    std::vector<unsigned int> ranks(size);
+    // Fill ranks (for scatter operations)
     std::mt19937 gen;
     for(size_t bi = 0; bi < size / items_per_block; bi++)
     {
-        auto block_ranks = input.begin() + bi * items_per_block;
+        auto block_ranks = ranks.begin() + bi * items_per_block;
         std::iota(block_ranks, block_ranks + items_per_block, 0);
         std::shuffle(block_ranks, block_ranks + items_per_block, gen);
     }
     T * d_input;
+    unsigned int * d_ranks;
     T * d_output;
     HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
+    HIP_CHECK(hipMalloc(&d_ranks, size * sizeof(unsigned int)));
     HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
     HIP_CHECK(
         hipMemcpy(
             d_input, input.data(),
             size * sizeof(T),
+            hipMemcpyHostToDevice
+        )
+    );
+    HIP_CHECK(
+        hipMemcpy(
+            d_ranks, ranks.data(),
+            size * sizeof(unsigned int),
             hipMemcpyHostToDevice
         )
     );
@@ -281,7 +302,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(kernel<Benchmark, T, BlockSize, ItemsPerThread, Trials>),
             dim3(size/items_per_block), dim3(BlockSize), 0, stream,
-            d_input, d_output
+            d_input, d_ranks, d_output
         );
         HIP_CHECK(hipPeekAtLastError());
         HIP_CHECK(hipDeviceSynchronize());
@@ -295,6 +316,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     state.SetItemsProcessed(state.iterations() * Trials * size);
 
     HIP_CHECK(hipFree(d_input));
+    HIP_CHECK(hipFree(d_ranks));
     HIP_CHECK(hipFree(d_output));
 }
 
@@ -310,6 +332,7 @@ benchmark::RegisterBenchmark( \
     CREATE_BENCHMARK(type, block, 2), \
     CREATE_BENCHMARK(type, block, 3), \
     CREATE_BENCHMARK(type, block, 4), \
+    CREATE_BENCHMARK(type, block, 7), \
     CREATE_BENCHMARK(type, block, 8)
 
 template<class Benchmark>
@@ -318,13 +341,20 @@ void add_benchmarks(const std::string& name,
                     hipStream_t stream,
                     size_t size)
 {
+    using custom_float2 = custom_type<float, float>;
+    using custom_double2 = custom_type<double, double>;
+
     std::vector<benchmark::internal::Benchmark*> bs =
     {
         BENCHMARK_TYPE(int, 256),
         BENCHMARK_TYPE(int8_t, 256),
-        BENCHMARK_TYPE(uint8_t, 256),
         BENCHMARK_TYPE(rocprim::half, 256),
         BENCHMARK_TYPE(long long, 256),
+        BENCHMARK_TYPE(custom_float2, 256),
+        BENCHMARK_TYPE(float2, 256),
+        BENCHMARK_TYPE(custom_double2, 256),
+        BENCHMARK_TYPE(double2, 256),
+        BENCHMARK_TYPE(float4, 256),
     };
 
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());

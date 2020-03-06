@@ -20,6 +20,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+option(BENCHMARK_CONFIG_TUNING "Benchmark device-level functions using various configs" OFF)
+
 function(add_rocprim_benchmark BENCHMARK_SOURCE)
   get_filename_component(BENCHMARK_TARGET ${BENCHMARK_SOURCE} NAME_WE)
   add_executable(${BENCHMARK_TARGET} ${BENCHMARK_SOURCE})
@@ -38,6 +40,9 @@ function(add_rocprim_benchmark BENCHMARK_SOURCE)
     PROPERTIES
       RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmark"
   )
+  if(BENCHMARK_CONFIG_TUNING)
+    target_compile_definitions(${BENCHMARK_TARGET} PRIVATE BENCHMARK_CONFIG_TUNING)
+  endif()
 endfunction()
 
 # ****************************************************************************

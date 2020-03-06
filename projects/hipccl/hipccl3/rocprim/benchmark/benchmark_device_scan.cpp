@@ -50,11 +50,12 @@
   }
 
 #ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 128;
+const size_t DEFAULT_N = 1024 * 1024 * 32;
 #endif
 
 template<
     bool Exclusive,
+    class Config,
     class T,
     class BinaryFunction
 >
@@ -69,7 +70,7 @@ auto run_device_scan(void * temporary_storage,
                      const bool debug = false)
     -> typename std::enable_if<Exclusive, hipError_t>::type
 {
-    return rocprim::exclusive_scan(
+    return rocprim::exclusive_scan<Config>(
         temporary_storage, storage_size,
         input, output, initial_value, input_size,
         scan_op, stream, debug
@@ -78,6 +79,7 @@ auto run_device_scan(void * temporary_storage,
 
 template<
     bool Exclusive,
+    class Config,
     class T,
     class BinaryFunction
 >
@@ -93,7 +95,7 @@ auto run_device_scan(void * temporary_storage,
     -> typename std::enable_if<!Exclusive, hipError_t>::type
 {
     (void) initial_value;
-    return rocprim::inclusive_scan(
+    return rocprim::inclusive_scan<Config>(
         temporary_storage, storage_size,
         input, output, input_size,
         scan_op, stream, debug
@@ -103,27 +105,16 @@ auto run_device_scan(void * temporary_storage,
 template<
     bool Exclusive,
     class T,
-    class BinaryFunction
+    class BinaryFunction,
+    class Config
 >
 void run_benchmark(benchmark::State& state,
                    size_t size,
                    const hipStream_t stream,
                    BinaryFunction scan_op)
 {
-    std::vector<T> input;
-    if(std::is_floating_point<T>::value)
-    {
-        input = get_random_data<T>(size, (T)-1000, (T)+1000);
-    }
-    else
-    {
-        input = get_random_data<T>(
-            size,
-            std::numeric_limits<T>::min(),
-            std::numeric_limits<T>::max()
-        );
-    }
-    T initial_value = get_random_value<T>((T)-1000, (T)+1000);
+    std::vector<T> input = get_random_data<T>(size, T(0), T(1000));
+    T initial_value = T(123);
     T * d_input;
     T * d_output;
     HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
@@ -141,26 +132,26 @@ void run_benchmark(benchmark::State& state,
     size_t temp_storage_size_bytes;
     void * d_temp_storage = nullptr;
     // Get size of d_temp_storage
-    HIP_CHECK(
-        run_device_scan<Exclusive>(
+    HIP_CHECK((
+        run_device_scan<Exclusive, Config>(
             d_temp_storage, temp_storage_size_bytes,
             d_input, d_output, initial_value, size,
             scan_op, stream
         )
-    );
+    ));
     HIP_CHECK(hipMalloc(&d_temp_storage,temp_storage_size_bytes));
     HIP_CHECK(hipDeviceSynchronize());
 
     // Warm-up
-    for(size_t i = 0; i < 10; i++)
+    for(size_t i = 0; i < 5; i++)
     {
-        HIP_CHECK(
-            run_device_scan<Exclusive>(
+        HIP_CHECK((
+            run_device_scan<Exclusive, Config>(
                 d_temp_storage, temp_storage_size_bytes,
                 d_input, d_output, initial_value, size,
                 scan_op, stream
             )
-        );
+        ));
     }
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -170,13 +161,13 @@ void run_benchmark(benchmark::State& state,
         auto start = std::chrono::high_resolution_clock::now();
         for(size_t i = 0; i < batch_size; i++)
         {
-            HIP_CHECK(
-                run_device_scan<Exclusive>(
+            HIP_CHECK((
+                run_device_scan<Exclusive, Config>(
                     d_temp_storage, temp_storage_size_bytes,
                     d_input, d_output, initial_value, size,
                     scan_op, stream
                 )
-            );
+            ));
         }
         HIP_CHECK(hipStreamSynchronize(stream));
 
@@ -193,17 +184,56 @@ void run_benchmark(benchmark::State& state,
     HIP_CHECK(hipFree(d_temp_storage));
 }
 
-#define CREATE_INCLUSIVE_BENCHMARK(T, SCAN_OP) \
-benchmark::RegisterBenchmark( \
-    ("inclusive_scan<" #T "," #SCAN_OP ">"), \
-    run_benchmark<false, T, SCAN_OP>, size, stream, SCAN_OP() \
-)
+#ifdef BENCHMARK_CONFIG_TUNING
 
-#define CREATE_EXCLUSIVE_BENCHMARK(T, SCAN_OP) \
+#define CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, IPT) \
 benchmark::RegisterBenchmark( \
-    ("exclusive_scan<" #T "," #SCAN_OP ">"), \
-    run_benchmark<true, T, SCAN_OP>, size, stream, SCAN_OP() \
-)
+    (std::string(EXCL ? "exclusive_scan" : "inclusive_scan") + \
+    ("<" #T ", " #SCAN_OP ", scan_config<" #BS ", " #IPT ", " #BSA "> >")).c_str(), \
+    run_benchmark<EXCL, T, SCAN_OP, typename rocprim::scan_config<BS, IPT, true, rocprim::block_load_method::block_load_transpose, rocprim::block_store_method::block_store_transpose, BSA> >, size, stream, SCAN_OP() \
+),
+
+#define CREATE_BENCHMARK1(EXCL, T, SCAN_OP, BSA, BS) \
+    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 1) \
+    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 2) \
+    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 3) \
+    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 4) \
+    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 5) \
+    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 6) \
+    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 7) \
+    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 8) \
+    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 9) \
+    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 10) \
+    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 11) \
+    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 12) \
+    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 13) \
+    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 14) \
+    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 15) \
+    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 16) \
+    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 17) \
+    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 18) \
+    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 19) \
+    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 20)
+
+constexpr rocprim::block_scan_algorithm using_warp_scan = rocprim::block_scan_algorithm::using_warp_scan;
+constexpr rocprim::block_scan_algorithm reduce_then_scan = rocprim::block_scan_algorithm::reduce_then_scan;
+
+#define CREATE_BENCHMARK(EXCL, T, SCAN_OP) \
+    CREATE_BENCHMARK1(EXCL, T, SCAN_OP, using_warp_scan, 64) \
+    CREATE_BENCHMARK1(EXCL, T, SCAN_OP, using_warp_scan, 128) \
+    CREATE_BENCHMARK1(EXCL, T, SCAN_OP, using_warp_scan, 256) \
+    CREATE_BENCHMARK1(EXCL, T, SCAN_OP, reduce_then_scan, 256)
+
+#else // BENCHMARK_CONFIG_TUNING
+
+#define CREATE_BENCHMARK(EXCL, T, SCAN_OP) \
+benchmark::RegisterBenchmark( \
+    (std::string(EXCL ? "exclusive_scan" : "inclusive_scan") + \
+    ("<" #T ", " #SCAN_OP ">")).c_str(), \
+    run_benchmark<EXCL, T, SCAN_OP, rocprim::default_config>, size, stream, SCAN_OP() \
+),
+
+#endif // BENCHMARK_CONFIG_TUNING
 
 int main(int argc, char *argv[])
 {
@@ -226,36 +256,47 @@ int main(int argc, char *argv[])
     std::cout << "[HIP] Device name: " << devProp.name << std::endl;
 
     using custom_double2 = custom_type<double, double>;
-    using custom_int2 = custom_type<int, int>;
+    using custom_float2 = custom_type<float, float>;
+
+    // Compilation may never finish, if the compiler needs to compile too many kernels,
+    // it is recommended to compile benchmarks only for 1-2 types when BENCHMARK_CONFIG_TUNING is used
+    // (all other CREATE_*_BENCHMARK should be commented/removed).
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks =
     {
-        CREATE_INCLUSIVE_BENCHMARK(int, rocprim::plus<int>),
-        CREATE_EXCLUSIVE_BENCHMARK(int, rocprim::plus<int>),
+        CREATE_BENCHMARK(false, int, rocprim::plus<int>)
+        CREATE_BENCHMARK(true, int, rocprim::plus<int>)
 
-        CREATE_INCLUSIVE_BENCHMARK(int8_t, rocprim::plus<int8_t>),
-        CREATE_EXCLUSIVE_BENCHMARK(int8_t, rocprim::plus<int8_t>),
+        CREATE_BENCHMARK(false, float, rocprim::plus<float>)
+        CREATE_BENCHMARK(true, float, rocprim::plus<float>)
 
-        CREATE_INCLUSIVE_BENCHMARK(uint8_t, rocprim::plus<uint8_t>),
-        CREATE_EXCLUSIVE_BENCHMARK(uint8_t, rocprim::plus<uint8_t>),
+        CREATE_BENCHMARK(false, double, rocprim::plus<double>)
+        CREATE_BENCHMARK(true, double, rocprim::plus<double>)
 
-        CREATE_INCLUSIVE_BENCHMARK(rocprim::half, rocprim::plus<rocprim::half>),
-        CREATE_EXCLUSIVE_BENCHMARK(rocprim::half, rocprim::plus<rocprim::half>),
+        CREATE_BENCHMARK(false, long long, rocprim::plus<long long>)
+        CREATE_BENCHMARK(true, long long, rocprim::plus<long long>)
 
-        CREATE_INCLUSIVE_BENCHMARK(float, rocprim::plus<float>),
-        CREATE_EXCLUSIVE_BENCHMARK(float, rocprim::plus<float>),
+        CREATE_BENCHMARK(false, float2, rocprim::plus<float2>)
+        CREATE_BENCHMARK(true, float2, rocprim::plus<float2>)
 
-        CREATE_INCLUSIVE_BENCHMARK(double, rocprim::plus<double>),
-        CREATE_EXCLUSIVE_BENCHMARK(double, rocprim::plus<double>),
+        CREATE_BENCHMARK(false, custom_float2, rocprim::plus<custom_float2>)
+        CREATE_BENCHMARK(true, custom_float2, rocprim::plus<custom_float2>)
 
-        CREATE_INCLUSIVE_BENCHMARK(long long, rocprim::plus<long long>),
-        CREATE_EXCLUSIVE_BENCHMARK(long long, rocprim::plus<long long>),
+        CREATE_BENCHMARK(false, double2, rocprim::plus<double2>)
+        CREATE_BENCHMARK(true, double2, rocprim::plus<double2>)
 
-        CREATE_INCLUSIVE_BENCHMARK(custom_double2, rocprim::plus<custom_double2>),
-        CREATE_EXCLUSIVE_BENCHMARK(custom_double2, rocprim::plus<custom_double2>),
-        CREATE_INCLUSIVE_BENCHMARK(custom_int2, rocprim::plus<custom_int2>),
-        CREATE_EXCLUSIVE_BENCHMARK(custom_int2, rocprim::plus<custom_int2>)
+        CREATE_BENCHMARK(false, custom_double2, rocprim::plus<custom_double2>)
+        CREATE_BENCHMARK(true, custom_double2, rocprim::plus<custom_double2>)
+
+        CREATE_BENCHMARK(false, int8_t, rocprim::plus<int8_t>)
+        CREATE_BENCHMARK(true, int8_t, rocprim::plus<int8_t>)
+
+        CREATE_BENCHMARK(false, uint8_t, rocprim::plus<uint8_t>)
+        CREATE_BENCHMARK(true, uint8_t, rocprim::plus<uint8_t>)
+
+        CREATE_BENCHMARK(false, rocprim::half, rocprim::plus<rocprim::half>)
+        CREATE_BENCHMARK(true, rocprim::half, rocprim::plus<rocprim::half>)
     };
 
     // Use manual timing

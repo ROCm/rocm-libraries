@@ -204,4 +204,28 @@ inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 
     return data;
 }
 
+template<class T>
+inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 1024 * 1024)
+    -> typename std::enable_if<!is_custom_type<T>::value && !std::is_same<decltype(max.x), void>::value, std::vector<T>>::type
+{
+    // NOTE 1: post-increment operator required, because HIP has different typedefs for vector field types
+    //         when using HCC or HIP-Clang. Using HIP-Clang members are accessed as fields of a struct via
+    //         a union, but in HCC mode they are proxy types (Scalar_accessor). STL algorithms don't
+    //         always tolerate proxies. Unfortunately, Scalar_accessor doesn't have any member typedefs to
+    //         conveniently obtain the inner stored type. All operations on it (operator+, operator+=,
+    //         CTOR, etc.) return a reference to an accessor, it is only the post-increment operator that
+    //         returns a copy of the stored type, hence we take the decltype of that.
+    //
+    // NOTE 2: decltype() is unevaluated context. We don't really modify max, just compute the type of the
+    //         expression if we were to actually call it.
+    using field_type = decltype(max.x++);
+    std::vector<T> data(size);
+    auto field_data = get_random_data<field_type>(size, min.x, max.x, max_random_size);
+    for(size_t i = 0; i < size; i++)
+    {
+        data[i] = T(field_data[i]);
+    }
+    return data;
+}
+
 #endif // ROCPRIM_BENCHMARK_UTILS_HPP_
