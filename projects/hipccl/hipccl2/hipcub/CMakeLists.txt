@@ -54,6 +54,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
 
 # Build options
 option(BUILD_TEST "Build tests (requires googletest)" OFF)
+option(DOWNLOAD_ROCPRIM "Download rocPRIM and do not search for rocPRIM package" OFF)
 
 # Get dependencies
 include(cmake/Dependencies.cmake)
