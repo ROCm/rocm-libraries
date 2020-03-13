@@ -195,7 +195,9 @@ test:rocm_install:
     - $SUDO_CMD dpkg -i --ignore-depends=cuda hip*.deb
     - $SUDO_CMD ln -s $ROCM_PATH /opt/rocm
     - export PATH=$PATH:/opt/rocm/bin
+    - env
     - hipconfig
+    - env
     # cmake
     - mkdir -p $DEPS_DIR/cmake
     - wget --no-check-certificate --quiet -O - $CMAKE_URL | tar --strip-components=1 -xz -C $DEPS_DIR/cmake

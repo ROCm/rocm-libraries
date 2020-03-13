@@ -1,0 +1,72 @@
+# MIT License
+#
+# Copyright (c) 2017 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+option(BENCHMARK_CONFIG_TUNING "Benchmark device-level functions using various configs" OFF)
+
+function(add_hipcub_benchmark BENCHMARK_SOURCE)
+  get_filename_component(BENCHMARK_TARGET ${BENCHMARK_SOURCE} NAME_WE)
+  if(HIP_PLATFORM STREQUAL "hcc")
+    add_executable(${BENCHMARK_TARGET} ${BENCHMARK_SOURCE})
+    target_link_libraries(${BENCHMARK_TARGET}
+      PRIVATE
+        hipcub
+        benchmark::benchmark
+    )
+    foreach(amdgpu_target ${AMDGPU_TARGETS})
+    target_link_libraries(${BENCHMARK_TARGET}
+      PRIVATE
+        --amdgpu-target=${amdgpu_target}
+    )
+  endforeach()
+  else()
+    set_source_files_properties(${BENCHMARK_SOURCE}
+      PROPERTIES
+          CUDA_SOURCE_PROPERTY_FORMAT OBJ
+    )
+    CUDA_ADD_EXECUTABLE(${BENCHMARK_TARGET}
+      ${BENCHMARK_SOURCE}
+      OPTIONS
+        --expt-extended-lambda
+    )
+    target_include_directories(${BENCHMARK_TARGET} SYSTEM BEFORE
+      PUBLIC
+        ${GTEST_INCLUDE_DIRS}
+    )
+    target_link_libraries(${BENCHMARK_TARGET}
+      hipcub_cub
+      benchmark::benchmark
+    )
+  endif()
+  set_target_properties(${BENCHMARK_TARGET}
+    PROPERTIES
+      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmark"
+  )
+  if(BENCHMARK_CONFIG_TUNING)
+    target_compile_definitions(${BENCHMARK_TARGET} PRIVATE BENCHMARK_CONFIG_TUNING)
+  endif()
+endfunction()
+
+# ****************************************************************************
+# Benchmarks
+# ****************************************************************************
+
+add_hipcub_benchmark(benchmark_block_scan.cpp)
