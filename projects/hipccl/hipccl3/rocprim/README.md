@@ -32,6 +32,8 @@ cd rocPRIM; mkdir build; cd build
 # Build options:
 #   BUILD_TEST - on by default,
 #   BUILD_BENCHMARK - off by default.
+#   BENCHMARK_CONFIG_TUNING - off by default. The purpose of this flag to find the best kernel config parameters.
+#     At ON the compilation time can be increased significantly.
 #   AMDGPU_TARGETS - list of AMD architectures, default: gfx803;gfx900;gfx906.
 #     You can make compilation faster if you want to test/benchmark only on one architecture,
 #     for example, add -DAMDGPU_TARGETS=gfx906 to 'cmake' parameters.

@@ -50,7 +50,7 @@
   }
 
 #ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 128;
+const size_t DEFAULT_N = 1024 * 1024 * 32;
 #endif
 
 namespace rp = rocprim;
@@ -121,7 +121,7 @@ struct exclusive_scan
         using U = typename std::remove_reference<T>::type;
 
         T values[ItemsPerThread];
-        U init = 100;
+        U init = U(100);
 
         for(unsigned int k = 0; k < ItemsPerThread; k++)
         {
@@ -158,7 +158,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     constexpr auto items_per_block = BlockSize * ItemsPerThread;
     const auto size = items_per_block * ((N + items_per_block - 1)/items_per_block);
     // Allocate and fill memory
-    std::vector<T> input(size, 1.0f);
+    std::vector<T> input(size, T(1));
     T * d_input;
     T * d_output;
     HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
@@ -220,8 +220,8 @@ void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                     hipStream_t stream,
                     size_t size)
 {
+    using custom_float2 = custom_type<float, float>;
     using custom_double2 = custom_type<double, double>;
-    using custom_int_double = custom_type<int, double>;
 
     std::vector<benchmark::internal::Benchmark*> new_benchmarks =
     {
@@ -240,14 +240,25 @@ void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
         BENCHMARK_TYPE(uint8_t, 256),
         BENCHMARK_TYPE(rocprim::half, 256),
 
+        CREATE_BENCHMARK(custom_float2, 256, 1),
+        CREATE_BENCHMARK(custom_float2, 256, 4),
+        CREATE_BENCHMARK(custom_float2, 256, 8),
+
+        CREATE_BENCHMARK(float2, 256, 1),
+        CREATE_BENCHMARK(float2, 256, 4),
+        CREATE_BENCHMARK(float2, 256, 8),
+
         CREATE_BENCHMARK(custom_double2, 256, 1),
         CREATE_BENCHMARK(custom_double2, 256, 4),
         CREATE_BENCHMARK(custom_double2, 256, 8),
 
-        CREATE_BENCHMARK(custom_int_double, 256, 1),
-        CREATE_BENCHMARK(custom_int_double, 256, 4),
-        CREATE_BENCHMARK(custom_int_double, 256, 8)
+        CREATE_BENCHMARK(double2, 256, 1),
+        CREATE_BENCHMARK(double2, 256, 4),
+        CREATE_BENCHMARK(double2, 256, 8),
 
+        CREATE_BENCHMARK(float4, 256, 1),
+        CREATE_BENCHMARK(float4, 256, 4),
+        CREATE_BENCHMARK(float4, 256, 8),
     };
     benchmarks.insert(benchmarks.end(), new_benchmarks.begin(), new_benchmarks.end());
 }
