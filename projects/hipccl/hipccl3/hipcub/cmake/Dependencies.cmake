@@ -67,26 +67,16 @@ endif()
 
 # rocPRIM (only for ROCm platform)
 if(HIP_PLATFORM STREQUAL "hcc")
-  if(NOT DOWNLOAD_ROCPRIM)
-    if(NOT DEFINED rocprim_DIR)
-      find_package(rocprim QUIET CONFIG PATHS /opt/rocm/rocprim)
-    else()
-      find_package(rocprim QUIET CONFIG PATHS "${rocprim_DIR}")
-    endif()
+  if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
+    find_package(rocprim)
   endif()
-
   if(NOT rocprim_FOUND)
-    if(NOT DOWNLOAD_ROCPRIM)
-      message(WARNING "rocPRIM package could not be found")
-    endif()
-
-    set(rocprim_DIR "${CMAKE_CURRENT_BINARY_DIR}/rocprim" CACHE PATH "" FORCE)
-    message(${rocprim_DIR})
+    message(STATUS "Downloading and building rocprim.")
     download_project(
       PROJ                rocprim
       GIT_REPOSITORY      https://github.com/ROCmSoftwarePlatform/rocPRIM.git
       GIT_TAG             88b03e36e13d17a7d3e07d954f59ba31b02f032d
-      INSTALL_DIR         ${rocprim_DIR}
+      INSTALL_DIR         ${CMAKE_CURRENT_BINARY_DIR}/deps/rocprim
       CMAKE_ARGS          -DBUILD_TEST=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm
       LOG_DOWNLOAD        TRUE
       LOG_CONFIGURE       TRUE
@@ -95,7 +85,7 @@ if(HIP_PLATFORM STREQUAL "hcc")
       BUILD_PROJECT       TRUE
       UPDATE_DISCONNECTED TRUE # Never update automatically from the remote repository
     )
-    find_package(rocprim REQUIRED CONFIG PATHS "${rocprim_DIR}")
+    find_package(rocprim REQUIRED CONFIG PATHS ${CMAKE_CURRENT_BINARY_DIR}/deps/rocprim)
   endif()
 endif()
 
