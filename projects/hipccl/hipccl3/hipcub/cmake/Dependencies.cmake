@@ -67,14 +67,16 @@ endif()
 
 # rocPRIM (only for ROCm platform)
 if(HIP_PLATFORM STREQUAL "hcc")
-  if(NOT DEFINED rocprim_DIR)
-    message(STATUS "Downloading and building rocPRIM.")
-    set(rocprim_DIR "${CMAKE_CURRENT_BINARY_DIR}/rocprim" CACHE PATH "")
+  if(NOT DOWNLOAD_ROCPRIM)
+    find_package(rocprim)
+  endif()
+  if(NOT rocprim_FOUND)
+    message(STATUS "Downloading and building rocprim.")
     download_project(
       PROJ                rocprim
       GIT_REPOSITORY      https://github.com/ROCmSoftwarePlatform/rocPRIM.git
       GIT_TAG             88b03e36e13d17a7d3e07d954f59ba31b02f032d
-      INSTALL_DIR         ${rocprim_DIR}
+      INSTALL_DIR         ${CMAKE_CURRENT_BINARY_DIR}/deps/rocprim
       CMAKE_ARGS          -DBUILD_TEST=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm
       LOG_DOWNLOAD        TRUE
       LOG_CONFIGURE       TRUE
@@ -83,8 +85,8 @@ if(HIP_PLATFORM STREQUAL "hcc")
       BUILD_PROJECT       TRUE
       UPDATE_DISCONNECTED TRUE # Never update automatically from the remote repository
     )
+    find_package(rocprim REQUIRED CONFIG PATHS ${CMAKE_CURRENT_BINARY_DIR}/deps/rocprim)
   endif()
-  find_package(rocprim REQUIRED CONFIG PATHS "${rocprim_DIR}")
 endif()
 
 # Test dependencies
