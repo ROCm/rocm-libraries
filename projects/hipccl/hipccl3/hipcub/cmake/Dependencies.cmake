@@ -67,7 +67,7 @@ endif()
 
 # rocPRIM (only for ROCm platform)
 if(HIP_PLATFORM STREQUAL "hcc")
-  if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
+  if(NOT DOWNLOAD_ROCPRIM)
     find_package(rocprim)
   endif()
   if(NOT rocprim_FOUND)
