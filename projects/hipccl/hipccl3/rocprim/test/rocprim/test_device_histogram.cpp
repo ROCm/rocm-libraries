@@ -20,27 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <algorithm>
-#include <functional>
-#include <iostream>
-#include <type_traits>
-#include <tuple>
-#include <vector>
-#include <utility>
-
-// Google Test
-#include <gtest/gtest.h>
-
-// HIP API
-#include <hip/hip_runtime.h>
-// rocPRIM API
-#include <rocprim/rocprim.hpp>
-
-#include "test_utils.hpp"
-
-namespace rp = rocprim;
-
-#define HIP_CHECK(error) ASSERT_EQ(error, hipSuccess)
+#include "common_test_header.hpp"
 
 // rows, columns, (row_stride - columns * Channels)
 std::vector<std::tuple<size_t, size_t, size_t>> get_dims()

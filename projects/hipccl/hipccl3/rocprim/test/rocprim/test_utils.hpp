@@ -21,25 +21,12 @@
 #ifndef TEST_TEST_UTILS_HPP_
 #define TEST_TEST_UTILS_HPP_
 
-#include <algorithm>
-#include <vector>
-#include <random>
-#include <type_traits>
-#include <cstdlib>
-
-// Google Test
-#include <gtest/gtest.h>
-
-// rocPRIM
-#include <rocprim/rocprim.hpp>
-
 // Identity iterator
 #include "identity_iterator.hpp"
 // Bounds checking iterator
 #include "bounds_checking_iterator.hpp"
 // Seed values
 #include "test_seed.hpp"
-
 
 // For better Google Test reporting and debug output of half values
 inline
