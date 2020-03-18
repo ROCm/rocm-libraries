@@ -20,17 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <iostream>
-#include <type_traits>
-
-// Google Test
-#include <gtest/gtest.h>
-// rocPRIM API
-#include <rocprim/rocprim.hpp>
-
-#include "test_utils.hpp"
-
-#define HIP_CHECK(error) ASSERT_EQ(static_cast<hipError_t>(error),hipSuccess)
+#include "common_test_header.hpp"
 
 TEST(RocprimZipIteratorTests, Traits)
 {

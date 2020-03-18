@@ -20,24 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <iostream>
-#include <numeric>
-#include <vector>
-#include <tuple>
-#include <type_traits>
-
-// Google Test
-#include <gtest/gtest.h>
-// rocPRIM API
-#include <rocprim/rocprim.hpp>
-
-#include "test_utils.hpp"
-#include "test_utils_types.hpp"
-
-#define HIP_CHECK(error)         \
-    ASSERT_EQ(static_cast<hipError_t>(error),hipSuccess)
-
-namespace rp = rocprim;
+#include "common_test_header.hpp"
 
 template<class Params>
 class RocprimBlockExchangeTests : public ::testing::Test {

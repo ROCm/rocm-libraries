@@ -20,16 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <iostream>
-#include <vector>
-
-// Google Test
-#include <gtest/gtest.h>
-
-// rocPRIM HIP API
-#include <rocprim/rocprim.hpp>
-
-#include "detail/get_rocprim_version.hpp"
+#include "common_test_header.hpp"
 
 TEST(RocprimBasicTests, GetVersion)
 {

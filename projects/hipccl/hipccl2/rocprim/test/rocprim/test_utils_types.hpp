@@ -21,12 +21,6 @@
 #ifndef TEST_TEST_UTILS_TYPES_HPP_
 #define TEST_TEST_UTILS_TYPES_HPP_
 
-// Google Test
-#include <gtest/gtest.h>
-
-// rocPRIM
-#include <rocprim/rocprim.hpp>
-
 template<
     class T,
     unsigned int WarpSize

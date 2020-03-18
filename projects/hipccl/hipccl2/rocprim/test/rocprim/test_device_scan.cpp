@@ -20,23 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <iostream>
-#include <vector>
-#include <algorithm>
-#include <cmath>
-
-// Google Test
-#include <gtest/gtest.h>
-// HIP API
-#include <hip/hip_runtime.h>
-// rocPRIM API
-#include <rocprim/rocprim.hpp>
-
-#include "test_utils.hpp"
-
-namespace rp = rocprim;
-
-#define HIP_CHECK(error) ASSERT_EQ(error, hipSuccess)
+#include "common_test_header.hpp"
 
 // Params for tests
 template<

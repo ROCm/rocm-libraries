@@ -20,20 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <iostream>
-#include <vector>
-
-// Google Test
-#include <gtest/gtest.h>
-// rocPRIM API
-#include <rocprim/rocprim.hpp>
-
-#include "test_utils.hpp"
-#include "test_utils_types.hpp"
-
-#define HIP_CHECK(error) ASSERT_EQ(error, hipSuccess)
-
-namespace rp = rocprim;
+#include "common_test_header.hpp"
 
 // ---------------------------------------------------------
 // Test for scan ops taking single input value
