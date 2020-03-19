@@ -16,6 +16,7 @@ function display_help()
     #    echo "    [-d|--dependencies] install build dependencies"
     echo "    [-c|--clients] build library clients too (combines with -i & -d)"
     echo "    [-g|--debug] -DCMAKE_BUILD_TYPE=Debug (default is =Release)"
+    echo"     [-b|--benchmark] builds and runs benchmark"
     echo "    [--hip-clang] build library for amdgpu backend using hip-clang"
 }
 
@@ -29,6 +30,7 @@ build_clients=false
 build_release=true
 build_hip_clang=false
 run_tests=false
+build_benchmark=false
 rocm_path=/opt/rocm
 build_relocatable=false
 
@@ -39,7 +41,7 @@ build_relocatable=false
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ $? -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,debug,hip-clang,test,package,relocatable --options hicdtpgr -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,debug,hip-clang,test,benchmark,package,relocatable --options hicdtbpgr -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -65,18 +67,21 @@ while true; do
 	-p|--package)
 	    build_package=true
 	    shift ;;
-        -r|--relocatable)
-             build_relocatable=true
-             shift ;;
-        -c|--clients)
-	    build_clients=true
-	    shift ;;
+    -r|--relocatable)
+         build_relocatable=true
+         shift ;;
+    -c|--clients)
+        build_clients=true
+        shift ;;
 	-g|--debug)
 	    build_release=false
 	    shift ;;
 	-t|--test)
 	    run_tests=true
 	    shift ;;
+    -b|--benchmark)
+        build_benchmark=true
+        shift ;;
 	--hip-clang)
 	    build_hip_clang=true
 	    shift ;;
@@ -126,12 +131,17 @@ if [ -e /etc/redhat-release ] ; then
     cmake_executable="cmake3"
 fi
 
+benchmark="OFF"
+if [[ "${build_benchmark}" == true ]]; then
+    benchmark="ON"
+fi
+
 if [[ "${build_relocatable}" == true ]]; then
-    CXX=${rocm_path}/bin/${compiler} ${cmake_executable} -DCMAKE_INSTALL_PREFIX=${rocm_path} -DBUILD_BENCHMARK=ON \
+    CXX=${rocm_path}/bin/${compiler} ${cmake_executable} -DCMAKE_INSTALL_PREFIX=${rocm_path} -DBUILD_BENCHMARK=${benchmark} \
     -DCMAKE_PREFIX_PATH="${rocm_path} ${rocm_path}/hcc  ${rocm_path}/hip" \
     -DCMAKE_MODULE_PATH="${rocm_path}/hip/cmake" ../../.     # or cmake-gui ../.
 else
-    CXX=${rocm_path}/bin/${compiler} ${cmake_executable} -DBUILD_BENCHMARK=ON ../../. # or cmake-gui ../.
+    CXX=${rocm_path}/bin/${compiler} ${cmake_executable} -DBUILD_BENCHMARK=${benchmark} ../../. # or cmake-gui ../.
 fi
 
 # Build
