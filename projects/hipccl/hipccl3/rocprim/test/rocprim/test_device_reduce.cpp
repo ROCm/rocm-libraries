@@ -22,6 +22,13 @@
 
 #include "common_test_header.hpp"
 
+// required rocprim headers
+#include <rocprim/device/device_reduce.hpp>
+#include <rocprim/iterator/constant_iterator.hpp>
+
+// required test headers
+#include "test_utils_types.hpp"
+
 // Params for tests
 template<
     class InputType,
@@ -57,7 +64,7 @@ typedef ::testing::Types<
     DeviceReduceParams<int, float>,
     DeviceReduceParams<int8_t, int8_t>,
     DeviceReduceParams<uint8_t, uint8_t>,
-    DeviceReduceParams<rp::half, rp::half>,
+    DeviceReduceParams<rocprim::half, rocprim::half>,
     DeviceReduceParams<test_utils::custom_test_type<float>, test_utils::custom_test_type<float>>,
     DeviceReduceParams<test_utils::custom_test_type<int>, test_utils::custom_test_type<float>>
 > RocprimDeviceReduceTestsParams;
@@ -135,14 +142,14 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
 {
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
-    using binary_op_type = typename std::conditional<std::is_same<U, rp::half>::value, test_utils::half_plus, rp::plus<U>>::type;
+    using binary_op_type = typename std::conditional<std::is_same<U, rocprim::half>::value, test_utils::half_plus, rocprim::plus<U>>::type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         const std::vector<size_t> sizes = get_sizes(seed_value);
         for(auto size : sizes)
@@ -152,7 +159,7 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             // precision of half differs between host and device with large plus reductions
-            if(std::is_same<U, rp::half>::value && size >= 1024)
+            if(std::is_same<U, rocprim::half>::value && size >= 1024)
             {
                 break;
             }
@@ -193,7 +200,7 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
                     d_temp_storage, temp_storage_size_bytes,
                     d_input,
                     test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
-                    input.size(), rp::plus<U>(), stream, debug_synchronous
+                    input.size(), rocprim::plus<U>(), stream, debug_synchronous
                 )
             );
 
@@ -210,7 +217,7 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
                     d_temp_storage, temp_storage_size_bytes,
                     d_input,
                     test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
-                    input.size(), rp::plus<U>(), stream, debug_synchronous
+                    input.size(), rocprim::plus<U>(), stream, debug_synchronous
                 )
             );
             HIP_CHECK(hipPeekAtLastError());
@@ -234,21 +241,21 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
             hipFree(d_temp_storage);
         }
     }
-    
+
 }
 
 TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
 {
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
-    using binary_op_type = typename std::conditional<std::is_same<U, rp::half>::value, test_utils::half_minimum, rp::minimum<U>>::type;
+    using binary_op_type = typename std::conditional<std::is_same<U, rocprim::half>::value, test_utils::half_minimum, rocprim::minimum<U>>::type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         const std::vector<size_t> sizes = get_sizes(seed_value);
         for(auto size : sizes)
@@ -293,7 +300,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
                     d_temp_storage, temp_storage_size_bytes,
                     d_input,
                     test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
-                    test_utils::numeric_limits<U>::max(), input.size(), rp::minimum<U>(), stream, debug_synchronous
+                    test_utils::numeric_limits<U>::max(), input.size(), rocprim::minimum<U>(), stream, debug_synchronous
                 )
             );
 
@@ -310,7 +317,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
                     d_temp_storage, temp_storage_size_bytes,
                     d_input,
                     test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
-                    test_utils::numeric_limits<U>::max(), input.size(), rp::minimum<U>(), stream, debug_synchronous
+                    test_utils::numeric_limits<U>::max(), input.size(), rocprim::minimum<U>(), stream, debug_synchronous
                 )
             );
             HIP_CHECK(hipPeekAtLastError());
@@ -334,7 +341,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
             hipFree(d_temp_storage);
         }
     }
-    
+
 }
 
 template<
@@ -353,12 +360,12 @@ struct arg_min
 };
 
 template<>
-struct arg_min<int, rp::half>
+struct arg_min<int, rocprim::half>
 {
     ROCPRIM_HOST_DEVICE inline
-    rocprim::key_value_pair<int, rp::half>
-    operator()(const rocprim::key_value_pair<int, rp::half>& a,
-               const rocprim::key_value_pair<int, rp::half>& b) const
+    rocprim::key_value_pair<int, rocprim::half>
+    operator()(const rocprim::key_value_pair<int, rocprim::half>& a,
+               const rocprim::key_value_pair<int, rocprim::half>& b) const
     {
         #if __HIP_DEVICE_COMPILE__
         return ((b.value < a.value) || ((a.value == b.value) && (b.key < a.key))) ? b : a;
@@ -379,7 +386,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         const std::vector<size_t> sizes = get_sizes(seed_value);
         for(auto size : sizes)
@@ -471,5 +478,5 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
             hipFree(d_temp_storage);
         }
     }
-    
+
 }

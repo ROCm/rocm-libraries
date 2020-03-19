@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 #ifndef ROCPRIM_COMMON_TEST_HEADER
-#define ROCPRIM_COMMON_TEST_HEADER 
+#define ROCPRIM_COMMON_TEST_HEADER
 
 #include <algorithm>
 #include <functional>
@@ -41,13 +41,6 @@
 #include <hip/hip_vector_types.h>
 #include <hip/hip_ext.h>
 
-// rocPRIM API
-#include <rocprim/rocprim.hpp>
-
-#include "rocprim/test_utils.hpp"
-#include "rocprim/test_utils_types.hpp"
-#include "rocprim/detail/get_rocprim_version.hpp"
-
 #define HIP_CHECK(condition)         \
 {                                    \
     hipError_t error = condition;    \
@@ -56,7 +49,5 @@
         exit(error); \
     } \
 }
-
-namespace rp = rocprim;
 
 #endif

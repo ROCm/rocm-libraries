@@ -22,6 +22,12 @@
 
 #include "common_test_header.hpp"
 
+// required rocprim headers
+#include <rocprim/device/device_segmented_radix_sort.hpp>
+
+// required test headers
+#include "test_utils_types.hpp"
+
 template<
     class Key,
     class Value,
@@ -58,14 +64,14 @@ typedef ::testing::Types<
     params<int8_t, int8_t, false, 0, 8, 0, 1000>,
     params<uint8_t, uint8_t, true, 0, 8, 2000, 10000>,
     params<uint8_t, uint8_t, false, 0, 8, 0, 1000>,
-    params<rp::half, rp::half, true, 0, 16, 2000, 10000>,
-    params<rp::half, rp::half, false, 0, 16, 0, 1000>,
+    params<rocprim::half, rocprim::half, true, 0, 16, 2000, 10000>,
+    params<rocprim::half, rocprim::half, false, 0, 16, 0, 1000>,
     params<float, int, false, 0, 32, 0, 1000>,
 
     // start_bit and end_bit
     params<uint8_t, uint8_t, true, 2, 5, 0, 10000>,
     params<uint8_t, uint8_t, false, 2, 6, 1000, 10000>,
-    params<unsigned short, rp::half, true, 4, 10, 0, 10000>,
+    params<unsigned short, rocprim::half, true, 4, 10, 0, 10000>,
     params<unsigned char, int, true, 2, 5, 0, 100>,
     params<unsigned short, int, true, 4, 10, 0, 10000>,
     params<unsigned int, short, false, 3, 22, 1000, 10000>,
@@ -80,7 +86,7 @@ TYPED_TEST_CASE(RocprimDeviceSegmentedRadixSort, Params);
 template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
 struct key_comparator
 {
-    static_assert(rp::is_unsigned<Key>::value, "Test supports start and end bits only for unsigned integers");
+    static_assert(rocprim::is_unsigned<Key>::value, "Test supports start and end bits only for unsigned integers");
 
     bool operator()(const Key& lhs, const Key& rhs)
     {
@@ -101,9 +107,9 @@ struct key_comparator<Key, Descending, 0, sizeof(Key) * 8>
 };
 
 template<bool Descending>
-struct key_comparator<rp::half, Descending, 0, sizeof(rp::half) * 8>
+struct key_comparator<rocprim::half, Descending, 0, sizeof(rocprim::half) * 8>
 {
-    bool operator()(const rp::half& lhs, const rp::half& rhs)
+    bool operator()(const rocprim::half& lhs, const rocprim::half& rhs)
     {
         // HIP's half doesn't have __host__ comparison operators, use floats instead
         return key_comparator<float, Descending, 0, sizeof(float) * 8>()(lhs, rhs);
@@ -157,7 +163,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeys)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         const std::vector<size_t> sizes = get_sizes(seed_value);
         for(size_t size : sizes)
@@ -166,7 +172,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeys)
 
             // Generate data
             std::vector<key_type> keys_input;
-            if(rp::is_floating_point<key_type>::value)
+            if(rocprim::is_floating_point<key_type>::value)
             {
                 keys_input = test_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000, seed_value);
             }
@@ -175,7 +181,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeys)
                 keys_input = test_utils::get_random_data<key_type>(
                     size,
                     std::numeric_limits<key_type>::min(),
-                    std::numeric_limits<key_type>::max(), 
+                    std::numeric_limits<key_type>::max(),
                     seed_index
                 );
             }
@@ -227,7 +233,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeys)
 
             size_t temporary_storage_bytes = 0;
             HIP_CHECK(
-                rp::segmented_radix_sort_keys(
+                rocprim::segmented_radix_sort_keys(
                     nullptr, temporary_storage_bytes,
                     d_keys_input, d_keys_output, size,
                     segments_count, d_offsets, d_offsets + 1,
@@ -243,7 +249,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeys)
             if(descending)
             {
                 HIP_CHECK(
-                    rp::segmented_radix_sort_keys_desc(
+                    rocprim::segmented_radix_sort_keys_desc(
                         d_temporary_storage, temporary_storage_bytes,
                         d_keys_input, d_keys_output, size,
                         segments_count, d_offsets, d_offsets + 1,
@@ -255,7 +261,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeys)
             else
             {
                 HIP_CHECK(
-                    rp::segmented_radix_sort_keys(
+                    rocprim::segmented_radix_sort_keys(
                         d_temporary_storage, temporary_storage_bytes,
                         d_keys_input, d_keys_output, size,
                         segments_count, d_offsets, d_offsets + 1,
@@ -282,7 +288,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeys)
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
         }
     }
-    
+
 }
 
 TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairs)
@@ -310,7 +316,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairs)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         const std::vector<size_t> sizes = get_sizes(seed_value);
         for(size_t size : sizes)
@@ -319,7 +325,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairs)
 
             // Generate data
             std::vector<key_type> keys_input;
-            if(rp::is_floating_point<key_type>::value)
+            if(rocprim::is_floating_point<key_type>::value)
             {
                 keys_input = test_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000, seed_value);
             }
@@ -328,7 +334,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairs)
                 keys_input = test_utils::get_random_data<key_type>(
                     size,
                     std::numeric_limits<key_type>::min(),
-                    std::numeric_limits<key_type>::max(), 
+                    std::numeric_limits<key_type>::max(),
                     seed_index
                 );
             }
@@ -409,7 +415,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairs)
             void * d_temporary_storage = nullptr;
             size_t temporary_storage_bytes = 0;
             HIP_CHECK(
-                rp::segmented_radix_sort_pairs(
+                rocprim::segmented_radix_sort_pairs(
                     d_temporary_storage, temporary_storage_bytes,
                     d_keys_input, d_keys_output, d_values_input, d_values_output, size,
                     segments_count, d_offsets, d_offsets + 1,
@@ -424,7 +430,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairs)
             if(descending)
             {
                 HIP_CHECK(
-                    rp::segmented_radix_sort_pairs_desc(
+                    rocprim::segmented_radix_sort_pairs_desc(
                         d_temporary_storage, temporary_storage_bytes,
                         d_keys_input, d_keys_output, d_values_input, d_values_output, size,
                         segments_count, d_offsets, d_offsets + 1,
@@ -436,7 +442,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairs)
             else
             {
                 HIP_CHECK(
-                    rp::segmented_radix_sort_pairs(
+                    rocprim::segmented_radix_sort_pairs(
                         d_temporary_storage, temporary_storage_bytes,
                         d_keys_input, d_keys_output, d_values_input, d_values_output, size,
                         segments_count, d_offsets, d_offsets + 1,
@@ -475,7 +481,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairs)
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, values_expected));
         }
     }
-    
+
 }
 
 TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
@@ -502,7 +508,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         const std::vector<size_t> sizes = get_sizes(seed_value);
         for(size_t size : sizes)
@@ -511,7 +517,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
 
             // Generate data
             std::vector<key_type> keys_input;
-            if(rp::is_floating_point<key_type>::value)
+            if(rocprim::is_floating_point<key_type>::value)
             {
                 keys_input = test_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000, seed_value);
             }
@@ -520,7 +526,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
                 keys_input = test_utils::get_random_data<key_type>(
                     size,
                     std::numeric_limits<key_type>::min(),
-                    std::numeric_limits<key_type>::max(), 
+                    std::numeric_limits<key_type>::max(),
                     seed_index
                 );
             }
@@ -570,14 +576,14 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
                 );
             }
 
-            rp::double_buffer<key_type> d_keys(d_keys_input, d_keys_output);
+            rocprim::double_buffer<key_type> d_keys(d_keys_input, d_keys_output);
 
             // Use custom config
-            using config = rp::segmented_radix_sort_config<7, 4, rp::kernel_config<192, 5>>;
+            using config = rocprim::segmented_radix_sort_config<7, 4, rocprim::kernel_config<192, 5>>;
 
             size_t temporary_storage_bytes = 0;
             HIP_CHECK(
-                rp::segmented_radix_sort_keys<config>(
+                rocprim::segmented_radix_sort_keys<config>(
                     nullptr, temporary_storage_bytes,
                     d_keys, size,
                     segments_count, d_offsets, d_offsets + 1,
@@ -593,7 +599,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
             if(descending)
             {
                 HIP_CHECK(
-                    rp::segmented_radix_sort_keys_desc<config>(
+                    rocprim::segmented_radix_sort_keys_desc<config>(
                         d_temporary_storage, temporary_storage_bytes,
                         d_keys, size,
                         segments_count, d_offsets, d_offsets + 1,
@@ -605,7 +611,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
             else
             {
                 HIP_CHECK(
-                    rp::segmented_radix_sort_keys<config>(
+                    rocprim::segmented_radix_sort_keys<config>(
                         d_temporary_storage, temporary_storage_bytes,
                         d_keys, size,
                         segments_count, d_offsets, d_offsets + 1,
@@ -632,7 +638,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
         }
     }
-    
+
 }
 
 TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
@@ -660,7 +666,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         const std::vector<size_t> sizes = get_sizes(seed_value);
         for(size_t size : sizes)
@@ -669,7 +675,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
 
             // Generate data
             std::vector<key_type> keys_input;
-            if(rp::is_floating_point<key_type>::value)
+            if(rocprim::is_floating_point<key_type>::value)
             {
                 keys_input = test_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000, seed_value);
             }
@@ -678,7 +684,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
                 keys_input = test_utils::get_random_data<key_type>(
                     size,
                     std::numeric_limits<key_type>::min(),
-                    std::numeric_limits<key_type>::max(), 
+                    std::numeric_limits<key_type>::max(),
                     seed_index
                 );
             }
@@ -756,13 +762,13 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
                 values_expected[i] = expected[i].second;
             }
 
-            rp::double_buffer<key_type> d_keys(d_keys_input, d_keys_output);
-            rp::double_buffer<value_type> d_values(d_values_input, d_values_output);
+            rocprim::double_buffer<key_type> d_keys(d_keys_input, d_keys_output);
+            rocprim::double_buffer<value_type> d_values(d_values_input, d_values_output);
 
             void * d_temporary_storage = nullptr;
             size_t temporary_storage_bytes = 0;
             HIP_CHECK(
-                rp::segmented_radix_sort_pairs(
+                rocprim::segmented_radix_sort_pairs(
                     d_temporary_storage, temporary_storage_bytes,
                     d_keys, d_values, size,
                     segments_count, d_offsets, d_offsets + 1,
@@ -777,7 +783,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
             if(descending)
             {
                 HIP_CHECK(
-                    rp::segmented_radix_sort_pairs_desc(
+                    rocprim::segmented_radix_sort_pairs_desc(
                         d_temporary_storage, temporary_storage_bytes,
                         d_keys, d_values, size,
                         segments_count, d_offsets, d_offsets + 1,
@@ -789,7 +795,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
             else
             {
                 HIP_CHECK(
-                    rp::segmented_radix_sort_pairs(
+                    rocprim::segmented_radix_sort_pairs(
                         d_temporary_storage, temporary_storage_bytes,
                         d_keys, d_values, size,
                         segments_count, d_offsets, d_offsets + 1,
@@ -828,5 +834,5 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, values_expected));
         }
     }
-    
+
 }

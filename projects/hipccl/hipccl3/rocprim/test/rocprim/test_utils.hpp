@@ -21,6 +21,10 @@
 #ifndef TEST_TEST_UTILS_HPP_
 #define TEST_TEST_UTILS_HPP_
 
+#include <rocprim/types.hpp>
+#include <rocprim/type_traits.hpp>
+#include <rocprim/detail/match_result_type.hpp>
+
 // Identity iterator
 #include "identity_iterator.hpp"
 // Bounds checking iterator

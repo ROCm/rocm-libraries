@@ -22,6 +22,15 @@
 
 #include "common_test_header.hpp"
 
+// required rocprim headers
+#include <rocprim/functional.hpp>
+#include <rocprim/iterator/discard_iterator.hpp>
+#include <rocprim/device/device_reduce_by_key.hpp>
+
+// required test headers
+#include "test_seed.hpp"
+#include "test_utils_types.hpp"
+
 TEST(RocprimDiscardIteratorTests, Equal)
 {
     using Iterator = typename rocprim::discard_iterator;
@@ -29,7 +38,7 @@ TEST(RocprimDiscardIteratorTests, Equal)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         Iterator x(test_utils::get_random_value<size_t>(0, 200, seed_value));
             Iterator y = x;
@@ -54,7 +63,7 @@ TEST(RocprimDiscardIteratorTests, Less)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         Iterator x(test_utils::get_random_value<size_t>(0, 200, seed_value));
         Iterator y = x + 1;

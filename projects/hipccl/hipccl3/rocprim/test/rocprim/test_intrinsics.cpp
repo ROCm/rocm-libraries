@@ -22,6 +22,13 @@
 
 #include "common_test_header.hpp"
 
+// required rocprim headers
+#include <rocprim/intrinsics/thread.hpp>
+#include <rocprim/intrinsics/warp_shuffle.hpp>
+
+// required test headers
+#include "test_utils_types.hpp"
+
 // Custom structure
 struct custom_notaligned
 {
@@ -105,7 +112,7 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleUp)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate input
         auto input = test_utils::get_random_data<T>(size, T(-100), T(100), seed_value);
@@ -127,7 +134,7 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleUp)
             auto deltas = test_utils::get_random_data<unsigned int>(
                 std::max<size_t>(1, logical_warp_size/2),
                 1U,
-                std::max<unsigned int>(1, logical_warp_size - 1), 
+                std::max<unsigned int>(1, logical_warp_size - 1),
                 seed_index
             );
 
@@ -181,7 +188,7 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleUp)
         }
         hipFree(device_data);
     }
-    
+
 }
 
 template<class T>
@@ -203,7 +210,7 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleDown)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate input
         auto input = test_utils::get_random_data<T>(size, T(-100), T(100), seed_value);
@@ -225,7 +232,7 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleDown)
             auto deltas = test_utils::get_random_data<unsigned int>(
                 std::max<size_t>(1, logical_warp_size/2),
                 1U,
-                std::max<unsigned int>(1, logical_warp_size - 1), 
+                std::max<unsigned int>(1, logical_warp_size - 1),
                 seed_index
             );
 
@@ -279,7 +286,7 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleDown)
         }
         hipFree(device_data);
     }
-    
+
 }
 
 template<class T>
@@ -303,7 +310,7 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleIndex)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate input
         auto input = test_utils::get_random_data<T>(size, T(-100), T(100), seed_value);
@@ -331,7 +338,7 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleIndex)
 
             auto src_lanes = test_utils::get_random_data<int>(
                 hardware_warp_size/logical_warp_size,
-                0, std::max<int>(0, logical_warp_size-1), 
+                0, std::max<int>(0, logical_warp_size-1),
                 seed_index
             );
 
@@ -390,7 +397,7 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleIndex)
         hipFree(device_data);
         hipFree(device_src_lanes);
     }
-    
+
 }
 
 TEST(RocprimIntrinsicsTests, ShuffleUpCustomStruct)
@@ -402,7 +409,7 @@ TEST(RocprimIntrinsicsTests, ShuffleUpCustomStruct)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate input
         std::vector<double> random_data = test_utils::get_random_data<double>(4 * size, -100, 100, seed_value);
@@ -432,7 +439,7 @@ TEST(RocprimIntrinsicsTests, ShuffleUpCustomStruct)
             auto deltas = test_utils::get_random_data<unsigned int>(
                 std::max<size_t>(1, logical_warp_size/2),
                 1U,
-                std::max<unsigned int>(1, logical_warp_size - 1), 
+                std::max<unsigned int>(1, logical_warp_size - 1),
                 seed_index
             );
 
@@ -486,7 +493,7 @@ TEST(RocprimIntrinsicsTests, ShuffleUpCustomStruct)
         }
         hipFree(device_data);
     }
-    
+
 }
 
 TEST(RocprimIntrinsicsTests, ShuffleUpCustomAlignedStruct)
@@ -498,7 +505,7 @@ TEST(RocprimIntrinsicsTests, ShuffleUpCustomAlignedStruct)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate input
         std::vector<double> random_data = test_utils::get_random_data<double>(3 * size, -100, 100, seed_value);
@@ -527,7 +534,7 @@ TEST(RocprimIntrinsicsTests, ShuffleUpCustomAlignedStruct)
             auto deltas = test_utils::get_random_data<unsigned int>(
                 std::max<size_t>(1, logical_warp_size/2),
                 1U,
-                std::max<unsigned int>(1, logical_warp_size - 1), 
+                std::max<unsigned int>(1, logical_warp_size - 1),
                 seed_index
             );
 
@@ -581,5 +588,5 @@ TEST(RocprimIntrinsicsTests, ShuffleUpCustomAlignedStruct)
         }
         hipFree(device_data);
     }
-    
+
 }

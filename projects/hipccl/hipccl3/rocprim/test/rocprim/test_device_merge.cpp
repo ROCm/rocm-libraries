@@ -22,6 +22,13 @@
 
 #include "common_test_header.hpp"
 
+// required rocprim headers
+#include <rocprim/functional.hpp>
+#include <rocprim/device/device_merge.hpp>
+
+// required test headers
+#include "test_utils_types.hpp"
+
 // Params for tests
 template<
     class KeyType,
@@ -208,7 +215,7 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
             hipFree(d_temp_storage);
         }
 
-        
+
     }
 }
 
@@ -403,6 +410,6 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKeyValue)
             hipFree(d_values_output);
             hipFree(d_temp_storage);
         }
-        
+
     }
 }

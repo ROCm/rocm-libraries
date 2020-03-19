@@ -22,6 +22,14 @@
 
 #include "common_test_header.hpp"
 
+// required rocprim headers
+#include <rocprim/block/block_load.hpp>
+#include <rocprim/block/block_store.hpp>
+#include <rocprim/block/block_reduce.hpp>
+
+// required test headers
+#include "test_utils_types.hpp"
+
 // ---------------------------------------------------------
 // Test for reduce ops taking single input value
 // ---------------------------------------------------------
@@ -46,7 +54,7 @@ void reduce_kernel(T* device_output, T* device_output_reductions)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
     T value = device_output[index];
-    rp::block_reduce<T, BlockSize, Algorithm> breduce;
+    rocprim::block_reduce<T, BlockSize, Algorithm> breduce;
     breduce.reduce(value, value, BinaryOp());
     if(hipThreadIdx_x == 0)
     {
@@ -57,7 +65,7 @@ void reduce_kernel(T* device_output, T* device_output_reductions)
 template <
     class T,
     unsigned int BlockSize,
-    rp::block_reduce_algorithm Algorithm,
+    rocprim::block_reduce_algorithm Algorithm,
     class BinaryOp
 >
 struct static_run_algo
@@ -109,7 +117,7 @@ struct static_run_algo
 TYPED_TEST(RocprimBlockReduceSingleValueTests, Reduce)
 {
     using T = typename TestFixture::input_type;
-    using binary_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_plus, rp::plus<T>>::type;
+    using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
     constexpr size_t block_size = TestFixture::block_size;
 
     // Given block size not supported
@@ -124,7 +132,7 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, Reduce)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
         std::vector<T> output = test_utils::get_random_data<T>(size, 2, 50, seed_value);
@@ -150,11 +158,11 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, Reduce)
         T* device_output_reductions;
         HIP_CHECK(hipMalloc(&device_output_reductions, output_reductions.size() * sizeof(T)));
 
-        static_run_algo<T, block_size, rp::block_reduce_algorithm::using_warp_reduce, binary_op_type>::run(
+        static_run_algo<T, block_size, rocprim::block_reduce_algorithm::using_warp_reduce, binary_op_type>::run(
             output, output_reductions, expected_reductions,
             device_output, device_output_reductions, grid_size, false
         );
-        static_run_algo<T, block_size, rp::block_reduce_algorithm::raking_reduce, binary_op_type>::run(
+        static_run_algo<T, block_size, rocprim::block_reduce_algorithm::raking_reduce, binary_op_type>::run(
             output, output_reductions, expected_reductions,
             device_output, device_output_reductions, grid_size, false
         );
@@ -162,13 +170,13 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, Reduce)
         HIP_CHECK(hipFree(device_output));
         HIP_CHECK(hipFree(device_output_reductions));
     }
-    
+
 }
 
 TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceMultiplies)
 {
     using T = typename TestFixture::input_type;
-    using binary_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_multiplies, rp::multiplies<T>>::type;
+    using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_multiplies, rocprim::multiplies<T>>::type;
     constexpr size_t block_size = TestFixture::block_size;
 
     // Given block size not supported
@@ -183,7 +191,7 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceMultiplies)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
         std::vector<T> output(size, 1);
@@ -214,11 +222,11 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceMultiplies)
         T* device_output_reductions;
         HIP_CHECK(hipMalloc(&device_output_reductions, output_reductions.size() * sizeof(T)));
 
-        static_run_algo<T, block_size, rp::block_reduce_algorithm::using_warp_reduce, binary_op_type>::run(
+        static_run_algo<T, block_size, rocprim::block_reduce_algorithm::using_warp_reduce, binary_op_type>::run(
             output, output_reductions, expected_reductions,
             device_output, device_output_reductions, grid_size, true
         );
-        static_run_algo<T, block_size, rp::block_reduce_algorithm::raking_reduce, binary_op_type>::run(
+        static_run_algo<T, block_size, rocprim::block_reduce_algorithm::raking_reduce, binary_op_type>::run(
             output, output_reductions, expected_reductions,
             device_output, device_output_reductions, grid_size, true
         );
@@ -226,7 +234,7 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceMultiplies)
         HIP_CHECK(hipFree(device_output));
         HIP_CHECK(hipFree(device_output_reductions));
     }
-    
+
 }
 
 template<
@@ -240,7 +248,7 @@ void reduce_valid_kernel(T* device_output, T* device_output_reductions, const un
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
     T value = device_output[index];
-    rp::block_reduce<T, BlockSize, Algorithm> breduce;
+    rocprim::block_reduce<T, BlockSize, Algorithm> breduce;
     breduce.reduce(value, value, valid_items, BinaryOp());
     if(hipThreadIdx_x == 0)
     {
@@ -251,7 +259,7 @@ void reduce_valid_kernel(T* device_output, T* device_output_reductions, const un
 template <
     class T,
     unsigned int BlockSize,
-    rp::block_reduce_algorithm Algorithm,
+    rocprim::block_reduce_algorithm Algorithm,
     class BinaryOp
 >
 struct static_run_valid
@@ -296,13 +304,13 @@ struct static_run_valid
 TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceValid)
 {
     using T = typename TestFixture::input_type;
-    using binary_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_plus, rp::plus<T>>::type;
+    using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
     constexpr size_t block_size = TestFixture::block_size;
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         const unsigned int valid_items = test_utils::get_random_value(block_size - 10, block_size, seed_value);
 
@@ -338,11 +346,11 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceValid)
         T* device_output_reductions;
         HIP_CHECK(hipMalloc(&device_output_reductions, output_reductions.size() * sizeof(T)));
 
-        static_run_valid<T, block_size, rp::block_reduce_algorithm::using_warp_reduce, binary_op_type>::run(
+        static_run_valid<T, block_size, rocprim::block_reduce_algorithm::using_warp_reduce, binary_op_type>::run(
             output, output_reductions, expected_reductions,
             device_output, device_output_reductions, valid_items, grid_size
         );
-        static_run_valid<T, block_size, rp::block_reduce_algorithm::raking_reduce, binary_op_type>::run(
+        static_run_valid<T, block_size, rocprim::block_reduce_algorithm::raking_reduce, binary_op_type>::run(
             output, output_reductions, expected_reductions,
             device_output, device_output_reductions, valid_items, grid_size
         );
@@ -350,7 +358,7 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceValid)
         HIP_CHECK(hipFree(device_output));
         HIP_CHECK(hipFree(device_output_reductions));
     }
-    
+
 }
 
 
@@ -382,7 +390,7 @@ void reduce_array_kernel(T* device_output, T* device_output_reductions)
         in_out[j] = device_output[index + j];
     }
 
-    rp::block_reduce<T, BlockSize, Algorithm> breduce;
+    rocprim::block_reduce<T, BlockSize, Algorithm> breduce;
     T reduction;
     breduce.reduce(in_out, reduction, BinaryOp());
 
@@ -397,11 +405,11 @@ template<
     class T,
     unsigned int BlockSize = 256U,
     unsigned int ItemsPerThread = 1U,
-    rp::block_reduce_algorithm Algorithm = rp::block_reduce_algorithm::using_warp_reduce
+    rocprim::block_reduce_algorithm Algorithm = rocprim::block_reduce_algorithm::using_warp_reduce
 >
 void test_block_reduce_input_arrays()
 {
-    using binary_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_maximum, rp::maximum<T>>::type;
+    using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_maximum, rocprim::maximum<T>>::type;
     constexpr auto algorithm = Algorithm;
     constexpr size_t block_size = BlockSize;
     constexpr size_t items_per_thread = ItemsPerThread;
@@ -419,7 +427,7 @@ void test_block_reduce_input_arrays()
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
         std::vector<T> output = test_utils::get_random_data<T>(size, 0, 100, seed_value);
@@ -485,7 +493,7 @@ void test_block_reduce_input_arrays()
         HIP_CHECK(hipFree(device_output));
         HIP_CHECK(hipFree(device_output_reductions));
     }
-    
+
 }
 
 // Static for-loop
@@ -494,7 +502,7 @@ template <
     unsigned int Last,
     class T,
     unsigned int BlockSize = 256U,
-    rp::block_reduce_algorithm Algorithm = rp::block_reduce_algorithm::using_warp_reduce
+    rocprim::block_reduce_algorithm Algorithm = rocprim::block_reduce_algorithm::using_warp_reduce
 >
 struct static_for_input_array
 {
@@ -509,7 +517,7 @@ template <
     unsigned int N,
     class T,
     unsigned int BlockSize,
-    rp::block_reduce_algorithm Algorithm
+    rocprim::block_reduce_algorithm Algorithm
 >
 struct static_for_input_array<N, N, T, BlockSize, Algorithm>
 {
@@ -523,6 +531,6 @@ TYPED_TEST(RocprimBlockReduceInputArrayTests, Reduce)
     using T = typename TestFixture::input_type;
     constexpr size_t block_size = TestFixture::block_size;
 
-    static_for_input_array<0, 2, T, block_size, rp::block_reduce_algorithm::using_warp_reduce>::run();
-    static_for_input_array<0, 2, T, block_size, rp::block_reduce_algorithm::raking_reduce>::run();
+    static_for_input_array<0, 2, T, block_size, rocprim::block_reduce_algorithm::using_warp_reduce>::run();
+    static_for_input_array<0, 2, T, block_size, rocprim::block_reduce_algorithm::raking_reduce>::run();
 }

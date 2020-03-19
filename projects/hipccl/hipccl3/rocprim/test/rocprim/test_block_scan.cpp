@@ -22,6 +22,15 @@
 
 #include "common_test_header.hpp"
 
+// required rocprim headers
+#include <rocprim/block/block_load.hpp>
+#include <rocprim/block/block_store.hpp>
+#include <rocprim/block/block_scan.hpp>
+
+// required test headers
+#include "test_utils_types.hpp"
+
+
 // ---------------------------------------------------------
 // Test for scan ops taking single input value
 // ---------------------------------------------------------
@@ -50,7 +59,7 @@ void scan_kernel(T* device_output, T* device_output_b, T init)
     (void)device_output_b;
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
     T value = device_output[index];
-    rp::block_scan<T, BlockSize, Algorithm> bscan;
+    rocprim::block_scan<T, BlockSize, Algorithm> bscan;
     bscan.inclusive_scan(value, value);
     device_output[index] = value;
 }
@@ -69,7 +78,7 @@ void scan_kernel(T* device_output, T* device_output_b, T init)
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
     T value = device_output[index];
     T reduction;
-    rp::block_scan<T, BlockSize, Algorithm> bscan;
+    rocprim::block_scan<T, BlockSize, Algorithm> bscan;
     bscan.inclusive_scan(value, value, reduction);
     device_output[index] = value;
     if(hipThreadIdx_x == 0)
@@ -99,9 +108,9 @@ void scan_kernel(T* device_output, T* device_output_b, T init)
 
     T value = device_output[index];
 
-    using bscan_t = rp::block_scan<T, BlockSize, Algorithm>;
+    using bscan_t = rocprim::block_scan<T, BlockSize, Algorithm>;
     __shared__ typename bscan_t::storage_type storage;
-    bscan_t().inclusive_scan(value, value, storage, prefix_callback, rp::plus<T>());
+    bscan_t().inclusive_scan(value, value, storage, prefix_callback, rocprim::plus<T>());
 
     device_output[index] = value;
     if(hipThreadIdx_x == 0)
@@ -123,7 +132,7 @@ void scan_kernel(T* device_output, T* device_output_b, T init)
     (void)device_output_b;
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
     T value = device_output[index];
-    rp::block_scan<T, BlockSize, Algorithm> bscan;
+    rocprim::block_scan<T, BlockSize, Algorithm> bscan;
     bscan.exclusive_scan(value, value, init);
     device_output[index] = value;
 }
@@ -141,7 +150,7 @@ void scan_kernel(T* device_output, T* device_output_b, T init)
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
     T value = device_output[index];
     T reduction;
-    rp::block_scan<T, BlockSize, Algorithm> bscan;
+    rocprim::block_scan<T, BlockSize, Algorithm> bscan;
     bscan.exclusive_scan(value, value, init, reduction);
     device_output[index] = value;
     if(hipThreadIdx_x == 0)
@@ -171,9 +180,9 @@ void scan_kernel(T* device_output, T* device_output_b, T init)
 
     T value = device_output[index];
 
-    using bscan_t = rp::block_scan<T, BlockSize, Algorithm>;
+    using bscan_t = rocprim::block_scan<T, BlockSize, Algorithm>;
     __shared__ typename bscan_t::storage_type storage;
-    bscan_t().exclusive_scan(value, value, storage, prefix_callback, rp::plus<T>());
+    bscan_t().exclusive_scan(value, value, storage, prefix_callback, rocprim::plus<T>());
 
     device_output[index] = value;
     if(hipThreadIdx_x == 0)
@@ -185,7 +194,7 @@ void scan_kernel(T* device_output, T* device_output_b, T init)
 template <
     class T,
     unsigned int BlockSize,
-    rp::block_scan_algorithm Algorithm,
+    rocprim::block_scan_algorithm Algorithm,
     int Method
 >
 struct static_run_algo
@@ -246,7 +255,7 @@ struct static_run_algo
 TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScan)
 {
     using T = typename TestFixture::type;
-    using binary_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_plus, rp::plus<T>>::type;
+    using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
     constexpr size_t block_size = TestFixture::block_size;
 
     // Given block size not supported
@@ -261,7 +270,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScan)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
         std::vector<T> output = test_utils::get_random_data<T>(size, 2, 50, seed_value);
@@ -283,25 +292,25 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScan)
         T* device_output;
         HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
 
-        static_run_algo<T, block_size, rp::block_scan_algorithm::using_warp_scan, 0>::run(
+        static_run_algo<T, block_size, rocprim::block_scan_algorithm::using_warp_scan, 0>::run(
             output, output, expected, expected,
             device_output, NULL, T(0), grid_size
         );
 
-        static_run_algo<T, block_size, rp::block_scan_algorithm::reduce_then_scan, 0>::run(
+        static_run_algo<T, block_size, rocprim::block_scan_algorithm::reduce_then_scan, 0>::run(
             output2, output2, expected, expected,
             device_output, NULL, T(0), grid_size
         );
 
         HIP_CHECK(hipFree(device_output));
     }
-    
+
 }
 
 TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanReduce)
 {
     using T = typename TestFixture::type;
-    using binary_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_plus, rp::plus<T>>::type;
+    using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
     constexpr size_t block_size = TestFixture::block_size;
 
     // Given block size not supported
@@ -316,7 +325,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanReduce)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
         std::vector<T> output = test_utils::get_random_data<T>(size, 2, 50, seed_value);
@@ -348,12 +357,12 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanReduce)
             )
         );
 
-        static_run_algo<T, block_size, rp::block_scan_algorithm::using_warp_scan, 1>::run(
+        static_run_algo<T, block_size, rocprim::block_scan_algorithm::using_warp_scan, 1>::run(
             output, output_reductions, expected, expected_reductions,
             device_output, device_output_reductions, T(0), grid_size
         );
 
-        static_run_algo<T, block_size, rp::block_scan_algorithm::reduce_then_scan, 1>::run(
+        static_run_algo<T, block_size, rocprim::block_scan_algorithm::reduce_then_scan, 1>::run(
             output2, output_reductions, expected, expected_reductions,
             device_output, device_output_reductions, T(0), grid_size
         );
@@ -361,13 +370,13 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanReduce)
         HIP_CHECK(hipFree(device_output));
         HIP_CHECK(hipFree(device_output_reductions));
     }
-    
+
 }
 
 TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanPrefixCallback)
 {
     using T = typename TestFixture::type;
-    using binary_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_plus, rp::plus<T>>::type;
+    using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
     constexpr size_t block_size = TestFixture::block_size;
 
     // Given block size not supported
@@ -382,7 +391,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanPrefixCallback)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
         std::vector<T> output = test_utils::get_random_data<T>(size, 2, 50, seed_value);
@@ -416,12 +425,12 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanPrefixCallback)
             )
         );
 
-        static_run_algo<T, block_size, rp::block_scan_algorithm::using_warp_scan, 2>::run(
+        static_run_algo<T, block_size, rocprim::block_scan_algorithm::using_warp_scan, 2>::run(
             output, output_block_prefixes, expected, expected_block_prefixes,
             device_output, device_output_bp, block_prefix, grid_size
         );
 
-        static_run_algo<T, block_size, rp::block_scan_algorithm::reduce_then_scan, 2>::run(
+        static_run_algo<T, block_size, rocprim::block_scan_algorithm::reduce_then_scan, 2>::run(
             output2, output_block_prefixes, expected, expected_block_prefixes,
             device_output, device_output_bp, block_prefix, grid_size
         );
@@ -429,13 +438,13 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanPrefixCallback)
         HIP_CHECK(hipFree(device_output));
         HIP_CHECK(hipFree(device_output_bp));
     }
-    
+
 }
 
 TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScan)
 {
     using T = typename TestFixture::type;
-    using binary_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_plus, rp::plus<T>>::type;
+    using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
     constexpr size_t block_size = TestFixture::block_size;
 
     // Given block size not supported
@@ -450,7 +459,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScan)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
         std::vector<T> output = test_utils::get_random_data<T>(size, 2, 50, seed_value);
@@ -474,25 +483,25 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScan)
         T* device_output;
         HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
 
-        static_run_algo<T, block_size, rp::block_scan_algorithm::using_warp_scan, 3>::run(
+        static_run_algo<T, block_size, rocprim::block_scan_algorithm::using_warp_scan, 3>::run(
             output, output, expected, expected,
             device_output, NULL, init, grid_size
         );
 
-        static_run_algo<T, block_size, rp::block_scan_algorithm::reduce_then_scan, 3>::run(
+        static_run_algo<T, block_size, rocprim::block_scan_algorithm::reduce_then_scan, 3>::run(
             output2, output2, expected, expected,
             device_output, NULL, init, grid_size
         );
 
         HIP_CHECK(hipFree(device_output));
     }
-    
+
 }
 
 TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanReduce)
 {
     using T = typename TestFixture::type;
-    using binary_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_plus, rp::plus<T>>::type;
+    using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
     constexpr size_t block_size = TestFixture::block_size;
 
     if(block_size > test_utils::get_max_block_size())
@@ -506,7 +515,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanReduce)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
         std::vector<T> output = test_utils::get_random_data<T>(size, 2, 50, seed_value);
@@ -548,12 +557,12 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanReduce)
             )
         );
 
-        static_run_algo<T, block_size, rp::block_scan_algorithm::using_warp_scan, 4>::run(
+        static_run_algo<T, block_size, rocprim::block_scan_algorithm::using_warp_scan, 4>::run(
             output, output_reductions, expected, expected_reductions,
             device_output, device_output_reductions, init, grid_size
         );
 
-        static_run_algo<T, block_size, rp::block_scan_algorithm::reduce_then_scan, 4>::run(
+        static_run_algo<T, block_size, rocprim::block_scan_algorithm::reduce_then_scan, 4>::run(
             output2, output_reductions, expected, expected_reductions,
             device_output, device_output_reductions, init, grid_size
         );
@@ -561,13 +570,13 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanReduce)
         HIP_CHECK(hipFree(device_output));
         HIP_CHECK(hipFree(device_output_reductions));
     }
-    
+
 }
 
 TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanPrefixCallback)
 {
     using T = typename TestFixture::type;
-    using binary_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_plus, rp::plus<T>>::type;
+    using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
     constexpr size_t block_size = TestFixture::block_size;
 
     // Given block size not supported
@@ -582,7 +591,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanPrefixCallback)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
         std::vector<T> output = test_utils::get_random_data<T>(size, 2, 50, seed_value);
@@ -622,12 +631,12 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanPrefixCallback)
             )
         );
 
-        static_run_algo<T, block_size, rp::block_scan_algorithm::using_warp_scan, 5>::run(
+        static_run_algo<T, block_size, rocprim::block_scan_algorithm::using_warp_scan, 5>::run(
             output, output_block_prefixes, expected, expected_block_prefixes,
             device_output, device_output_bp, block_prefix, grid_size
         );
 
-        static_run_algo<T, block_size, rp::block_scan_algorithm::reduce_then_scan, 5>::run(
+        static_run_algo<T, block_size, rocprim::block_scan_algorithm::reduce_then_scan, 5>::run(
             output2, output_block_prefixes, expected, expected_block_prefixes,
             device_output, device_output_bp, block_prefix, grid_size
         );
@@ -635,7 +644,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanPrefixCallback)
         HIP_CHECK(hipFree(device_output));
         HIP_CHECK(hipFree(device_output_bp));
     }
-    
+
 }
 
 // ---------------------------------------------------------
@@ -671,7 +680,7 @@ void inclusive_scan_array_kernel(T* device_output)
         in_out[j] = device_output[index + j];
     }
 
-    rp::block_scan<T, BlockSize, Algorithm> bscan;
+    rocprim::block_scan<T, BlockSize, Algorithm> bscan;
     bscan.inclusive_scan(in_out, in_out, BinaryOp());
 
     // store
@@ -700,7 +709,7 @@ void inclusive_scan_reduce_array_kernel(T* device_output, T* device_output_reduc
         in_out[j] = device_output[index + j];
     }
 
-    rp::block_scan<T, BlockSize, Algorithm> bscan;
+    rocprim::block_scan<T, BlockSize, Algorithm> bscan;
     T reduction;
     bscan.inclusive_scan(in_out, in_out, reduction, BinaryOp());
 
@@ -742,7 +751,7 @@ void inclusive_scan_array_prefix_callback_kernel(T* device_output, T* device_out
         in_out[j] = device_output[index + j];
     }
 
-    using bscan_t = rp::block_scan<T, BlockSize, Algorithm>;
+    using bscan_t = rocprim::block_scan<T, BlockSize, Algorithm>;
     __shared__ typename bscan_t::storage_type storage;
     bscan_t().inclusive_scan(in_out, in_out, storage, prefix_callback, BinaryOp());
 
@@ -776,7 +785,7 @@ void exclusive_scan_array_kernel(T* device_output, T init)
         in_out[j] = device_output[index + j];
     }
 
-    rp::block_scan<T, BlockSize, Algorithm> bscan;
+    rocprim::block_scan<T, BlockSize, Algorithm> bscan;
     bscan.exclusive_scan(in_out, in_out, init, BinaryOp());
 
     // store
@@ -804,7 +813,7 @@ void exclusive_scan_reduce_array_kernel(T* device_output, T* device_output_reduc
         in_out[j] = device_output[index + j];
     }
 
-    rp::block_scan<T, BlockSize, Algorithm> bscan;
+    rocprim::block_scan<T, BlockSize, Algorithm> bscan;
     T reduction;
     bscan.exclusive_scan(in_out, in_out, init, reduction, BinaryOp());
 
@@ -850,7 +859,7 @@ void exclusive_scan_prefix_callback_array_kernel(
         in_out[j] = device_output[index+ j];
     }
 
-    using bscan_t = rp::block_scan<T, BlockSize, Algorithm>;
+    using bscan_t = rocprim::block_scan<T, BlockSize, Algorithm>;
     __shared__ typename bscan_t::storage_type storage;
     bscan_t().exclusive_scan(in_out, in_out, storage, prefix_callback, BinaryOp());
 
@@ -872,12 +881,12 @@ template<
     int Method,
     unsigned int BlockSize = 256U,
     unsigned int ItemsPerThread = 1U,
-    rp::block_scan_algorithm Algorithm = rp::block_scan_algorithm::using_warp_scan
+    rocprim::block_scan_algorithm Algorithm = rocprim::block_scan_algorithm::using_warp_scan
 >
 auto test_block_scan_input_arrays()
 -> typename std::enable_if<Method == 0>::type
 {
-    using binary_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_maximum, rp::maximum<T>>::type;
+    using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_maximum, rocprim::maximum<T>>::type;
     constexpr auto algorithm = Algorithm;
     constexpr size_t block_size = BlockSize;
     constexpr size_t items_per_thread = ItemsPerThread;
@@ -895,7 +904,7 @@ auto test_block_scan_input_arrays()
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
         std::vector<T> output = test_utils::get_random_data<T>(size, 2, 100, seed_value);
@@ -947,7 +956,7 @@ auto test_block_scan_input_arrays()
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
         HIP_CHECK(hipFree(device_output));
     }
-    
+
 }
 
 template<
@@ -955,12 +964,12 @@ template<
     int Method,
     unsigned int BlockSize = 256U,
     unsigned int ItemsPerThread = 1U,
-    rp::block_scan_algorithm Algorithm = rp::block_scan_algorithm::using_warp_scan
+    rocprim::block_scan_algorithm Algorithm = rocprim::block_scan_algorithm::using_warp_scan
 >
 auto test_block_scan_input_arrays()
 -> typename std::enable_if<Method == 1>::type
 {
-    using binary_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_maximum, rp::maximum<T>>::type;
+    using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_maximum, rocprim::maximum<T>>::type;
     constexpr auto algorithm = Algorithm;
     constexpr size_t block_size = BlockSize;
     constexpr size_t items_per_thread = ItemsPerThread;
@@ -978,7 +987,7 @@ auto test_block_scan_input_arrays()
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
         std::vector<T> output = test_utils::get_random_data<T>(size, 2, 100, seed_value);
@@ -1061,7 +1070,7 @@ auto test_block_scan_input_arrays()
         HIP_CHECK(hipFree(device_output));
         HIP_CHECK(hipFree(device_output_reductions));
     }
-    
+
 }
 
 template<
@@ -1069,12 +1078,12 @@ template<
     int Method,
     unsigned int BlockSize = 256U,
     unsigned int ItemsPerThread = 1U,
-    rp::block_scan_algorithm Algorithm = rp::block_scan_algorithm::using_warp_scan
+    rocprim::block_scan_algorithm Algorithm = rocprim::block_scan_algorithm::using_warp_scan
 >
 auto test_block_scan_input_arrays()
 -> typename std::enable_if<Method == 2>::type
 {
-    using binary_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_maximum, rp::maximum<T>>::type;
+    using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_maximum, rocprim::maximum<T>>::type;
     constexpr auto algorithm = Algorithm;
     constexpr size_t block_size = BlockSize;
     constexpr size_t items_per_thread = ItemsPerThread;
@@ -1092,7 +1101,7 @@ auto test_block_scan_input_arrays()
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
         std::vector<T> output = test_utils::get_random_data<T>(size, 2, 100, seed_value);
@@ -1177,7 +1186,7 @@ auto test_block_scan_input_arrays()
         HIP_CHECK(hipFree(device_output));
         HIP_CHECK(hipFree(device_output_bp));
     }
-    
+
 }
 
 template<
@@ -1185,12 +1194,12 @@ template<
     int Method,
     unsigned int BlockSize = 256U,
     unsigned int ItemsPerThread = 1U,
-    rp::block_scan_algorithm Algorithm = rp::block_scan_algorithm::using_warp_scan
+    rocprim::block_scan_algorithm Algorithm = rocprim::block_scan_algorithm::using_warp_scan
 >
 auto test_block_scan_input_arrays()
 -> typename std::enable_if<Method == 3>::type
 {
-    using binary_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_maximum, rp::maximum<T>>::type;
+    using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_maximum, rocprim::maximum<T>>::type;
     constexpr auto algorithm = Algorithm;
     constexpr size_t block_size = BlockSize;
     constexpr size_t items_per_thread = ItemsPerThread;
@@ -1208,7 +1217,7 @@ auto test_block_scan_input_arrays()
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
         std::vector<T> output = test_utils::get_random_data<T>(size, 2, 100, seed_value);
@@ -1263,7 +1272,7 @@ auto test_block_scan_input_arrays()
 
         HIP_CHECK(hipFree(device_output));
     }
-    
+
 }
 
 template<
@@ -1271,12 +1280,12 @@ template<
     int Method,
     unsigned int BlockSize = 256U,
     unsigned int ItemsPerThread = 1U,
-    rp::block_scan_algorithm Algorithm = rp::block_scan_algorithm::using_warp_scan
+    rocprim::block_scan_algorithm Algorithm = rocprim::block_scan_algorithm::using_warp_scan
 >
 auto test_block_scan_input_arrays()
 -> typename std::enable_if<Method == 4>::type
 {
-    using binary_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_maximum, rp::maximum<T>>::type;
+    using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_maximum, rocprim::maximum<T>>::type;
     constexpr auto algorithm = Algorithm;
     constexpr size_t block_size = BlockSize;
     constexpr size_t items_per_thread = ItemsPerThread;
@@ -1294,7 +1303,7 @@ auto test_block_scan_input_arrays()
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
         std::vector<T> output = test_utils::get_random_data<T>(size, 2, 100, seed_value);
@@ -1374,7 +1383,7 @@ auto test_block_scan_input_arrays()
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output_reductions, expected_reductions));
     }
-    
+
 }
 
 template<
@@ -1382,12 +1391,12 @@ template<
     int Method,
     unsigned int BlockSize = 256U,
     unsigned int ItemsPerThread = 1U,
-    rp::block_scan_algorithm Algorithm = rp::block_scan_algorithm::using_warp_scan
+    rocprim::block_scan_algorithm Algorithm = rocprim::block_scan_algorithm::using_warp_scan
 >
 auto test_block_scan_input_arrays()
 -> typename std::enable_if<Method == 5>::type
 {
-    using binary_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_maximum, rp::maximum<T>>::type;
+    using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_maximum, rocprim::maximum<T>>::type;
     constexpr auto algorithm = Algorithm;
     constexpr size_t block_size = BlockSize;
     constexpr size_t items_per_thread = ItemsPerThread;
@@ -1405,7 +1414,7 @@ auto test_block_scan_input_arrays()
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
         std::vector<T> output = test_utils::get_random_data<T>(size, 2, 100, seed_value);
@@ -1487,7 +1496,7 @@ auto test_block_scan_input_arrays()
         HIP_CHECK(hipFree(device_output));
         HIP_CHECK(hipFree(device_output_bp));
     }
-    
+
 }
 
 // Static for-loop
@@ -1502,8 +1511,8 @@ struct static_for_input_array
 {
     static void run()
     {
-        test_block_scan_input_arrays<T, Method, BlockSize, items[First], rp::block_scan_algorithm::using_warp_scan>();
-        test_block_scan_input_arrays<T, Method, BlockSize, items[First], rp::block_scan_algorithm::reduce_then_scan>();
+        test_block_scan_input_arrays<T, Method, BlockSize, items[First], rocprim::block_scan_algorithm::using_warp_scan>();
+        test_block_scan_input_arrays<T, Method, BlockSize, items[First], rocprim::block_scan_algorithm::reduce_then_scan>();
         static_for_input_array<First + 1, Last, T, Method, BlockSize>::run();
     }
 };

@@ -22,6 +22,12 @@
 
 #include "common_test_header.hpp"
 
+// required rocprim headers
+#include <rocprim/warp/warp_sort.hpp>
+
+// required test headers
+#include "test_utils_types.hpp"
+
 template<typename Params>
 class RocprimWarpSortShuffleBasedTests : public ::testing::Test {
 public:
@@ -41,7 +47,7 @@ typedef ::testing::Types<
     warp_sort_param_type(test_utils::custom_test_type<int>),
     warp_sort_param_type(uint8_t),
     warp_sort_param_type(int8_t),
-    warp_sort_param_type(rp::half)
+    warp_sort_param_type(rocprim::half)
 > WarpSortParams;
 
 TYPED_TEST_CASE(RocprimWarpSortShuffleBasedTests, WarpSortParams);
@@ -55,23 +61,23 @@ void test_hip_warp_sort(T* d_output)
 {
     unsigned int i = hipThreadIdx_x + (hipBlockIdx_x * hipBlockDim_x);
     T value = d_output[i];
-    rp::warp_sort<T, LogicalWarpSize> wsort;
+    rocprim::warp_sort<T, LogicalWarpSize> wsort;
     wsort.sort(value);
     d_output[i] = value;
 }
 
 TYPED_TEST(RocprimWarpSortShuffleBasedTests, Sort)
 {
-    // logical warp side for warp primitive, execution warp size is always rp::warp_size()
+    // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
     using T = typename TestFixture::params::type;
-    using binary_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_less, rp::less<T>>::type;
+    using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_less, rocprim::less<T>>::type;
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
-    const size_t block_size = std::max<size_t>(rp::warp_size(), 4 * logical_warp_size);
+    const size_t block_size = std::max<size_t>(rocprim::warp_size(), 4 * logical_warp_size);
     constexpr size_t grid_size = 4;
     const size_t size = block_size * grid_size;
 
     // Given warp size not supported
-    if(logical_warp_size > rp::warp_size() || !rp::detail::is_power_of_two(logical_warp_size))
+    if(logical_warp_size > rocprim::warp_size() || !rocprim::detail::is_power_of_two(logical_warp_size))
     {
         return;
     }
@@ -79,7 +85,7 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, Sort)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
         std::vector<T> output = test_utils::get_random_data<T>(size, 0, 100, seed_value);
@@ -127,7 +133,7 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, Sort)
 
         test_utils::assert_near(output, expected, 0.01);
     }
-    
+
 }
 
 template<
@@ -141,7 +147,7 @@ void test_hip_sort_key_value_kernel(KeyType* d_output_key, ValueType* d_output_v
     unsigned int i = hipThreadIdx_x + (hipBlockIdx_x * hipBlockDim_x);
     KeyType key = d_output_key[i];
     ValueType value = d_output_value[i];
-    rp::warp_sort<KeyType, LogicalWarpSize, ValueType> wsort;
+    rocprim::warp_sort<KeyType, LogicalWarpSize, ValueType> wsort;
     wsort.sort(key, value);
     d_output_key[i] = key;
     d_output_value[i] = value;
@@ -149,18 +155,18 @@ void test_hip_sort_key_value_kernel(KeyType* d_output_key, ValueType* d_output_v
 
 TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
 {
-    // logical warp side for warp primitive, execution warp size is always rp::warp_size()
+    // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
     using T = typename TestFixture::params::type;
     using pair = test_utils::custom_test_type<T>;
-    using value_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_less, rp::less<T>>::type;
-    using eq_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_equal_to, rp::equal_to<T>>::type;
+    using value_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_less, rocprim::less<T>>::type;
+    using eq_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_equal_to, rocprim::equal_to<T>>::type;
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
-    const size_t block_size = std::max<size_t>(rp::warp_size(), 4 * logical_warp_size);
+    const size_t block_size = std::max<size_t>(rocprim::warp_size(), 4 * logical_warp_size);
     constexpr size_t grid_size = 4;
     const size_t size = block_size * grid_size;
 
     // Given warp size not supported
-    if(logical_warp_size > rp::warp_size() || !rp::detail::is_power_of_two(logical_warp_size))
+    if(logical_warp_size > rocprim::warp_size() || !rocprim::detail::is_power_of_two(logical_warp_size))
     {
         return;
     }
@@ -168,7 +174,7 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
         std::vector<T> output_key = test_utils::get_random_data<T>(size, 0, 100, seed_value);
@@ -268,5 +274,5 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
         test_utils::assert_near(output_key, expected_key, 0.01);
         test_utils::assert_near(output_value, expected_value, 0.01);
     }
-    
+
 }

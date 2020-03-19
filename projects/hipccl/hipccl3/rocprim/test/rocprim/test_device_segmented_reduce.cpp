@@ -22,6 +22,12 @@
 
 #include "common_test_header.hpp"
 
+// required rocprim headers
+#include <rocprim/device/device_segmented_reduce.hpp>
+
+// required test headers
+#include "test_utils_types.hpp"
+
 template<
     class Input,
     class Output,
@@ -54,23 +60,23 @@ using custom_int2 = test_utils::custom_test_type<int>;
 using custom_double2 = test_utils::custom_test_type<double>;
 
 typedef ::testing::Types<
-    params<unsigned char, unsigned int, rp::plus<unsigned int>>,
-    params<int, int, rp::plus<int>, -100, 0, 10000>,
-    params<double, double, rp::minimum<double>, 1000, 0, 10000>,
-    params<int8_t, int8_t, rp::maximum<int8_t>, 0, 0, 2000>,
-    params<uint8_t, uint8_t, rp::plus<uint8_t>, 10, 1000, 10000>,
-    params<uint8_t, uint8_t, rp::maximum<uint8_t>, 50, 2, 10>,
-    params<rp::half, rp::half, test_utils::half_maximum, 0, 1000, 2000>,
-    params<rp::half, rp::half, test_utils::half_plus, 50, 2, 10>,
-    params<custom_short2, custom_int2, rp::plus<custom_int2>, 10, 1000, 10000>,
-    params<custom_double2, custom_double2, rp::maximum<custom_double2>, 50, 2, 10>,
-    params<float, float, rp::plus<float>, 123, 100, 200>,
-    params<unsigned char, long long, rp::plus<int>, 10, 3000, 4000>,
+    params<unsigned char, unsigned int, rocprim::plus<unsigned int>>,
+    params<int, int, rocprim::plus<int>, -100, 0, 10000>,
+    params<double, double, rocprim::minimum<double>, 1000, 0, 10000>,
+    params<int8_t, int8_t, rocprim::maximum<int8_t>, 0, 0, 2000>,
+    params<uint8_t, uint8_t, rocprim::plus<uint8_t>, 10, 1000, 10000>,
+    params<uint8_t, uint8_t, rocprim::maximum<uint8_t>, 50, 2, 10>,
+    params<rocprim::half, rocprim::half, test_utils::half_maximum, 0, 1000, 2000>,
+    params<rocprim::half, rocprim::half, test_utils::half_plus, 50, 2, 10>,
+    params<custom_short2, custom_int2, rocprim::plus<custom_int2>, 10, 1000, 10000>,
+    params<custom_double2, custom_double2, rocprim::maximum<custom_double2>, 50, 2, 10>,
+    params<float, float, rocprim::plus<float>, 123, 100, 200>,
+    params<unsigned char, long long, rocprim::plus<int>, 10, 3000, 4000>,
 #ifndef __HIP__
     // hip-clang does not allow to convert half to float
-    params<rp::half, float, rp::plus<float>, 0, 10, 300>,
+    params<rocprim::half, float, rocprim::plus<float>, 0, 10, 300>,
 #endif
-    params<rp::half, rp::half, test_utils::half_minimum, 0, 1000, 30000>
+    params<rocprim::half, rocprim::half, test_utils::half_minimum, 0, 1000, 30000>
 > Params;
 
 TYPED_TEST_CASE(RocprimDeviceSegmentedReduce, Params);
@@ -113,8 +119,8 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
-     
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
         for(size_t size : get_sizes(seed_value))
         {
             SCOPED_TRACE(testing::Message() << "with size = " << size);
@@ -173,7 +179,7 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
             size_t temporary_storage_bytes;
 
             HIP_CHECK(
-                rp::segmented_reduce(
+                rocprim::segmented_reduce(
                     nullptr, temporary_storage_bytes,
                     d_values_input, d_aggregates_output,
                     segments_count,
@@ -189,7 +195,7 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
             HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
             HIP_CHECK(
-                rp::segmented_reduce(
+                rocprim::segmented_reduce(
                     d_temporary_storage, temporary_storage_bytes,
                     d_values_input,
                     test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_aggregates_output),
@@ -218,5 +224,5 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(aggregates_output, aggregates_expected, 0.01f));
         }
     }
-    
+
 }

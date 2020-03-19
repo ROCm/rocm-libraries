@@ -22,6 +22,12 @@
 
 #include "common_test_header.hpp"
 
+// required rocprim headers
+#include <rocprim/device/device_reduce_by_key.hpp>
+
+// required test headers
+#include "test_utils_types.hpp"
+
 template<
     class Key,
     class Value,
@@ -75,24 +81,24 @@ using custom_int2 = test_utils::custom_test_type<int>;
 using custom_double2 = test_utils::custom_test_type<double>;
 
 typedef ::testing::Types<
-    params<int, int, rp::plus<int>, 1, 1, int, rp::equal_to<int>, true>,
-    params<double, int, rp::plus<int>, 3, 5, long long, custom_key_compare_op1<double>>,
-    params<float, custom_double2, rp::minimum<custom_double2>, 1, 10000>,
-    params<custom_double2, custom_int2, rp::plus<custom_int2>, 1, 10>,
-    params<unsigned long long, float, rp::minimum<float>, 1, 30>,
-    params<int, rp::half, test_utils::half_minimum, 15, 100>,
-    params<int, unsigned int, rp::maximum<unsigned int>, 20, 100>,
-    params<float, long long, rp::maximum<unsigned long long>, 100, 400, long long, custom_key_compare_op1<float>>,
-    params<unsigned int, unsigned char, rp::plus<unsigned char>, 200, 600>,
-    params<double, int, rp::plus<int>, 100, 2000, double, custom_key_compare_op1<double>>,
-    params<int8_t, int8_t, rp::maximum<int8_t>, 20, 100>,
-    params<uint8_t, uint8_t, rp::maximum<uint8_t>, 20, 100>,
-    params<char, rp::half, test_utils::half_maximum, 123, 1234>,
-    params<custom_int2, unsigned int, rp::plus<unsigned int>, 1000, 5000>,
-    params<unsigned int, int, rp::plus<int>, 2048, 2048>,
-    params<long long, short, rp::plus<long long>, 1000, 10000, long long>,
-    params<unsigned int, double, rp::minimum<double>, 1000, 50000>,
-    params<unsigned long long, unsigned long long, rp::plus<unsigned long long>, 100000, 100000>
+    params<int, int, rocprim::plus<int>, 1, 1, int, rocprim::equal_to<int>, true>,
+    params<double, int, rocprim::plus<int>, 3, 5, long long, custom_key_compare_op1<double>>,
+    params<float, custom_double2, rocprim::minimum<custom_double2>, 1, 10000>,
+    params<custom_double2, custom_int2, rocprim::plus<custom_int2>, 1, 10>,
+    params<unsigned long long, float, rocprim::minimum<float>, 1, 30>,
+    params<int, rocprim::half, test_utils::half_minimum, 15, 100>,
+    params<int, unsigned int, rocprim::maximum<unsigned int>, 20, 100>,
+    params<float, long long, rocprim::maximum<unsigned long long>, 100, 400, long long, custom_key_compare_op1<float>>,
+    params<unsigned int, unsigned char, rocprim::plus<unsigned char>, 200, 600>,
+    params<double, int, rocprim::plus<int>, 100, 2000, double, custom_key_compare_op1<double>>,
+    params<int8_t, int8_t, rocprim::maximum<int8_t>, 20, 100>,
+    params<uint8_t, uint8_t, rocprim::maximum<uint8_t>, 20, 100>,
+    params<char, rocprim::half, test_utils::half_maximum, 123, 1234>,
+    params<custom_int2, unsigned int, rocprim::plus<unsigned int>, 1000, 5000>,
+    params<unsigned int, int, rocprim::plus<int>, 2048, 2048>,
+    params<long long, short, rocprim::plus<long long>, 1000, 10000, long long>,
+    params<unsigned int, double, rocprim::minimum<double>, 1000, 50000>,
+    params<unsigned long long, unsigned long long, rocprim::plus<unsigned long long>, 100000, 100000>
 > Params;
 
 TYPED_TEST_CASE(RocprimDeviceReduceByKey, Params);
@@ -137,7 +143,7 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         for(size_t size : get_sizes(seed_value))
         {
@@ -235,7 +241,7 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
             size_t temporary_storage_bytes;
 
             HIP_CHECK(
-                rp::reduce_by_key(
+                rocprim::reduce_by_key(
                     nullptr, temporary_storage_bytes,
                     d_keys_input, d_values_input, size,
                     test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_unique_output),
@@ -252,7 +258,7 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
             HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
             HIP_CHECK(
-                rp::reduce_by_key(
+                rocprim::reduce_by_key(
                     d_temporary_storage, temporary_storage_bytes,
                     d_keys_input, d_values_input, size,
                     d_unique_output, d_aggregates_output,
@@ -301,5 +307,5 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(aggregates_output, aggregates_expected));
         }
     }
-    
+
 }

@@ -22,6 +22,12 @@
 
 #include "common_test_header.hpp"
 
+// required rocprim headers
+#include <rocprim/rocprim.hpp>
+
+// required test headers
+#include "detail/get_rocprim_version.hpp"
+
 TEST(RocprimBasicTests, GetVersion)
 {
     auto version = rocprim::version();
