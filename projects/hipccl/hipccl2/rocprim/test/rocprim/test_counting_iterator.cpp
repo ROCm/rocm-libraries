@@ -22,6 +22,13 @@
 
 #include "common_test_header.hpp"
 
+// required rocprim headers
+#include <rocprim/iterator/counting_iterator.hpp>
+#include <rocprim/device/device_transform.hpp>
+
+// required test headers
+#include "test_utils_types.hpp"
+
 // Params for tests
 template<class InputType>
 struct RocprimCountingIteratorParams
@@ -69,7 +76,7 @@ TYPED_TEST(RocprimCountingIteratorTests, Transform)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Create counting_iterator<U> with random starting point
         Iterator input_begin(test_utils::get_random_value<T>(0, 200, seed_value));
@@ -116,5 +123,5 @@ TYPED_TEST(RocprimCountingIteratorTests, Transform)
 
         hipFree(d_output);
     }
-    
+
 }

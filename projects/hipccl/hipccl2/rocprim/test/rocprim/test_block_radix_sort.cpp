@@ -22,6 +22,14 @@
 
 #include "common_test_header.hpp"
 
+// required rocprim headers
+#include <rocprim/block/block_load.hpp>
+#include <rocprim/block/block_store.hpp>
+#include <rocprim/block/block_radix_sort.hpp>
+
+// required test headers
+#include "test_utils_types.hpp"
+
 template<class Params>
 class RocprimBlockRadixSort : public ::testing::Test {
 public:
@@ -50,7 +58,7 @@ TYPED_TEST_CASE(RocprimBlockRadixSort, BlockParams);
 template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
 struct key_comparator
 {
-    static_assert(rp::is_unsigned<Key>::value, "Test supports start and end bits only for unsigned integers");
+    static_assert(rocprim::is_unsigned<Key>::value, "Test supports start and end bits only for unsigned integers");
 
     bool operator()(const Key& lhs, const Key& rhs)
     {
@@ -71,9 +79,9 @@ struct key_comparator<Key, Descending, 0, sizeof(Key) * 8>
 };
 
 template<bool Descending>
-struct key_comparator<rp::half, Descending, 0, sizeof(rp::half) * 8>
+struct key_comparator<rocprim::half, Descending, 0, sizeof(rocprim::half) * 8>
 {
-    bool operator()(const rp::half& lhs, const rp::half& rhs)
+    bool operator()(const rocprim::half& lhs, const rocprim::half& rhs)
     {
         // HIP's half doesn't have __host__ comparison operators, use floats instead
         return key_comparator<float, Descending, 0, sizeof(float) * 8>()(lhs, rhs);
@@ -107,9 +115,9 @@ void sort_key_kernel(
     const unsigned int block_offset = hipBlockIdx_x * items_per_block;
 
     key_type keys[ItemsPerThread];
-    rp::block_load_direct_blocked(lid, device_keys_output + block_offset, keys);
+    rocprim::block_load_direct_blocked(lid, device_keys_output + block_offset, keys);
 
-    rp::block_radix_sort<key_type, BlockSize, ItemsPerThread> bsort;
+    rocprim::block_radix_sort<key_type, BlockSize, ItemsPerThread> bsort;
 
     if(to_striped)
     {
@@ -118,7 +126,7 @@ void sort_key_kernel(
         else
             bsort.sort_to_striped(keys, start_bit, end_bit);
 
-        rp::block_store_direct_striped<BlockSize>(lid, device_keys_output + block_offset, keys);
+        rocprim::block_store_direct_striped<BlockSize>(lid, device_keys_output + block_offset, keys);
     }
     else
     {
@@ -127,7 +135,7 @@ void sort_key_kernel(
         else
             bsort.sort(keys, start_bit, end_bit);
 
-        rp::block_store_direct_blocked(lid, device_keys_output + block_offset, keys);
+        rocprim::block_store_direct_blocked(lid, device_keys_output + block_offset, keys);
     }
 }
 
@@ -152,10 +160,10 @@ void sort_key_value_kernel(
 
     key_type keys[ItemsPerThread];
     value_type values[ItemsPerThread];
-    rp::block_load_direct_blocked(lid, device_keys_output + block_offset, keys);
-    rp::block_load_direct_blocked(lid, device_values_output + block_offset, values);
+    rocprim::block_load_direct_blocked(lid, device_keys_output + block_offset, keys);
+    rocprim::block_load_direct_blocked(lid, device_values_output + block_offset, values);
 
-    rp::block_radix_sort<key_type, BlockSize, ItemsPerThread, value_type> bsort;
+    rocprim::block_radix_sort<key_type, BlockSize, ItemsPerThread, value_type> bsort;
     if(to_striped)
     {
         if(descending)
@@ -163,8 +171,8 @@ void sort_key_value_kernel(
         else
             bsort.sort_to_striped(keys, values, start_bit, end_bit);
 
-        rp::block_store_direct_striped<BlockSize>(lid, device_keys_output + block_offset, keys);
-        rp::block_store_direct_striped<BlockSize>(lid, device_values_output + block_offset, values);
+        rocprim::block_store_direct_striped<BlockSize>(lid, device_keys_output + block_offset, keys);
+        rocprim::block_store_direct_striped<BlockSize>(lid, device_values_output + block_offset, values);
     }
     else
     {
@@ -173,8 +181,8 @@ void sort_key_value_kernel(
         else
             bsort.sort(keys, values, start_bit, end_bit);
 
-        rp::block_store_direct_blocked(lid, device_keys_output + block_offset, keys);
-        rp::block_store_direct_blocked(lid, device_values_output + block_offset, values);
+        rocprim::block_store_direct_blocked(lid, device_keys_output + block_offset, keys);
+        rocprim::block_store_direct_blocked(lid, device_values_output + block_offset, values);
     }
 }
 
@@ -198,8 +206,8 @@ auto test_block_radix_sort()
     constexpr size_t items_per_thread = ItemsPerThread;
     constexpr bool descending = Descending;
     constexpr bool to_striped = ToStriped;
-    constexpr unsigned int start_bit = (rp::is_unsigned<Key>::value == false) ? 0 : StartBit;
-    constexpr unsigned int end_bit = (rp::is_unsigned<Key>::value == false) ? sizeof(Key) * 8 : EndBit;
+    constexpr unsigned int start_bit = (rocprim::is_unsigned<Key>::value == false) ? 0 : StartBit;
+    constexpr unsigned int end_bit = (rocprim::is_unsigned<Key>::value == false) ? sizeof(Key) * 8 : EndBit;
     constexpr size_t items_per_block = block_size * items_per_thread;
 
     // Given block size not supported
@@ -214,11 +222,11 @@ auto test_block_radix_sort()
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
         std::vector<key_type> keys_output;
-        if(rp::is_floating_point<key_type>::value)
+        if(rocprim::is_floating_point<key_type>::value)
         {
             keys_output = test_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000, seed_value);
         }
@@ -274,9 +282,9 @@ auto test_block_radix_sort()
         // Verifying results
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
 
-        HIP_CHECK(hipFree(device_keys_output));  
+        HIP_CHECK(hipFree(device_keys_output));
     }
-    
+
 }
 
 template<
@@ -299,8 +307,8 @@ auto test_block_radix_sort()
     constexpr size_t items_per_thread = ItemsPerThread;
     constexpr bool descending = Descending;
     constexpr bool to_striped = ToStriped;
-    constexpr unsigned int start_bit = (rp::is_unsigned<Key>::value == false) ? 0 : StartBit;
-    constexpr unsigned int end_bit = (rp::is_unsigned<Key>::value == false) ? sizeof(Key) * 8 : EndBit;
+    constexpr unsigned int start_bit = (rocprim::is_unsigned<Key>::value == false) ? 0 : StartBit;
+    constexpr unsigned int end_bit = (rocprim::is_unsigned<Key>::value == false) ? sizeof(Key) * 8 : EndBit;
     constexpr size_t items_per_block = block_size * items_per_thread;
 
     // Given block size not supported
@@ -315,11 +323,11 @@ auto test_block_radix_sort()
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
         std::vector<key_type> keys_output;
-        if(rp::is_floating_point<key_type>::value)
+        if(rocprim::is_floating_point<key_type>::value)
         {
             keys_output = test_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000, seed_value);
         }
@@ -328,7 +336,7 @@ auto test_block_radix_sort()
             keys_output = test_utils::get_random_data<key_type>(
                 size,
                 std::numeric_limits<key_type>::min(),
-                std::numeric_limits<key_type>::max(), 
+                std::numeric_limits<key_type>::max(),
                 seed_index
             );
         }
@@ -412,7 +420,7 @@ auto test_block_radix_sort()
         HIP_CHECK(hipFree(device_keys_output));
         HIP_CHECK(hipFree(device_values_output));
     }
-    
+
 }
 
 // Static for-loop

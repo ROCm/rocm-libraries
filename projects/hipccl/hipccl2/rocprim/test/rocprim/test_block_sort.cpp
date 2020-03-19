@@ -22,6 +22,14 @@
 
 #include "common_test_header.hpp"
 
+// required rocprim headers
+#include <rocprim/block/block_load.hpp>
+#include <rocprim/block/block_store.hpp>
+#include <rocprim/block/block_sort.hpp>
+
+// required test headers
+#include "test_utils_types.hpp"
+
 template<typename Params>
 class RocprimBlockSortTests : public ::testing::Test {
 public:
@@ -37,11 +45,11 @@ template<
     class key_type
 >
 __global__
-void sort_key_kernel(key_type * device_key_output) 
+void sort_key_kernel(key_type * device_key_output)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
     key_type key = device_key_output[index];
-    rp::block_sort<key_type, BlockSize> bsort;
+    rocprim::block_sort<key_type, BlockSize> bsort;
     bsort.sort(key);
     device_key_output[index] = key;
 }
@@ -49,7 +57,7 @@ void sort_key_kernel(key_type * device_key_output)
 TYPED_TEST(RocprimBlockSortTests, SortKey)
 {
     using key_type = typename TestFixture::key_type;
-    using binary_op_type = typename std::conditional<std::is_same<key_type, rp::half>::value, test_utils::half_less, rp::less<key_type>>::type;
+    using binary_op_type = typename std::conditional<std::is_same<key_type, rocprim::half>::value, test_utils::half_less, rocprim::less<key_type>>::type;
     const size_t block_size = TestFixture::block_size;
     const size_t size = block_size * 1134;
     const size_t grid_size = size / block_size;
@@ -57,7 +65,7 @@ TYPED_TEST(RocprimBlockSortTests, SortKey)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
         std::vector<key_type> output = test_utils::get_random_data<key_type>(size, -100, 100, seed_value);
@@ -106,15 +114,15 @@ TYPED_TEST(RocprimBlockSortTests, SortKey)
 
         HIP_CHECK(hipFree(device_key_output));
     }
-    
+
 }
 
 template<class Key, class Value>
 struct pair_comparator
 {
-    using less_key = typename std::conditional<std::is_same<Key, rp::half>::value, test_utils::half_less, rp::less<Key>>::type;
-    using eq_key = typename std::conditional<std::is_same<Key, rp::half>::value, test_utils::half_equal_to, rp::equal_to<Key>>::type;
-    using less_value = typename std::conditional<std::is_same<Value, rp::half>::value, test_utils::half_less, rp::less<Value>>::type;
+    using less_key = typename std::conditional<std::is_same<Key, rocprim::half>::value, test_utils::half_less, rocprim::less<Key>>::type;
+    using eq_key = typename std::conditional<std::is_same<Key, rocprim::half>::value, test_utils::half_equal_to, rocprim::equal_to<Key>>::type;
+    using less_value = typename std::conditional<std::is_same<Value, rocprim::half>::value, test_utils::half_less, rocprim::less<Value>>::type;
 
     bool operator()(const std::pair<Key, Value>& lhs, const std::pair<Key, Value>& rhs)
     {
@@ -128,12 +136,12 @@ template<
     class value_type
 >
 __global__
-void sort_key_value_kernel(key_type * device_key_output, value_type * device_value_output) 
+void sort_key_value_kernel(key_type * device_key_output, value_type * device_value_output)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
     key_type key = device_key_output[index];
     value_type value = device_value_output[index];
-    rp::block_sort<key_type, BlockSize, value_type> bsort;
+    rocprim::block_sort<key_type, BlockSize, value_type> bsort;
     bsort.sort(key, value);
     device_key_output[index] = key;
     device_value_output[index] = value;
@@ -143,8 +151,8 @@ TYPED_TEST(RocprimBlockSortTests, SortKeyValue)
 {
     using key_type = typename TestFixture::key_type;
     using value_type = typename TestFixture::value_type;
-    using value_op_type = typename std::conditional<std::is_same<value_type, rp::half>::value, test_utils::half_less, rp::less<value_type>>::type;
-    using eq_op_type = typename std::conditional<std::is_same<key_type, rp::half>::value, test_utils::half_equal_to, rp::equal_to<key_type>>::type;
+    using value_op_type = typename std::conditional<std::is_same<value_type, rocprim::half>::value, test_utils::half_less, rocprim::less<value_type>>::type;
+    using eq_op_type = typename std::conditional<std::is_same<key_type, rocprim::half>::value, test_utils::half_equal_to, rocprim::equal_to<key_type>>::type;
     const size_t block_size = TestFixture::block_size;
     const size_t size = block_size * 1134;
     const size_t grid_size = size / block_size;
@@ -152,7 +160,7 @@ TYPED_TEST(RocprimBlockSortTests, SortKeyValue)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
         std::vector<key_type> output_key = test_utils::get_random_data<key_type>(size, 0, 100, seed_value);
@@ -241,17 +249,17 @@ TYPED_TEST(RocprimBlockSortTests, SortKeyValue)
             std::sort(expected_value.begin() + i, expected_value.begin() + j, value_op);
             i = j;
         }
-        
+
         test_utils::assert_eq(output_key, expected_key);
         test_utils::assert_eq(output_value, expected_value);
     }
-    
+
 }
 
 template<class Key, class Value>
 struct key_value_comparator
 {
-    using greater_key = typename std::conditional<std::is_same<Key, rp::half>::value, test_utils::half_greater, rp::greater<Key>>::type;
+    using greater_key = typename std::conditional<std::is_same<Key, rocprim::half>::value, test_utils::half_greater, rocprim::greater<Key>>::type;
     bool operator()(const std::pair<Key, Value>& lhs, const std::pair<Key, Value>& rhs)
     {
         return greater_key()(lhs.first, rhs.first);
@@ -269,7 +277,7 @@ void custom_sort_key_value_kernel(key_type * device_key_output, value_type * dev
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
     key_type key = device_key_output[index];
     value_type value = device_value_output[index];
-    rp::block_sort<key_type, BlockSize, value_type> bsort;
+    rocprim::block_sort<key_type, BlockSize, value_type> bsort;
     bsort.sort(key, value, rocprim::greater<key_type>());
     device_key_output[index] = key;
     device_value_output[index] = value;
@@ -279,8 +287,8 @@ TYPED_TEST(RocprimBlockSortTests, CustomSortKeyValue)
 {
     using key_type = typename TestFixture::key_type;
     using value_type = typename TestFixture::value_type;
-    using value_op_type = typename std::conditional<std::is_same<value_type, rp::half>::value, test_utils::half_less, rp::less<value_type>>::type;
-    using eq_op_type = typename std::conditional<std::is_same<key_type, rp::half>::value, test_utils::half_equal_to, rp::equal_to<key_type>>::type;
+    using value_op_type = typename std::conditional<std::is_same<value_type, rocprim::half>::value, test_utils::half_less, rocprim::less<value_type>>::type;
+    using eq_op_type = typename std::conditional<std::is_same<key_type, rocprim::half>::value, test_utils::half_equal_to, rocprim::equal_to<key_type>>::type;
     const size_t block_size = TestFixture::block_size;
     const size_t size = block_size * 1134;
     const size_t grid_size = size / block_size;
@@ -288,7 +296,7 @@ TYPED_TEST(RocprimBlockSortTests, CustomSortKeyValue)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
         std::vector<key_type> output_key = test_utils::get_random_data<key_type>(size, 0, 100, seed_value);
@@ -381,5 +389,5 @@ TYPED_TEST(RocprimBlockSortTests, CustomSortKeyValue)
         test_utils::assert_eq(output_key, expected_key);
         test_utils::assert_eq(output_value, expected_value);
     }
-    
+
 }

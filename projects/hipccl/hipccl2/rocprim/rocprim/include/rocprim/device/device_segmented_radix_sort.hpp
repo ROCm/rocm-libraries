@@ -34,6 +34,8 @@
 #include "../functional.hpp"
 #include "../types.hpp"
 
+#include "../block/block_load.hpp"
+
 #include "device_segmented_radix_sort_config.hpp"
 #include "detail/device_segmented_radix_sort.hpp"
 

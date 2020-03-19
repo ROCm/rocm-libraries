@@ -22,6 +22,13 @@
 
 #include "common_test_header.hpp"
 
+// required rocprim headers
+#include <rocprim/functional.hpp>
+#include <rocprim/device/device_merge_sort.hpp>
+
+// required test headers
+#include "test_utils_types.hpp"
+
 // Params for tests
 template<
     class KeyType,
@@ -92,7 +99,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         for(size_t size : get_sizes(seed_value))
         {
@@ -188,7 +195,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
             hipFree(d_temp_storage);
         }
     }
-    
+
 }
 
 TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
@@ -203,7 +210,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         for(size_t size : get_sizes(seed_value))
         {
@@ -348,5 +355,5 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
             hipFree(d_temp_storage);
         }
     }
-    
+
 }

@@ -22,6 +22,12 @@
 
 #include "common_test_header.hpp"
 
+// required rocprim headers
+#include <rocprim/device/device_run_length_encode.hpp>
+
+// required test headers
+#include "test_utils_types.hpp"
+
 template<
     class Key,
     class Count,
@@ -106,7 +112,7 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, Encode)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         for(size_t size : get_sizes(seed_value))
         {
@@ -236,7 +242,7 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, Encode)
             ASSERT_NO_FATAL_FAILURE(test_utils::custom_assert_eq(counts_output, counts_expected, runs_count_expected));
         }
     }
-    
+
 }
 
 TYPED_TEST(RocprimDeviceRunLengthEncode, NonTrivialRuns)
@@ -260,7 +266,7 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, NonTrivialRuns)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         for(size_t size : get_sizes(seed_value))
         {
@@ -406,5 +412,5 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, NonTrivialRuns)
             ASSERT_NO_FATAL_FAILURE(test_utils::custom_assert_eq(counts_output, counts_expected, runs_count_expected));
         }
     }
-    
+
 }

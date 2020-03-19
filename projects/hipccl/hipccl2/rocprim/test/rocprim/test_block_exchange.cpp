@@ -22,6 +22,14 @@
 
 #include "common_test_header.hpp"
 
+// required rocprim headers
+#include <rocprim/config.hpp>
+#include <rocprim/block/block_load.hpp>
+#include <rocprim/block/block_store.hpp>
+
+// required test headers
+#include "test_utils_types.hpp"
+
 template<class Params>
 class RocprimBlockExchangeTests : public ::testing::Test {
 public:
@@ -45,12 +53,12 @@ void blocked_to_striped_kernel(Type* device_input, OutputType* device_output)
 
     Type input[ItemsPerThread];
     OutputType output[ItemsPerThread];
-    rp::block_load_direct_blocked(lid, device_input + block_offset, input);
+    rocprim::block_load_direct_blocked(lid, device_input + block_offset, input);
 
-    rp::block_exchange<Type, block_size, ItemsPerThread> exchange;
+    rocprim::block_exchange<Type, block_size, ItemsPerThread> exchange;
     exchange.blocked_to_striped(input, output);
 
-    rp::block_store_direct_blocked(lid, device_output + block_offset, output);
+    rocprim::block_store_direct_blocked(lid, device_output + block_offset, output);
 }
 
 template<
@@ -68,12 +76,12 @@ void striped_to_blocked_kernel(Type* device_input, OutputType* device_output)
 
     Type input[ItemsPerThread];
     OutputType output[ItemsPerThread];
-    rp::block_load_direct_blocked(lid, device_input + block_offset, input);
+    rocprim::block_load_direct_blocked(lid, device_input + block_offset, input);
 
-    rp::block_exchange<Type, block_size, ItemsPerThread> exchange;
+    rocprim::block_exchange<Type, block_size, ItemsPerThread> exchange;
     exchange.striped_to_blocked(input, output);
 
-    rp::block_store_direct_blocked(lid, device_output + block_offset, output);
+    rocprim::block_store_direct_blocked(lid, device_output + block_offset, output);
 }
 
 template<
@@ -91,12 +99,12 @@ void blocked_to_warp_striped_kernel(Type* device_input, OutputType* device_outpu
 
     Type input[ItemsPerThread];
     OutputType output[ItemsPerThread];
-    rp::block_load_direct_blocked(lid, device_input + block_offset, input);
+    rocprim::block_load_direct_blocked(lid, device_input + block_offset, input);
 
-    rp::block_exchange<Type, block_size, ItemsPerThread> exchange;
+    rocprim::block_exchange<Type, block_size, ItemsPerThread> exchange;
     exchange.blocked_to_warp_striped(input, output);
 
-    rp::block_store_direct_blocked(lid, device_output + block_offset, output);
+    rocprim::block_store_direct_blocked(lid, device_output + block_offset, output);
 }
 
 template<
@@ -114,12 +122,12 @@ void warp_striped_to_blocked_kernel(Type* device_input, OutputType* device_outpu
 
     Type input[ItemsPerThread];
     OutputType output[ItemsPerThread];
-    rp::block_load_direct_blocked(lid, device_input + block_offset, input);
+    rocprim::block_load_direct_blocked(lid, device_input + block_offset, input);
 
-    rp::block_exchange<Type, block_size, ItemsPerThread> exchange;
+    rocprim::block_exchange<Type, block_size, ItemsPerThread> exchange;
     exchange.warp_striped_to_blocked(input, output);
 
-    rp::block_store_direct_blocked(lid, device_output + block_offset, output);
+    rocprim::block_store_direct_blocked(lid, device_output + block_offset, output);
 }
 
 template<
@@ -138,13 +146,13 @@ void scatter_to_blocked_kernel(Type* device_input, OutputType* device_output, un
     Type input[ItemsPerThread];
     OutputType output[ItemsPerThread];
     unsigned int ranks[ItemsPerThread];
-    rp::block_load_direct_blocked(lid, device_input + block_offset, input);
-    rp::block_load_direct_blocked(lid, device_ranks + block_offset, ranks);
+    rocprim::block_load_direct_blocked(lid, device_input + block_offset, input);
+    rocprim::block_load_direct_blocked(lid, device_ranks + block_offset, ranks);
 
-    rp::block_exchange<Type, block_size, ItemsPerThread> exchange;
+    rocprim::block_exchange<Type, block_size, ItemsPerThread> exchange;
     exchange.scatter_to_blocked(input, output, ranks);
 
-    rp::block_store_direct_blocked(lid, device_output + block_offset, output);
+    rocprim::block_store_direct_blocked(lid, device_output + block_offset, output);
 }
 
 template<
@@ -163,13 +171,13 @@ void scatter_to_striped_kernel(Type* device_input, OutputType* device_output, un
     Type input[ItemsPerThread];
     OutputType output[ItemsPerThread];
     unsigned int ranks[ItemsPerThread];
-    rp::block_load_direct_blocked(lid, device_input + block_offset, input);
-    rp::block_load_direct_blocked(lid, device_ranks + block_offset, ranks);
+    rocprim::block_load_direct_blocked(lid, device_input + block_offset, input);
+    rocprim::block_load_direct_blocked(lid, device_ranks + block_offset, ranks);
 
-    rp::block_exchange<Type, block_size, ItemsPerThread> exchange;
+    rocprim::block_exchange<Type, block_size, ItemsPerThread> exchange;
     exchange.scatter_to_striped(input, output, ranks);
 
-    rp::block_store_direct_blocked(lid, device_output + block_offset, output);
+    rocprim::block_store_direct_blocked(lid, device_output + block_offset, output);
 }
 
 // Test for exchange

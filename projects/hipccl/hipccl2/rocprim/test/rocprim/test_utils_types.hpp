@@ -21,6 +21,11 @@
 #ifndef TEST_TEST_UTILS_TYPES_HPP_
 #define TEST_TEST_UTILS_TYPES_HPP_
 
+#include "test_utils.hpp"
+
+// required rocprim headers
+#include <rocprim/config.hpp>
+
 template<
     class T,
     unsigned int WarpSize

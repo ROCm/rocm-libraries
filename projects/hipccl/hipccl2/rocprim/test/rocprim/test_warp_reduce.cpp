@@ -22,6 +22,12 @@
 
 #include "common_test_header.hpp"
 
+// required rocprim headers
+#include <rocprim/warp/warp_reduce.hpp>
+
+// required test headers
+#include "test_utils_types.hpp"
+
 template<class Params>
 class RocprimWarpReduceTests : public ::testing::Test {
 public:
@@ -39,12 +45,12 @@ __global__
 void warp_reduce_sum_kernel(T* device_input, T* device_output)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
-    const unsigned int warp_id = rp::detail::logical_warp_id<LogicalWarpSize>();
+    const unsigned int warp_id = rocprim::detail::logical_warp_id<LogicalWarpSize>();
     unsigned int index = hipThreadIdx_x + (hipBlockIdx_x * hipBlockDim_x);
 
     T value = device_input[index];
 
-    using wreduce_t = rp::warp_reduce<T, LogicalWarpSize>;
+    using wreduce_t = rocprim::warp_reduce<T, LogicalWarpSize>;
     __shared__ typename wreduce_t::storage_type storage[warps_no];
     wreduce_t().reduce(value, value, storage[warp_id]);
 
@@ -56,18 +62,18 @@ void warp_reduce_sum_kernel(T* device_input, T* device_output)
 
 TYPED_TEST(RocprimWarpReduceTests, ReduceSum)
 {
-    // logical warp side for warp primitive, execution warp size is always rp::warp_size()
+    // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
     using T = typename TestFixture::params::type;
-    using binary_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_plus, rp::plus<T>>::type;
+    using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
     constexpr size_t block_size =
-        rp::detail::is_power_of_two(logical_warp_size)
-            ? rp::max<size_t>(rp::warp_size(), logical_warp_size * 4)
-            : (rp::warp_size()/logical_warp_size) * logical_warp_size;
+        rocprim::detail::is_power_of_two(logical_warp_size)
+            ? rocprim::max<size_t>(rocprim::warp_size(), logical_warp_size * 4)
+            : (rocprim::warp_size()/logical_warp_size) * logical_warp_size;
     const size_t size = block_size * 4;
 
     // Given warp size not supported
-    if(logical_warp_size > rp::warp_size())
+    if(logical_warp_size > rocprim::warp_size())
     {
         return;
     }
@@ -75,7 +81,7 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSum)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
         std::vector<T> input = test_utils::get_random_data<T>(size, 2, 50, seed_value); // used for input
@@ -132,7 +138,7 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSum)
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_output));
     }
-    
+
 }
 
 template<
@@ -144,12 +150,12 @@ __global__
 void warp_allreduce_sum_kernel(T* device_input, T* device_output)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
-    const unsigned int warp_id = rp::detail::logical_warp_id<LogicalWarpSize>();
+    const unsigned int warp_id = rocprim::detail::logical_warp_id<LogicalWarpSize>();
     unsigned int index = hipThreadIdx_x + (hipBlockIdx_x * hipBlockDim_x);
 
     T value = device_input[index];
 
-    using wreduce_t = rp::warp_reduce<T, LogicalWarpSize, true>;
+    using wreduce_t = rocprim::warp_reduce<T, LogicalWarpSize, true>;
     __shared__ typename wreduce_t::storage_type storage[warps_no];
     wreduce_t().reduce(value, value, storage[warp_id]);
 
@@ -158,18 +164,18 @@ void warp_allreduce_sum_kernel(T* device_input, T* device_output)
 
 TYPED_TEST(RocprimWarpReduceTests, AllReduceSum)
 {
-    // logical warp side for warp primitive, execution warp size is always rp::warp_size()
+    // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
     using T = typename TestFixture::params::type;
-    using binary_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_plus, rp::plus<T>>::type;
+    using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
     constexpr size_t block_size =
-        rp::detail::is_power_of_two(logical_warp_size)
-            ? rp::max<size_t>(rp::warp_size(), logical_warp_size * 4)
-            : (rp::warp_size()/logical_warp_size) * logical_warp_size;
+        rocprim::detail::is_power_of_two(logical_warp_size)
+            ? rocprim::max<size_t>(rocprim::warp_size(), logical_warp_size * 4)
+            : (rocprim::warp_size()/logical_warp_size) * logical_warp_size;
     const size_t size = block_size * 4;
 
     // Given warp size not supported
-    if(logical_warp_size > rp::warp_size())
+    if(logical_warp_size > rocprim::warp_size())
     {
         return;
     }
@@ -177,7 +183,7 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSum)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
         std::vector<T> input = test_utils::get_random_data<T>(size, 2, 50, seed_value); // used for input
@@ -238,7 +244,7 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSum)
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_output));
     }
-    
+
 }
 
 template<
@@ -250,12 +256,12 @@ __global__
 void warp_reduce_sum_kernel(T* device_input, T* device_output, size_t valid)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
-    const unsigned int warp_id = rp::detail::logical_warp_id<LogicalWarpSize>();
+    const unsigned int warp_id = rocprim::detail::logical_warp_id<LogicalWarpSize>();
     unsigned int index = hipThreadIdx_x + (hipBlockIdx_x * hipBlockDim_x);
 
     T value = device_input[index];
 
-    using wreduce_t = rp::warp_reduce<T, LogicalWarpSize>;
+    using wreduce_t = rocprim::warp_reduce<T, LogicalWarpSize>;
     __shared__ typename wreduce_t::storage_type storage[warps_no];
     wreduce_t().reduce(value, value, valid, storage[warp_id]);
 
@@ -267,19 +273,19 @@ void warp_reduce_sum_kernel(T* device_input, T* device_output, size_t valid)
 
 TYPED_TEST(RocprimWarpReduceTests, ReduceSumValid)
 {
-    // logical warp side for warp primitive, execution warp size is always rp::warp_size()
+    // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
     using T = typename TestFixture::params::type;
-    using binary_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_plus, rp::plus<T>>::type;
+    using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
     constexpr size_t block_size =
-        rp::detail::is_power_of_two(logical_warp_size)
-            ? rp::max<size_t>(rp::warp_size(), logical_warp_size * 4)
-            : (rp::warp_size()/logical_warp_size) * logical_warp_size;
+        rocprim::detail::is_power_of_two(logical_warp_size)
+            ? rocprim::max<size_t>(rocprim::warp_size(), logical_warp_size * 4)
+            : (rocprim::warp_size()/logical_warp_size) * logical_warp_size;
     const size_t size = block_size * 4;
     const size_t valid = logical_warp_size - 1;
 
     // Given warp size not supported
-    if(logical_warp_size > rp::warp_size())
+    if(logical_warp_size > rocprim::warp_size())
     {
         return;
     }
@@ -287,7 +293,7 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumValid)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
         std::vector<T> input = test_utils::get_random_data<T>(size, 2, 50, seed_value); // used for input
@@ -344,7 +350,7 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumValid)
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_output));
     }
-    
+
 }
 
 template<
@@ -356,12 +362,12 @@ __global__
 void warp_allreduce_sum_kernel(T* device_input, T* device_output, size_t valid)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
-    const unsigned int warp_id = rp::detail::logical_warp_id<LogicalWarpSize>();
+    const unsigned int warp_id = rocprim::detail::logical_warp_id<LogicalWarpSize>();
     unsigned int index = hipThreadIdx_x + (hipBlockIdx_x * hipBlockDim_x);
 
     T value = device_input[index];
 
-    using wreduce_t = rp::warp_reduce<T, LogicalWarpSize, true>;
+    using wreduce_t = rocprim::warp_reduce<T, LogicalWarpSize, true>;
     __shared__ typename wreduce_t::storage_type storage[warps_no];
     wreduce_t().reduce(value, value, valid, storage[warp_id]);
 
@@ -370,19 +376,19 @@ void warp_allreduce_sum_kernel(T* device_input, T* device_output, size_t valid)
 
 TYPED_TEST(RocprimWarpReduceTests, AllReduceSumValid)
 {
-    // logical warp side for warp primitive, execution warp size is always rp::warp_size()
+    // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
     using T = typename TestFixture::params::type;
-    using binary_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_plus, rp::plus<T>>::type;
+    using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
     constexpr size_t block_size =
-        rp::detail::is_power_of_two(logical_warp_size)
-            ? rp::max<size_t>(rp::warp_size(), logical_warp_size * 4)
-            : (rp::warp_size()/logical_warp_size) * logical_warp_size;
+        rocprim::detail::is_power_of_two(logical_warp_size)
+            ? rocprim::max<size_t>(rocprim::warp_size(), logical_warp_size * 4)
+            : (rocprim::warp_size()/logical_warp_size) * logical_warp_size;
     const size_t size = block_size * 4;
     const size_t valid = logical_warp_size - 1;
 
     // Given warp size not supported
-    if(logical_warp_size > rp::warp_size())
+    if(logical_warp_size > rocprim::warp_size())
     {
         return;
     }
@@ -390,7 +396,7 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSumValid)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
         std::vector<T> input = test_utils::get_random_data<T>(size, 2, 50, seed_value); // used for input
@@ -451,7 +457,7 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSumValid)
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_output));
     }
-    
+
 }
 
 TYPED_TEST(RocprimWarpReduceTests, ReduceSumCustomStruct)
@@ -459,16 +465,16 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumCustomStruct)
     using base_type = typename TestFixture::params::type;
     using T = test_utils::custom_test_type<base_type>;
 
-    // logical warp side for warp primitive, execution warp size is always rp::warp_size()
+    // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
     constexpr size_t block_size =
-        rp::detail::is_power_of_two(logical_warp_size)
-            ? rp::max<size_t>(rp::warp_size(), logical_warp_size * 4)
-            : (rp::warp_size()/logical_warp_size) * logical_warp_size;
+        rocprim::detail::is_power_of_two(logical_warp_size)
+            ? rocprim::max<size_t>(rocprim::warp_size(), logical_warp_size * 4)
+            : (rocprim::warp_size()/logical_warp_size) * logical_warp_size;
     const size_t size = block_size * 4;
 
     // Given warp size not supported
-    if(logical_warp_size > rp::warp_size())
+    if(logical_warp_size > rocprim::warp_size())
     {
         return;
     }
@@ -476,7 +482,7 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumCustomStruct)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
         std::vector<T> input(size);
@@ -541,7 +547,7 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumCustomStruct)
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_output));
     }
-    
+
 }
 
 template<
@@ -554,13 +560,13 @@ __global__
 void head_segmented_warp_reduce_kernel(T* input, Flag* flags, T* output)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
-    const unsigned int warp_id = rp::detail::logical_warp_id<LogicalWarpSize>();
+    const unsigned int warp_id = rocprim::detail::logical_warp_id<LogicalWarpSize>();
     unsigned int index = hipThreadIdx_x + (hipBlockIdx_x * hipBlockDim_x);
 
     T value = input[index];
     auto flag = flags[index];
 
-    using wreduce_t = rp::warp_reduce<T, LogicalWarpSize, true>;
+    using wreduce_t = rocprim::warp_reduce<T, LogicalWarpSize, true>;
     __shared__ typename wreduce_t::storage_type storage[warps_no];
     wreduce_t().head_segmented_reduce(value, value, flag, storage[warp_id]);
 
@@ -569,19 +575,19 @@ void head_segmented_warp_reduce_kernel(T* input, Flag* flags, T* output)
 
 TYPED_TEST(RocprimWarpReduceTests, HeadSegmentedReduceSum)
 {
-    // logical warp side for warp primitive, execution warp size is always rp::warp_size()
+    // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
     using T = typename TestFixture::params::type;
-    using binary_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_plus, rp::plus<T>>::type;
+    using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
     using flag_type = unsigned char;
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
     constexpr size_t block_size =
-        rp::detail::is_power_of_two(logical_warp_size)
-            ? rp::max<size_t>(rp::warp_size(), logical_warp_size * 4)
-            : (rp::warp_size()/logical_warp_size) * logical_warp_size;
+        rocprim::detail::is_power_of_two(logical_warp_size)
+            ? rocprim::max<size_t>(rocprim::warp_size(), logical_warp_size * 4)
+            : (rocprim::warp_size()/logical_warp_size) * logical_warp_size;
     const size_t size = block_size * 4;
 
     // Given warp size not supported
-    if(logical_warp_size > rp::warp_size())
+    if(logical_warp_size > rocprim::warp_size())
     {
         return;
     }
@@ -589,7 +595,7 @@ TYPED_TEST(RocprimWarpReduceTests, HeadSegmentedReduceSum)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
         std::vector<T> input = test_utils::get_random_data<T>(size, 1, 10, seed_value); // used for input
@@ -679,7 +685,7 @@ TYPED_TEST(RocprimWarpReduceTests, HeadSegmentedReduceSum)
         HIP_CHECK(hipFree(device_flags));
         HIP_CHECK(hipFree(device_output));
     }
-    
+
 }
 
 template<
@@ -692,13 +698,13 @@ __global__
 void tail_segmented_warp_reduce_kernel(T* input, Flag* flags, T* output)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
-    const unsigned int warp_id = rp::detail::logical_warp_id<LogicalWarpSize>();
+    const unsigned int warp_id = rocprim::detail::logical_warp_id<LogicalWarpSize>();
     unsigned int index = hipThreadIdx_x + (hipBlockIdx_x * hipBlockDim_x);
 
     T value = input[index];
     auto flag = flags[index];
 
-    using wreduce_t = rp::warp_reduce<T, LogicalWarpSize, true>;
+    using wreduce_t = rocprim::warp_reduce<T, LogicalWarpSize, true>;
     __shared__ typename wreduce_t::storage_type storage[warps_no];
     wreduce_t().tail_segmented_reduce(value, value, flag, storage[warp_id]);
 
@@ -707,19 +713,19 @@ void tail_segmented_warp_reduce_kernel(T* input, Flag* flags, T* output)
 
 TYPED_TEST(RocprimWarpReduceTests, TailSegmentedReduceSum)
 {
-    // logical warp side for warp primitive, execution warp size is always rp::warp_size()
+    // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
     using T = typename TestFixture::params::type;
-    using binary_op_type = typename std::conditional<std::is_same<T, rp::half>::value, test_utils::half_plus, rp::plus<T>>::type;
+    using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
     using flag_type = unsigned char;
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
     constexpr size_t block_size =
-        rp::detail::is_power_of_two(logical_warp_size)
-            ? rp::max<size_t>(rp::warp_size(), logical_warp_size * 4)
-            : (rp::warp_size()/logical_warp_size) * logical_warp_size;
+        rocprim::detail::is_power_of_two(logical_warp_size)
+            ? rocprim::max<size_t>(rocprim::warp_size(), logical_warp_size * 4)
+            : (rocprim::warp_size()/logical_warp_size) * logical_warp_size;
     const size_t size = block_size * 4;
 
     // Given warp size not supported
-    if(logical_warp_size > rp::warp_size())
+    if(logical_warp_size > rocprim::warp_size())
     {
         return;
     }
@@ -727,7 +733,7 @@ TYPED_TEST(RocprimWarpReduceTests, TailSegmentedReduceSum)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
         std::vector<T> input = test_utils::get_random_data<T>(size, 1, 10, seed_value); // used for input
@@ -826,5 +832,5 @@ TYPED_TEST(RocprimWarpReduceTests, TailSegmentedReduceSum)
         HIP_CHECK(hipFree(device_flags));
         HIP_CHECK(hipFree(device_output));
     }
-    
+
 }

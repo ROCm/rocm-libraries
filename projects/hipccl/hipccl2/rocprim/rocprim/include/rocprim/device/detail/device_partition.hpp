@@ -32,6 +32,7 @@
 #include "../../block/block_load.hpp"
 #include "../../block/block_store.hpp"
 #include "../../block/block_scan.hpp"
+#include "../../block/block_discontinuity.hpp"
 
 #include "device_scan_lookback.hpp"
 #include "lookback_scan_state.hpp"
