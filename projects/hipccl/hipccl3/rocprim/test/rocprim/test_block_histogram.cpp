@@ -20,20 +20,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <iostream>
-#include <vector>
+#include "common_test_header.hpp"
 
-// Google Test
-#include <gtest/gtest.h>
-// rocPRIM API
-#include <rocprim/rocprim.hpp>
+// required rocprim headers
+#include <rocprim/block/block_load.hpp>
+#include <rocprim/block/block_store.hpp>
+#include <rocprim/block/block_histogram.hpp>
 
-#include "test_utils.hpp"
+// required test headers
 #include "test_utils_types.hpp"
-
-#define HIP_CHECK(error) ASSERT_EQ(static_cast<hipError_t>(error), hipSuccess)
-
-namespace rp = rocprim;
 
 // Params for tests
 template<class Params>
@@ -70,8 +65,8 @@ typedef ::testing::Types<
     block_param_type(uint8_t, uint8_t),
     block_param_type(uint8_t, short),
     block_param_type(uint8_t, int8_t),
-    block_param_type(unsigned short, rp::half),
-    block_param_type(unsigned int, rp::half)
+    block_param_type(unsigned short, rocprim::half),
+    block_param_type(unsigned int, rocprim::half)
 > BlockHistSortParams;
 
 TYPED_TEST_CASE(RocprimBlockHistogramAtomicInputArrayTests, BlockHistAtomicParams);
@@ -98,7 +93,7 @@ void histogram_kernel(T* device_output, T* device_output_bin)
         in_out[j] = device_output[index + j];
     }
 
-    rp::block_histogram<T, BlockSize, ItemsPerThread, BinSize, Algorithm> bhist;
+    rocprim::block_histogram<T, BlockSize, ItemsPerThread, BinSize, Algorithm> bhist;
     bhist.histogram(in_out, hist);
 
     #pragma unroll
@@ -118,7 +113,7 @@ template<
     class BinType,
     unsigned int BlockSize = 256U,
     unsigned int ItemsPerThread = 1U,
-    rp::block_histogram_algorithm Algorithm = rp::block_histogram_algorithm::using_atomic
+    rocprim::block_histogram_algorithm Algorithm = rocprim::block_histogram_algorithm::using_atomic
 >
 void test_block_histogram_input_arrays()
 {
@@ -141,7 +136,7 @@ void test_block_histogram_input_arrays()
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
         std::vector<T> output = test_utils::get_random_data<T>(size, 0, bin - 1, seed_value);
@@ -204,7 +199,7 @@ void test_block_histogram_input_arrays()
         HIP_CHECK(hipFree(device_output));
         HIP_CHECK(hipFree(device_output_bin));
     }
-    
+
 }
 
 // Static for-loop
@@ -214,7 +209,7 @@ template <
     class T,
     class BinType,
     unsigned int BlockSize = 256U,
-    rp::block_histogram_algorithm Algorithm = rp::block_histogram_algorithm::using_atomic
+    rocprim::block_histogram_algorithm Algorithm = rocprim::block_histogram_algorithm::using_atomic
 >
 struct static_for_input_array
 {
@@ -230,7 +225,7 @@ template <
     class T,
     class BinType,
     unsigned int BlockSize,
-    rp::block_histogram_algorithm Algorithm
+    rocprim::block_histogram_algorithm Algorithm
 >
 struct static_for_input_array<N, N, T, BinType, BlockSize, Algorithm>
 {
@@ -245,7 +240,7 @@ TYPED_TEST(RocprimBlockHistogramAtomicInputArrayTests, Histogram)
     using BinType = typename TestFixture::bin_type;
     constexpr size_t block_size = TestFixture::block_size;
 
-    static_for_input_array<0, 4, T, BinType, block_size, rp::block_histogram_algorithm::using_atomic>::run();
+    static_for_input_array<0, 4, T, BinType, block_size, rocprim::block_histogram_algorithm::using_atomic>::run();
 }
 
 TYPED_TEST(RocprimBlockHistogramSortInputArrayTests, Histogram)
@@ -254,5 +249,5 @@ TYPED_TEST(RocprimBlockHistogramSortInputArrayTests, Histogram)
     using BinType = typename TestFixture::bin_type;
     constexpr size_t block_size = TestFixture::block_size;
 
-    static_for_input_array<0, 4, T, BinType, block_size, rp::block_histogram_algorithm::using_sort>::run();
+    static_for_input_array<0, 4, T, BinType, block_size, rocprim::block_histogram_algorithm::using_sort>::run();
 }

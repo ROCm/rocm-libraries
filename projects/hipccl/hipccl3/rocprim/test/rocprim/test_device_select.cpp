@@ -20,21 +20,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <iostream>
-#include <vector>
-#include <algorithm>
+#include "common_test_header.hpp"
 
-// Google Test
-#include <gtest/gtest.h>
+// required rocprim headers
+#include <rocprim/device/device_select.hpp>
+#include <rocprim/iterator/constant_iterator.hpp>
+#include <rocprim/iterator/discard_iterator.hpp>
 
-// HIP API
-#include <hip/hip_runtime.h>
-// rocPRIM API
-#include <rocprim/rocprim.hpp>
-
-#include "test_utils.hpp"
-
-#define HIP_CHECK(error) ASSERT_EQ(static_cast<hipError_t>(error),hipSuccess)
+// required test headers
+#include "test_utils_types.hpp"
 
 // Params for tests
 template<
@@ -101,7 +95,7 @@ TYPED_TEST(RocprimDeviceSelectTests, Flagged)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         const std::vector<size_t> sizes = get_sizes(seed_value);
         for(auto size : sizes)
@@ -220,7 +214,7 @@ TYPED_TEST(RocprimDeviceSelectTests, Flagged)
             hipFree(d_temp_storage);
         }
     }
-    
+
 }
 
 template<class T>
@@ -262,7 +256,7 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         const std::vector<size_t> sizes = get_sizes(seed_value);
         for(auto size : sizes)
@@ -370,7 +364,7 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
             hipFree(d_temp_storage);
         }
     }
-    
+
 }
 
 std::vector<float> get_discontinuity_probabilities()
@@ -457,7 +451,7 @@ TYPED_TEST(RocprimDeviceSelectTests, Unique)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         const auto sizes = get_sizes(seed_value);
         const auto probabilities = get_discontinuity_probabilities();
@@ -578,5 +572,5 @@ TYPED_TEST(RocprimDeviceSelectTests, Unique)
             }
         }
     }
-    
+
 }

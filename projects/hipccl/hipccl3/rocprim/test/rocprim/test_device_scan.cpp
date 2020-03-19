@@ -20,23 +20,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <iostream>
-#include <vector>
-#include <algorithm>
-#include <cmath>
+#include "common_test_header.hpp"
 
-// Google Test
-#include <gtest/gtest.h>
-// HIP API
-#include <hip/hip_runtime.h>
-// rocPRIM API
-#include <rocprim/rocprim.hpp>
+// required rocprim headers
+#include <rocprim/device/device_scan.hpp>
+#include <rocprim/device/device_scan_by_key.hpp>
+#include <rocprim/iterator/constant_iterator.hpp>
 
-#include "test_utils.hpp"
-
-namespace rp = rocprim;
-
-#define HIP_CHECK(error) ASSERT_EQ(error, hipSuccess)
+// required test headers
+#include "test_utils_types.hpp"
 
 // Params for tests
 template<
@@ -76,28 +68,28 @@ typedef ::testing::Types<
     DeviceScanParams<unsigned short>,
     DeviceScanParams<short, int>,
     DeviceScanParams<int>,
-    DeviceScanParams<float, float, rp::maximum<float> >,
-    DeviceScanParams<int8_t, int8_t, rp::maximum<int8_t>>,
-    DeviceScanParams<uint8_t, uint8_t, rp::maximum<uint8_t>>,
+    DeviceScanParams<float, float, rocprim::maximum<float> >,
+    DeviceScanParams<int8_t, int8_t, rocprim::maximum<int8_t>>,
+    DeviceScanParams<uint8_t, uint8_t, rocprim::maximum<uint8_t>>,
 #ifndef __HIP__
     // hip-clang does provide host comparison operators
-    DeviceScanParams<rp::half, rp::half, test_utils::half_maximum>,
+    DeviceScanParams<rocprim::half, rocprim::half, test_utils::half_maximum>,
     // hip-clang does not allow to convert half to float
-    DeviceScanParams<rp::half, float>,
+    DeviceScanParams<rocprim::half, float>,
 #endif
     // Large
-    DeviceScanParams<int, double, rp::plus<int> >,
-    DeviceScanParams<int, double, rp::plus<double> >,
-    DeviceScanParams<int, long long, rp::plus<long long> >,
-    DeviceScanParams<unsigned int, unsigned long long, rp::plus<unsigned long long> >,
-    DeviceScanParams<long long, long long, rp::maximum<long long> >,
-    DeviceScanParams<double, double, rp::plus<double>, true>,
-    DeviceScanParams<signed char, long, rp::plus<long> >,
-    DeviceScanParams<float, double, rp::minimum<double> >,
+    DeviceScanParams<int, double, rocprim::plus<int> >,
+    DeviceScanParams<int, double, rocprim::plus<double> >,
+    DeviceScanParams<int, long long, rocprim::plus<long long> >,
+    DeviceScanParams<unsigned int, unsigned long long, rocprim::plus<unsigned long long> >,
+    DeviceScanParams<long long, long long, rocprim::maximum<long long> >,
+    DeviceScanParams<double, double, rocprim::plus<double>, true>,
+    DeviceScanParams<signed char, long, rocprim::plus<long> >,
+    DeviceScanParams<float, double, rocprim::minimum<double> >,
     DeviceScanParams<test_utils::custom_test_type<int> >,
     DeviceScanParams<
         test_utils::custom_test_type<double>, test_utils::custom_test_type<double>,
-        rp::plus<test_utils::custom_test_type<double> >, true
+        rocprim::plus<test_utils::custom_test_type<double> >, true
     >,
     DeviceScanParams<test_utils::custom_test_type<int> >,
     DeviceScanParams<test_utils::custom_test_array_type<long long, 5> >,
@@ -184,7 +176,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScan)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         const std::vector<size_t> sizes = get_sizes(seed_value);
         for(auto size : sizes)
@@ -270,7 +262,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScan)
             hipFree(d_temp_storage);
         }
     }
-    
+
 }
 
 TYPED_TEST(RocprimDeviceScanTests, ExclusiveScan)
@@ -284,7 +276,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScan)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         const std::vector<size_t> sizes = get_sizes(seed_value);
         for(auto size : sizes)
@@ -372,7 +364,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScan)
             hipFree(d_temp_storage);
         }
     }
-    
+
 }
 
 TYPED_TEST(RocprimDeviceScanTests, InclusiveScanByKey)
@@ -387,7 +379,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanByKey)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         const std::vector<size_t> sizes = get_sizes(seed_value);
         for(auto size : sizes)
@@ -515,7 +507,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanByKey)
             hipFree(d_temp_storage);
         }
     }
-    
+
 }
 
 TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
@@ -530,7 +522,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         const std::vector<size_t> sizes = get_sizes(seed_value);
         for(auto size : sizes)
@@ -640,5 +632,5 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
             hipFree(d_temp_storage);
         }
     }
-    
+
 }

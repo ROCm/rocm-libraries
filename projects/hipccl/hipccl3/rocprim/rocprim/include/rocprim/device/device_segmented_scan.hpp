@@ -31,9 +31,11 @@
 #include "../iterator/zip_iterator.hpp"
 #include "../iterator/discard_iterator.hpp"
 #include "../iterator/transform_iterator.hpp"
+#include "../iterator/counting_iterator.hpp"
 #include "../types/tuple.hpp"
 
 #include "device_scan_config.hpp"
+#include "device_scan.hpp"
 #include "detail/device_segmented_scan.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
