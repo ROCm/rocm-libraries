@@ -24,6 +24,7 @@
 #include <type_traits>
 
 #include "../config.hpp"
+#include "../intrinsics/thread.hpp"
 #include "../detail/various.hpp"
 
 /// \addtogroup primitivesmodule_deviceconfigs

@@ -20,15 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <iostream>
-#include <vector>
-
-// Google Test
-#include <gtest/gtest.h>
-
-// HIP API
-#include <hip/hip_runtime.h>
-#define HIP_CHECK(x) ASSERT_EQ(x, hipSuccess)
+#include "common_test_header.hpp"
 
 template<class T>
 T ax(const T a, const T x) __device__

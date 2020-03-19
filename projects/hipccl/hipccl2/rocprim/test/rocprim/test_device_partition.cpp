@@ -20,21 +20,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <iostream>
-#include <vector>
-#include <algorithm>
-#include <cmath>
+#include "common_test_header.hpp"
 
-// Google Test
-#include <gtest/gtest.h>
-// HIP API
-#include <hip/hip_runtime.h>
-// rocPRIM API
-#include <rocprim/rocprim.hpp>
+// required rocprim headers
+#include <rocprim/device/device_partition.hpp>
+#include <rocprim/iterator/constant_iterator.hpp>
 
-#include "test_utils.hpp"
-
-#define HIP_CHECK(error) ASSERT_EQ(static_cast<hipError_t>(error),hipSuccess)
+// required test headers
+#include "test_utils_types.hpp"
 
 // Params for tests
 template<
@@ -102,7 +95,7 @@ TYPED_TEST(RocprimDevicePartitionTests, Flagged)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         const std::vector<size_t> sizes = get_sizes(seed_value);
         for(auto size : sizes)
@@ -236,7 +229,7 @@ TYPED_TEST(RocprimDevicePartitionTests, Flagged)
             hipFree(d_temp_storage);
         }
     }
-    
+
 }
 
 TYPED_TEST(RocprimDevicePartitionTests, PredicateEmptyInput)
@@ -347,7 +340,7 @@ TYPED_TEST(RocprimDevicePartitionTests, Predicate)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         const std::vector<size_t> sizes = get_sizes(seed_value);
         for(auto size : sizes)
@@ -470,5 +463,5 @@ TYPED_TEST(RocprimDevicePartitionTests, Predicate)
             hipFree(d_temp_storage);
         }
     }
-    
+
 }

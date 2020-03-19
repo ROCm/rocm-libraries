@@ -21,11 +21,10 @@
 #ifndef TEST_TEST_UTILS_TYPES_HPP_
 #define TEST_TEST_UTILS_TYPES_HPP_
 
-// Google Test
-#include <gtest/gtest.h>
+#include "test_utils.hpp"
 
-// rocPRIM
-#include <rocprim/rocprim.hpp>
+// required rocprim headers
+#include <rocprim/config.hpp>
 
 template<
     class T,
