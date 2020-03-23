@@ -43,6 +43,9 @@ std::ostream& operator<<(std::ostream& stream, const rocprim::half& value)
 namespace test_utils
 {
 
+static constexpr uint32_t random_data_generation_segments = 8;
+static constexpr uint32_t random_data_generation_repeat_strides = 2;
+
 // Support half operators on host side
 
 ROCPRIM_HOST inline
@@ -209,7 +212,26 @@ inline auto get_random_data(size_t size, T min, T max, int seed_value)
     gen.seed(seed_value);
     std::uniform_int_distribution<T> distribution(min, max);
     std::vector<T> data(size);
-    std::generate(data.begin(), data.end(), [&]() { return distribution(gen); });
+    uint32_t segment_size = size / random_data_generation_segments;
+    for(uint32_t segment_index = 0; segment_index < random_data_generation_segments; segment_index++)
+    {
+        if(segment_index % random_data_generation_repeat_strides == 0)
+        {
+            T repeated_value = distribution(gen);
+            std::fill(
+                data.begin() + segment_size * segment_index,
+                data.begin() + segment_size * (segment_index + 1),
+                repeated_value);
+
+        }
+        else
+        {
+            std::generate(
+                data.begin() + segment_size * segment_index,
+                data.begin() + segment_size * (segment_index + 1),
+                [&]() { return distribution(gen); });
+        }
+    }
     return data;
 }
 
@@ -224,7 +246,26 @@ inline auto get_random_data(size_t size, T min, T max, int seed_value)
     using dis_type = typename std::conditional<std::is_same<rocprim::half, T>::value, float, T>::type;
     std::uniform_real_distribution<dis_type> distribution(min, max);
     std::vector<T> data(size);
-    std::generate(data.begin(), data.end(), [&]() { return distribution(gen); });
+    uint32_t segment_size = size / random_data_generation_segments;
+    for(uint32_t segment_index = 0; segment_index < random_data_generation_segments; segment_index++)
+    {
+        if(segment_index % random_data_generation_repeat_strides == 0)
+        {
+            T repeated_value = distribution(gen);
+            std::fill(
+                data.begin() + segment_size * segment_index,
+                data.begin() + segment_size * (segment_index + 1),
+                repeated_value);
+
+        }
+        else
+        {
+            std::generate(
+                data.begin() + segment_size * segment_index,
+                data.begin() + segment_size * (segment_index + 1),
+                [&]() { return distribution(gen); });
+        }
+    }
     return data;
 }
 
@@ -252,7 +293,7 @@ template<class T>
 inline auto get_random_value(T min, T max, int seed_value)
     -> typename std::enable_if<rocprim::is_arithmetic<T>::value, T>::type
 {
-    return get_random_data(1, min, max, seed_value)[0];
+    return get_random_data(random_data_generation_segments, min, max, seed_value)[0];
 }
 
 // Can't use std::prefix_sum for inclusive/exclusive scan, because
