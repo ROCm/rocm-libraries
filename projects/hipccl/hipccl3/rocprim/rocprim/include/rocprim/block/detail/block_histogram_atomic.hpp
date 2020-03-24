@@ -36,12 +36,15 @@ namespace detail
 
 template<
     class T,
-    unsigned int BlockSize,
+    unsigned int BlockSizeX,
+    unsigned int BlockSizeY,
+    unsigned int BlockSizeZ,
     unsigned int ItemsPerThread,
     unsigned int Bins
 >
 class block_histogram_atomic
 {
+    static constexpr unsigned int BlockSize = BlockSizeX * BlockSizeY * BlockSizeZ;
     static_assert(
         std::is_convertible<T, unsigned int>::value,
         "T must be convertible to unsigned int"
