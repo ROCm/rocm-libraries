@@ -1,13 +1,13 @@
 // This file is for internal AMD use.
 // If you are interested in running your own Jenkins, please raise a github issue for assistance.
 
-def runCompileCommand(platform, project)
+def runCompileCommand(platform, project, jobName)
 {
     project.paths.construct_build_prefix()
         
     def command 
 
-    if(platform.jenkinsLabel.contains('hip-clang'))
+    if(jobName.contains('hipclang'))
     {
         command = """#!/usr/bin/env bash
                 set -x
@@ -45,11 +45,7 @@ def runPackageCommand(platform, project)
 {
     def command
         
-    if(platform.jenkinsLabel.contains('hip-clang'))
-    {
-        packageCommand = null
-    }
-    else if(platform.jenkinsLabel.contains('ubuntu'))
+    if(platform.jenkinsLabel.contains('ubuntu'))
     {
         command = """
                 set -x
