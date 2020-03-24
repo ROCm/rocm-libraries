@@ -59,15 +59,15 @@ struct select_block_reduce_impl;
 template<>
 struct select_block_reduce_impl<block_reduce_algorithm::using_warp_reduce>
 {
-    template<class T, unsigned int BlockSize>
-    using type = block_reduce_warp_reduce<T, BlockSize>;
+    template<class T, unsigned int BlockSizeX, unsigned int BlockSizeY, unsigned int BlockSizeZ>
+    using type = block_reduce_warp_reduce<T, BlockSizeX, BlockSizeY, BlockSizeZ>;
 };
 
 template<>
 struct select_block_reduce_impl<block_reduce_algorithm::raking_reduce>
 {
-    template<class T, unsigned int BlockSize>
-    using type = block_reduce_raking_reduce<T, BlockSize>;
+    template<class T, unsigned int BlockSizeX, unsigned int BlockSizeY, unsigned int BlockSizeZ>
+    using type = block_reduce_raking_reduce<T, BlockSizeX, BlockSizeY, BlockSizeZ>;
 };
 
 } // end namespace detail
@@ -117,15 +117,17 @@ struct select_block_reduce_impl<block_reduce_algorithm::raking_reduce>
 /// \endparblock
 template<
     class T,
-    unsigned int BlockSize,
-    block_reduce_algorithm Algorithm = block_reduce_algorithm::default_algorithm
+    unsigned int BlockSizeX,
+    block_reduce_algorithm Algorithm = block_reduce_algorithm::default_algorithm,
+    unsigned int BlockSizeY = 1,
+    unsigned int BlockSizeZ = 1
 >
 class block_reduce
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
-    : private detail::select_block_reduce_impl<Algorithm>::template type<T, BlockSize>
+    : private detail::select_block_reduce_impl<Algorithm>::template type<T, BlockSizeX, BlockSizeY, BlockSizeZ>
 #endif
 {
-    using base_type = typename detail::select_block_reduce_impl<Algorithm>::template type<T, BlockSize>;
+    using base_type = typename detail::select_block_reduce_impl<Algorithm>::template type<T, BlockSizeX, BlockSizeY, BlockSizeZ>;
 public:
     /// \brief Struct used to allocate a temporary memory that is required for thread
     /// communication during operations provided by related parallel primitive.

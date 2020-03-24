@@ -118,10 +118,13 @@ apply(FlagOp flag_op, const T& a, const T& b, unsigned int)
 /// \endparblock
 template<
     class T,
-    unsigned int BlockSize
+    unsigned int BlockSizeX,
+    unsigned int BlockSizeY = 1,
+    unsigned int BlockSizeZ = 1
 >
 class block_discontinuity
 {
+    static constexpr unsigned int BlockSize = BlockSizeX * BlockSizeY * BlockSizeZ;
     // Struct used for creating a raw_storage object for this primitive's temporary storage.
     struct storage_type_
     {
@@ -903,7 +906,7 @@ private:
     {
         static_assert(::rocprim::is_integral<Flag>::value, "Flag must be integral type");
 
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         storage_type_& storage_ = storage.get();
         // Copy input items for rare cases when input and head_flags/tail_flags are the same arrays
         // (in other cases it does not affect performance)
