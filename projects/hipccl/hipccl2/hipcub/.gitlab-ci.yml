@@ -56,6 +56,18 @@ build:rocm:
   extends: .rocm
   stage: build
   script:
+    # Install rocPRIM package
+    - echo ${ROCPRIM_GIT_URL}
+    - echo $ROCPRIM_GIT_URL
+    - git clone -b develop_stream https://gitlab-ci-token:${CI_JOB_TOKEN}@${ROCPRIM_GIT_URL}
+    - cd rocPRIM
+    - mkdir build
+    - cd build
+    - CXX=hcc cmake -DBUILD_TEST=OFF ../.
+    - make package
+    - $SUDO_CMD dpkg -i rocprim-*.deb
+    - cd ../..
+    # hipCUB
     - mkdir build
     - cd build
     - CXX=hcc cmake -DBUILD_TEST=ON ../.
@@ -140,6 +152,18 @@ test:rocm_install:
   stage: test
   dependencies: []
   script:
+    # Install rocPRIM package
+    - echo ${ROCPRIM_GIT_URL}
+    - echo $ROCPRIM_GIT_URL
+    - git clone -b develop_stream https://gitlab-ci-token:${CI_JOB_TOKEN}@${ROCPRIM_GIT_URL}
+    - cd rocPRIM
+    - mkdir build
+    - cd build
+    - CXX=hcc cmake -DBUILD_TEST=OFF ../.
+    - make package
+    - $SUDO_CMD dpkg -i rocprim-*.deb
+    - cd ../..
+    # hipCUB
     - mkdir build_only_install
     - cd build_only_install
     - CXX=hcc cmake -DBUILD_TEST=OFF ../.
