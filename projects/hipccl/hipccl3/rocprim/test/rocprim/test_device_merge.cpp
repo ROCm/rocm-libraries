@@ -91,6 +91,10 @@ TYPED_TEST_CASE(RocprimDeviceMergeTests, RocprimDeviceMergeTestsParams);
 
 TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using key_type = typename TestFixture::key_type;
     using compare_op_type = typename TestFixture::compare_op_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
@@ -221,6 +225,10 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
 
 TYPED_TEST(RocprimDeviceMergeTests, MergeKeyValue)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+    
     using key_type = typename TestFixture::key_type;
     using value_type = typename TestFixture::value_type;
     using compare_op_type = typename TestFixture::compare_op_type;

@@ -44,7 +44,14 @@ function(add_rocprim_test TEST_NAME TEST_SOURCES)
     PROPERTIES
       RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test/rocprim"
   )
-  add_test(${TEST_NAME} ${TEST_TARGET})
+  if(AMDGPU_TEST_TARGETS)
+  foreach(AMDGPU_TARGET IN LISTS AMDGPU_TEST_TARGETS)
+    add_test("${AMDGPU_TARGET}-${TEST_NAME}" ${TEST_TARGET})
+    set_tests_properties("${AMDGPU_TARGET}-${TEST_NAME}" PROPERTIES RESOURCE_GROUPS "1,${AMDGPU_TARGET}:1")
+  endforeach()
+  else()
+    add_test(${TEST_NAME} ${TEST_TARGET})
+  endif()
 endfunction()
 
 # ****************************************************************************

@@ -257,6 +257,10 @@ void load_store_kernel(Type* device_input, Type* device_output)
 
 TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClass)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using Type = typename TestFixture::params::type;
     constexpr size_t block_size = TestFixture::params::block_size;
     constexpr rocprim::block_load_method load_method = TestFixture::params::load_method;
@@ -355,6 +359,10 @@ void load_store_valid_kernel(Type* device_input, Type* device_output, size_t val
 
 TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClassValid)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+    
     using Type = typename TestFixture::params::type;
     constexpr size_t block_size = TestFixture::params::block_size;
     constexpr rocprim::block_load_method load_method = TestFixture::params::load_method;
@@ -467,6 +475,10 @@ void load_store_valid_default_kernel(Type* device_input, Type* device_output, si
 
 TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClassDefault)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+    
     using Type = typename TestFixture::params::type;
     constexpr size_t block_size = TestFixture::params::block_size;
     constexpr rocprim::block_load_method load_method = TestFixture::params::load_method;

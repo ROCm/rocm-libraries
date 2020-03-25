@@ -30,7 +30,7 @@ cd rocPRIM; mkdir build; cd build
 
 # Configure rocPRIM, setup options for your system.
 # Build options:
-#   BUILD_TEST - on by default,
+#   BUILD_TEST - off by default,
 #   BUILD_BENCHMARK - off by default.
 #   BENCHMARK_CONFIG_TUNING - off by default. The purpose of this flag to find the best kernel config parameters.
 #     At ON the compilation time can be increased significantly.
@@ -83,18 +83,57 @@ target_link_libraries(<your_target> roc::rocprim_hip)
 
 ## Running Unit Tests
 
+Unit tests are implemented in terms of Google Test and collections of tests are wrapped to be invoked from CTest for convenience.
+
 ```shell
 # Go to rocPRIM build directory
 cd rocPRIM; cd build
 
+# List available tests
+ctest --show-only
+
 # To run all tests
 ctest
 
-# To run unit tests for rocPRIM
-./test/rocprim/<unit-test-name>
+# Run specific test(s)
+ctest -R <regex>
+
+# To run the Google Test manually
+./test/rocprim/test_<unit-test-name>
 ```
 
-## Using custom seeds for the tests
+### Using multiple GPUs concurrently for testing
+
+This feature requires CMake 3.16+ to be used for building / testing.
+
+The unit tests can make use of CTest `RESOURCE_GROUPS` feature enabling distributing tests across multiple GPUs in an intelligent manner. The feature can accelerate testing when multiple GPUs of the same family are in a system as well as test multiple family of products from one invocation without having to resort to `HIP_VISIBLE_DEVICES` environment variable.
+
+Assuming the user has 2 GPUs from the gfx900 family, one may specify during configuration `-D AMDGPU_TEST_TARGETS=gfx900` stating only one family will be tested. Leaving this var empty (default) results in targeting the default device in the system. To let CMake know there are 2 GPUs that should be targeted, one has to feed CTest a JSON file via the `--resource-spec-file=<path_to_file>` flag. For example:
+
+```json
+{
+  "version": {
+    "major": 1,
+    "minor": 0
+  },
+  "local": [
+    {
+      "gfx900": [
+        {
+          "id": "0"
+        },
+        {
+          "id": "1"
+        }
+      ]
+    }
+  ]
+}
+```
+
+Invoking CTest as `ctest --resource-spec-file <path_to_file> -j2` will allow two tests to run concurrently which will be distributed among the two GPUs. Modify the `-j` and the resource spec file as needed.
+
+### Using custom seeds for the tests
 
 Go to the `rocPRIM/test/rocprim/test_seed.hpp` file. 
 ```cpp

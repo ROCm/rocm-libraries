@@ -113,6 +113,10 @@ struct transform<rocprim::half>
 
 TYPED_TEST(RocprimDeviceTransformTests, Transform)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
@@ -208,6 +212,10 @@ struct binary_transform<rocprim::half, rocprim::half, rocprim::half>
 
 TYPED_TEST(RocprimDeviceTransformTests, BinaryTransform)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+    
     using T1 = typename TestFixture::input_type;
     using T2 = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;

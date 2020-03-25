@@ -84,6 +84,10 @@ TYPED_TEST_CASE(RocprimDeviceSelectTests, RocprimDeviceSelectTestsParams);
 
 TYPED_TEST(RocprimDeviceSelectTests, Flagged)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     using F = typename TestFixture::flag_type;
@@ -246,6 +250,10 @@ struct select_op<rocprim::half>
 
 TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
@@ -377,6 +385,10 @@ std::vector<float> get_discontinuity_probabilities()
 
 TYPED_TEST(RocprimDeviceSelectTests, UniqueEmptyInput)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::input_type;
     using op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_equal_to, rocprim::equal_to<T>>::type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
@@ -439,6 +451,10 @@ TYPED_TEST(RocprimDeviceSelectTests, UniqueEmptyInput)
 
 TYPED_TEST(RocprimDeviceSelectTests, Unique)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+    
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     using op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_equal_to, rocprim::equal_to<T>>::type;

@@ -68,6 +68,10 @@ void test_hip_warp_sort(T* d_output)
 
 TYPED_TEST(RocprimWarpSortShuffleBasedTests, Sort)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
     using T = typename TestFixture::params::type;
     using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_less, rocprim::less<T>>::type;
@@ -155,6 +159,10 @@ void test_hip_sort_key_value_kernel(KeyType* d_output_key, ValueType* d_output_v
 
 TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+    
     // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
     using T = typename TestFixture::params::type;
     using pair = test_utils::custom_test_type<T>;

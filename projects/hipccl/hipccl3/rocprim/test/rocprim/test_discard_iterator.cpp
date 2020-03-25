@@ -33,6 +33,10 @@
 
 TEST(RocprimDiscardIteratorTests, Equal)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using Iterator = typename rocprim::discard_iterator;
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
@@ -58,6 +62,10 @@ TEST(RocprimDiscardIteratorTests, Equal)
 
 TEST(RocprimDiscardIteratorTests, Less)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using Iterator = typename rocprim::discard_iterator;
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
@@ -80,6 +88,10 @@ TEST(RocprimDiscardIteratorTests, Less)
 
 TEST(RocprimDiscardIteratorTests, ReduceByKey)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+    
     const bool debug_synchronous = false;
 
     hipStream_t stream = 0; // default

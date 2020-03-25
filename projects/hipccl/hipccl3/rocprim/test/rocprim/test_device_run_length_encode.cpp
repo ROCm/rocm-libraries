@@ -94,6 +94,10 @@ std::vector<size_t> get_sizes(int seed_value)
 
 TYPED_TEST(RocprimDeviceRunLengthEncode, Encode)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using key_type = typename TestFixture::params::key_type;
     using count_type = typename TestFixture::params::count_type;
     using key_inner_type = typename test_utils::inner_type<key_type>::type;
@@ -247,6 +251,10 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, Encode)
 
 TYPED_TEST(RocprimDeviceRunLengthEncode, NonTrivialRuns)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+    
     using key_type = typename TestFixture::params::key_type;
     using count_type = typename TestFixture::params::count_type;
     using offset_type = typename TestFixture::params::count_type;

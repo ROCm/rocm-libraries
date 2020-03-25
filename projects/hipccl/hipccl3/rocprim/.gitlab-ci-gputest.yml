@@ -1,15 +1,15 @@
 test:vega20:
   extends: .test
-  dependencies:
-    - build:rocm
+  needs:
+    - build:cmake-latest
   tags:
     - vega20
     - rocm
 
 test:s9300:
   extends: .test
-  dependencies:
-    - build:rocm
+  needs:
+    - build:cmake-latest
   tags:
     - s9300
     - rocm
@@ -17,8 +17,8 @@ test:s9300:
 
 test:mi25:
   extends: .test
-  dependencies:
-    - build:rocm
+  needs:
+    - build:cmake-latest
   tags:
     - mi25
     - rocm 
