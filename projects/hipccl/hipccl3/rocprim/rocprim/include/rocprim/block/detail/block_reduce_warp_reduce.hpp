@@ -38,10 +38,13 @@ namespace detail
 
 template<
     class T,
-    unsigned int BlockSize
+    unsigned int BlockSizeX,
+    unsigned int BlockSizeY,
+    unsigned int BlockSizeZ
 >
 class block_reduce_warp_reduce
 {
+    static constexpr unsigned int BlockSize = BlockSizeX * BlockSizeY * BlockSizeZ;
     // Select warp size
     static constexpr unsigned int warp_size_ =
         detail::get_min_warp_size(BlockSize, ::rocprim::warp_size());
@@ -79,7 +82,7 @@ public:
                 BinaryFunction reduce_op)
     {
         this->reduce_impl(
-            ::rocprim::flat_block_thread_id(),
+            ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>(),
             input, output, storage, reduce_op
         );
     }
@@ -110,7 +113,7 @@ public:
         }
 
         // Reduction of reduced values to get partials
-        const auto flat_tid = ::rocprim::flat_block_thread_id();
+        const auto flat_tid = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         this->reduce_impl(
             flat_tid,
             thread_input, output, // input, output
@@ -138,7 +141,7 @@ public:
                 BinaryFunction reduce_op)
     {
         this->reduce_impl(
-            ::rocprim::flat_block_thread_id(),
+            ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>(),
             input, output, valid_items, storage, reduce_op
         );
     }
@@ -163,7 +166,7 @@ private:
                      storage_type& storage,
                      BinaryFunction reduce_op)
     {
-        const auto warp_id = ::rocprim::warp_id();
+        const auto warp_id = ::rocprim::warp_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         const auto lane_id = ::rocprim::lane_id();
         const unsigned int warp_offset = warp_id * warp_size_;
         const unsigned int num_valid =
@@ -229,7 +232,7 @@ private:
                      storage_type& storage,
                      BinaryFunction reduce_op)
     {
-        const auto warp_id = ::rocprim::warp_id();
+        const auto warp_id = ::rocprim::warp_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         const auto lane_id = ::rocprim::lane_id();
         const unsigned int warp_offset = warp_id * warp_size_;
         const unsigned int num_valid =
