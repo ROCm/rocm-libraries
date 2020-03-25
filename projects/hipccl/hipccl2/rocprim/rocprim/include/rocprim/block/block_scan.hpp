@@ -59,20 +59,20 @@ struct select_block_scan_impl;
 template<>
 struct select_block_scan_impl<block_scan_algorithm::using_warp_scan>
 {
-    template<class T, unsigned int BlockSize>
-    using type = block_scan_warp_scan<T, BlockSize>;
+    template<class T, unsigned int BlockSizeX, unsigned int BlockSizeY, unsigned int BlockSizeZ>
+    using type = block_scan_warp_scan<T, BlockSizeX, BlockSizeY, BlockSizeZ>;
 };
 
 template<>
 struct select_block_scan_impl<block_scan_algorithm::reduce_then_scan>
 {
-    template<class T, unsigned int BlockSize>
+    template<class T, unsigned int BlockSizeX, unsigned int BlockSizeY, unsigned int BlockSizeZ>
     // When BlockSize is less than hardware warp size block_scan_warp_scan performs better than
     // block_scan_reduce_then_scan by specializing for warps
     using type = typename std::conditional<
-                    (BlockSize <= ::rocprim::warp_size()),
-                    block_scan_warp_scan<T, BlockSize>,
-                    block_scan_reduce_then_scan<T, BlockSize>
+                    (BlockSizeX * BlockSizeY * BlockSizeZ <= ::rocprim::warp_size()),
+                    block_scan_warp_scan<T, BlockSizeX, BlockSizeY, BlockSizeZ>,
+                    block_scan_reduce_then_scan<T, BlockSizeX, BlockSizeY, BlockSizeZ>
                  >::type;
 };
 
@@ -83,8 +83,10 @@ struct select_block_scan_impl<block_scan_algorithm::reduce_then_scan>
 /// threads in a block.
 ///
 /// \tparam T - the input/output type.
-/// \tparam BlockSize - the number of threads in a block.
+/// \tparam BlockSizeX - the number of threads in a block's x dimension.
 /// \tparam Algorithm - selected scan algorithm, block_scan_algorithm::default_algorithm by default.
+/// \tparam BlockSizeY - the number of threads in a block's y dimension, defaults to 1.
+/// \tparam BlockSizeZ - the number of threads in a block's z dimension, defaults to 1.
 ///
 /// \par Overview
 /// * Supports non-commutative scan operators. However, a scan operator should be
@@ -124,15 +126,17 @@ struct select_block_scan_impl<block_scan_algorithm::reduce_then_scan>
 /// \endparblock
 template<
     class T,
-    unsigned int BlockSize,
-    block_scan_algorithm Algorithm = block_scan_algorithm::default_algorithm
+    unsigned int BlockSizeX,
+    block_scan_algorithm Algorithm = block_scan_algorithm::default_algorithm,
+    unsigned int BlockSizeY = 1,
+    unsigned int BlockSizeZ = 1
 >
 class block_scan
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
-    : private detail::select_block_scan_impl<Algorithm>::template type<T, BlockSize>
+    : private detail::select_block_scan_impl<Algorithm>::template type<T, BlockSizeX, BlockSizeY, BlockSizeZ>
 #endif
 {
-    using base_type = typename detail::select_block_scan_impl<Algorithm>::template type<T, BlockSize>;
+    using base_type = typename detail::select_block_scan_impl<Algorithm>::template type<T, BlockSizeX, BlockSizeY, BlockSizeZ>;
 public:
     /// \brief Struct used to allocate a temporary memory that is required for thread
     /// communication during operations provided by related parallel primitive.

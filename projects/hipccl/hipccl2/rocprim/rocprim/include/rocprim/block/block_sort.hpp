@@ -56,8 +56,8 @@ struct select_block_sort_impl;
 template<>
 struct select_block_sort_impl<block_sort_algorithm::bitonic_sort>
 {
-    template<class Key, unsigned int BlockSize, class Value>
-    using type = block_sort_bitonic<Key, BlockSize, Value>;
+    template<class Key, unsigned int BlockSizeX, unsigned int BlockSizeY, unsigned int BlockSizeZ, class Value>
+    using type = block_sort_bitonic<Key, BlockSizeX, BlockSizeY, BlockSizeZ, Value>;
 };
 
 } // end namespace detail
@@ -105,16 +105,18 @@ struct select_block_sort_impl<block_sort_algorithm::bitonic_sort>
 /// \endparblock
 template<
     class Key,
-    unsigned int BlockSize,
+    unsigned int BlockSizeX,
     class Value = empty_type,
-    block_sort_algorithm Algorithm = block_sort_algorithm::default_algorithm
+    block_sort_algorithm Algorithm = block_sort_algorithm::default_algorithm,
+    unsigned int BlockSizeY = 1,
+    unsigned int BlockSizeZ = 1
 >
 class block_sort
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
-    : private detail::select_block_sort_impl<Algorithm>::template type<Key, BlockSize, Value>
+    : private detail::select_block_sort_impl<Algorithm>::template type<Key, BlockSizeX, BlockSizeY, BlockSizeZ, Value>
 #endif
 {
-    using base_type = typename detail::select_block_sort_impl<Algorithm>::template type<Key, BlockSize, Value>;
+    using base_type = typename detail::select_block_sort_impl<Algorithm>::template type<Key, BlockSizeX, BlockSizeY, BlockSizeZ, Value>;
 public:
     /// \brief Struct used to allocate a temporary memory that is required for thread
     /// communication during operations provided by related parallel primitive.

@@ -46,9 +46,14 @@ namespace detail
 /// It uses warp scan and reduce functions of bool (1 bit values) based on ballot and bit count.
 /// They have much better performance (several times faster) than generic scan and reduce classes
 /// because of using hardware ability to calculate which lanes have true predicate values.
-template<unsigned int BlockSize>
+template<
+    unsigned int BlockSizeX,
+    unsigned int BlockSizeY = 1,
+    unsigned int BlockSizeZ = 1
+>
 class block_bit_plus_scan
 {
+    static constexpr unsigned int BlockSize = BlockSizeX * BlockSizeY * BlockSizeZ;
     // Select warp size
     static constexpr unsigned int warp_size =
         detail::get_min_warp_size(BlockSize, ::rocprim::warp_size());
@@ -81,7 +86,7 @@ public:
                         unsigned int& reduction,
                         storage_type& storage)
     {
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         const unsigned int lane_id = ::rocprim::lane_id();
         const unsigned int warp_id = ::rocprim::warp_id();
         storage_type_& storage_ = storage.get();
@@ -177,19 +182,22 @@ public:
 /// \endparblock
 template<
     class Key,
-    unsigned int BlockSize,
+    unsigned int BlockSizeX,
     unsigned int ItemsPerThread,
-    class Value = empty_type
+    class Value = empty_type,
+    unsigned int BlockSizeY = 1,
+    unsigned int BlockSizeZ = 1
 >
 class block_radix_sort
 {
+    static constexpr unsigned int BlockSize = BlockSizeX * BlockSizeY * BlockSizeZ;
     static constexpr bool with_values = !std::is_same<Value, empty_type>::value;
 
     using bit_key_type = typename ::rocprim::detail::radix_key_codec<Key>::bit_key_type;
-    using bit_block_scan = detail::block_bit_plus_scan<BlockSize>;
+    using bit_block_scan = detail::block_bit_plus_scan<BlockSizeX, BlockSizeY, BlockSizeZ>;
 
-    using bit_keys_exchange_type = ::rocprim::block_exchange<bit_key_type, BlockSize, ItemsPerThread>;
-    using values_exchange_type = ::rocprim::block_exchange<Value, BlockSize, ItemsPerThread>;
+    using bit_keys_exchange_type = ::rocprim::block_exchange<bit_key_type, BlockSizeX, ItemsPerThread, BlockSizeY, BlockSizeZ>;
+    using values_exchange_type = ::rocprim::block_exchange<Value, BlockSizeX, ItemsPerThread, BlockSizeY, BlockSizeZ>;
 
     // Struct used for creating a raw_storage object for this primitive's temporary storage.
     struct storage_type_
@@ -867,7 +875,7 @@ private:
         using key_codec = ::rocprim::detail::radix_key_codec<Key, Descending>;
         storage_type_& storage_ = storage.get();
 
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
 
         bit_key_type bit_keys[ItemsPerThread];
         for(unsigned int i = 0; i < ItemsPerThread; i++)
