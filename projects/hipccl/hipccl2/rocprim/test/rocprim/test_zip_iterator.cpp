@@ -149,6 +149,10 @@ struct tuple3_transform_op
 
 TEST(RocprimZipIteratorTests, Transform)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+    
     using T1 = int;
     using T2 = double;
     using T3 = unsigned char;
@@ -285,6 +289,10 @@ struct tuple2_reduce_op
 
 TEST(RocprimZipIteratorTests, TransformReduce)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T1 = int;
     using T2 = unsigned int;
     using T3 = unsigned char;

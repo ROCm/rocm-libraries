@@ -90,6 +90,10 @@ TYPED_TEST_CASE(RocprimDeviceSortTests, RocprimDeviceSortTestsParams);
 
 TYPED_TEST(RocprimDeviceSortTests, SortKey)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using key_type = typename TestFixture::key_type;
     using compare_function = typename TestFixture::compare_function;
     const bool debug_synchronous = TestFixture::debug_synchronous;
@@ -200,6 +204,10 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
 
 TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+    
     using key_type = typename TestFixture::key_type;
     using value_type = typename TestFixture::value_type;
     using compare_function = typename TestFixture::compare_function;

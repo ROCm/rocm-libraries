@@ -62,6 +62,10 @@ void warp_reduce_sum_kernel(T* device_input, T* device_output)
 
 TYPED_TEST(RocprimWarpReduceTests, ReduceSum)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
     using T = typename TestFixture::params::type;
     using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
@@ -164,6 +168,10 @@ void warp_allreduce_sum_kernel(T* device_input, T* device_output)
 
 TYPED_TEST(RocprimWarpReduceTests, AllReduceSum)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
     using T = typename TestFixture::params::type;
     using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
@@ -273,6 +281,10 @@ void warp_reduce_sum_kernel(T* device_input, T* device_output, size_t valid)
 
 TYPED_TEST(RocprimWarpReduceTests, ReduceSumValid)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
     using T = typename TestFixture::params::type;
     using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
@@ -376,6 +388,10 @@ void warp_allreduce_sum_kernel(T* device_input, T* device_output, size_t valid)
 
 TYPED_TEST(RocprimWarpReduceTests, AllReduceSumValid)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
     using T = typename TestFixture::params::type;
     using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
@@ -462,6 +478,10 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSumValid)
 
 TYPED_TEST(RocprimWarpReduceTests, ReduceSumCustomStruct)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using base_type = typename TestFixture::params::type;
     using T = test_utils::custom_test_type<base_type>;
 
@@ -575,6 +595,10 @@ void head_segmented_warp_reduce_kernel(T* input, Flag* flags, T* output)
 
 TYPED_TEST(RocprimWarpReduceTests, HeadSegmentedReduceSum)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
     using T = typename TestFixture::params::type;
     using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
@@ -713,6 +737,10 @@ void tail_segmented_warp_reduce_kernel(T* input, Flag* flags, T* output)
 
 TYPED_TEST(RocprimWarpReduceTests, TailSegmentedReduceSum)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+    
     // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
     using T = typename TestFixture::params::type;
     using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;

@@ -94,6 +94,10 @@ std::vector<size_t> get_sizes(int seed_value)
 
 TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScan)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+    
     using input_type = typename TestFixture::params::input_type;
     using output_type = typename TestFixture::params::output_type;
     using scan_op_type = typename TestFixture::params::scan_op_type;
@@ -226,6 +230,10 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScan)
 
 TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScan)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using input_type = typename TestFixture::params::input_type;
     using output_type = typename TestFixture::params::output_type;
     using scan_op_type = typename TestFixture::params::scan_op_type;
@@ -360,6 +368,10 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScan)
 
 TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScanUsingHeadFlags)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     // Does not support output iterator with void value_type
     using input_type = typename TestFixture::params::input_type;
     using flag_type = unsigned int;
@@ -496,6 +508,10 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScanUsingHeadFlags)
 
 TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScanUsingHeadFlags)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     // Does not support output iterator with void value_type
     using input_type = typename TestFixture::params::input_type;
     using flag_type = unsigned int;

@@ -84,6 +84,10 @@ TYPED_TEST_CASE(RocprimTransformIteratorTests, RocprimTransformIteratorTestsPara
 
 TYPED_TEST(RocprimTransformIteratorTests, TransformReduce)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+    
     using input_type = typename TestFixture::input_type;
     using value_type = typename TestFixture::value_type;
     using unary_function = typename TestFixture::unary_function;
