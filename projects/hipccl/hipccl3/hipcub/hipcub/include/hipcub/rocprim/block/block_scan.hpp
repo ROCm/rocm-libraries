@@ -70,8 +70,10 @@ template<
 class BlockScan
     : private ::rocprim::block_scan<
         T,
-        BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z,
-        static_cast<::rocprim::block_scan_algorithm>(ALGORITHM)
+        BLOCK_DIM_X,
+        static_cast<::rocprim::block_scan_algorithm>(ALGORITHM),
+        BLOCK_DIM_Y,
+        BLOCK_DIM_Z
       >
 {
     static_assert(
@@ -82,8 +84,10 @@ class BlockScan
     using base_type =
         typename ::rocprim::block_scan<
             T,
-            BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z,
-            static_cast<::rocprim::block_scan_algorithm>(ALGORITHM)
+            BLOCK_DIM_X,
+            static_cast<::rocprim::block_scan_algorithm>(ALGORITHM),
+            BLOCK_DIM_Y,
+            BLOCK_DIM_Z
         >;
 
     // Reference to temporary storage (usually shared memory)

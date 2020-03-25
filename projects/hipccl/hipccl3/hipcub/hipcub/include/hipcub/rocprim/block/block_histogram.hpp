@@ -70,10 +70,12 @@ template<
 class BlockHistogram
     : private ::rocprim::block_histogram<
         T,
-        BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z,
+        BLOCK_DIM_X,
         ITEMS_PER_THREAD,
         BINS,
-        static_cast<::rocprim::block_histogram_algorithm>(ALGORITHM)
+        static_cast<::rocprim::block_histogram_algorithm>(ALGORITHM),
+        BLOCK_DIM_Y,
+        BLOCK_DIM_Z
       >
 {
     static_assert(
@@ -84,10 +86,12 @@ class BlockHistogram
     using base_type =
         typename ::rocprim::block_histogram<
             T,
-            BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z,
+            BLOCK_DIM_X,
             ITEMS_PER_THREAD,
             BINS,
-            static_cast<::rocprim::block_histogram_algorithm>(ALGORITHM)
+            static_cast<::rocprim::block_histogram_algorithm>(ALGORITHM),
+            BLOCK_DIM_Y,
+            BLOCK_DIM_Z
         >;
 
     // Reference to temporary storage (usually shared memory)
