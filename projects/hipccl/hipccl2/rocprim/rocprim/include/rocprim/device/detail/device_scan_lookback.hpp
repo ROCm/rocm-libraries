@@ -225,7 +225,7 @@ void lookback_scan_kernel_impl(InputIterator input,
         };
     } storage;
 
-    const auto flat_block_thread_id = ::rocprim::flat_block_thread_id();
+    const auto flat_block_thread_id = ::rocprim::detail::block_thread_id<0>();
     const auto flat_block_id = ordered_bid.get(flat_block_thread_id, storage.ordered_bid);
     const unsigned int block_offset = flat_block_id * items_per_block;
     const auto valid_in_last_block = size - items_per_block * (number_of_blocks - 1);
