@@ -43,8 +43,20 @@ std::ostream& operator<<(std::ostream& stream, const rocprim::half& value)
 namespace test_utils
 {
 
-static constexpr uint32_t random_data_generation_segments = 8;
-static constexpr uint32_t random_data_generation_repeat_strides = 2;
+static constexpr uint32_t random_data_generation_segments = 32;
+static constexpr uint32_t random_data_generation_repeat_strides = 4;
+
+template<class T>
+struct precision_threshold
+{
+    static constexpr float percentage = 0.01f;
+};
+
+template<>
+struct precision_threshold<rocprim::half>
+{
+    static constexpr float percentage = 0.05f;
+};
 
 // Support half operators on host side
 
@@ -213,24 +225,31 @@ inline auto get_random_data(size_t size, T min, T max, int seed_value)
     std::uniform_int_distribution<T> distribution(min, max);
     std::vector<T> data(size);
     uint32_t segment_size = size / random_data_generation_segments;
-    for(uint32_t segment_index = 0; segment_index < random_data_generation_segments; segment_index++)
+    if(segment_size != 0)
     {
-        if(segment_index % random_data_generation_repeat_strides == 0)
+        for(uint32_t segment_index = 0; segment_index < random_data_generation_segments; segment_index++)
         {
-            T repeated_value = distribution(gen);
-            std::fill(
-                data.begin() + segment_size * segment_index,
-                data.begin() + segment_size * (segment_index + 1),
-                repeated_value);
+            if(segment_index % random_data_generation_repeat_strides == 0)
+            {
+                T repeated_value = distribution(gen);
+                std::fill(
+                    data.begin() + segment_size * segment_index,
+                    data.begin() + segment_size * (segment_index + 1),
+                    repeated_value);
 
+            }
+            else
+            {
+                std::generate(
+                    data.begin() + segment_size * segment_index,
+                    data.begin() + segment_size * (segment_index + 1),
+                    [&]() { return distribution(gen); });
+            }
         }
-        else
-        {
-            std::generate(
-                data.begin() + segment_size * segment_index,
-                data.begin() + segment_size * (segment_index + 1),
-                [&]() { return distribution(gen); });
-        }
+    }
+    else
+    {
+        std::generate(data.begin(), data.end(), [&]() { return distribution(gen); });
     }
     return data;
 }
@@ -247,24 +266,32 @@ inline auto get_random_data(size_t size, T min, T max, int seed_value)
     std::uniform_real_distribution<dis_type> distribution(min, max);
     std::vector<T> data(size);
     uint32_t segment_size = size / random_data_generation_segments;
-    for(uint32_t segment_index = 0; segment_index < random_data_generation_segments; segment_index++)
+    if(segment_size != 0)
     {
-        if(segment_index % random_data_generation_repeat_strides == 0)
+        for(uint32_t segment_index = 0; segment_index < random_data_generation_segments; segment_index++)
         {
-            T repeated_value = distribution(gen);
-            std::fill(
-                data.begin() + segment_size * segment_index,
-                data.begin() + segment_size * (segment_index + 1),
-                repeated_value);
+            if(segment_index % random_data_generation_repeat_strides == 0)
+            {
+                T repeated_value = distribution(gen);
+                std::fill(
+                    data.begin() + segment_size * segment_index,
+                    data.begin() + segment_size * (segment_index + 1),
+                    repeated_value);
 
+            }
+            else
+            {
+                std::generate(
+                    data.begin() + segment_size * segment_index,
+                    data.begin() + segment_size * (segment_index + 1),
+                    [&]() { return distribution(gen); });
+            }
         }
-        else
-        {
-            std::generate(
-                data.begin() + segment_size * segment_index,
-                data.begin() + segment_size * (segment_index + 1),
-                [&]() { return distribution(gen); });
-        }
+    }
+    else
+    {
+        std::generate(data.begin(), data.end(), [&]() { return distribution(gen); });
+
     }
     return data;
 }
@@ -756,7 +783,33 @@ inline auto get_random_data(size_t size, typename T::value_type min, typename T:
     gen.seed(seed_value);
     std::uniform_int_distribution<typename T::value_type> distribution(min, max);
     std::vector<T> data(size);
-    std::generate(data.begin(), data.end(), [&]() { return T(distribution(gen), distribution(gen)); });
+    uint32_t segment_size = size / random_data_generation_segments;
+    if(segment_size != 0)
+    {
+        for(uint32_t segment_index = 0; segment_index < random_data_generation_segments; segment_index++)
+        {
+            if(segment_index % random_data_generation_repeat_strides == 0)
+            {
+                T repeated_value = T(distribution(gen), distribution(gen));
+                std::fill(
+                    data.begin() + segment_size * segment_index,
+                    data.begin() + segment_size * (segment_index + 1),
+                    repeated_value);
+
+            }
+            else
+            {
+                std::generate(
+                    data.begin() + segment_size * segment_index,
+                    data.begin() + segment_size * (segment_index + 1),
+                    [&]() { return T(distribution(gen), distribution(gen)); });
+            }
+        }
+    }
+    else
+    {
+        std::generate(data.begin(), data.end(), [&]() { return T(distribution(gen), distribution(gen)); });
+    }
     return data;
 }
 
@@ -772,7 +825,33 @@ inline auto get_random_data(size_t size, typename T::value_type min, typename T:
     gen.seed(seed_value);
     std::uniform_real_distribution<typename T::value_type> distribution(min, max);
     std::vector<T> data(size);
-    std::generate(data.begin(), data.end(), [&]() { return T(distribution(gen), distribution(gen)); });
+    uint32_t segment_size = size / random_data_generation_segments;
+    if(segment_size != 0)
+    {
+        for(uint32_t segment_index = 0; segment_index < random_data_generation_segments; segment_index++)
+        {
+            if(segment_index % random_data_generation_repeat_strides == 0)
+            {
+                T repeated_value = T(distribution(gen), distribution(gen));
+                std::fill(
+                    data.begin() + segment_size * segment_index,
+                    data.begin() + segment_size * (segment_index + 1),
+                    repeated_value);
+
+            }
+            else
+            {
+                std::generate(
+                    data.begin() + segment_size * segment_index,
+                    data.begin() + segment_size * (segment_index + 1),
+                    [&]() { return T(distribution(gen), distribution(gen)); });
+            }
+        }
+    }
+    else
+    {
+        std::generate(data.begin(), data.end(), [&]() { return T(distribution(gen), distribution(gen)); });
+    }
     return data;
 }
 
@@ -807,7 +886,7 @@ template<class T>
 inline auto get_random_value(typename T::value_type min, typename T::value_type max, int seed_value)
     -> typename std::enable_if<is_custom_test_type<T>::value || is_custom_test_array_type<T>::value, T>::type
 {
-    return get_random_data(1, min, max, seed_value)[0];
+    return get_random_data(random_data_generation_segments, min, max, seed_value)[0];
 }
 
 template<class T>
