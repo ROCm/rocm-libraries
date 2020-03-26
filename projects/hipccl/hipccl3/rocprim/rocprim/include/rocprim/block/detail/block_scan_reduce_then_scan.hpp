@@ -124,7 +124,7 @@ public:
                         BinaryFunction scan_op)
     {
         const auto flat_tid = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
-        const auto warp_id = ::rocprim::warp_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
+        const auto warp_id = ::rocprim::warp_id(flat_tid);
         storage_type_& storage_ = storage.get();
         this->inclusive_scan_impl(flat_tid, input, output, storage, scan_op);
         // Include block prefix (this operation overwrites storage_.threads[0])
@@ -238,7 +238,7 @@ public:
 
         // this operation overwrites storage_.threads[0]
         T block_prefix = this->get_block_prefix(
-            flat_tid, ::rocprim::warp_id<BlockSizeX, BlockSizeY, BlockSizeZ>(),
+            flat_tid, ::rocprim::warp_id(flat_tid),
             storage_.threads[index(BlockSize - 1)], // block reduction
             prefix_callback_op, storage
         );
@@ -318,7 +318,7 @@ public:
                         BinaryFunction scan_op)
     {
         const auto flat_tid = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
-        const auto warp_id = ::rocprim::warp_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
+        const auto warp_id = ::rocprim::warp_id(flat_tid);
         storage_type_& storage_ = storage.get();
         this->exclusive_scan_impl(
             flat_tid, input, output, storage, scan_op
@@ -447,7 +447,7 @@ public:
 
         // this operation overwrites storage_.warp_prefixes[0]
         T block_prefix = this->get_block_prefix(
-            flat_tid, ::rocprim::warp_id<BlockSizeX, BlockSizeY, BlockSizeZ>(),
+            flat_tid, ::rocprim::warp_id(flat_tid),
             storage_.threads[index(BlockSize - 1)], // block reduction
             prefix_callback_op, storage
         );

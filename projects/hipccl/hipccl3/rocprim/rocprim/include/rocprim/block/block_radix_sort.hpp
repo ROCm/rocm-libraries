@@ -88,7 +88,7 @@ public:
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         const unsigned int lane_id = ::rocprim::lane_id();
-        const unsigned int warp_id = ::rocprim::warp_id();
+        const unsigned int warp_id = ::rocprim::warp_id(flat_id);
         storage_type_& storage_ = storage.get();
 
         unsigned int warp_reduction = ::rocprim::bit_count(::rocprim::ballot(input[0]));
