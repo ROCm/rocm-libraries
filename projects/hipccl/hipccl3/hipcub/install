@@ -52,6 +52,12 @@ fi
 
 eval set -- "${GETOPT_PARSE}"
 
+check_exit_code( )
+{
+    if (( $1 != 0 )); then
+    exit $1
+    fi
+}
 
 while true; do
     case "${1}" in
@@ -145,9 +151,11 @@ if [[ "${build_relocatable}" == true ]]; then
 else
     CXX=$rocm_path/bin/${compiler} ${cmake_executable} ${build_tests} ${build_type} ../../. # or cmake-gui ../.
 fi
+check_exit_code "$?"
 
 # Build
 make -j$(nproc)
+check_exit_code "$?"
 
 if ($run_tests); then
 # Optionally, run tests if they're enabled.
@@ -155,11 +163,13 @@ ctest --output-on-failure
 fi
 
 if ($install_package); then
-# Install
-make install
+    # Install
+    make install
+    check_exit_code "$?"
 fi
 
 if ($build_package); then
-# Install
-make package -j$(nproc)
+    # Package
+    make package -j$(nproc)
+    check_exit_code "$?"
 fi
