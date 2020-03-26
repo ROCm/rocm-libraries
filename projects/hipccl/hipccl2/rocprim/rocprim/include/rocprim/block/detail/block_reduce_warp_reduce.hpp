@@ -166,7 +166,7 @@ private:
                      storage_type& storage,
                      BinaryFunction reduce_op)
     {
-        const auto warp_id = ::rocprim::warp_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
+        const auto warp_id = ::rocprim::warp_id(flat_tid);
         const auto lane_id = ::rocprim::lane_id();
         const unsigned int warp_offset = warp_id * warp_size_;
         const unsigned int num_valid =
@@ -232,7 +232,7 @@ private:
                      storage_type& storage,
                      BinaryFunction reduce_op)
     {
-        const auto warp_id = ::rocprim::warp_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
+        const auto warp_id = ::rocprim::warp_id(flat_tid);
         const auto lane_id = ::rocprim::lane_id();
         const unsigned int warp_offset = warp_id * warp_size_;
         const unsigned int num_valid =
