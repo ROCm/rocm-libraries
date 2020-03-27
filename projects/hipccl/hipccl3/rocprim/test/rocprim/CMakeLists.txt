@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -52,7 +52,7 @@ endfunction()
 # ****************************************************************************
 
 # HIP basic test, which also checks if there are no linkage problems when there are multiple sources
-add_rocprim_test("rocprim.basic_test" "test_basic.cpp;detail/get_rocprim_version.cpp") 
+add_rocprim_test("rocprim.basic_test" "test_basic.cpp;detail/get_rocprim_version.cpp")
 
 add_rocprim_test("rocprim.arg_index_iterator" test_arg_index_iterator.cpp)
 add_rocprim_test("rocprim.block_discontinuity" test_block_discontinuity.cpp)

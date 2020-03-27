@@ -1,4 +1,4 @@
-// Copyright (c) 2017 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -152,7 +152,7 @@ public:
     void get(const unsigned int block_id, flag_type& flag, T& value)
     {
         prefix_type prefix;
-        
+
         const uint SLEEP_MAX = 32;
         uint times_through = 1;
 
@@ -281,7 +281,7 @@ public:
 
             flag = load_volatile(&prefixes_flags[padding + block_id]);
             ::rocprim::detail::memory_fence_device();
-        } 
+        }
 
         if(flag == PREFIX_PARTIAL)
             value = load_volatile(&prefixes_partial_values[padding + block_id]);
