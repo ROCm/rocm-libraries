@@ -24,6 +24,8 @@
 #include <type_traits>
 #include <iterator>
 
+#include "device_reduce_config.hpp"
+
 #include "../config.hpp"
 #include "../functional.hpp"
 #include "../detail/various.hpp"

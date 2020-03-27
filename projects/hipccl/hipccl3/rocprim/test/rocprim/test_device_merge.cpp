@@ -20,21 +20,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <iostream>
-#include <vector>
-#include <algorithm>
+#include "common_test_header.hpp"
 
-// Google Test
-#include <gtest/gtest.h>
+// required rocprim headers
+#include <rocprim/functional.hpp>
+#include <rocprim/device/device_merge.hpp>
 
-// HIP API
-#include <hip/hip_runtime.h>
-// rocPRIM API
-#include <rocprim/rocprim.hpp>
-
-#include "test_utils.hpp"
-
-#define HIP_CHECK(error) ASSERT_EQ(error, hipSuccess)
+// required test headers
+#include "test_utils_types.hpp"
 
 // Params for tests
 template<
@@ -222,7 +215,7 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
             hipFree(d_temp_storage);
         }
 
-        
+
     }
 }
 
@@ -417,6 +410,6 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKeyValue)
             hipFree(d_values_output);
             hipFree(d_temp_storage);
         }
-        
+
     }
 }

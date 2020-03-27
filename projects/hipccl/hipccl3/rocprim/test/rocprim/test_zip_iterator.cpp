@@ -20,17 +20,17 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <iostream>
-#include <type_traits>
+#include "common_test_header.hpp"
 
-// Google Test
-#include <gtest/gtest.h>
-// rocPRIM API
-#include <rocprim/rocprim.hpp>
+// required rocprim headers
+#include <rocprim/device/device_reduce.hpp>
+#include <rocprim/device/device_transform.hpp>
+#include <rocprim/iterator/counting_iterator.hpp>
+#include <rocprim/iterator/zip_iterator.hpp>
+#include <rocprim/iterator/transform_iterator.hpp>
 
-#include "test_utils.hpp"
-
-#define HIP_CHECK(error) ASSERT_EQ(static_cast<hipError_t>(error),hipSuccess)
+// required test headers
+#include "test_utils_types.hpp"
 
 TEST(RocprimZipIteratorTests, Traits)
 {
@@ -162,7 +162,7 @@ TEST(RocprimZipIteratorTests, Transform)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
         std::vector<T1> input1 = test_utils::get_random_data<T1>(size, 1, 100, seed_value);
@@ -254,7 +254,7 @@ TEST(RocprimZipIteratorTests, Transform)
         hipFree(d_input3);
         hipFree(d_output);
     }
-    
+
 }
 
 template<class T1, class T2, class T3>
@@ -299,7 +299,7 @@ TEST(RocprimZipIteratorTests, TransformReduce)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
         std::vector<T1> input1 = test_utils::get_random_data<T1>(size, 1, 100, seed_value);
@@ -436,5 +436,5 @@ TEST(RocprimZipIteratorTests, TransformReduce)
         hipFree(d_output2);
         hipFree(d_temp_storage);
     }
-    
+
 }

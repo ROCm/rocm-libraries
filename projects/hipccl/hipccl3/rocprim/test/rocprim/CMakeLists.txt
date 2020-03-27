@@ -27,6 +27,7 @@ function(add_rocprim_test TEST_NAME TEST_SOURCES)
   target_include_directories(${TEST_TARGET} SYSTEM BEFORE
     PUBLIC
       ${GTEST_INCLUDE_DIRS}
+      ${COMMON_TEST_HEADER_DIRECTORY}
   )
   target_link_libraries(${TEST_TARGET}
     PRIVATE
