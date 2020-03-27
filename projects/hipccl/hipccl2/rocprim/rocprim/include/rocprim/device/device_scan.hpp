@@ -1,4 +1,4 @@
-// Copyright (c) 2017 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -374,8 +374,8 @@ auto scan_impl(void * temporary_storage,
 
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         auto grid_size = (number_of_blocks + block_size - 1)/block_size;
-       
-        if (prop.gcnArch == 908) 
+
+        if (prop.gcnArch == 908)
         {
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(init_lookback_scan_state_kernel<scan_state_with_sleep_type>),
