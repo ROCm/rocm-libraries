@@ -20,24 +20,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <algorithm>
-#include <functional>
-#include <iostream>
-#include <random>
-#include <type_traits>
-#include <vector>
-#include <utility>
+#include "common_test_header.hpp"
 
-// Google Test
-#include <gtest/gtest.h>
-// HIP API
-#include <hip/hip_runtime.h>
-// rocPRIM API
-#include <rocprim/rocprim.hpp>
+// required rocprim headers
+#include <rocprim/device/device_run_length_encode.hpp>
 
-#include "test_utils.hpp"
-
-#define HIP_CHECK(error) ASSERT_EQ(error, hipSuccess)
+// required test headers
+#include "test_utils_types.hpp"
 
 template<
     class Key,
@@ -123,7 +112,7 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, Encode)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         for(size_t size : get_sizes(seed_value))
         {
@@ -253,7 +242,7 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, Encode)
             ASSERT_NO_FATAL_FAILURE(test_utils::custom_assert_eq(counts_output, counts_expected, runs_count_expected));
         }
     }
-    
+
 }
 
 TYPED_TEST(RocprimDeviceRunLengthEncode, NonTrivialRuns)
@@ -277,7 +266,7 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, NonTrivialRuns)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         for(size_t size : get_sizes(seed_value))
         {
@@ -423,5 +412,5 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, NonTrivialRuns)
             ASSERT_NO_FATAL_FAILURE(test_utils::custom_assert_eq(counts_output, counts_expected, runs_count_expected));
         }
     }
-    
+
 }

@@ -31,6 +31,8 @@
 #include "../../intrinsics.hpp"
 #include "../../functional.hpp"
 
+#include "../../block/block_load.hpp"
+
 #include "uint_fast_div.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE

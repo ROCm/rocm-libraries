@@ -31,6 +31,8 @@
 #include "../../functional.hpp"
 #include "../../types.hpp"
 
+#include "../../block/block_load.hpp"
+#include "../../block/block_store.hpp"
 #include "../../block/block_scan.hpp"
 
 #include "device_radix_sort.hpp"

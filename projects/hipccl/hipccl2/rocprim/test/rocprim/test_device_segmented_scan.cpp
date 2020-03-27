@@ -20,26 +20,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <algorithm>
-#include <functional>
-#include <iostream>
-#include <random>
-#include <type_traits>
-#include <vector>
-#include <utility>
+#include "common_test_header.hpp"
 
-// Google Test
-#include <gtest/gtest.h>
-// HIP API
-#include <hip/hip_runtime.h>
-// rocPRIM API
-#include <rocprim/rocprim.hpp>
+// required rocprim headers
+#include <rocprim/device/device_segmented_scan.hpp>
 
-#include "test_utils.hpp"
-
-#define HIP_CHECK(error) ASSERT_EQ(error, hipSuccess)
-
-namespace rp = rocprim;
+// required test headers
+#include "test_utils_types.hpp"
 
 template<
     class Input,
@@ -83,9 +70,9 @@ typedef ::testing::Types<
     params<float, float, rocprim::plus<float>, 123, 100, 200, true>,
 #ifndef __HIP__
     // hip-clang does not allow to convert half to float
-    params<rp::half, float, rp::plus<float>, 0, 10, 300, true>,
+    params<rocprim::half, float, rocprim::plus<float>, 0, 10, 300, true>,
     // hip-clang does provide host comparison operators
-    params<rp::half, rp::half, test_utils::half_minimum, 0, 1000, 30000>,
+    params<rocprim::half, rocprim::half, test_utils::half_minimum, 0, 1000, 30000>,
 #endif
     params<unsigned char, long long, rocprim::plus<int>, 10, 3000, 4000>
 > Params;
@@ -131,7 +118,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScan)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         const std::vector<size_t> sizes = get_sizes(seed_value);
         for(size_t size : get_sizes(seed_value))
@@ -234,7 +221,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScan)
             HIP_CHECK(hipFree(d_values_output));
         }
     }
-    
+
 }
 
 TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScan)
@@ -264,7 +251,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScan)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         const std::vector<size_t> sizes = get_sizes(seed_value);
         for(size_t size : sizes)
@@ -368,7 +355,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScan)
             HIP_CHECK(hipFree(d_values_output));
         }
     }
-    
+
 }
 
 TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScanUsingHeadFlags)
@@ -385,7 +372,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScanUsingHeadFlags)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         const std::vector<size_t> sizes = get_sizes(seed_value);
         for(auto size : sizes)
@@ -504,7 +491,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScanUsingHeadFlags)
             HIP_CHECK(hipFree(d_output));
         }
     }
-    
+
 }
 
 TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScanUsingHeadFlags)
@@ -522,7 +509,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScanUsingHeadFlags)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value); 
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         const std::vector<size_t> sizes = get_sizes(seed_value);
         for(auto size : sizes)

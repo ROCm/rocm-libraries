@@ -24,9 +24,14 @@
 #include <type_traits>
 #include <iterator>
 
+#include "device_scan.hpp"
+
 #include "../config.hpp"
+#include "../detail/match_result_type.hpp"
 #include "../iterator/zip_iterator.hpp"
 #include "../iterator/discard_iterator.hpp"
+#include "../iterator/counting_iterator.hpp"
+#include "../iterator/transform_iterator.hpp"
 #include "../types/tuple.hpp"
 
 #include "../detail/various.hpp"

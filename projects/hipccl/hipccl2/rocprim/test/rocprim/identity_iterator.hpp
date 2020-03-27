@@ -21,12 +21,6 @@
 #ifndef TEST_IDENTITY_ITERATOR_HPP_
 #define TEST_IDENTITY_ITERATOR_HPP_
 
-#include <type_traits>
-#include <iterator>
-
-// rocPRIM
-#include <rocprim/rocprim.hpp>
-
 namespace test_utils
 {
 

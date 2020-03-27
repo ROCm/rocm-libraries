@@ -20,14 +20,23 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+# This variable is defined here to be accessible to other test sub-modules
+set(COMMON_TEST_HEADER_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
 function(add_hip_test TEST_NAME TEST_SOURCES)
   list(GET TEST_SOURCES 0 TEST_MAIN_SOURCE)
+
   get_filename_component(TEST_TARGET ${TEST_MAIN_SOURCE} NAME_WE)
+
   add_executable(${TEST_TARGET} ${TEST_SOURCES})
+
   target_include_directories(${TEST_TARGET} SYSTEM BEFORE
     PUBLIC
       ${GTEST_INCLUDE_DIRS}
+      ${COMMON_TEST_HEADER_DIRECTORY}
   )
+
+  message(STATUS "${CMAKE_CURRENT_SOURCE_DIR}=${${CMAKE_CURRENT_SOURCE_DIR}}")
 
   target_link_libraries(${TEST_TARGET} PRIVATE hip::device)
 
@@ -35,16 +44,19 @@ function(add_hip_test TEST_NAME TEST_SOURCES)
     PRIVATE
       ${GTEST_BOTH_LIBRARIES}
   )
+
   foreach(amdgpu_target ${AMDGPU_TARGETS})
     target_link_libraries(${TEST_TARGET}
       PRIVATE
         --amdgpu-target=${amdgpu_target}
     )
   endforeach()
+
   set_target_properties(${TEST_TARGET}
     PROPERTIES
       RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test"
   )
+
   add_test(${TEST_NAME} ${TEST_TARGET})
 endfunction()
 

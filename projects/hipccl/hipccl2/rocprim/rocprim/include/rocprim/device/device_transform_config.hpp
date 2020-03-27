@@ -24,6 +24,7 @@
 #include <type_traits>
 
 #include "../config.hpp"
+#include "../functional.hpp"
 #include "../detail/various.hpp"
 
 #include "config_types.hpp"
