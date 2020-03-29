@@ -51,7 +51,7 @@ template<>
 // tag's definition comes before the generic definition of execution_policy
 struct tag : execution_policy<tag>
 {
-  __host__ __device__ tag() {}
+  __host__ __device__ THRUST_CONSTEXPR tag() {}
 };
 
 // allow conversion to tag when it is not a successor
@@ -67,11 +67,7 @@ template<typename Derived>
 };
 
 
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-static const __device__ tag seq;
-#else
-static const tag seq;
-#endif
+THRUST_INLINE_CONSTANT tag seq;
 
 
 } // end sequential
