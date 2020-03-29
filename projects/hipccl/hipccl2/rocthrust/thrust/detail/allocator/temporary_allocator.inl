@@ -21,7 +21,8 @@
 #include <thrust/system/detail/bad_alloc.h>
 #include <cassert>
 
-#if defined(__CUDA_ARCH__) && THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#if (defined(__NVCOMPILER_CUDA__) || defined(__CUDA_ARCH__)) && \
+    THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #include <thrust/system/cuda/detail/terminate.h>
 #endif
 
@@ -50,13 +51,15 @@ __host__ __device__
     // note that we pass cnt to deallocate, not a value derived from result.second
     deallocate(result.first, cnt);
 
-#if defined(__CUDA_ARCH__)
-    thrust::system::cuda::detail::terminate_with_message("temporary_buffer::allocate: get_temporary_buffer failed");
-#elif defined(__HIP_DEVICE_COMPILE__)
-    thrust::system::hip::detail::terminate_with_message("temporary_buffer::allocate: get_temporary_buffer failed");
-#else
-    throw thrust::system::detail::bad_alloc("temporary_buffer::allocate: get_temporary_buffer failed");
-#endif
+    if (THRUST_IS_HOST_CODE) {
+      #if THRUST_INCLUDE_HOST_CODE
+        throw thrust::system::detail::bad_alloc("temporary_buffer::allocate: get_temporary_buffer failed");
+      #endif
+    } else {
+      #if THRUST_INCLUDE_DEVICE_CODE
+        thrust::system::cuda::detail::terminate_with_message("temporary_buffer::allocate: get_temporary_buffer failed");
+      #endif
+    }
   } // end if
 
   return result.first;
