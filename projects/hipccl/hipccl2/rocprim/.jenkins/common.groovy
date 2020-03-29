@@ -46,7 +46,7 @@ def runPackageCommand(platform, project, jobName)
 {
     def command
 
-    if(platform.jenkinsLabel.contains('centos'))
+    if(platform.jenkinsLabel.contains('centos') || platform.jenkinsLabel.contains('sles'))
     {
         command = """
                 set -x
