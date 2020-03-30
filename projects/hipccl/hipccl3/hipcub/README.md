@@ -36,6 +36,7 @@ cd hipCUB; mkdir build; cd build
 # Configure hipCUB, setup options for your system.
 # Build options:
 #   BUILD_TEST - OFF by default,
+#   DOWNLOAD_ROCPRIM - OFF by default and at ON the rocPRIM will be downloaded to build folder,
 #
 # ! IMPORTANT !
 # On ROCm platform set C++ compiler to HCC. You can do it by adding 'CXX=<path-to-hcc>'
