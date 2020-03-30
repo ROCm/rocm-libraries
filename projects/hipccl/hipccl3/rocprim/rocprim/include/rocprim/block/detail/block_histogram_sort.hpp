@@ -39,20 +39,23 @@ namespace detail
 
 template<
     class T,
-    unsigned int BlockSize,
+    unsigned int BlockSizeX,
+    unsigned int BlockSizeY,
+    unsigned int BlockSizeZ,
     unsigned int ItemsPerThread,
     unsigned int Bins
 >
 class block_histogram_sort
 {
+    static constexpr unsigned int BlockSize = BlockSizeX * BlockSizeY * BlockSizeZ;
     static_assert(
         std::is_convertible<T, unsigned int>::value,
         "T must be convertible to unsigned int"
     );
 
 private:
-    using radix_sort = block_radix_sort<T, BlockSize, ItemsPerThread>;
-    using discontinuity = block_discontinuity<T, BlockSize>;
+    using radix_sort = block_radix_sort<T, BlockSizeX, ItemsPerThread, empty_type, BlockSizeY, BlockSizeZ>;
+    using discontinuity = block_discontinuity<T, BlockSizeX, BlockSizeY, BlockSizeZ>;
 
 public:
     union storage_type_
@@ -88,7 +91,7 @@ public:
             "unsigned int must be convertible to Counter"
         );
         constexpr auto tile_size = BlockSize * ItemsPerThread;
-        const auto flat_tid = ::rocprim::flat_block_thread_id();
+        const auto flat_tid = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         unsigned int head_flags[ItemsPerThread];
         discontinuity_op flags_op(storage);
         storage_type_& storage_ = storage.get();
@@ -109,7 +112,7 @@ public:
         ::rocprim::syncthreads();
 
         discontinuity().flag_heads(head_flags, input, flags_op, storage_.flag);
-        
+
         // ::rocprim::syncthreads() isn't required here as input is sorted by this point
         // and it's impossible that flags_op will be called where b = input[0] and a != b
         if(flat_tid == 0)

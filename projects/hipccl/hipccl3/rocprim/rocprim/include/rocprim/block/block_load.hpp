@@ -120,9 +120,11 @@ enum class block_load_method
 /// \endparblock
 template<
     class T,
-    unsigned int BlockSize,
+    unsigned int BlockSizeX,
     unsigned int ItemsPerThread,
-    block_load_method Method = block_load_method::block_load_direct
+    block_load_method Method = block_load_method::block_load_direct,
+    unsigned int BlockSizeY = 1,
+    unsigned int BlockSizeZ = 1
 >
 class block_load
 {
@@ -165,7 +167,7 @@ public:
         static_assert(std::is_convertible<value_type, T>::value,
                       "The type T must be such that an object of type InputIterator "
                       "can be dereferenced and then implicitly converted to T.");
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         block_load_direct_blocked(flat_id, block_input, items);
     }
 
@@ -192,7 +194,7 @@ public:
         static_assert(std::is_convertible<value_type, T>::value,
                       "The type T must be such that an object of type InputIterator "
                       "can be dereferenced and then implicitly converted to T.");
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         block_load_direct_blocked(flat_id, block_input, items, valid);
     }
 
@@ -226,7 +228,7 @@ public:
         static_assert(std::is_convertible<value_type, T>::value,
                       "The type T must be such that an object of type InputIterator "
                       "can be dereferenced and then implicitly converted to T.");
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         block_load_direct_blocked(flat_id, block_input, items, valid,
                                   out_of_bounds);
     }
@@ -382,10 +384,12 @@ public:
 
 template<
     class T,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread
+    unsigned int BlockSizeX,
+    unsigned int ItemsPerThread,
+    unsigned int BlockSizeY,
+    unsigned int BlockSizeZ
 >
-class block_load<T, BlockSize, ItemsPerThread, block_load_method::block_load_vectorize>
+class block_load<T, BlockSizeX, ItemsPerThread, block_load_method::block_load_vectorize, BlockSizeY, BlockSizeZ>
 {
 private:
     using storage_type_ = typename ::rocprim::detail::empty_storage_type;
@@ -401,7 +405,7 @@ public:
     void load(T* block_input,
               T (&items)[ItemsPerThread])
     {
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         block_load_direct_blocked_vectorized(flat_id, block_input, items);
     }
 
@@ -414,7 +418,7 @@ public:
         static_assert(std::is_convertible<value_type, T>::value,
                       "The type T must be such that an object of type InputIterator "
                       "can be dereferenced and then implicitly converted to T.");
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         block_load_direct_blocked(flat_id, block_input, items);
     }
 
@@ -428,7 +432,7 @@ public:
         static_assert(std::is_convertible<value_type, T>::value,
                       "The type T must be such that an object of type InputIterator "
                       "can be dereferenced and then implicitly converted to T.");
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         block_load_direct_blocked(flat_id, block_input, items, valid);
     }
 
@@ -446,7 +450,7 @@ public:
         static_assert(std::is_convertible<value_type, T>::value,
                       "The type T must be such that an object of type InputIterator "
                       "can be dereferenced and then implicitly converted to T.");
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         block_load_direct_blocked(flat_id, block_input, items, valid,
                                   out_of_bounds);
     }
@@ -511,11 +515,15 @@ public:
 
 template<
     class T,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread
+    unsigned int BlockSizeX,
+    unsigned int ItemsPerThread,
+    unsigned int BlockSizeY,
+    unsigned int BlockSizeZ
 >
-class block_load<T, BlockSize, ItemsPerThread, block_load_method::block_load_transpose>
+class block_load<T, BlockSizeX, ItemsPerThread, block_load_method::block_load_transpose, BlockSizeY, BlockSizeZ>
 {
+    static constexpr unsigned int BlockSize = BlockSizeX * BlockSizeY * BlockSizeZ;
+
 private:
     using block_exchange_type = block_exchange<T, BlockSize, ItemsPerThread>;
 
@@ -532,7 +540,7 @@ public:
                       "The type T must be such that an object of type InputIterator "
                       "can be dereferenced and then implicitly converted to T.");
         ROCPRIM_SHARED_MEMORY storage_type storage;
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         block_load_direct_striped<BlockSize>(flat_id, block_input, items);
         block_exchange_type().striped_to_blocked(items, items, storage);
     }
@@ -548,7 +556,7 @@ public:
                       "The type T must be such that an object of type InputIterator "
                       "can be dereferenced and then implicitly converted to T.");
         ROCPRIM_SHARED_MEMORY storage_type storage;
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         block_load_direct_striped<BlockSize>(flat_id, block_input, items, valid);
         block_exchange_type().striped_to_blocked(items, items, storage);
     }
@@ -568,7 +576,7 @@ public:
                       "The type T must be such that an object of type InputIterator "
                       "can be dereferenced and then implicitly converted to T.");
         ROCPRIM_SHARED_MEMORY storage_type storage;
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         block_load_direct_striped<BlockSize>(flat_id, block_input, items, valid,
                                              out_of_bounds);
         block_exchange_type().striped_to_blocked(items, items, storage);
@@ -584,7 +592,7 @@ public:
         static_assert(std::is_convertible<value_type, T>::value,
                       "The type T must be such that an object of type InputIterator "
                       "can be dereferenced and then implicitly converted to T.");
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         block_load_direct_striped<BlockSize>(flat_id, block_input, items);
         block_exchange_type().striped_to_blocked(items, items, storage);
     }
@@ -600,7 +608,7 @@ public:
         static_assert(std::is_convertible<value_type, T>::value,
                       "The type T must be such that an object of type InputIterator "
                       "can be dereferenced and then implicitly converted to T.");
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         block_load_direct_striped<BlockSize>(flat_id, block_input, items, valid);
         block_exchange_type().striped_to_blocked(items, items, storage);
     }
@@ -620,7 +628,7 @@ public:
         static_assert(std::is_convertible<value_type, T>::value,
                       "The type T must be such that an object of type InputIterator "
                       "can be dereferenced and then implicitly converted to T.");
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         block_load_direct_striped<BlockSize>(flat_id, block_input, items, valid,
                                              out_of_bounds);
         block_exchange_type().striped_to_blocked(items, items, storage);
@@ -629,13 +637,16 @@ public:
 
 template<
     class T,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread
+    unsigned int BlockSizeX,
+    unsigned int ItemsPerThread,
+    unsigned int BlockSizeY,
+    unsigned int BlockSizeZ
 >
-class block_load<T, BlockSize, ItemsPerThread, block_load_method::block_load_warp_transpose>
+class block_load<T, BlockSizeX, ItemsPerThread, block_load_method::block_load_warp_transpose, BlockSizeY, BlockSizeZ>
 {
+    static constexpr unsigned int BlockSize = BlockSizeX * BlockSizeY * BlockSizeZ;
 private:
-    using block_exchange_type = block_exchange<T, BlockSize, ItemsPerThread>;
+    using block_exchange_type = block_exchange<T, BlockSizeX, ItemsPerThread, BlockSizeY, BlockSizeZ>;
 
 public:
     static_assert(BlockSize % warp_size() == 0,
@@ -653,7 +664,7 @@ public:
                       "The type T must be such that an object of type InputIterator "
                       "can be dereferenced and then implicitly converted to T.");
         ROCPRIM_SHARED_MEMORY storage_type storage;
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         block_load_direct_warp_striped(flat_id, block_input, items);
         block_exchange_type().warp_striped_to_blocked(items, items, storage);
     }
@@ -669,7 +680,7 @@ public:
                       "The type T must be such that an object of type InputIterator "
                       "can be dereferenced and then implicitly converted to T.");
         ROCPRIM_SHARED_MEMORY storage_type storage;
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         block_load_direct_warp_striped(flat_id, block_input, items, valid);
         block_exchange_type().warp_striped_to_blocked(items, items, storage);
 
@@ -690,7 +701,7 @@ public:
                       "The type T must be such that an object of type InputIterator "
                       "can be dereferenced and then implicitly converted to T.");
         ROCPRIM_SHARED_MEMORY storage_type storage;
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         block_load_direct_warp_striped(flat_id, block_input, items, valid,
                                        out_of_bounds);
         block_exchange_type().warp_striped_to_blocked(items, items, storage);
@@ -706,7 +717,7 @@ public:
         static_assert(std::is_convertible<value_type, T>::value,
                       "The type T must be such that an object of type InputIterator "
                       "can be dereferenced and then implicitly converted to T.");
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         block_load_direct_warp_striped(flat_id, block_input, items);
         block_exchange_type().warp_striped_to_blocked(items, items, storage);
     }
@@ -722,7 +733,7 @@ public:
         static_assert(std::is_convertible<value_type, T>::value,
                       "The type T must be such that an object of type InputIterator "
                       "can be dereferenced and then implicitly converted to T.");
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         block_load_direct_warp_striped(flat_id, block_input, items, valid);
         block_exchange_type().warp_striped_to_blocked(items, items, storage);
     }
@@ -742,7 +753,7 @@ public:
         static_assert(std::is_convertible<value_type, T>::value,
                       "The type T must be such that an object of type InputIterator "
                       "can be dereferenced and then implicitly converted to T.");
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         block_load_direct_warp_striped(flat_id, block_input, items, valid,
                                        out_of_bounds);
         block_exchange_type().warp_striped_to_blocked(items, items, storage);

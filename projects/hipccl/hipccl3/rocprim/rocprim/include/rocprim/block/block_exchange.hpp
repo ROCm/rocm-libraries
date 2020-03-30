@@ -73,11 +73,14 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \endparblock
 template<
     class T,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread
+    unsigned int BlockSizeX,
+    unsigned int ItemsPerThread,
+    unsigned int BlockSizeY = 1,
+    unsigned int BlockSizeZ = 1
 >
 class block_exchange
 {
+    static constexpr unsigned int BlockSize = BlockSizeX * BlockSizeY * BlockSizeZ;
     // Select warp size
     static constexpr unsigned int warp_size =
         detail::get_min_warp_size(BlockSize, ::rocprim::warp_size());
@@ -166,7 +169,7 @@ public:
                             U (&output)[ItemsPerThread],
                             storage_type& storage)
     {
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         storage_type_& storage_ = storage.get();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
@@ -232,7 +235,7 @@ public:
                             U (&output)[ItemsPerThread],
                             storage_type& storage)
     {
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         storage_type_& storage_ = storage.get();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
@@ -300,7 +303,7 @@ public:
     {
         constexpr unsigned int items_per_warp = warp_size * ItemsPerThread;
         const unsigned int lane_id = ::rocprim::lane_id();
-        const unsigned int warp_id = ::rocprim::warp_id();
+        const unsigned int warp_id = ::rocprim::warp_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         const unsigned int current_warp_size = get_current_warp_size();
         const unsigned int offset = warp_id * items_per_warp;
         storage_type_& storage_ = storage.get();
@@ -369,7 +372,7 @@ public:
     {
         constexpr unsigned int items_per_warp = warp_size * ItemsPerThread;
         const unsigned int lane_id = ::rocprim::lane_id();
-        const unsigned int warp_id = ::rocprim::warp_id();
+        const unsigned int warp_id = ::rocprim::warp_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         const unsigned int current_warp_size = get_current_warp_size();
         const unsigned int offset = warp_id * items_per_warp;
         storage_type_& storage_ = storage.get();
@@ -443,7 +446,7 @@ public:
                             const Offset (&ranks)[ItemsPerThread],
                             storage_type& storage)
     {
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         storage_type_& storage_ = storage.get();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
@@ -517,7 +520,7 @@ public:
                             const Offset (&ranks)[ItemsPerThread],
                             storage_type& storage)
     {
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         storage_type_& storage_ = storage.get();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
@@ -597,7 +600,7 @@ public:
                                     const Offset (&ranks)[ItemsPerThread],
                                     storage_type& storage)
     {
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         storage_type_& storage_ = storage.get();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
@@ -682,7 +685,7 @@ public:
                                     const ValidFlag (&is_valid)[ItemsPerThread],
                                     storage_type& storage)
     {
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         storage_type_& storage_ = storage.get();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
@@ -706,7 +709,7 @@ private:
     ROCPRIM_DEVICE inline
     unsigned int get_current_warp_size() const
     {
-        const unsigned int warp_id = ::rocprim::warp_id();
+        const unsigned int warp_id = ::rocprim::warp_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         return (warp_id == warps_no - 1)
             ? (BlockSize % warp_size > 0 ? BlockSize % warp_size : warp_size)
             : warp_size;
