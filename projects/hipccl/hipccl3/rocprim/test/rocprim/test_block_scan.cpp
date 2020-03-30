@@ -244,10 +244,10 @@ struct static_run_algo
         }
 
         // Verifying results
-        test_utils::assert_near(output, expected, 0.01);
+        test_utils::assert_near(output, expected, test_utils::precision_threshold<T>::percentage);
         if(device_output_b)
         {
-            test_utils::assert_near(output_b, expected_b, 0.01);
+            test_utils::assert_near(output_b, expected_b, test_utils::precision_threshold<T>::percentage);
         }
     }
 };
