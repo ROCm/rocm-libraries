@@ -1,4 +1,4 @@
-// Copyright (c) 2017 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -145,7 +145,7 @@ hipError_t partition_impl(void * temporary_storage,
     using offset_scan_state_type = detail::lookback_scan_state<offset_type>;
     using offset_scan_state_with_sleep_type = detail::lookback_scan_state<offset_type, true>;
     using ordered_block_id_type = detail::ordered_block_id<unsigned int>;
-    
+
 
     constexpr unsigned int block_size = config::block_size;
     constexpr unsigned int items_per_thread = config::items_per_thread;
@@ -191,34 +191,34 @@ hipError_t partition_impl(void * temporary_storage,
 
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
     auto grid_size = (number_of_blocks + block_size - 1)/block_size;
-    
+
     hipDeviceProp_t prop;
     int deviceId;
     hipGetDevice(&deviceId);
     hipGetDeviceProperties(&prop, deviceId);
 
-    if (prop.gcnArch == 908) 
+    if (prop.gcnArch == 908)
     {
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(init_offset_scan_state_kernel<offset_scan_state_with_sleep_type>),
             dim3(grid_size), dim3(block_size), 0, stream,
             offset_scan_state_with_sleep, number_of_blocks, ordered_bid
-        );    
+        );
     } else
     {
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(init_offset_scan_state_kernel<offset_scan_state_type>),
             dim3(grid_size), dim3(block_size), 0, stream,
             offset_scan_state, number_of_blocks, ordered_bid
-        );    
+        );
     }
-    
+
 
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_offset_scan_state_kernel", size, start)
 
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
     grid_size = number_of_blocks;
-    if (prop.gcnArch == 908) 
+    if (prop.gcnArch == 908)
     {
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(partition_kernel<
@@ -230,7 +230,7 @@ hipError_t partition_impl(void * temporary_storage,
             input, flags, output, selected_count_output, size, predicate,
             inequality_op, offset_scan_state_with_sleep, number_of_blocks, ordered_bid
         );
-    } else 
+    } else
     {
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(partition_kernel<
