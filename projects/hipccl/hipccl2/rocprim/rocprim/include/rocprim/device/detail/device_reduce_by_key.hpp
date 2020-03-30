@@ -173,10 +173,10 @@ void fill_unique_counts(KeysInputIterator keys_input,
         unsigned int unique_counts[warps_no];
     } storage;
 
-    const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+    const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
     const unsigned int batch_id = ::rocprim::detail::block_id<0>();
     const unsigned int lane_id = ::rocprim::lane_id();
-    const unsigned int warp_id = ::rocprim::warp_id();
+    const unsigned int warp_id = ::rocprim::warp_id<0, 1, 1>();
 
     unsigned int block_offset;
     unsigned int blocks_per_batch;
@@ -286,7 +286,7 @@ void scan_unique_counts(unsigned int * unique_counts,
         typename scan_type::storage_type scan;
     } storage;
 
-    const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+    const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
 
     unsigned int values[ItemsPerThread];
     load_type().load(unique_counts, values, batches, 0, storage.load);
@@ -357,7 +357,7 @@ void reduce_by_key(KeysInputIterator keys_input,
         detail::raw_storage<result_type> carry_in;
     } storage;
 
-    const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+    const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
     const unsigned int batch_id = ::rocprim::detail::block_id<0>();
 
     unsigned int block_offset;
@@ -567,7 +567,7 @@ void scan_and_scatter_carry_outs(const carry_out<Result> * carry_outs,
         typename scan_type::storage_type scan;
     } storage;
 
-    const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+    const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
 
     carry_out<result_type> cs[ItemsPerThread];
     block_load_direct_blocked(flat_id, carry_outs, cs, batches - 1);

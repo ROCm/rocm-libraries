@@ -38,10 +38,13 @@ namespace detail
 
 template<
     class T,
-    unsigned int BlockSize
+    unsigned int BlockSizeX,
+    unsigned int BlockSizeY,
+    unsigned int BlockSizeZ
 >
 class block_reduce_raking_reduce
 {
+    static constexpr unsigned int BlockSize = BlockSizeX * BlockSizeY * BlockSizeZ;
     // Number of items to reduce per thread
     static constexpr unsigned int thread_reduction_size_ =
         (BlockSize + ::rocprim::warp_size() - 1)/ ::rocprim::warp_size();
@@ -70,7 +73,7 @@ public:
                 BinaryFunction reduce_op)
     {
         this->reduce_impl(
-            ::rocprim::flat_block_thread_id(),
+            ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>(),
             input, output, storage, reduce_op
         );
     }
@@ -101,7 +104,7 @@ public:
         }
 
         // Reduction of reduced values to get partials
-        const auto flat_tid = ::rocprim::flat_block_thread_id();
+        const auto flat_tid = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         this->reduce_impl(
             flat_tid,
             thread_input, output, // input, output
@@ -129,7 +132,7 @@ public:
                 BinaryFunction reduce_op)
     {
         this->reduce_impl(
-            ::rocprim::flat_block_thread_id(),
+            ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>(),
             input, output, valid_items, storage, reduce_op
         );
     }

@@ -197,7 +197,7 @@ void block_reduce_kernel_impl(InputIterator input,
         typename block_reduce_type::storage_type reduce;
     } storage;
 
-    const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+    const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
     const unsigned int flat_block_id = ::rocprim::detail::block_id<0>();
     const unsigned int block_offset = flat_block_id * items_per_thread * block_size;
 

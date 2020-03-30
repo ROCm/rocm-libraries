@@ -120,9 +120,11 @@ enum class block_store_method
 /// \endparblock
 template<
     class T,
-    unsigned int BlockSize,
+    unsigned int BlockSizeX,
     unsigned int ItemsPerThread,
-    block_store_method Method = block_store_method::block_store_direct
+    block_store_method Method = block_store_method::block_store_direct,
+    unsigned int BlockSizeY = 1,
+    unsigned int BlockSizeZ = 1
 >
 class block_store
 {
@@ -161,7 +163,7 @@ public:
     void store(OutputIterator block_output,
                T (&items)[ItemsPerThread])
     {
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         block_store_direct_blocked(flat_id, block_output, items);
     }
 
@@ -184,7 +186,7 @@ public:
                T (&items)[ItemsPerThread],
                unsigned int valid)
     {
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         block_store_direct_blocked(flat_id, block_output, items, valid);
     }
 
@@ -279,10 +281,12 @@ public:
 
 template<
     class T,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread
+    unsigned int BlockSizeX,
+    unsigned int ItemsPerThread,
+    unsigned int BlockSizeY,
+    unsigned int BlockSizeZ
 >
-class block_store<T, BlockSize, ItemsPerThread, block_store_method::block_store_vectorize>
+class block_store<T, BlockSizeX, ItemsPerThread, block_store_method::block_store_vectorize, BlockSizeY, BlockSizeZ>
 {
 private:
     using storage_type_ = typename ::rocprim::detail::empty_storage_type;
@@ -298,7 +302,7 @@ public:
     void store(T* block_output,
                T (&items)[ItemsPerThread])
     {
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         block_store_direct_blocked_vectorized(flat_id, block_output, items);
     }
 
@@ -307,7 +311,7 @@ public:
     void store(OutputIterator block_output,
                U (&items)[ItemsPerThread])
     {
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         block_store_direct_blocked(flat_id, block_output, items);
     }
 
@@ -317,7 +321,7 @@ public:
                T (&items)[ItemsPerThread],
                unsigned int valid)
     {
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         block_store_direct_blocked(flat_id, block_output, items, valid);
     }
 
@@ -354,11 +358,14 @@ public:
 
 template<
     class T,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread
+    unsigned int BlockSizeX,
+    unsigned int ItemsPerThread,
+    unsigned int BlockSizeY,
+    unsigned int BlockSizeZ
 >
-class block_store<T, BlockSize, ItemsPerThread, block_store_method::block_store_transpose>
+class block_store<T, BlockSizeX, ItemsPerThread, block_store_method::block_store_transpose, BlockSizeY, BlockSizeZ>
 {
+    static constexpr unsigned int BlockSize = BlockSizeX * BlockSizeY * BlockSizeZ;
 private:
     using block_exchange_type = block_exchange<T, BlockSize, ItemsPerThread>;
 
@@ -371,7 +378,7 @@ public:
                T (&items)[ItemsPerThread])
     {
         ROCPRIM_SHARED_MEMORY storage_type storage;
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         block_exchange_type().blocked_to_striped(items, items, storage);
         block_store_direct_striped<BlockSize>(flat_id, block_output, items);
     }
@@ -383,7 +390,7 @@ public:
                unsigned int valid)
     {
         ROCPRIM_SHARED_MEMORY storage_type storage;
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         block_exchange_type().blocked_to_striped(items, items, storage);
         block_store_direct_striped<BlockSize>(flat_id, block_output, items, valid);
     }
@@ -394,7 +401,7 @@ public:
                T (&items)[ItemsPerThread],
                storage_type& storage)
     {
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         block_exchange_type().blocked_to_striped(items, items, storage);
         block_store_direct_striped<BlockSize>(flat_id, block_output, items);
     }
@@ -406,7 +413,7 @@ public:
                unsigned int valid,
                storage_type& storage)
     {
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         block_exchange_type().blocked_to_striped(items, items, storage);
         block_store_direct_striped<BlockSize>(flat_id, block_output, items, valid);
     }
@@ -414,11 +421,14 @@ public:
 
 template<
     class T,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread
+    unsigned int BlockSizeX,
+    unsigned int ItemsPerThread,
+    unsigned int BlockSizeY,
+    unsigned int BlockSizeZ
 >
-class block_store<T, BlockSize, ItemsPerThread, block_store_method::block_store_warp_transpose>
+class block_store<T, BlockSizeX, ItemsPerThread, block_store_method::block_store_warp_transpose, BlockSizeY, BlockSizeZ>
 {
+    static constexpr unsigned int BlockSize = BlockSizeX * BlockSizeY * BlockSizeZ;
 private:
     using block_exchange_type = block_exchange<T, BlockSize, ItemsPerThread>;
 
@@ -434,7 +444,7 @@ public:
                T (&items)[ItemsPerThread])
     {
         ROCPRIM_SHARED_MEMORY storage_type storage;
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         block_exchange_type().blocked_to_warp_striped(items, items, storage);
         block_store_direct_warp_striped(flat_id, block_output, items);
     }
@@ -446,7 +456,7 @@ public:
                unsigned int valid)
     {
         ROCPRIM_SHARED_MEMORY storage_type storage;
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         block_exchange_type().blocked_to_warp_striped(items, items, storage);
         block_store_direct_warp_striped(flat_id, block_output, items, valid);
     }
@@ -457,7 +467,7 @@ public:
                T (&items)[ItemsPerThread],
                storage_type& storage)
     {
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         block_exchange_type().blocked_to_warp_striped(items, items, storage);
         block_store_direct_warp_striped(flat_id, block_output, items);
     }
@@ -469,7 +479,7 @@ public:
                unsigned int valid,
                storage_type& storage)
     {
-        const unsigned int flat_id = ::rocprim::flat_block_thread_id();
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         block_exchange_type().blocked_to_warp_striped(items, items, storage);
         block_store_direct_warp_striped(flat_id, block_output, items, valid);
     }

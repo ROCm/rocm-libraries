@@ -38,11 +38,15 @@ namespace detail
 
 template<
     class Key,
-    unsigned int BlockSize,
+    unsigned int BlockSizeX,
+    unsigned int BlockSizeY,
+    unsigned int BlockSizeZ,
     class Value
 >
 class block_sort_bitonic
 {
+    static constexpr unsigned int BlockSize = BlockSizeX * BlockSizeY * BlockSizeZ;
+
     template<class KeyType, class ValueType>
     struct storage_type_
     {
@@ -66,7 +70,7 @@ public:
               BinaryFunction compare_function)
     {
         this->sort_impl<BlockSize>(
-            ::rocprim::flat_block_thread_id(),
+            ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>(),
             storage, compare_function,
             thread_key
         );
@@ -89,7 +93,7 @@ public:
               BinaryFunction compare_function)
     {
         this->sort_impl<BlockSize>(
-            ::rocprim::flat_block_thread_id(),
+            ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>(),
             storage, compare_function,
             thread_key, thread_value
         );
@@ -113,7 +117,7 @@ public:
               BinaryFunction compare_function)
     {
         this->sort_impl(
-            ::rocprim::flat_block_thread_id(), size,
+            ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>(), size,
             storage, compare_function,
             thread_key
         );
@@ -128,7 +132,7 @@ public:
               BinaryFunction compare_function)
     {
         this->sort_impl(
-            ::rocprim::flat_block_thread_id(), size,
+            ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>(), size,
             storage, compare_function,
             thread_key, thread_value
         );
