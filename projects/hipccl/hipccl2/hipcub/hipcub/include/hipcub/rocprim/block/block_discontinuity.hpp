@@ -44,7 +44,9 @@ template<
 class BlockDiscontinuity
     : private ::rocprim::block_discontinuity<
         T,
-        BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z
+        BLOCK_DIM_X,
+        BLOCK_DIM_Y,
+        BLOCK_DIM_Z
       >
 {
     static_assert(
@@ -55,7 +57,9 @@ class BlockDiscontinuity
     using base_type =
         typename ::rocprim::block_discontinuity<
             T,
-            BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z
+            BLOCK_DIM_X,
+            BLOCK_DIM_Y,
+            BLOCK_DIM_Z
         >;
 
     // Reference to temporary storage (usually shared memory)

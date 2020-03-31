@@ -75,9 +75,11 @@ template<
 class BlockStore
     : private ::rocprim::block_store<
         T,
-        BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z,
+        BLOCK_DIM_X,
         ITEMS_PER_THREAD,
-        static_cast<::rocprim::block_store_method>(ALGORITHM)
+        static_cast<::rocprim::block_store_method>(ALGORITHM),
+        BLOCK_DIM_Y,
+        BLOCK_DIM_Z
       >
 {
     static_assert(
@@ -88,9 +90,11 @@ class BlockStore
     using base_type =
         typename ::rocprim::block_store<
             T,
-            BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z,
+            BLOCK_DIM_X,
             ITEMS_PER_THREAD,
-            static_cast<::rocprim::block_store_method>(ALGORITHM)
+            static_cast<::rocprim::block_store_method>(ALGORITHM),
+            BLOCK_DIM_Y,
+            BLOCK_DIM_Z
         >;
 
     // Reference to temporary storage (usually shared memory)
