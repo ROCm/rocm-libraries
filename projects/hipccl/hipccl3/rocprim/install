@@ -54,6 +54,12 @@ fi
 
 eval set -- "${GETOPT_PARSE}"
 
+check_exit_code( )
+{
+    if (( $1 != 0 )); then
+	exit $1
+    fi
+}
 
 while true; do
     case "${1}" in
@@ -98,10 +104,6 @@ if [[ "${build_relocatable}" == true ]]; then
     fi
 fi
 
-# Instal the pre-commit hook
-bash ./githooks/install
-
-
 # Go to rocPRIM directory, create and go to the build directory.
 mkdir -p build; cd build
 
@@ -113,7 +115,7 @@ fi
 
 # Configure rocPRIM, setup options for your system.
 # Build options:
-#   BUILD_TEST - on by default,
+#   BUILD_TEST - off by default,
 #   BUILD_BENCHMARK - off by default.
 #
 # ! IMPORTANT !
@@ -136,16 +138,24 @@ if [[ "${build_benchmark}" == true ]]; then
     benchmark="ON"
 fi
 
+clients="OFF"
+if [[ "${build_clients}" == true ]]; then
+    clients="ON"
+fi
+
+
 if [[ "${build_relocatable}" == true ]]; then
     CXX=${rocm_path}/bin/${compiler} ${cmake_executable} -DCMAKE_INSTALL_PREFIX=${rocm_path} -DBUILD_BENCHMARK=${benchmark} \
-    -DCMAKE_PREFIX_PATH="${rocm_path} ${rocm_path}/hcc  ${rocm_path}/hip" \
-    -DCMAKE_MODULE_PATH="${rocm_path}/hip/cmake" ../../.     # or cmake-gui ../.
+       -DCMAKE_PREFIX_PATH="${rocm_path} ${rocm_path}/hcc  ${rocm_path}/hip" \
+       -DBUILD_BENCHMARK=${benchmark} -DBUILD_TEST=${clients} \
+       -DCMAKE_MODULE_PATH="${rocm_path}/hip/cmake" ../../.     # or cmake-gui ../.
 else
-    CXX=${rocm_path}/bin/${compiler} ${cmake_executable} -DBUILD_BENCHMARK=${benchmark} ../../. # or cmake-gui ../.
+    CXX=${rocm_path}/bin/${compiler} ${cmake_executable} -DBUILD_BENCHMARK=${benchmark} -DBUILD_TEST=${clients} ../../. # or cmake-gui ../.
 fi
 
 # Build
 make -j$(nproc)
+check_exit_code "$?"
 
 if ($run_tests); then
 # Optionally, run tests if they're enabled.
@@ -155,9 +165,11 @@ fi
 if ($install_package); then
 # Install
 make install
+check_exit_code "$?"
 fi
 
 if ($build_package); then
 # Install
 make package -j$(nproc)
+check_exit_code "$?"
 fi
