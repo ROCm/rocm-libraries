@@ -46,8 +46,10 @@ template<
 class BlockExchange
     : private ::rocprim::block_exchange<
         InputT,
-        BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z,
-        ITEMS_PER_THREAD
+        BLOCK_DIM_X,
+        ITEMS_PER_THREAD,
+        BLOCK_DIM_Y,
+        BLOCK_DIM_Z
       >
 {
     static_assert(
@@ -58,8 +60,10 @@ class BlockExchange
     using base_type =
         typename ::rocprim::block_exchange<
             InputT,
-            BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z,
-            ITEMS_PER_THREAD
+            BLOCK_DIM_X,
+            ITEMS_PER_THREAD,
+            BLOCK_DIM_Y,
+            BLOCK_DIM_Z
         >;
 
     // Reference to temporary storage (usually shared memory)

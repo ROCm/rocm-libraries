@@ -70,8 +70,10 @@ template<
 class BlockReduce
     : private ::rocprim::block_reduce<
         T,
-        BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z,
-        static_cast<::rocprim::block_reduce_algorithm>(ALGORITHM)
+        BLOCK_DIM_X,
+        static_cast<::rocprim::block_reduce_algorithm>(ALGORITHM),
+        BLOCK_DIM_Y,
+        BLOCK_DIM_Z
       >
 {
     static_assert(
@@ -82,8 +84,10 @@ class BlockReduce
     using base_type =
         typename ::rocprim::block_reduce<
             T,
-            BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z,
-            static_cast<::rocprim::block_reduce_algorithm>(ALGORITHM)
+            BLOCK_DIM_X,
+            static_cast<::rocprim::block_reduce_algorithm>(ALGORITHM),
+            BLOCK_DIM_Y,
+            BLOCK_DIM_Z
         >;
 
     // Reference to temporary storage (usually shared memory)

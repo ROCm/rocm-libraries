@@ -26,7 +26,7 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  ******************************************************************************/
- 
+
 #ifndef HIPCUB_ROCPRIM_BLOCK_BLOCK_RADIX_SORT_HPP_
 #define HIPCUB_ROCPRIM_BLOCK_BLOCK_RADIX_SORT_HPP_
 
@@ -54,9 +54,11 @@ template<
 class BlockRadixSort
     : private ::rocprim::block_radix_sort<
         KeyT,
-        BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z,
+        BLOCK_DIM_X,
         ITEMS_PER_THREAD,
-        ValueT
+        ValueT,
+        BLOCK_DIM_Y,
+        BLOCK_DIM_Z
       >
 {
     static_assert(
@@ -67,9 +69,11 @@ class BlockRadixSort
     using base_type =
         typename ::rocprim::block_radix_sort<
             KeyT,
-            BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z,
+            BLOCK_DIM_X,
             ITEMS_PER_THREAD,
-            ValueT
+            ValueT,
+            BLOCK_DIM_Y,
+            BLOCK_DIM_Z
         >;
 
     // Reference to temporary storage (usually shared memory)
