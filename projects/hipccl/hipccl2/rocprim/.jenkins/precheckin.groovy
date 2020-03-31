@@ -9,6 +9,7 @@ def runCI =
     nodeDetails, jobName->
 
     def prj = new rocProject('rocPRIM', 'PreCheckin')
+    prj.paths.build_command = './install -c'
 
     def nodes = new dockerNodes(nodeDetails, jobName, prj)
 
