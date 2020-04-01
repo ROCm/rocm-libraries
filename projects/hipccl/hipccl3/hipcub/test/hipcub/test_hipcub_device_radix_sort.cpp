@@ -20,21 +20,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <algorithm>
-#include <functional>
-#include <iostream>
-#include <type_traits>
-#include <vector>
-#include <utility>
+#include "common_test_header.hpp"
 
-// Google Test
-#include <gtest/gtest.h>
-// hipCUB API
-#include <hipcub/hipcub.hpp>
-
-#include "test_utils.hpp"
-
-#define HIP_CHECK(error) ASSERT_EQ(error, hipSuccess)
+// hipcub API
+#ifdef __HIP_PLATFORM_HCC__
+    #include "hipcub/rocprim/device/device_radix_sort.hpp"
+#elif defined(__HIP_PLATFORM_NVCC__)
+    #include "hipcub/cub/device/device_radix_sort.hpp"
+#endif
 
 template<
     class Key,

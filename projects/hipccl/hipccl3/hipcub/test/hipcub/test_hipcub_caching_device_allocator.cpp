@@ -27,19 +27,13 @@
  *
  ******************************************************************************/
 
-#include <iostream>
-#include <vector>
+#include "common_test_header.hpp"
 
-// Google Test
-#include <gtest/gtest.h>
-// HIP API
-#include <hip/hip_runtime.h>
-// hipCUB API
-#include <hipcub/hipcub.hpp>
-
-#include "test_utils.hpp"
-
-#define HIP_CHECK(error) ASSERT_EQ(error, hipSuccess)
+#ifdef __HIP_PLATFORM_HCC__
+    #include "hipcub/rocprim/util_allocator.hpp"
+#elif defined(__HIP_PLATFORM_NVCC__)
+    #include "hipcub/cub/util_allocator.hpp"
+#endif
 
 __global__ void EmptyKernel() { }
 

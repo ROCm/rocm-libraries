@@ -20,18 +20,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <iostream>
-#include <vector>
-#include <type_traits>
+#include "common_test_header.hpp"
 
-// Google Test
-#include <gtest/gtest.h>
-// hipCUB API
-#include <hipcub/hipcub.hpp>
-
-#include "test_utils.hpp"
-
-#define HIP_CHECK(error) ASSERT_EQ(error, hipSuccess)
+// hipcub API
+#ifdef __HIP_PLATFORM_HCC__
+    #include "hipcub/rocprim/block/block_load.hpp"
+    #include "hipcub/rocprim/block/block_store.hpp"
+#elif defined(__HIP_PLATFORM_NVCC__)
+    #include "hipcub/cub/hipcub.hpp"
+#endif
 
 template<
     class Type,

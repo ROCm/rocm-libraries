@@ -32,6 +32,8 @@
 
 #include "../../config.hpp"
 
+#include "../thread/thread_operators.hpp"
+
 BEGIN_HIPCUB_NAMESPACE
 
 class DeviceSelect

@@ -20,17 +20,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <iostream>
-#include <vector>
+#include "common_test_header.hpp"
 
-// Google Test
-#include <gtest/gtest.h>
-// hipCUB API
-#include <hipcub/hipcub.hpp>
-
-#include "test_utils.hpp"
-
-#define HIP_CHECK(error) ASSERT_EQ(static_cast<hipError_t>(error), hipSuccess)
+// hipcub API
+#ifdef __HIP_PLATFORM_HCC__
+    #include "hipcub/rocprim/block/block_histogram.hpp"
+#elif defined(__HIP_PLATFORM_NVCC__)
+    #include "hipcub/cub/hipcub.hpp"
+#endif
 
 // Params for tests
 template<

@@ -21,14 +21,13 @@
 #ifndef ROCPRIM_TEST_TEST_UTILS_HPP_
 #define ROCPRIM_TEST_TEST_UTILS_HPP_
 
-#include <algorithm>
-#include <vector>
-#include <random>
-#include <type_traits>
-#include <cstdlib>
+// hipCUB API
+#ifdef __HIP_PLATFORM_HCC__
+    #include "hipcub/rocprim/util_ptx.hpp"
+#elif defined(__HIP_PLATFORM_NVCC__)
+    #include "hipcub/cub/hipcub.hpp"
+#endif
 
-// hipCUB
-#include <hipcub/hipcub.hpp>
 // Seed values
 #include "test_seed.hpp"
 

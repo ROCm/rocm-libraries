@@ -26,22 +26,15 @@
     #pragma GCC diagnostic ignored "-Wunused-parameter"
 #endif
 
-#include <algorithm>
-#include <functional>
-#include <iostream>
-#include <type_traits>
-#include <tuple>
-#include <vector>
-#include <utility>
+#include "common_test_header.hpp"
 
-// Google Test
-#include <gtest/gtest.h>
-// hipCUB API
-#include <hipcub/hipcub.hpp>
-
-#include "test_utils.hpp"
-
-#define HIP_CHECK(error) ASSERT_EQ(error, hipSuccess)
+// hipcub API
+#ifdef __HIP_PLATFORM_HCC__
+    #include "hipcub/rocprim/device/device_histogram.hpp"
+    #include "hipcub/rocprim/iterator/transform_input_iterator.hpp"
+#elif defined(__HIP_PLATFORM_NVCC__)
+    #include "hipcub/cub/device/device_histogram.hpp"
+#endif
 
 // rows, columns, (row_stride - columns * Channels)
 std::vector<std::tuple<size_t, size_t, size_t>> get_dims()
