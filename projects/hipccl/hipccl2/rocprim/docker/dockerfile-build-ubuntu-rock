@@ -20,7 +20,6 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     git \
     make \
     cmake \
-    clang-format-3.8 \
     pkg-config \
     python2.7 \
     python-yaml \
