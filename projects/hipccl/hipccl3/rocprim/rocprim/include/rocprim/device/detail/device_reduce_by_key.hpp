@@ -45,7 +45,13 @@ template<class Value>
 struct carry_out
 {
     ROCPRIM_DEVICE inline
-    carry_out& operator=(carry_out rhs)
+    carry_out() = default;
+
+    ROCPRIM_DEVICE inline
+    carry_out(const carry_out& rhs) = default;
+
+    ROCPRIM_DEVICE inline
+    carry_out& operator=(const carry_out& rhs)
     {
         value = rhs.value;
         destination = rhs.destination;
@@ -62,7 +68,13 @@ template<class Value>
 struct scan_by_key_pair
 {
     ROCPRIM_DEVICE inline
-    scan_by_key_pair& operator=(scan_by_key_pair rhs)
+    scan_by_key_pair() = default;
+
+    ROCPRIM_DEVICE inline
+    scan_by_key_pair(const scan_by_key_pair& rhs) = default;
+
+    ROCPRIM_DEVICE inline
+    scan_by_key_pair& operator=(const scan_by_key_pair& rhs)
     {
         key = rhs.key;
         value = rhs.value;
