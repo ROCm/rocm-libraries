@@ -27,6 +27,7 @@ install_package=false
 build_package=false
 build_clients=false
 build_release=true
+build_type=Release
 build_hip_clang=false
 run_tests=false
 rocm_path=/opt/rocm
@@ -39,7 +40,7 @@ build_relocatable=false
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ $? -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,debug,hip-clang,test,package,relocatable --options hicdtpr -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,debug,hip-clang,test,package,relocatable --options hicdtprg -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -62,37 +63,38 @@ check_exit_code( )
 
 while true; do
     case "${1}" in
-	-h|--help)
-	    display_help
-	    exit 0
-	    ;;
-	-i|--install)
-	    install_package=true
-	    shift ;;
-	-p|--package)
-	    build_package=true
-	    shift ;;
-	-c|--clients)
-	    build_clients=true
-	    shift ;;
+        -h|--help)
+            display_help
+            exit 0
+            ;;
+        -i|--install)
+            install_package=true
+            shift ;;
+        -p|--package)
+            build_package=true
+            shift ;;
+        -c|--clients)
+            build_clients=true
+            shift ;;
         -r|--relocatable)
             build_relocatable=true
             shift ;;
-	-g|--debug)
-	    build_release=false
-	    shift ;;
-	-t|--test)
-	    run_tests=true
-	    shift ;;
-	--hip-clang)
-	    build_hip_clang=true
-	    shift ;;
-	--) shift ; break ;;
-	*)  echo "Unexpected command line parameter received; aborting";
-	    exit 1
-	    ;;
+        -g|--debug)
+            build_type=Debug
+            build_release=false
+            shift ;;
+        -t|--test)
+            run_tests=true
+            shift ;;
+        --hip-clang)
+            build_hip_clang=true
+            shift ;;
+        --) shift ; break ;;
+        *)  echo "Unexpected command line parameter received; aborting";
+            exit 1
+            ;;
     esac
-    done
+done
 
 if [[ "${build_relocatable}" == true ]]; then
     if ! [ -z ${ROCM_PATH+x} ]; then
@@ -146,7 +148,7 @@ if [[ "${build_relocatable}" == true ]]; then
         -DROCPRIM_ROOT=${rocm_path}/rocprim ${build_test}\
          ../../. # or cmake-gui ../.
 else
-    CXX=$rocm_path/bin/${compiler} ${cmake_executable} ${build_test} ../../. # or cmake-gui ../.
+    CXX=$rocm_path/bin/${compiler} ${cmake_executable} ${build_test} -DCMAKE_BUILD_TYPE=${build_type} ../../. # or cmake-gui ../.
 fi
 check_exit_code "$?"
 
