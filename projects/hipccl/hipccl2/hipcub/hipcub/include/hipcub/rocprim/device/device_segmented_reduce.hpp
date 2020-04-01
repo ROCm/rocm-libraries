@@ -36,6 +36,7 @@
 #include "../../config.hpp"
 
 #include "../thread/thread_operators.hpp"
+#include "../iterator/arg_index_input_iterator.hpp"
 
 BEGIN_HIPCUB_NAMESPACE
 

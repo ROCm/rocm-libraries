@@ -26,24 +26,14 @@
     #pragma GCC diagnostic ignored "-Wunused-parameter"
 #endif
 
-#include <algorithm>
-#include <functional>
-#include <iostream>
-#include <random>
-#include <type_traits>
-#include <vector>
-#include <utility>
+#include "common_test_header.hpp"
 
-// Google Test
-#include <gtest/gtest.h>
-// HIP API
-#include <hip/hip_runtime.h>
-// hipCUB API
-#include <hipcub/hipcub.hpp>
-
-#include "test_utils.hpp"
-
-#define HIP_CHECK(error) ASSERT_EQ(error, hipSuccess)
+// hipcub API
+#ifdef __HIP_PLATFORM_HCC__
+    #include "hipcub/rocprim/device/device_run_length_encode.hpp"
+#elif defined(__HIP_PLATFORM_NVCC__)
+    #include "hipcub/cub/device/device_run_length_encode.hpp"
+#endif
 
 template<
     class Key,
