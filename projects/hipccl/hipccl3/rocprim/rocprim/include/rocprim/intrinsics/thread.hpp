@@ -151,7 +151,7 @@ ROCPRIM_DEVICE inline
 auto flat_block_id()
     -> typename std::enable_if<(BlockSizeY > 1 && BlockSizeZ == 1), unsigned int>::type
 {
-    return hipThreadIdx_x + (hipBlockIdx_y * hipGridDim_x);
+    return hipBlockIdx_x + (hipBlockIdx_y * hipGridDim_x);
 }
 
 template<unsigned int BlockSizeX, unsigned int BlockSizeY, unsigned int BlockSizeZ>
@@ -159,7 +159,7 @@ ROCPRIM_DEVICE inline
 auto flat_block_id()
     -> typename std::enable_if<(BlockSizeY > 1 && BlockSizeZ > 1), unsigned int>::type
 {
-    return hipThreadIdx_x + (hipBlockIdx_y * hipGridDim_x) +
+    return hipBlockIdx_x + (hipBlockIdx_y * hipGridDim_x) +
            (hipBlockIdx_z * hipGridDim_y * hipGridDim_x);
 }
 
