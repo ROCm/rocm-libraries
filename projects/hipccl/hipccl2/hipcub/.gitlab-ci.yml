@@ -30,7 +30,7 @@ variables:
   # Local build options
   LOCAL_CXXFLAGS: ""
   LOCAL_CMAKE_OPTIONS: ""
-  ROCM_PATH: "/opt/rocm-3.1.0/"
+  ROCM_PATH: "/opt/rocm-3.3.0/"
 
 # hipCUB with rocPRIM backend
 
