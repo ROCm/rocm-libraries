@@ -188,8 +188,8 @@ TYPED_TEST(HipcubDeviceHistogramEven, Even)
             // Generate data
             std::vector<sample_type> input = test_utils::get_random_data<sample_type>(
                 size,
-                lower_level,
-                upper_level,
+                static_cast<sample_type>(lower_level),
+                static_cast<sample_type>(upper_level),
                 seed_value
             );
 
