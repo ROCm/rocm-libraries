@@ -234,7 +234,7 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
             HIP_CHECK(hipDeviceSynchronize());
 
             // Check if output values are as expected
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output[0], expected, 0.01f));
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output[0], expected, test_utils::precision_threshold<T>::percentage));
 
             hipFree(d_input);
             hipFree(d_output);
@@ -334,7 +334,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
             HIP_CHECK(hipDeviceSynchronize());
 
             // Check if output values are as expected
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output[0], expected, 0.01f));
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output[0], expected, test_utils::precision_threshold<T>::percentage));
 
             hipFree(d_input);
             hipFree(d_output);
@@ -471,7 +471,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
 
             // Check if output values are as expected
             ASSERT_EQ(output[0].key, expected.key);
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output[0].value, expected.value, 0.01f));
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output[0].value, expected.value, test_utils::precision_threshold<T>::percentage));
 
             hipFree(d_input);
             hipFree(d_output);

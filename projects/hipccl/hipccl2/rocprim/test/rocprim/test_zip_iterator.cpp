@@ -244,7 +244,7 @@ TEST(RocprimZipIteratorTests, Transform)
         // Check if output values are as expected
         for(size_t i = 0; i < output.size(); i++)
         {
-            auto diff = std::max<U>(std::abs(0.01f * expected[i]), U(0.01f));
+            auto diff = std::max<U>(std::abs(test_utils::precision_threshold<U>::percentage * expected[i]), U(test_utils::precision_threshold<U>::percentage));
             if(std::is_integral<U>::value) diff = 0;
             ASSERT_NEAR(output[i], expected[i], diff) << "where index = " << i;
         }
@@ -421,11 +421,11 @@ TEST(RocprimZipIteratorTests, TransformReduce)
         HIP_CHECK(hipDeviceSynchronize());
 
         // Check if output values are as expected
-        auto diff1 = std::max<U1>(std::abs(0.01f * expected1), U1(0.01f));
+        auto diff1 = std::max<U1>(std::abs(test_utils::precision_threshold<U1>::percentage * expected1), U1(test_utils::precision_threshold<U1>::percentage));
         if(std::is_integral<U1>::value) diff1 = 0;
         ASSERT_NEAR(output1[0], expected1, diff1);
 
-        auto diff2 = std::max<U2>(std::abs(0.01f * expected2), U2(0.01f));
+        auto diff2 = std::max<U2>(std::abs(test_utils::precision_threshold<U2>::percentage * expected2), U2(test_utils::precision_threshold<U2>::percentage));
         if(std::is_integral<U2>::value) diff2 = 0;
         ASSERT_NEAR(output2[0], expected2, diff2);
 

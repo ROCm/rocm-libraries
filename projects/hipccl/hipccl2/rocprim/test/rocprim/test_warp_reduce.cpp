@@ -133,7 +133,7 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSum)
             )
         );
 
-        test_utils::assert_near(output, expected, 0.01);
+        test_utils::assert_near(output, expected, test_utils::precision_threshold<T>::percentage);
 
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_output));
@@ -239,7 +239,7 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSum)
             )
         );
 
-        test_utils::assert_near(output, expected, 0.01);
+        test_utils::assert_near(output, expected, test_utils::precision_threshold<T>::percentage);
 
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_output));
@@ -345,7 +345,7 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumValid)
             )
         );
 
-        test_utils::assert_near(output, expected, 0.01);
+        test_utils::assert_near(output, expected, test_utils::precision_threshold<T>::percentage);
 
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_output));
@@ -452,7 +452,7 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSumValid)
             )
         );
 
-        test_utils::assert_near(output, expected, 0.01);
+        test_utils::assert_near(output, expected, test_utils::precision_threshold<T>::percentage);
 
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_output));
@@ -542,7 +542,7 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumCustomStruct)
             )
         );
 
-        test_utils::assert_near(output, expected, 0.01);
+        test_utils::assert_near(output, expected, test_utils::precision_threshold<T>::percentage);
 
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_output));
@@ -679,7 +679,7 @@ TYPED_TEST(RocprimWarpReduceTests, HeadSegmentedReduceSum)
                 expected_segment[i] = expected[i];
             }
         }
-        test_utils::assert_near(output_segment, expected_segment, 0.01);
+        test_utils::assert_near(output_segment, expected_segment, test_utils::precision_threshold<T>::percentage);
 
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_flags));
@@ -826,7 +826,7 @@ TYPED_TEST(RocprimWarpReduceTests, TailSegmentedReduceSum)
             output_segment[i] = output[index];
             expected_segment[i] = expected[index];
         }
-        test_utils::assert_near(output_segment, expected_segment, 0.01);
+        test_utils::assert_near(output_segment, expected_segment, test_utils::precision_threshold<T>::percentage);
 
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_flags));
