@@ -184,7 +184,7 @@ TYPED_TEST(RocprimArgIndexIteratorTests, ReduceArgMinimum)
         HIP_CHECK(hipDeviceSynchronize());
 
         // Check if output values are as expected
-        auto diff = std::max<T>(std::abs(0.01f * expected.value), T(0.01f));
+        auto diff = std::max<T>(std::abs(test_utils::precision_threshold<T>::percentage * expected.value), T(test_utils::precision_threshold<T>::percentage));
         if(std::is_integral<T>::value) diff = 0;
         ASSERT_EQ(output[0].key, expected.key);
         ASSERT_NEAR(output[0].value, expected.value, diff);
