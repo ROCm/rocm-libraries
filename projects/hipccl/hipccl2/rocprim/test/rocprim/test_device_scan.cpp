@@ -255,7 +255,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScan)
             HIP_CHECK(hipDeviceSynchronize());
 
             // Check if output values are as expected
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, 0.01f));
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, test_utils::precision_threshold<T>::percentage));
 
             hipFree(d_input);
             hipFree(d_output);
@@ -357,7 +357,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScan)
             HIP_CHECK(hipDeviceSynchronize());
 
             // Check if output values are as expected
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, 0.01f));
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, test_utils::precision_threshold<T>::percentage));
 
             hipFree(d_input);
             hipFree(d_output);
@@ -499,7 +499,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanByKey)
             HIP_CHECK(hipDeviceSynchronize());
 
             // Check if output values are as expected
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, 0.01f));
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, test_utils::precision_threshold<T>::percentage));
 
             hipFree(d_keys);
             hipFree(d_input);
@@ -624,7 +624,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
             HIP_CHECK(hipDeviceSynchronize());
 
             // Check if output values are as expected
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, 0.01f));
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, test_utils::precision_threshold<T>::percentage));
 
             hipFree(d_keys);
             hipFree(d_input);
