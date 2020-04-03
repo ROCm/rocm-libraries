@@ -119,7 +119,7 @@ TYPED_TEST(RocprimConstantIteratorTests, Transform)
             }
             else if(std::is_floating_point<T>::value)
             {
-                auto tolerance = std::max<T>(std::abs(0.1f * expected[i]), T(0.01f));
+                auto tolerance = std::max<T>(std::abs(0.1f * expected[i]), T(test_utils::precision_threshold<T>::percentage));
                 ASSERT_NEAR(output[i], expected[i], tolerance) << "where index = " << i;
             }
         }

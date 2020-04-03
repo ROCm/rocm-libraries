@@ -135,7 +135,7 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScan)
         );
 
         // Validating results
-        test_utils::assert_near(output, expected, 0.01);
+        test_utils::assert_near(output, expected, test_utils::precision_threshold<T>::percentage);
 
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_output));
@@ -264,8 +264,8 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScanReduce)
         );
 
         // Validating results
-        test_utils::assert_near(output, expected, 0.01);
-        test_utils::assert_near(output_reductions, expected_reductions, 0.01);
+        test_utils::assert_near(output, expected, test_utils::precision_threshold<T>::percentage);
+        test_utils::assert_near(output_reductions, expected_reductions, test_utils::precision_threshold<T>::percentage);
 
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_output));
@@ -371,7 +371,7 @@ TYPED_TEST(RocprimWarpScanTests, ExclusiveScan)
         );
 
         // Validating results
-        test_utils::assert_near(output, expected, 0.01);
+        test_utils::assert_near(output, expected, test_utils::precision_threshold<T>::percentage);
 
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_output));
@@ -509,8 +509,8 @@ TYPED_TEST(RocprimWarpScanTests, ExclusiveReduceScan)
         );
 
         // Validating results
-        test_utils::assert_near(output, expected, 0.01);
-        test_utils::assert_near(output_reductions, expected_reductions, 0.01);
+        test_utils::assert_near(output, expected, test_utils::precision_threshold<T>::percentage);
+        test_utils::assert_near(output_reductions, expected_reductions, test_utils::precision_threshold<T>::percentage);
 
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_output));
@@ -648,8 +648,8 @@ TYPED_TEST(RocprimWarpScanTests, Scan)
         );
 
         // Validating results
-        test_utils::assert_near(output_inclusive, expected_inclusive, 0.01);
-        test_utils::assert_near(output_exclusive, expected_exclusive, 0.01);
+        test_utils::assert_near(output_inclusive, expected_inclusive, test_utils::precision_threshold<T>::percentage);
+        test_utils::assert_near(output_exclusive, expected_exclusive, test_utils::precision_threshold<T>::percentage);
 
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_inclusive_output));
@@ -811,9 +811,9 @@ TYPED_TEST(RocprimWarpScanTests, ScanReduce)
         );
 
         // Validating results
-        test_utils::assert_near(output_inclusive, expected_inclusive, 0.01);
-        test_utils::assert_near(output_exclusive, expected_exclusive, 0.01);
-        test_utils::assert_near(output_reductions, expected_reductions, 0.01);
+        test_utils::assert_near(output_inclusive, expected_inclusive, test_utils::precision_threshold<T>::percentage);
+        test_utils::assert_near(output_exclusive, expected_exclusive, test_utils::precision_threshold<T>::percentage);
+        test_utils::assert_near(output_reductions, expected_reductions, test_utils::precision_threshold<T>::percentage);
 
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_inclusive_output));
@@ -906,7 +906,7 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScanCustomType)
         );
 
         // Validating results
-        test_utils::assert_near(output, expected, 0.01);
+        test_utils::assert_near(output, expected, test_utils::precision_threshold<T>::percentage);
 
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_output));

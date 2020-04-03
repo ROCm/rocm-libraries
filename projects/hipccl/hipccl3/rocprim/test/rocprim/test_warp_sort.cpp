@@ -131,7 +131,7 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, Sort)
             )
         );
 
-        test_utils::assert_near(output, expected, 0.01);
+        test_utils::assert_near(output, expected, test_utils::precision_threshold<T>::percentage);
     }
 
 }
@@ -271,8 +271,8 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
             i = j;
         }
 
-        test_utils::assert_near(output_key, expected_key, 0.01);
-        test_utils::assert_near(output_value, expected_value, 0.01);
+        test_utils::assert_near(output_key, expected_key, test_utils::precision_threshold<T>::percentage);
+        test_utils::assert_near(output_value, expected_value, test_utils::precision_threshold<T>::percentage);
     }
 
 }
