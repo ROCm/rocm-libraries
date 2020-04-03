@@ -109,7 +109,7 @@ struct static_run_algo
         }
         else
         {
-            test_utils::assert_near(output_reductions, expected_reductions, 0.01);
+            test_utils::assert_near(output_reductions, expected_reductions, test_utils::precision_threshold<T>::percentage);
         }
     }
 };
@@ -297,7 +297,7 @@ struct static_run_valid
         );
 
         // Verifying results
-        test_utils::assert_near(output_reductions, expected_reductions, 0.01);
+        test_utils::assert_near(output_reductions, expected_reductions, test_utils::precision_threshold<T>::percentage);
     }
 };
 
