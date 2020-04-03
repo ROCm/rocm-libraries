@@ -173,7 +173,7 @@ TYPED_TEST(RocprimDeviceTransformTests, Transform)
             HIP_CHECK(hipDeviceSynchronize());
 
             // Check if output values are as expected
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, 0.01f));
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, test_utils::precision_threshold<T>::percentage));
 
             hipFree(d_input);
             hipFree(d_output);
@@ -282,7 +282,7 @@ TYPED_TEST(RocprimDeviceTransformTests, BinaryTransform)
             HIP_CHECK(hipDeviceSynchronize());
 
             // Check if output values are as expected
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, 0.01f));
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, test_utils::precision_threshold<U>::percentage));
 
             hipFree(d_input1);
             hipFree(d_input2);

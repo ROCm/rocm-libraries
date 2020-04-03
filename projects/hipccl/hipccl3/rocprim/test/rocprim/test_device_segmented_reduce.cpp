@@ -221,7 +221,7 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
             HIP_CHECK(hipFree(d_offsets));
             HIP_CHECK(hipFree(d_aggregates_output));
 
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(aggregates_output, aggregates_expected, 0.01f));
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(aggregates_output, aggregates_expected, test_utils::precision_threshold<output_type>::percentage));
         }
     }
 
