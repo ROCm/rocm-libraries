@@ -19,24 +19,26 @@ if (NOT Git_FOUND)
 endif()
 
 # rocPRIM (https://github.com/ROCmSoftwarePlatform/rocPRIM)
-if(NOT DEFINED ROCPRIM_ROOT)
-  message(STATUS "Downloading and building rocPRIM.")
-  set(ROCPRIM_ROOT ${CMAKE_CURRENT_BINARY_DIR}/rocPRIM CACHE PATH "")
+if(NOT DOWNLOAD_ROCPRIM)
+  find_package(rocprim)
+endif()
+if(NOT rocprim_FOUND)
+  message(STATUS "Downloading and building rocprim.")
   download_project(
-    PROJ                rocPRIM
+    PROJ                rocprim
     GIT_REPOSITORY      https://github.com/ROCmSoftwarePlatform/rocPRIM.git
-    GIT_TAG             5fa0c79fbb199f83c5202d9e218311a78335a1f4
-    INSTALL_DIR         ${ROCPRIM_ROOT}
+    GIT_TAG             a6ce0b9ce6e68eaf219bace8f6d532fb81ca5d9e
+    INSTALL_DIR         ${CMAKE_CURRENT_BINARY_DIR}/deps/rocprim
     CMAKE_ARGS          -DBUILD_TEST=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm
     LOG_DOWNLOAD        TRUE
     LOG_CONFIGURE       TRUE
     LOG_BUILD           TRUE
     LOG_INSTALL         TRUE
     BUILD_PROJECT       TRUE
-    UPDATE_DISCONNECTED TRUE
+    UPDATE_DISCONNECTED TRUE # Never update automatically from the remote repository
   )
+  find_package(rocprim REQUIRED CONFIG PATHS ${CMAKE_CURRENT_BINARY_DIR}/deps/rocprim)
 endif()
-find_package(rocprim REQUIRED CONFIG PATHS ${ROCPRIM_ROOT})
 
 # Test dependencies
 if(BUILD_TEST)
