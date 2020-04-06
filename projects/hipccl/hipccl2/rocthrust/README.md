@@ -40,6 +40,7 @@ cd rocThrust; mkdir build; cd build
 # Configure rocThrust, setup options for your system.
 # Build options:
 #   BUILD_TEST - ON by default,
+#   DOWNLOAD_ROCPRIM - OFF by default and at ON the rocPRIM will be downloaded to build folder,
 #
 # ! IMPORTANT !
 # On ROCm platform set C++ compiler to HCC. You can do it by adding 'CXX=<path-to-hcc>'
@@ -92,13 +93,13 @@ ctest
 
 ## Using custom seeds for the tests
 
-Go to the `rocPRIM/test/rocprim/test_seed.hpp` file. 
+Go to the `rocPRIM/test/rocprim/test_seed.hpp` file.
 ```cpp
 //(1)
 static constexpr int random_seeds_count = 10;
 
 //(2)
-static constexpr unsigned int seeds [] = {0, 2, 10, 1000}; 
+static constexpr unsigned int seeds [] = {0, 2, 10, 1000};
 
 //(3)
 static constexpr size_t seed_size = sizeof(seeds) / sizeof(seeds[0]);
@@ -106,10 +107,10 @@ static constexpr size_t seed_size = sizeof(seeds) / sizeof(seeds[0]);
 
 (1) defines a constant that sets how many passes over the tests will be done with runtime-generated seeds. Modify at will.
 
-(2) defines the user generated seeds. Each of the elements of the array will be used as seed for all tests. Modify at will. If no static seeds are desired, the array should be left empty. 
+(2) defines the user generated seeds. Each of the elements of the array will be used as seed for all tests. Modify at will. If no static seeds are desired, the array should be left empty.
 
 ```cpp
-static constexpr unsigned int seeds [] = {}; 
+static constexpr unsigned int seeds [] = {};
 ```
 
 (3) this line should never be modified.
