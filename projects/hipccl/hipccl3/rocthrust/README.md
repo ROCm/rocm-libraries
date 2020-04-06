@@ -74,7 +74,7 @@ find_package(rocthrust REQUIRED CONFIG PATHS "/opt/rocm/rocthrust")
 
 ...
 includes rocThrust headers and roc::rocprim_hip target
-target_link_libraries(<your_target> rocthrust)
+target_link_libraries(<your_target> roc::rocthrust)
 ```
 
 ## Running Unit Tests
