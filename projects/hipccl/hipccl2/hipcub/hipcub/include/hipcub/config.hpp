@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2020, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -41,61 +41,23 @@
     } /* hipcub */
 
 #ifdef __HIP_PLATFORM_HCC__
-    #include <rocprim/rocprim.hpp>
-
     #define HIPCUB_ROCPRIM_API 1
-    #define HIPCUB_DEVICE __device__
-    #define HIPCUB_HOST __host__
-    #define HIPCUB_HOST_DEVICE __host__ __device__
     #define HIPCUB_RUNTIME_FUNCTION __host__
-    #define HIPCUB_SHARED_MEMORY __shared__
 #elif defined(__HIP_PLATFORM_NVCC__)
-    // Block
-    #include <cub/block/block_histogram.cuh>
-    #include <cub/block/block_discontinuity.cuh>
-    #include <cub/block/block_exchange.cuh>
-    #include <cub/block/block_load.cuh>
-    #include <cub/block/block_radix_rank.cuh>
-    #include <cub/block/block_radix_sort.cuh>
-    #include <cub/block/block_reduce.cuh>
-    #include <cub/block/block_scan.cuh>
-    #include <cub/block/block_store.cuh>
-
-    // Thread
-    #include <cub/thread/thread_load.cuh>
-    #include <cub/thread/thread_operators.cuh>
-    #include <cub/thread/thread_reduce.cuh>
-    #include <cub/thread/thread_scan.cuh>
-    #include <cub/thread/thread_store.cuh>
-
-    // Warp
-    #include <cub/warp/warp_reduce.cuh>
-    #include <cub/warp/warp_scan.cuh>
-
-    // Iterator
-    #include <cub/iterator/arg_index_input_iterator.cuh>
-    #include <cub/iterator/cache_modified_input_iterator.cuh>
-    #include <cub/iterator/cache_modified_output_iterator.cuh>
-    #include <cub/iterator/constant_input_iterator.cuh>
-    #include <cub/iterator/counting_input_iterator.cuh>
-    #include <cub/iterator/tex_obj_input_iterator.cuh>
-    #include <cub/iterator/tex_ref_input_iterator.cuh>
-    #include <cub/iterator/transform_input_iterator.cuh>
-
-    // Util
-    #include <cub/util_arch.cuh>
-    #include <cub/util_debug.cuh>
-    #include <cub/util_device.cuh>
-    #include <cub/util_macro.cuh>
-    #include <cub/util_ptx.cuh>
-    #include <cub/util_type.cuh>
-
     #define HIPCUB_CUB_API 1
-    #define HIPCUB_DEVICE __device__
-    #define HIPCUB_HOST __host__
-    #define HIPCUB_HOST_DEVICE __host__ __device__
     #define HIPCUB_RUNTIME_FUNCTION CUB_RUNTIME_FUNCTION
-    #define HIPCUB_SHARED_MEMORY __shared__
+
+    #include <cub/util_arch.cuh>
+    #define HIPCUB_WARP_THREADS CUB_PTX_WARP_THREADS
+    #define HIPCUB_ARCH CUB_PTX_ARCH
+    BEGIN_HIPCUB_NAMESPACE
+    using namespace cub;
+    END_HIPCUB_NAMESPACE
 #endif
+
+#define HIPCUB_HOST __host__
+#define HIPCUB_DEVICE __device__
+#define HIPCUB_HOST_DEVICE __host__ __device__
+#define HIPCUB_SHARED_MEMORY __shared__
 
 #endif // HIPCUB_CONFIG_HPP_

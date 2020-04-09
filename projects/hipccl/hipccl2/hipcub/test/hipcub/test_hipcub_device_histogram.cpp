@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2020 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -29,12 +29,8 @@
 #include "common_test_header.hpp"
 
 // hipcub API
-#ifdef __HIP_PLATFORM_HCC__
-    #include "hipcub/rocprim/device/device_histogram.hpp"
-    #include "hipcub/rocprim/iterator/transform_input_iterator.hpp"
-#elif defined(__HIP_PLATFORM_NVCC__)
-    #include "hipcub/cub/device/device_histogram.hpp"
-#endif
+#include "hipcub/device/device_histogram.hpp" 
+#include "hipcub/iterator/transform_input_iterator.hpp" 
 
 // rows, columns, (row_stride - columns * Channels)
 std::vector<std::tuple<size_t, size_t, size_t>> get_dims()
