@@ -1,4 +1,4 @@
-// Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2020 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,9 +23,10 @@
 
 // hipCUB API
 #ifdef __HIP_PLATFORM_HCC__
-    #include "hipcub/rocprim/util_ptx.hpp"
+    #include "hipcub/backend/rocprim/util_ptx.hpp"
 #elif defined(__HIP_PLATFORM_NVCC__)
-    #include "hipcub/cub/hipcub.hpp"
+    #include "hipcub/config.hpp"
+    #include <cub/util_ptx.cuh>
 #endif
 
 // Seed values

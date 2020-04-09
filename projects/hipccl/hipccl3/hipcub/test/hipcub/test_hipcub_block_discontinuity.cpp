@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2020 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,14 +23,10 @@
 #include "common_test_header.hpp"
 
 // hipcub API
-#ifdef __HIP_PLATFORM_HCC__
-    #include "hipcub/rocprim/block/block_discontinuity.hpp"
-    #include "hipcub/rocprim/thread/thread_operators.hpp"
-    #include "hipcub/rocprim/block/block_load_func.hpp"
-    #include "hipcub/rocprim/block/block_store_func.hpp"
-#elif defined(__HIP_PLATFORM_NVCC__)
-    #include "hipcub/cub/hipcub.hpp"
-#endif
+#include "hipcub/block/block_discontinuity.hpp"
+#include "hipcub/thread/thread_operators.hpp"
+#include "hipcub/block/block_load.hpp"
+#include "hipcub/block/block_store.hpp"
 
 template<
     class T,

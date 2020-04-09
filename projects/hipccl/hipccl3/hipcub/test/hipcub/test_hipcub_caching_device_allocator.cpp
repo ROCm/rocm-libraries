@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2018-2020, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -29,11 +29,7 @@
 
 #include "common_test_header.hpp"
 
-#ifdef __HIP_PLATFORM_HCC__
-    #include "hipcub/rocprim/util_allocator.hpp"
-#elif defined(__HIP_PLATFORM_NVCC__)
-    #include "hipcub/cub/util_allocator.hpp"
-#endif
+#include "hipcub/util_allocator.hpp"
 
 __global__ void EmptyKernel() { }
 
