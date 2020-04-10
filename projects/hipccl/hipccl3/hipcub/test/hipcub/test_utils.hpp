@@ -21,6 +21,10 @@
 #ifndef ROCPRIM_TEST_TEST_UTILS_HPP_
 #define ROCPRIM_TEST_TEST_UTILS_HPP_
 
+#ifndef TEST_UTILS_INCLUDE_GAURD
+    #error test_utils.hpp must ONLY be included by common_test_header.hpp. Please include common_test_header.hpp instead.
+#endif
+
 // hipCUB API
 #ifdef __HIP_PLATFORM_HCC__
     #include "hipcub/backend/rocprim/util_ptx.hpp"
