@@ -38,6 +38,10 @@
 // HIP API
 #include <hip/hip_runtime.h>
 
+// test_utils.hpp should only be included by this header.
+// The following definition is used as guard in test_utils.hpp
+// Including test_utils.hpp by itself will cause a compile error.
+#define TEST_UTILS_INCLUDE_GAURD
 #include "test_utils.hpp"
 
 #define HIP_CHECK(error) ASSERT_EQ(error, hipSuccess)
