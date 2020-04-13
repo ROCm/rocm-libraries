@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,24 +26,10 @@
     #pragma GCC diagnostic ignored "-Wunused-parameter"
 #endif
 
-#include <algorithm>
-#include <functional>
-#include <iostream>
-#include <random>
-#include <type_traits>
-#include <vector>
-#include <utility>
+#include "common_test_header.hpp"
 
-// Google Test
-#include <gtest/gtest.h>
-// HIP API
-#include <hip/hip_runtime.h>
-// hipCUB API
-#include <hipcub/hipcub.hpp>
-
-#include "test_utils.hpp"
-
-#define HIP_CHECK(error) ASSERT_EQ(error, hipSuccess)
+// hipcub API
+#include "hipcub/device/device_run_length_encode.hpp"
 
 template<
     class Key,

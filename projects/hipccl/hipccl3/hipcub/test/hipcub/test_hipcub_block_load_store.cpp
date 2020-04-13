@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,18 +20,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <iostream>
-#include <vector>
-#include <type_traits>
+#include "common_test_header.hpp"
 
-// Google Test
-#include <gtest/gtest.h>
-// hipCUB API
-#include <hipcub/hipcub.hpp>
-
-#include "test_utils.hpp"
-
-#define HIP_CHECK(error) ASSERT_EQ(error, hipSuccess)
+// hipcub API
+#include "hipcub/block/block_load.hpp"
+#include "hipcub/block/block_store.hpp"
 
 template<
     class Type,

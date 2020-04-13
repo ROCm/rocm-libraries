@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2020, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -27,19 +27,9 @@
  *
  ******************************************************************************/
 
-#include <iostream>
-#include <vector>
+#include "common_test_header.hpp"
 
-// Google Test
-#include <gtest/gtest.h>
-// HIP API
-#include <hip/hip_runtime.h>
-// hipCUB API
-#include <hipcub/hipcub.hpp>
-
-#include "test_utils.hpp"
-
-#define HIP_CHECK(error) ASSERT_EQ(error, hipSuccess)
+#include "hipcub/util_allocator.hpp"
 
 __global__ void EmptyKernel() { }
 

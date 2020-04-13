@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,22 +26,11 @@
     #pragma GCC diagnostic ignored "-Wunused-parameter"
 #endif
 
-#include <algorithm>
-#include <functional>
-#include <iostream>
-#include <type_traits>
-#include <tuple>
-#include <vector>
-#include <utility>
+#include "common_test_header.hpp"
 
-// Google Test
-#include <gtest/gtest.h>
-// hipCUB API
-#include <hipcub/hipcub.hpp>
-
-#include "test_utils.hpp"
-
-#define HIP_CHECK(error) ASSERT_EQ(error, hipSuccess)
+// hipcub API
+#include "hipcub/device/device_histogram.hpp"
+#include "hipcub/iterator/transform_input_iterator.hpp"
 
 // rows, columns, (row_stride - columns * Channels)
 std::vector<std::tuple<size_t, size_t, size_t>> get_dims()
