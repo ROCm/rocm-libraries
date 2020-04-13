@@ -1,4 +1,4 @@
-// Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,14 +21,18 @@
 #ifndef ROCPRIM_TEST_TEST_UTILS_HPP_
 #define ROCPRIM_TEST_TEST_UTILS_HPP_
 
-#include <algorithm>
-#include <vector>
-#include <random>
-#include <type_traits>
-#include <cstdlib>
+#ifndef TEST_UTILS_INCLUDE_GAURD
+    #error test_utils.hpp must ONLY be included by common_test_header.hpp. Please include common_test_header.hpp instead.
+#endif
 
-// hipCUB
-#include <hipcub/hipcub.hpp>
+// hipCUB API
+#ifdef __HIP_PLATFORM_HCC__
+    #include "hipcub/backend/rocprim/util_ptx.hpp"
+#elif defined(__HIP_PLATFORM_NVCC__)
+    #include "hipcub/config.hpp"
+    #include <cub/util_ptx.cuh>
+#endif
+
 // Seed values
 #include "test_seed.hpp"
 
