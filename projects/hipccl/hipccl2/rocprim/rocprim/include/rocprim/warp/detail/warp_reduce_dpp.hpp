@@ -56,32 +56,32 @@ public:
         if(WarpSize > 1)
         {
             // quad_perm:[1,0,3,2] -> 10110001
-            output = reduce_op(warp_move_dpp(output, 0xb1), output);
+            output = reduce_op(warp_move_dpp<T, 0xb1>(output), output);
         }
         if(WarpSize > 2)
         {
             // quad_perm:[2,3,0,1] -> 01001110
-            output = reduce_op(warp_move_dpp(output, 0x4e), output);
+            output = reduce_op(warp_move_dpp<T, 0x4e>(output), output);
         }
         if(WarpSize > 4)
         {
             // row_shr:4
-            output = reduce_op(warp_move_dpp(output, 0x114), output);
+            output = reduce_op(warp_move_dpp<T, 0x114>(output), output);
         }
         if(WarpSize > 8)
         {
             // row_shr:8
-            output = reduce_op(warp_move_dpp(output, 0x118), output);
+            output = reduce_op(warp_move_dpp<T, 0x118>(output), output);
         }
         if(WarpSize > 16)
         {
             // row_bcast:15
-            output = reduce_op(warp_move_dpp(output, 0x142), output);
+            output = reduce_op(warp_move_dpp<T, 0x142>(output), output);
         }
         if(WarpSize > 32)
         {
             // row_bcast:31
-            output = reduce_op(warp_move_dpp(output, 0x143), output);
+            output = reduce_op(warp_move_dpp<T, 0x143>(output), output);
         }
 
         // Read the result from the last lane of the logical warp

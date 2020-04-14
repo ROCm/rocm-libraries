@@ -56,32 +56,32 @@ public:
 
         if(WarpSize > 1)
         {
-            T t = scan_op(warp_move_dpp(output, 0x111), output); // row_shr:1
+            T t = scan_op(warp_move_dpp<T, 0x111>(output), output); // row_shr:1
             if(row_lane_id >= 1) output = t;
         }
         if(WarpSize > 2)
         {
-            T t = scan_op(warp_move_dpp(output, 0x112), output); // row_shr:2
+            T t = scan_op(warp_move_dpp<T, 0x112>(output), output); // row_shr:2
             if(row_lane_id >= 2) output = t;
         }
         if(WarpSize > 4)
         {
-            T t = scan_op(warp_move_dpp(output, 0x114), output); // row_shr:4
+            T t = scan_op(warp_move_dpp<T, 0x114>(output), output); // row_shr:4
             if(row_lane_id >= 4) output = t;
         }
         if(WarpSize > 8)
         {
-            T t = scan_op(warp_move_dpp(output, 0x118), output); // row_shr:8
+            T t = scan_op(warp_move_dpp<T, 0x118>(output), output); // row_shr:8
             if(row_lane_id >= 8) output = t;
         }
         if(WarpSize > 16)
         {
-            T t = scan_op(warp_move_dpp(output, 0x142), output); // row_bcast:15
+            T t = scan_op(warp_move_dpp<T, 0x142>(output), output); // row_bcast:15
             if(lane_id % 32 >= 16) output = t;
         }
         if(WarpSize > 32)
         {
-            T t = scan_op(warp_move_dpp(output, 0x143), output); // row_bcast:31
+            T t = scan_op(warp_move_dpp<T, 0x143>(output), output); // row_bcast:31
             if(lane_id >= 32) output = t;
         }
     }

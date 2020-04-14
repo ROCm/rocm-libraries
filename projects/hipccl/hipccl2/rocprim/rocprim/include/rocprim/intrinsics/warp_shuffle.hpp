@@ -59,10 +59,9 @@ ROCPRIM_DEVICE
 int __amdgcn_update_dpp(int old, int src, int dpp_ctrl, int row_mask, int bank_mask, bool bound_ctrl)
     __asm("llvm.amdgcn.update.dpp.i32");
 
-template<class T>
+template<class T, int dpp_ctrl, int row_mask = 0xf, int bank_mask = 0xf, bool bound_ctrl = false>
 ROCPRIM_DEVICE inline
-T warp_move_dpp(T input, int dpp_ctrl,
-                int row_mask = 0xf, int bank_mask = 0xf, bool bound_ctrl = false)
+T warp_move_dpp(T input)
 {
     constexpr int words_no = (sizeof(T) + sizeof(int) - 1) / sizeof(int);
 
