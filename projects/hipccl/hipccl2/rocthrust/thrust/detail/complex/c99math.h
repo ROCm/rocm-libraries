@@ -17,6 +17,7 @@
  */
 #pragma once
 
+#include <math.h>
 #include <cmath>
 #include <thrust/detail/complex/math_private.h>
 
