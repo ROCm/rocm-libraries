@@ -78,7 +78,7 @@ unsigned int flat_block_thread_id()
 template<unsigned int BlockSizeX, unsigned int BlockSizeY, unsigned int BlockSizeZ>
 ROCPRIM_DEVICE inline
 auto flat_block_thread_id()
-    -> typename std::enable_if<(BlockSizeX <= 256 && BlockSizeY == 1 && BlockSizeZ == 1), unsigned int>::type
+    -> typename std::enable_if<(BlockSizeY == 1 && BlockSizeZ == 1), unsigned int>::type
 {
     return hipThreadIdx_x;
 }
@@ -86,8 +86,7 @@ auto flat_block_thread_id()
 template<unsigned int BlockSizeX, unsigned int BlockSizeY, unsigned int BlockSizeZ>
 ROCPRIM_DEVICE inline
 auto flat_block_thread_id()
-    -> typename std::enable_if<(BlockSizeX > 256 && BlockSizeX <= 1024 && BlockSizeY == 1 && BlockSizeZ == 1) ||
-                               (BlockSizeY > 1 && BlockSizeZ == 1), unsigned int>::type
+    -> typename std::enable_if<(BlockSizeY > 1 && BlockSizeZ == 1), unsigned int>::type
 {
     return hipThreadIdx_x + (hipThreadIdx_y * hipBlockDim_x);
 }
