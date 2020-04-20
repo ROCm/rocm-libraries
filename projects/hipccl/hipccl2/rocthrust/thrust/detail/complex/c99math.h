@@ -158,9 +158,9 @@ using std::isfinite;
 #    endif // __HIP_COMPILER__
 
 #  endif // __CUDACC__
+#endif // _MSC_VER
 
 using ::atanh;
-#endif // _MSC_VER
 
 #if defined _MSC_VER
 
