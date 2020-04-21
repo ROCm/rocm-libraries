@@ -44,6 +44,12 @@ cd hipCUB; mkdir build; cd build
 #
 [CXX=hcc] cmake ../. # or cmake-gui ../.
 
+# To configure rocRAND for Nvidia platforms, 'CXX=<path-to-nvcc>', `CXX=nvcc` or omitting the flag
+# entirely before 'cmake' is sufficient
+[CXX=nvcc] cmake -DBUILD_BENCHMARK=ON ../. # or cmake-gui ../.
+# or
+cmake -DBUILD_BENCHMARK=ON ../. # or cmake-gui ../.
+
 # Build
 make -j4
 
