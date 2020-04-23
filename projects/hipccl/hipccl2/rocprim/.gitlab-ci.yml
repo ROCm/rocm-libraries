@@ -196,11 +196,12 @@ test:vega20:
     TEST_GFX_IPS_REGEX: gfx906
   script:
     - cd $BUILD_LATEST_DIR
+    - $CMAKE_LATEST_PATH/bin/cmake -P $CI_PROJECT_DIR/cmake/GenerateResourceSpec.cmake
     - $SUDO_CMD $CMAKE_LATEST_PATH/bin/ctest
       --output-on-failure
       --repeat-until-fail 2
       --tests-regex "hip|$TEST_GFX_IPS_REGEX"
-      --resource-spec-file $RESOURCE_FILE
+      --resource-spec-file ./resources.json
       --parallel $PARALLEL_JOBS
 
 test:s9300:
@@ -216,11 +217,12 @@ test:s9300:
     TEST_GFX_IPS_REGEX: gfx803
   script:
     - cd $BUILD_LATEST_DIR
+    - $CMAKE_LATEST_PATH/bin/cmake -P $CI_PROJECT_DIR/cmake/GenerateResourceSpec.cmake
     - $SUDO_CMD $CMAKE_LATEST_PATH/bin/ctest
       --output-on-failure
       --repeat-until-fail 2
       --tests-regex "hip|$TEST_GFX_IPS_REGEX"
-      --resource-spec-file $RESOURCE_FILE
+      --resource-spec-file ./resources.json
       --parallel $PARALLEL_JOBS
   allow_failure: true
 
@@ -237,11 +239,12 @@ test:mi25:
     TEST_GFX_IPS_REGEX: gfx900
   script:
     - cd $BUILD_LATEST_DIR
+    - $CMAKE_LATEST_PATH/bin/cmake -P $CI_PROJECT_DIR/cmake/GenerateResourceSpec.cmake
     - $SUDO_CMD $CMAKE_LATEST_PATH/bin/ctest
       --output-on-failure
       --repeat-until-fail 2
       --tests-regex "hip|$TEST_GFX_IPS_REGEX"
-      --resource-spec-file $RESOURCE_FILE
+      --resource-spec-file ./resources.json
       --parallel $PARALLEL_JOBS
 
 test:deb:
