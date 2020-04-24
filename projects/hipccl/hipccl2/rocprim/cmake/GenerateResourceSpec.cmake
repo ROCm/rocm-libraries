@@ -39,8 +39,8 @@ string(REGEX MATCHALL [[--(gfx[0-9]+)]]
 # };
 # 
 # std::vector<device> GFXIP_AND_ID{ {"gfx900",0},{"gfx803",1},{"gfx900",2} };
-# std::stable_sort(GFXIP_AND_ID.begin(), GFXIP_AND_ID.end(),
-#                  [](const device& lhs, const device& rhs)
+# std::sort(GFXIP_AND_ID.begin(), GFXIP_AND_ID.end(),
+#           [](const device& lhs, const device& rhs)
 # {
 #   return std::lexicographical_compare(lhs.ip.begin(), lhs.ip.end(),
 #                                       rhs.ip.begin(), rhs.ip.end());
