@@ -196,7 +196,7 @@ test:vega20:
     TEST_GFX_IPS_REGEX: gfx906
   script:
     - cd $BUILD_LATEST_DIR
-    - $CMAKE_LATEST_PATH/bin/cmake -P $CI_PROJECT_DIR/cmake/GenerateResourceSpec.cmake
+    - $SUDO_CMD $CMAKE_LATEST_PATH/bin/cmake -P $CI_PROJECT_DIR/cmake/GenerateResourceSpec.cmake
     - $SUDO_CMD $CMAKE_LATEST_PATH/bin/ctest
       --output-on-failure
       --repeat-until-fail 2
@@ -217,7 +217,7 @@ test:s9300:
     TEST_GFX_IPS_REGEX: gfx803
   script:
     - cd $BUILD_LATEST_DIR
-    - $CMAKE_LATEST_PATH/bin/cmake -P $CI_PROJECT_DIR/cmake/GenerateResourceSpec.cmake
+    - $SUDO_CMD $CMAKE_LATEST_PATH/bin/cmake -P $CI_PROJECT_DIR/cmake/GenerateResourceSpec.cmake
     - $SUDO_CMD $CMAKE_LATEST_PATH/bin/ctest
       --output-on-failure
       --repeat-until-fail 2
@@ -239,7 +239,7 @@ test:mi25:
     TEST_GFX_IPS_REGEX: gfx900
   script:
     - cd $BUILD_LATEST_DIR
-    - $CMAKE_LATEST_PATH/bin/cmake -P $CI_PROJECT_DIR/cmake/GenerateResourceSpec.cmake
+    - $SUDO_CMD $CMAKE_LATEST_PATH/bin/cmake -P $CI_PROJECT_DIR/cmake/GenerateResourceSpec.cmake
     - $SUDO_CMD $CMAKE_LATEST_PATH/bin/ctest
       --output-on-failure
       --repeat-until-fail 2
