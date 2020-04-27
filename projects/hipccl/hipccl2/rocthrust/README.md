@@ -209,9 +209,14 @@ Documentation is available [here](https://rocthrust.readthedocs.io/en/latest/).
 
 ## Support
 
-Bugs and feature requests can be reported through [the issue tracker](https://github.com/ROCmSoftwarePlatform/rocThrust/issues).
+CMake Support
+-------------
 
-## Contributions and License
+Thrust provides CMake configuration files that make it easy to include Thrust
+from other CMake projects. See the [CMake README](thrust/cmake/README.md)
+for details.
 
-Contributions of any kind are most welcome! More details are found at [CONTRIBUTING](./CONTRIBUTING.md)
-and [LICENSE](./LICENSE.txt).
+Development process
+-------------------
+
+For information on development process and branching, see [this document](doc/branching.md).
