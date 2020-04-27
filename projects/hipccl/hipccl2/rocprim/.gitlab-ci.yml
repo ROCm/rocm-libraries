@@ -191,12 +191,13 @@ test:vega20:
     - vega20
     - rocm
   variables:
-    RESOURCE_FILE: $CI_PROJECT_DIR/test/ci/241_resources.json
     PARALLEL_JOBS: 2
     TEST_GFX_IPS_REGEX: gfx906
   script:
     - cd $BUILD_LATEST_DIR
-    - $SUDO_CMD $CMAKE_LATEST_PATH/bin/cmake -P $CI_PROJECT_DIR/cmake/GenerateResourceSpec.cmake
+    - $SUDO_CMD $CMAKE_LATEST_PATH/bin/cmake
+      -D CMAKE_PREFIX_PATH=/opt/rocm
+      -P $CI_PROJECT_DIR/cmake/GenerateResourceSpec.cmake
     - $SUDO_CMD $CMAKE_LATEST_PATH/bin/ctest
       --output-on-failure
       --repeat-until-fail 2
@@ -212,12 +213,13 @@ test:s9300:
     - s9300
     - rocm
   variables:
-    RESOURCE_FILE: $CI_PROJECT_DIR/test/ci/243_resources.json
     PARALLEL_JOBS: 6
     TEST_GFX_IPS_REGEX: gfx803
   script:
     - cd $BUILD_LATEST_DIR
-    - $SUDO_CMD $CMAKE_LATEST_PATH/bin/cmake -P $CI_PROJECT_DIR/cmake/GenerateResourceSpec.cmake
+    - $SUDO_CMD $CMAKE_LATEST_PATH/bin/cmake
+      -D CMAKE_PREFIX_PATH=/opt/rocm
+      -P $CI_PROJECT_DIR/cmake/GenerateResourceSpec.cmake
     - $SUDO_CMD $CMAKE_LATEST_PATH/bin/ctest
       --output-on-failure
       --repeat-until-fail 2
@@ -234,12 +236,13 @@ test:mi25:
     - mi25
     - rocm
   variables:
-    RESOURCE_FILE: $CI_PROJECT_DIR/test/ci/244_resources.json
     PARALLEL_JOBS: 2
     TEST_GFX_IPS_REGEX: gfx900
   script:
     - cd $BUILD_LATEST_DIR
-    - $SUDO_CMD $CMAKE_LATEST_PATH/bin/cmake -P $CI_PROJECT_DIR/cmake/GenerateResourceSpec.cmake
+    - $SUDO_CMD $CMAKE_LATEST_PATH/bin/cmake
+      -D CMAKE_PREFIX_PATH=/opt/rocm
+      -P $CI_PROJECT_DIR/cmake/GenerateResourceSpec.cmake
     - $SUDO_CMD $CMAKE_LATEST_PATH/bin/ctest
       --output-on-failure
       --repeat-until-fail 2
