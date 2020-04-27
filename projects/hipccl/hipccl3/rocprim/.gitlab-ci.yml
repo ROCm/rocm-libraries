@@ -175,7 +175,7 @@ build:package:
       - $PACKAGE_DIR/rocprim*.zip
     expire_in: 2 weeks
 
-include: '.after-script-template.yml'
+include: '.gitlab-ci-gputest.yml'
 
 test:deb:
   stage: test
