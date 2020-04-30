@@ -70,3 +70,4 @@ endfunction()
 # ****************************************************************************
 
 add_hipcub_benchmark(benchmark_block_scan.cpp)
+add_hipcub_benchmark(benchmark_block_reduce.cpp)
