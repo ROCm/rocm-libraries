@@ -36,10 +36,6 @@
 
 // HIP API
 #include <hipcub/hipcub.hpp>
-// #include <hip/hip_runtime.h>
-
-// rocPRIM
-// #include <rocprim/rocprim.hpp>
 
 #define HIP_CHECK(condition)         \
   {                                  \
@@ -53,8 +49,6 @@
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 32;
 #endif
-
-// namespace rp = rocprim;
 
 template<
     class Runner,
@@ -84,24 +78,17 @@ struct blocked_to_striped
         const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
 
         T input[ItemsPerThread];        
-        // rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
         hipcub::LoadDirectBlocked(lid, d_input + block_offset, input);
 
 
         #pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
-            // rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
-            // exchange.blocked_to_striped(input, input);
             hipcub::BlockExchange<T, BlockSize, ItemsPerThread> exchange;
             exchange.BlockedToStriped(input, input);
-
-            ::rocprim::syncthreads();
+            __syncthreads(); // extra sync needed because of loop. In normal usage sync with be cared for by the load and store functions (outside the loop).
         }
-
-        // rp::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, input);
         hipcub::StoreDirectStriped<BlockSize>(lid, d_output + block_offset, input);
-
     }
 };
 
@@ -120,22 +107,15 @@ struct striped_to_blocked
         const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
 
         T input[ItemsPerThread];
-        // rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
         hipcub::LoadDirectStriped<BlockSize>(lid, d_input + block_offset, input);
 
         #pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
-            // rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
-            // exchange.striped_to_blocked(input, input);
-            // ::rocprim::syncthreads();
             hipcub::BlockExchange<T, BlockSize, ItemsPerThread> exchange;
             exchange.StripedToBlocked(input, input);
-            ::rocprim::syncthreads();
+            __syncthreads();// extra sync needed because of loop. In normal usage sync with be cared for by the load and store functions (outside the loop).
         }
-
-        // rp::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, input);
-        // hipcub::StoreDirectStriped<BlockSize>(lid, d_output + block_offset, input);
         hipcub::StoreDirectBlocked(lid, d_output + block_offset, input);
     }
 };
@@ -155,21 +135,15 @@ struct blocked_to_warp_striped
         const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
 
         T input[ItemsPerThread];
-        // rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
         hipcub::LoadDirectBlocked(lid, d_input + block_offset, input);
 
         #pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
-            // rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
-            // exchange.blocked_to_warp_striped(input, input);
-            // ::rocprim::syncthreads();
             hipcub::BlockExchange<T, BlockSize, ItemsPerThread> exchange;
             exchange.BlockedToWarpStriped(input, input);
-            ::rocprim::syncthreads();
+            __syncthreads();// extra sync needed because of loop. In normal usage sync with be cared for by the load and store functions (outside the loop).
         }
-
-        // rp::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, input);
         hipcub::StoreDirectWarpStriped(lid, d_output + block_offset, input);
     }
 };
@@ -189,22 +163,15 @@ struct warp_striped_to_blocked
         const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
 
         T input[ItemsPerThread];
-        // rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
         hipcub::LoadDirectWarpStriped(lid, d_input + block_offset, input);
-
 
         #pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
-            // rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
-            // exchange.warp_striped_to_blocked(input, input);
-            // ::rocprim::syncthreads();
             hipcub::BlockExchange<T, BlockSize, ItemsPerThread> exchange;
             exchange.WarpStripedToBlocked(input, input);
-            ::rocprim::syncthreads();
+            __syncthreads(); // extra sync needed because of loop. In normal usage sync with be cared for by the load and store functions (outside the loop).
         }
-
-        // rp::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, input);
         hipcub::StoreDirectBlocked(lid, d_output + block_offset, input);
     }
 };
@@ -225,23 +192,16 @@ struct scatter_to_blocked
 
         T input[ItemsPerThread];
         unsigned int ranks[ItemsPerThread];
-        // rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
-        // rp::block_load_direct_striped<BlockSize>(lid, d_ranks + block_offset, ranks);
         hipcub::LoadDirectStriped<BlockSize>(lid, d_input + block_offset, input);
         hipcub::LoadDirectStriped<BlockSize>(lid, d_ranks + block_offset, ranks);
 
         #pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
-            // rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
-            // exchange.scatter_to_blocked(input, input, ranks);
             hipcub::BlockExchange<T, BlockSize, ItemsPerThread> exchange;
             exchange.ScatterToBlocked(input, input, ranks);
-
-            ::rocprim::syncthreads();
+            __syncthreads();// extra sync needed because of loop. In normal usage sync with be cared for by the load and store functions (outside the loop).        
         }
-
-        // rp::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, input);
         hipcub::StoreDirectBlocked(lid, d_output + block_offset, input);
     }
 };
@@ -262,22 +222,16 @@ struct scatter_to_striped
 
         T input[ItemsPerThread];
         unsigned int ranks[ItemsPerThread];
-        // rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
-        // rp::block_load_direct_striped<BlockSize>(lid, d_ranks + block_offset, ranks);
-        hipcub::LoadDirectBlocked(lid, d_input + block_offset, input);
-        hipcub::LoadDirectBlocked(lid, d_ranks + block_offset, ranks);        
+        hipcub::LoadDirectStriped<BlockSize>(lid, d_input + block_offset, input);
+        hipcub::LoadDirectStriped<BlockSize>(lid, d_ranks + block_offset, ranks);        
 
         #pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
-            // rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
-            // exchange.scatter_to_striped(input, input, ranks);
             hipcub::BlockExchange<T, BlockSize, ItemsPerThread> exchange;
             exchange.ScatterToStriped(input, input, ranks);
-            ::rocprim::syncthreads();
+            __syncthreads(); // extra sync needed because of loop. In normal usage sync with be cared for by the load and store functions (outside the loop).
         }
-
-        // rp::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, input);
         hipcub::StoreDirectStriped<BlockSize>(lid, d_output + block_offset, input);
     }
 };
@@ -384,7 +338,6 @@ void add_benchmarks(const std::string& name,
     {
         BENCHMARK_TYPE(int, 256),
         BENCHMARK_TYPE(int8_t, 256),
-        // BENCHMARK_TYPE(rocprim::half, 256),
         BENCHMARK_TYPE(long long, 256),
         BENCHMARK_TYPE(custom_float2, 256),
         BENCHMARK_TYPE(float2, 256),
