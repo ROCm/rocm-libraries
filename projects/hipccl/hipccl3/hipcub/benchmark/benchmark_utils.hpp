@@ -97,87 +97,87 @@ inline T get_random_value(T min, T max)
     return get_random_data(1, min, max)[0];
 }
 
-// template<class T, class U = T>
-// struct custom_type
-// {
-//     using first_type = T;
-//     using second_type = U;
+template<class T, class U = T>
+struct custom_type
+{
+    using first_type = T;
+    using second_type = U;
 
-//     T x;
-//     U y;
+    T x;
+    U y;
 
-//     ROCPRIM_HOST_DEVICE inline
-//     custom_type(T xx = 0, U yy = 0) : x(xx), y(yy)
-//     {
-//     }
+    HIPCUB_HOST_DEVICE inline
+    custom_type(T xx = 0, U yy = 0) : x(xx), y(yy)
+    {
+    }
 
-//     ROCPRIM_HOST_DEVICE inline
-//     ~custom_type() = default;
+    HIPCUB_HOST_DEVICE inline
+    ~custom_type() = default;
 
-//     ROCPRIM_HOST_DEVICE inline
-//     custom_type operator+(const custom_type& rhs) const
-//     {
-//         return custom_type(x + rhs.x, y + rhs.y);
-//     }
+    HIPCUB_HOST_DEVICE inline
+    custom_type operator+(const custom_type& rhs) const
+    {
+        return custom_type(x + rhs.x, y + rhs.y);
+    }
 
-//     ROCPRIM_HOST_DEVICE inline
-//     bool operator<(const custom_type& rhs) const
-//     {
-//         return (x < rhs.x || (x == rhs.x && y < rhs.y));
-//     }
+    HIPCUB_HOST_DEVICE inline
+    bool operator<(const custom_type& rhs) const
+    {
+        return (x < rhs.x || (x == rhs.x && y < rhs.y));
+    }
 
-//     ROCPRIM_HOST_DEVICE inline
-//     bool operator==(const custom_type& rhs) const
-//     {
-//         return x == rhs.x && y == rhs.y;
-//     }
-// };
+    HIPCUB_HOST_DEVICE inline
+    bool operator==(const custom_type& rhs) const
+    {
+        return x == rhs.x && y == rhs.y;
+    }
+};
 
-// template<typename>
-// struct is_custom_type : std::false_type {};
+template<typename>
+struct is_custom_type : std::false_type {};
 
-// template<class T, class U>
-// struct is_custom_type<custom_type<T,U>> : std::true_type {};
+template<class T, class U>
+struct is_custom_type<custom_type<T,U>> : std::true_type {};
 
-// template<class T>
-// inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 1024 * 1024)
-//     -> typename std::enable_if<is_custom_type<T>::value, std::vector<T>>::type
-// {
-//     using first_type = typename T::first_type;
-//     using second_type = typename T::second_type;
-//     std::vector<T> data(size);
-//     auto fdata = get_random_data<first_type>(size, min.x, max.x, max_random_size);
-//     auto sdata = get_random_data<second_type>(size, min.y, max.y, max_random_size);
-//     for(size_t i = 0; i < size; i++)
-//     {
-//         data[i] = T(fdata[i], sdata[i]);
-//     }
-//     return data;
-// }
+template<class T>
+inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 1024 * 1024)
+    -> typename std::enable_if<is_custom_type<T>::value, std::vector<T>>::type
+{
+    using first_type = typename T::first_type;
+    using second_type = typename T::second_type;
+    std::vector<T> data(size);
+    auto fdata = get_random_data<first_type>(size, min.x, max.x, max_random_size);
+    auto sdata = get_random_data<second_type>(size, min.y, max.y, max_random_size);
+    for(size_t i = 0; i < size; i++)
+    {
+        data[i] = T(fdata[i], sdata[i]);
+    }
+    return data;
+}
 
-// template<class T>
-// inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 1024 * 1024)
-//     -> typename std::enable_if<!is_custom_type<T>::value && !std::is_same<decltype(max.x), void>::value, std::vector<T>>::type
-// {
-//     // NOTE 1: post-increment operator required, because HIP has different typedefs for vector field types
-//     //         when using HCC or HIP-Clang. Using HIP-Clang members are accessed as fields of a struct via
-//     //         a union, but in HCC mode they are proxy types (Scalar_accessor). STL algorithms don't
-//     //         always tolerate proxies. Unfortunately, Scalar_accessor doesn't have any member typedefs to
-//     //         conveniently obtain the inner stored type. All operations on it (operator+, operator+=,
-//     //         CTOR, etc.) return a reference to an accessor, it is only the post-increment operator that
-//     //         returns a copy of the stored type, hence we take the decltype of that.
-//     //
-//     // NOTE 2: decltype() is unevaluated context. We don't really modify max, just compute the type of the
-//     //         expression if we were to actually call it.
-//     using field_type = decltype(max.x++);
-//     std::vector<T> data(size);
-//     auto field_data = get_random_data<field_type>(size, min.x, max.x, max_random_size);
-//     for(size_t i = 0; i < size; i++)
-//     {
-//         data[i] = T(field_data[i]);
-//     }
-//     return data;
-// }
+template<class T>
+inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 1024 * 1024)
+    -> typename std::enable_if<!is_custom_type<T>::value && !std::is_same<decltype(max.x), void>::value, std::vector<T>>::type
+{
+    // NOTE 1: post-increment operator required, because HIP has different typedefs for vector field types
+    //         when using HCC or HIP-Clang. Using HIP-Clang members are accessed as fields of a struct via
+    //         a union, but in HCC mode they are proxy types (Scalar_accessor). STL algorithms don't
+    //         always tolerate proxies. Unfortunately, Scalar_accessor doesn't have any member typedefs to
+    //         conveniently obtain the inner stored type. All operations on it (operator+, operator+=,
+    //         CTOR, etc.) return a reference to an accessor, it is only the post-increment operator that
+    //         returns a copy of the stored type, hence we take the decltype of that.
+    //
+    // NOTE 2: decltype() is unevaluated context. We don't really modify max, just compute the type of the
+    //         expression if we were to actually call it.
+    using field_type = decltype(max.x++);
+    std::vector<T> data(size);
+    auto field_data = get_random_data<field_type>(size, min.x, max.x, max_random_size);
+    for(size_t i = 0; i < size; i++)
+    {
+        data[i] = T(field_data[i]);
+    }
+    return data;
+}
 
 } // end benchmark_util namespace
 

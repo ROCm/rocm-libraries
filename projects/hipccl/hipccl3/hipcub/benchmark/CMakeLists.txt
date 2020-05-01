@@ -69,6 +69,8 @@ endfunction()
 # Benchmarks
 # ****************************************************************************
 
+add_hipcub_benchmark(benchmark_block_exchange.cpp)
+add_hipcub_benchmark(benchmark_block_histogram.cpp)
 add_hipcub_benchmark(benchmark_block_radix_sort.cpp)
 add_hipcub_benchmark(benchmark_block_reduce.cpp)
 add_hipcub_benchmark(benchmark_block_scan.cpp)
