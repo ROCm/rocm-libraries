@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2019 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -47,74 +47,100 @@
   }
 
 #ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 32;
+const size_t DEFAULT_N = 1024 * 1024 * 128;
 #endif
 
+enum class benchmark_kinds
+{
+    sort_keys,
+    sort_pairs
+};
+
 template<
-    class Runner,
     class T,
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
     unsigned int Trials
 >
 __global__
-void kernel(const T* input, T* output)
+void sort_keys_kernel(const T * input, T * output)
 {
-    Runner::template run<T, BlockSize, ItemsPerThread, Trials>(input, output);
+    const unsigned int lid = hipThreadIdx_x;
+    const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
+
+    T keys[ItemsPerThread];
+    hipcub::LoadDirectStriped<BlockSize>(lid, input + block_offset, keys);
+    
+    #pragma nounroll
+    for(unsigned int trial = 0; trial < Trials; trial++)
+    { 
+        hipcub::BlockRadixSort<T, BlockSize, ItemsPerThread> sort;
+        sort.Sort(keys);
+    }
+
+    hipcub::StoreDirectStriped<BlockSize>(lid, output + block_offset, keys); 
 }
 
-template<hipcub::BlockReduceAlgorithm algorithm>
-struct reduce
-{
-    template<
-        class T,
-        unsigned int BlockSize,
-        unsigned int ItemsPerThread,
-        unsigned int Trials
-    >
-    __device__
-    static void run(const T* input, T* output)
-    {
-        const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
-
-        T values[ItemsPerThread];
-        T reduced_value;
-        for(unsigned int k = 0; k < ItemsPerThread; k++)
-        {
-            values[k] = input[i * ItemsPerThread + k];
-        }
-
-        using breduce_t = hipcub::BlockReduce<T, BlockSize, algorithm>;
-        __shared__ typename breduce_t::TempStorage storage;
-
-        #pragma nounroll
-        for(unsigned int trial = 0; trial < Trials; trial++)
-        {
-            reduced_value = breduce_t(storage).Reduce(values, hipcub::Sum());
-            values[0] = reduced_value;
-        }
-
-        if(hipThreadIdx_x == 0)
-        {
-            output[hipBlockIdx_x] = reduced_value;
-        }
-    }
-};
-
 template<
-    class Benchmark,
     class T,
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
-    unsigned int Trials = 100
+    unsigned int Trials
 >
-void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
+__global__
+void sort_pairs_kernel(const T * input, T * output)
 {
-    // Make sure size is a multiple of BlockSize
+    const unsigned int lid = hipThreadIdx_x;
+    const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
+
+    T keys[ItemsPerThread];
+    T values[ItemsPerThread];
+    hipcub::LoadDirectStriped<BlockSize>(lid, input + block_offset, keys);
+    
+    for(unsigned int i = 0; i < ItemsPerThread; i++)
+    {
+        values[i] = keys[i] + T(1);
+    }
+
+    #pragma nounroll
+    for(unsigned int trial = 0; trial < Trials; trial++)
+    {
+        hipcub::BlockRadixSort<T, BlockSize, ItemsPerThread, T> sort;
+        sort.Sort(keys, values);
+    }
+
+    for(unsigned int i = 0; i < ItemsPerThread; i++)
+    {
+        keys[i] += values[i];
+    }
+    hipcub::StoreDirectStriped<BlockSize>(lid, output + block_offset, keys);
+    
+}
+
+template<
+    class T,
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    unsigned int Trials = 10
+>
+void run_benchmark(benchmark::State& state, benchmark_kinds benchmark_kind, hipStream_t stream, size_t N)
+{
     constexpr auto items_per_block = BlockSize * ItemsPerThread;
     const auto size = items_per_block * ((N + items_per_block - 1)/items_per_block);
-    // Allocate and fill memory
-    std::vector<T> input(size, T(1));
+
+    std::vector<T> input;
+    if(std::is_floating_point<T>::value)
+    {
+        input = benchmark_utils::get_random_data<T>(size, (T)-1000, (T)+1000);
+    }
+    else
+    {
+        input = benchmark_utils::get_random_data<T>(
+            size,
+            std::numeric_limits<T>::min(),
+            std::numeric_limits<T>::max()
+        );
+    }
     T * d_input;
     T * d_output;
     HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
@@ -128,71 +154,93 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     );
     HIP_CHECK(hipDeviceSynchronize());
 
-    for (auto _ : state)
+    for(auto _ : state)
     {
         auto start = std::chrono::high_resolution_clock::now();
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(kernel<Benchmark, T, BlockSize, ItemsPerThread, Trials>),
-            dim3(size/items_per_block), dim3(BlockSize), 0, stream,
-            d_input, d_output
-        );
+
+        if(benchmark_kind == benchmark_kinds::sort_keys)
+        {
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(sort_keys_kernel<T, BlockSize, ItemsPerThread, Trials>),
+                dim3(size/items_per_block), dim3(BlockSize), 0, stream,
+                d_input, d_output
+            );
+        }
+        else if(benchmark_kind == benchmark_kinds::sort_pairs)
+        {
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(sort_pairs_kernel<T, BlockSize, ItemsPerThread, Trials>),
+                dim3(size/items_per_block), dim3(BlockSize), 0, stream,
+                d_input, d_output
+            );
+        }
         HIP_CHECK(hipPeekAtLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         auto end = std::chrono::high_resolution_clock::now();
         auto elapsed_seconds =
             std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-
         state.SetIterationTime(elapsed_seconds.count());
     }
-    state.SetBytesProcessed(state.iterations() * size * sizeof(T) * Trials);
-    state.SetItemsProcessed(state.iterations() * size * Trials);
+    state.SetBytesProcessed(state.iterations() * Trials * size * sizeof(T));
+    state.SetItemsProcessed(state.iterations() * Trials * size);
 
     HIP_CHECK(hipFree(d_input));
     HIP_CHECK(hipFree(d_output));
 }
 
-// IPT - items per thread
 #define CREATE_BENCHMARK(T, BS, IPT) \
-    benchmark::RegisterBenchmark( \
-        (std::string("block_reduce<"#T", "#BS", "#IPT", " + algorithm_name + ">.") + method_name).c_str(), \
-        run_benchmark<Benchmark, T, BS, IPT>, \
-        stream, size \
-    )
+benchmark::RegisterBenchmark( \
+    (std::string("block_radix_sort<" #T ", " #BS ", " #IPT ">.") + name).c_str(), \
+    run_benchmark<T, BS, IPT>, \
+    benchmark_kind, stream, size \
+)
 
 #define BENCHMARK_TYPE(type, block) \
     CREATE_BENCHMARK(type, block, 1), \
     CREATE_BENCHMARK(type, block, 2), \
     CREATE_BENCHMARK(type, block, 3), \
     CREATE_BENCHMARK(type, block, 4), \
-    CREATE_BENCHMARK(type, block, 8), \
-    CREATE_BENCHMARK(type, block, 11), \
-    CREATE_BENCHMARK(type, block, 16)
+    CREATE_BENCHMARK(type, block, 8)
 
-template<class Benchmark>
-void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                    const std::string& method_name,
-                    const std::string& algorithm_name,
+void add_benchmarks(benchmark_kinds benchmark_kind,
+                    const std::string& name,
+                    std::vector<benchmark::internal::Benchmark*>& benchmarks,
                     hipStream_t stream,
                     size_t size)
 {
-    
-    std::vector<benchmark::internal::Benchmark*> new_benchmarks =
+    std::vector<benchmark::internal::Benchmark*> bs =
     {
-        // When block size is less than or equal to warp size
         BENCHMARK_TYPE(int, 64),
-        BENCHMARK_TYPE(float, 64),
-        BENCHMARK_TYPE(double, 64),
-        BENCHMARK_TYPE(int8_t, 64),
-        BENCHMARK_TYPE(uint8_t, 64),
-
+        BENCHMARK_TYPE(int, 128),
+        BENCHMARK_TYPE(int, 192),
         BENCHMARK_TYPE(int, 256),
-        BENCHMARK_TYPE(float, 256),
-        BENCHMARK_TYPE(double, 256),
+        BENCHMARK_TYPE(int, 320),
+        BENCHMARK_TYPE(int, 512),
+
+        BENCHMARK_TYPE(int8_t, 64),
+        BENCHMARK_TYPE(int8_t, 128),
+        BENCHMARK_TYPE(int8_t, 192),
         BENCHMARK_TYPE(int8_t, 256),
+        BENCHMARK_TYPE(int8_t, 320),
+        BENCHMARK_TYPE(int8_t, 512),
+
+        BENCHMARK_TYPE(uint8_t, 64),
+        BENCHMARK_TYPE(uint8_t, 128),
+        BENCHMARK_TYPE(uint8_t, 192),
         BENCHMARK_TYPE(uint8_t, 256),
+        BENCHMARK_TYPE(uint8_t, 320),
+        BENCHMARK_TYPE(uint8_t, 512),
+        
+        BENCHMARK_TYPE(long long, 64),
+        BENCHMARK_TYPE(long long, 128),
+        BENCHMARK_TYPE(long long, 192),
+        BENCHMARK_TYPE(long long, 256),
+        BENCHMARK_TYPE(long long, 320),
+        BENCHMARK_TYPE(long long, 512),
     };
-    benchmarks.insert(benchmarks.end(), new_benchmarks.begin(), new_benchmarks.end());
+
+    benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
 
 int main(int argc, char *argv[])
@@ -217,16 +265,8 @@ int main(int argc, char *argv[])
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
-    // using_warp_scan
-    using reduce_uwr_t = reduce<hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_WARP_REDUCTIONS>;
-    add_benchmarks<reduce_uwr_t>(
-        benchmarks, "reduce", "BLOCK_REDUCE_WARP_REDUCTIONS", stream, size
-    );
-    // reduce then scan
-    using reduce_rr_t = reduce<hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING>;
-    add_benchmarks<reduce_rr_t>(
-        benchmarks, "reduce", "BLOCK_REDUCE_RAKING", stream, size
-    );
+    add_benchmarks(benchmark_kinds::sort_keys, "sort(keys)", benchmarks, stream, size);
+    add_benchmarks(benchmark_kinds::sort_pairs, "sort(keys, values)", benchmarks, stream, size);
 
     // Use manual timing
     for(auto& b : benchmarks)
