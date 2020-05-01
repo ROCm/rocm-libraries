@@ -107,15 +107,20 @@ struct copy_fn final
   , ForwardIt&& first, Sentinel&& last
   , OutputIt&& output
   )
-  // ADL dispatch.
-  THRUST_DECLTYPE_RETURNS(
-    async_copy(
+//  THRUST_DECLTYPE_RETURNS(
+  { return
+    copy_fn::call(
       thrust::detail::derived_cast(thrust::detail::strip_const(exec))
-    , thrust::detail::derived_cast(thrust::detail::strip_const(exec))
+      // Synthesize a suitable new execution policy, because we don't want to
+      // try and extract twice from the one we were passed.
+    , typename remove_cvref_t<
+        decltype(thrust::detail::derived_cast(thrust::detail::strip_const(exec)))
+      >::tag_type{}
     , THRUST_FWD(first), THRUST_FWD(last)
     , THRUST_FWD(output)
     )
-  )
+    ; }
+//  )
 
   template <typename ForwardIt, typename Sentinel, typename OutputIt>
   __host__
