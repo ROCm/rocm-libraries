@@ -35,10 +35,6 @@
 
 // HIP API
 #include <hipcub/hipcub.hpp>
-// #include <hip/hip_runtime.h>
-
-// rocPRIM
-// #include <rocprim/rocprim.hpp>
 
 #define HIP_CHECK(condition)         \
   {                                  \
@@ -52,8 +48,6 @@
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 32;
 #endif
-
-// namespace rp = rocprim;
 
 const unsigned int batch_size = 10;
 const unsigned int warmup_size = 5;
