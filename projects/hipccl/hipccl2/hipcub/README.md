@@ -147,5 +147,3 @@ Bugs and feature requests can be reported through [the issue tracker](https://gi
 
 Contributions of any kind are most welcome! More details are found at [CONTRIBUTING](./CONTRIBUTING.md)
 and [LICENSE](./LICENSE.txt).
-
-## Add silly comment for GPG signing
