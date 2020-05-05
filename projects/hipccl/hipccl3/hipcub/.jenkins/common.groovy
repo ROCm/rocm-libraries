@@ -7,10 +7,13 @@ def runCompileCommand(platform, project, jobName)
         
     def command 
 
+    def getRocPRIM = auxiliary.getLibrary('rocPRIM', platform.jenkinsLabel,'develop')
+
     if(jobName.contains('hipclang'))
     {
         command = """#!/usr/bin/env bash
                 set -x
+                ${getRocPRIM}
                 cd ${project.paths.project_build_prefix}
                 LD_LIBRARY_PATH=/opt/rocm/hcc/lib CXX=/opt/rocm/bin/hipcc ${project.paths.build_command} --hip-clang
                 """
@@ -19,6 +22,7 @@ def runCompileCommand(platform, project, jobName)
     {
         command = """#!/usr/bin/env bash
                 set -x
+                ${getRocPRIM}
                 cd ${project.paths.project_build_prefix}
                 LD_LIBRARY_PATH=/opt/rocm/hcc/lib CXX=/opt/rocm/bin/hcc ${project.paths.build_command}
                 """
