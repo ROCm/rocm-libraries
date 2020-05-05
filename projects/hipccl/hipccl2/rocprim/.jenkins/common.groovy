@@ -30,8 +30,9 @@ def runCompileCommand(platform, project, jobName)
 def runTestCommand (platform, project)
 {
     String sudo = auxiliary.sudo(platform.jenkinsLabel)
-    def testCommand = 'ctest --output-on-failure'
+    String centos = platform.jenkinsLabel.contains('centos') ? '3' : ''
 
+    def testCommand = "ctest${centos} --output-on-failure"
     def command = """#!/usr/bin/env bash
                 set -x
                 cd ${project.paths.project_build_prefix}
