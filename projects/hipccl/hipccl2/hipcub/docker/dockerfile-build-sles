@@ -23,7 +23,6 @@ RUN zypper refresh && zypper -n install\
     libcxxtools9 \
     libnuma1 
 
-
 # docker pipeline runs containers with particular uid
 # create a jenkins user with this specific uid so it can use sudo priviledges
 # Grant any member of sudo group password-less sudo privileges
