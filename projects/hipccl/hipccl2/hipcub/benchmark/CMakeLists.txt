@@ -81,5 +81,5 @@ add_hipcub_benchmark(benchmark_device_reduce.cpp)
 add_hipcub_benchmark(benchmark_device_run_length_encode.cpp)
 add_hipcub_benchmark(benchmark_device_scan.cpp)
 add_hipcub_benchmark(benchmark_device_segmented_radix_sort.cpp)
-
+add_hipcub_benchmark(benchmark_device_segmented_reduce.cpp)
 add_hipcub_benchmark(benchmark_device_select.cpp)
