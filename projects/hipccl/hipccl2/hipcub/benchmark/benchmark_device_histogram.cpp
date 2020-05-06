@@ -20,30 +20,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <iostream>
-#include <chrono>
-#include <vector>
-#include <locale>
-#include <string>
-#include <limits>
-
-// Google Benchmark
-#include "benchmark/benchmark.h"
-// CmdParser
-#include "cmdparser.hpp"
-#include "benchmark_utils.hpp"
+#include "common_benchmark_header.hpp"
 
 // HIP API
-#include <hipcub/hipcub.hpp>
+#include "hipcub/device/device_histogram.hpp"
 
-#define HIP_CHECK(condition)         \
-  {                                  \
-    hipError_t error = condition;    \
-    if(error != hipSuccess){         \
-        std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
-        exit(error); \
-    } \
-  }
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 32;

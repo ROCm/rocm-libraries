@@ -20,40 +20,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <iostream>
-#include <chrono>
-#include <vector>
-#include <locale>
-#include <string>
-#include <limits>
-
-// Google Benchmark
-#include "benchmark/benchmark.h"
-// CmdParser
-#include "cmdparser.hpp"
-#include "benchmark_utils.hpp"
+#include "common_benchmark_header.hpp"
 
 // HIP API
-#include <hipcub/hipcub.hpp>
-// #include <hip/hip_runtime.h>
+#include "hipcub/device/device_run_length_encode.hpp"
 
-// // rocPRIM
-// #include <rocprim/rocprim.hpp>
-
-#define HIP_CHECK(condition)         \
-  {                                   \
-    hipError_t error = condition;    \
-    if(error != hipSuccess){         \
-        std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
-        exit(error); \
-    } \
-  }
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 32;
 #endif
-
-// namespace rp = rocprim;
 
 template<class T>
 void run_encode_benchmark(benchmark::State& state, size_t max_length, hipStream_t stream, size_t size)
@@ -286,8 +261,7 @@ void add_encode_benchmarks(size_t max_length,
 
         CREATE_ENCODE_BENCHMARK(int8_t),
         CREATE_ENCODE_BENCHMARK(uint8_t),
-        // CREATE_ENCODE_BENCHMARK(rocprim::half),
-
+        
         CREATE_ENCODE_BENCHMARK(custom_float2),
         CREATE_ENCODE_BENCHMARK(custom_double2),
     };
@@ -319,8 +293,7 @@ void add_non_trivial_runs_benchmarks(size_t max_length,
 
         CREATE_NON_TRIVIAL_RUNS_BENCHMARK(int8_t),
         CREATE_NON_TRIVIAL_RUNS_BENCHMARK(uint8_t),
-        // CREATE_NON_TRIVIAL_RUNS_BENCHMARK(rocprim::half),
-
+        
         CREATE_NON_TRIVIAL_RUNS_BENCHMARK(custom_float2),
         CREATE_NON_TRIVIAL_RUNS_BENCHMARK(custom_double2),
     };
