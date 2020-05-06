@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_TEST_TEST_UTILS_HPP_
-#define ROCPRIM_TEST_TEST_UTILS_HPP_
+#ifndef HIPCUB_TEST_TEST_UTILS_HPP_
+#define HIPCUB_TEST_TEST_UTILS_HPP_
 
 #ifndef TEST_UTILS_INCLUDE_GAURD
     #error test_utils.hpp must ONLY be included by common_test_header.hpp. Please include common_test_header.hpp instead.
@@ -507,4 +507,4 @@ namespace std
     };
 }
 
-#endif // ROCPRIM_TEST_HIPCUB_TEST_UTILS_HPP_
+#endif // HIPCUB_TEST_HIPCUB_TEST_UTILS_HPP_
