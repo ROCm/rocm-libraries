@@ -18,16 +18,20 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_BENCHMARK_UTILS_HPP_
-#define ROCPRIM_BENCHMARK_UTILS_HPP_
+#ifndef HIPCUB_BENCHMARK_UTILS_HPP_
+#define HIPCUB_BENCHMARK_UTILS_HPP_
 
-#include <algorithm>
-#include <vector>
-#include <random>
-#include <type_traits>
+#ifndef BENCHMARK_UTILS_INCLUDE_GAURD
+    #error benchmark_utils.hpp must ONLY be included by common_benchmark_header.hpp. Please include common_benchmark_header.hpp instead.
+#endif
 
-// hipCUB
-#include <hipcub/hipcub.hpp>
+// hipCUB API
+#ifdef __HIP_PLATFORM_HCC__
+    #include "hipcub/backend/rocprim/util_ptx.hpp"
+#elif defined(__HIP_PLATFORM_NVCC__)
+    #include "hipcub/config.hpp"
+    #include <cub/util_ptx.cuh>
+#endif
 
 namespace benchmark_utils
 {
@@ -181,4 +185,4 @@ inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 
 
 } // end benchmark_util namespace
 
-#endif // ROCPRIM_BENCHMARK_UTILS_HPP_
+#endif // HIPCUB_BENCHMARK_UTILS_HPP_

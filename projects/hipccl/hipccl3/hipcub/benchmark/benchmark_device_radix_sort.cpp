@@ -20,32 +20,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <iostream>
-#include <chrono>
-#include <vector>
-#include <limits>
-#include <memory>
-#include <string>
-#include <cstdio>
-#include <cstdlib>
-
-// Google Benchmark
-#include "benchmark/benchmark.h"
-// CmdParser
-#include "cmdparser.hpp"
-#include "benchmark_utils.hpp"
+#include "common_benchmark_header.hpp"
 
 // HIP API
-#include <hipcub/hipcub.hpp>
+#include "hipcub/device/device_radix_sort.hpp"
 
-#define HIP_CHECK(condition)         \
-  {                                  \
-    hipError_t error = condition;    \
-    if(error != hipSuccess){         \
-        std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
-        exit(error); \
-    } \
-  }
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 32;
@@ -253,99 +232,6 @@ void run_sort_pairs_benchmark(benchmark::State& state,
     HIP_CHECK(hipFree(d_values_output));
 }
 
-#ifdef BENCHMARK_CONFIG_TUNING
-
-#define CREATE_SORT_KEYS_BENCHMARK1(Key, LRB, SRB, BS1, IPT1, BS2, IPT2) \
-benchmarks.push_back( \
-    benchmark::RegisterBenchmark( \
-        (std::string("sort_keys") + "<" #Key ", radix_sort_config<" #LRB ", " #SRB ", kernel_config<" #BS1 ", " #IPT1 ">, kernel_config<" #BS2 ", " #IPT2 "> >").c_str(), \
-        [=](benchmark::State& state) { run_sort_keys_benchmark<Key, rocprim::radix_sort_config<LRB, SRB, rocprim::kernel_config<BS1, IPT1>, rocprim::kernel_config<BS2, IPT2> > >(state, stream, size, keys_input); } \
-    ) \
-);
-
-#define CREATE_SORT_KEYS_BENCHMARK2(Key, LRB, SRB, BS1, IPT1, BS2) \
-    CREATE_SORT_KEYS_BENCHMARK1(Key, LRB, SRB, BS1, IPT1, BS2, 2) \
-    CREATE_SORT_KEYS_BENCHMARK1(Key, LRB, SRB, BS1, IPT1, BS2, 3) \
-    CREATE_SORT_KEYS_BENCHMARK1(Key, LRB, SRB, BS1, IPT1, BS2, 4) \
-    CREATE_SORT_KEYS_BENCHMARK1(Key, LRB, SRB, BS1, IPT1, BS2, 5) \
-    CREATE_SORT_KEYS_BENCHMARK1(Key, LRB, SRB, BS1, IPT1, BS2, 6) \
-    CREATE_SORT_KEYS_BENCHMARK1(Key, LRB, SRB, BS1, IPT1, BS2, 7) \
-    CREATE_SORT_KEYS_BENCHMARK1(Key, LRB, SRB, BS1, IPT1, BS2, 8) \
-    CREATE_SORT_KEYS_BENCHMARK1(Key, LRB, SRB, BS1, IPT1, BS2, 9) \
-    CREATE_SORT_KEYS_BENCHMARK1(Key, LRB, SRB, BS1, IPT1, BS2, 10) \
-    CREATE_SORT_KEYS_BENCHMARK1(Key, LRB, SRB, BS1, IPT1, BS2, 11) \
-    CREATE_SORT_KEYS_BENCHMARK1(Key, LRB, SRB, BS1, IPT1, BS2, 12) \
-    CREATE_SORT_KEYS_BENCHMARK1(Key, LRB, SRB, BS1, IPT1, BS2, 13) \
-    CREATE_SORT_KEYS_BENCHMARK1(Key, LRB, SRB, BS1, IPT1, BS2, 14) \
-    CREATE_SORT_KEYS_BENCHMARK1(Key, LRB, SRB, BS1, IPT1, BS2, 15) \
-    CREATE_SORT_KEYS_BENCHMARK1(Key, LRB, SRB, BS1, IPT1, BS2, 16) \
-    CREATE_SORT_KEYS_BENCHMARK1(Key, LRB, SRB, BS1, IPT1, BS2, 17) \
-    CREATE_SORT_KEYS_BENCHMARK1(Key, LRB, SRB, BS1, IPT1, BS2, 18) \
-    CREATE_SORT_KEYS_BENCHMARK1(Key, LRB, SRB, BS1, IPT1, BS2, 19) \
-    CREATE_SORT_KEYS_BENCHMARK1(Key, LRB, SRB, BS1, IPT1, BS2, 20)
-
-#define CREATE_SORT_KEYS_BENCHMARK3(Key, BS1, IPT1) \
-    CREATE_SORT_KEYS_BENCHMARK2(Key, 4, 3, BS1, IPT1, 256) \
-    CREATE_SORT_KEYS_BENCHMARK2(Key, 5, 4, BS1, IPT1, 256) \
-    CREATE_SORT_KEYS_BENCHMARK2(Key, 6, 4, BS1, IPT1, 256) \
-    CREATE_SORT_KEYS_BENCHMARK2(Key, 7, 6, BS1, IPT1, 256) \
-    CREATE_SORT_KEYS_BENCHMARK2(Key, 8, 7, BS1, IPT1, 256)
-
-#define CREATE_SORT_KEYS_BENCHMARK(Key) \
-    { \
-        auto keys_input = std::make_shared<std::vector<Key>>(generate_keys<Key>(size)); \
-        CREATE_SORT_KEYS_BENCHMARK3(Key, 256, 1) \
-        CREATE_SORT_KEYS_BENCHMARK3(Key, 256, 2) \
-        CREATE_SORT_KEYS_BENCHMARK3(Key, 256, 4) \
-        CREATE_SORT_KEYS_BENCHMARK3(Key, 256, 8) \
-    }
-
-#define CREATE_SORT_PAIRS_BENCHMARK1(Key, Value, LRB, SRB, BS1, IPT1, BS2, IPT2) \
-benchmarks.push_back( \
-    benchmark::RegisterBenchmark( \
-        (std::string("sort_pairs") + "<" #Key ", " #Value ", radix_sort_config<" #LRB ", " #SRB ", kernel_config<" #BS1 ", " #IPT1 ">, kernel_config<" #BS2 ", " #IPT2 "> >").c_str(), \
-        [=](benchmark::State& state) { run_sort_pairs_benchmark<Key, Value, rocprim::radix_sort_config<LRB, SRB, rocprim::kernel_config<BS1, IPT1>, rocprim::kernel_config<BS2, IPT2> > >(state, stream, size, keys_input); } \
-    ) \
-);
-
-#define CREATE_SORT_PAIRS_BENCHMARK2(Key, Value, LRB, SRB, BS1, IPT1, BS2) \
-    CREATE_SORT_PAIRS_BENCHMARK1(Key, Value, LRB, SRB, BS1, IPT1, BS2, 2) \
-    CREATE_SORT_PAIRS_BENCHMARK1(Key, Value, LRB, SRB, BS1, IPT1, BS2, 3) \
-    CREATE_SORT_PAIRS_BENCHMARK1(Key, Value, LRB, SRB, BS1, IPT1, BS2, 4) \
-    CREATE_SORT_PAIRS_BENCHMARK1(Key, Value, LRB, SRB, BS1, IPT1, BS2, 5) \
-    CREATE_SORT_PAIRS_BENCHMARK1(Key, Value, LRB, SRB, BS1, IPT1, BS2, 6) \
-    CREATE_SORT_PAIRS_BENCHMARK1(Key, Value, LRB, SRB, BS1, IPT1, BS2, 7) \
-    CREATE_SORT_PAIRS_BENCHMARK1(Key, Value, LRB, SRB, BS1, IPT1, BS2, 8) \
-    CREATE_SORT_PAIRS_BENCHMARK1(Key, Value, LRB, SRB, BS1, IPT1, BS2, 9) \
-    CREATE_SORT_PAIRS_BENCHMARK1(Key, Value, LRB, SRB, BS1, IPT1, BS2, 10) \
-    CREATE_SORT_PAIRS_BENCHMARK1(Key, Value, LRB, SRB, BS1, IPT1, BS2, 11) \
-    CREATE_SORT_PAIRS_BENCHMARK1(Key, Value, LRB, SRB, BS1, IPT1, BS2, 12) \
-    CREATE_SORT_PAIRS_BENCHMARK1(Key, Value, LRB, SRB, BS1, IPT1, BS2, 13) \
-    CREATE_SORT_PAIRS_BENCHMARK1(Key, Value, LRB, SRB, BS1, IPT1, BS2, 14) \
-    CREATE_SORT_PAIRS_BENCHMARK1(Key, Value, LRB, SRB, BS1, IPT1, BS2, 15) \
-    CREATE_SORT_PAIRS_BENCHMARK1(Key, Value, LRB, SRB, BS1, IPT1, BS2, 16) \
-    CREATE_SORT_PAIRS_BENCHMARK1(Key, Value, LRB, SRB, BS1, IPT1, BS2, 17) \
-    CREATE_SORT_PAIRS_BENCHMARK1(Key, Value, LRB, SRB, BS1, IPT1, BS2, 18) \
-    CREATE_SORT_PAIRS_BENCHMARK1(Key, Value, LRB, SRB, BS1, IPT1, BS2, 19) \
-    CREATE_SORT_PAIRS_BENCHMARK1(Key, Value, LRB, SRB, BS1, IPT1, BS2, 20)
-
-#define CREATE_SORT_PAIRS_BENCHMARK3(Key, Value, BS1, IPT1) \
-    CREATE_SORT_PAIRS_BENCHMARK2(Key, Value, 4, 3, BS1, IPT1, 256) \
-    CREATE_SORT_PAIRS_BENCHMARK2(Key, Value, 5, 4, BS1, IPT1, 256) \
-    CREATE_SORT_PAIRS_BENCHMARK2(Key, Value, 6, 4, BS1, IPT1, 256) \
-    CREATE_SORT_PAIRS_BENCHMARK2(Key, Value, 7, 6, BS1, IPT1, 256) \
-    CREATE_SORT_PAIRS_BENCHMARK2(Key, Value, 8, 7, BS1, IPT1, 256)
-
-#define CREATE_SORT_PAIRS_BENCHMARK(Key, Value) \
-    { \
-        auto keys_input = std::make_shared<std::vector<Key>>(generate_keys<Key>(size)); \
-        CREATE_SORT_PAIRS_BENCHMARK3(Key, Value, 256, 1) \
-        CREATE_SORT_PAIRS_BENCHMARK3(Key, Value, 256, 2) \
-        CREATE_SORT_PAIRS_BENCHMARK3(Key, Value, 256, 4) \
-        CREATE_SORT_PAIRS_BENCHMARK3(Key, Value, 256, 8) \
-    }
-
-#else // BENCHMARK_CONFIG_TUNING
 
 #define CREATE_SORT_KEYS_BENCHMARK(Key) \
     { \
@@ -369,11 +255,6 @@ benchmarks.push_back( \
         ); \
     }
 
-#endif // BENCHMARK_CONFIG_TUNING
-
-// Compilation may never finish, if the compiler needs to compile too many kernels,
-// it is recommended to compile benchmarks only for 1-2 types when BENCHMARK_CONFIG_TUNING is used
-// (all other CREATE_*_BENCHMARK should be commented/removed).
 
 void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                               hipStream_t stream,

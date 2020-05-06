@@ -18,33 +18,13 @@
 // AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// SOFTWARE
 
-#include <iostream>
-#include <chrono>
-#include <vector>
-#include <limits>
-#include <string>
-#include <cstdio>
-#include <cstdlib>
+#include "common_benchmark_header.hpp"
 
-// Google Benchmark
-#include "benchmark/benchmark.h"
-// CmdParser
-#include "cmdparser.hpp"
-#include "benchmark_utils.hpp"
 // HIP API
-#include <hipcub/hipcub.hpp>
+#include "hipcub/device/device_scan.hpp"
 
-
-#define HIP_CHECK(condition)         \
-  {                                  \
-    hipError_t error = condition;    \
-    if(error != hipSuccess){         \
-        std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
-        exit(error); \
-    } \
-  }
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 32;
@@ -181,47 +161,6 @@ void run_benchmark(benchmark::State& state,
     HIP_CHECK(hipFree(d_temp_storage));
 }
 
-#ifdef BENCHMARK_CONFIG_TUNING
-
-#define CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, IPT) \
-benchmark::RegisterBenchmark( \
-    (std::string(EXCL ? "exclusive_scan" : "inclusive_scan") + \
-    ("<" #T ", " #SCAN_OP ", scan_config<" #BS ", " #IPT ", " #BSA "> >")).c_str(), \
-    run_benchmark<EXCL, T, SCAN_OP, typename rocprim::scan_config<BS, IPT, true, rocprim::block_load_method::block_load_transpose, rocprim::block_store_method::block_store_transpose, BSA> >, size, stream, SCAN_OP() \
-),
-
-#define CREATE_BENCHMARK1(EXCL, T, SCAN_OP, BSA, BS) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 1) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 2) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 3) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 4) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 5) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 6) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 7) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 8) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 9) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 10) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 11) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 12) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 13) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 14) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 15) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 16) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 17) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 18) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 19) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 20)
-
-constexpr rocprim::block_scan_algorithm using_warp_scan = rocprim::block_scan_algorithm::using_warp_scan;
-constexpr rocprim::block_scan_algorithm reduce_then_scan = rocprim::block_scan_algorithm::reduce_then_scan;
-
-#define CREATE_BENCHMARK(EXCL, T, SCAN_OP) \
-    CREATE_BENCHMARK1(EXCL, T, SCAN_OP, using_warp_scan, 64) \
-    CREATE_BENCHMARK1(EXCL, T, SCAN_OP, using_warp_scan, 128) \
-    CREATE_BENCHMARK1(EXCL, T, SCAN_OP, using_warp_scan, 256) \
-    CREATE_BENCHMARK1(EXCL, T, SCAN_OP, reduce_then_scan, 256)
-
-#else // BENCHMARK_CONFIG_TUNING
 
 #define CREATE_BENCHMARK(EXCL, T, SCAN_OP) \
 benchmark::RegisterBenchmark( \
@@ -230,7 +169,6 @@ benchmark::RegisterBenchmark( \
     run_benchmark<EXCL, T, SCAN_OP, rocprim::default_config>, size, stream, SCAN_OP() \
 ),
 
-#endif // BENCHMARK_CONFIG_TUNING
 
 int main(int argc, char *argv[])
 {
@@ -263,6 +201,7 @@ int main(int argc, char *argv[])
     std::vector<benchmark::internal::Benchmark*> benchmarks =
     {
         CREATE_BENCHMARK(false, int, hipcub::Sum)
+        CREATE_BENCHMARK(true, int, hipcub::Sum)
 
         CREATE_BENCHMARK(false, float, hipcub::Sum)
         CREATE_BENCHMARK(true, float, hipcub::Sum)
