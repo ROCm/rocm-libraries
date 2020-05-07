@@ -21,12 +21,14 @@ def runCompileCommand(platform, project, jobName)
 def runTestCommand (platform, project)
 {
     String sudo = auxiliary.sudo(platform.jenkinsLabel)
+    String centos = platform.jenkinsLabel.contains('centos') ? '3' : ''
+    def testCommand = "ctest${centos} --output-on-failure"
 
-	def command = """#!/usr/bin/env bash
+    def command = """#!/usr/bin/env bash
                     set -x
                     cd ${project.paths.project_build_prefix}/build/release
                     make -j\$(nproc)
-                    ${sudo} LD_LIBRARY_PATH=/opt/rocm/lib ctest --output-on-failure
+                    ${sudo} LD_LIBRARY_PATH=/opt/rocm/lib ${testCommand}
                 """
 
     platform.runCommand(this, command)
