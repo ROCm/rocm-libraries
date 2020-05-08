@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -79,47 +79,7 @@ struct inclusive_scan
     }
 
 };
-/*
-template<rocprim::block_scan_algorithm algorithm>
-struct exclusive_scan
-{
-    template<
-        class T,
-        unsigned int BlockSize,
-        unsigned int ItemsPerThread,
-        unsigned int Trials
-    >
-    __device__
-    static void run(const T* input, T* output)
-    {
-        const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
-        using U = typename std::remove_reference<T>::type;
 
-        T values[ItemsPerThread];
-        U init = U(100);
-
-        for(unsigned int k = 0; k < ItemsPerThread; k++)
-        {
-            values[k] = input[i * ItemsPerThread + k];
-        }
-
-        using bscan_t = rp::block_scan<T, BlockSize, algorithm>;
-        __shared__ typename bscan_t::storage_type storage;
-
-        #pragma nounroll
-        for(unsigned int trial = 0; trial < Trials; trial++)
-        {
-            bscan_t().exclusive_scan(values, values, init, storage);
-        }
-
-        for(unsigned int k = 0; k < ItemsPerThread; k++)
-        {
-            output[i * ItemsPerThread + k] = values[k];
-        }
-    }
-
-};
-*/
 template<
     class Benchmark,
     class T,
@@ -195,8 +155,8 @@ void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                     hipStream_t stream,
                     size_t size)
 {
-    //using custom_float2 = custom_type<float, float>;
-    //using custom_double2 = custom_type<double, double>;
+    using custom_float2 = benchmark_utils::custom_type<float, float>;
+    using custom_double2 = benchmark_utils::custom_type<double, double>;
 
     std::vector<benchmark::internal::Benchmark*> new_benchmarks =
     {
@@ -206,34 +166,32 @@ void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
         BENCHMARK_TYPE(double, 64),
         BENCHMARK_TYPE(int8_t, 64),
         BENCHMARK_TYPE(uint8_t, 64),
-        //BENCHMARK_TYPE(rocprim::half, 64),
 
         BENCHMARK_TYPE(int, 256),
         BENCHMARK_TYPE(float, 256),
         BENCHMARK_TYPE(double, 256),
         BENCHMARK_TYPE(int8_t, 256),
         BENCHMARK_TYPE(uint8_t, 256),
-        //BENCHMARK_TYPE(rocprim::half, 256),
 
-        //CREATE_BENCHMARK(custom_float2, 256, 1),
-        //CREATE_BENCHMARK(custom_float2, 256, 4),
-        //CREATE_BENCHMARK(custom_float2, 256, 8),
+        CREATE_BENCHMARK(custom_float2, 256, 1),
+        CREATE_BENCHMARK(custom_float2, 256, 4),
+        CREATE_BENCHMARK(custom_float2, 256, 8),
 
-        //CREATE_BENCHMARK(float2, 256, 1),
-        //CREATE_BENCHMARK(float2, 256, 4),
-        //CREATE_BENCHMARK(float2, 256, 8),
+        CREATE_BENCHMARK(float2, 256, 1),
+        CREATE_BENCHMARK(float2, 256, 4),
+        CREATE_BENCHMARK(float2, 256, 8),
 
-        //CREATE_BENCHMARK(custom_double2, 256, 1),
-        //CREATE_BENCHMARK(custom_double2, 256, 4),
-        //CREATE_BENCHMARK(custom_double2, 256, 8),
+        CREATE_BENCHMARK(custom_double2, 256, 1),
+        CREATE_BENCHMARK(custom_double2, 256, 4),
+        CREATE_BENCHMARK(custom_double2, 256, 8),
 
-        //CREATE_BENCHMARK(double2, 256, 1),
-        //CREATE_BENCHMARK(double2, 256, 4),
-        //CREATE_BENCHMARK(double2, 256, 8),
+        CREATE_BENCHMARK(double2, 256, 1),
+        CREATE_BENCHMARK(double2, 256, 4),
+        CREATE_BENCHMARK(double2, 256, 8),
 
-        //CREATE_BENCHMARK(float4, 256, 1),
-        //CREATE_BENCHMARK(float4, 256, 4),
-        //CREATE_BENCHMARK(float4, 256, 8),
+        CREATE_BENCHMARK(float4, 256, 1),
+        CREATE_BENCHMARK(float4, 256, 4),
+        CREATE_BENCHMARK(float4, 256, 8),
     };
     benchmarks.insert(benchmarks.end(), new_benchmarks.begin(), new_benchmarks.end());
 }
