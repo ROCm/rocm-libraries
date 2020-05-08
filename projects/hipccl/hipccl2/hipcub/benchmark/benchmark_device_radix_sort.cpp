@@ -53,7 +53,7 @@ std::vector<Key> generate_keys(size_t size)
     }
 }
 
-template<class Key, class Config>
+template<class Key>
 void run_sort_keys_benchmark(benchmark::State& state,
                              hipStream_t stream,
                              size_t size,
@@ -131,7 +131,7 @@ void run_sort_keys_benchmark(benchmark::State& state,
     HIP_CHECK(hipFree(d_keys_output));
 }
 
-template<class Key, class Value, class Config>
+template<class Key, class Value>
 void run_sort_pairs_benchmark(benchmark::State& state,
                               hipStream_t stream,
                               size_t size,
@@ -239,7 +239,7 @@ void run_sort_pairs_benchmark(benchmark::State& state,
         benchmarks.push_back( \
             benchmark::RegisterBenchmark( \
                 (std::string("sort_keys") + "<" #Key ">").c_str(), \
-                [=](benchmark::State& state) { run_sort_keys_benchmark<Key, rocprim::default_config>(state, stream, size, keys_input); } \
+                [=](benchmark::State& state) { run_sort_keys_benchmark<Key>(state, stream, size, keys_input); } \
             ) \
         ); \
     }
@@ -250,7 +250,7 @@ void run_sort_pairs_benchmark(benchmark::State& state,
         benchmarks.push_back( \
             benchmark::RegisterBenchmark( \
                 (std::string("sort_pairs") + "<" #Key ", " #Value">").c_str(), \
-                [=](benchmark::State& state) { run_sort_pairs_benchmark<Key, Value, rocprim::default_config>(state, stream, size, keys_input); } \
+                [=](benchmark::State& state) { run_sort_pairs_benchmark<Key, Value>(state, stream, size, keys_input); } \
             ) \
         ); \
     }

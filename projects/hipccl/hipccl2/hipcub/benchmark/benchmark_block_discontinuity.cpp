@@ -24,6 +24,8 @@
 
 // HIP API
 #include "hipcub/block/block_discontinuity.hpp"
+
+#include "hipcub/thread/thread_operators.hpp" //to use hipcub::Equality
 #include "hipcub/block/block_load.hpp"
 #include "hipcub/block/block_store.hpp"
 
@@ -31,6 +33,16 @@
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 128;
 #endif
+
+template<class T>
+struct custom_flag_op1
+{
+    HIPCUB_HOST_DEVICE
+    bool operator()(const T& a, const T& b)
+    {
+        return (a == b);
+    }
+};
 
 template<
     class Runner,
@@ -71,11 +83,11 @@ struct flag_heads
             bool head_flags[ItemsPerThread];
             if(WithTile)
             {
-                bdiscontinuity.FlagHeads(head_flags, input, rocprim::equal_to<T>(), T(123));
+                bdiscontinuity.FlagHeads(head_flags, input, hipcub::Equality(), T(123));
             }
             else
             {
-                bdiscontinuity.FlagHeads(head_flags, input, rocprim::equal_to<T>());
+                bdiscontinuity.FlagHeads(head_flags, input, hipcub::Equality());
             }
 
             for(unsigned int i = 0; i < ItemsPerThread; i++)
@@ -113,11 +125,11 @@ struct flag_tails
             bool tail_flags[ItemsPerThread];
             if(WithTile)
             {
-                bdiscontinuity.FlagTails(tail_flags, input, rocprim::equal_to<T>(), T(123));
+                bdiscontinuity.FlagTails(tail_flags, input, hipcub::Equality(), T(123));
             }
             else
             {
-                bdiscontinuity.FlagTails(tail_flags, input, rocprim::equal_to<T>());
+                bdiscontinuity.FlagTails(tail_flags, input, hipcub::Equality());
             }
 
             for(unsigned int i = 0; i < ItemsPerThread; i++)
@@ -156,11 +168,11 @@ struct flag_heads_and_tails
             bool tail_flags[ItemsPerThread];
             if(WithTile)
             {
-                bdiscontinuity.FlagHeadsAndTails(head_flags, T(123), tail_flags, T(234), input, rocprim::equal_to<T>());
+                bdiscontinuity.FlagHeadsAndTails(head_flags, T(123), tail_flags, T(234), input, hipcub::Equality());
             }
             else
             {
-                bdiscontinuity.FlagHeadsAndTails(head_flags, tail_flags, input, rocprim::equal_to<T>());
+                bdiscontinuity.FlagHeadsAndTails(head_flags, tail_flags, input, hipcub::Equality());
             }
 
             for(unsigned int i = 0; i < ItemsPerThread; i++)
