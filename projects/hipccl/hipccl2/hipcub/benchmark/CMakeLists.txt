@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2020 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -19,8 +19,6 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
-
-option(BENCHMARK_CONFIG_TUNING "Benchmark device-level functions using various configs" OFF)
 
 function(add_hipcub_benchmark BENCHMARK_SOURCE)
   get_filename_component(BENCHMARK_TARGET ${BENCHMARK_SOURCE} NAME_WE)
@@ -60,9 +58,6 @@ function(add_hipcub_benchmark BENCHMARK_SOURCE)
     PROPERTIES
       RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmark"
   )
-  if(BENCHMARK_CONFIG_TUNING)
-    target_compile_definitions(${BENCHMARK_TARGET} PRIVATE BENCHMARK_CONFIG_TUNING)
-  endif()
 endfunction()
 
 # ****************************************************************************
