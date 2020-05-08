@@ -32,7 +32,6 @@ const size_t DEFAULT_N = 1024 * 1024 * 32;
 
 template<
     bool Exclusive,
-    class Config,
     class T,
     class BinaryFunction
 >
@@ -56,7 +55,6 @@ auto run_device_scan(void * temporary_storage,
 
 template<
     bool Exclusive,
-    class Config,
     class T,
     class BinaryFunction
 >
@@ -82,8 +80,7 @@ auto run_device_scan(void * temporary_storage,
 template<
     bool Exclusive,
     class T,
-    class BinaryFunction,
-    class Config
+    class BinaryFunction
 >
 void run_benchmark(benchmark::State& state,
                    size_t size,
@@ -110,7 +107,7 @@ void run_benchmark(benchmark::State& state,
     void * d_temp_storage = nullptr;
     // Get size of d_temp_storage
     HIP_CHECK((
-        run_device_scan<Exclusive, Config>(
+        run_device_scan<Exclusive>(
             d_temp_storage, temp_storage_size_bytes,
             d_input, d_output, initial_value, size,
             scan_op, stream
@@ -123,7 +120,7 @@ void run_benchmark(benchmark::State& state,
     for(size_t i = 0; i < 5; i++)
     {
         HIP_CHECK((
-            run_device_scan<Exclusive, Config>(
+            run_device_scan<Exclusive>(
                 d_temp_storage, temp_storage_size_bytes,
                 d_input, d_output, initial_value, size,
                 scan_op, stream
@@ -139,7 +136,7 @@ void run_benchmark(benchmark::State& state,
         for(size_t i = 0; i < batch_size; i++)
         {
             HIP_CHECK((
-                run_device_scan<Exclusive, Config>(
+                run_device_scan<Exclusive>(
                     d_temp_storage, temp_storage_size_bytes,
                     d_input, d_output, initial_value, size,
                     scan_op, stream
@@ -166,7 +163,7 @@ void run_benchmark(benchmark::State& state,
 benchmark::RegisterBenchmark( \
     (std::string(EXCL ? "exclusive_scan" : "inclusive_scan") + \
     ("<" #T ", " #SCAN_OP ">")).c_str(), \
-    run_benchmark<EXCL, T, SCAN_OP, rocprim::default_config>, size, stream, SCAN_OP() \
+    run_benchmark<EXCL, T, SCAN_OP>, size, stream, SCAN_OP() \
 ),
 
 

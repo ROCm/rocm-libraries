@@ -183,7 +183,6 @@ void add_benchmarks(size_t max_length,
 
         CREATE_BENCHMARK(int8_t, int8_t),
         CREATE_BENCHMARK(uint8_t, uint8_t),
-        // CREATE_BENCHMARK(rocprim::half, rocprim::half),
 
         CREATE_BENCHMARK(long long, float),
         CREATE_BENCHMARK(long long, double),

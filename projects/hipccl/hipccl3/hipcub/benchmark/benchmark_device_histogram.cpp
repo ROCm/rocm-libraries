@@ -406,8 +406,7 @@ void add_even_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmark
             BENCHMARK_TYPE(int),
             BENCHMARK_TYPE(int8_t),
             BENCHMARK_TYPE(uint8_t),
-            BENCHMARK_TYPE(unsigned short),
-            BENCHMARK_TYPE(rocprim::half)
+            BENCHMARK_TYPE(unsigned short)
         };
         benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
     };

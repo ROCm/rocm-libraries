@@ -65,7 +65,6 @@ inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 
 {
     std::random_device rd;
     std::default_random_engine gen(rd());
-    //using dis_type = typename std::conditional<std::is_same<rocprim::half, T>::value, float, T>::type;
     std::uniform_real_distribution<T> distribution(min, max);
     std::vector<T> data(size);
     std::generate(
