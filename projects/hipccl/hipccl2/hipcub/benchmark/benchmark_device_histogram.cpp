@@ -24,7 +24,7 @@
 
 // HIP API
 #include "hipcub/device/device_histogram.hpp"
-
+#include "hipcub/iterator/transform_input_iterator.hpp"
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 32;
@@ -119,7 +119,7 @@ void run_even_benchmark(benchmark::State& state,
             d_input, 
             d_histogram,
             bins + 1, lower_level, upper_level,
-            size,
+            int(size),
             stream, false
         )
     );
@@ -136,7 +136,7 @@ void run_even_benchmark(benchmark::State& state,
                 d_input,
                 d_histogram,
                 bins + 1, lower_level, upper_level,
-                size,
+                int(size),
                 stream, false
             )
         );
@@ -155,7 +155,7 @@ void run_even_benchmark(benchmark::State& state,
                     d_input, 
                     d_histogram,
                     bins + 1, lower_level, upper_level,
-                    size,
+                    int(size),
                     stream, false
                 )
             );
@@ -221,7 +221,7 @@ void run_multi_even_benchmark(benchmark::State& state,
             d_input, 
             d_histogram,
             num_levels, lower_level, upper_level,
-            size,
+            int(size),
             stream, false
         )
     ));
@@ -238,7 +238,7 @@ void run_multi_even_benchmark(benchmark::State& state,
                 d_input, 
                 d_histogram,
                 num_levels, lower_level, upper_level,
-                size,
+                int(size),
                 stream, false
             )
         ));
@@ -257,7 +257,7 @@ void run_multi_even_benchmark(benchmark::State& state,
                     d_input, 
                     d_histogram,
                     num_levels, lower_level, upper_level,
-                    size,
+                    int(size),
                     stream, false
                 )
             ));
@@ -320,7 +320,7 @@ void run_range_benchmark(benchmark::State& state, size_t bins, hipStream_t strea
             d_input, 
             d_histogram,
             bins + 1, d_levels,
-            size,
+            int(size),
             stream, false
         )
     );
@@ -337,7 +337,7 @@ void run_range_benchmark(benchmark::State& state, size_t bins, hipStream_t strea
                 d_input, 
                 d_histogram,
                 bins + 1, d_levels,
-                size,
+                int(size),
                 stream, false
             )
         );
@@ -356,7 +356,7 @@ void run_range_benchmark(benchmark::State& state, size_t bins, hipStream_t strea
                     d_input, 
                     d_histogram,
                     bins + 1, d_levels,
-                    size,
+                    int(size),
                     stream, false
                 )
             );

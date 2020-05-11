@@ -58,7 +58,7 @@ void run_benchmark(benchmark::State& state,
     HIP_CHECK(hipDeviceSynchronize());
 
     // Allocate temporary storage memory
-    size_t temp_storage_size_bytes;
+    size_t temp_storage_size_bytes = 0;
     void * d_temp_storage = nullptr;
     // Get size of d_temp_storage
     HIP_CHECK(

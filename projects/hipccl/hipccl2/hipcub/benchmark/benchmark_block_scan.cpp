@@ -177,21 +177,9 @@ void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
         CREATE_BENCHMARK(custom_float2, 256, 4),
         CREATE_BENCHMARK(custom_float2, 256, 8),
 
-        CREATE_BENCHMARK(float2, 256, 1),
-        CREATE_BENCHMARK(float2, 256, 4),
-        CREATE_BENCHMARK(float2, 256, 8),
-
         CREATE_BENCHMARK(custom_double2, 256, 1),
         CREATE_BENCHMARK(custom_double2, 256, 4),
         CREATE_BENCHMARK(custom_double2, 256, 8),
-
-        CREATE_BENCHMARK(double2, 256, 1),
-        CREATE_BENCHMARK(double2, 256, 4),
-        CREATE_BENCHMARK(double2, 256, 8),
-
-        CREATE_BENCHMARK(float4, 256, 1),
-        CREATE_BENCHMARK(float4, 256, 4),
-        CREATE_BENCHMARK(float4, 256, 8),
     };
     benchmarks.insert(benchmarks.end(), new_benchmarks.begin(), new_benchmarks.end());
 }
