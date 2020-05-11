@@ -86,7 +86,7 @@ void run_benchmark(benchmark::State& state,
                    size_t size,
                    const hipStream_t stream,
                    BinaryFunction scan_op)
-{
+{    
     std::vector<T> input = benchmark_utils::get_random_data<T>(size, T(0), T(1000));
     T initial_value = T(123);
     T * d_input;
@@ -103,7 +103,7 @@ void run_benchmark(benchmark::State& state,
     HIP_CHECK(hipDeviceSynchronize());
 
     // Allocate temporary storage memory
-    size_t temp_storage_size_bytes;
+    size_t temp_storage_size_bytes = 0;
     void * d_temp_storage = nullptr;
     // Get size of d_temp_storage
     HIP_CHECK((
@@ -186,7 +186,7 @@ int main(int argc, char *argv[])
     HIP_CHECK(hipGetDevice(&device_id));
     HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
     std::cout << "[HIP] Device name: " << devProp.name << std::endl;
-
+    
     using custom_double2 = benchmark_utils::custom_type<double, double>;
     using custom_float2 = benchmark_utils::custom_type<float, float>;
 
@@ -209,14 +209,8 @@ int main(int argc, char *argv[])
         CREATE_BENCHMARK(false, long long, hipcub::Sum)
         CREATE_BENCHMARK(true, long long, hipcub::Sum)
 
-        CREATE_BENCHMARK(false, float2, hipcub::Sum)
-        CREATE_BENCHMARK(true, float2, hipcub::Sum)
-
         CREATE_BENCHMARK(false, custom_float2, hipcub::Sum)
         CREATE_BENCHMARK(true, custom_float2, hipcub::Sum)
-
-        CREATE_BENCHMARK(false, double2, hipcub::Sum)
-        CREATE_BENCHMARK(true, double2, hipcub::Sum)
 
         CREATE_BENCHMARK(false, custom_double2, hipcub::Sum)
         CREATE_BENCHMARK(true, custom_double2, hipcub::Sum)

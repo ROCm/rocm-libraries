@@ -35,6 +35,8 @@
     #include <cub/util_ptx.cuh>
 #endif
 
+ 
+
 namespace benchmark_utils
 {
 
@@ -116,8 +118,10 @@ struct custom_type
     {
     }
 
-    HIPCUB_HOST_DEVICE inline
-    ~custom_type() = default;
+    #ifndef HIPCUB_CUB_API
+        HIPCUB_HOST_DEVICE inline
+        ~custom_type() = default;
+    #endif
 
     HIPCUB_HOST_DEVICE inline
     custom_type operator+(const custom_type& rhs) const

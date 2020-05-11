@@ -322,10 +322,7 @@ void add_benchmarks(const std::string& name,
         BENCHMARK_TYPE(int8_t, 256),
         BENCHMARK_TYPE(long long, 256),
         BENCHMARK_TYPE(custom_float2, 256),
-        BENCHMARK_TYPE(float2, 256),
         BENCHMARK_TYPE(custom_double2, 256),
-        BENCHMARK_TYPE(double2, 256),
-        BENCHMARK_TYPE(float4, 256),
     };
 
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
