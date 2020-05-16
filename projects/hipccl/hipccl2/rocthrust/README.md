@@ -66,79 +66,18 @@ make package
 [sudo] make install
 ```
 
-### Macro options
+This code sample computes the sum of 100 random numbers in parallel:
 
-```
-# Performance improvement option. If you define THRUST_HIP_PRINTF_ENABLED before
-# thrust includes to 0, you can disable printfs on device side and improve
-# performance. The default value is 1
-#define THRUST_HIP_PRINTF_ENABLED 0
-```
+```c++
+#include <thrust/host_vector.h>
+#include <thrust/device_vector.h>
+#include <thrust/generate.h>
+#include <thrust/reduce.h>
+#include <thrust/functional.h>
+#include <algorithm>
+#include <cstdlib>
 
-### Using rocThrust In A Project
-
-Recommended way of including rocThrust into a CMake project is by using its package
-configuration files.
-
-```cmake
-# On ROCm rocThrust requires rocPRIM
-find_package(rocprim REQUIRED CONFIG PATHS "/opt/rocm/rocprim")
-
-# "/opt/rocm" - default install prefix
-find_package(rocthrust REQUIRED CONFIG PATHS "/opt/rocm/rocthrust")
-
-...
-includes rocThrust headers and roc::rocprim_hip target
-target_link_libraries(<your_target> roc::rocthrust)
-```
-
-## Running Unit Tests
-
-```sh
-# Go to rocThrust build directory
-cd rocThrust; cd build
-
-# Configure with examples flag on
-CXX=hipcc cmake -DBUILD_TEST=ON ..
-
-# Build tests
-make -j4
-
-# To run all tests
-ctest
-
-# To run unit tests for rocThrust
-./test/<unit-test-name>
-```
-
-### Using multiple GPUs concurrently for testing
-
-This feature requires CMake 3.16+ to be used for building / testing. _(Prior versions of CMake cannot assign ids to tests when running in parallel. Assigning tests to distinct devices could only be done at the cost of extreme complexity._)
-
-The unit tests can make use of [CTest Resource Allocation](https://cmake.org/cmake/help/latest/manual/ctest.1.html#resource-allocation) feature enabling distributing tests across multiple GPUs in an intelligent manner. The feature can accelerate testing when multiple GPUs of the same family are in a system as well as test multiple family of products from one invocation without having to resort to `HIP_VISIBLE_DEVICES` environment variable. The feature relies on the presence of a resource spec file.
-
-> IMPORTANT: trying to use `RESOURCE_GROUPS` and `--resource-spec-file` with CMake/CTest respectively of versions prior to 3.16 omits the feature silently. No warnings issued about unknown properties or command-line arguments. Make sure that `cmake`/`ctest` invoked are sufficiently recent.
-
-#### Auto resource spec generation
-
-There is a utility script in the repo that may be called independently:
-
-```shell
-# Go to rocThrust build directory
-cd rocThrust; cd build
-
-# Invoke directly or use CMake script mode via cmake -P
-../cmake/GenerateResourceSpec.cmake
-
-# Assuming you have 2 compatible GPUs in the system
-ctest --resource-spec-file ./resources.json --parallel 2
-```
-
-#### Manual
-
-Assuming the user has 2 GPUs from the gfx900 family and they are the first devices enumerated by the system one may specify during configuration `-D AMDGPU_TEST_TARGETS=gfx900` stating only one family will be tested. Leaving this var empty (default) results in targeting the default device in the system. To let CMake know there are 2 GPUs that should be targeted, one has to feed CTest a JSON file via the `--resource-spec-file <path_to_file>` flag. For example:
-
-```json
+int main(void)
 {
   "version": {
     "major": 1,
@@ -219,4 +158,4 @@ for details.
 Development process
 -------------------
 
-For information on development process and branching, see [this document](doc/branching.md).
+For information on development process, see [this document](doc/development_model.md).
