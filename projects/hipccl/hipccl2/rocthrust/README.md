@@ -2,7 +2,9 @@
 
 HIP back-end for Thrust (alpha release).
 
-## Introduction
+Thrust is included in the NVIDIA HPC SDK and the CUDA Toolkit.
+
+Refer to the [Quick Start Guide](http://github.com/thrust/thrust/wiki/Quick-Start-Guide) page for further information and examples.
 
 Thrust is a parallel algorithm library. This library has been ported to [HIP](https://github.com/ROCm-Developer-Tools/HIP)/[ROCm](https://rocm.github.io/) platform, which uses the [rocPRIM](https://github.com/ROCmSoftwarePlatform/rocPRIM) library. The HIP ported library works on HIP/ROCm platforms. Currently there is no CUDA backend in place.
 
@@ -98,55 +100,49 @@ int main(void)
 }
 ```
 
-## Using custom seeds for the tests
+Releases
+--------
 
-There are 2 CMake configuration-time options that control random data fed to unit tests.
+Thrust is distributed with the NVIDIA HPC SDK and the CUDA Toolkit in addition
+to GitHub.
 
-- `RNG_SEED_COUNT`, (0 by default) controls non-repeatable random dataset count. It draws values from a default constructed `std::random_device`. Should tests fail, the actual seed producing the failure are reported by Gtest, enabling reproducibility.
-- `PRNG_SEEDS`, (1 by default) controls repeatable dataset seeds. It is a CMake formatted (semi-colon delimited) array of 32-bit unsigned integrals.
-  - _(Note: semi-colons often collide with shell command parsing. It is advised to escape the entire CMake CLI argument to avoid the variable itself picking up quotation marks. Pass `cmake "-DPRNG_SEEDS=1;2;3;4"` instead of `cmake -DPRNG_SEEDS="1;2;3;4"`, the two cases differ in how the CMake executable receives its arguments from the OS.)_
+See the [changelog](CHANGELOG.md) for details about specific releases.
 
-## Running Examples
-```sh
-# Go to rocThrust build directory
-cd rocThrust; cd build
-
-# Configure with examples flag on
-CXX=hipcc cmake -DBUILD_EXAMPLES=ON ..
-
-# Build examples
-make -j4
-
-# Run the example you want to run
-# ./examples/example_thrust_<example-name>
-# For example:
-./examples/example_thrust_version
-
-# Example for linking with cpp files
-./examples/cpp_integration/example_thrust_linking
-```
-
-## Running Benchmarks
-```sh
-# Go to rocThrust build directory
-cd rocThrust; cd build
-
-# Configure with benchmarks flag on
-CXX=hipcc cmake -DBUILD_BENCHMARKS=ON ..
-
-# Build benchmarks
-make -j4
-
-# Run the benchmarks
-./benchmarks/benchmark_thrust_bench
-```
-
-
-## Documentation
-
-Documentation is available [here](https://rocthrust.readthedocs.io/en/latest/).
-
-## Support
+| Thrust Release    | Included In                    |
+| ----------------- | ------------------------------ |
+| 1.9.10            | NVIDIA HPC SDK 20.5            |
+| 1.9.9             | CUDA Toolkit 11.0              |
+| 1.9.8-1           | NVIDIA HPC SDK 20.3            |
+| 1.9.8             | CUDA Toolkit 11.0 Early Access |
+| 1.9.7-1           | CUDA Toolkit 10.2 for Tegra    |
+| 1.9.7             | CUDA Toolkit 10.2              |
+| 1.9.6-1           | NVIDIA HPC SDK 20.3            |
+| 1.9.6             | CUDA Toolkit 10.1 Update 2     |
+| 1.9.5             | CUDA Toolkit 10.1 Update 1     |
+| 1.9.4             | CUDA Toolkit 10.1              |
+| 1.9.3             | CUDA Toolkit 10.0              |
+| 1.9.2             | CUDA Toolkit 9.2               |
+| 1.9.1-2           | CUDA Toolkit 9.1               |
+| 1.9.0-5           | CUDA Toolkit 9.0               |
+| 1.8.3             | CUDA Toolkit 8.0               |
+| 1.8.2             | CUDA Toolkit 7.5               |
+| 1.8.1             | CUDA Toolkit 7.0               |
+| 1.8.0             |                                |
+| 1.7.2             | CUDA Toolkit 6.5               |
+| 1.7.1             | CUDA Toolkit 6.0               |
+| 1.7.0             | CUDA Toolkit 5.5               |
+| 1.6.0             |                                |
+| 1.5.3             | CUDA Toolkit 5.0               |
+| 1.5.2             | CUDA Toolkit 4.2               |
+| 1.5.1             | CUDA Toolkit 4.1               |
+| 1.5.0             |                                |
+| 1.4.0             | CUDA Toolkit 4.0               |
+| 1.3.0             |                                |
+| 1.2.1             |                                |
+| 1.2.0             |                                |
+| 1.1.1             |                                |
+| 1.1.0             |                                |
+| 1.0.0             |                                |
 
 CMake Support
 -------------
@@ -155,7 +151,8 @@ Thrust provides CMake configuration files that make it easy to include Thrust
 from other CMake projects. See the [CMake README](thrust/cmake/README.md)
 for details.
 
-Development process
+Development Process
 -------------------
 
-For information on development process, see [this document](doc/development_model.md).
+For information on development process, see [this document](DEVELOPMENT_MODEL.md).
+
