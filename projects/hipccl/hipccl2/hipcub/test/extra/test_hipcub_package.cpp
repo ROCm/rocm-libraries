@@ -20,6 +20,7 @@
 
 #include <iostream>
 #include <vector>
+#include <numeric>
 #include <algorithm>
 
 #include <hip/hip_runtime.h>

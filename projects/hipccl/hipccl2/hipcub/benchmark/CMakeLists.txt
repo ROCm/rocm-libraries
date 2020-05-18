@@ -22,20 +22,17 @@
 
 function(add_hipcub_benchmark BENCHMARK_SOURCE)
   get_filename_component(BENCHMARK_TARGET ${BENCHMARK_SOURCE} NAME_WE)
-  if(HIP_PLATFORM STREQUAL "hcc")
-    add_executable(${BENCHMARK_TARGET} ${BENCHMARK_SOURCE})
-    target_link_libraries(${BENCHMARK_TARGET}
-      PRIVATE
-        hipcub
-        benchmark::benchmark
-    )
-    foreach(amdgpu_target ${AMDGPU_TARGETS})
-    target_link_libraries(${BENCHMARK_TARGET}
-      PRIVATE
-        --amdgpu-target=${amdgpu_target}
-    )
-  endforeach()
-  else()
+  if((HIP_PLATFORM STREQUAL "nvcc"))
+    if((CMAKE_VERSION VERSION_LESS "3.10"))
+      CUDA_INCLUDE_DIRECTORIES(
+          "${PROJECT_BINARY_DIR}/hipcub/include/hipcub"
+          "${PROJECT_BINARY_DIR}/hipcub/include"
+          "${PROJECT_SOURCE_DIR}/hipcub/include"
+          "${GOOGLEBENCHMARK_ROOT}/include"
+          ${GTEST_INCLUDE_DIRS}
+          ${CUB_INCLUDE_DIR}
+      )
+    endif()
     set_source_files_properties(${BENCHMARK_SOURCE}
       PROPERTIES
           CUDA_SOURCE_PROPERTY_FORMAT OBJ
@@ -47,12 +44,25 @@ function(add_hipcub_benchmark BENCHMARK_SOURCE)
     )
     target_include_directories(${BENCHMARK_TARGET} SYSTEM BEFORE
       PUBLIC
-        ${GTEST_INCLUDE_DIRS}
+        "${GOOGLEBENCHMARK_ROOT}/include"
     )
     target_link_libraries(${BENCHMARK_TARGET}
       hipcub_cub
       benchmark::benchmark
     )
+  else()
+    add_executable(${BENCHMARK_TARGET} ${BENCHMARK_SOURCE})
+    target_link_libraries(${BENCHMARK_TARGET}
+      PRIVATE
+        hipcub
+        benchmark::benchmark
+    )
+    foreach(amdgpu_target ${AMDGPU_TARGETS})
+      target_link_libraries(${BENCHMARK_TARGET}
+        PRIVATE
+          --amdgpu-target=${amdgpu_target}
+        )
+    endforeach()
   endif()
   set_target_properties(${BENCHMARK_TARGET}
     PROPERTIES
