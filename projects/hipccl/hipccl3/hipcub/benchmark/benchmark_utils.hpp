@@ -35,7 +35,7 @@
     #include <cub/util_ptx.cuh>
 #endif
 
- 
+
 
 namespace benchmark_utils
 {
@@ -102,6 +102,93 @@ template<class T>
 inline T get_random_value(T min, T max)
 {
     return get_random_data(1, min, max)[0];
+}
+
+
+// Can't use std::prefix_sum for inclusive/exclusive scan, because
+// it does not handle short[] -> int(int a, int b) { a + b; } -> int[]
+// they way we expect. That's because sum in std::prefix_sum's implementation
+// is of type typename std::iterator_traits<InputIt>::value_type (short)
+template<class InputIt, class OutputIt, class BinaryOperation>
+OutputIt host_inclusive_scan(InputIt first, InputIt last,
+                             OutputIt d_first, BinaryOperation op)
+{
+    using input_type = typename std::iterator_traits<InputIt>::value_type;
+    using output_type = typename std::iterator_traits<OutputIt>::value_type;
+    using result_type =
+        typename std::conditional<
+            std::is_void<output_type>::value, input_type, output_type
+        >::type;
+
+    if (first == last) return d_first;
+
+    result_type sum = *first;
+    *d_first = sum;
+
+    while (++first != last) {
+       sum = op(sum, static_cast<result_type>(*first));
+       *++d_first = sum;
+    }
+    return ++d_first;
+}
+
+template<class InputIt, class T, class OutputIt, class BinaryOperation>
+OutputIt host_exclusive_scan(InputIt first, InputIt last,
+                             T initial_value, OutputIt d_first,
+                             BinaryOperation op)
+{
+    using input_type = typename std::iterator_traits<InputIt>::value_type;
+    using output_type = typename std::iterator_traits<OutputIt>::value_type;
+    using result_type =
+        typename std::conditional<
+            std::is_void<output_type>::value, input_type, output_type
+        >::type;
+
+    if (first == last) return d_first;
+
+    result_type sum = initial_value;
+    *d_first = initial_value;
+
+    while ((first+1) != last)
+    {
+       sum = op(sum, static_cast<result_type>(*first));
+       *++d_first = sum;
+       first++;
+    }
+    return ++d_first;
+}
+
+template<class InputIt, class KeyIt, class T, class OutputIt, class BinaryOperation, class KeyCompare>
+OutputIt host_exclusive_scan_by_key(InputIt first, InputIt last, KeyIt k_first,
+                                    T initial_value, OutputIt d_first,
+                                    BinaryOperation op, KeyCompare key_compare_op)
+{
+    using input_type = typename std::iterator_traits<InputIt>::value_type;
+    using output_type = typename std::iterator_traits<OutputIt>::value_type;
+    using result_type =
+        typename std::conditional<
+            std::is_void<output_type>::value, input_type, output_type
+        >::type;
+
+    if (first == last) return d_first;
+
+    result_type sum = initial_value;
+    *d_first = initial_value;
+
+    while ((first+1) != last)
+    {
+        if(key_compare_op(*k_first, *++k_first))
+        {
+            sum = op(sum, static_cast<result_type>(*first));
+        }
+        else
+        {
+            sum = initial_value;
+        }
+        *++d_first = sum;
+        first++;
+    }
+    return ++d_first;
 }
 
 template<class T, class U = T>
