@@ -1,58 +1,9 @@
-### Build dirs ###
-build/
-
-### Docs dirs ###
-doc/html/
-doc/xml/
-doc/latex/
-doc/*.tag
-
-# Created by https://www.gitignore.io/api/c++,cmake
-
-### C++ ###
-# Prerequisites
-*.d
-
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
-
-# Executables
-*.exe
-*.out
-*.app
-
-### CMake ###
-CMakeCache.txt
-CMakeFiles
-CMakeScripts
-Makefile
-cmake_install.cmake
-install_manifest.txt
-compile_commands.json
-CTestTestfile.cmake
-build
+thrust/system/cuda/detail/.gitignore
+*.bash
+*.log
+.p4config
+run
+build*
 doc/html
 discrete_voronoi.pgm
 
