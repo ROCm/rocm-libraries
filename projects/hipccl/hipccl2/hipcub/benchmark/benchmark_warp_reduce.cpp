@@ -186,52 +186,57 @@ benchmark::RegisterBenchmark( \
     stream, size \
 )
 
-#define BENCHMARK_TYPE_32Threads(type) \
-    CREATE_BENCHMARK(type, 32, 64), \
-    CREATE_BENCHMARK(type, 31, 64), \
-    CREATE_BENCHMARK(type, 16, 64), \
-    CREATE_BENCHMARK(type, 15, 64)
 
-#define BENCHMARK_TYPE_64Threads(type) \
-    CREATE_BENCHMARK(type, 32, 64), \
+// If warp size limit is 16
+#define BENCHMARK_TYPE_WS16(type) \
+    CREATE_BENCHMARK(type, 15, 32), \
+    CREATE_BENCHMARK(type, 16, 32)
+
+
+// If warp size limit is 32
+#define BENCHMARK_TYPE_WS32(type) \
+    BENCHMARK_TYPE_WS16(type), \
+    CREATE_BENCHMARK(type, 31, 32), \
+    CREATE_BENCHMARK(type, 32, 32), \
+    CREATE_BENCHMARK(type, 32, 64)
+
+
+// If warp size limit is 64
+#define BENCHMARK_TYPE_WS64(type) \
+    BENCHMARK_TYPE_WS32(type), \
     CREATE_BENCHMARK(type, 37, 64), \
     CREATE_BENCHMARK(type, 61, 64), \
     CREATE_BENCHMARK(type, 64, 64)
 
 
 template<bool Segmented>
-void add_benchmarks32(const std::string& name,
+void add_benchmarks(const std::string& name,
                     std::vector<benchmark::internal::Benchmark*>& benchmarks,
                     hipStream_t stream,
                     size_t size)
 {
     std::vector<benchmark::internal::Benchmark*> bs =
     {
-        BENCHMARK_TYPE_32Threads(int),
-        BENCHMARK_TYPE_32Threads(float),
-        BENCHMARK_TYPE_32Threads(double),
-        BENCHMARK_TYPE_32Threads(int8_t),
-        BENCHMARK_TYPE_32Threads(uint8_t)
+#if HIPCUB_WARP_THREADS == 16
+        BENCHMARK_TYPE_WS16(int),
+        BENCHMARK_TYPE_WS16(float),
+        BENCHMARK_TYPE_WS16(double),
+        BENCHMARK_TYPE_WS16(int8_t),
+        BENCHMARK_TYPE_WS16(uint8_t)
+#elif HIPCUB_WARP_THREADS == 32
+        BENCHMARK_TYPE_WS32(int),
+        BENCHMARK_TYPE_WS32(float),
+        BENCHMARK_TYPE_WS32(double),
+        BENCHMARK_TYPE_WS32(int8_t),
+        BENCHMARK_TYPE_WS32(uint8_t)
+#else
+        BENCHMARK_TYPE_WS64(int),
+        BENCHMARK_TYPE_WS64(float),
+        BENCHMARK_TYPE_WS64(double),
+        BENCHMARK_TYPE_WS64(int8_t),
+        BENCHMARK_TYPE_WS64(uint8_t)
+#endif
     };
-
-    benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
-}
-
-template<bool Segmented>
-void add_benchmarks64(const std::string& name,
-                    std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                    hipStream_t stream,
-                    size_t size)
-{
-    std::vector<benchmark::internal::Benchmark*> bs =
-    {
-        BENCHMARK_TYPE_64Threads(int),
-        BENCHMARK_TYPE_64Threads(float),
-        BENCHMARK_TYPE_64Threads(double),
-        BENCHMARK_TYPE_64Threads(int8_t),
-        BENCHMARK_TYPE_64Threads(uint8_t)
-    };
-
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
 
@@ -254,18 +259,11 @@ int main(int argc, char *argv[])
     HIP_CHECK(hipGetDevice(&device_id));
     HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
     std::cout << "[HIP] Device name: " << devProp.name << std::endl;
-    const int warpsize = devProp.warpSize;
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
-
-    if (warpsize == 64){
-        add_benchmarks64<false>("reduce", benchmarks, stream, size);
-        add_benchmarks64<true>("segmented_reduce", benchmarks, stream, size);
-    } else {
-        add_benchmarks32<false>("reduce", benchmarks, stream, size);
-        add_benchmarks32<true>("segmented_reduce", benchmarks, stream, size);
-    }
+    add_benchmarks<false>("reduce", benchmarks, stream, size);
+    add_benchmarks<true>("segmented_reduce", benchmarks, stream, size);
 
     // Use manual timing
     for(auto& b : benchmarks)
