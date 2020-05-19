@@ -217,13 +217,13 @@ void add_benchmarks(const std::string& name,
 {
     std::vector<benchmark::internal::Benchmark*> bs =
     {
-#if HIPCUB_WARP_THREADS == 16
+#if HIPCUB_WARP_THREADS_MACRO == 16
         BENCHMARK_TYPE_WS16(int),
         BENCHMARK_TYPE_WS16(float),
         BENCHMARK_TYPE_WS16(double),
         BENCHMARK_TYPE_WS16(int8_t),
         BENCHMARK_TYPE_WS16(uint8_t)
-#elif HIPCUB_WARP_THREADS == 32
+#elif HIPCUB_WARP_THREADS_MACRO == 32
         BENCHMARK_TYPE_WS32(int),
         BENCHMARK_TYPE_WS32(float),
         BENCHMARK_TYPE_WS32(double),
