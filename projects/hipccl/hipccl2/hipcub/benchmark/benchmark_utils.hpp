@@ -35,7 +35,11 @@
     #include <cub/util_ptx.cuh>
 #endif
 
-
+#ifndef HIPCUB_CUB_API
+#define HIPCUB_WARP_THREADS_MACRO warpSize
+#else
+#define HIPCUB_WARP_THREADS_MACRO HIPCUB_WARP_THREADS
+#endif
 
 namespace benchmark_utils
 {

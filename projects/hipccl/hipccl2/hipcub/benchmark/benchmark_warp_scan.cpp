@@ -169,7 +169,7 @@ void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
 
     std::vector<benchmark::internal::Benchmark*> new_benchmarks =
     {
-#if HIPCUB_WARP_THREADS == 16
+#if HIPCUB_WARP_THREADS_MACRO == 16
         BENCHMARK_TYPE_WS16(int),
         BENCHMARK_TYPE_WS16(float),
         BENCHMARK_TYPE_WS16(double),
@@ -177,7 +177,7 @@ void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
         BENCHMARK_TYPE_WS16(uint8_t),
         BENCHMARK_TYPE_WS16(custom_double2),
         BENCHMARK_TYPE_WS16(custom_int_double)
-#elif HIPCUB_WARP_THREADS == 32
+#elif HIPCUB_WARP_THREADS_MACRO == 32
         BENCHMARK_TYPE_WS32(int),
         BENCHMARK_TYPE_WS32(float),
         BENCHMARK_TYPE_WS32(double),
