@@ -20,6 +20,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+// CUB's implementation of single_pass_scan_operators has maybe uninitialized parameters,
+// disable the warning because all warnings are threated as errors:
+#ifdef __HIP_PLATFORM_NVCC__
+    #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
+
 #include "common_benchmark_header.hpp"
 
 // HIP API
@@ -89,17 +95,17 @@ void run_benchmark(benchmark::State& state, size_t max_length, hipStream_t strea
 
     void * d_temporary_storage = nullptr;
     size_t temporary_storage_bytes = 0;
-   
+
     hipcub::Sum reduce_op;
 
     HIP_CHECK(
         hipcub::DeviceReduce::ReduceByKey(
             nullptr, temporary_storage_bytes,
-            d_keys_input, d_unique_output, d_values_input, 
+            d_keys_input, d_unique_output, d_values_input,
             d_aggregates_output,
             d_unique_count_output,
-            reduce_op, size, 
-            stream 
+            reduce_op, size,
+            stream
         )
     );
 
@@ -112,10 +118,10 @@ void run_benchmark(benchmark::State& state, size_t max_length, hipStream_t strea
         HIP_CHECK(
             hipcub::DeviceReduce::ReduceByKey(
                 d_temporary_storage, temporary_storage_bytes,
-                d_keys_input, 
+                d_keys_input,
                 d_unique_output, d_values_input, d_aggregates_output,
                 d_unique_count_output,
-                reduce_op, size, 
+                reduce_op, size,
                 stream
             )
         );
@@ -131,10 +137,10 @@ void run_benchmark(benchmark::State& state, size_t max_length, hipStream_t strea
             HIP_CHECK(
                 hipcub::DeviceReduce::ReduceByKey(
                     d_temporary_storage, temporary_storage_bytes,
-                    d_keys_input, 
+                    d_keys_input,
                     d_unique_output, d_values_input, d_aggregates_output,
                     d_unique_count_output,
-                    reduce_op, size, 
+                    reduce_op, size,
                     stream
                 )
             );

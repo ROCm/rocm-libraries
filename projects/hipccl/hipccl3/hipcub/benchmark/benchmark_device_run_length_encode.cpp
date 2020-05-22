@@ -20,6 +20,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+// CUB's implementation of DeviceRunLengthEncode has unused parameters,
+// disable the warning because all warnings are threated as errors:
+#ifdef __HIP_PLATFORM_NVCC__
+    #pragma GCC diagnostic ignored "-Wunused-parameter"
+#endif
+
 #include "common_benchmark_header.hpp"
 
 // HIP API
@@ -78,7 +84,7 @@ void run_encode_benchmark(benchmark::State& state, size_t max_length, hipStream_
     HIP_CHECK(
         hipcub::DeviceRunLengthEncode::Encode(
             nullptr, temporary_storage_bytes,
-            d_input, 
+            d_input,
             d_unique_output, d_counts_output, d_runs_count_output,
             size, stream, false
         )
@@ -93,7 +99,7 @@ void run_encode_benchmark(benchmark::State& state, size_t max_length, hipStream_
         HIP_CHECK(
             hipcub::DeviceRunLengthEncode::Encode(
                 d_temporary_storage, temporary_storage_bytes,
-                d_input, 
+                d_input,
                 d_unique_output, d_counts_output, d_runs_count_output,
                 size,
                 stream, false
@@ -261,7 +267,7 @@ void add_encode_benchmarks(size_t max_length,
 
         CREATE_ENCODE_BENCHMARK(int8_t),
         CREATE_ENCODE_BENCHMARK(uint8_t),
-        
+
         CREATE_ENCODE_BENCHMARK(custom_float2),
         CREATE_ENCODE_BENCHMARK(custom_double2),
     };
@@ -293,7 +299,7 @@ void add_non_trivial_runs_benchmarks(size_t max_length,
 
         CREATE_NON_TRIVIAL_RUNS_BENCHMARK(int8_t),
         CREATE_NON_TRIVIAL_RUNS_BENCHMARK(uint8_t),
-        
+
         CREATE_NON_TRIVIAL_RUNS_BENCHMARK(custom_float2),
         CREATE_NON_TRIVIAL_RUNS_BENCHMARK(custom_double2),
     };

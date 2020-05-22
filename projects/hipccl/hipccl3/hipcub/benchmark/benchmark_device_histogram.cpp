@@ -20,6 +20,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+// CUB's implementation of DeviceRunLengthEncode has unused parameters,
+// disable the warning because all warnings are threated as errors:
+#ifdef __HIP_PLATFORM_NVCC__
+    #pragma GCC diagnostic ignored "-Wunused-parameter"
+#endif
+
 #include "common_benchmark_header.hpp"
 
 // HIP API
@@ -116,7 +122,7 @@ void run_even_benchmark(benchmark::State& state,
     HIP_CHECK(
         hipcub::DeviceHistogram::HistogramEven(
             d_temporary_storage, temporary_storage_bytes,
-            d_input, 
+            d_input,
             d_histogram,
             bins + 1, lower_level, upper_level,
             int(size),
@@ -152,7 +158,7 @@ void run_even_benchmark(benchmark::State& state,
             HIP_CHECK(
                 hipcub::DeviceHistogram::HistogramEven(
                     d_temporary_storage, temporary_storage_bytes,
-                    d_input, 
+                    d_input,
                     d_histogram,
                     bins + 1, lower_level, upper_level,
                     int(size),
@@ -218,7 +224,7 @@ void run_multi_even_benchmark(benchmark::State& state,
     HIP_CHECK((
         hipcub::DeviceHistogram::MultiHistogramEven<Channels, ActiveChannels>(
             d_temporary_storage, temporary_storage_bytes,
-            d_input, 
+            d_input,
             d_histogram,
             num_levels, lower_level, upper_level,
             int(size),
@@ -235,7 +241,7 @@ void run_multi_even_benchmark(benchmark::State& state,
         HIP_CHECK((
             hipcub::DeviceHistogram::MultiHistogramEven<Channels, ActiveChannels>(
                 d_temporary_storage, temporary_storage_bytes,
-                d_input, 
+                d_input,
                 d_histogram,
                 num_levels, lower_level, upper_level,
                 int(size),
@@ -254,7 +260,7 @@ void run_multi_even_benchmark(benchmark::State& state,
             HIP_CHECK((
                 hipcub::DeviceHistogram::MultiHistogramEven<Channels, ActiveChannels>(
                     d_temporary_storage, temporary_storage_bytes,
-                    d_input, 
+                    d_input,
                     d_histogram,
                     num_levels, lower_level, upper_level,
                     int(size),
@@ -317,7 +323,7 @@ void run_range_benchmark(benchmark::State& state, size_t bins, hipStream_t strea
     HIP_CHECK(
         hipcub::DeviceHistogram::HistogramRange(
             d_temporary_storage, temporary_storage_bytes,
-            d_input, 
+            d_input,
             d_histogram,
             bins + 1, d_levels,
             int(size),
@@ -334,7 +340,7 @@ void run_range_benchmark(benchmark::State& state, size_t bins, hipStream_t strea
         HIP_CHECK(
             hipcub::DeviceHistogram::HistogramRange(
                 d_temporary_storage, temporary_storage_bytes,
-                d_input, 
+                d_input,
                 d_histogram,
                 bins + 1, d_levels,
                 int(size),
@@ -353,7 +359,7 @@ void run_range_benchmark(benchmark::State& state, size_t bins, hipStream_t strea
             HIP_CHECK(
                 hipcub::DeviceHistogram::HistogramRange(
                     d_temporary_storage, temporary_storage_bytes,
-                    d_input, 
+                    d_input,
                     d_histogram,
                     bins + 1, d_levels,
                     int(size),
