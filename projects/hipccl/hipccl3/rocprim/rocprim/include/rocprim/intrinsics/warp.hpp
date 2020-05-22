@@ -47,8 +47,13 @@ ROCPRIM_DEVICE inline
 unsigned int masked_bit_count(unsigned long long x, unsigned int add = 0)
 {
     int c;
+    #ifdef __HIP__
+    c = ::__builtin_amdgcn_mbcnt_lo(static_cast<int>(x), add);
+    c = ::__builtin_amdgcn_mbcnt_hi(static_cast<int>(x >> 32), c);
+    #else
     c = ::__mbcnt_lo(static_cast<int>(x), add);
     c = ::__mbcnt_hi(static_cast<int>(x >> 32), c);
+    #endif  
     return c;
 }
 
