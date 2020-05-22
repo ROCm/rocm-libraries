@@ -157,7 +157,7 @@ void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                     hipStream_t stream,
                     size_t size)
 {
-    
+
     std::vector<benchmark::internal::Benchmark*> new_benchmarks =
     {
         // When block size is less than or equal to warp size

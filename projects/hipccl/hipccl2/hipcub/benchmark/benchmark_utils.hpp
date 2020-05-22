@@ -205,8 +205,24 @@ struct custom_type
     U y;
 
     HIPCUB_HOST_DEVICE inline
-    custom_type(T xx = 0, U yy = 0) : x(xx), y(yy)
+    constexpr custom_type() {}
+
+    HIPCUB_HOST_DEVICE inline
+    constexpr custom_type(T xx, U yy) : x(xx), y(yy)
     {
+    }
+
+    HIPCUB_HOST_DEVICE inline
+    constexpr custom_type(T xy) : x(xy), y(xy)
+    {
+    }
+
+    template<class V, class W = V>
+    HIPCUB_HOST_DEVICE inline
+    custom_type(const custom_type<V,W>& other)
+    {
+        x = other.x;
+        y = other.y;
     }
 
     #ifndef HIPCUB_CUB_API
@@ -215,9 +231,23 @@ struct custom_type
     #endif
 
     HIPCUB_HOST_DEVICE inline
+    custom_type& operator=(const custom_type& other)
+    {
+        x = other.x;
+        y = other.y;
+        return *this;
+    }
+
+    HIPCUB_HOST_DEVICE inline
     custom_type operator+(const custom_type& rhs) const
     {
         return custom_type(x + rhs.x, y + rhs.y);
+    }
+
+    HIPCUB_HOST_DEVICE inline
+    custom_type operator-(const custom_type& other) const
+    {
+        return custom_type(x - other.x, y - other.y);
     }
 
     HIPCUB_HOST_DEVICE inline
@@ -227,10 +257,24 @@ struct custom_type
     }
 
     HIPCUB_HOST_DEVICE inline
+    bool operator>(const custom_type& other) const
+    {
+        return (x > other.x || (x == other.x && y > other.y));
+    }
+
+    HIPCUB_HOST_DEVICE inline
     bool operator==(const custom_type& rhs) const
     {
         return x == rhs.x && y == rhs.y;
     }
+
+    HIPCUB_HOST_DEVICE inline
+    bool operator!=(const custom_type& other) const
+    {
+       return !(*this == other);
+    }
+
+
 };
 
 template<typename>
@@ -280,5 +324,45 @@ inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 
 }
 
 } // end benchmark_util namespace
+
+// Need for hipcub::DeviceReduce::Min/Max etc.
+namespace std
+{
+    template<>
+    class numeric_limits<benchmark_utils::custom_type<int>>
+    {
+        using T = typename benchmark_utils::custom_type<int>;
+
+        public:
+
+        static constexpr inline T max()
+        {
+            return std::numeric_limits<typename T::first_type>::max();
+        }
+
+        static constexpr inline T lowest()
+        {
+            return std::numeric_limits<typename T::first_type>::lowest();
+        }
+    };
+
+    template<>
+    class numeric_limits<benchmark_utils::custom_type<float>>
+    {
+        using T = typename benchmark_utils::custom_type<float>;
+
+        public:
+
+        static constexpr inline T max()
+        {
+            return std::numeric_limits<typename T::first_type>::max();
+        }
+
+        static constexpr inline T lowest()
+        {
+            return std::numeric_limits<typename T::first_type>::lowest();
+        }
+    };
+}
 
 #endif // HIPCUB_BENCHMARK_UTILS_HPP_

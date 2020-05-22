@@ -20,6 +20,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE
 
+// CUB's implementation of single_pass_scan_operators has maybe uninitialized parameters,
+// disable the warning because all warnings are threated as errors:
+#ifdef __HIP_PLATFORM_NVCC__
+    #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
+
 #include "common_benchmark_header.hpp"
 
 // HIP API
@@ -86,7 +92,7 @@ void run_benchmark(benchmark::State& state,
                    size_t size,
                    const hipStream_t stream,
                    BinaryFunction scan_op)
-{    
+{
     std::vector<T> input = benchmark_utils::get_random_data<T>(size, T(0), T(1000));
     T initial_value = T(123);
     T * d_input;
@@ -186,7 +192,7 @@ int main(int argc, char *argv[])
     HIP_CHECK(hipGetDevice(&device_id));
     HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
     std::cout << "[HIP] Device name: " << devProp.name << std::endl;
-    
+
     using custom_double2 = benchmark_utils::custom_type<double, double>;
     using custom_float2 = benchmark_utils::custom_type<float, float>;
 
