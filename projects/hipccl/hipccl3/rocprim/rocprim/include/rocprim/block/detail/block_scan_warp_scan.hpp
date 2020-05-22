@@ -688,7 +688,7 @@ private:
     }
 
     // i-th warp will have its prefix stored in storage_.warp_prefixes[i-1]
-    template<class BinaryFunction>
+    template<class BinaryFunction, unsigned int BlockSize_ = BlockSize>
     ROCPRIM_DEVICE inline
     void calculate_warp_prefixes(const unsigned int flat_tid,
                                  const unsigned int warp_id,
@@ -699,7 +699,7 @@ private:
         storage_type_& storage_ = storage.get();
         // Save the warp reduction result, that is the scan result
         // for last element in each warp
-        if(flat_tid == ::rocprim::min((warp_id+1) * warp_size_, BlockSize) - 1)
+        if(flat_tid == ::rocprim::min((warp_id+1) * warp_size_, BlockSize_) - 1)
         {
             storage_.warp_prefixes[warp_id] = inclusive_input;
         }
