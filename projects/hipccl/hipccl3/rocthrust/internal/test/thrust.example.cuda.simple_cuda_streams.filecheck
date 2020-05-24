@@ -1,0 +1,3 @@
+     CHECK: ping! ball is now
+     CHECK: pong! ball is now
+     CHECK: {{(ping|pong)}}! ball is now 25
