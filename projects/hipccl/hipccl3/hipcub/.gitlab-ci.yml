@@ -175,9 +175,10 @@ benchmark:rocm_vega20:
     - vega20
     - rocm
   script:
-    - cd build/benchmark
-    - $SUDO_CMD chmod +x ${CI_PROJECT_DIR}/.scripts/benchmark.sh
-    - $SUDO_CMD ${CI_PROJECT_DIR}/.scripts/benchmark.sh
+    - cd build
+    - cmake
+      -D BENCHMARK_BINARY_DIR=benchmark
+      -P ${CI_PROJECT_DIR}/.gitlab/cmake-run-benchmark.txt
   allow_failure: true
 
 test:rocm_s9300:
@@ -208,9 +209,10 @@ benchmark:rocm_s9300:
     - s9300
     - rocm
   script:
-    - cd build/benchmark
-    - $SUDO_CMD chmod +x ${CI_PROJECT_DIR}/.scripts/benchmark.sh
-    - $SUDO_CMD ${CI_PROJECT_DIR}/.scripts/benchmark.sh
+    - cd build
+    - cmake
+      -D BENCHMARK_BINARY_DIR=benchmark
+      -P ${CI_PROJECT_DIR}/.gitlab/cmake-run-benchmark.txt
 
 test:rocm_mi25:
   extends: .rocm
@@ -239,9 +241,10 @@ benchmark:rocm_mi25:
     - mi25
     - rocm
   script:
-    - cd build/benchmark
-    - $SUDO_CMD chmod +x ${CI_PROJECT_DIR}/.scripts/benchmark.sh
-    - $SUDO_CMD ${CI_PROJECT_DIR}/.scripts/benchmark.sh
+    - cd build
+    - cmake
+      -D BENCHMARK_BINARY_DIR=benchmark
+      -P ${CI_PROJECT_DIR}/.gitlab/cmake-run-benchmark.txt
 
 test:rocm_package:
   extends: .rocm
@@ -403,10 +406,11 @@ benchmark:nvcc_titanv:
   needs:
     - build:nvcc-benchmark
   script:
-    - cd build/benchmark
+    - cd build
     - CUDA_VISIBLE_DEVICES=0
-    - $SUDO_CMD chmod +x ${CI_PROJECT_DIR}/.scripts/benchmark.sh
-    - $SUDO_CMD ${CI_PROJECT_DIR}/.scripts/benchmark.sh
+    - cmake
+      -D BENCHMARK_BINARY_DIR=benchmark
+      -P ${CI_PROJECT_DIR}/.gitlab/cmake-run-benchmark.txt
   allow_failure: true
 
 test:nvcc_980:
@@ -430,10 +434,11 @@ benchmark:nvcc_980:
   needs:
     - build:nvcc-benchmark
   script:
-    - cd build/benchmark
+    - cd build
     - CUDA_VISIBLE_DEVICES=1
-    - $SUDO_CMD chmod +x ${CI_PROJECT_DIR}/.scripts/benchmark.sh
-    - $SUDO_CMD ${CI_PROJECT_DIR}/.scripts/benchmark.sh
+    - cmake
+      -D BENCHMARK_BINARY_DIR=benchmark
+      -P ${CI_PROJECT_DIR}/.gitlab/cmake-run-benchmark.txt
   allow_failure: true
 
 test:nvcc_package:
