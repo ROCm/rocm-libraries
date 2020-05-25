@@ -141,6 +141,10 @@ std::vector<size_t> get_sizes(int seed_value)
 
 TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeys)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using key_type = typename TestFixture::params::key_type;
     constexpr bool descending = TestFixture::params::descending;
     constexpr unsigned int start_bit = TestFixture::params::start_bit;
@@ -293,6 +297,10 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeys)
 
 TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairs)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using key_type = typename TestFixture::params::key_type;
     using value_type = typename TestFixture::params::value_type;
     constexpr bool descending = TestFixture::params::descending;
@@ -486,6 +494,10 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairs)
 
 TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using key_type = typename TestFixture::params::key_type;
     constexpr bool descending = TestFixture::params::descending;
     constexpr unsigned int start_bit = TestFixture::params::start_bit;
@@ -643,6 +655,10 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
 
 TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+    
     using key_type = typename TestFixture::params::key_type;
     using value_type = typename TestFixture::params::value_type;
     constexpr bool descending = TestFixture::params::descending;

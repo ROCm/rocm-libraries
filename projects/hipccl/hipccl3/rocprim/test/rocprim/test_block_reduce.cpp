@@ -116,6 +116,10 @@ struct static_run_algo
 
 TYPED_TEST(RocprimBlockReduceSingleValueTests, Reduce)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::input_type;
     using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
     constexpr size_t block_size = TestFixture::block_size;
@@ -175,6 +179,10 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, Reduce)
 
 TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceMultiplies)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::input_type;
     using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_multiplies, rocprim::multiplies<T>>::type;
     constexpr size_t block_size = TestFixture::block_size;
@@ -303,6 +311,10 @@ struct static_run_valid
 
 TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceValid)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::input_type;
     using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
     constexpr size_t block_size = TestFixture::block_size;
@@ -528,6 +540,10 @@ struct static_for_input_array<N, N, T, BlockSize, Algorithm>
 
 TYPED_TEST(RocprimBlockReduceInputArrayTests, Reduce)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+    
     using T = typename TestFixture::input_type;
     constexpr size_t block_size = TestFixture::block_size;
 

@@ -63,6 +63,10 @@ void warp_inclusive_scan_kernel(T* device_input, T* device_output)
 
 TYPED_TEST(RocprimWarpScanTests, InclusiveScan)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::params::type;
     using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
     // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
@@ -174,6 +178,10 @@ void warp_inclusive_scan_reduce_kernel(
 
 TYPED_TEST(RocprimWarpScanTests, InclusiveScanReduce)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::params::type;
     using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
     // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
@@ -297,6 +305,10 @@ void warp_exclusive_scan_kernel(T* device_input, T* device_output, T init)
 
 TYPED_TEST(RocprimWarpScanTests, ExclusiveScan)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::params::type;
     using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
     // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
@@ -411,6 +423,10 @@ void warp_exclusive_scan_reduce_kernel(
 
 TYPED_TEST(RocprimWarpScanTests, ExclusiveReduceScan)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::params::type;
     using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
     // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
@@ -548,6 +564,10 @@ void warp_scan_kernel(
 
 TYPED_TEST(RocprimWarpScanTests, Scan)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::params::type;
     using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
     // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
@@ -692,6 +712,10 @@ void warp_scan_reduce_kernel(
 
 TYPED_TEST(RocprimWarpScanTests, ScanReduce)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::params::type;
     using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
     // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
@@ -825,6 +849,10 @@ TYPED_TEST(RocprimWarpScanTests, ScanReduce)
 
 TYPED_TEST(RocprimWarpScanTests, InclusiveScanCustomType)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+    
     using base_type = typename TestFixture::params::type;
     using T = test_utils::custom_test_type<base_type>;
     // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()

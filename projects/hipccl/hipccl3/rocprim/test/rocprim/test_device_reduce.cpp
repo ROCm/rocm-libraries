@@ -86,6 +86,10 @@ TYPED_TEST_CASE(RocprimDeviceReduceTests, RocprimDeviceReduceTestsParams);
 
 TYPED_TEST(RocprimDeviceReduceTests, ReduceEmptyInput)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
@@ -140,6 +144,10 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceEmptyInput)
 
 TYPED_TEST(RocprimDeviceReduceTests, Reduce)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     using binary_op_type = typename std::conditional<std::is_same<U, rocprim::half>::value, test_utils::half_plus, rocprim::plus<U>>::type;
@@ -246,6 +254,10 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
 
 TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     using binary_op_type = typename std::conditional<std::is_same<U, rocprim::half>::value, test_utils::half_minimum, rocprim::minimum<U>>::type;
@@ -378,6 +390,10 @@ struct arg_min<int, rocprim::half>
 
 TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+    
     using T = typename TestFixture::input_type;
     using key_value = rocprim::key_value_pair<int, T>;
     const bool debug_synchronous = TestFixture::debug_synchronous;

@@ -586,6 +586,10 @@ struct static_for
 {
     static void run()
     {
+        int device_id = test_utils::obtain_device_from_ctest();
+        SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+        HIP_CHECK(hipSetDevice(device_id));
+
         test_block_discontinuity<Type, FlagType, FlagOpType, Method, BlockSize, items[First]>();
         static_for<First + 1, Last, Type, FlagType, FlagOpType, Method, BlockSize>::run();
     }
