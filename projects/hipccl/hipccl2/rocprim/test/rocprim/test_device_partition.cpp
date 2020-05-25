@@ -84,6 +84,10 @@ TYPED_TEST_CASE(RocprimDevicePartitionTests, RocprimDevicePartitionTestsParams);
 
 TYPED_TEST(RocprimDevicePartitionTests, Flagged)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     using F = typename TestFixture::flag_type;
@@ -234,6 +238,10 @@ TYPED_TEST(RocprimDevicePartitionTests, Flagged)
 
 TYPED_TEST(RocprimDevicePartitionTests, PredicateEmptyInput)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
@@ -323,6 +331,10 @@ TYPED_TEST(RocprimDevicePartitionTests, PredicateEmptyInput)
 
 TYPED_TEST(RocprimDevicePartitionTests, Predicate)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+    
     using O = typename TestFixture::input_type;
     using T = typename std::conditional<std::is_same<O, rocprim::half>::value, int, O>::type;//typename TestFixture::input_type;
     using U = typename TestFixture::output_type;

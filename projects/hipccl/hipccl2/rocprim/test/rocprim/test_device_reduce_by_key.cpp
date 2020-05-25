@@ -119,6 +119,10 @@ std::vector<size_t> get_sizes(int seed_value)
 
 TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+    
     using key_type = typename TestFixture::params::key_type;
     using value_type = typename TestFixture::params::value_type;
     using aggregate_type = typename TestFixture::params::aggregate_type;

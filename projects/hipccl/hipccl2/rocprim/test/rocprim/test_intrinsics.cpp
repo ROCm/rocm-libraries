@@ -105,6 +105,10 @@ void shuffle_up_kernel(T* data, unsigned int delta, unsigned int width)
 
 TYPED_TEST(RocprimIntrinsicsTests, ShuffleUp)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::type;
     const size_t hardware_warp_size = ::rocprim::warp_size();
     const size_t size = hardware_warp_size;
@@ -203,6 +207,10 @@ void shuffle_down_kernel(T* data, unsigned int delta, unsigned int width)
 
 TYPED_TEST(RocprimIntrinsicsTests, ShuffleDown)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::type;
     const size_t hardware_warp_size = ::rocprim::warp_size();
     const size_t size = hardware_warp_size;
@@ -303,6 +311,10 @@ void shuffle_index_kernel(T* data, int* src_lanes, unsigned int width)
 
 TYPED_TEST(RocprimIntrinsicsTests, ShuffleIndex)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::type;
     const size_t hardware_warp_size = ::rocprim::warp_size();
     const size_t size = hardware_warp_size;
@@ -402,6 +414,10 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleIndex)
 
 TEST(RocprimIntrinsicsTests, ShuffleUpCustomStruct)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = custom_notaligned;
     const size_t hardware_warp_size = ::rocprim::warp_size();
     const size_t size = hardware_warp_size;
@@ -498,8 +514,12 @@ TEST(RocprimIntrinsicsTests, ShuffleUpCustomStruct)
 
 TEST(RocprimIntrinsicsTests, ShuffleUpCustomAlignedStruct)
 {
+    int device_id = test_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = custom_16aligned;
-        const size_t hardware_warp_size = ::rocprim::warp_size();
+    const size_t hardware_warp_size = ::rocprim::warp_size();
     const size_t size = hardware_warp_size;
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
