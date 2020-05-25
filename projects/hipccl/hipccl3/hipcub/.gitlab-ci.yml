@@ -175,10 +175,9 @@ benchmark:rocm_vega20:
     - vega20
     - rocm
   script:
-    - cd build
     - cmake
-      -D BENCHMARK_BINARY_DIR=benchmark
-      -P ${CI_PROJECT_DIR}/.gitlab/cmake-run-benchmark.txt
+      -D BENCHMARK_BINARY_DIR=build/benchmark
+      -P ${CI_PROJECT_DIR}/.gitlab/cmake-run-benchmarks.txt
   allow_failure: true
 
 test:rocm_s9300:
@@ -209,10 +208,9 @@ benchmark:rocm_s9300:
     - s9300
     - rocm
   script:
-    - cd build
     - cmake
-      -D BENCHMARK_BINARY_DIR=benchmark
-      -P ${CI_PROJECT_DIR}/.gitlab/cmake-run-benchmark.txt
+      -D BENCHMARK_BINARY_DIR=build/benchmark
+      -P ${CI_PROJECT_DIR}/.gitlab/cmake-run-benchmarks.txt
 
 test:rocm_mi25:
   extends: .rocm
@@ -241,10 +239,9 @@ benchmark:rocm_mi25:
     - mi25
     - rocm
   script:
-    - cd build
     - cmake
-      -D BENCHMARK_BINARY_DIR=benchmark
-      -P ${CI_PROJECT_DIR}/.gitlab/cmake-run-benchmark.txt
+      -D BENCHMARK_BINARY_DIR=build/benchmark
+      -P ${CI_PROJECT_DIR}/.gitlab/cmake-run-benchmarks.txt
 
 test:rocm_package:
   extends: .rocm
@@ -406,11 +403,10 @@ benchmark:nvcc_titanv:
   needs:
     - build:nvcc-benchmark
   script:
-    - cd build
     - CUDA_VISIBLE_DEVICES=0
     - cmake
-      -D BENCHMARK_BINARY_DIR=benchmark
-      -P ${CI_PROJECT_DIR}/.gitlab/cmake-run-benchmark.txt
+      -D BENCHMARK_BINARY_DIR=build/benchmark
+      -P ${CI_PROJECT_DIR}/.gitlab/cmake-run-benchmarks.txt
   allow_failure: true
 
 test:nvcc_980:
@@ -434,11 +430,10 @@ benchmark:nvcc_980:
   needs:
     - build:nvcc-benchmark
   script:
-    - cd build
     - CUDA_VISIBLE_DEVICES=1
     - cmake
-      -D BENCHMARK_BINARY_DIR=benchmark
-      -P ${CI_PROJECT_DIR}/.gitlab/cmake-run-benchmark.txt
+      -D BENCHMARK_BINARY_DIR=build/benchmark
+      -P ${CI_PROJECT_DIR}/.gitlab/cmake-run-benchmarks.txt
   allow_failure: true
 
 test:nvcc_package:
