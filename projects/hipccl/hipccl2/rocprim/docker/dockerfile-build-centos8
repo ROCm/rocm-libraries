@@ -1,0 +1,30 @@
+# Parameters related to building rocPRIM
+ARG base_image
+
+FROM ${base_image}
+LABEL maintainer="rocprim-maintainer@amd.com"
+
+USER root
+ARG user_uid
+
+RUN yum install -y --nogpgcheck\
+    sudo \
+    ca-certificates \
+    git \
+    make \
+    clang \
+    clang-devel \
+    gcc-c++ \
+    gcc-gfortran \
+    pkgconfig \
+    boost-devel \
+    numactl-libs \
+    rpm-build
+
+# docker pipeline runs containers with particular uid
+# create a jenkins user with this specific uid so it can use sudo priviledges
+# Grant any member of sudo group password-less sudo privileges
+RUN useradd --create-home -u ${user_uid} -o -G video --shell /bin/bash jenkins && \
+    echo '%video ALL=(ALL) NOPASSWD:ALL' | tee /etc/sudoers.d/sudo-nopasswd && \
+    chmod 400 /etc/sudoers.d/sudo-nopasswd
+    

@@ -12,7 +12,7 @@ def runCompileCommand(platform, project, jobName)
         command = """#!/usr/bin/env bash
                 set -x
                 cd ${project.paths.project_build_prefix}
-                LD_LIBRARY_PATH=/opt/rocm/hcc/lib CXX=/opt/rocm/bin/hipcc ${project.paths.build_command} --hip-clang
+                CXX=/opt/rocm/bin/hipcc ${project.paths.build_command} --hip-clang
             """
     }
     else
