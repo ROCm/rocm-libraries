@@ -20,6 +20,11 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+stages:
+  - build
+  - test          # Tests if unit tests are passing (CTest)
+  - benchmark
+
 variables:
   SUDO_CMD: "" # Must be "sudo" on images which don't use root user
   DEPS_DIR: "$CI_PROJECT_DIR/__dependencies"
@@ -33,7 +38,6 @@ variables:
   ROCM_PATH: "/opt/rocm-3.3.0/"
 
 # hipCUB with rocPRIM backend
-
 .rocm:
   variables:
     SUDO_CMD: "sudo -E"
@@ -42,7 +46,7 @@ variables:
   image: rocm/rocm-terminal:latest
   before_script:
     - $SUDO_CMD apt-get update -qq
-    - $SUDO_CMD apt-get install -y -qq libnuma-dev libunwind-dev git wget tar xz-utils bzip2 build-essential pkg-config ca-certificates
+    - $SUDO_CMD apt-get install -y -qq libnuma-dev libunwind-dev git wget tar xz-utils bzip2 build-essential pkg-config  ninja-build ca-certificates
     - hipconfig
     # cmake
     - mkdir -p $DEPS_DIR/cmake
@@ -52,30 +56,61 @@ variables:
     - export CXXFLAGS=$CXXFLAGS" "$LOCAL_CXXFLAGS
     - export CMAKE_OPTIONS=$CXXFLAGS" "$LOCAL_CMAKE_OPTIONS
 
-build:rocm:
+.rocm:build:
   extends: .rocm
-  stage: build
-  script:
+  before_script:
+    # We need to duplicate before script
+    - $SUDO_CMD apt-get update -qq
+    - $SUDO_CMD apt-get install -y -qq libnuma-dev libunwind-dev git wget tar xz-utils bzip2 build-essential pkg-config  ninja-build ca-certificates
+    - hipconfig
+    # cmake
+    - mkdir -p $DEPS_DIR/cmake
+    - wget --no-check-certificate --quiet -O - $CMAKE_URL | tar --strip-components=1 -xz -C $DEPS_DIR/cmake
+    - export PATH=$DEPS_DIR/cmake/bin:$PATH
+    # Combine global build options with local options
+    - export CXXFLAGS=$CXXFLAGS" "$LOCAL_CXXFLAGS
+    - export CMAKE_OPTIONS=$CXXFLAGS" "$LOCAL_CMAKE_OPTIONS
     # Install rocPRIM package
-    - echo ${ROCPRIM_GIT_URL}
-    - echo $ROCPRIM_GIT_URL
-    - git clone -b develop_stream https://gitlab-ci-token:${CI_JOB_TOKEN}@${ROCPRIM_GIT_URL}
+    - branch_name="develop_stream"
+    - if [ $CI_COMMIT_BRANCH == develop ] || [ $CI_COMMIT_BRANCH == master ]; then branch_name=$CI_COMMIT_BRANCH;
+    - fi;
+    - git clone -b $branch_name https://gitlab-ci-token:${CI_JOB_TOKEN}@${ROCPRIM_GIT_URL}
     - cd rocPRIM
     - mkdir build
     - cd build
-    - CXX=hcc cmake -DBUILD_TEST=OFF ../.
-    - make package
+    - cmake
+      -G Ninja
+      -D CMAKE_CXX_COMPILER=hcc
+      -D CMAKE_BUILD_TYPE=Release
+      -D BUILD_TEST=OFF
+      -D BUILD_EXAMPLE=OFF
+      -B build
+      ../.
+    - $SUDO_CMD cpack
+      -G "DEB"
     - $SUDO_CMD dpkg -i rocprim-*.deb
     - cd ../..
-    # hipCUB
+
+build:rocm:
+  extends: .rocm:build
+  stage: build
+  script:
     - mkdir build
     - cd build
-    - CXX=hcc cmake -DBUILD_TEST=ON ../.
-    - make -j16
-    - make package
+    - cmake
+      -G Ninja
+      -D CMAKE_CXX_COMPILER=hcc
+      -D CMAKE_BUILD_TYPE=Release
+      -D BUILD_TEST=ON
+      -D BUILD_EXAMPLE=ON
+      -B build
+      ../.
+    - cmake
+      --build ./
+    - $SUDO_CMD cpack
+      -G "DEB;ZIP"
   artifacts:
     paths:
-      - build/library/
       - build/test/hipcub/test_*
       - build/test/CTestTestfile.cmake
       - build/test/hipcub/CTestTestfile.cmake
@@ -86,9 +121,37 @@ build:rocm:
       - build/hipcub*.zip
     expire_in: 2 weeks
 
+build:rocm-benchmark:
+  extends: .rocm:build
+  stage: build
+  only:
+    - internal_benchmark
+    - develop_stream
+    - develop
+    - master
+  script:
+    - mkdir build
+    - cd build
+    # Build hipCUB benchmark
+    - cmake
+      -G Ninja
+      -D CMAKE_CXX_COMPILER=hcc
+      -D CMAKE_BUILD_TYPE=Release
+      -D BUILD_BENCHMARK=ON
+      -B build
+      ../.
+    - cmake
+      --build ./
+  artifacts:
+    paths:
+      - build/benchmark/*
+      - build/googlebenchmark/
+    expire_in: 2 weeks
+
 test:rocm_vega20:
   extends: .rocm
-  dependencies:
+  stage: test
+  needs:
     - build:rocm
   tags:
     - vega20
@@ -97,9 +160,30 @@ test:rocm_vega20:
     - cd build
     - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 2
 
+benchmark:rocm_vega20:
+  extends: .rocm
+  stage: benchmark
+  when: manual
+  only:
+    - internal_benchmark
+    - develop_stream
+    - develop
+    - master
+  needs:
+    - build:rocm-benchmark
+  tags:
+    - vega20
+    - rocm
+  script:
+    - cmake
+      -D BENCHMARK_BINARY_DIR=build/benchmark
+      -P ${CI_PROJECT_DIR}/.gitlab/cmake-run-benchmarks.txt
+  allow_failure: true
+
 test:rocm_s9300:
   extends: .rocm
-  dependencies:
+  stage: test
+  needs:
     - build:rocm
   tags:
     - s9300
@@ -109,9 +193,29 @@ test:rocm_s9300:
     - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 2
   allow_failure: true
 
+benchmark:rocm_s9300:
+  extends: .rocm
+  stage: benchmark
+  when: manual
+  only:
+    - internal_benchmark
+    - develop_stream
+    - develop
+    - master
+  needs:
+    - build:rocm-benchmark
+  tags:
+    - s9300
+    - rocm
+  script:
+    - cmake
+      -D BENCHMARK_BINARY_DIR=build/benchmark
+      -P ${CI_PROJECT_DIR}/.gitlab/cmake-run-benchmarks.txt
+
 test:rocm_mi25:
   extends: .rocm
-  dependencies:
+  stage: test
+  needs:
     - build:rocm
   tags:
     - mi25
@@ -120,10 +224,29 @@ test:rocm_mi25:
     - cd build
     - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 2
 
+benchmark:rocm_mi25:
+  extends: .rocm
+  stage: benchmark
+  when: manual
+  only:
+    - internal_benchmark
+    - develop_stream
+    - develop
+    - master
+  needs:
+    - build:rocm-benchmark
+  tags:
+    - mi25
+    - rocm
+  script:
+    - cmake
+      -D BENCHMARK_BINARY_DIR=build/benchmark
+      -P ${CI_PROJECT_DIR}/.gitlab/cmake-run-benchmarks.txt
+
 test:rocm_package:
   extends: .rocm
   stage: test
-  dependencies:
+  needs:
     - build:rocm
   script:
     # Install rocPRIM package
@@ -150,7 +273,7 @@ test:rocm_package:
 test:rocm_install:
   extends: .rocm
   stage: test
-  dependencies: []
+  needs: []
   script:
     # Install rocPRIM package
     - echo ${ROCPRIM_GIT_URL}
@@ -179,12 +302,12 @@ test:rocm_install:
 .nvcc:
   tags:
     - nvcc
-  image: nvidia/cuda:10.1-devel-ubuntu16.04
+  image: nvidia/cuda:10.2-devel-ubuntu18.04
   before_script:
     - nvidia-smi
     # HIP-nvcc
     - $SUDO_CMD apt-get update -qq
-    - $SUDO_CMD apt-get install -y -qq libnuma-dev libunwind-dev git wget tar xz-utils bzip2 build-essential pkg-config ca-certificates
+    - $SUDO_CMD apt-get install -y -qq libnuma-dev libunwind-dev git wget tar xz-utils bzip2 build-essential pkg-config ninja-build protobuf-compiler gcc-8 g++-8 libidn11 ca-certificates
     - wget -qO - http://repo.radeon.com/rocm/apt/debian/rocm.gpg.key | $SUDO_CMD apt-key add -
     - echo 'deb [arch=amd64] http://repo.radeon.com/rocm/apt/debian/ xenial main' | $SUDO_CMD tee /etc/apt/sources.list.d/rocm.list
     - $SUDO_CMD apt-get update -qq
@@ -210,12 +333,19 @@ build:nvcc:
   script:
     - mkdir build
     - cd build
-    - cmake -DBUILD_TEST=ON ../.
-    - make -j16
-    - make package
+    - cmake
+      -G Ninja
+      -D CMAKE_BUILD_TYPE=Release
+      -D BUILD_TEST=ON
+      -D BUILD_EXAMPLE=ON
+      -B build
+      ../.
+    - cmake
+      --build ./
+    - $SUDO_CMD cpack
+      -G "DEB;ZIP"
   artifacts:
     paths:
-      - build/library/
       - build/test/hipcub/test_*
       - build/test/CTestTestfile.cmake
       - build/test/hipcub/CTestTestfile.cmake
@@ -226,28 +356,90 @@ build:nvcc:
       - build/hipcub*.zip
     expire_in: 2 weeks
 
+build:nvcc-benchmark:
+  extends: .nvcc
+  stage: build
+  only:
+    - internal_benchmark
+    - develop_stream
+    - develop
+    - master
+  script:
+    - mkdir build
+    - cd build
+    - cmake
+      -G Ninja
+      -D CMAKE_BUILD_TYPE=Release
+      -D BUILD_BENCHMARK=ON
+      -D CMAKE_C_COMPILER:FILEPATH=/usr/bin/gcc-8
+      -B build
+      ../.
+    - cmake
+      --build ./
+  artifacts:
+    paths:
+      - build/benchmark/*
+      - build/googlebenchmark/
+    expire_in: 2 weeks
+
 test:nvcc_titanv:
   extends: .nvcc
   stage: test
-  dependencies:
+  needs:
     - build:nvcc
   script:
     - cd build
     - CUDA_VISIBLE_DEVICES=0 ctest --output-on-failure --repeat-until-fail 2
 
+benchmark:nvcc_titanv:
+  extends: .nvcc
+  stage: benchmark
+  when: manual
+  only:
+    - internal_benchmark
+    - develop_stream
+    - develop
+    - master
+  needs:
+    - build:nvcc-benchmark
+  script:
+    - CUDA_VISIBLE_DEVICES=0
+    - cmake
+      -D BENCHMARK_BINARY_DIR=build/benchmark
+      -P ${CI_PROJECT_DIR}/.gitlab/cmake-run-benchmarks.txt
+  allow_failure: true
+
 test:nvcc_980:
   extends: .nvcc
   stage: test
-  dependencies:
+  needs:
     - build:nvcc
   script:
     - cd build
     - CUDA_VISIBLE_DEVICES=1 ctest --output-on-failure --repeat-until-fail 2
 
+benchmark:nvcc_980:
+  extends: .nvcc
+  stage: benchmark
+  when: manual
+  only:
+    - internal_benchmark
+    - develop_stream
+    - develop
+    - master
+  needs:
+    - build:nvcc-benchmark
+  script:
+    - CUDA_VISIBLE_DEVICES=1
+    - cmake
+      -D BENCHMARK_BINARY_DIR=build/benchmark
+      -P ${CI_PROJECT_DIR}/.gitlab/cmake-run-benchmarks.txt
+  allow_failure: true
+
 test:nvcc_package:
   extends: .nvcc
   stage: test
-  dependencies:
+  needs:
     - build:nvcc
   script:
     - cd build
@@ -261,7 +453,7 @@ test:nvcc_package:
 test:nvcc_install:
   extends: .nvcc
   stage: test
-  dependencies: []
+  needs: []
   script:
     - mkdir build_only_install
     - cd build_only_install
