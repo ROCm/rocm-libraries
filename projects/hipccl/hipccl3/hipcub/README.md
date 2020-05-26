@@ -136,7 +136,7 @@ static constexpr unsigned int seeds [] = {};
 ## Running Benchmarks
 
 ```shell
-# Go to rocPRIM build directory
+# Go to hipCUB build directory
 cd hipCUB; cd build
 
 # To run benchmark for warp functions:
