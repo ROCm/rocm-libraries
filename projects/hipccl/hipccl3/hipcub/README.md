@@ -1,7 +1,7 @@
 # hipCUB
 
 hipCUB is a thin wrapper library on top of [rocPRIM](https://github.com/ROCmSoftwarePlatform/rocPRIM) or
-[CUB](https://github.com/NVlabs/cub). It enables developers to port project using CUB library to the
+[CUB](https://github.com/thrust/cub). It enables developers to port project using CUB library to the
 [HIP](https://github.com/ROCm-Developer-Tools/HIP) layer and to run them on AMD hardware. In [ROCm](https://rocm.github.io/)
 environment hipCUB uses rocPRIM library as the backend, however, on CUDA platforms it uses CUB instead.
 
@@ -24,6 +24,10 @@ Optional:
 * [GTest](https://github.com/google/googletest)
   * Required only for tests. Building tests is enabled by default.
   * It will be automatically downloaded and built by CMake script.
+* [Google Benchmark](https://github.com/google/benchmark)
+  * Required only for benchmarks. Building benchmarks is off by default.
+  * It will be automatically downloaded and built by cmake script.
+  * At nvcc + gcc the google benchmarks require gcc8 or higher version
 
 ## Build And Install
 
@@ -36,6 +40,7 @@ cd hipCUB; mkdir build; cd build
 # Configure hipCUB, setup options for your system.
 # Build options:
 #   BUILD_TEST - OFF by default,
+#   BUILD_BENCHMARK - OFF by default.
 #   DOWNLOAD_ROCPRIM - OFF by default and at ON the rocPRIM will be downloaded to build folder,
 #
 # ! IMPORTANT !
@@ -44,11 +49,13 @@ cd hipCUB; mkdir build; cd build
 #
 [CXX=hcc] cmake ../. # or cmake-gui ../.
 
-# To configure rocRAND for Nvidia platforms, 'CXX=<path-to-nvcc>', `CXX=nvcc` or omitting the flag
+# To configure hipCUB for Nvidia platforms, 'CXX=<path-to-nvcc>', `CXX=nvcc` or omitting the flag
 # entirely before 'cmake' is sufficient
-[CXX=nvcc] cmake -DBUILD_BENCHMARK=ON ../. # or cmake-gui ../.
+[CXX=nvcc] cmake -DBUILD_TEST=ON ../. # or cmake-gui ../.
 # or
-cmake -DBUILD_BENCHMARK=ON ../. # or cmake-gui ../.
+cmake -DBUILD_TEST=ON ../. # or cmake-gui ../.
+# To configure to build benchmarks, you should set the C compiler at nvcc build case
+cmake -DBUILD_BENCHMARK=ON -DCMAKE_C_COMPILER:FILEPATH=/usr/bin/gcc-8
 
 # Build
 make -j4
@@ -125,6 +132,29 @@ static constexpr unsigned int seeds [] = {};
 ```
 
 (3) this line should never be modified.
+
+## Running Benchmarks
+
+```shell
+# Go to rocPRIM build directory
+cd hipCUB; cd build
+
+# To run benchmark for warp functions:
+# Further option can be found using --help
+# [] Fields are optional
+./benchmark/benchmark_warp_<function_name> [--size <size>] [--trials <trials>]
+
+# To run benchmark for block functions:
+# Further option can be found using --help
+# [] Fields are optional
+./benchmark/benchmark_block_<function_name> [--size <size>] [--trials <trials>]
+
+# To run benchmark for device functions:
+# Further option can be found using --help
+# [] Fields are optional
+./benchmark/benchmark_device_<function_name> [--size <size>] [--trials <trials>]
+```
+
 
 ## Documentation
 
