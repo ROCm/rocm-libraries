@@ -5,7 +5,6 @@
 function(add_thrust_test TEST)
     set(TEST_SOURCE "${TEST}.cu")
     set(TEST_TARGET "test_thrust_${TEST}")
-    set_source_files_properties(${TEST_SOURCE} PROPERTIES LANGUAGE CXX COMPILE_FLAGS "-x c++")
     add_executable(${TEST_TARGET} ${TEST_SOURCE} testframework.cpp)
     target_include_directories(${TEST_TARGET} SYSTEM BEFORE
         PUBLIC
