@@ -33,12 +33,15 @@
 
 #include <thrust/system/hip/config.h>
 
-#include <thrust/advance.h>
+
 #include <thrust/detail/dispatch/is_trivial_copy.h>
-#include <thrust/detail/raw_pointer_cast.h>
-#include <thrust/detail/temporary_buffer.h>
 #include <thrust/distance.h>
+#include <thrust/advance.h>
+#include <thrust/detail/raw_pointer_cast.h>
 #include <thrust/system/hip/detail/uninitialized_copy.h>
+#include <thrust/system/hip/detail/util.h>
+#include <thrust/detail/temporary_array.h>
+
 
 BEGIN_NS_THRUST
 namespace hip_rocprim
@@ -126,33 +129,24 @@ namespace __copy
         // copy input data into host temp storage
         InputIt last = first;
         thrust::advance(last, num_items);
-        //    thrust::detail::temporary_array<InputTy,H> temp(host_s, first, last);
-        InputTy* temp = thrust::raw_pointer_cast(
-            thrust::get_temporary_buffer<InputTy>(host_s, sizeof(InputTy) * num_items).first);
+        thrust::detail::temporary_array<InputTy, H> temp(host_s, num_items);
 
         for(Size idx = 0; idx != num_items; idx++)
         {
-            ::new(static_cast<void*>(temp + idx)) InputTy(*first);
+            ::new(static_cast<void*>(temp.data().get() + idx)) InputTy(*first);
             ++first;
         }
 
         // allocate device temporary storage
-        hipError_t status;
-        InputTy*   d_in_ptr = thrust::raw_pointer_cast(
-            thrust::get_temporary_buffer<InputTy>(device_s, sizeof(InputTy) * num_items).first);
+        thrust::detail::temporary_array<InputTy, D> d_in_ptr(device_s, num_items);
 
         // trivial copy data from host to device
-        status = hip_rocprim::trivial_copy_to_device(
-            d_in_ptr, temp, num_items, hip_rocprim::stream(device_s));
+        hipError_t status = hip_rocprim::trivial_copy_to_device(
+            d_in_ptr.data().get(), temp.data().get(), num_items, hip_rocprim::stream(device_s));
         hip_rocprim::throw_on_error(status, "__copy:: H->D: failed");
 
         // device->device copy
-        OutputIt ret = hip_rocprim::copy_n(device_s, d_in_ptr, num_items, result);
-
-        // free device temporary storage
-        thrust::return_temporary_buffer(host_s, temp);
-        thrust::return_temporary_buffer(device_s, d_in_ptr);
-
+        OutputIt ret = hip_rocprim::copy_n(device_s, d_in_ptr.data(), num_items, result);
         return ret;
 #endif
     }
@@ -187,37 +181,21 @@ namespace __copy
         return result;
 #else
         // allocate device temp storage
-        hipError_t status;
-
-        InputTy* d_in_ptr = thrust::raw_pointer_cast(
-            thrust::get_temporary_buffer<InputTy>(device_s, sizeof(InputTy) * num_items).first);
+        thrust::detail::temporary_array<InputTy, D> d_in_ptr(device_s, num_items);
 
         // uninitialize copy into temp device storage
-        hip_rocprim::uninitialized_copy_n(device_s, first, num_items, d_in_ptr);
+        hip_rocprim::uninitialized_copy_n(device_s, first, num_items, d_in_ptr.data());
 
         // allocate host temp storage
-        //    thrust::detail::temporary_array<InputTy,H> temp(0, host_s, num_items);
-        InputTy* temp = thrust::raw_pointer_cast(
-            thrust::get_temporary_buffer<InputTy>(host_s, num_items).first);
+        thrust::detail::temporary_array<InputTy, H> temp(host_s, num_items);
 
         // trivial copy from device to host
-        status = hip_rocprim::trivial_copy_from_device(
-            temp, d_in_ptr, num_items, hip_rocprim::stream(device_s));
+        hipError_t status = hip_rocprim::trivial_copy_from_device(
+            temp.data().get(), d_in_ptr.data().get(), num_items, hip_rocprim::stream(device_s));
         hip_rocprim::throw_on_error(status, "__copy:: D->H: failed");
 
-        // copy host->host
-        OutputIt ret = result;
-        for(Size idx = 0; idx != num_items; ++idx)
-        {
-            // XXX generates warning using VC14 is there is type narrowing
-            *ret = temp[idx];
-            ++ret;
-        }
-        //OutputIt ret = thrust::copy(host_s, temp, temp+num_items, result);
-
-        // free temp device storage
-        thrust::return_temporary_buffer(device_s, d_in_ptr);
-        thrust::return_temporary_buffer(host_s, temp);
+        // host->host copy
+        OutputIt ret = thrust::copy_n(host_s, temp.data(), num_items, result);
 
         return ret;
 #endif

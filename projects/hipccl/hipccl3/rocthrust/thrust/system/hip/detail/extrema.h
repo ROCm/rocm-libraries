@@ -30,11 +30,14 @@
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 #include <thrust/system/hip/config.h>
 #include <thrust/system/hip/detail/reduce.h>
-//
-#include <thrust/distance.h>
+#include <thrust/system/hip/detail/get_value.h>
+
+#include <thrust/detail/cstdint.h>
+#include <thrust/detail/temporary_array.h>
 #include <thrust/extrema.h>
 #include <thrust/pair.h>
-#include <thrust/system/hip/detail/get_value.h>
+#include <thrust/distance.h>
+
 
 // rocprim include
 #include <rocprim/rocprim.hpp>
@@ -165,45 +168,43 @@ namespace __extrema
             hip_rocprim::throw_on_error(hipErrorInvalidValue,
                                         "extrema number of items is zero");
 
-        void*       d_temp_storage     = NULL;
         size_t      temp_storage_bytes = 0;
         hipStream_t stream             = hip_rocprim::stream(policy);
-        T*          d_ret_ptr          = NULL;
         bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
 
         // Determine temporary device storage requirements.
-        hip_rocprim::throw_on_error(rocprim::reduce(d_temp_storage,
+        hip_rocprim::throw_on_error(rocprim::reduce(NULL,
                                                     temp_storage_bytes,
                                                     first,
-                                                    d_ret_ptr,
+                                                    reinterpret_cast<T*>(NULL),
                                                     num_items,
                                                     binary_op,
                                                     stream,
                                                     debug_sync),
                                     "extrema failed on 1st step");
 
+        size_t storage_size = temp_storage_bytes + sizeof(T);
+
         // Allocate temporary storage.
-        d_temp_storage = hip_rocprim::get_memory_buffer(policy, sizeof(T) + temp_storage_bytes);
-        hip_rocprim::throw_on_error(hipGetLastError(), "extrema failed to get memory buffer");
+        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
+            tmp(policy, storage_size);
+        void *ptr = static_cast<void*>(tmp.data().get());
 
-        d_ret_ptr = reinterpret_cast<T*>(reinterpret_cast<char*>(d_temp_storage)
-                                         + temp_storage_bytes);
+        T* d_result = reinterpret_cast<T*>(
+	    reinterpret_cast<char*>(ptr) + temp_storage_bytes);
 
-        hip_rocprim::throw_on_error(rocprim::reduce(d_temp_storage,
+        hip_rocprim::throw_on_error(rocprim::reduce(ptr,
                                                     temp_storage_bytes,
                                                     first,
-                                                    d_ret_ptr,
+                                                    d_result,
                                                     num_items,
                                                     binary_op,
                                                     stream,
                                                     debug_sync),
                                     "extrema failed on 2nd step");
 
-        T return_value = hip_rocprim::get_value(policy, d_ret_ptr);
+        T return_value = hip_rocprim::get_value(policy, d_result);
 
-        hip_rocprim::return_memory_buffer(policy, d_temp_storage);
-        hip_rocprim::throw_on_error(hipGetLastError(),
-                                    "extrema failed to return memory buffer");
 
         return return_value;
     }

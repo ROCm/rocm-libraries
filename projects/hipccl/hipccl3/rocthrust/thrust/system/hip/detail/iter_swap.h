@@ -22,8 +22,9 @@
 #include <thrust/system/hip/config.h>
 
 #include <thrust/detail/raw_pointer_cast.h>
-#include <thrust/swap.h>
 #include <thrust/system/hip/detail/execution_policy.h>
+#include <thrust/swap.h>
+
 
 BEGIN_NS_THRUST
 namespace hip_rocprim

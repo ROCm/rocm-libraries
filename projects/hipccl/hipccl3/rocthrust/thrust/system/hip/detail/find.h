@@ -169,7 +169,7 @@ find_if_not(execution_policy<Derived>& policy,
             InputIt                    last,
             Predicate                  predicate)
 {
-    return hip_rocprim::find_if(policy, first, last, detail::not1(predicate));
+    return hip_rocprim::find_if(policy, first, last, thrust::detail::not1(predicate));
 }
 
 template <class Derived, class InputIt, class T>
@@ -179,7 +179,7 @@ find(execution_policy<Derived>& policy,
      InputIt                    last,
      T const&                   value)
 {
-    return hip_rocprim::find_if(policy, first, last, detail::equal_to_value<T>(value));
+    return hip_rocprim::find_if(policy, first, last, thrust::detail::equal_to_value<T>(value));
 }
 
 } // namespace hip_rocprim

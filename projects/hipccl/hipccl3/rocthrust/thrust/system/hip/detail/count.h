@@ -63,7 +63,7 @@ count(execution_policy<Derived>& policy,
       Value const&               value)
 {
     return hip_rocprim::count_if(
-        policy, first, last, detail::equal_to_value<Value>(value)
+        policy, first, last, thrust::detail::equal_to_value<Value>(value)
     );
 }
 

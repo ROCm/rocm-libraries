@@ -71,8 +71,8 @@ template <class Derived, class Input, class Size, class UnaryOp>
 Input THRUST_HIP_FUNCTION
 for_each_n(execution_policy<Derived>& policy, Input first, Size count, UnaryOp op)
 {
-    typedef detail::wrapped_function<UnaryOp, void> wrapped_t;
-    wrapped_t                                       wrapped_op(op);
+    typedef thrust::detail::wrapped_function<UnaryOp, void> wrapped_t;
+    wrapped_t                                               wrapped_op(op);
 
     hip_rocprim::parallel_for(policy, for_each_f<Input, wrapped_t>(first, wrapped_op), count);
     return first + count;

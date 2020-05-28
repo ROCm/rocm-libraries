@@ -28,14 +28,16 @@
 #pragma once
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+#include <thrust/detail/cstdint.h>
+#include <thrust/detail/temporary_array.h>
 #include <thrust/system/hip/detail/util.h>
 
-#include <thrust/detail/minmax.h>
-#include <thrust/detail/mpl/math.h>
-#include <thrust/distance.h>
-#include <thrust/system/hip/detail/memory_buffer.h>
 #include <thrust/system/hip/detail/par_to_seq.h>
 #include <thrust/system/hip/execution_policy.h>
+#include <thrust/detail/mpl/math.h>
+#include <thrust/detail/minmax.h>
+#include <thrust/distance.h>
+
 
 // rocprim include
 #include <rocprim/rocprim.hpp>
@@ -45,35 +47,34 @@ namespace hip_rocprim
 {
 namespace __scan_by_key
 {
-    template <class Policy,
-              class KeysInputIterator,
-              class ValuesInputIterator,
-              class ValuesOutputIterator,
-              class KeyCompareFunction = ::rocprim::equal_to<
+    template <typename Derived,
+              typename KeysInputIterator,
+              typename ValuesInputIterator,
+              typename ValuesOutputIterator,
+              typename KeyCompareFunction = ::rocprim::equal_to<
                   typename std::iterator_traits<KeysInputIterator>::value_type>,
-              class BinaryFunction
+              typename BinaryFunction
               = ::rocprim::plus<typename std::iterator_traits<ValuesInputIterator>::value_type>>
-    ValuesOutputIterator THRUST_HIP_RUNTIME_FUNCTION
-    inclusive_scan_by_key(Policy&              policy,
-                          KeysInputIterator    key_first,
-                          KeysInputIterator    key_last,
-                          ValuesInputIterator  value_first,
-                          ValuesOutputIterator value_result,
-                          KeyCompareFunction   key_compare_op,
-                          BinaryFunction       scan_op)
+    THRUST_HIP_RUNTIME_FUNCTION ValuesOutputIterator
+    inclusive_scan_by_key(execution_policy<Derived>& policy,
+                          KeysInputIterator          key_first,
+                          KeysInputIterator          key_last,
+                          ValuesInputIterator        value_first,
+                          ValuesOutputIterator       value_result,
+                          KeyCompareFunction         key_compare_op,
+                          BinaryFunction             scan_op)
     {
-        size_t      num_items      = static_cast<size_t>(thrust::distance(key_first, key_last));
-        void*       d_temp_storage = nullptr;
-        size_t      temp_storage_bytes = 0;
-        hipStream_t stream             = hip_rocprim::stream(policy);
-        bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
+        size_t      num_items    = static_cast<size_t>(thrust::distance(key_first, key_last));
+        size_t      storage_size = 0;
+        hipStream_t stream       = hip_rocprim::stream(policy);
+        bool        debug_sync   = THRUST_HIP_DEBUG_SYNC_FLAG;
 
         if(num_items == 0)
             return value_result;
 
         // Determine temporary device storage requirements.
-        hip_rocprim::throw_on_error(rocprim::inclusive_scan_by_key(d_temp_storage,
-                                                                   temp_storage_bytes,
+        hip_rocprim::throw_on_error(rocprim::inclusive_scan_by_key(NULL,
+                                                                   storage_size,
                                                                    key_first,
                                                                    value_first,
                                                                    value_result,
@@ -85,13 +86,13 @@ namespace __scan_by_key
                                     "scan_by_key failed on 1st step");
 
         // Allocate temporary storage.
-        d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes);
-        hip_rocprim::throw_on_error(hipGetLastError(),
-                                    "scan_by_key failed to get memory buffer");
+        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
+            tmp(policy, storage_size);
+        void *ptr = static_cast<void*>(tmp.data().get());
 
         // Run scan.
-        hip_rocprim::throw_on_error(rocprim::inclusive_scan_by_key(d_temp_storage,
-                                                                   temp_storage_bytes,
+        hip_rocprim::throw_on_error(rocprim::inclusive_scan_by_key(ptr,
+                                                                   storage_size,
                                                                    key_first,
                                                                    value_first,
                                                                    value_result,
@@ -101,45 +102,40 @@ namespace __scan_by_key
                                                                    stream,
                                                                    debug_sync),
                                     "scan_by_key failed on 2nd step");
-
-        hip_rocprim::return_memory_buffer(policy, d_temp_storage);
-        hip_rocprim::throw_on_error(hipGetLastError(),
-                                    "scan_by_key failed to return memory buffer");
 
         return value_result + num_items;
     }
 
-    template <class Policy,
-              class KeysInputIterator,
-              class ValuesInputIterator,
-              class ValuesOutputIterator,
-              class InitialValueType,
-              class KeyCompareFunction = ::rocprim::equal_to<
+    template <typename Derived,
+              typename KeysInputIterator,
+              typename ValuesInputIterator,
+              typename ValuesOutputIterator,
+              typename InitialValueType,
+              typename KeyCompareFunction = ::rocprim::equal_to<
                   typename std::iterator_traits<KeysInputIterator>::value_type>,
-              class BinaryFunction
+              typename BinaryFunction
               = ::rocprim::plus<typename std::iterator_traits<ValuesInputIterator>::value_type>>
-    ValuesOutputIterator THRUST_HIP_RUNTIME_FUNCTION
-    exclusive_scan_by_key(Policy&              policy,
-                          KeysInputIterator    key_first,
-                          KeysInputIterator    key_last,
-                          ValuesInputIterator  value_first,
-                          ValuesOutputIterator value_result,
-                          InitialValueType     init,
-                          KeyCompareFunction   key_compare_op,
-                          BinaryFunction       scan_op)
+    THRUST_HIP_RUNTIME_FUNCTION ValuesOutputIterator
+    exclusive_scan_by_key(execution_policy<Derived>& policy,
+                          KeysInputIterator          key_first,
+                          KeysInputIterator          key_last,
+                          ValuesInputIterator        value_first,
+                          ValuesOutputIterator       value_result,
+                          InitialValueType           init,
+                          KeyCompareFunction         key_compare_op,
+                          BinaryFunction             scan_op)
     {
-        size_t      num_items      = static_cast<size_t>(thrust::distance(key_first, key_last));
-        void*       d_temp_storage = nullptr;
-        size_t      temp_storage_bytes = 0;
-        hipStream_t stream             = hip_rocprim::stream(policy);
-        bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
+        size_t      num_items    = static_cast<size_t>(thrust::distance(key_first, key_last));
+        size_t      storage_size = 0;
+        hipStream_t stream       = hip_rocprim::stream(policy);
+        bool        debug_sync   = THRUST_HIP_DEBUG_SYNC_FLAG;
 
         if(num_items == 0)
             return value_result;
 
         // Determine temporary device storage requirements.
-        hip_rocprim::throw_on_error(rocprim::exclusive_scan_by_key(d_temp_storage,
-                                                                   temp_storage_bytes,
+        hip_rocprim::throw_on_error(rocprim::exclusive_scan_by_key(NULL,
+                                                                   storage_size,
                                                                    key_first,
                                                                    value_first,
                                                                    value_result,
@@ -151,14 +147,15 @@ namespace __scan_by_key
                                                                    debug_sync),
                                     "scan_by_key failed on 1st step");
 
+
         // Allocate temporary storage.
-        d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes);
-        hip_rocprim::throw_on_error(hipGetLastError(),
-                                    "scan_by_key failed to get memory buffer");
+        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
+            tmp(policy, storage_size);
+        void *ptr = static_cast<void*>(tmp.data().get());
 
         // Run scan.
-        hip_rocprim::throw_on_error(rocprim::exclusive_scan_by_key(d_temp_storage,
-                                                                   temp_storage_bytes,
+        hip_rocprim::throw_on_error(rocprim::exclusive_scan_by_key(ptr,
+                                                                   storage_size,
                                                                    key_first,
                                                                    value_first,
                                                                    value_result,
@@ -169,10 +166,6 @@ namespace __scan_by_key
                                                                    stream,
                                                                    debug_sync),
                                     "scan_by_key failed on 2nd step");
-
-        hip_rocprim::return_memory_buffer(policy, d_temp_storage);
-        hip_rocprim::throw_on_error(hipGetLastError(),
-                                    "scan_by_key failed to return memory buffer");
 
         return value_result + num_items;
     }
@@ -192,7 +185,7 @@ __thrust_exec_check_disable__ template <class Derived,
                                         class ValOutputIt,
                                         class BinaryPred,
                                         class ScanOp>
-ValOutputIt THRUST_HIP_FUNCTION
+THRUST_HIP_FUNCTION ValOutputIt
 inclusive_scan_by_key(execution_policy<Derived>& policy,
                       KeyInputIt                 key_first,
                       KeyInputIt                 key_last,
@@ -231,7 +224,7 @@ template <class Derived,
           class ValInputIt,
           class ValOutputIt,
           class BinaryPred>
-ValOutputIt THRUST_HIP_FUNCTION
+THRUST_HIP_FUNCTION ValOutputIt
 inclusive_scan_by_key(execution_policy<Derived>& policy,
                       KeyInputIt                 key_first,
                       KeyInputIt                 key_last,
@@ -250,7 +243,7 @@ inclusive_scan_by_key(execution_policy<Derived>& policy,
 }
 
 template <class Derived, class KeyInputIt, class ValInputIt, class ValOutputIt>
-ValOutputIt THRUST_HIP_FUNCTION
+THRUST_HIP_FUNCTION ValOutputIt
 inclusive_scan_by_key(execution_policy<Derived>& policy,
                       KeyInputIt                 key_first,
                       KeyInputIt                 key_last,
@@ -274,7 +267,7 @@ __thrust_exec_check_disable__ template <class Derived,
                                         class Init,
                                         class BinaryPred,
                                         class ScanOp>
-ValOutputIt THRUST_HIP_FUNCTION
+THRUST_HIP_FUNCTION ValOutputIt
 exclusive_scan_by_key(execution_policy<Derived>& policy,
                       KeyInputIt                 key_first,
                       KeyInputIt                 key_last,
@@ -316,7 +309,7 @@ template <class Derived,
           class ValOutputIt,
           class Init,
           class BinaryPred>
-ValOutputIt THRUST_HIP_FUNCTION
+THRUST_HIP_FUNCTION ValOutputIt
 exclusive_scan_by_key(execution_policy<Derived>& policy,
                       KeyInputIt                 key_first,
                       KeyInputIt                 key_last,
@@ -336,7 +329,7 @@ exclusive_scan_by_key(execution_policy<Derived>& policy,
 }
 
 template <class Derived, class KeyInputIt, class ValInputIt, class ValOutputIt, class Init>
-ValOutputIt THRUST_HIP_FUNCTION
+THRUST_HIP_FUNCTION ValOutputIt
 exclusive_scan_by_key(execution_policy<Derived>& policy,
                       KeyInputIt                 key_first,
                       KeyInputIt                 key_last,
@@ -351,7 +344,7 @@ exclusive_scan_by_key(execution_policy<Derived>& policy,
 }
 
 template <class Derived, class KeyInputIt, class ValInputIt, class ValOutputIt>
-ValOutputIt THRUST_HIP_FUNCTION
+THRUST_HIP_FUNCTION ValOutputIt
 exclusive_scan_by_key(execution_policy<Derived>& policy,
                       KeyInputIt                 key_first,
                       KeyInputIt                 key_last,

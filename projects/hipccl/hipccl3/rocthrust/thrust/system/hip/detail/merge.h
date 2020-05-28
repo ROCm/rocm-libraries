@@ -28,19 +28,21 @@
 #pragma once
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+#include <thrust/detail/cstdint.h>
+#include <thrust/detail/temporary_array.h>
 #include <thrust/system/hip/config.h>
 
+#include <thrust/system/hip/detail/get_value.h>
+#include <thrust/system/hip/detail/par_to_seq.h>
+#include <thrust/system/hip/detail/util.h>
 #include <thrust/detail/minmax.h>
+#include <thrust/merge.h>
+#include <thrust/pair.h>
 #include <thrust/detail/mpl/math.h>
 #include <thrust/detail/range/head_flags.h>
 #include <thrust/distance.h>
 #include <thrust/functional.h>
-#include <thrust/merge.h>
-#include <thrust/pair.h>
-#include <thrust/system/hip/detail/get_value.h>
-#include <thrust/system/hip/detail/memory_buffer.h>
-#include <thrust/system/hip/detail/par_to_seq.h>
-#include <thrust/system/hip/detail/util.h>
+
 
 // rocPRIM includes
 #include <rocprim/rocprim.hpp>
@@ -87,14 +89,13 @@ namespace __merge
         size_type input2_size
             = static_cast<size_type>(thrust::distance(keys2_first, keys2_last));
 
-        void*       d_temp_storage     = NULL;
-        size_t      temp_storage_bytes = 0;
-        hipStream_t stream             = hip_rocprim::stream(policy);
-        bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
+        size_t      storage_size = 0;
+        hipStream_t stream       = hip_rocprim::stream(policy);
+        bool        debug_sync   = THRUST_HIP_DEBUG_SYNC_FLAG;
 
         // Determine temporary device storage requirements.
-        hip_rocprim::throw_on_error(rocprim::merge(d_temp_storage,
-                                                   temp_storage_bytes,
+        hip_rocprim::throw_on_error(rocprim::merge(NULL,
+                                                   storage_size,
                                                    keys1_first,
                                                    keys2_first,
                                                    result,
@@ -106,11 +107,12 @@ namespace __merge
                                     "merge failed on 1st step");
 
         // Allocate temporary storage.
-        d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes);
-        hip_rocprim::throw_on_error(hipGetLastError(), "merge failed to get memory buffer");
+        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
+            tmp(policy, storage_size);
+        void *ptr = static_cast<void*>(tmp.data().get());
 
-        hip_rocprim::throw_on_error(rocprim::merge(d_temp_storage,
-                                                   temp_storage_bytes,
+        hip_rocprim::throw_on_error(rocprim::merge(ptr,
+                                                   storage_size,
                                                    keys1_first,
                                                    keys2_first,
                                                    result,
@@ -121,32 +123,31 @@ namespace __merge
                                                    debug_sync),
                                     "merge failed on 2nd step");
 
-        hip_rocprim::return_memory_buffer(policy, d_temp_storage);
-        hip_rocprim::throw_on_error(hipGetLastError(), "merge failed to return memory buffer");
 
         ResultIt result_end = result + input1_size + input2_size;
         return result_end;
     }
 
-    template <class Policy,
-              class KeysIt1,
-              class KeysIt2,
-              class ItemsIt1,
-              class ItemsIt2,
-              class KeysOutputIt,
-              class ItemsOutputIt,
-              class CompareOp>
-    pair<KeysOutputIt, ItemsOutputIt> THRUST_HIP_RUNTIME_FUNCTION
-    merge(Policy&       policy,
-          KeysIt1       keys1_first,
-          KeysIt1       keys1_last,
-          KeysIt2       keys2_first,
-          KeysIt2       keys2_last,
-          ItemsIt1      items1_first,
-          ItemsIt2      items2_first,
-          KeysOutputIt  keys_result,
-          ItemsOutputIt items_result,
-          CompareOp     compare_op)
+    template <typename Derived,
+              typename KeysIt1,
+              typename KeysIt2,
+              typename ItemsIt1,
+              typename ItemsIt2,
+              typename KeysOutputIt,
+              typename ItemsOutputIt,
+              typename CompareOp>
+    THRUST_HIP_RUNTIME_FUNCTION		  
+    pair<KeysOutputIt, ItemsOutputIt> 
+    merge(execution_policy<Derived>& policy,
+          KeysIt1                    keys1_first,
+          KeysIt1                    keys1_last,
+          KeysIt2                    keys2_first,
+          KeysIt2                    keys2_last,
+          ItemsIt1                   items1_first,
+          ItemsIt2                   items2_first,
+          KeysOutputIt               keys_result,
+          ItemsOutputIt              items_result,
+          CompareOp                  compare_op)
     {
         typedef size_t size_type;
 
@@ -160,16 +161,15 @@ namespace __merge
         size_type input2_size
             = static_cast<size_type>(thrust::distance(keys2_first, keys2_last));
 
-        void*       d_temp_storage     = NULL;
-        size_t      temp_storage_bytes = 0;
-        hipStream_t stream             = hip_rocprim::stream(policy);
-        bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
+        size_t      storage_size = 0;
+        hipStream_t stream       = hip_rocprim::stream(policy);
+        bool        debug_sync   = THRUST_HIP_DEBUG_SYNC_FLAG;
 
         // Determine temporary device storage requirements.
         hip_rocprim::throw_on_error(
             rocprim::merge(
-                d_temp_storage,
-                temp_storage_bytes,
+                NULL,
+                storage_size,
                 rocprim::make_zip_iterator(rocprim::make_tuple(keys1_first, items1_first)),
                 rocprim::make_zip_iterator(rocprim::make_tuple(keys2_first, items2_first)),
                 rocprim::make_zip_iterator(rocprim::make_tuple(keys_result, items_result)),
@@ -181,14 +181,15 @@ namespace __merge
             "merge_by_key failed on 1st step");
 
         // Allocate temporary storage.
-        d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes);
-        hip_rocprim::throw_on_error(hipGetLastError(),
-                                    "merge_by_key failed to get memory buffer");
+        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
+            tmp(policy, storage_size);
+        void *ptr = static_cast<void*>(tmp.data().get());
+
 
         hip_rocprim::throw_on_error(
             rocprim::merge(
-                d_temp_storage,
-                temp_storage_bytes,
+                ptr,
+                storage_size,
                 rocprim::make_zip_iterator(rocprim::make_tuple(keys1_first, items1_first)),
                 rocprim::make_zip_iterator(rocprim::make_tuple(keys2_first, items2_first)),
                 rocprim::make_zip_iterator(rocprim::make_tuple(keys_result, items_result)),
@@ -198,10 +199,6 @@ namespace __merge
                 stream,
                 debug_sync),
             "merge_by_key failed on 2nd step");
-
-        hip_rocprim::return_memory_buffer(policy, d_temp_storage);
-        hip_rocprim::throw_on_error(hipGetLastError(),
-                                    "merge_by_key failed to return memory buffer");
 
         size_t count = input1_size + input2_size;
         return thrust::make_pair(keys_result + count, items_result + count);
@@ -341,7 +338,7 @@ merge_by_key(execution_policy<Derived>& policy,
              KeysOutputIt               keys_result,
              ItemsOutputIt              items_result)
 {
-    typedef typename thrust::iterator_value<ItemsIt1>::type items_type;
+    typedef typename thrust::iterator_value<KeysIt1>::type keys_type;
     return hip_rocprim::merge_by_key(policy,
                                      keys1_first,
                                      keys1_last,
@@ -351,7 +348,7 @@ merge_by_key(execution_policy<Derived>& policy,
                                      items2_first,
                                      keys_result,
                                      items_result,
-                                     thrust::less<items_type>());
+                                     thrust::less<keys_type>());
 }
 
 } // namespace hip_rocprim
