@@ -28,11 +28,13 @@
 #pragma once
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+#include <thrust/detail/cstdint.h>
+#include <thrust/detail/temporary_array.h>
 #include <thrust/distance.h>
+#include <thrust/detail/alignment.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/iterator/transform_iterator.h>
 #include <thrust/system/hip/config.h>
-#include <thrust/system/hip/detail/memory_buffer.h>
 #include <thrust/system/hip/detail/par_to_seq.h>
 #include <thrust/system/hip/detail/util.h>
 
@@ -71,43 +73,43 @@ namespace hip_rocprim
 {
 namespace __copy_if
 {
-    template <class Policy, class InputIt, class OutputIt, class Predicate>
-    OutputIt THRUST_HIP_RUNTIME_FUNCTION
-    copy_if(Policy& policy, InputIt first, InputIt last, OutputIt output, Predicate predicate)
+    template <typename Derived, typename InputIt, typename OutputIt, typename Predicate>
+    THRUST_HIP_RUNTIME_FUNCTION OutputIt
+    copy_if(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt output, Predicate predicate) 
     {
         typedef typename iterator_traits<InputIt>::difference_type size_type;
 
         size_type   num_items          = thrust::distance(first, last);
-        void*       d_temp_storage     = NULL;
         size_t      temp_storage_bytes = 0;
         hipStream_t stream             = hip_rocprim::stream(policy);
-        size_type*  d_num_selected_out = NULL;
         bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
 
         if(num_items == 0)
             return output;
 
         // Determine temporary device storage requirements.
-        hip_rocprim::throw_on_error(rocprim::select(d_temp_storage,
+        hip_rocprim::throw_on_error(rocprim::select(NULL,
                                                     temp_storage_bytes,
                                                     first,
                                                     output,
-                                                    d_num_selected_out,
+                                                    reinterpret_cast<size_type*>(NULL),
                                                     num_items,
                                                     predicate,
                                                     stream,
                                                     debug_sync),
                                     "copy_if failed on 1st step");
 
+        size_t storage_size = temp_storage_bytes + sizeof(size_type);
+
         // Allocate temporary storage.
-        d_temp_storage
-            = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes + sizeof(size_type));
-        hip_rocprim::throw_on_error(hipGetLastError(), "copy_if failed to get memory buffer");
+        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
+            tmp(policy, storage_size);
+        void *ptr = static_cast<void*>(tmp.data().get());
 
-        d_num_selected_out = reinterpret_cast<size_type*>(
-            reinterpret_cast<char*>(d_temp_storage) + temp_storage_bytes);
+        size_type* d_num_selected_out 
+		    = reinterpret_cast<size_type*>(reinterpret_cast<char*>(ptr) + temp_storage_bytes);
 
-        hip_rocprim::throw_on_error(rocprim::select(d_temp_storage,
+        hip_rocprim::throw_on_error(rocprim::select(ptr,
                                                     temp_storage_bytes,
                                                     first,
                                                     output,
@@ -120,29 +122,23 @@ namespace __copy_if
 
         size_type num_selected = get_value(policy, d_num_selected_out);
 
-        hip_rocprim::return_memory_buffer(policy, d_temp_storage);
-        hip_rocprim::throw_on_error(hipGetLastError(),
-                                    "copy_if failed to return memory buffer");
-
         return output + num_selected;
     }
 
-    template <class Policy, class InputIt, class StencilIt, class OutputIt, class Predicate>
-    OutputIt THRUST_HIP_RUNTIME_FUNCTION
-    copy_if(Policy&   policy,
-            InputIt   first,
-            InputIt   last,
-            StencilIt stencil,
-            OutputIt  output,
-            Predicate predicate)
+    template <typename Derived, typename InputIt, typename StencilIt, typename OutputIt, typename Predicate>
+    THRUST_HIP_RUNTIME_FUNCTION OutputIt
+    copy_if(execution_policy<Derived>& policy,
+            InputIt                    first,
+            InputIt                    last,
+            StencilIt                  stencil,
+            OutputIt                   output,
+            Predicate                  predicate)
     {
         typedef typename iterator_traits<InputIt>::difference_type size_type;
 
         size_type   num_items          = thrust::distance(first, last);
-        void*       d_temp_storage     = NULL;
         size_t      temp_storage_bytes = 0;
         hipStream_t stream             = hip_rocprim::stream(policy);
-        size_type*  d_num_selected_out = NULL;
         bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
 
         if(num_items == 0)
@@ -151,26 +147,28 @@ namespace __copy_if
         auto flags = thrust::make_transform_iterator(stencil, predicate);
 
         // Determine temporary device storage requirements.
-        hip_rocprim::throw_on_error(rocprim::select(d_temp_storage,
+        hip_rocprim::throw_on_error(rocprim::select(NULL,
                                                     temp_storage_bytes,
                                                     first,
                                                     flags,
                                                     output,
-                                                    d_num_selected_out,
+                                                    reinterpret_cast<size_type*>(NULL),
                                                     num_items,
                                                     stream,
                                                     debug_sync),
                                     "copy_if failed on 1st step");
+									
+        size_t storage_size = temp_storage_bytes + sizeof(size_type);
 
         // Allocate temporary storage.
-        d_temp_storage
-            = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes + sizeof(size_type));
-        hip_rocprim::throw_on_error(hipGetLastError(), "copy_if failed to get memory buffer");
+        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
+            tmp(policy, storage_size);
+        void *ptr = static_cast<void*>(tmp.data().get());
 
-        d_num_selected_out = reinterpret_cast<size_type*>(
-            reinterpret_cast<char*>(d_temp_storage) + temp_storage_bytes);
+        size_type* d_num_selected_out 
+		    = reinterpret_cast<size_type*>(reinterpret_cast<size_type*>(ptr) + temp_storage_bytes);
 
-        hip_rocprim::throw_on_error(rocprim::select(d_temp_storage,
+        hip_rocprim::throw_on_error(rocprim::select(ptr,
                                                     temp_storage_bytes,
                                                     first,
                                                     flags,
@@ -182,10 +180,6 @@ namespace __copy_if
                                     "copy_if failed on 2nd step");
 
         size_type num_selected = get_value(policy, d_num_selected_out);
-
-        hip_rocprim::return_memory_buffer(policy, d_temp_storage);
-        hip_rocprim::throw_on_error(hipGetLastError(),
-                                    "copy_if failed to return memory buffer");
 
         return output + num_selected;
     }
@@ -205,7 +199,7 @@ copy_if(execution_policy<Derived>& policy,
         Predicate                  pred)
 {
     THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-        (__copy_if::copy_if<execution_policy<Derived>,
+        (__copy_if::copy_if<Derived,
                             InputIterator,
                             OutputIterator,
                             Predicate>)
@@ -231,7 +225,7 @@ copy_if(execution_policy<Derived>& policy,
         Predicate                  pred)
 {
     THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-        (__copy_if::copy_if<execution_policy<Derived>,
+        (__copy_if::copy_if<Derived,
                            InputIterator,
                            StencilIterator,
                            OutputIterator,

@@ -30,18 +30,19 @@
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 #include <thrust/detail/config.h>
 
-#include <thrust/detail/alignment.h>
 #include <thrust/detail/cstdint.h>
+#include <thrust/detail/temporary_array.h>
+#include <thrust/detail/alignment.h>
 #include <thrust/detail/minmax.h>
 #include <thrust/detail/raw_reference_cast.h>
-#include <thrust/detail/temporary_array.h>
 #include <thrust/detail/type_traits/iterator/is_output_iterator.h>
-#include <thrust/device_vector.h>
-#include <thrust/distance.h>
-#include <thrust/functional.h>
 #include <thrust/system/hip/detail/get_value.h>
 #include <thrust/system/hip/detail/par_to_seq.h>
 #include <thrust/system/hip/detail/util.h>
+#include <thrust/device_vector.h>
+#include <thrust/distance.h>
+#include <thrust/functional.h>
+
 
 // rocprim include
 #include <rocprim/rocprim.hpp>
@@ -51,35 +52,34 @@ BEGIN_NS_THRUST
 // forward declare generic reduce
 // to circumvent circular dependency
 template <typename DerivedPolicy, typename InputIterator, typename T, typename BinaryFunction>
-T __host__ __device__
-reduce(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
-       InputIterator                                               first,
-       InputIterator                                               last,
-       T                                                           init,
-       BinaryFunction                                              binary_op);
+__host__ __device__
+T reduce(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+         InputIterator                                               first,
+         InputIterator                                               last,
+         T                                                           init,
+         BinaryFunction                                              binary_op);
 
 namespace hip_rocprim
 {
 namespace __reduce
 {
-    template <class Policy, class InputIt, class Size, class T, class BinaryOp>
-    T THRUST_HIP_RUNTIME_FUNCTION
-    reduce(Policy& policy, InputIt first, Size num_items, T init, BinaryOp binary_op)
+    template <typename Derived, typename InputIt, typename Size, typename T, typename BinaryOp>
+    THRUST_HIP_RUNTIME_FUNCTION
+    T reduce(execution_policy<Derived>& policy, InputIt first, Size num_items, T init, BinaryOp binary_op)
     {
         if(num_items == 0)
             return init;
 
-        void*       d_temp_storage     = NULL;
+
         size_t      temp_storage_bytes = 0;
         hipStream_t stream             = hip_rocprim::stream(policy);
-        T*          d_ret_ptr          = NULL;
         bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
 
         // Determine temporary device storage requirements.
-        hip_rocprim::throw_on_error(rocprim::reduce(d_temp_storage,
+        hip_rocprim::throw_on_error(rocprim::reduce(NULL,
                                                     temp_storage_bytes,
                                                     first,
-                                                    d_ret_ptr,
+                                                    reinterpret_cast<T*>(NULL),
                                                     init,
                                                     num_items,
                                                     binary_op,
@@ -87,14 +87,17 @@ namespace __reduce
                                                     debug_sync),
                                     "reduce failed on 1st step");
 
+        size_t storage_size = temp_storage_bytes + sizeof(T);
+
         // Allocate temporary storage.
-        d_temp_storage = hip_rocprim::get_memory_buffer(policy, sizeof(T) + temp_storage_bytes);
-        hip_rocprim::throw_on_error(hipGetLastError(), "reduce failed to get memory buffer");
+        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
+            tmp(policy, storage_size);
+        void *ptr = static_cast<void*>(tmp.data().get());
 
-        d_ret_ptr = reinterpret_cast<T*>(reinterpret_cast<char*>(d_temp_storage)
-                                         + temp_storage_bytes);
+        T* d_ret_ptr = reinterpret_cast<T*>(
+            reinterpret_cast<T*>(ptr) + temp_storage_bytes);
 
-        hip_rocprim::throw_on_error(rocprim::reduce(d_temp_storage,
+        hip_rocprim::throw_on_error(rocprim::reduce(ptr,
                                                     temp_storage_bytes,
                                                     first,
                                                     d_ret_ptr,
@@ -107,9 +110,6 @@ namespace __reduce
 
         T return_value = hip_rocprim::get_value(policy, d_ret_ptr);
 
-        hip_rocprim::return_memory_buffer(policy, d_temp_storage);
-        hip_rocprim::throw_on_error(hipGetLastError(), "reduce failed to return memory buffer");
-
         return return_value;
     }
 }
@@ -119,12 +119,12 @@ namespace __reduce
 //-------------------------
 
 template <class Derived, class InputIt, class Size, class T, class BinaryOp>
-T THRUST_HIP_FUNCTION
-reduce_n(execution_policy<Derived>& policy,
-         InputIt                    first,
-         Size                       num_items,
-         T                          init,
-         BinaryOp                   binary_op)
+THRUST_HIP_FUNCTION
+T reduce_n(execution_policy<Derived>& policy,
+           InputIt                    first,
+           Size                       num_items,
+           T                          init,
+           BinaryOp                   binary_op)
 {
     THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
         (__reduce::reduce<Derived, InputIt, Size, T, BinaryOp>)
@@ -139,12 +139,12 @@ reduce_n(execution_policy<Derived>& policy,
 }
 
 template <class Derived, class InputIt, class T, class BinaryOp>
-T THRUST_HIP_FUNCTION
-reduce(execution_policy<Derived>& policy,
-       InputIt                    first,
-       InputIt                    last,
-       T                          init,
-       BinaryOp                   binary_op)
+THRUST_HIP_FUNCTION
+T reduce(execution_policy<Derived>& policy,
+         InputIt                    first,
+         InputIt                    last,
+         T                          init,
+         BinaryOp                   binary_op)
 {
     typedef typename iterator_traits<InputIt>::difference_type size_type;
     // FIXME: Check for RA iterator.
@@ -153,17 +153,18 @@ reduce(execution_policy<Derived>& policy,
 }
 
 template <class Derived, class InputIt, class T>
-T THRUST_HIP_FUNCTION
-reduce(execution_policy<Derived>& policy,
-       InputIt                    first,
-       InputIt                    last,
-       T                          init)
+THRUST_HIP_FUNCTION
+T reduce(execution_policy<Derived>& policy,
+         InputIt                    first,
+         InputIt                    last,
+         T                          init)
 {
     return hip_rocprim::reduce(policy, first, last, init, plus<T>());
 }
 
 template <class Derived, class InputIt>
-typename iterator_traits<InputIt>::value_type THRUST_HIP_FUNCTION
+THRUST_HIP_FUNCTION
+typename iterator_traits<InputIt>::value_type 
 reduce(execution_policy<Derived>& policy,
        InputIt                    first,
        InputIt                    last)

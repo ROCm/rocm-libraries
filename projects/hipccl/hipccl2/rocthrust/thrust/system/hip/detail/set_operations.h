@@ -28,16 +28,18 @@
 #pragma once
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-#include <thrust/detail/mpl/math.h>
-#include <thrust/distance.h>
+#include <thrust/detail/cstdint.h>
+#include <thrust/detail/temporary_array.h>
+#include <thrust/system/hip/detail/util.h>
+#include <thrust/system/hip/detail/execution_policy.h>
+#include <thrust/system/hip/detail/get_value.h>
+#include <thrust/system/hip/detail/par_to_seq.h>
 #include <thrust/extrema.h>
 #include <thrust/pair.h>
 #include <thrust/set_operations.h>
-#include <thrust/system/hip/detail/execution_policy.h>
-#include <thrust/system/hip/detail/get_value.h>
-#include <thrust/system/hip/detail/memory_buffer.h>
-#include <thrust/system/hip/detail/par_to_seq.h>
-#include <thrust/system/hip/detail/util.h>
+
+#include <thrust/detail/mpl/math.h>
+#include <thrust/distance.h>
 
 // rocprim include
 #include <rocprim/rocprim.hpp>
@@ -50,7 +52,7 @@ namespace hip_rocprim
 namespace __set_operations
 {
     template <bool UpperBound, class IntT, class It, class T, class Comp>
-    void THRUST_HIP_DEVICE_FUNCTION
+    THRUST_HIP_DEVICE_FUNCTION void
     binary_search_iteration(It data, int& begin, int& end, T key, int shift, Comp comp)
     {
         IntT scale = (1 << shift) - 1;
@@ -65,7 +67,7 @@ namespace __set_operations
     }
 
     template <bool UpperBound, class T, class It, class Comp>
-    int THRUST_HIP_DEVICE_FUNCTION
+    THRUST_HIP_DEVICE_FUNCTION int
     binary_search(It data, int count, T key, Comp comp)
     {
         int begin = 0;
@@ -76,7 +78,7 @@ namespace __set_operations
     }
 
     template <bool UpperBound, class IntT, class T, class It, class Comp>
-    int THRUST_HIP_DEVICE_FUNCTION
+    THRUST_HIP_DEVICE_FUNCTION int
     biased_binary_search(It data, int count, T key, IntT levels, Comp comp)
     {
         int begin = 0;
@@ -97,7 +99,7 @@ namespace __set_operations
     }
 
     template <bool UpperBound, class It1, class It2, class Comp>
-    int THRUST_HIP_DEVICE_FUNCTION
+    THRUST_HIP_DEVICE_FUNCTION int
     merge_path(It1 a, int aCount, It2 b, int bCount, int diag, Comp comp)
     {
         typedef typename thrust::iterator_traits<It1>::value_type T;
@@ -226,13 +228,13 @@ namespace __set_operations
 
     public:
         template <bool IS_FULL_TILE, class T, class It1, class It2>
-        void THRUST_HIP_DEVICE_FUNCTION
+        THRUST_HIP_DEVICE_FUNCTION void
         gmem_to_reg(T (&output)[ITEMS_PER_THREAD], It1 input1, It2 input2, int count1, int count2)
         {
             const unsigned int thread_id = ::rocprim::detail::block_thread_id<0>();
             if(IS_FULL_TILE)
             {
-                #pragma unroll
+#pragma unroll
                 for(int ITEM = 0; ITEM < ITEMS_PER_THREAD - 1; ++ITEM)
                 {
                     int idx      = BLOCK_THREADS * ITEM + thread_id;
@@ -250,7 +252,7 @@ namespace __set_operations
             }
             else
             {
-                #pragma unroll
+#pragma unroll
                 for(int ITEM = 0; ITEM < ITEMS_PER_THREAD; ++ITEM)
                 {
                     int idx = BLOCK_THREADS * ITEM + thread_id;
@@ -264,7 +266,7 @@ namespace __set_operations
         }
 
         template <class T, class It>
-        void THRUST_HIP_DEVICE_FUNCTION
+        THRUST_HIP_DEVICE_FUNCTION void
         reg_to_shared(It output, T (&input)[ITEMS_PER_THREAD])
         {
             const unsigned int thread_id = ::rocprim::detail::block_thread_id<0>();
@@ -277,14 +279,14 @@ namespace __set_operations
         }
 
         template <class OutputIt, class T, class SharedIt>
-        void THRUST_HIP_DEVICE_FUNCTION
-        scatter(OutputIt output,
-                T (&input)[ITEMS_PER_THREAD],
-                SharedIt shared,
-                int      active_mask,
-                Size     thread_output_prefix,
-                Size     tile_output_prefix,
-                int      tile_output_count)
+        THRUST_HIP_DEVICE_FUNCTION
+        void scatter(OutputIt output,
+                     T (&input)[ITEMS_PER_THREAD],
+                     SharedIt shared,
+                     int      active_mask,
+                     Size     thread_output_prefix,
+                     Size     tile_output_prefix,
+                     int      tile_output_count)
         {
             int local_scatter_idx = thread_output_prefix - tile_output_prefix;
             #pragma unroll
@@ -304,16 +306,16 @@ namespace __set_operations
             }
         }
 
-        int THRUST_HIP_DEVICE_FUNCTION
-        serial_set_op(key_type* keys,
-                      int       keys1_beg,
-                      int       keys2_beg,
-                      int       keys1_count,
-                      int       keys2_count,
-                      key_type (&output)[ITEMS_PER_THREAD],
-                      int (&indices)[ITEMS_PER_THREAD],
-                      CompareOp compare_op,
-                      SetOp     set_op)
+        THRUST_HIP_DEVICE_FUNCTION
+        int serial_set_op(key_type* keys,
+                          int       keys1_beg,
+                          int       keys2_beg,
+                          int       keys1_count,
+                          int       keys2_count,
+                          key_type (&output)[ITEMS_PER_THREAD],
+                          int (&indices)[ITEMS_PER_THREAD],
+                          CompareOp compare_op,
+                          SetOp     set_op)
         {
             int active_mask = set_op(
                 keys, keys1_beg, keys2_beg, keys1_count, keys2_count, output, indices, compare_op);
@@ -322,19 +324,19 @@ namespace __set_operations
         }
 
         template <bool IS_LAST_TILE, class LookBackScanState>
-        void THRUST_HIP_DEVICE_FUNCTION
-        consume_tile(Size               tile_idx,
-                     LookBackScanState& lookback_scan_state,
-                     KeysIt1            keys1_in,
-                     KeysIt2            keys2_in,
-                     ValuesIt1          values1_in,
-                     ValuesIt2          values2_in,
-                     KeysOutputIt       keys_out,
-                     ValuesOutputIt     values_out,
-                     CompareOp          compare_op,
-                     SetOp              set_op,
-                     pair<Size, Size>*  partitions,
-                     Size*              output_count)
+        THRUST_HIP_DEVICE_FUNCTION
+        void consume_tile(Size               tile_idx,
+                          LookBackScanState& lookback_scan_state,
+                          KeysIt1            keys1_in,
+                          KeysIt2            keys2_in,
+                          ValuesIt1          values1_in,
+                          ValuesIt2          values2_in,
+                          KeysOutputIt       keys_out,
+                          ValuesOutputIt     values_out,
+                          CompareOp          compare_op,
+                          SetOp              set_op,
+                          pair<Size, Size>*  partitions,
+                          Size*              output_count)
         {
             using block_scan_type = ::rocprim::block_scan<Size, BLOCK_THREADS>;
 
@@ -619,7 +621,7 @@ namespace __set_operations
             T aKey = keys[aBegin];
             T bKey = keys[bBegin];
 
-            #pragma unroll
+#pragma unroll
             for(int i = 0; i < ITEMS_PER_THREAD; ++i)
             {
                 bool pB = aBegin >= aEnd;
@@ -1000,16 +1002,17 @@ namespace __set_operations
 #undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
 
     template <bool HAS_VALUES,
-              class Derived,
-              class KeysIt1,
-              class KeysIt2,
-              class ValuesIt1,
-              class ValuesIt2,
-              class KeysOutputIt,
-              class ValuesOutputIt,
-              class CompareOp,
-              class SetOp>
-    pair<KeysOutputIt, ValuesOutputIt> THRUST_HIP_RUNTIME_FUNCTION
+              typename Derived,
+              typename KeysIt1,
+              typename KeysIt2,
+              typename ValuesIt1,
+              typename ValuesIt2,
+              typename KeysOutputIt,
+              typename ValuesOutputIt,
+              typename CompareOp,
+              typename SetOp>
+    THRUST_HIP_RUNTIME_FUNCTION
+    pair<KeysOutputIt, ValuesOutputIt>
     set_operations(execution_policy<Derived>& policy,
                    KeysIt1                    keys1_first,
                    KeysIt1                    keys1_last,
@@ -1029,13 +1032,11 @@ namespace __set_operations
         if(num_keys1 + num_keys2 == 0)
             return thrust::make_pair(keys_output, values_output);
 
-        void*       d_temp_storage     = NULL;
         size_t      temp_storage_bytes = 0;
         hipStream_t stream             = hip_rocprim::stream(policy);
-        size_type*  d_output_count     = NULL;
         bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
 
-        hip_rocprim::throw_on_error(doit_step<HAS_VALUES>(d_temp_storage,
+        hip_rocprim::throw_on_error(doit_step<HAS_VALUES>(NULL,
                                                           temp_storage_bytes,
                                                           keys1_first,
                                                           keys2_first,
@@ -1045,7 +1046,7 @@ namespace __set_operations
                                                           num_keys2,
                                                           keys_output,
                                                           values_output,
-                                                          d_output_count,
+                                                          reinterpret_cast<size_type*>(NULL),
                                                           compare_op,
                                                           set_op,
                                                           stream,
@@ -1053,15 +1054,16 @@ namespace __set_operations
                                     "set_operations failed on 1st step");
 
         temp_storage_bytes = rocprim::detail::align_size(temp_storage_bytes);
-        d_temp_storage
-            = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes + sizeof(size_type));
-        hip_rocprim::throw_on_error(hipGetLastError(),
-                                    "set_operations failed to get memory buffer");
 
-        d_output_count = reinterpret_cast<size_type*>(reinterpret_cast<char*>(d_temp_storage)
-                                                      + temp_storage_bytes);
+        // Allocate temporary storage.
+        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
+            tmp(policy, temp_storage_bytes + sizeof(size_type));
+        void *ptr = static_cast<void*>(tmp.data().get());
 
-        hip_rocprim::throw_on_error(doit_step<HAS_VALUES>(d_temp_storage,
+        size_type* d_output_count = reinterpret_cast<size_type*>(
+            reinterpret_cast<char*>(ptr) + temp_storage_bytes);
+
+        hip_rocprim::throw_on_error(doit_step<HAS_VALUES>(ptr,
                                                           temp_storage_bytes,
                                                           keys1_first,
                                                           keys2_first,
@@ -1079,10 +1081,6 @@ namespace __set_operations
                                     "set_operations failed on 2nd step");
 
         size_type output_count = hip_rocprim::get_value(policy, d_output_count);
-
-        hip_rocprim::return_memory_buffer(policy, d_temp_storage);
-        hip_rocprim::throw_on_error(hipGetLastError(),
-                                    "set_operations failed to return memory buffer");
 
         return thrust::make_pair(keys_output + output_count, values_output + output_count);
     }

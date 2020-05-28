@@ -28,12 +28,13 @@
 #pragma once
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+#include <thrust/detail/cstdint.h>
+#include <thrust/detail/temporary_array.h>
 
-#include <thrust/distance.h>
-#include <thrust/sort.h>
 #include <thrust/system/hip/detail/execution_policy.h>
-#include <thrust/system/hip/detail/memory_buffer.h>
 #include <thrust/system/hip/detail/par_to_seq.h>
+#include <thrust/sort.h>
+#include <thrust/distance.h>
 
 // rocPRIM includes
 #include <rocprim/rocprim.hpp>
@@ -100,27 +101,30 @@ namespace __merge_sort
         }
     };
 
-    template <class SORT_ITEMS, class Policy, class KeysIt, class ItemsIt, class CompareOp>
-    void THRUST_HIP_RUNTIME_FUNCTION
-    merge_sort(Policy&   policy,
-               KeysIt    keys_first,
-               KeysIt    keys_last,
-               ItemsIt   items_first,
-               CompareOp compare_op)
+	template <typename SORT_ITEMS,
+              typename Derived,
+              typename KeysIt,
+              typename ItemsIt,
+              typename CompareOp>
+    THRUST_HIP_RUNTIME_FUNCTION 
+    void merge_sort(execution_policy<Derived>& policy,
+                    KeysIt                     keys_first,
+                    KeysIt                     keys_last,
+                    ItemsIt                    items_first,
+                    CompareOp                  compare_op)
     {
         typedef typename iterator_traits<KeysIt>::difference_type size_type;
 
         const size_type count = static_cast<size_type>(thrust::distance(keys_first, keys_last));
 
-        void*       d_temp_storage     = NULL;
-        size_t      temp_storage_bytes = 0;
-        hipStream_t stream             = hip_rocprim::stream(policy);
-        bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
+        size_t      storage_size = 0;
+        hipStream_t stream       = hip_rocprim::stream(policy);
+        bool        debug_sync   = THRUST_HIP_DEBUG_SYNC_FLAG;
 
         hipError_t status;
 
-        status = dispatch<SORT_ITEMS>::doit(d_temp_storage,
-                                            temp_storage_bytes,
+        status = dispatch<SORT_ITEMS>::doit(NULL,
+                                            storage_size,
                                             keys_first,
                                             items_first,
                                             count,
@@ -129,12 +133,13 @@ namespace __merge_sort
                                             debug_sync);
         hip_rocprim::throw_on_error(status, "merge_sort: failed on 1st step");
 
-        d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes);
-        hip_rocprim::throw_on_error(hipGetLastError(),
-                                    "merge_sort: failed to get memory buffer");
+        // Allocate temporary storage.
+        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
+            tmp(policy, storage_size);
+        void *ptr = static_cast<void*>(tmp.data().get());
 
-        status = dispatch<SORT_ITEMS>::doit(d_temp_storage,
-                                            temp_storage_bytes,
+        status = dispatch<SORT_ITEMS>::doit(ptr,
+                                            storage_size,
                                             keys_first,
                                             items_first,
                                             count,
@@ -142,10 +147,6 @@ namespace __merge_sort
                                             stream,
                                             debug_sync);
         hip_rocprim::throw_on_error(status, "merge_sort: failed on 2nd step");
-
-        hip_rocprim::return_memory_buffer(policy, d_temp_storage);
-        hip_rocprim::throw_on_error(hipGetLastError(),
-                                    "merge_sort: failed to return memory buffer");
     }
 } // namespace __merge_sort
 
@@ -263,27 +264,30 @@ namespace __radix_sort
         }
     }; // struct dispatch -- sort pairs in descending order;
 
-    template <class SORT_ITEMS, class Policy, class KeysIt, class ItemsIt, class CompareOp>
-    void THRUST_HIP_RUNTIME_FUNCTION
-    radix_sort(Policy&   policy,
-               KeysIt    keys_first,
-               KeysIt    keys_last,
-               ItemsIt   items_first,
-               CompareOp )
+    template <typename SORT_ITEMS,
+              typename Derived,
+              typename KeysIt,
+              typename ItemsIt,
+              typename CompareOp>
+    THRUST_HIP_RUNTIME_FUNCTION
+    void radix_sort(execution_policy<Derived>& policy,
+                    KeysIt                     keys_first,
+                    KeysIt                     keys_last,
+                    ItemsIt                    items_first,
+                    CompareOp )
     {
         typedef typename iterator_traits<KeysIt>::difference_type size_type;
 
         const size_type count = static_cast<size_type>(thrust::distance(keys_first, keys_last));
-
-        void*       d_temp_storage     = NULL;
-        size_t      temp_storage_bytes = 0;
-        hipStream_t stream             = hip_rocprim::stream(policy);
-        bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
+		
+        size_t      storage_size = 0;
+        hipStream_t stream       = hip_rocprim::stream(policy);
+        bool        debug_sync   = THRUST_HIP_DEBUG_SYNC_FLAG;
 
         hipError_t status;
 
-        status = dispatch<SORT_ITEMS, CompareOp>::doit(d_temp_storage,
-                                                       temp_storage_bytes,
+        status = dispatch<SORT_ITEMS, CompareOp>::doit(NULL,
+                                                       storage_size,
                                                        keys_first,
                                                        items_first,
                                                        count,
@@ -291,22 +295,19 @@ namespace __radix_sort
                                                        debug_sync);
         hip_rocprim::throw_on_error(status, "radix_sort: failed on 1st step");
 
-        d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes);
-        hip_rocprim::throw_on_error(hipGetLastError(),
-                                    "radix_sort: failed to get memory buffer");
+        // Allocate temporary storage.
+        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
+            tmp(policy, storage_size);
+        void *ptr = static_cast<void*>(tmp.data().get());
 
-        status = dispatch<SORT_ITEMS, CompareOp>::doit(d_temp_storage,
-                                                       temp_storage_bytes,
+        status = dispatch<SORT_ITEMS, CompareOp>::doit(ptr,
+                                                       storage_size,
                                                        keys_first,
                                                        items_first,
                                                        count,
                                                        stream,
                                                        debug_sync);
         hip_rocprim::throw_on_error(status, "radix_sort: failed on 2nd step");
-
-        hip_rocprim::return_memory_buffer(policy, d_temp_storage);
-        hip_rocprim::throw_on_error(hipGetLastError(),
-                                    "radix_sort: failed to return memory buffer");
     }
 } // __radix_sort
 
