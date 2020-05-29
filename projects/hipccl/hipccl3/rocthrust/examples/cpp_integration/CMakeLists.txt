@@ -1,24 +1,26 @@
-FILE(GLOB SOURCES_CU  *.cu)
-FILE(GLOB SOURCES_CPP *.cpp)
-FILE(GLOB SOURCES_H *.h)
-set(SOURCES_BACKEND ${SOURCES_CU} ${SOURCES_CPP} ${SOURCES_H})
-list(APPEND SOURCES_BACKEND "README")
+# ########################################################################
+# Copyright 2020 Advanced Micro Devices, Inc.
+# ########################################################################
 
-install(FILES ${SOURCES_BACKEND} DESTINATION "examples/cpp_integration" COMPONENT examples)
 
-if (NOT "x${DEVICE_BACKEND}" STREQUAL "xCUDA")
-  return()
-endif()
+# link host.cpp to device.cu
 
-list(LENGTH SOURCES_BACKEND index)
-message(STATUS "Found ${index} examples/cpp_integration")
+set(EXAMPLE_SOURCE host.cpp device.cu device.h)
+set(EXAMPLE_TARGET example_thrust_linking)
+set_source_files_properties(device.cu PROPERTIES LANGUAGE CXX COMPILE_FLAGS "-x c++")
+add_executable(${EXAMPLE_TARGET} ${EXAMPLE_SOURCE})
 
-set(targets_backend "")
-set(exec_name "cpp_integration")
-set(target example-${exec_name})
-thrust_add_executable(${target} ${SOURCES_BACKEND})
-set_target_properties(${target} PROPERTIES OUTPUT_NAME ${exec_name})
-install(TARGETS ${target} DESTINATION "examples/cpp_integration/${HOST_BACKEND}_host_${DEVICE_BACKEND}_device_${THRUST_MODE}" OPTIONAL COMPONENT examples-bin)
-list(APPEND targets_backend ${target})
-
-set(targets ${targets} ${targets_backend} PARENT_SCOPE)
+target_link_libraries(${EXAMPLE_TARGET}
+    PRIVATE
+        rocthrust
+)
+foreach(amdgpu_target ${AMDGPU_TARGETS})
+    target_link_libraries(${EXAMPLE_TARGET}
+        PRIVATE
+            --amdgpu-target=${amdgpu_target}
+    )
+endforeach()
+set_target_properties(${EXAMPLE_TARGET}
+    PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/examples/cpp_integration"
+)
