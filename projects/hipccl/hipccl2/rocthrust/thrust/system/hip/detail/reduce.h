@@ -28,20 +28,20 @@
 #pragma once
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-#include <thrust/detail/config.h>
+#include <thrust/system/hip/config.h>
 
 #include <thrust/detail/cstdint.h>
 #include <thrust/detail/temporary_array.h>
-#include <thrust/detail/alignment.h>
-#include <thrust/detail/minmax.h>
+#include <thrust/system/hip/detail/util.h>
 #include <thrust/detail/raw_reference_cast.h>
 #include <thrust/detail/type_traits/iterator/is_output_iterator.h>
-#include <thrust/system/hip/detail/get_value.h>
 #include <thrust/system/hip/detail/par_to_seq.h>
-#include <thrust/system/hip/detail/util.h>
-#include <thrust/device_vector.h>
-#include <thrust/distance.h>
+#include <thrust/system/hip/detail/get_value.h>
 #include <thrust/functional.h>
+#include <thrust/device_vector.h>
+#include <thrust/detail/minmax.h>
+#include <thrust/distance.h>
+#include <thrust/detail/alignment.h>
 
 
 // rocprim include
@@ -51,7 +51,10 @@ BEGIN_NS_THRUST
 
 // forward declare generic reduce
 // to circumvent circular dependency
-template <typename DerivedPolicy, typename InputIterator, typename T, typename BinaryFunction>
+template <typename DerivedPolicy,
+          typename InputIterator,
+          typename T,
+          typename BinaryFunction>
 __host__ __device__
 T reduce(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
          InputIterator                                               first,
@@ -63,7 +66,11 @@ namespace hip_rocprim
 {
 namespace __reduce
 {
-    template <typename Derived, typename InputIt, typename Size, typename T, typename BinaryOp>
+    template <typename Derived,
+              typename InputIt,
+              typename Size,
+              typename T,
+              typename BinaryOp>
     THRUST_HIP_RUNTIME_FUNCTION
     T reduce(execution_policy<Derived>& policy, InputIt first, Size num_items, T init, BinaryOp binary_op)
     {
@@ -95,7 +102,7 @@ namespace __reduce
         void *ptr = static_cast<void*>(tmp.data().get());
 
         T* d_ret_ptr = reinterpret_cast<T*>(
-            reinterpret_cast<T*>(ptr) + temp_storage_bytes);
+            reinterpret_cast<char*>(ptr) + temp_storage_bytes);
 
         hip_rocprim::throw_on_error(rocprim::reduce(ptr,
                                                     temp_storage_bytes,
@@ -164,7 +171,7 @@ T reduce(execution_policy<Derived>& policy,
 
 template <class Derived, class InputIt>
 THRUST_HIP_FUNCTION
-typename iterator_traits<InputIt>::value_type 
+typename iterator_traits<InputIt>::value_type
 reduce(execution_policy<Derived>& policy,
        InputIt                    first,
        InputIt                    last)

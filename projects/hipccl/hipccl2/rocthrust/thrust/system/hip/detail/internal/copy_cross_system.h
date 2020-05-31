@@ -105,27 +105,16 @@ namespace __copy
 
     // non-trivial H->D copy
     template <class H, class D, class InputIt, class Size, class OutputIt>
-    OutputIt __host__ /* WORKAROUND */ __device__
-    cross_system_copy_n(thrust::cpp::execution_policy<H>&         host_s,
-                        thrust::hip_rocprim::execution_policy<D>& device_s,
-                        InputIt                                   first,
-                        Size                                      num_items,
-                        OutputIt                                  result,
-                        thrust::detail::false_type) // non-trivial copy
+    OutputIt __host__
+    cross_system_copy_n_hd_nt(thrust::cpp::execution_policy<H>&         host_s,
+                              thrust::hip_rocprim::execution_policy<D>& device_s,
+                              InputIt                                   first,
+                              Size                                      num_items,
+                              OutputIt                                  result)
     {
         // get type of the input data
         typedef typename thrust::iterator_value<InputIt>::type InputTy;
 
-        // WORKAROUND
-#if defined(THRUST_HIP_DEVICE_CODE)
-        THRUST_UNUSED_VAR(host_s);
-        THRUST_UNUSED_VAR(device_s);
-        THRUST_UNUSED_VAR(first);
-        THRUST_UNUSED_VAR(num_items);
-        THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-            (hip_rocprim::copy_n<D, InputTy*, Size, OutputIt>));
-        return result;
-#else
         // copy input data into host temp storage
         InputIt last = first;
         thrust::advance(last, num_items);
@@ -147,59 +136,104 @@ namespace __copy
 
         // device->device copy
         OutputIt ret = hip_rocprim::copy_n(device_s, d_in_ptr.data(), num_items, result);
+
         return ret;
-#endif
     }
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-    // non-trivial copy D->H, only supported with HCC compiler
-    // because copy ctor must have  __device__ annotations, which is hcc-only
-    // feature
-    template <class D, class H, class InputIt, class Size, class OutputIt>
-    OutputIt __host__ /* WORKAROUND */ __device__
-    cross_system_copy_n(thrust::hip_rocprim::execution_policy<D>& device_s,
-                        thrust::cpp::execution_policy<H>&         host_s,
+    // non-trivial H->D copy
+    template <class H, class D, class InputIt, class Size, class OutputIt>
+    OutputIt __host__ __device__
+    cross_system_copy_n(thrust::cpp::execution_policy<H>&         host_s,
+                        thrust::hip_rocprim::execution_policy<D>& device_s,
                         InputIt                                   first,
                         Size                                      num_items,
                         OutputIt                                  result,
                         thrust::detail::false_type) // non-trivial copy
-
     {
         // get type of the input data
         typedef typename thrust::iterator_value<InputIt>::type InputTy;
 
-        // WORKAROUND
+        THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+            (hip_rocprim::__copy::cross_system_copy_n_hd_nt<H, D, InputIt, Size, OutputIt>)
+        );
+
 #if defined(THRUST_HIP_DEVICE_CODE)
-        THRUST_UNUSED_VAR(device_s);
         THRUST_UNUSED_VAR(host_s);
+        THRUST_UNUSED_VAR(device_s);
         THRUST_UNUSED_VAR(first);
         THRUST_UNUSED_VAR(num_items);
 
-        THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-            (hip_rocprim::uninitialized_copy_n<D, InputIt, Size, InputTy*>)
-        );
         return result;
 #else
-        // allocate device temp storage
-        thrust::detail::temporary_array<InputTy, D> d_in_ptr(device_s, num_items);
-
-        // uninitialize copy into temp device storage
-        hip_rocprim::uninitialized_copy_n(device_s, first, num_items, d_in_ptr.data());
-
-        // allocate host temp storage
-        thrust::detail::temporary_array<InputTy, H> temp(host_s, num_items);
-
-        // trivial copy from device to host
-        hipError_t status = hip_rocprim::trivial_copy_from_device(
-            temp.data().get(), d_in_ptr.data().get(), num_items, hip_rocprim::stream(device_s));
-        hip_rocprim::throw_on_error(status, "__copy:: D->H: failed");
-
-        // host->host copy
-        OutputIt ret = thrust::copy_n(host_s, temp.data(), num_items, result);
-
-        return ret;
+        return cross_system_copy_n_hd_nt(host_s, device_s, first, num_items, result);
 #endif
     }
+
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+
+// non-trivial copy
+template <class D, class H, class InputIt, class Size, class OutputIt>
+OutputIt __host__
+cross_system_copy_n_dh_nt(thrust::hip_rocprim::execution_policy<D>& device_s,
+                          thrust::cpp::execution_policy<H>&         host_s,
+                          InputIt                                   first,
+                          Size                                      num_items,
+                          OutputIt                                  result)
+{
+    // get type of the input data
+    typedef typename thrust::iterator_value<InputIt>::type InputTy;
+
+    // allocate device temp storage
+    thrust::detail::temporary_array<InputTy, D> d_in_ptr(device_s, num_items);
+
+    // uninitialize copy into temp device storage
+    hip_rocprim::uninitialized_copy_n(device_s, first, num_items, d_in_ptr.data());
+
+    // allocate host temp storage
+    thrust::detail::temporary_array<InputTy, H> temp(host_s, num_items);
+
+    // trivial copy from device to host
+    hipError_t status = hip_rocprim::trivial_copy_from_device(
+        temp.data().get(), d_in_ptr.data().get(), num_items, hip_rocprim::stream(device_s));
+    hip_rocprim::throw_on_error(status, "__copy:: D->H: failed");
+
+    // host->host copy
+    OutputIt ret = thrust::copy_n(host_s, temp.data(), num_items, result);
+
+    return ret;
+}
+
+// non-trivial copy D->H, only supported with HCC compiler
+// because copy ctor must have  __device__ annotations, which is hcc-only
+// feature
+template <class D, class H, class InputIt, class Size, class OutputIt>
+OutputIt __host__  __device__
+cross_system_copy_n(thrust::hip_rocprim::execution_policy<D>& device_s,
+                thrust::cpp::execution_policy<H>&         host_s,
+                InputIt                                   first,
+                Size                                      num_items,
+                OutputIt                                  result,
+                thrust::detail::false_type) // non-trivial copy
+
+{
+    // get type of the input data
+    typedef typename thrust::iterator_value<InputIt>::type InputTy;
+
+    THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+        (hip_rocprim::__copy::cross_system_copy_n_dh_nt<D, H, InputIt, Size, OutputIt>)
+    );
+
+#if defined(THRUST_HIP_DEVICE_CODE)
+    THRUST_UNUSED_VAR(device_s);
+    THRUST_UNUSED_VAR(host_s);
+    THRUST_UNUSED_VAR(first);
+    THRUST_UNUSED_VAR(num_items);
+
+    return result;
+#else
+    return  cross_system_copy_n_dh_nt(device_s, host_s, first, num_items, result);
+#endif
+}
 #endif
 
     template <class System1, class System2, class InputIt, class Size, class OutputIt>

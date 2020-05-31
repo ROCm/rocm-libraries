@@ -31,10 +31,10 @@
 #include <iterator>
 #include <thrust/system/hip/config.h>
 
+#include <thrust/system/hip/detail/util.h>
+#include <thrust/system/hip/detail/parallel_for.h>
 #include <thrust/detail/function.h>
 #include <thrust/distance.h>
-#include <thrust/system/hip/detail/parallel_for.h>
-#include <thrust/system/hip/detail/util.h>
 
 BEGIN_NS_THRUST
 
@@ -72,9 +72,11 @@ Input THRUST_HIP_FUNCTION
 for_each_n(execution_policy<Derived>& policy, Input first, Size count, UnaryOp op)
 {
     typedef thrust::detail::wrapped_function<UnaryOp, void> wrapped_t;
-    wrapped_t                                               wrapped_op(op);
+    wrapped_t wrapped_op(op);
 
-    hip_rocprim::parallel_for(policy, for_each_f<Input, wrapped_t>(first, wrapped_op), count);
+    hip_rocprim::parallel_for(policy,
+                              for_each_f<Input, wrapped_t>(first, wrapped_op),
+                              count);
     return first + count;
 }
 
