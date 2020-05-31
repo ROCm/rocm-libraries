@@ -18,9 +18,9 @@
 #pragma once
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+#include <thrust/system/hip/config.h>
 #include <thrust/detail/config.h>
 #include <thrust/detail/raw_pointer_cast.h>
-#include <thrust/system/hip/config.h>
 #include <thrust/system/hip/detail/copy.h>
 #include <thrust/system/hip/detail/execution_policy.h>
 

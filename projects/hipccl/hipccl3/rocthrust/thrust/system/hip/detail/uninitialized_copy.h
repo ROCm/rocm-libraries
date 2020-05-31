@@ -31,8 +31,8 @@
 #include <iterator>
 #include <thrust/distance.h>
 #include <thrust/system/hip/detail/execution_policy.h>
-#include <thrust/system/hip/detail/parallel_for.h>
 #include <thrust/system/hip/detail/util.h>
+#include <thrust/system/hip/detail/parallel_for.h>
 
 BEGIN_NS_THRUST
 namespace hip_rocprim
