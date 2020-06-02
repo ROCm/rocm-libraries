@@ -4,6 +4,7 @@
 #include <thrust/sort.h>
 #include <thrust/reduce.h>
 #include <thrust/scan.h>
+#include <thrust/version.h>
 
 #include <algorithm>
 #include <numeric>
@@ -26,6 +27,24 @@
 
 #if defined(HAVE_TBB)
   #include "tbb_algos.h"
+#endif
+
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC // HCC compiler
+#ifdef __HIP_DEVICE_COMPILE__
+  using ::abs;
+  using ::sqrt;
+#else
+  using std::abs;
+  using std::sqrt;
+#endif
+#else // Not HCC devce compiler
+  using std::abs;
+  using std::sqrt;
+#endif
+
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
+  #include <thrust/system_error.h>     // For `thrust::system_error`
+  #include <thrust/system/hip/error.h> // For `thrust::hip_category`
 #endif
 
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
@@ -173,7 +192,7 @@ T sample_standard_deviation(InputIt first, InputIt last, T average)
   value_and_count<T> vc
     = thrust::transform_reduce(first, last, transform, init_vc, reduce_vc);
 
-  return std::sqrt(vc.value / T(vc.count - 1));
+  return sqrt(vc.value / T(vc.count - 1));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -200,8 +219,8 @@ T uncertainty_multiplicative(
   , T const& B, T const& B_unc
     )
 {
-  return std::abs(f)
-       * std::sqrt((A_unc / A) * (A_unc / A) + (B_unc / B) * (B_unc / B));
+  return abs(f)
+       * sqrt((A_unc / A) * (A_unc / A) + (B_unc / B) * (B_unc / B));
 }
 
 // Compute the propagated uncertainty from addition of two uncertain values,
@@ -217,7 +236,7 @@ T uncertainty_additive(
   , T const& d, T const& B_unc
     )
 {
-  return std::sqrt((c * c * A_unc * A_unc) + (d * d * B_unc * B_unc));
+  return sqrt((c * c * A_unc * A_unc) + (d * d * B_unc * B_unc));
 }
 
 ///////////////////////////////////////////////////////////////////////////////

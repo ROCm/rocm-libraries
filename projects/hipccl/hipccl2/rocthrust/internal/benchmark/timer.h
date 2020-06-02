@@ -1,6 +1,64 @@
 #pragma once
 
 #include <cassert>
+#include <thrust/detail/config.h>
+
+#if (THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC)
+
+#define HIP_CHECK(condition)         \
+  {                                  \
+    hipError_t error = condition;    \
+    if(error != hipSuccess){         \
+        std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
+        exit(error); \
+    } \
+  }
+
+class hip_timer
+{
+    hipEvent_t start_;
+    hipEvent_t stop_;
+
+ public:
+    hip_timer()
+    {
+        HIP_CHECK(hipEventCreate(&start_));
+        HIP_CHECK(hipEventCreate(&stop_));
+    }
+
+    ~hip_timer()
+    {
+        HIP_CHECK(hipEventDestroy(start_));
+        HIP_CHECK(hipEventDestroy(stop_));
+    }
+
+    void start()
+    {
+        HIP_CHECK(hipEventRecord(start_, 0));
+    }
+
+    void stop()
+    {
+        HIP_CHECK(hipEventRecord(stop_, 0));
+        HIP_CHECK(hipEventSynchronize(stop_));
+    }
+
+    double milliseconds_elapsed()
+    {
+        float elapsed_time;
+        HIP_CHECK(hipEventElapsedTime(&elapsed_time, start_, stop_));
+        return elapsed_time;
+    }
+
+    double seconds_elapsed()
+    {
+        return milliseconds_elapsed() / 1000.0;
+    }
+};
+
+#endif
+
+#if (THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC)
 
 #  define CUDA_SAFE_CALL_NO_SYNC( call) do {                                 \
     cudaError err = call;                                                    \
@@ -60,6 +118,8 @@ class cuda_timer
         return milliseconds_elapsed() / 1000.0;
     }
 };
+
+#endif
 
 #if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC)
 #include <windows.h>
@@ -125,5 +185,3 @@ class steady_timer
     }
 };
 #endif
-
-
