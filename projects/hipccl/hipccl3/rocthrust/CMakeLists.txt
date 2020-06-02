@@ -37,6 +37,7 @@ include(cmake/VerifyCompiler.cmake)
 option(DISABLE_WERROR "Disable building with Werror" ON)
 option(BUILD_TEST "Build tests" OFF)
 option(BUILD_EXAMPLES "Build examples" OFF)
+option(BUILD_BENCHMARKS "Build benchmarks" OFF)
 option(DOWNLOAD_ROCPRIM "Download rocPRIM and do not search for rocPRIM package" OFF)
 
 # Set CXX flags
@@ -72,10 +73,14 @@ if(BUILD_TEST)
   add_subdirectory(testing)
 endif()
 
-# Tests
+# Examples
 if(BUILD_EXAMPLES)
-  message (STATUS "  BUILD_EXAMPLES        : ON")
   add_subdirectory(examples)
+endif()
+
+# Benchmarks
+if(BUILD_BENCHMARKS)
+  add_subdirectory(internal/benchmark)
 endif()
 
 # Package
