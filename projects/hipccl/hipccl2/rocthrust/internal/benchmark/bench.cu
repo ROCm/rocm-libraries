@@ -37,7 +37,7 @@
   using std::abs;
   using std::sqrt;
 #endif
-#else // Not HCC devce compiler
+#else // Not HCC device compiler
   using std::abs;
   using std::sqrt;
 #endif
