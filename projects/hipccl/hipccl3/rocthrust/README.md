@@ -39,8 +39,10 @@ cd rocThrust; mkdir build; cd build
 
 # Configure rocThrust, setup options for your system.
 # Build options:
-#   DISABLE_WERROR - ON by default, This flag disable the -Werror compiler flag
-#   BUILD_TEST - OFF by default,
+#   DISABLE_WERROR   - ON  by default, This flag disable the -Werror compiler flag
+#   BUILD_TEST       - OFF by default,
+#   BUILD_EXAMPLES   - OFF by default,
+#   BUILD_BENCHMARKS - OFF by default,
 #   DOWNLOAD_ROCPRIM - OFF by default and at ON the rocPRIM will be downloaded to build folder,
 #
 # ! IMPORTANT !
@@ -85,6 +87,12 @@ target_link_libraries(<your_target> roc::rocthrust)
 # Go to rocThrust build directory
 cd rocThrust; cd build
 
+# Configure with examples flag on
+CXX=hipcc cmake -DBUILD_TEST=ON ..
+
+# Build tests
+make -j4
+
 # To run all tests
 ctest
 
@@ -115,6 +123,43 @@ static constexpr unsigned int seeds [] = {};
 ```
 
 (3) this line should never be modified.
+
+
+## Running Examples
+```sh
+# Go to rocThrust build directory
+cd rocThrust; cd build
+
+# Configure with examples flag on
+CXX=hipcc cmake -DBUILD_EXAMPLES=ON ..
+
+# Build examples
+make -j4
+
+# Run the example you want to run
+# ./examples/example_thrust_<example-name>
+# For example:
+./examples/example_thrust_version
+
+# Example for linking with cpp files
+./examples/cpp_integration/example_thrust_linking
+```
+
+## Running Benchmarks
+```sh
+# Go to rocThrust build directory
+cd rocThrust; cd build
+
+# Configure with benchmarks flag on
+CXX=hipcc cmake -DBUILD_BENCHMARKS=ON ..
+
+# Build benchmarks
+make -j4
+
+# Run the benchmarks
+./benchmarks/benchmark_thrust_bench 
+```
+
 
 ## Documentation
 
