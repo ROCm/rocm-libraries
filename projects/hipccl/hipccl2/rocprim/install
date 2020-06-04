@@ -125,10 +125,7 @@ fi
 # before 'cmake' or setting cmake option 'CMAKE_CXX_COMPILER' to path to the HCC compiler.
 #
 
-compiler="hcc"
-if [[ "${build_hip_clang}" == true ]]; then
-    compiler="hipcc"
-fi
+compiler="hipcc"
 
 cmake_executable="cmake"
 if [ -e /etc/redhat-release ] ; then
@@ -148,7 +145,7 @@ fi
 
 if [[ "${build_relocatable}" == true ]]; then
     CXX=${rocm_path}/bin/${compiler} ${cmake_executable} -DCMAKE_INSTALL_PREFIX=${rocm_path} -DBUILD_BENCHMARK=${benchmark} \
-       -DCMAKE_PREFIX_PATH="${rocm_path} ${rocm_path}/hcc  ${rocm_path}/hip" \
+       -DCMAKE_PREFIX_PATH="${rocm_path}  ${rocm_path}/hip" \
        -DBUILD_BENCHMARK=${benchmark} -DBUILD_TEST=${clients} \
        -DCMAKE_MODULE_PATH="${rocm_path}/hip/cmake" ../../.     # or cmake-gui ../.
 else
