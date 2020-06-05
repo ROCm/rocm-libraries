@@ -88,7 +88,7 @@ build:cmake-latest:
     - cd $BUILD_LATEST_DIR
     - cmake
       -G Ninja
-      -D CMAKE_CXX_COMPILER=hcc
+      -D CMAKE_CXX_COMPILER=hipcc
       -D CMAKE_BUILD_TYPE=Release
       -D BUILD_TEST=ON
       -D BUILD_EXAMPLE=ON
@@ -120,7 +120,7 @@ build:cmake-minimum:
     - cd $BUILD_MINIMUM_DIR
     - cmake
       -G Ninja
-      -D CMAKE_CXX_COMPILER=hcc
+      -D CMAKE_CXX_COMPILER=hipcc
       -D CMAKE_BUILD_TYPE=Release
       -D BUILD_TEST=ON
       -D BUILD_EXAMPLE=ON
@@ -150,7 +150,7 @@ build:package:
     - cd $PACKAGE_DIR
     - cmake
       -G Ninja
-      -D CMAKE_CXX_COMPILER=hcc
+      -D CMAKE_CXX_COMPILER=hipcc
       -D CMAKE_BUILD_TYPE=Release
       -B $PACKAGE_DIR
       $CI_PROJECT_DIR
@@ -162,7 +162,7 @@ build:package:
     - mkdir -p ../package_test && cd ../package_test
     - cmake
       -G Ninja
-      -D CMAKE_CXX_COMPILER=hcc
+      -D CMAKE_CXX_COMPILER=hipcc
       -D CMAKE_BUILD_TYPE=Release
       $CI_PROJECT_DIR/test/extra
     - cmake
@@ -190,7 +190,7 @@ test:deb:
     - mkdir -p package_test && cd package_test
     - cmake
       -G Ninja
-      -D CMAKE_CXX_COMPILER=hcc
+      -D CMAKE_CXX_COMPILER=hipcc
       -D CMAKE_BUILD_TYPE=Release
       $CI_PROJECT_DIR/test/extra
     - cmake
