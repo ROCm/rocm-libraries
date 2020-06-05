@@ -8,8 +8,7 @@ performant GPU-accelerated code on AMD ROCm platform.
 * Git
 * CMake (3.5.1 or later)
 * AMD [ROCm](https://rocm.github.io/install.html) platform (1.8.2 or later)
-  * Including [HCC](https://github.com/RadeonOpenCompute/hcc) compiler
-  * Alternatively [HIP-clang](https://github.com/ROCm-Developer-Tools/HIP/blob/master/INSTALL.md#hip-clang) compiler
+  * Including [HIP-clang](https://github.com/ROCm-Developer-Tools/HIP/blob/master/INSTALL.md#hip-clang) compiler
 
 Optional:
 
@@ -43,11 +42,9 @@ cd rocPRIM; mkdir build; cd build
 #     tests only of a specific architecture is possible for eg: ctest -R gfx803|gfx900
 #
 # ! IMPORTANT !
-# Set C++ compiler to HCC or HIP-clang. You can do it by adding 'CXX=<path-to-compiler>'
+# Set C++ compiler to HIP-clang. You can do it by adding 'CXX=<path-to-compiler>'
 # before 'cmake' or setting cmake option 'CMAKE_CXX_COMPILER' to path to the compiler.
-# Using HCC:
-[CXX=hcc] cmake -DBUILD_BENCHMARK=ON ../. # or cmake-gui ../.
-# or using HIP-clang:
+# Using HIP-clang:
 [CXX=hipcc] cmake -DBUILD_BENCHMARK=ON ../.
 
 # Build
