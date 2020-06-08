@@ -37,7 +37,7 @@ build:rocm:
   script:
     - mkdir build
     - cd build
-    - CXX=hcc cmake -DBUILD_TEST=ON ../.
+    - CXX=hipcc cmake -DBUILD_TEST=ON ../.
     - make -j $(nproc)
     - make package
   artifacts:
@@ -82,7 +82,7 @@ test:rocm_package:
     - cd rocPRIM
     - mkdir build
     - cd build
-    - CXX=hcc cmake -DBUILD_TEST=OFF ../.
+    - CXX=hipcc cmake -DBUILD_TEST=OFF ../.
     - make package
     - $SUDO_CMD dpkg -i rocprim-*.deb
     - cd ../..
@@ -90,7 +90,7 @@ test:rocm_package:
     - cd build
     - $SUDO_CMD dpkg -i rocthrust-*.deb
     - mkdir ../package_test && cd ../package_test
-    - CXX=hcc cmake ../extra/. -Drocprim_DIR="/opt/rocm/rocprim"
+    - CXX=hipcc cmake ../extra/. -Drocprim_DIR="/opt/rocm/rocprim"
     - make VERBOSE=1
     - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 1
     - $SUDO_CMD dpkg -r rocthrust
@@ -106,9 +106,9 @@ test:rocm_install:
   script:
     - mkdir build_only_install
     - cd build_only_install
-    - CXX=hcc cmake -DBUILD_TEST=OFF ../.
+    - CXX=hipcc cmake -DBUILD_TEST=OFF ../.
     - $SUDO_CMD make install
     - mkdir ../install_test && cd ../install_test
-    - CXX=hcc cmake ../extra/.
+    - CXX=hipcc cmake ../extra/.
     - make VERBOSE=1
     - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 1
