@@ -35,7 +35,7 @@ variables:
   # Local build options
   LOCAL_CXXFLAGS: ""
   LOCAL_CMAKE_OPTIONS: ""
-  ROCM_PATH: "/opt/rocm-3.3.0/"
+  ROCM_PATH: "/opt/rocm-3.5.0/"
 
 # hipCUB with rocPRIM backend
 .rocm:
@@ -80,7 +80,7 @@ variables:
     - cd build
     - cmake
       -G Ninja
-      -D CMAKE_CXX_COMPILER=hcc
+      -D CMAKE_CXX_COMPILER=hipcc
       -D CMAKE_BUILD_TYPE=Release
       -D BUILD_TEST=OFF
       -D BUILD_EXAMPLE=OFF
@@ -99,7 +99,7 @@ build:rocm:
     - cd build
     - cmake
       -G Ninja
-      -D CMAKE_CXX_COMPILER=hcc
+      -D CMAKE_CXX_COMPILER=hipcc
       -D CMAKE_BUILD_TYPE=Release
       -D BUILD_TEST=ON
       -D BUILD_EXAMPLE=ON
@@ -135,7 +135,7 @@ build:rocm-benchmark:
     # Build hipCUB benchmark
     - cmake
       -G Ninja
-      -D CMAKE_CXX_COMPILER=hcc
+      -D CMAKE_CXX_COMPILER=hipcc
       -D CMAKE_BUILD_TYPE=Release
       -D BUILD_BENCHMARK=ON
       -B build
@@ -256,7 +256,7 @@ test:rocm_package:
     - cd rocPRIM
     - mkdir build
     - cd build
-    - CXX=hcc cmake -DBUILD_TEST=OFF ../.
+    - CXX=hipcc cmake -DBUILD_TEST=OFF ../.
     - make package
     - $SUDO_CMD dpkg -i rocprim-*.deb
     - cd ../..
@@ -264,7 +264,7 @@ test:rocm_package:
     - cd build
     - $SUDO_CMD dpkg -i hipcub-*.deb
     - mkdir ../package_test && cd ../package_test
-    - CXX=hcc cmake ../test/extra/. -Drocprim_DIR="/opt/rocm/rocprim"
+    - CXX=hipcc cmake ../test/extra/. -Drocprim_DIR="/opt/rocm/rocprim"
     - make VERBOSE=1
     - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 2
     - $SUDO_CMD dpkg -r hipcub
@@ -282,17 +282,17 @@ test:rocm_install:
     - cd rocPRIM
     - mkdir build
     - cd build
-    - CXX=hcc cmake -DBUILD_TEST=OFF ../.
+    - CXX=hipcc cmake -DBUILD_TEST=OFF ../.
     - make package
     - $SUDO_CMD dpkg -i rocprim-*.deb
     - cd ../..
     # hipCUB
     - mkdir build_only_install
     - cd build_only_install
-    - CXX=hcc cmake -DBUILD_TEST=OFF ../.
+    - CXX=hipcc cmake -DBUILD_TEST=OFF ../.
     - $SUDO_CMD make install
     - mkdir ../install_test && cd ../install_test
-    - CXX=hcc cmake ../test/extra/.
+    - CXX=hipcc cmake ../test/extra/.
     - make VERBOSE=1
     - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 2
 
