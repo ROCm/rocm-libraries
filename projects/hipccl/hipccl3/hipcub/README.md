@@ -11,7 +11,7 @@ environment hipCUB uses rocPRIM library as the backend, however, on CUDA platfor
 * CMake (3.5.1 or later)
 * For AMD GPUs:
   * AMD [ROCm](https://rocm.github.io/install.html) platform (1.8.0 or later)
-    * Including [HCC](https://github.com/RadeonOpenCompute/hcc) compiler, which must be
+    * Including [HIP-clang](https://github.com/ROCm-Developer-Tools/HIP/blob/master/INSTALL.md#hip-clang) compiler, which must be
       set as C++ compiler on ROCm platform.
   * [rocPRIM](https://github.com/ROCmSoftwarePlatform/rocPRIM) library
     * It will be automatically downloaded and built by CMake script.
@@ -44,10 +44,10 @@ cd hipCUB; mkdir build; cd build
 #   DOWNLOAD_ROCPRIM - OFF by default and at ON the rocPRIM will be downloaded to build folder,
 #
 # ! IMPORTANT !
-# On ROCm platform set C++ compiler to HCC. You can do it by adding 'CXX=<path-to-hcc>'
-# before 'cmake' or setting cmake option 'CMAKE_CXX_COMPILER' to path to the HCC compiler.
+# Set C++ compiler to HCC or HIP-clang. You can do it by adding 'CXX=<path-to-compiler>'
+# before 'cmake' or setting cmake option 'CMAKE_CXX_COMPILER' to path to the compiler.
 #
-[CXX=hcc] cmake ../. # or cmake-gui ../.
+[CXX=hipcc] cmake ../. # or cmake-gui ../.
 
 # To configure hipCUB for Nvidia platforms, 'CXX=<path-to-nvcc>', `CXX=nvcc` or omitting the flag
 # entirely before 'cmake' is sufficient

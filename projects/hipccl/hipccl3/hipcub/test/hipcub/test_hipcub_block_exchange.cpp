@@ -101,6 +101,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
+__ATTRIBUTE_WORK_GROUP_SIZE_RANGE__(32,512)
 void blocked_to_striped_kernel(Type* device_input, OutputType* device_output)
 {
     constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
@@ -203,6 +204,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
+__ATTRIBUTE_WORK_GROUP_SIZE_RANGE__(32,512)
 void striped_to_blocked_kernel(Type* device_input, OutputType* device_output)
 {
     constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
@@ -305,6 +307,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
+__ATTRIBUTE_WORK_GROUP_SIZE_RANGE__(32,512)
 void blocked_to_warp_striped_kernel(Type* device_input, OutputType* device_output)
 {
     constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
@@ -427,6 +430,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
+__ATTRIBUTE_WORK_GROUP_SIZE_RANGE__(32,512)
 void warp_striped_to_blocked_kernel(Type* device_input, OutputType* device_output)
 {
     constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
@@ -547,6 +551,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
+__ATTRIBUTE_WORK_GROUP_SIZE_RANGE__(32,512)
 void scatter_to_blocked_kernel(Type* device_input, OutputType* device_output, unsigned int* device_ranks)
 {
     constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
@@ -669,6 +674,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
+__ATTRIBUTE_WORK_GROUP_SIZE_RANGE__(32,512)
 void scatter_to_striped_kernel(Type* device_input, OutputType* device_output, unsigned int* device_ranks)
 {
     constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);

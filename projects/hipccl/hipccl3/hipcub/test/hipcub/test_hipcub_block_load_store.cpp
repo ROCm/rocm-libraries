@@ -169,6 +169,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
+__ATTRIBUTE_WORK_GROUP_SIZE__(BlockSize)
 void load_store_kernel(Type* device_input, Type* device_output)
 {
     Type items[ItemsPerThread];
@@ -269,6 +270,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
+__ATTRIBUTE_WORK_GROUP_SIZE__(BlockSize)
 void load_store_valid_kernel(Type* device_input, Type* device_output, size_t valid)
 {
     Type items[ItemsPerThread];
@@ -382,6 +384,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
+__ATTRIBUTE_WORK_GROUP_SIZE__(BlockSize)
 void load_store_valid_default_kernel(Type* device_input, Type* device_output, size_t valid, int _default)
 {
     Type items[ItemsPerThread];

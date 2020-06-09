@@ -45,6 +45,7 @@ template<
     unsigned int Trials
 >
 __global__
+__ATTRIBUTE_WORK_GROUP_SIZE__(BlockSize)
 void sort_keys_kernel(const T * input, T * output)
 {
     const unsigned int lid = hipThreadIdx_x;
@@ -52,15 +53,15 @@ void sort_keys_kernel(const T * input, T * output)
 
     T keys[ItemsPerThread];
     hipcub::LoadDirectStriped<BlockSize>(lid, input + block_offset, keys);
-    
+
     #pragma nounroll
     for(unsigned int trial = 0; trial < Trials; trial++)
-    { 
+    {
         hipcub::BlockRadixSort<T, BlockSize, ItemsPerThread> sort;
         sort.Sort(keys);
     }
 
-    hipcub::StoreDirectStriped<BlockSize>(lid, output + block_offset, keys); 
+    hipcub::StoreDirectStriped<BlockSize>(lid, output + block_offset, keys);
 }
 
 template<
@@ -70,6 +71,7 @@ template<
     unsigned int Trials
 >
 __global__
+__ATTRIBUTE_WORK_GROUP_SIZE__(BlockSize)
 void sort_pairs_kernel(const T * input, T * output)
 {
     const unsigned int lid = hipThreadIdx_x;
@@ -78,7 +80,7 @@ void sort_pairs_kernel(const T * input, T * output)
     T keys[ItemsPerThread];
     T values[ItemsPerThread];
     hipcub::LoadDirectStriped<BlockSize>(lid, input + block_offset, keys);
-    
+
     for(unsigned int i = 0; i < ItemsPerThread; i++)
     {
         values[i] = keys[i] + T(1);
@@ -96,7 +98,7 @@ void sort_pairs_kernel(const T * input, T * output)
         keys[i] += values[i];
     }
     hipcub::StoreDirectStriped<BlockSize>(lid, output + block_offset, keys);
-    
+
 }
 
 template<
@@ -213,7 +215,7 @@ void add_benchmarks(benchmark_kinds benchmark_kind,
         BENCHMARK_TYPE(uint8_t, 256),
         BENCHMARK_TYPE(uint8_t, 320),
         BENCHMARK_TYPE(uint8_t, 512),
-        
+
         BENCHMARK_TYPE(long long, 64),
         BENCHMARK_TYPE(long long, 128),
         BENCHMARK_TYPE(long long, 192),
