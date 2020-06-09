@@ -39,6 +39,7 @@ template<
     unsigned int Trials
 >
 __global__
+__ATTRIBUTE_WORK_GROUP_SIZE__(BlockSize)
 void kernel(const T* input, T* output)
 {
     Runner::template run<T, BlockSize, ItemsPerThread, BinSize, Trials>(input, output);

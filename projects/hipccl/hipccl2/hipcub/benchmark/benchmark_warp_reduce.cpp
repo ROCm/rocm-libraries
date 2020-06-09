@@ -36,6 +36,7 @@ template<
     unsigned int Trials
 >
 __global__
+__ATTRIBUTE_WORK_GROUP_SIZE_RANGE__(32,64)
 void warp_reduce_kernel(const T * d_input, T * d_output)
 {
     const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
@@ -61,6 +62,7 @@ template<
     unsigned int Trials
 >
 __global__
+__ATTRIBUTE_WORK_GROUP_SIZE_RANGE__(32,64)
 void segmented_warp_reduce_kernel(const T* d_input, Flag* d_flags, T* d_output)
 {
     const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
