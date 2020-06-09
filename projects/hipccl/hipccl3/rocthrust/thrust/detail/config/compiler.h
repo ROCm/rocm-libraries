@@ -33,6 +33,7 @@
 #endif // __CUDACC__
 
 #if defined(__HCC__) || defined(__HIP__)
+#define __HIP_ENABLE_DEVICE_MALLOC__ 1 // Macro enables Device Malloc
 #include <hip/hip_runtime.h>
 #endif
 
