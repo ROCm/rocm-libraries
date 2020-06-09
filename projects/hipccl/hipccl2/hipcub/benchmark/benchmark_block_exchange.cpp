@@ -40,6 +40,7 @@ template<
     unsigned int Trials
 >
 __global__
+__ATTRIBUTE_WORK_GROUP_SIZE__(BlockSize)
 void kernel(const T * d_input, const unsigned int * d_ranks, T * d_output)
 {
     Runner::template run<T, BlockSize, ItemsPerThread, Trials>(d_input, d_ranks, d_output);
@@ -59,7 +60,7 @@ struct blocked_to_striped
         const unsigned int lid = hipThreadIdx_x;
         const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
 
-        T input[ItemsPerThread];        
+        T input[ItemsPerThread];
         hipcub::LoadDirectBlocked(lid, d_input + block_offset, input);
 
 
@@ -182,7 +183,7 @@ struct scatter_to_blocked
         {
             hipcub::BlockExchange<T, BlockSize, ItemsPerThread> exchange;
             exchange.ScatterToBlocked(input, input, ranks);
-            __syncthreads();// extra sync needed because of loop. In normal usage sync with be cared for by the load and store functions (outside the loop).        
+            __syncthreads();// extra sync needed because of loop. In normal usage sync with be cared for by the load and store functions (outside the loop).
         }
         hipcub::StoreDirectBlocked(lid, d_output + block_offset, input);
     }
@@ -205,7 +206,7 @@ struct scatter_to_striped
         T input[ItemsPerThread];
         unsigned int ranks[ItemsPerThread];
         hipcub::LoadDirectStriped<BlockSize>(lid, d_input + block_offset, input);
-        hipcub::LoadDirectStriped<BlockSize>(lid, d_ranks + block_offset, ranks);        
+        hipcub::LoadDirectStriped<BlockSize>(lid, d_ranks + block_offset, ranks);
 
         #pragma nounroll
         for(unsigned int trial = 0; trial < Trials; trial++)
