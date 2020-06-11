@@ -105,7 +105,7 @@ namespace __copy
 
     // non-trivial H->D copy
     template <class H, class D, class InputIt, class Size, class OutputIt>
-    OutputIt __host__
+    OutputIt THRUST_HIP_RUNTIME_FUNCTION
     cross_system_copy_n_hd_nt(thrust::cpp::execution_policy<H>&         host_s,
                               thrust::hip_rocprim::execution_policy<D>& device_s,
                               InputIt                                   first,
@@ -142,7 +142,7 @@ namespace __copy
 
     // non-trivial H->D copy
     template <class H, class D, class InputIt, class Size, class OutputIt>
-    OutputIt __host__ __device__
+    OutputIt THRUST_HIP_FUNCTION
     cross_system_copy_n(thrust::cpp::execution_policy<H>&         host_s,
                         thrust::hip_rocprim::execution_policy<D>& device_s,
                         InputIt                                   first,
@@ -150,30 +150,60 @@ namespace __copy
                         OutputIt                                  result,
                         thrust::detail::false_type) // non-trivial copy
     {
-        // get type of the input data
-        typedef typename thrust::iterator_value<InputIt>::type InputTy;
 
-        THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-            (hip_rocprim::__copy::cross_system_copy_n_hd_nt<H, D, InputIt, Size, OutputIt>)
-        );
 
-#if defined(THRUST_HIP_DEVICE_CODE)
-        THRUST_UNUSED_VAR(host_s);
-        THRUST_UNUSED_VAR(device_s);
-        THRUST_UNUSED_VAR(first);
-        THRUST_UNUSED_VAR(num_items);
+      // struct workaround is required for HIP-clang
+      // THRUST_HIP_PRESERVE_KERNELS_WORKAROUND is required for HCC
+      struct workaround
+      {
+          __host__
+          static OutputIt par(thrust::cpp::execution_policy<H>&         host_s,
+                              thrust::hip_rocprim::execution_policy<D>& device_s,
+                              InputIt                                   first,
+                              Size                                      num_items,
+                              OutputIt                                  result)
+          {
+  #if __HCC__ && __HIP_DEVICE_COMPILE__
+              THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+                (cross_system_copy_n_hd_nt<H, D, InputIt, Size, OutputIt>)
+              );
+              THRUST_UNUSED_VAR(host_s);
+              THRUST_UNUSED_VAR(device_s);
+              THRUST_UNUSED_VAR(first);
+              THRUST_UNUSED_VAR(num_items);
+  #else
+              return cross_system_copy_n_hd_nt(host_s, device_s, first, num_items, result);
+  #endif
+          }
 
-        return result;
-#else
-        return cross_system_copy_n_hd_nt(host_s, device_s, first, num_items, result);
-#endif
+          __device__
+          static OutputIt seq(thrust::cpp::execution_policy<H>&         host_s,
+                              thrust::hip_rocprim::execution_policy<D>& device_s,
+                              InputIt                                   first,
+                              Size                                      num_items,
+                              OutputIt                                  result)
+          {
+            THRUST_UNUSED_VAR(host_s);
+            THRUST_UNUSED_VAR(device_s);
+            THRUST_UNUSED_VAR(first);
+            THRUST_UNUSED_VAR(num_items);
+
+            return result;
+          }
+      };
+
+  #if __THRUST_HAS_HIPRT__
+      return workaround::par(host_s, device_s, first, num_items, result);
+  #else
+      return workaround::seq(host_s, device_s, first, num_items, result);
+  #endif
     }
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 
 // non-trivial copy
 template <class D, class H, class InputIt, class Size, class OutputIt>
-OutputIt __host__
+OutputIt THRUST_HIP_RUNTIME_FUNCTION
 cross_system_copy_n_dh_nt(thrust::hip_rocprim::execution_policy<D>& device_s,
                           thrust::cpp::execution_policy<H>&         host_s,
                           InputIt                                   first,
@@ -207,7 +237,7 @@ cross_system_copy_n_dh_nt(thrust::hip_rocprim::execution_policy<D>& device_s,
 // because copy ctor must have  __device__ annotations, which is hcc-only
 // feature
 template <class D, class H, class InputIt, class Size, class OutputIt>
-OutputIt __host__  __device__
+OutputIt THRUST_HIP_FUNCTION
 cross_system_copy_n(thrust::hip_rocprim::execution_policy<D>& device_s,
                 thrust::cpp::execution_policy<H>&         host_s,
                 InputIt                                   first,
@@ -216,28 +246,56 @@ cross_system_copy_n(thrust::hip_rocprim::execution_policy<D>& device_s,
                 thrust::detail::false_type) // non-trivial copy
 
 {
-    // get type of the input data
-    typedef typename thrust::iterator_value<InputIt>::type InputTy;
-
-    THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-        (hip_rocprim::__copy::cross_system_copy_n_dh_nt<D, H, InputIt, Size, OutputIt>)
-    );
-
-#if defined(THRUST_HIP_DEVICE_CODE)
-    THRUST_UNUSED_VAR(device_s);
-    THRUST_UNUSED_VAR(host_s);
-    THRUST_UNUSED_VAR(first);
-    THRUST_UNUSED_VAR(num_items);
-
-    return result;
+  // struct workaround is required for HIP-clang
+  // THRUST_HIP_PRESERVE_KERNELS_WORKAROUND is required for HCC
+  struct workaround
+  {
+      __host__
+      static OutputIt par(thrust::hip_rocprim::execution_policy<D>& device_s,
+                          thrust::cpp::execution_policy<H>&         host_s,
+                          InputIt                                   first,
+                          Size                                      num_items,
+                          OutputIt                                  result)
+      {
+#if __HCC__ && __HIP_DEVICE_COMPILE__
+          THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+            (cross_system_copy_n_dh_nt<D, H, InputIt, Size, OutputIt>)
+          );
+          THRUST_UNUSED_VAR(device_s);
+          THRUST_UNUSED_VAR(host_s);
+          THRUST_UNUSED_VAR(first);
+          THRUST_UNUSED_VAR(num_items);
 #else
-    return  cross_system_copy_n_dh_nt(device_s, host_s, first, num_items, result);
+          return cross_system_copy_n_dh_nt(device_s, host_s, first, num_items, result);
+#endif
+      }
+
+      __device__
+      static OutputIt seq(thrust::hip_rocprim::execution_policy<D>& device_s,
+                          thrust::cpp::execution_policy<H>&         host_s,
+                          InputIt                                   first,
+                          Size                                      num_items,
+                          OutputIt                                  result)
+      {
+        THRUST_UNUSED_VAR(device_s);
+        THRUST_UNUSED_VAR(host_s);
+        THRUST_UNUSED_VAR(first);
+        THRUST_UNUSED_VAR(num_items);
+
+        return result;
+      }
+  };
+
+#if __THRUST_HAS_HIPRT__
+  return workaround::par(device_s, host_s, first, num_items, result);
+#else
+  return workaround::seq(device_s, host_s, first, num_items, result);
 #endif
 }
 #endif
 
     template <class System1, class System2, class InputIt, class Size, class OutputIt>
-    OutputIt __host__ /* WORKAROUND */ __device__
+    OutputIt THRUST_HIP_FUNCTION
     cross_system_copy_n(cross_system<System1, System2> systems, InputIt begin, Size n, OutputIt result)
     {
         return cross_system_copy_n(
@@ -250,7 +308,7 @@ cross_system_copy_n(thrust::hip_rocprim::execution_policy<D>& device_s,
     }
 
     template <class System1, class System2, class InputIterator, class OutputIterator>
-    OutputIterator __host__ /* WORKAROUND */ __device__
+    OutputIterator THRUST_HIP_FUNCTION
     cross_system_copy(cross_system<System1, System2> systems,
                       InputIterator                  begin,
                       InputIterator                  end,
