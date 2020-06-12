@@ -43,9 +43,18 @@
         #define __THRUST_HAS_HIPRT__ 0
         #define THRUST_HIP_RUNTIME_FUNCTION __host__ __forceinline__
     #endif
+    #define THRUST_HIP_ATTRIBUTE_WORK_GROUP_SIZE(BlockSize)  \
+            __attribute__((amdgpu_flat_work_group_size(BlockSize,BlockSize)))
+    #define THRUST_HIP_ATTRIBUTE_WORK_GROUP_SIZE_RANGE(MinBlockSize,MaxBlockSize)  \
+            __attribute__((amdgpu_flat_work_group_size(MinBlockSize,MaxBlockSize)))
+    #define THRUST_HIP_ATTRIBUTE_WORK_GROUP_SIZE_RANGE_DEFAULT  \
+            THRUST_HIP_ATTRIBUTE_WORK_GROUP_SIZE_RANGE(128,256)
 #else
     #define __THRUST_HAS_HIPRT__ 0
     #define THRUST_HIP_RUNTIME_FUNCTION __host__ __forceinline__
+    #define THRUST_HIP_ATTRIBUTE_WORK_GROUP_SIZE(BlockSize)
+    #define THRUST_HIP_ATTRIBUTE_WORK_GROUP_SIZE_RANGE(MinBlockSize,MaxBlockSize)
+    #define THRUST_HIP_ATTRIBUTE_WORK_GROUP_SIZE_RANGE_DEFAULT
 #endif
 
 #ifdef __HIP_DEVICE_COMPILE__

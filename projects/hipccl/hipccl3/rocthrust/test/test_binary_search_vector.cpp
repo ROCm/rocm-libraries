@@ -36,7 +36,9 @@ struct custom_less
 };
 
 template <class T>
-__global__ void lower_bound_kernel(size_t n, T* input, ptrdiff_t* output)
+__global__
+THRUST_HIP_ATTRIBUTE_WORK_GROUP_SIZE_RANGE_DEFAULT
+void lower_bound_kernel(size_t n, T* input, ptrdiff_t* output)
 {
     thrust::counting_iterator<T> values(0);
     thrust::lower_bound(
@@ -79,7 +81,9 @@ TYPED_TEST(BinarySearchVectorTestsInKernel, TestLowerBound)
 }
 
 template <class T>
-__global__ void upper_bound_kernel(size_t n, T* input, ptrdiff_t* output)
+__global__
+THRUST_HIP_ATTRIBUTE_WORK_GROUP_SIZE_RANGE_DEFAULT
+void upper_bound_kernel(size_t n, T* input, ptrdiff_t* output)
 {
     thrust::counting_iterator<T> values(0);
     thrust::upper_bound(thrust::device, input, input + n, values, values + 10, output);
@@ -121,7 +125,9 @@ TYPED_TEST(BinarySearchVectorTestsInKernel, TestUpperBound)
 }
 
 template <class T>
-__global__ void binary_search_kernel(size_t n, T* input, bool* output)
+__global__
+THRUST_HIP_ATTRIBUTE_WORK_GROUP_SIZE_RANGE_DEFAULT
+void binary_search_kernel(size_t n, T* input, bool* output)
 {
     thrust::counting_iterator<T> values(0);
     thrust::binary_search(thrust::device, input, input + n, values, values + 10, output);
