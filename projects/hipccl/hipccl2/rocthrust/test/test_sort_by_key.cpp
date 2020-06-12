@@ -242,7 +242,9 @@ TEST(SortByKeyTests, TestSortByKeyBoolDescending)
 }
 
 //TODO: refactor this test into a different set of tests
-__global__ void SortByKeyKernel(int const N, int* keys, short* values)
+__global__
+THRUST_HIP_ATTRIBUTE_WORK_GROUP_SIZE_RANGE_DEFAULT
+void SortByKeyKernel(int const N, int* keys, short* values)
 {
     if(threadIdx.x == 0)
     {

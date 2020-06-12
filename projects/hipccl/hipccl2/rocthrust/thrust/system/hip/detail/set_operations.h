@@ -783,19 +783,20 @@ namespace __set_operations
               class CompareOp,
               class SetOp,
               class LookBackScanState>
-    __global__ void
-    lookback_set_op_kernel(KeysIt1                                         keys1,
-                           KeysIt2                                         keys2,
-                           ValuesIt1                                       values1,
-                           ValuesIt2                                       values2,
-                           KeysOutputIt                                    keys_output,
-                           ValuesOutputIt                                  values_output,
-                           CompareOp                                       compare_op,
-                           SetOp                                           set_op,
-                           pair<Size, Size>*                               partitions,
-                           Size*                                           output_count,
-                           LookBackScanState                               lookback_scan_state,
-                           rocprim::detail::ordered_block_id<unsigned int> ordered_bid)
+    __global__
+    THRUST_HIP_ATTRIBUTE_WORK_GROUP_SIZE_RANGE_DEFAULT
+    void lookback_set_op_kernel(KeysIt1                                         keys1,
+                                KeysIt2                                         keys2,
+                                ValuesIt1                                       values1,
+                                ValuesIt2                                       values2,
+                                KeysOutputIt                                    keys_output,
+                                ValuesOutputIt                                  values_output,
+                                CompareOp                                       compare_op,
+                                SetOp                                           set_op,
+                                pair<Size, Size>*                               partitions,
+                                Size*                                           output_count,
+                                LookBackScanState                               lookback_scan_state,
+                                rocprim::detail::ordered_block_id<unsigned int> ordered_bid)
     {
         ROCPRIM_SHARED_MEMORY
         typename rocprim::detail::ordered_block_id<unsigned int>::storage_type storage_ordered_bid;
