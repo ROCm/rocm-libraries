@@ -11,9 +11,10 @@ __THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_BEGIN
 
 
 template <typename Iterator1, typename Iterator2>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA || THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
 __global__
-#endif 
+THRUST_HIP_ATTRIBUTE_WORK_GROUP_SIZE_RANGE_DEFAULT
+#endif
 void simple_copy_on_device(Iterator1 first1, Iterator1 last1, Iterator2 first2)
 {
     while(first1 != last1)
@@ -23,7 +24,7 @@ void simple_copy_on_device(Iterator1 first1, Iterator1 last1, Iterator2 first2)
 template <typename Iterator1, typename Iterator2>
 void simple_copy(Iterator1 first1, Iterator1 last1, Iterator2 first2)
 {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA || THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
     simple_copy_on_device<<<1,1>>>(first1, last1, first2);
 #else
     simple_copy_on_device(first1, last1, first2);
@@ -33,7 +34,7 @@ void simple_copy(Iterator1 first1, Iterator1 last1, Iterator2 first2)
 
 void TestDeviceDereferenceDeviceVectorIterator(void)
 {
-    thrust::device_vector<int> input = unittest::random_integers<int>(100); 
+    thrust::device_vector<int> input = unittest::random_integers<int>(100);
     thrust::device_vector<int> output(input.size(), 0);
 
     simple_copy(input.begin(), input.end(), output.begin());
@@ -44,7 +45,7 @@ DECLARE_UNITTEST(TestDeviceDereferenceDeviceVectorIterator);
 
 void TestDeviceDereferenceDevicePtr(void)
 {
-    thrust::device_vector<int> input = unittest::random_integers<int>(100); 
+    thrust::device_vector<int> input = unittest::random_integers<int>(100);
     thrust::device_vector<int> output(input.size(), 0);
 
     thrust::device_ptr<int> _first1 = &input[0];
@@ -59,7 +60,7 @@ DECLARE_UNITTEST(TestDeviceDereferenceDevicePtr);
 
 void TestDeviceDereferenceTransformIterator(void)
 {
-    thrust::device_vector<int> input = unittest::random_integers<int>(100); 
+    thrust::device_vector<int> input = unittest::random_integers<int>(100);
     thrust::device_vector<int> output(input.size(), 0);
 
     simple_copy(thrust::make_transform_iterator(input.begin(), thrust::identity<int>()),
