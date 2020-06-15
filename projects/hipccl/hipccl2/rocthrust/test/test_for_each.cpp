@@ -89,7 +89,9 @@ TYPED_TEST(ForEachTests, HostPathSimpleTest)
 }
 
 template <class F>
-__global__ void simple_test_kernel(F func, int size)
+__global__
+THRUST_HIP_ATTRIBUTE_WORK_GROUP_SIZE_RANGE_DEFAULT
+void simple_test_kernel(F func, int size)
 {
     // (void) func; (void) size;
     thrust::for_each(thrust::seq,
@@ -492,4 +494,4 @@ TEST(ForEachVectorTests, TestForEachNWithLargeTypes)
     _TestForEachNWithLargeTypes<int, 256>();
     _TestForEachNWithLargeTypes<int, 512>();
     _TestForEachNWithLargeTypes<int, 1024>(); // fails on Vista 64 w/ VS2008
-} 
+}
