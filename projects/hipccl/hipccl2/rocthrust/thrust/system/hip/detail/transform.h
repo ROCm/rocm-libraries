@@ -33,9 +33,10 @@
 // not having a value_type member when passing to a rocPRIM function
 #include <thrust/system/hip/pointer.h>
 
-#include <thrust/distance.h>
-#include <thrust/system/hip/detail/parallel_for.h>
 #include <thrust/system/hip/detail/util.h>
+#include <thrust/detail/type_traits/result_of_adaptable_function.h>
+#include <thrust/system/hip/detail/parallel_for.h>
+#include <thrust/distance.h>
 
 BEGIN_NS_THRUST
 namespace hip_rocprim
