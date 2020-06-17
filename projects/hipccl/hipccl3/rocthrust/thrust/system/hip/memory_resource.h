@@ -1,5 +1,5 @@
 /*
- *  Copyright 2018 NVIDIA Corporation 
+ *  Copyright 2018 NVIDIA Corporation
  *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
@@ -21,9 +21,6 @@
 
 #pragma once
 
-#include <hip/hip_runtime.h>
-#include <thrust/system/hip/execution_policy.h>
-
 #include <thrust/mr/memory_resource.h>
 #include <thrust/system/hip/detail/guarded_hip_runtime_api.h>
 #include <thrust/system/hip/pointer.h>
@@ -31,14 +28,13 @@
 #include <thrust/system/hip/error.h>
 #include <thrust/system/hip/detail/util.h>
 
-#include <thrust/system/hip/memory.h>
 #include <thrust/memory/detail/host_system_resource.h>
 
 namespace thrust
 {
 namespace system
 {
-namespace hip_rocprim
+namespace hip
 {
 namespace detail
 {
@@ -90,7 +86,7 @@ namespace detail
     typedef detail::hip_memory_resource<detail::hipMallocManaged, hipFree,
         thrust::hip_rocprim::pointer<void> >
         managed_memory_resource;
-    typedef detail::hip_memory_resource<hipMallocHost, hipFreeHost,
+    typedef detail::hip_memory_resource<hipMallocHost, hipHostFree,
         thrust::host_memory_resource::pointer>
         pinned_memory_resource;
 
@@ -100,6 +96,6 @@ typedef detail::device_memory_resource memory_resource;
 typedef detail::managed_memory_resource universal_memory_resource;
 typedef detail::pinned_memory_resource universal_host_pinned_memory_resource;
 
-} // end hip_rocprim
+} // end hip
 } // end system
 } // end thrust
