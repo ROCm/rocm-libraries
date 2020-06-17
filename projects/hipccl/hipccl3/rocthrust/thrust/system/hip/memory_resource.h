@@ -38,7 +38,7 @@ namespace thrust
 {
 namespace system
 {
-namespace hip
+namespace hip_rocprim
 {
 namespace detail
 {
@@ -100,6 +100,6 @@ typedef detail::device_memory_resource memory_resource;
 typedef detail::managed_memory_resource universal_memory_resource;
 typedef detail::pinned_memory_resource universal_host_pinned_memory_resource;
 
-} // end hip
+} // end hip_rocprim
 } // end system
 } // end thrust
