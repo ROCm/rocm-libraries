@@ -1,6 +1,6 @@
 /*
- *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Copyright 2008-2018 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2020 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -100,6 +100,20 @@ struct my_allocator_with_custom_destroy
     {
         use_me_to_alloc.deallocate(ptr, n);
     }
+
+    bool operator==(const my_allocator_with_custom_destroy &) const
+    {
+        return true;
+    }
+
+    bool operator!=(const my_allocator_with_custom_destroy &other) const
+    {
+        return !(*this == other);
+    }
+
+    typedef thrust::detail::true_type is_always_equal;
+
+
 
     // use composition rather than inheritance
     // to avoid inheriting std::allocator's member

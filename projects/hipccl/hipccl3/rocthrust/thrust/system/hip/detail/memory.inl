@@ -17,10 +17,9 @@
 
 #pragma once
 
-#include <limits>
 #include <thrust/detail/config.h>
 #include <thrust/system/hip/detail/malloc_and_free.h>
-#include <thrust/system/hip/memory.h>
+#include <limits>
 
 BEGIN_NS_THRUST
 namespace hip_rocprim
@@ -45,5 +44,5 @@ THRUST_HIP_FUNCTION void free(pointer<void> ptr)
     return thrust::hip_rocprim::free(hip_tag, ptr.get());
 } // end free()
 
-} // namespace hip_rocprim
-END_NS_THRUST
+} // end hip_rocprim
+} // end thrust
