@@ -37,7 +37,7 @@ struct custom_less
 
 template <class T>
 __global__
-THRUST_HIP_ATTRIBUTE_WORK_GROUP_SIZE_RANGE_DEFAULT
+THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
 void lower_bound_kernel(size_t n, T* input, ptrdiff_t* output)
 {
     thrust::counting_iterator<T> values(0);
@@ -82,7 +82,7 @@ TYPED_TEST(BinarySearchVectorTestsInKernel, TestLowerBound)
 
 template <class T>
 __global__
-THRUST_HIP_ATTRIBUTE_WORK_GROUP_SIZE_RANGE_DEFAULT
+THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
 void upper_bound_kernel(size_t n, T* input, ptrdiff_t* output)
 {
     thrust::counting_iterator<T> values(0);
@@ -126,7 +126,7 @@ TYPED_TEST(BinarySearchVectorTestsInKernel, TestUpperBound)
 
 template <class T>
 __global__
-THRUST_HIP_ATTRIBUTE_WORK_GROUP_SIZE_RANGE_DEFAULT
+THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
 void binary_search_kernel(size_t n, T* input, bool* output)
 {
     thrust::counting_iterator<T> values(0);

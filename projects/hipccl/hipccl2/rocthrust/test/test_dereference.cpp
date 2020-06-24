@@ -25,7 +25,7 @@
 
 template <typename Iterator1, typename Iterator2>
 __global__
-THRUST_HIP_ATTRIBUTE_WORK_GROUP_SIZE_RANGE_DEFAULT
+THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
 void simple_copy_on_device(Iterator1 first1, Iterator1 last1, Iterator2 first2)
 {
     while(first1 != last1)
