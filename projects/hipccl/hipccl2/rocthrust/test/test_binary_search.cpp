@@ -36,7 +36,7 @@ struct custom_less
 
 template <class T>
 __global__
-THRUST_HIP_ATTRIBUTE_WORK_GROUP_SIZE_RANGE_DEFAULT
+THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
 void lower_bound_kernel(size_t n, T* input, ptrdiff_t* output)
 {
     output[0] = thrust::lower_bound(thrust::device, input, input + n, T(0), custom_less()) - input;
@@ -88,7 +88,7 @@ TYPED_TEST(BinarySearchTestsInKernel, TestLowerBound)
 
 template <class T>
 __global__
-THRUST_HIP_ATTRIBUTE_WORK_GROUP_SIZE_RANGE_DEFAULT
+THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
 void upper_bound_kernel(size_t n, T* input, ptrdiff_t* output)
 {
     output[0] = thrust::upper_bound(thrust::device, input, input + n, T(0)) - input;
@@ -140,7 +140,7 @@ TYPED_TEST(BinarySearchTestsInKernel, TestUpperBound)
 
 template <class T>
 __global__
-THRUST_HIP_ATTRIBUTE_WORK_GROUP_SIZE_RANGE_DEFAULT
+THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
 void binary_search_kernel(size_t n, T* input, bool* output)
 {
     output[0] = thrust::binary_search(thrust::device, input, input + n, T(0));
