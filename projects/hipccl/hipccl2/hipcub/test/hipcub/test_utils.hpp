@@ -25,16 +25,6 @@
     #error test_utils.hpp must ONLY be included by common_test_header.hpp. Please include common_test_header.hpp instead.
 #endif
 
-#ifdef __HIP_PLATFORM_HCC__
-    #define __ATTRIBUTE_WORK_GROUP_SIZE__(BlockSize)  \
-            __attribute__((amdgpu_flat_work_group_size(BlockSize,BlockSize)))
-    #define __ATTRIBUTE_WORK_GROUP_SIZE_RANGE__(MinBlockSize,MaxBlockSize)  \
-            __attribute__((amdgpu_flat_work_group_size(MinBlockSize,MaxBlockSize)))
-#else
-    #define __ATTRIBUTE_WORK_GROUP_SIZE__(BlockSize)
-    #define __ATTRIBUTE_WORK_GROUP_SIZE_RANGE__(MinBlockSize,MaxBlockSize)
-#endif
-
 // hipCUB API
 #ifdef __HIP_PLATFORM_HCC__
     #include "hipcub/backend/rocprim/util_ptx.hpp"

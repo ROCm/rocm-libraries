@@ -59,5 +59,9 @@
 #define HIPCUB_DEVICE __device__
 #define HIPCUB_HOST_DEVICE __host__ __device__
 #define HIPCUB_SHARED_MEMORY __shared__
+// TODO: This paremeters should be tuned for NAVI.
+#ifndef HIPCUB_DEFAULT_MIN_WARPS_PER_EU
+    #define HIPCUB_DEFAULT_MIN_WARPS_PER_EU 1
+#endif
 
 #endif // HIPCUB_CONFIG_HPP_
