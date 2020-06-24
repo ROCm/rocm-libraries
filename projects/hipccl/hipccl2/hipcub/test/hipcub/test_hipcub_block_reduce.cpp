@@ -102,7 +102,7 @@ template<
     class T
 >
 __global__
-__ATTRIBUTE_WORK_GROUP_SIZE__(BlockSize)
+__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
 void reduce_kernel(T* device_output, T* device_output_reductions)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
@@ -202,7 +202,7 @@ template<
     class T
 >
 __global__
-__ATTRIBUTE_WORK_GROUP_SIZE__(BlockSize)
+__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
 void reduce_valid_kernel(T* device_output, T* device_output_reductions, const unsigned int valid_items)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
@@ -352,7 +352,7 @@ template<
     class T
 >
 __global__
-__ATTRIBUTE_WORK_GROUP_SIZE__(BlockSize)
+__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
 void reduce_array_kernel(T* device_output, T* device_output_reductions)
 {
     const unsigned int index = ((hipBlockIdx_x * BlockSize) + hipThreadIdx_x) * ItemsPerThread;
