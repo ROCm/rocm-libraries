@@ -45,6 +45,7 @@ template<
     class key_type
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void sort_key_kernel(key_type * device_key_output)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
@@ -140,6 +141,7 @@ template<
     class value_type
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void sort_key_value_kernel(key_type * device_key_output, value_type * device_value_output)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
@@ -280,6 +282,7 @@ template<
     class value_type
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void custom_sort_key_value_kernel(key_type * device_key_output, value_type * device_value_output)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
@@ -296,7 +299,7 @@ TYPED_TEST(RocprimBlockSortTests, CustomSortKeyValue)
     int device_id = test_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
-    
+
     using key_type = typename TestFixture::key_type;
     using value_type = typename TestFixture::value_type;
     using value_op_type = typename std::conditional<std::is_same<value_type, rocprim::half>::value, test_utils::half_less, rocprim::less<value_type>>::type;

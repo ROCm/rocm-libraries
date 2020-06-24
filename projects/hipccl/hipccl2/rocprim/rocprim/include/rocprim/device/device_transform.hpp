@@ -50,6 +50,7 @@ template<
     class UnaryFunction
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void transform_kernel(InputIterator input,
                       const size_t size,
                       OutputIterator output,
