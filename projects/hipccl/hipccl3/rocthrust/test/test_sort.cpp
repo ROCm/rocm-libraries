@@ -432,7 +432,7 @@ TEST(SortTests, TestSortBoolDescending)
 
 //TODO: refactor this test into a different set of tests
 __global__
-THRUST_HIP_ATTRIBUTE_WORK_GROUP_SIZE_RANGE_DEFAULT
+THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
 void SortKernel(int const N, int* array)
 {
     if(threadIdx.x == 0)
