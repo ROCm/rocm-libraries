@@ -90,7 +90,7 @@ TYPED_TEST(ForEachTests, HostPathSimpleTest)
 
 template <class F>
 __global__
-THRUST_HIP_ATTRIBUTE_WORK_GROUP_SIZE_RANGE_DEFAULT
+THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
 void simple_test_kernel(F func, int size)
 {
     // (void) func; (void) size;

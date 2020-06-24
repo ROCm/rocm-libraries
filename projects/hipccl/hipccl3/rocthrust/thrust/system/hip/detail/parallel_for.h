@@ -48,7 +48,7 @@ namespace __parallel_for
 
     template <unsigned int BlockSize, unsigned int ItemsPerThread, class F, class Size>
     __global__
-    THRUST_HIP_ATTRIBUTE_WORK_GROUP_SIZE(BlockSize)
+    THRUST_HIP_LAUNCH_BOUNDS(BlockSize)
     void kernel(F f, Size num_items)
     {
         constexpr auto     items_per_block = BlockSize * ItemsPerThread;

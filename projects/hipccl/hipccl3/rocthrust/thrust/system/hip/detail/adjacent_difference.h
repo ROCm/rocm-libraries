@@ -103,7 +103,7 @@ namespace __adjacent_difference
               class HeadsIt,
               class Size>
     __global__
-    THRUST_HIP_ATTRIBUTE_WORK_GROUP_SIZE(BlockSize)
+    THRUST_HIP_LAUNCH_BOUNDS(BlockSize)
     void block_heads_fill(InputIt input, HeadsIt block_heads, Size input_size)
     {
         constexpr auto items_per_block  = BlockSize * ItemsPerThread;
@@ -143,7 +143,7 @@ namespace __adjacent_difference
               class OutputIt,
               class BinaryOp>
     __global__
-    THRUST_HIP_ATTRIBUTE_WORK_GROUP_SIZE(BlockSize)
+    THRUST_HIP_LAUNCH_BOUNDS(BlockSize)
     void adjacent_difference_kernel(InputIt      input,
                                     HeadsIt      block_heads,
                                     const size_t input_size,
