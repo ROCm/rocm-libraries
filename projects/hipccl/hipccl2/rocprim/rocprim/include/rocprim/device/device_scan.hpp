@@ -369,8 +369,8 @@ auto scan_impl(void * temporary_storage,
 
         hipDeviceProp_t prop;
         int deviceId;
-        hipGetDevice(&deviceId);
-        hipGetDeviceProperties(&prop, deviceId);
+        static_cast<void>(hipGetDevice(&deviceId));
+        static_cast<void>(hipGetDeviceProperties(&prop, deviceId));
 
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         auto grid_size = (number_of_blocks + block_size - 1)/block_size;
