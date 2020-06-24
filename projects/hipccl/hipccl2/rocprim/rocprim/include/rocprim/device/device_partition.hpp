@@ -194,8 +194,8 @@ hipError_t partition_impl(void * temporary_storage,
 
     hipDeviceProp_t prop;
     int deviceId;
-    hipGetDevice(&deviceId);
-    hipGetDeviceProperties(&prop, deviceId);
+    static_cast<void>(hipGetDevice(&deviceId));
+    static_cast<void>(hipGetDeviceProperties(&prop, deviceId));
 
     if (prop.gcnArch == 908)
     {
