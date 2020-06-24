@@ -53,7 +53,7 @@ template<
     unsigned int Trials
 >
 __global__
-__ATTRIBUTE_WORK_GROUP_SIZE__(BlockSize)
+__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
 void kernel(const T * d_input, T * d_output)
 {
     Runner::template run<T, BlockSize, ItemsPerThread, WithTile, Trials>(d_input, d_output);

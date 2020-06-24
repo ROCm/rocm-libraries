@@ -32,7 +32,7 @@ const size_t DEFAULT_N = 1024 * 1024 * 32;
 
 template<class T, unsigned int WarpSize, unsigned int Trials>
 __global__
-__ATTRIBUTE_WORK_GROUP_SIZE_RANGE__(32,256)
+__launch_bounds__(256, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
 void warp_inclusive_scan_kernel(const T* input, T* output)
 {
     const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
@@ -52,7 +52,7 @@ void warp_inclusive_scan_kernel(const T* input, T* output)
 
 template<class T, unsigned int WarpSize, unsigned int Trials>
 __global__
-__ATTRIBUTE_WORK_GROUP_SIZE_RANGE__(32,256)
+__launch_bounds__(256, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
 void warp_exclusive_scan_kernel(const T* input, T* output, const T init)
 {
     const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;

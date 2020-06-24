@@ -89,7 +89,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
-__ATTRIBUTE_WORK_GROUP_SIZE__(BlockSize)
+__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
 void warp_reduce_kernel(T* device_input, T* device_output)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
@@ -201,7 +201,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
-__ATTRIBUTE_WORK_GROUP_SIZE__(BlockSize)
+__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
 void warp_reduce_valid_kernel(T* device_input, T* device_output, const int valid)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
@@ -315,7 +315,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
-__ATTRIBUTE_WORK_GROUP_SIZE__(BlockSize)
+__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
 void head_segmented_warp_reduce_kernel(T* input, Flag* flags, T* output)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
@@ -469,7 +469,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
-__ATTRIBUTE_WORK_GROUP_SIZE__(BlockSize)
+__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
 void tail_segmented_warp_reduce_kernel(T* input, Flag* flags, T* output)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
