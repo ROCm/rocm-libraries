@@ -50,8 +50,8 @@ variables:
   stage: build:cmake_minimum
   before_script:
     - $SUDO_CMD apt update -qq
-    #                             | Used in the script    | Build tools                                                        | Fetch from https:// | rocminfo calls lsmod
-    - $SUDO_CMD apt install -y -qq wget tar xz-utils bzip2 libnuma-dev libunwind-dev git build-essential pkg-config ninja-build ca-certificates       kmod
+    # | Used in the script    | Build tools | Fetch from https:// | rocminfo calls lsmod
+    - $SUDO_CMD apt install -y -qq wget tar xz-utils bzip2 libnuma-dev libunwind-dev git build-essential pkg-config ninja-build ca-certificates kmod
     # Fetch CMake only if the cache has not been restored
     - if [ ! -d $CMAKE_MINIMUM_PATH ]; then mkdir -p $CMAKE_MINIMUM_PATH; wget --no-check-certificate --quiet -O - $CMAKE_MINIMUM_URL | tar --strip-components=1 -xz -C $CMAKE_MINIMUM_PATH
     - fi
@@ -67,8 +67,8 @@ variables:
   stage: build:cmake_latest
   before_script:
     - $SUDO_CMD apt update -qq
-    #                             | Used in the script    | Build tools                                                        | Fetch from https:// | rocminfo calls lsmod
-    - $SUDO_CMD apt install -y -qq wget tar xz-utils bzip2 libnuma-dev libunwind-dev git build-essential pkg-config ninja-build ca-certificates       kmod
+    # | Used in the script    | Build tools | Fetch from https:// | rocminfo calls lsmod
+    - $SUDO_CMD apt install -y -qq wget tar xz-utils bzip2 libnuma-dev libunwind-dev git build-essential pkg-config ninja-build ca-certificates kmod
     # Fetch CMake only if the cache has not been restored
     - if [ ! -d $CMAKE_LATEST_PATH ]; then mkdir -p $CMAKE_LATEST_PATH; wget --no-check-certificate --quiet -O - $CMAKE_LATEST_URL | tar --strip-components=1 -xz -C $CMAKE_LATEST_PATH;
     - fi;
@@ -125,6 +125,7 @@ build:cmake-minimum:
       -D BUILD_TEST=ON
       -D BUILD_EXAMPLE=ON
       -D BUILD_BENCHMARK=ON
+      -D DISABLE_WERROR=OFF
       -B $BUILD_MINIMUM_DIR
       ../../.
     - cmake
@@ -167,7 +168,7 @@ build:package:
       $CI_PROJECT_DIR/test/extra
     - cmake
       --build .
-    - $SUDO_CMD ./test_rocprim_package  
+    - $SUDO_CMD ./test_rocprim_package
     - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 2
   artifacts:
     paths:
