@@ -42,6 +42,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void warp_reduce_sum_kernel(T* device_input, T* device_output)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
@@ -151,6 +152,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void warp_allreduce_sum_kernel(T* device_input, T* device_output)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
@@ -261,6 +263,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void warp_reduce_sum_kernel(T* device_input, T* device_output, size_t valid)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
@@ -371,6 +374,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void warp_allreduce_sum_kernel(T* device_input, T* device_output, size_t valid)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
@@ -577,6 +581,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void head_segmented_warp_reduce_kernel(T* input, Flag* flags, T* output)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
@@ -719,6 +724,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void tail_segmented_warp_reduce_kernel(T* input, Flag* flags, T* output)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
@@ -740,7 +746,7 @@ TYPED_TEST(RocprimWarpReduceTests, TailSegmentedReduceSum)
     int device_id = test_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
-    
+
     // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
     using T = typename TestFixture::params::type;
     using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;

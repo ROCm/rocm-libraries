@@ -245,6 +245,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void load_store_kernel(Type* device_input, Type* device_output)
 {
     Type items[ItemsPerThread];
@@ -347,6 +348,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void load_store_valid_kernel(Type* device_input, Type* device_output, size_t valid)
 {
     Type items[ItemsPerThread];
@@ -362,7 +364,7 @@ TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClassValid)
     int device_id = test_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
-    
+
     using Type = typename TestFixture::params::type;
     constexpr size_t block_size = TestFixture::params::block_size;
     constexpr rocprim::block_load_method load_method = TestFixture::params::load_method;
@@ -463,6 +465,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void load_store_valid_default_kernel(Type* device_input, Type* device_output, size_t valid, int _default)
 {
     Type items[ItemsPerThread];
@@ -478,7 +481,7 @@ TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClassDefault)
     int device_id = test_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
-    
+
     using Type = typename TestFixture::params::type;
     constexpr size_t block_size = TestFixture::params::block_size;
     constexpr rocprim::block_load_method load_method = TestFixture::params::load_method;
