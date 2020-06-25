@@ -35,7 +35,7 @@ variables:
   # Local build options
   LOCAL_CXXFLAGS: ""
   LOCAL_CMAKE_OPTIONS: ""
-  ROCM_PATH: "/opt/rocm-3.5.0/"
+  ROCM_LATEST_PATH: "/opt/rocm-3.5.1/"
 
 # hipCUB with rocPRIM backend
 .rocm:
@@ -316,7 +316,7 @@ test:rocm_install:
     # (with heavy libraries, tools etc. that also require GUI and other packages)
     - apt-get download hip-nvcc
     - $SUDO_CMD dpkg -i --ignore-depends=cuda hip*.deb
-    - $SUDO_CMD ln -s $ROCM_PATH /opt/rocm
+    - $SUDO_CMD ln -s $ROCM_LATEST_PATH /opt/rocm
     - export PATH=$PATH:/opt/rocm/bin
     - hipconfig
     # cmake
