@@ -147,7 +147,7 @@ template<
     class key_type
 >
 __global__
-__ATTRIBUTE_WORK_GROUP_SIZE__(BlockSize)
+__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
 void sort_key_kernel(
     key_type* device_keys_output,
     bool to_striped,
@@ -284,7 +284,7 @@ template<
     class value_type
 >
 __global__
-__ATTRIBUTE_WORK_GROUP_SIZE__(BlockSize)
+__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
 void sort_key_value_kernel(
     key_type* device_keys_output,
     value_type* device_values_output,

@@ -100,7 +100,7 @@ template<
     class T
 >
 __global__
-__ATTRIBUTE_WORK_GROUP_SIZE__(BlockSize)
+__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
 void histogram_kernel(T* device_output, T* device_output_bin)
 {
     const unsigned int index = ((hipBlockIdx_x * BlockSize) + hipThreadIdx_x) * ItemsPerThread;
