@@ -102,7 +102,9 @@ namespace __adjacent_difference
               class InputIt,
               class HeadsIt,
               class Size>
-    __global__ void block_heads_fill(InputIt input, HeadsIt block_heads, Size input_size)
+    __global__
+    THRUST_HIP_LAUNCH_BOUNDS(BlockSize)
+    void block_heads_fill(InputIt input, HeadsIt block_heads, Size input_size)
     {
         constexpr auto items_per_block  = BlockSize * ItemsPerThread;
         Size           tile_base        = blockIdx.x * items_per_block;
@@ -140,11 +142,13 @@ namespace __adjacent_difference
               class HeadsIt,
               class OutputIt,
               class BinaryOp>
-    __global__ void adjacent_difference_kernel(InputIt      input,
-                                               HeadsIt      block_heads,
-                                               const size_t input_size,
-                                               OutputIt     output,
-                                               BinaryOp     binary_op)
+    __global__
+    THRUST_HIP_LAUNCH_BOUNDS(BlockSize)
+    void adjacent_difference_kernel(InputIt      input,
+                                    HeadsIt      block_heads,
+                                    const size_t input_size,
+                                    OutputIt     output,
+                                    BinaryOp     binary_op)
     {
         using input_type = typename std::iterator_traits<InputIt>::value_type;
 
