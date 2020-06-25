@@ -47,7 +47,9 @@ namespace __parallel_for
     };
 
     template <unsigned int BlockSize, unsigned int ItemsPerThread, class F, class Size>
-    __global__ void kernel(F f, Size num_items)
+    __global__
+    THRUST_HIP_LAUNCH_BOUNDS(BlockSize)
+    void kernel(F f, Size num_items)
     {
         constexpr auto     items_per_block = BlockSize * ItemsPerThread;
         Size               tile_base       = blockIdx.x * items_per_block;
