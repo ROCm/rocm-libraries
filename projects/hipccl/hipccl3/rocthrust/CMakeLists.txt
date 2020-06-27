@@ -22,9 +22,10 @@ endif ()
 # Disable compiler extensions:
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Where to put the things we build:
-set(THRUST_LIBRARY_OUTPUT_DIR "${Thrust_BINARY_DIR}/lib")
-set(THRUST_EXECUTABLE_OUTPUT_DIR "${Thrust_BINARY_DIR}/bin")
+# Where to put build outputs. Use CMAKE_BINARY_DIR so they'll show up in the
+# top-level project's dir when building Thrust via add_subdirectory.
+set(THRUST_LIBRARY_OUTPUT_DIR "${CMAKE_BINARY_DIR}/lib")
+set(THRUST_EXECUTABLE_OUTPUT_DIR "${CMAKE_BINARY_DIR}/bin")
 
 # Temporary hacks to make Feta work; this requires you to define
 # `CMAKE_CUDA_COMPILER_ID=Feta` and `CMAKE_CUDA_COMPILER_FORCED`.
@@ -62,7 +63,8 @@ enable_language(CXX)
 # pass `-ccbin ${CMAKE_CUDA_HOST_COMPILER}` to Feta, which it doesn't
 # understand.
 if (NOT "Feta" STREQUAL "${CMAKE_CUDA_COMPILER_ID}")
-  if (NOT "${CMAKE_CUDA_HOST_COMPILER}" STREQUAL "")
+  if (NOT ("${CMAKE_CUDA_HOST_COMPILER}" STREQUAL "" OR
+           "${CMAKE_CUDA_HOST_COMPILER}" STREQUAL "${CMAKE_CXX_COMPILER}"))
     unset(CMAKE_CUDA_HOST_COMPILER CACHE)
     message(FATAL_ERROR "Thrust tests and examples require the C++ compiler"
       " and the CUDA host compiler to be the same; to set this compiler, please"
@@ -82,7 +84,7 @@ message(STATUS "TBB system found?  ${THRUST_TBB_FOUND}")
 message(STATUS "OMP system found?  ${THRUST_OMP_FOUND}")
 
 if (THRUST_CUDA_FOUND)
-  include(cmake/ThrustCUDAConfig.cmake)
+  include(cmake/ThrustCudaConfig.cmake)
 endif()
 
 # Setup VERSION
@@ -95,6 +97,7 @@ print_configuration_summary()
 option(THRUST_ENABLE_HEADER_TESTING "Test that all public headers compile." "ON")
 option(THRUST_ENABLE_TESTING "Build Thrust testing suite." "ON")
 option(THRUST_ENABLE_EXAMPLES "Build Thrust examples." "ON")
+option(THRUST_INCLUDE_CUB_CMAKE "Build CUB tests and examples. (Requires CUDA)." "OFF")
 
 if (THRUST_ENABLE_HEADER_TESTING)
   include(cmake/ThrustHeaderTesting.cmake)
@@ -112,4 +115,9 @@ endif()
 
 if (THRUST_ENABLE_EXAMPLES)
   add_subdirectory(examples)
+endif()
+
+if (THRUST_INCLUDE_CUB_CMAKE AND THRUST_CUDA_FOUND)
+  set(CUB_IN_THRUST ON)
+  add_subdirectory(dependencies/cub)
 endif()
