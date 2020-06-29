@@ -57,6 +57,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
+__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void test_hip_warp_sort(T* d_output)
 {
     unsigned int i = hipThreadIdx_x + (hipBlockIdx_x * hipBlockDim_x);
@@ -146,6 +147,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
+__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void test_hip_sort_key_value_kernel(KeyType* d_output_key, ValueType* d_output_value)
 {
     unsigned int i = hipThreadIdx_x + (hipBlockIdx_x * hipBlockDim_x);
@@ -162,7 +164,7 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
     int device_id = test_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
-    
+
     // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
     using T = typename TestFixture::params::type;
     using pair = test_utils::custom_test_type<T>;

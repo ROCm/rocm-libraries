@@ -103,6 +103,7 @@ template<
     class key_type
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void sort_key_kernel(
     key_type* device_keys_output,
     bool to_striped,
@@ -146,6 +147,7 @@ template<
     class value_type
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void sort_key_value_kernel(
     key_type* device_keys_output,
     value_type* device_values_output,
@@ -475,7 +477,7 @@ TYPED_TEST(RocprimBlockRadixSort, SortKeysValues)
     int device_id = test_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
-    
+
     using key_type = typename TestFixture::params::input_type;
     using value_type = typename TestFixture::params::output_type;
     constexpr size_t block_size = TestFixture::params::block_size;

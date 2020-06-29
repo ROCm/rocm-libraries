@@ -53,6 +53,7 @@ template<
     typename std::enable_if<Method == 0>::type* = nullptr
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void scan_kernel(T* device_output, T* device_output_b, T init)
 {
     (void)init;
@@ -72,6 +73,7 @@ template<
     typename std::enable_if<Method == 1>::type* = nullptr
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void scan_kernel(T* device_output, T* device_output_b, T init)
 {
     (void)init;
@@ -95,6 +97,7 @@ template<
     typename std::enable_if<Method == 2>::type* = nullptr
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void scan_kernel(T* device_output, T* device_output_b, T init)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
@@ -127,6 +130,7 @@ template<
     typename std::enable_if<Method == 3>::type* = nullptr
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void scan_kernel(T* device_output, T* device_output_b, T init)
 {
     (void)device_output_b;
@@ -145,6 +149,7 @@ template<
     typename std::enable_if<Method == 4>::type* = nullptr
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void scan_kernel(T* device_output, T* device_output_b, T init)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
@@ -167,6 +172,7 @@ template<
     typename std::enable_if<Method == 5>::type* = nullptr
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void scan_kernel(T* device_output, T* device_output_b, T init)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
@@ -693,6 +699,7 @@ template<
     class BinaryOp
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void inclusive_scan_array_kernel(T* device_output)
 {
     const unsigned int index = ((hipBlockIdx_x * BlockSize ) + hipThreadIdx_x) * ItemsPerThread;
@@ -722,6 +729,7 @@ template<
     class BinaryOp
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void inclusive_scan_reduce_array_kernel(T* device_output, T* device_output_reductions)
 {
     const unsigned int index = ((hipBlockIdx_x * BlockSize ) + hipThreadIdx_x) * ItemsPerThread;
@@ -757,6 +765,7 @@ template<
     class BinaryOp
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void inclusive_scan_array_prefix_callback_kernel(T* device_output, T* device_output_bp, T block_prefix)
 {
     const unsigned int index = ((hipBlockIdx_x * BlockSize) + hipThreadIdx_x) * ItemsPerThread;
@@ -799,6 +808,7 @@ template<
     class BinaryOp
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void exclusive_scan_array_kernel(T* device_output, T init)
 {
     const unsigned int index = ((hipBlockIdx_x * BlockSize) + hipThreadIdx_x) * ItemsPerThread;
@@ -827,6 +837,7 @@ template<
     class BinaryOp
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void exclusive_scan_reduce_array_kernel(T* device_output, T* device_output_reductions, T init)
 {
     const unsigned int index = ((hipBlockIdx_x * BlockSize) + hipThreadIdx_x) * ItemsPerThread;
@@ -861,6 +872,7 @@ template<
     class BinaryOp
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void exclusive_scan_prefix_callback_array_kernel(
     T* device_output,
     T* device_output_bp,
@@ -1538,7 +1550,7 @@ struct static_for_input_array
         int device_id = test_utils::obtain_device_from_ctest();
         SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
         HIP_CHECK(hipSetDevice(device_id));
-        
+
         test_block_scan_input_arrays<T, Method, BlockSize, items[First], rocprim::block_scan_algorithm::using_warp_scan>();
         test_block_scan_input_arrays<T, Method, BlockSize, items[First], rocprim::block_scan_algorithm::reduce_then_scan>();
         static_for_input_array<First + 1, Last, T, Method, BlockSize>::run();

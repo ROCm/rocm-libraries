@@ -48,6 +48,7 @@ template<
     class BinaryFunction
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void block_sort_kernel(KeysInputIterator keys_input,
                        KeysOutputIterator keys_output,
                        ValuesInputIterator values_input,
@@ -69,6 +70,7 @@ template<
     class BinaryFunction
 >
 __global__
+__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void block_merge_kernel(KeysInputIterator keys_input,
                         KeysOutputIterator keys_output,
                         ValuesInputIterator values_input,

@@ -35,6 +35,13 @@
     #define ROCPRIM_HOST __host__
     #define ROCPRIM_HOST_DEVICE __host__ __device__
     #define ROCPRIM_SHARED_MEMORY __shared__
+    // TODO: These paremeters should be tuned for NAVI in the close future.
+    #ifndef ROCPRIM_DEFAULT_MAX_BLOCK_SIZE
+        #define ROCPRIM_DEFAULT_MAX_BLOCK_SIZE 256
+    #endif
+    #ifndef ROCPRIM_DEFAULT_MIN_WARPS_PER_EU
+        #define ROCPRIM_DEFAULT_MIN_WARPS_PER_EU 1
+    #endif
 #endif
 
 #ifdef ROCPRIM_DISABLE_DPP

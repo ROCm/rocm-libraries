@@ -57,6 +57,7 @@ template<
     class BinaryFunction
 >
 __global__
+__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void segmented_scan_kernel(InputIterator input,
                            OutputIterator output,
                            OffsetIterator begin_offsets,
