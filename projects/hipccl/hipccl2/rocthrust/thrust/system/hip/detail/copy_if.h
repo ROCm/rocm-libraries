@@ -75,7 +75,7 @@ namespace __copy_if
 {
     template <typename Derived, typename InputIt, typename OutputIt, typename Predicate>
     THRUST_HIP_RUNTIME_FUNCTION OutputIt
-    copy_if(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt output, Predicate predicate) 
+    copy_if(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt output, Predicate predicate)
     {
         typedef typename iterator_traits<InputIt>::difference_type size_type;
 
@@ -106,7 +106,7 @@ namespace __copy_if
             tmp(policy, storage_size);
         void *ptr = static_cast<void*>(tmp.data().get());
 
-        size_type* d_num_selected_out 
+        size_type* d_num_selected_out
 		    = reinterpret_cast<size_type*>(reinterpret_cast<char*>(ptr) + temp_storage_bytes);
 
         hip_rocprim::throw_on_error(rocprim::select(ptr,
@@ -157,7 +157,7 @@ namespace __copy_if
                                                     stream,
                                                     debug_sync),
                                     "copy_if failed on 1st step");
-									
+
         size_t storage_size = temp_storage_bytes + sizeof(size_type);
 
         // Allocate temporary storage.
@@ -165,8 +165,8 @@ namespace __copy_if
             tmp(policy, storage_size);
         void *ptr = static_cast<void*>(tmp.data().get());
 
-        size_type* d_num_selected_out 
-		    = reinterpret_cast<size_type*>(reinterpret_cast<size_type*>(ptr) + temp_storage_bytes);
+        size_type* d_num_selected_out
+		    = reinterpret_cast<size_type*>(reinterpret_cast<char*>(ptr) + temp_storage_bytes);
 
         hip_rocprim::throw_on_error(rocprim::select(ptr,
                                                     temp_storage_bytes,
