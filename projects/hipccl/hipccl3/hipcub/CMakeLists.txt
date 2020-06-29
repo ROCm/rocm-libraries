@@ -60,7 +60,7 @@ option(DOWNLOAD_ROCPRIM "Download rocPRIM and do not search for rocPRIM package"
 include(cmake/Dependencies.cmake)
 
 # Setup VERSION
-set(VERSION_STRING "2.10.1")
+set(VERSION_STRING "2.10.2")
 rocm_setup_version(VERSION ${VERSION_STRING})
 
 # AMD targets
