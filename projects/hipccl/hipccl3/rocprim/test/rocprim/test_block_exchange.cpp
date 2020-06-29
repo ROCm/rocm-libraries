@@ -45,6 +45,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
+__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void blocked_to_striped_kernel(Type* device_input, OutputType* device_output)
 {
     constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
@@ -68,6 +69,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
+__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void striped_to_blocked_kernel(Type* device_input, OutputType* device_output)
 {
     constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
@@ -91,6 +93,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
+__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void blocked_to_warp_striped_kernel(Type* device_input, OutputType* device_output)
 {
     constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
@@ -114,6 +117,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
+__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void warp_striped_to_blocked_kernel(Type* device_input, OutputType* device_output)
 {
     constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
@@ -137,6 +141,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
+__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void scatter_to_blocked_kernel(Type* device_input, OutputType* device_output, unsigned int* device_ranks)
 {
     constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
@@ -162,6 +167,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
+__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void scatter_to_striped_kernel(Type* device_input, OutputType* device_output, unsigned int* device_ranks)
 {
     constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);

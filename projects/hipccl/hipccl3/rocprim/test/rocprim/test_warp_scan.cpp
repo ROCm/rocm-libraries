@@ -46,6 +46,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void warp_inclusive_scan_kernel(T* device_input, T* device_output)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
@@ -153,6 +154,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void warp_inclusive_scan_reduce_kernel(
     T* device_input,
     T* device_output,
@@ -288,6 +290,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void warp_exclusive_scan_kernel(T* device_input, T* device_output, T init)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
@@ -397,6 +400,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void warp_exclusive_scan_reduce_kernel(
     T* device_input,
     T* device_output,
@@ -541,6 +545,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void warp_scan_kernel(
     T* device_input,
     T* device_inclusive_output,
@@ -684,6 +689,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void warp_scan_reduce_kernel(
     T* device_input,
     T* device_inclusive_output,
@@ -852,7 +858,7 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScanCustomType)
     int device_id = test_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
-    
+
     using base_type = typename TestFixture::params::type;
     using T = test_utils::custom_test_type<base_type>;
     // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()

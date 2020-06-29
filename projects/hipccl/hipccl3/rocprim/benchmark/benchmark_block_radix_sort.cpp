@@ -68,6 +68,7 @@ template<
     unsigned int Trials
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void sort_keys_kernel(const T * input, T * output)
 {
     const unsigned int lid = hipThreadIdx_x;
@@ -93,6 +94,7 @@ template<
     unsigned int Trials
 >
 __global__
+__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void sort_pairs_kernel(const T * input, T * output)
 {
     const unsigned int lid = hipThreadIdx_x;
