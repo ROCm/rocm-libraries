@@ -17,7 +17,7 @@ variables:
 
 before_script:
   - $SUDO_CMD apt-get update -qq
-  - $SUDO_CMD apt-get install -y -qq libnuma-dev libunwind-dev git wget tar xz-utils bzip2 build-essential pkg-config ca-certificates
+  - $SUDO_CMD apt-get install -y -qq libidn11 libnuma-dev libunwind-dev git wget tar xz-utils bzip2 build-essential pkg-config ca-certificates
   - hipconfig
   # cmake
   - mkdir -p $DEPS_DIR/cmake
@@ -37,7 +37,7 @@ build:rocm:
   script:
     - mkdir build
     - cd build
-    - CXX=hipcc cmake -DBUILD_TEST=ON ../.
+    - CXX=hipcc cmake -DBUILD_TEST=ON -DCMAKE_CXX_FLAGS="-w" ../.
     - make -j $(nproc)
     - make package
   artifacts:
@@ -46,7 +46,7 @@ build:rocm:
       - build/test/test_*
       - build/test/CTestTestfile.cmake
       - build/testing/test_thrust_*
-      - build/testing/CTestTestfile.cmake      
+      - build/testing/CTestTestfile.cmake
       - build/gtest/
       - build/CMakeCache.txt
       - build/CTestTestfile.cmake
