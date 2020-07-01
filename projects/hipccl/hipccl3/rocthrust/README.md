@@ -39,7 +39,8 @@ cd rocThrust; mkdir build; cd build
 
 # Configure rocThrust, setup options for your system.
 # Build options:
-#   BUILD_TEST - ON by default,
+#   DISABLE_WERROR - ON by default, This flag disable the -Werror compiler flag
+#   BUILD_TEST - OFF by default,
 #   DOWNLOAD_ROCPRIM - OFF by default and at ON the rocPRIM will be downloaded to build folder,
 #
 # ! IMPORTANT !
