@@ -29,9 +29,12 @@ cd rocPRIM; mkdir build; cd build
 
 # Configure rocPRIM, setup options for your system.
 # Build options:
-#   BUILD_TEST - off by default,
-#   BUILD_BENCHMARK - off by default.
-#   BENCHMARK_CONFIG_TUNING - off by default. The purpose of this flag to find the best kernel config parameters.
+#   DISABLE_WERROR - ON by default, This flag disable the -Werror compiler flag
+#   ONLY_INSTALL - OFF by default, If this flag is on, the build ignore the BUILD_* flags
+#   BUILD_TEST - OFF by default,
+#   BUILD_EXAMPLE - OFF by default,
+#   BUILD_BENCHMARK - OFF by default.
+#   BENCHMARK_CONFIG_TUNING - OFF by default. The purpose of this flag to find the best kernel config parameters.
 #     At ON the compilation time can be increased significantly.
 #   AMDGPU_TARGETS - list of AMD architectures, default: gfx803;gfx900;gfx906;gfx908.
 #     You can make compilation faster if you want to test/benchmark only on one architecture,
@@ -155,13 +158,13 @@ Invoking CTest as `ctest --resource-spec-file <path_to_file> --parallel 2` will 
 
 ### Using custom seeds for the tests
 
-Go to the `rocPRIM/test/rocprim/test_seed.hpp` file. 
+Go to the `rocPRIM/test/rocprim/test_seed.hpp` file.
 ```cpp
 //(1)
 static constexpr int random_seeds_count = 10;
 
 //(2)
-static constexpr unsigned int seeds [] = {0, 2, 10, 1000}; 
+static constexpr unsigned int seeds [] = {0, 2, 10, 1000};
 
 //(3)
 static constexpr size_t seed_size = sizeof(seeds) / sizeof(seeds[0]);
@@ -169,10 +172,10 @@ static constexpr size_t seed_size = sizeof(seeds) / sizeof(seeds[0]);
 
 (1) defines a constant that sets how many passes over the tests will be done with runtime-generated seeds. Modify at will.
 
-(2) defines the user generated seeds. Each of the elements of the array will be used as seed for all tests. Modify at will. If no static seeds are desired, the array should be left empty. 
+(2) defines the user generated seeds. Each of the elements of the array will be used as seed for all tests. Modify at will. If no static seeds are desired, the array should be left empty.
 
 ```cpp
-static constexpr unsigned int seeds [] = {}; 
+static constexpr unsigned int seeds [] = {};
 ```
 
 (3) this line should never be modified.

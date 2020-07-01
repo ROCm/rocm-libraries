@@ -46,8 +46,14 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker searc
 # Verify that hcc compiler is used on ROCM platform
 include(cmake/VerifyCompiler.cmake)
 
-# Build option to disable -Werror
+# Build options
+# Disable -Werror
 option(DISABLE_WERROR "Disable building with Werror" ON)
+option(BUILD_TEST "Build tests (requires googletest)" OFF)
+option(BUILD_BENCHMARK "Build benchmarks" OFF)
+option(BUILD_EXAMPLE "Build examples" OFF)
+# Disables building tests, benchmarks, examples
+option(ONLY_INSTALL "Only install" OFF)
 
 # Set CXX flags
 set(CMAKE_CXX_STANDARD 14)
@@ -58,13 +64,6 @@ if(DISABLE_WERROR)
 else()
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror")
 endif()
-
-# Build options
-option(BUILD_TEST "Build tests (requires googletest)" OFF)
-option(BUILD_BENCHMARK "Build benchmarks" OFF)
-option(BUILD_EXAMPLE "Build examples" OFF)
-# Disables building tests, benchmarks, examples
-option(ONLY_INSTALL "Only install" OFF)
 
 # Get dependencies
 include(cmake/Dependencies.cmake)
