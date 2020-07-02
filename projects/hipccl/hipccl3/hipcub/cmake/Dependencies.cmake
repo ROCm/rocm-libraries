@@ -37,7 +37,7 @@ if (NOT Git_FOUND)
 endif()
 
 # CUB (only for CUDA platform)
-if(HIP_PLATFORM STREQUAL "nvcc")
+if(HIP_COMPILER STREQUAL "nvcc")
   if(NOT DEFINED CUB_INCLUDE_DIR)
     file(
       DOWNLOAD https://github.com/NVlabs/cub/archive/1.8.0.zip
@@ -66,7 +66,7 @@ if(HIP_PLATFORM STREQUAL "nvcc")
 endif()
 
 # rocPRIM (only for ROCm platform)
-if(HIP_PLATFORM STREQUAL "hcc")
+if(HIP_COMPILER STREQUAL "hcc" OR HIP_COMPILER STREQUAL "clang")
   if(NOT DOWNLOAD_ROCPRIM)
     find_package(rocprim)
   endif()
