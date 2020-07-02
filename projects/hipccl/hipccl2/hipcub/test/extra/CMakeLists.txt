@@ -37,7 +37,7 @@ include(VerifyCompiler)
 
 # Download CUB
 include(DownloadProject)
-if(HIP_PLATFORM STREQUAL "nvcc")
+if(HIP_COMPILER STREQUAL "nvcc")
   if(NOT DEFINED CUB_INCLUDE_DIR)
     file(
       DOWNLOAD https://github.com/NVlabs/cub/archive/1.8.0.zip
@@ -66,7 +66,7 @@ if(HIP_PLATFORM STREQUAL "nvcc")
 endif()
 
 # Download rocPRIM (only for ROCm platform)
-if(HIP_PLATFORM STREQUAL "hcc")
+if(HIP_COMPILER STREQUAL "hcc" OR HIP_COMPILER STREQUAL "clang")
   if(NOT DEFINED rocprim_DIR)
     message(STATUS "Downloading and building rocPRIM.")
     set(rocprim_DIR "${CMAKE_CURRENT_BINARY_DIR}/rocprim" CACHE PATH "")
@@ -104,7 +104,7 @@ enable_testing()
 
 # Use CUDA_INCLUDE_DIRECTORIES to include required dirs
 # for nvcc if cmake version is less than 3.10
-if((HIP_PLATFORM STREQUAL "nvcc") AND (CMAKE_VERSION VERSION_LESS "3.10"))
+if((HIP_COMPILER STREQUAL "nvcc") AND (CMAKE_VERSION VERSION_LESS "3.10"))
     CUDA_INCLUDE_DIRECTORIES(
         ${hipcub_INCLUDE_DIR}
         ${GTEST_INCLUDE_DIRS}
@@ -115,7 +115,7 @@ endif()
 function(add_hipcub_test TEST_NAME TEST_SOURCES)
   list(GET TEST_SOURCES 0 TEST_MAIN_SOURCE)
   get_filename_component(TEST_TARGET ${TEST_MAIN_SOURCE} NAME_WE)
-  if(HIP_PLATFORM STREQUAL "hcc")
+  if(HIP_COMPILER STREQUAL "hcc" OR HIP_COMPILER STREQUAL "clang")
     add_executable(${TEST_TARGET} ${TEST_SOURCES})
     target_link_libraries(${TEST_TARGET}
       PRIVATE
