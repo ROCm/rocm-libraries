@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2019 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -21,6 +21,7 @@
 # SOFTWARE.
 
 function(print_configuration_summary)
+  message(STATUS "")
   message(STATUS "******** Summary ********")
   message(STATUS "General:")
   message(STATUS "  System                : ${CMAKE_SYSTEM_NAME}")
@@ -33,6 +34,8 @@ function(print_configuration_summary)
   message(STATUS "  Install prefix        : ${CMAKE_INSTALL_PREFIX}")
   message(STATUS "  Device targets        : ${AMDGPU_TARGETS}")
   message(STATUS "")
+  message(STATUS "  DISABLE_WERROR        : ${DISABLE_WERROR}")
+  message(STATUS "  ONLY_INSTALL          : ${ONLY_INSTALL}")
   message(STATUS "  BUILD_TEST            : ${BUILD_TEST}")
   message(STATUS "  BUILD_BENCHMARK       : ${BUILD_BENCHMARK}")
   message(STATUS "  BUILD_EXAMPLE         : ${BUILD_EXAMPLE}")
