@@ -69,7 +69,7 @@ include: '.gitlab-ci-gputest.yml'
 test:rocm_package:
   stage: test
   tags:
-    - rocm
+    - rocm-stable
   variables:
     SUDO_CMD: "sudo -E"
   dependencies:
@@ -99,7 +99,7 @@ test:rocm_package:
 test:rocm_install:
   stage: test
   tags:
-    - rocm
+    - rocm-stable
   variables:
     SUDO_CMD: "sudo -E"
   dependencies: []
