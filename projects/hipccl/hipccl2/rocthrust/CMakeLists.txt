@@ -32,15 +32,21 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker searc
 # Verify that hcc compiler is used on ROCM platform
 include(cmake/VerifyCompiler.cmake)
 
+# Build options
+# Disable -Werror
+option(DISABLE_WERROR "Disable building with Werror" ON)
+option(BUILD_TEST "Build tests" OFF)
+option(DOWNLOAD_ROCPRIM "Download rocPRIM and do not search for rocPRIM package" OFF)
+
 # Set CXX flags
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wno-unused-function")
-
-# Build options
-option(BUILD_TEST "Build tests" OFF)
-option(DOWNLOAD_ROCPRIM "Download rocPRIM and do not search for rocPRIM package" OFF)
+if(DISABLE_WERROR)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wno-unused-function")
+else()
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wno-unused-function -Werror")
+endif()
 
 # Get dependencies
 include(cmake/Dependencies.cmake)
