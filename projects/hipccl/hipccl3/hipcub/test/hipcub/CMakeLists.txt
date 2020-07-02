@@ -22,7 +22,7 @@
 
 # Use CUDA_INCLUDE_DIRECTORIES to include required dirs
 # for nvcc if cmake version is less than 3.10
-if((HIP_PLATFORM STREQUAL "nvcc") AND (CMAKE_VERSION VERSION_LESS "3.10"))
+if((HIP_COMPILER STREQUAL "nvcc") AND (CMAKE_VERSION VERSION_LESS "3.10"))
     CUDA_INCLUDE_DIRECTORIES(
         "${PROJECT_BINARY_DIR}/hipcub/include/hipcub"
         "${PROJECT_BINARY_DIR}/hipcub/include"
@@ -35,7 +35,7 @@ endif()
 function(add_hipcub_test TEST_NAME TEST_SOURCES)
   list(GET TEST_SOURCES 0 TEST_MAIN_SOURCE)
   get_filename_component(TEST_TARGET ${TEST_MAIN_SOURCE} NAME_WE)
-  if(HIP_PLATFORM STREQUAL "hcc")
+  if(HIP_COMPILER STREQUAL "hcc" OR HIP_COMPILER STREQUAL "clang")
     add_executable(${TEST_TARGET} ${TEST_SOURCES})
     target_include_directories(${TEST_TARGET} SYSTEM BEFORE
       PUBLIC

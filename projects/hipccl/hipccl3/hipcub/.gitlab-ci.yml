@@ -35,7 +35,7 @@ variables:
   # Local build options
   LOCAL_CXXFLAGS: ""
   LOCAL_CMAKE_OPTIONS: ""
-  ROCM_LATEST_PATH: "/opt/rocm-3.5.1/"
+  ROCM_LATEST_PATH: "/opt/rocm-3.5.0/"
 
 # hipCUB with rocPRIM backend
 .rocm:
@@ -46,7 +46,7 @@ variables:
   image: rocm/rocm-terminal:latest
   before_script:
     - $SUDO_CMD apt-get update -qq
-    - $SUDO_CMD apt-get install -y -qq libnuma-dev libunwind-dev git wget tar xz-utils bzip2 build-essential pkg-config  ninja-build ca-certificates
+    - $SUDO_CMD apt-get install -y -qq libidn11 libnuma-dev libunwind-dev git wget tar xz-utils bzip2 build-essential pkg-config  ninja-build ca-certificates
     - hipconfig
     # cmake
     - mkdir -p $DEPS_DIR/cmake
@@ -61,7 +61,7 @@ variables:
   before_script:
     # We need to duplicate before script
     - $SUDO_CMD apt-get update -qq
-    - $SUDO_CMD apt-get install -y -qq libnuma-dev libunwind-dev git wget tar xz-utils bzip2 build-essential pkg-config  ninja-build ca-certificates
+    - $SUDO_CMD apt-get install -y -qq libidn11 libnuma-dev libunwind-dev git wget tar xz-utils bzip2 build-essential pkg-config  ninja-build ca-certificates
     - hipconfig
     # cmake
     - mkdir -p $DEPS_DIR/cmake
@@ -246,6 +246,8 @@ benchmark:rocm_mi25:
 test:rocm_package:
   extends: .rocm
   stage: test
+  tags:
+    - rocm-stable
   needs:
     - build:rocm
   script:
@@ -273,6 +275,8 @@ test:rocm_package:
 test:rocm_install:
   extends: .rocm
   stage: test
+  tags:
+    - rocm-stable
   needs: []
   script:
     # Install rocPRIM package
@@ -316,6 +320,7 @@ test:rocm_install:
     # (with heavy libraries, tools etc. that also require GUI and other packages)
     - apt-get download hip-nvcc
     - $SUDO_CMD dpkg -i --ignore-depends=cuda hip*.deb
+    - $SUDO_CMD ls -d /opt/*
     - $SUDO_CMD ln -s $ROCM_LATEST_PATH /opt/rocm
     - export PATH=$PATH:/opt/rocm/bin
     - hipconfig
@@ -335,6 +340,7 @@ build:nvcc:
     - cd build
     - cmake
       -G Ninja
+      -D HIP_COMPILER=nvcc
       -D CMAKE_BUILD_TYPE=Release
       -D BUILD_TEST=ON
       -D BUILD_EXAMPLE=ON
@@ -369,6 +375,7 @@ build:nvcc-benchmark:
     - cd build
     - cmake
       -G Ninja
+      -D HIP_COMPILER=nvcc
       -D CMAKE_BUILD_TYPE=Release
       -D BUILD_BENCHMARK=ON
       -D CMAKE_C_COMPILER:FILEPATH=/usr/bin/gcc-8
@@ -445,7 +452,7 @@ test:nvcc_package:
     - cd build
     - $SUDO_CMD dpkg -i hipcub_nvcc-*.deb
     - mkdir ../package_test && cd ../package_test
-    - cmake ../test/extra/.
+    - cmake -DHIP_COMPILER=nvcc ../test/extra/.
     - make VERBOSE=1
     - ctest --output-on-failure --repeat-until-fail 2
     - $SUDO_CMD dpkg -r hipcub_nvcc
@@ -457,9 +464,9 @@ test:nvcc_install:
   script:
     - mkdir build_only_install
     - cd build_only_install
-    - cmake -DBUILD_TEST=OFF ../.
+    - cmake -DHIP_COMPILER=nvcc -DBUILD_TEST=OFF ../.
     - $SUDO_CMD make install
     - mkdir ../install_test && cd ../install_test
-    - cmake ../test/extra/.
+    - cmake -DHIP_COMPILER=nvcc ../test/extra/.
     - make VERBOSE=1
     - ctest --output-on-failure --repeat-until-fail 2

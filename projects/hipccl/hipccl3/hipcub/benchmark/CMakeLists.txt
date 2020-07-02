@@ -22,7 +22,7 @@
 
 function(add_hipcub_benchmark BENCHMARK_SOURCE)
   get_filename_component(BENCHMARK_TARGET ${BENCHMARK_SOURCE} NAME_WE)
-  if((HIP_PLATFORM STREQUAL "nvcc"))
+  if((HIP_COMPILER STREQUAL "nvcc"))
     if((CMAKE_VERSION VERSION_LESS "3.10"))
       CUDA_INCLUDE_DIRECTORIES(
           "${PROJECT_BINARY_DIR}/hipcub/include/hipcub"
