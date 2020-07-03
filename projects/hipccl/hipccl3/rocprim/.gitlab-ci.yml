@@ -145,7 +145,7 @@ build:package:
   extends:
     - .deps:cmake-minimum
   tags:
-    - rocm
+    - rocm-stable
   script:
     - mkdir -p $PACKAGE_DIR
     - cd $PACKAGE_DIR
@@ -183,7 +183,7 @@ test:deb:
   needs:
     - build:package
   tags:
-    - rocm
+    - rocm-stable
   extends:
     - .deps:cmake-minimum
   script:
