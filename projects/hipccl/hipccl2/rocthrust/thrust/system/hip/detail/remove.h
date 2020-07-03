@@ -44,7 +44,7 @@ remove_if(execution_policy<Derived>& policy,
           StencilIt                  stencil,
           Predicate                  predicate)
 {
-    return hip_rocprim::copy_if(policy, first, last, stencil, first, detail::not1(predicate));
+    return hip_rocprim::copy_if(policy, first, last, stencil, first, thrust::detail::not1(predicate));
 }
 
 template <class Derived, class InputIt, class Predicate>
@@ -54,7 +54,7 @@ remove_if(execution_policy<Derived>& policy,
           InputIt                    last,
           Predicate                  predicate)
 {
-    return hip_rocprim::copy_if(policy, first, last, first, detail::not1(predicate));
+    return hip_rocprim::copy_if(policy, first, last, first, thrust::detail::not1(predicate));
 }
 
 template <class Derived, class InputIt, class T>
@@ -64,7 +64,7 @@ remove(execution_policy<Derived>& policy,
        InputIt                    last,
        const T&                   value)
 {
-    detail::equal_to_value<T> pred(value);
+    thrust::detail::equal_to_value<T> pred(value);
     return hip_rocprim::remove_if(policy, first, last, pred);
 }
 

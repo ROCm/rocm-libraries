@@ -34,11 +34,12 @@
 #include <thrust/detail/type_traits/iterator/is_output_iterator.h>
 
 #include <thrust/system/cuda/detail/execution_policy.h>
+#include <thrust/detail/cstdint.h>
+#include <thrust/detail/temporary_array.h>
 #include <thrust/system/cuda/detail/util.h>
 #include <thrust/system/cuda/detail/cub/device/device_scan.cuh>
 #include <thrust/system/cuda/detail/core/agent_launcher.h>
 #include <thrust/system/cuda/detail/par_to_seq.h>
-#include <thrust/system/cuda/detail/memory_buffer.h>
 #include <thrust/detail/mpl/math.h>
 #include <thrust/detail/minmax.h>
 #include <thrust/distance.h>
@@ -309,7 +310,7 @@ namespace __scan {
       void THRUST_DEVICE_FUNCTION scan_tile(T (&items)[ITEMS_PER_THREAD],
                                             _ScanOp scan_op,
                                             T &     block_aggregate,
-                                            detail::false_type /* is_inclusive */)
+                                            thrust::detail::false_type /* is_inclusive */)
       {
         BlockScan(storage.scan).ExclusiveScan(items, items, scan_op, block_aggregate);
       }
@@ -319,7 +320,7 @@ namespace __scan {
       void THRUST_DEVICE_FUNCTION scan_tile(T (&items)[ITEMS_PER_THREAD],
                                             plus<T> /*scan_op*/,
                                             T &     block_aggregate,
-                                            detail::false_type /* is_inclusive */)
+                                            thrust::detail::false_type /* is_inclusive */)
       {
         BlockScan(storage.scan).ExclusiveSum(items, items, block_aggregate);
       }
@@ -330,7 +331,7 @@ namespace __scan {
       void THRUST_DEVICE_FUNCTION scan_tile(T (&items)[ITEMS_PER_THREAD],
                                             _ScanOp scan_op,
                                             T &     block_aggregate,
-                                            detail::true_type /* is_inclusive */)
+                                            thrust::detail::true_type /* is_inclusive */)
       {
         BlockScan(storage.scan).InclusiveScan(items, items, scan_op, block_aggregate);
       }
@@ -341,7 +342,7 @@ namespace __scan {
       void THRUST_DEVICE_FUNCTION scan_tile(T (&items)[ITEMS_PER_THREAD],
                                             plus<T> /*scan_op*/,
                                             T &     block_aggregate,
-                                            detail::true_type /* is_inclusive */)
+                                            thrust::detail::true_type /* is_inclusive */)
       {
         BlockScan(storage.scan).InclusiveSum(items, items, block_aggregate);
       }
@@ -357,7 +358,7 @@ namespace __scan {
                                             _ScanOp         scan_op,
                                             T &             block_aggregate,
                                             PrefixCallback &prefix_op,
-                                            detail::false_type /* is_inclusive */)
+                                            thrust::detail::false_type /* is_inclusive */)
       {
         BlockScan(storage.scan).ExclusiveScan(items, items, scan_op, prefix_op);
         block_aggregate = prefix_op.GetBlockAggregate();
@@ -370,7 +371,7 @@ namespace __scan {
                                             plus<T>         /*scan_op*/,
                                             T &             block_aggregate,
                                             PrefixCallback &prefix_op,
-                                            detail::false_type /* is_inclusive */)
+                                            thrust::detail::false_type /* is_inclusive */)
       {
         BlockScan(storage.scan).ExclusiveSum(items, items, prefix_op);
         block_aggregate = prefix_op.GetBlockAggregate();
@@ -383,7 +384,7 @@ namespace __scan {
                                             _ScanOp         scan_op,
                                             T &             block_aggregate,
                                             PrefixCallback &prefix_op,
-                                            detail::true_type /* is_inclusive */)
+                                            thrust::detail::true_type /* is_inclusive */)
       {
         BlockScan(storage.scan).InclusiveScan(items, items, scan_op, prefix_op);
         block_aggregate = prefix_op.GetBlockAggregate();
@@ -396,7 +397,7 @@ namespace __scan {
                                             plus<T>         /*scan_op*/,
                                             T &             block_aggregate,
                                             PrefixCallback &prefix_op,
-                                            detail::true_type /* is_inclusive */)
+                                            thrust::detail::true_type /* is_inclusive */)
       {
         BlockScan(storage.scan).InclusiveSum(items, items, prefix_op);
         block_aggregate = prefix_op.GetBlockAggregate();
@@ -688,33 +689,31 @@ namespace __scan {
     return status;
   }    // func doit_step
 
-  template <class Inclusive,
-            class Policy,
-            class InputIt,
-            class OutputIt,
-            class Size,
-            class ScanOp,
-            class AddInitToExclusiveScan>
-  OutputIt THRUST_RUNTIME_FUNCTION
-  scan(Policy &               policy,
-       InputIt                input_it,
-       OutputIt               output_it,
-       Size                   num_items,
-       ScanOp                 scan_op,
-       AddInitToExclusiveScan add_init_to_exclusive_scan)
+  template <typename Inclusive,
+            typename Derived,
+            typename InputIt,
+            typename OutputIt,
+            typename Size,
+            typename ScanOp,
+            typename AddInitToExclusiveScan>
+  THRUST_RUNTIME_FUNCTION
+  OutputIt scan(execution_policy<Derived>& policy,
+                InputIt                    input_it,
+                OutputIt                   output_it,
+                Size                       num_items,
+                ScanOp                     scan_op,
+                AddInitToExclusiveScan     add_init_to_exclusive_scan)
   {
-
     if (num_items == 0)
       return output_it;
 
-    char *       d_temp_storage     = NULL;
-    size_t       temp_storage_bytes = 0;
-    cudaStream_t stream             = cuda_cub::stream(policy);
-    bool         debug_sync         = THRUST_DEBUG_SYNC_FLAG;
+    size_t       storage_size = 0;
+    cudaStream_t stream       = cuda_cub::stream(policy);
+    bool         debug_sync   = THRUST_DEBUG_SYNC_FLAG;
 
     cudaError_t status;
-    status = doit_step<Inclusive>(d_temp_storage,
-                                  temp_storage_bytes,
+    status = doit_step<Inclusive>(NULL,
+                                  storage_size,
                                   input_it,
                                   num_items,
                                   add_init_to_exclusive_scan,
@@ -724,14 +723,13 @@ namespace __scan {
                                   debug_sync);
     cuda_cub::throw_on_error(status, "scan failed on 1st step");
 
-    void *ptr = cuda_cub::get_memory_buffer(policy, temp_storage_bytes);
-    cuda_cub::throw_on_error(cudaGetLastError(),
-                             "scan failed to get memory buffer");
-    
-    d_temp_storage = static_cast<char *>(ptr);
+    // Allocate temporary storage.
+    thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
+      tmp(policy, storage_size);
+    void *ptr = static_cast<void*>(tmp.data().get());
 
-    status = doit_step<Inclusive>(d_temp_storage,
-                                  temp_storage_bytes,
+    status = doit_step<Inclusive>(ptr,
+                                  storage_size,
                                   input_it,
                                   num_items,
                                   add_init_to_exclusive_scan,
@@ -743,10 +741,6 @@ namespace __scan {
 
     status = cuda_cub::synchronize(policy);
     cuda_cub::throw_on_error(status, "scan failed to synchronize");
-
-    cuda_cub::return_memory_buffer(policy, ptr);
-    cuda_cub::throw_on_error(cudaGetLastError(),
-                             "scan failed to return memory buffer");
 
     return output_it + num_items;
   }    // func scan
@@ -774,12 +768,12 @@ inclusive_scan_n(execution_policy<Derived> &policy,
   if (__THRUST_HAS_CUDART__)
   {
     typedef typename iterator_traits<InputIt>::value_type T;
-    ret = __scan::scan<detail::true_type>(policy,
-                                          first,
-                                          result,
-                                          num_items,
-                                          scan_op,
-                                          __scan::DoNothing<T>());
+    ret = __scan::scan<thrust::detail::true_type>(policy,
+                                                  first,
+                                                  result,
+                                                  num_items,
+                                                  scan_op,
+                                                  __scan::DoNothing<T>());
   }
   else
   {
@@ -846,7 +840,7 @@ exclusive_scan_n(execution_policy<Derived> &policy,
   OutputIt ret = result;
   if (__THRUST_HAS_CUDART__)
   {
-    ret = __scan::scan<detail::false_type>(
+    ret = __scan::scan<thrust::detail::false_type>(
         policy,
         first,
         result,

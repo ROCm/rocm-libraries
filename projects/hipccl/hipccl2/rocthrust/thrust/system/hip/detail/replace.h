@@ -97,7 +97,7 @@ replace(execution_policy<Derived>& policy,
                               last,
                               first,
                               __replace::constant_f<T>(new_value),
-                              detail::equal_to_value<T>(old_value));
+                              thrust::detail::equal_to_value<T>(old_value));
 }
 
 template <class Derived, class Iterator, class Predicate, class T>
@@ -173,7 +173,7 @@ replace_copy(execution_policy<Derived>& policy,
              T const&                   new_value)
 {
     return hip_rocprim::replace_copy_if(
-        policy, first, last, result, detail::equal_to_value<T>(old_value), new_value
+        policy, first, last, result, thrust::detail::equal_to_value<T>(old_value), new_value
     );
 }
 

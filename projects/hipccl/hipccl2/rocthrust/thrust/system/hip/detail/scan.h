@@ -31,27 +31,29 @@
 #include <thrust/detail/config.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/iterator/is_output_iterator.h>
+#include <thrust/detail/cstdint.h>
+#include <thrust/detail/temporary_array.h>
 #include <thrust/functional.h>
 
-#include <thrust/detail/minmax.h>
-#include <thrust/detail/mpl/math.h>
-#include <thrust/distance.h>
 #include <thrust/system/hip/detail/execution_policy.h>
-#include <thrust/system/hip/detail/memory_buffer.h>
 #include <thrust/system/hip/detail/par_to_seq.h>
 #include <thrust/system/hip/detail/util.h>
+#include <thrust/detail/mpl/math.h>
+#include <thrust/detail/alignment.h>
+#include <thrust/detail/minmax.h>
+#include <thrust/distance.h>
+
 
 // rocprim include
 #include <rocprim/rocprim.hpp>
-#include <thrust/detail/alignment.h>
-#include <thrust/detail/cstdint.h>
+
 
 BEGIN_NS_THRUST
 template <typename DerivedPolicy,
           typename InputIterator,
           typename OutputIterator,
           typename AssociativeOperator>
-OutputIterator THRUST_HIP_FUNCTION
+THRUST_HIP_FUNCTION OutputIterator
 inclusive_scan(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
                InputIterator                                               first,
                InputIterator                                               last,
@@ -63,7 +65,7 @@ template <typename DerivedPolicy,
           typename OutputIterator,
           typename T,
           typename AssociativeOperator>
-OutputIterator THRUST_HIP_FUNCTION
+THRUST_HIP_FUNCTION OutputIterator
 exclusive_scan(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
                InputIterator                                               first,
                InputIterator                                               last,
@@ -75,25 +77,24 @@ namespace hip_rocprim
 {
 namespace __scan
 {
-    template <class Policy, class InputIt, class OutputIt, class Size, class ScanOp>
-    OutputIt THRUST_HIP_RUNTIME_FUNCTION
-    inclusive_scan(Policy&  policy,
-                   InputIt  input_it,
-                   OutputIt output_it,
-                   Size     num_items,
-                   ScanOp   scan_op)
+    template <typename Derived, typename InputIt, typename OutputIt, typename Size, typename ScanOp>
+    THRUST_HIP_RUNTIME_FUNCTION OutputIt
+    inclusive_scan(execution_policy<Derived>& policy,
+                   InputIt                    input_it,
+                   OutputIt                   output_it,
+                   Size                       num_items,
+                   ScanOp                     scan_op)
     {
         if(num_items == 0)
             return output_it;
 
-        void*       d_temp_storage     = nullptr;
-        size_t      temp_storage_bytes = 0;
-        hipStream_t stream             = hip_rocprim::stream(policy);
-        bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
+        size_t      storage_size = 0;
+        hipStream_t stream       = hip_rocprim::stream(policy);
+        bool        debug_sync   = THRUST_HIP_DEBUG_SYNC_FLAG;
 
         // Determine temporary device storage requirements.
-        hip_rocprim::throw_on_error(rocprim::inclusive_scan(d_temp_storage,
-                                                            temp_storage_bytes,
+        hip_rocprim::throw_on_error(rocprim::inclusive_scan(NULL,
+                                                            storage_size,
                                                             input_it,
                                                             output_it,
                                                             num_items,
@@ -103,12 +104,13 @@ namespace __scan
                                     "scan failed on 1st step");
 
         // Allocate temporary storage.
-        d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes);
-        hip_rocprim::throw_on_error(hipGetLastError(), "scan failed to get memory buffer");
+        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
+            tmp(policy, storage_size);
+        void *ptr = static_cast<void*>(tmp.data().get());
 
         // Run scan.
-        hip_rocprim::throw_on_error(rocprim::inclusive_scan(d_temp_storage,
-                                                            temp_storage_bytes,
+        hip_rocprim::throw_on_error(rocprim::inclusive_scan(ptr,
+                                                            storage_size,
                                                             input_it,
                                                             output_it,
                                                             num_items,
@@ -117,32 +119,29 @@ namespace __scan
                                                             debug_sync),
                                     "scan failed on 2nd step");
 
-        hip_rocprim::return_memory_buffer(policy, d_temp_storage);
-        hip_rocprim::throw_on_error(hipGetLastError(), "scan failed to return memory buffer");
 
         return output_it + num_items;
     }
 
-    template <class Policy, class InputIt, class OutputIt, class Size, class T, class ScanOp>
-    OutputIt THRUST_HIP_RUNTIME_FUNCTION
-    exclusive_scan(Policy&  policy,
-                   InputIt  input_it,
-                   OutputIt output_it,
-                   Size     num_items,
-                   T        init,
-                   ScanOp   scan_op)
+    template <typename Derived, typename InputIt, typename OutputIt, typename Size, typename T, typename ScanOp>
+    THRUST_HIP_RUNTIME_FUNCTION OutputIt
+    exclusive_scan(execution_policy<Derived>& policy,
+                   InputIt                    input_it,
+                   OutputIt                   output_it,
+                   Size                       num_items,
+                   T                          init,
+                   ScanOp                     scan_op)
     {
         if(num_items == 0)
             return output_it;
 
-        void*       d_temp_storage     = nullptr;
-        size_t      temp_storage_bytes = 0;
-        hipStream_t stream             = hip_rocprim::stream(policy);
-        bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
+        size_t      storage_size = 0;
+        hipStream_t stream       = hip_rocprim::stream(policy);
+        bool        debug_sync   = THRUST_HIP_DEBUG_SYNC_FLAG;
 
         // Determine temporary device storage requirements.
-        hip_rocprim::throw_on_error(rocprim::exclusive_scan(d_temp_storage,
-                                                            temp_storage_bytes,
+        hip_rocprim::throw_on_error(rocprim::exclusive_scan(NULL,
+                                                            storage_size,
                                                             input_it,
                                                             output_it,
                                                             init,
@@ -153,12 +152,13 @@ namespace __scan
                                     "scan failed on 1st step");
 
         // Allocate temporary storage.
-        d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes);
-        hip_rocprim::throw_on_error(hipGetLastError(), "scan failed to get memory buffer");
+        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
+            tmp(policy, storage_size);
+        void *ptr = static_cast<void*>(tmp.data().get());
 
         // Run scan.
-        hip_rocprim::throw_on_error(rocprim::exclusive_scan(d_temp_storage,
-                                                            temp_storage_bytes,
+        hip_rocprim::throw_on_error(rocprim::exclusive_scan(ptr,
+                                                            storage_size,
                                                             input_it,
                                                             output_it,
                                                             init,
@@ -167,9 +167,6 @@ namespace __scan
                                                             stream,
                                                             debug_sync),
                                     "scan failed on 2nd step");
-
-        hip_rocprim::return_memory_buffer(policy, d_temp_storage);
-        hip_rocprim::throw_on_error(hipGetLastError(), "scan failed to return memory buffer");
 
         return output_it + num_items;
     }
@@ -181,7 +178,7 @@ namespace __scan
 //-------------------------
 
 template <class Derived, class InputIt, class Size, class OutputIt, class ScanOp>
-OutputIt THRUST_HIP_FUNCTION
+THRUST_HIP_FUNCTION OutputIt
 inclusive_scan_n(execution_policy<Derived>& policy,
                  InputIt                    input_it,
                  Size                       num_items,

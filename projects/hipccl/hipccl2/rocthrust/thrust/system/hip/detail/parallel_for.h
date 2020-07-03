@@ -30,9 +30,9 @@
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 #include <thrust/system/hip/config.h>
 
+#include <thrust/system/hip/detail/util.h>
 #include <thrust/detail/type_traits/result_of_adaptable_function.h>
 #include <thrust/system/hip/detail/par_to_seq.h>
-#include <thrust/system/hip/detail/util.h>
 
 BEGIN_NS_THRUST
 namespace hip_rocprim
