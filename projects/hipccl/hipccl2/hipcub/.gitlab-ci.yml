@@ -340,7 +340,6 @@ build:nvcc:
     - cd build
     - cmake
       -G Ninja
-      -D HIP_COMPILER=nvcc
       -D CMAKE_BUILD_TYPE=Release
       -D BUILD_TEST=ON
       -D BUILD_EXAMPLE=ON
@@ -375,7 +374,6 @@ build:nvcc-benchmark:
     - cd build
     - cmake
       -G Ninja
-      -D HIP_COMPILER=nvcc
       -D CMAKE_BUILD_TYPE=Release
       -D BUILD_BENCHMARK=ON
       -D CMAKE_C_COMPILER:FILEPATH=/usr/bin/gcc-8
@@ -452,7 +450,7 @@ test:nvcc_package:
     - cd build
     - $SUDO_CMD dpkg -i hipcub_nvcc-*.deb
     - mkdir ../package_test && cd ../package_test
-    - cmake -DHIP_COMPILER=nvcc ../test/extra/.
+    - cmake ../test/extra/.
     - make VERBOSE=1
     - ctest --output-on-failure --repeat-until-fail 2
     - $SUDO_CMD dpkg -r hipcub_nvcc
@@ -464,9 +462,9 @@ test:nvcc_install:
   script:
     - mkdir build_only_install
     - cd build_only_install
-    - cmake -DHIP_COMPILER=nvcc -DBUILD_TEST=OFF ../.
+    - cmake -DBUILD_TEST=OFF ../.
     - $SUDO_CMD make install
     - mkdir ../install_test && cd ../install_test
-    - cmake -DHIP_COMPILER=nvcc ../test/extra/.
+    - cmake ../test/extra/.
     - make VERBOSE=1
     - ctest --output-on-failure --repeat-until-fail 2
