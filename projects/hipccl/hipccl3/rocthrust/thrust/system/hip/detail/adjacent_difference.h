@@ -28,15 +28,17 @@
 #pragma once
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-#include <thrust/detail/minmax.h>
-#include <thrust/detail/mpl/math.h>
-#include <thrust/distance.h>
-#include <thrust/functional.h>
 #include <thrust/system/hip/config.h>
-#include <thrust/system/hip/detail/memory_buffer.h>
+
+#include <thrust/detail/cstdint.h>
+#include <thrust/detail/temporary_array.h>
 #include <thrust/system/hip/detail/par_to_seq.h>
 #include <thrust/system/hip/detail/transform.h>
 #include <thrust/system/hip/detail/util.h>
+#include <thrust/functional.h>
+#include <thrust/distance.h>
+#include <thrust/detail/mpl/math.h>
+#include <thrust/detail/minmax.h>
 
 // rocprim include
 #include <rocprim/rocprim.hpp>
@@ -47,7 +49,7 @@ template <typename DerivedPolicy,
           typename InputIterator,
           typename OutputIterator,
           typename BinaryFunction>
-OutputIterator __host__ __device__
+__host__ __device__ OutputIterator
 adjacent_difference(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
                     InputIterator                                               first,
                     InputIterator                                               last,
@@ -348,24 +350,30 @@ namespace __adjacent_difference
 
 #undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
 
-    template <class Policy, class InputIt, class OutputIt, class BinaryOp>
-    static OutputIt THRUST_HIP_RUNTIME_FUNCTION adjacent_difference(
-        Policy& policy, InputIt first, InputIt last, OutputIt result, BinaryOp binary_op)
+    template <typename Derived,
+              typename InputIt,
+              typename OutputIt,
+              typename BinaryOp>
+    static OutputIt THRUST_HIP_RUNTIME_FUNCTION 
+    adjacent_difference(execution_policy<Derived>& policy,
+                        InputIt                    first,
+                        InputIt                    last,
+                        OutputIt                   result,
+                        BinaryOp                   binary_op)
     {
         typedef typename iterator_traits<InputIt>::difference_type size_type;
 
-        size_type   num_items          = thrust::distance(first, last);
-        void*       d_temp_storage     = NULL;
-        size_t      temp_storage_bytes = 0;
-        hipStream_t stream             = hip_rocprim::stream(policy);
-        bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
+        size_type   num_items    = thrust::distance(first, last);
+        size_t      storage_size = 0;
+        hipStream_t stream       = hip_rocprim::stream(policy);
+        bool        debug_sync   = THRUST_HIP_DEBUG_SYNC_FLAG;
 
         if(num_items == 0)
             return result;
 
         // Determine temporary device storage requirements.
-        hip_rocprim::throw_on_error(doit_step(d_temp_storage,
-                                              temp_storage_bytes,
+        hip_rocprim::throw_on_error(doit_step(NULL,
+                                              storage_size,
                                               first,
                                               result,
                                               binary_op,
@@ -375,12 +383,12 @@ namespace __adjacent_difference
                                     "adjacent_difference failed on 1st step");
 
         // Allocate temporary storage.
-        d_temp_storage = hip_rocprim::get_memory_buffer(policy, temp_storage_bytes);
-        hip_rocprim::throw_on_error(hipGetLastError(),
-                                    "adjacent_difference failed to get memory buffer");
+        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
+            tmp(policy, storage_size);
+        void *ptr = static_cast<void*>(tmp.data().get());
 
-        hip_rocprim::throw_on_error(doit_step(d_temp_storage,
-                                              temp_storage_bytes,
+        hip_rocprim::throw_on_error(doit_step(ptr,
+                                              storage_size,
                                               first,
                                               result,
                                               binary_op,
@@ -388,10 +396,6 @@ namespace __adjacent_difference
                                               stream,
                                               debug_sync),
                                     "adjacent_difference failed on 2nd step");
-
-        hip_rocprim::return_memory_buffer(policy, d_temp_storage);
-        hip_rocprim::throw_on_error(hipGetLastError(),
-                                    "adjacent_difference failed to return memory buffer");
 
         return result + num_items;
     }

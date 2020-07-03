@@ -73,7 +73,7 @@ namespace detail
 
 const error_category& hip_category(void)
 {
-    static const hip_rocprim::detail::hip_error_category result;
+    static const thrust::system::hip_rocprim::detail::hip_error_category result;
     return result;
 }
 
