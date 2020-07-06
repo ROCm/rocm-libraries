@@ -428,7 +428,7 @@ __host__ __device__
   void contiguous_storage<T,Alloc>
     ::swap_allocators(false_type, Alloc &other)
 {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
   // allocators must be equal when swapping containers with allocators that propagate on swap
   assert(!is_allocator_not_equal(other));
 #else
@@ -536,4 +536,3 @@ __host__ __device__
 } // end swap()
 
 } // end thrust
-
