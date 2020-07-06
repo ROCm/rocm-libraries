@@ -66,7 +66,7 @@ namespace unittest
         {
             static_assert_exception ex(filename, lineno);
 
-#ifdef __CUDA_ARCH__
+#if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
             *detail::device_exception = ex;
 #else
             throw ex;
@@ -74,4 +74,3 @@ namespace unittest
         }
     }
 }
-
