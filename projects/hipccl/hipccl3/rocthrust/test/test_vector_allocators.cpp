@@ -3,8 +3,6 @@
 
 #include "test_header.hpp"
 
-TESTS_DEFINE(VectorAllocatorTests, FullTestsParams);
-
 template<typename BaseAlloc, bool PropagateOnSwap>
 class stateful_allocator : public BaseAlloc
 {
@@ -244,10 +242,10 @@ void TestVectorAllocatorPropagateOnSwap()
 
 TEST(VectorAllocatorTests, TestVectorAllocatorPropagateOnSwapHost)
 {
-    TestVectorAllocatorPropagateOnSwap<host_vector>();
+    TestVectorAllocatorPropagateOnSwap<host_vector_nsp>();
 }
 
 TEST(VectorAllocatorTests, TestVectorAllocatorPropagateOnSwapDevice)
 {
-    TestVectorAllocatorPropagateOnSwap<device_vector>();
+    TestVectorAllocatorPropagateOnSwap<device_vector_nsp>();
 }
