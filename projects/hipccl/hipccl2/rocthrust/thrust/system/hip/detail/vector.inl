@@ -20,7 +20,7 @@
 #include <thrust/detail/config.h>
 #include <thrust/system/hip/vector.h>
 
-BEGIN_NS_THRUST
+THRUST_BEGIN_NS
 namespace hip_rocprim
 {
 
@@ -116,4 +116,4 @@ vector<T, Allocator>& vector<T, Allocator>::operator=(
 }
 
 } // end hip_rocprim
-END_NS_THRUST
+THRUST_END_NS

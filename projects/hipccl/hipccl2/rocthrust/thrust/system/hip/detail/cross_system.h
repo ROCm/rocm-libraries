@@ -30,7 +30,7 @@
 #include <thrust/system/cpp/detail/execution_policy.h>
 #include <thrust/system/hip/detail/execution_policy.h>
 
-BEGIN_NS_THRUST
+THRUST_BEGIN_NS
 namespace hip_rocprim
 {
 
@@ -82,4 +82,4 @@ select_system(const thrust::cpp::execution_policy<Sys1>& sys1,
 }
 
 } // namespace hip_rocprim
-END_NS_THRUST
+THRUST_END_NS

@@ -42,7 +42,7 @@
 // rocprim include
 #include <rocprim/rocprim.hpp>
 
-BEGIN_NS_THRUST
+THRUST_BEGIN_NS
 namespace hip_rocprim
 {
 namespace __scan_by_key
@@ -358,7 +358,7 @@ exclusive_scan_by_key(execution_policy<Derived>& policy,
 }
 
 } // namespace hip_rocprim
-END_NS_THRUST
+THRUST_END_NS
 
 #include <thrust/scan.h>
 

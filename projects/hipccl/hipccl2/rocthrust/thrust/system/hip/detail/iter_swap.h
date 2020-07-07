@@ -26,7 +26,7 @@
 #include <thrust/swap.h>
 
 
-BEGIN_NS_THRUST
+THRUST_BEGIN_NS
 namespace hip_rocprim
 {
 
@@ -46,5 +46,5 @@ iter_swap(thrust::hip::execution_policy<DerivedPolicy>&, Pointer1 a, Pointer2 b)
 } // end iter_swap()
 
 } // end hip_rocprim
-END_NS_THRUST
+THRUST_END_NS
 #endif

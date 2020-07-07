@@ -30,7 +30,7 @@
 #include <thrust/system/detail/bad_alloc.h>
 #include <thrust/system/hip/detail/util.h>
 
-BEGIN_NS_THRUST
+THRUST_BEGIN_NS
 namespace hip_rocprim
 {
 
@@ -94,4 +94,4 @@ free(execution_policy<DerivedPolicy>&, Pointer ptr)
 } // end free()
 
 } // namespace hip_rocprim
-END_NS_THRUST
+THRUST_END_NS

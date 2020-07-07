@@ -29,10 +29,6 @@
 
 #include <thrust/detail/config.h>
 
-#ifndef BEGIN_NS_THRUST
-#define BEGIN_NS_THRUST namespace thrust {
-#endif
-
 #define THRUST_UNUSED_VAR(expr) do { (void)(expr); } while (0)
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
@@ -84,8 +80,3 @@
 
 #define THRUST_ROCPRIM_NS_PREFIX namespace thrust {   namespace hip_rocprim {
 #define THRUST_ROCPRIM_NS_POSTFIX }  }
-
-
-#ifndef END_NS_THRUST
-#define END_NS_THRUST }
-#endif

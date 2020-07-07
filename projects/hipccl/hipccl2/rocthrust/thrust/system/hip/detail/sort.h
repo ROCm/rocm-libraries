@@ -39,7 +39,7 @@
 // rocPRIM includes
 #include <rocprim/rocprim.hpp>
 
-BEGIN_NS_THRUST
+THRUST_BEGIN_NS
 namespace hip_rocprim
 {
 namespace __merge_sort
@@ -535,5 +535,5 @@ stable_sort_by_key(execution_policy<Derived>& policy,
 }
 
 } // namespace hip_rocprim
-END_NS_THRUST
+THRUST_END_NS
 #endif
