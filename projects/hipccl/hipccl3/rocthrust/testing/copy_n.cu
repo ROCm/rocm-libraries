@@ -137,7 +137,7 @@ void TestCopyNMixedTypes(void)
     ASSERT_EQUAL(d[4], 4);
     ASSERT_EQUAL_QUIET(d_result, d.end());
 }
-DECLARE_VECTOR_UNITTEST(TestCopyNMixedTypes);
+DECLARE_INTEGRAL_VECTOR_UNITTEST(TestCopyNMixedTypes);
 
 
 void TestCopyNVectorBool(void)
@@ -218,7 +218,7 @@ void TestCopyNCountingIterator(void)
     ASSERT_EQUAL(vec[2], 3);
     ASSERT_EQUAL(vec[3], 4);
 }
-DECLARE_VECTOR_UNITTEST(TestCopyNCountingIterator);
+DECLARE_INTEGRAL_VECTOR_UNITTEST(TestCopyNCountingIterator);
 
 template <typename Vector>
 void TestCopyNZipIterator(void)

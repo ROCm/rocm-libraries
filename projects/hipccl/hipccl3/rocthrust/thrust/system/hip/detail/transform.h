@@ -29,13 +29,11 @@
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
 #include <thrust/system/hip/config.h>
-// This include is needed to circumvent issue with thrust::pointer
-// not having a value_type member when passing to a rocPRIM function
-#include <thrust/system/hip/pointer.h>
 
-#include <thrust/distance.h>
-#include <thrust/system/hip/detail/parallel_for.h>
 #include <thrust/system/hip/detail/util.h>
+#include <thrust/detail/type_traits/result_of_adaptable_function.h>
+#include <thrust/system/hip/detail/parallel_for.h>
+#include <thrust/distance.h>
 
 BEGIN_NS_THRUST
 namespace hip_rocprim

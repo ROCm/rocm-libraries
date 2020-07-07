@@ -28,11 +28,11 @@
 #pragma once
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
-#include <thrust/distance.h>
-#include <thrust/functional.h>
 #include <thrust/system/hip/config.h>
 #include <thrust/system/hip/detail/execution_policy.h>
 #include <thrust/system/hip/detail/transform.h>
+#include <thrust/functional.h>
+#include <thrust/distance.h>
 
 BEGIN_NS_THRUST
 namespace hip_rocprim

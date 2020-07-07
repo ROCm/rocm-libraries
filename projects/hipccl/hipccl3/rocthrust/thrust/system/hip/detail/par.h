@@ -1,6 +1,6 @@
 /******************************************************************************
- * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019, Advanced Micro Devices, Inc.  All rights reserved.
+ * Copyright (c) 2016-2018, NVIDIA CORPORATION.  All rights reserved.
+ * Modifications Copyright (c) 2019-2020, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -27,9 +27,10 @@
  ******************************************************************************/
 #pragma once
 
-#include <thrust/detail/allocator/allocator_traits.h>
+
 #include <thrust/detail/config.h>
-#include <thrust/detail/execute_with_allocator.h>
+#include <thrust/system/hip/detail/guarded_hip_runtime_api.h>
+#include <thrust/detail/allocator_aware_execution_policy.h>
 #include <thrust/system/hip/detail/execution_policy.h>
 
 BEGIN_NS_THRUST
@@ -42,7 +43,8 @@ namespace hip_rocprim
     }
 
     template <class Derived>
-    hipStream_t __host__ __device__ get_stream(execution_policy<Derived>&)
+    hipStream_t __host__ __device__
+    get_stream(execution_policy<Derived>&)
     {
         return default_stream();
     }
@@ -66,7 +68,9 @@ namespace hip_rocprim
         {
         }
 
-        __host__ __device__ Derived on(hipStream_t const& s) const
+        __host__ __device__ 
+        Derived 
+        on(hipStream_t const& s) const
         {
             Derived result = derived_cast(*this);
             result.stream  = s;
@@ -74,7 +78,8 @@ namespace hip_rocprim
         }
 
     private:
-        friend hipStream_t __host__ __device__ get_stream(execute_on_stream_base& exec)
+        friend hipStream_t __host__ __device__ 
+        get_stream(const execute_on_stream_base& exec)
         {
             return exec.stream;
         }
@@ -104,7 +109,8 @@ namespace hip_rocprim
             : base_t(stream) {};
     };
 
-    struct par_t : execution_policy<par_t>
+    struct par_t : execution_policy<par_t>,
+        thrust::detail::allocator_aware_execution_policy<execute_on_stream_base>
     {
         typedef execution_policy<par_t> base_t;
 
@@ -113,23 +119,10 @@ namespace hip_rocprim
         {
         }
 
-        template <class Allocator>
-        struct enable_alloc
-        {
-            typedef typename thrust::detail::enable_if<
-                thrust::detail::is_allocator<Allocator>::value,
-                thrust::detail::execute_with_allocator<Allocator, execute_on_stream_base>>::type
-                type;
-        };
+        typedef execute_on_stream stream_attachment_type;
 
-        template <class Allocator>
-        __host__ __device__ typename enable_alloc<Allocator>::type
-                 operator()(Allocator& alloc) const
-        {
-            return thrust::detail::execute_with_allocator<Allocator, execute_on_stream_base>(alloc);
-        }
-
-        execute_on_stream __device__ __host__ on(hipStream_t const& stream) const
+        stream_attachment_type __device__ __host__ 
+        on(hipStream_t const& stream) const
         {
             return execute_on_stream(stream);
         }
