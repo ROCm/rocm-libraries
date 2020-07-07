@@ -209,7 +209,7 @@ void TestTransformScanSimple(void)
     ASSERT_EQUAL(iter - input.begin(), input.size());
     ASSERT_EQUAL(input, result);
 }
-DECLARE_VECTOR_UNITTEST(TestTransformScanSimple);
+DECLARE_INTEGRAL_VECTOR_UNITTEST(TestTransformScanSimple);
 
 
 template <typename T>
@@ -263,7 +263,7 @@ void TestTransformScanCountingIterator(void)
     ASSERT_EQUAL(result[1], -3);
     ASSERT_EQUAL(result[2], -6);
 }
-DECLARE_VECTOR_UNITTEST(TestTransformScanCountingIterator);
+DECLARE_INTEGRAL_VECTOR_UNITTEST(TestTransformScanCountingIterator);
 
 template <typename T>
 struct TestTransformScanToDiscardIterator

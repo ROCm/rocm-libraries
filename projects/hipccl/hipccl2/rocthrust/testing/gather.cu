@@ -46,7 +46,7 @@ void TestGatherSimple(void)
     ASSERT_EQUAL(dst[3], 7);
     ASSERT_EQUAL(dst[4], 2);
 }
-DECLARE_VECTOR_UNITTEST(TestGatherSimple);
+DECLARE_INTEGRAL_VECTOR_UNITTEST(TestGatherSimple);
 
 
 template<typename InputIterator, typename RandomAccessIterator, typename OutputIterator>
@@ -174,7 +174,7 @@ void TestGatherIfSimple(void)
     ASSERT_EQUAL(dst[3], 7);
     ASSERT_EQUAL(dst[4], 0);
 }
-DECLARE_VECTOR_UNITTEST(TestGatherIfSimple);
+DECLARE_INTEGRAL_VECTOR_UNITTEST(TestGatherIfSimple);
 
 template <typename T>
 struct is_even_gather_if
@@ -363,6 +363,6 @@ void TestGatherCountingIterator(void)
 
     ASSERT_EQUAL(output, map);
 }
-DECLARE_VECTOR_UNITTEST(TestGatherCountingIterator);
+DECLARE_INTEGRAL_VECTOR_UNITTEST(TestGatherCountingIterator);
 
 __THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_END

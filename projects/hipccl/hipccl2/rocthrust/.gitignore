@@ -56,3 +56,5 @@ CTestTestfile.cmake
 build
 
 # End of https://www.gitignore.io/api/c++,cmake
+
+.vscode

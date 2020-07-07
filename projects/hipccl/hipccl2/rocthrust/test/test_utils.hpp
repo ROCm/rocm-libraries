@@ -19,6 +19,8 @@
 
 #include <thrust/execution_policy.h>
 #include <thrust/host_vector.h>
+#include <thrust/mr/allocator.h>
+
 #include "test_seed.hpp"
 
 #include <algorithm>
