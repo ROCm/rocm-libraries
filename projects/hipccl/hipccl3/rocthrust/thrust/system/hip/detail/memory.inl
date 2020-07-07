@@ -21,7 +21,7 @@
 #include <thrust/system/hip/detail/malloc_and_free.h>
 #include <limits>
 
-BEGIN_NS_THRUST
+THRUST_BEGIN_NS
 namespace hip_rocprim
 {
 

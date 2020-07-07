@@ -32,7 +32,7 @@
 
 #include <thrust/system/hip/detail/mismatch.h>
 
-BEGIN_NS_THRUST
+THRUST_BEGIN_NS
 namespace hip_rocprim
 {
 
@@ -59,5 +59,5 @@ equal(execution_policy<Derived>& policy,
 }
 
 } // namespace hip_rocprim
-END_NS_THRUST
+THRUST_END_NS
 #endif

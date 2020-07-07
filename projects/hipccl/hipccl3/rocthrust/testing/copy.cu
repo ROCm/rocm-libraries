@@ -202,7 +202,7 @@ DECLARE_UNITTEST(TestCopyVectorBool);
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
 // Workaround: std::back_insert_iterator has void value_type.
-BEGIN_NS_THRUST
+THRUST_BEGIN_NS
 template <> struct access_traits<void>
 {
   typedef const int& const_type;
@@ -210,7 +210,7 @@ template <> struct access_traits<void>
 
   typedef const int& parameter_type;
 };
-END_NS_THRUST
+THRUST_END_NS
 
 #endif
 

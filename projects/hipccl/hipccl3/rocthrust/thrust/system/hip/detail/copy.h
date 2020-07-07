@@ -31,7 +31,7 @@
 #include <thrust/system/hip/detail/cross_system.h>
 #include <thrust/system/hip/detail/execution_policy.h>
 
-BEGIN_NS_THRUST
+THRUST_BEGIN_NS
 
 template <typename DerivedPolicy, typename InputIt, typename OutputIt>
 __host__ __device__
@@ -80,13 +80,13 @@ copy_n(cross_system<System1, System2> systems,
        OutputIterator                 result);
 
 } // namespace hip_rocprim
-END_NS_THRUST
+THRUST_END_NS
 
 #include <thrust/system/hip/detail/internal/copy_cross_system.h>
 #include <thrust/system/hip/detail/internal/copy_device_to_device.h>
 #include <thrust/system/hip/detail/par_to_seq.h>
 
-BEGIN_NS_THRUST
+THRUST_BEGIN_NS
 namespace hip_rocprim
 {
 
@@ -164,7 +164,7 @@ copy_n(cross_system<System1, System2> systems,
 } // end copy_n()
 
 } // namespace hip_rocprim
-END_NS_THRUST
+THRUST_END_NS
 
 #include <thrust/detail/temporary_array.h>
 #include <thrust/memory.h>

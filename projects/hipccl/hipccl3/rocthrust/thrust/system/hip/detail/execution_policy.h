@@ -33,7 +33,7 @@
 #include <thrust/iterator/detail/any_system_tag.h>
 #include <thrust/system/hip/config.h>
 
-BEGIN_NS_THRUST
+THRUST_BEGIN_NS
 namespace hip_rocprim
 {
     struct tag;
@@ -75,4 +75,4 @@ namespace hip
     using thrust::hip_rocprim::tag;
 } // namespace hip
 
-END_NS_THRUST
+THRUST_END_NS
