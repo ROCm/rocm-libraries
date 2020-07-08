@@ -199,7 +199,13 @@ hipError_t partition_impl(void * temporary_storage,
     static_cast<void>(hipGetDevice(&deviceId));
     static_cast<void>(hipGetDeviceProperties(&prop, deviceId));
 
-    if (prop.gcnArch == 908)
+#if HIP_VERSION >= 307
+    int asicRevision = prop.asicRevision;
+#else
+    int asicRevision = 0;
+#endif
+
+    if (prop.gcnArch == 908 && asicRevision < 2)
     {
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(init_offset_scan_state_kernel<offset_scan_state_with_sleep_type>),
@@ -220,7 +226,7 @@ hipError_t partition_impl(void * temporary_storage,
 
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
     grid_size = number_of_blocks;
-    if (prop.gcnArch == 908)
+    if (prop.gcnArch == 908 && asicRevision < 2)
     {
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(partition_kernel<
