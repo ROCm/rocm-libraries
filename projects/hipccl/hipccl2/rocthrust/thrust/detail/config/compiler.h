@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2020 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -33,7 +33,10 @@
 #endif // __CUDACC__
 
 #if defined(__HCC__) || defined(__HIP__)
-#define __HIP_ENABLE_DEVICE_MALLOC__ 1 // Macro enables Device Malloc
+// Macro enables Device Malloc
+#ifndef __HIP_ENABLE_DEVICE_MALLOC__
+#define __HIP_ENABLE_DEVICE_MALLOC__ 1 
+#endif
 #include <hip/hip_runtime.h>
 #endif
 
