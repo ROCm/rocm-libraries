@@ -27,7 +27,7 @@
  ******************************************************************************/
 #pragma once
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #include <thrust/system/hip/config.h>
 
 #include <thrust/detail/cstdint.h>
@@ -443,4 +443,4 @@ adjacent_difference(execution_policy<Derived>& policy,
 END_NS_THRUST
 
 //
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP

@@ -199,7 +199,7 @@ namespace __copy
   #endif
     }
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
 // non-trivial copy
 template <class D, class H, class InputIt, class Size, class OutputIt>

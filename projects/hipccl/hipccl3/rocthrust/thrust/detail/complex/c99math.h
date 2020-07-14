@@ -1,7 +1,7 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
  *  Copyright 2013 Filipe RNC Maia
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved. 
+ *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -66,7 +66,7 @@ inline __host__ __device__ double infinity<double>()
   return res;
 }
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #ifdef __HIP_DEVICE_COMPILE__
   using ::cos;
   using ::log;
@@ -82,7 +82,7 @@ inline __host__ __device__ double infinity<double>()
   using std::sqrt;
   using std::atan2;
 #endif
-#endif // HCC compiler
+#endif // HIP compiler
 
 #if defined _MSC_VER
 __host__ __device__ inline int isinf(float x){

@@ -90,7 +90,7 @@ BEGIN_NS_THRUST
 namespace hip_rocprim
 {
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 // D->D copy requires HCC compiler
 
 __thrust_exec_check_disable__ template <class System, class InputIterator, class OutputIterator>
