@@ -199,7 +199,7 @@ void TestCopyVectorBool(void)
 DECLARE_UNITTEST(TestCopyVectorBool);
 
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
 // Workaround: std::back_insert_iterator has void value_type.
 BEGIN_NS_THRUST

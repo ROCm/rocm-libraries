@@ -21,7 +21,7 @@
 
 #include "test_header.hpp"
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
 TESTS_DEFINE(AdjacentDifferenceTests, FullTestsParams);
 TESTS_DEFINE(AdjacentDifferenceVariableTests, NumericalTestsParams);
@@ -232,4 +232,4 @@ TEST(AdjacentDifferenceTests, TestAdjacentDifferenceDispatchImplicit)
     ASSERT_EQ(13, d_input.front());
 }
 
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP

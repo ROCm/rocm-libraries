@@ -27,7 +27,7 @@
  ******************************************************************************/
 #pragma once
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #include <thrust/detail/config.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/iterator/is_output_iterator.h>
@@ -294,4 +294,4 @@ END_NS_THRUST
 
 #include <thrust/scan.h>
 
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP

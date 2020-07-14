@@ -3,7 +3,7 @@
 #include <cassert>
 #include <thrust/detail/config.h>
 
-#if (THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC)
+#if (THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP)
 
 #define HIP_CHECK(condition)         \
   {                                  \

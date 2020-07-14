@@ -52,7 +52,7 @@ TEST(HipThrustMemory, TypeMalloc)
     thrust::free(dev_tag, ptr);
 }
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 TEST(HipThrustMemory, MallocUseMemory)
 {
     const size_t              size = 1024;
@@ -67,7 +67,7 @@ TEST(HipThrustMemory, MallocUseMemory)
     // Free
     thrust::free(dev_tag, ptr);
 }
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
 // Define a new system class, as the my_system one is already used with a thrust::sort template definition
 // that calls back into sort.cu
