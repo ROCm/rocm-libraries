@@ -27,7 +27,7 @@
 
 #define __thrust_forceinline__ __forceinline__
 
-#elif THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+#elif THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
 #define __thrust_forceinline__ __forceinline__
 
