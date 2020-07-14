@@ -52,7 +52,7 @@
 #define THRUST_DEVICE_COMPILER_GCC     2
 #define THRUST_DEVICE_COMPILER_NVCC    3
 #define THRUST_DEVICE_COMPILER_CLANG   4
-#define THRUST_DEVICE_COMPILER_HCC     5
+#define THRUST_DEVICE_COMPILER_HIP     5
 
 // figure out which host compiler we're using
 // XXX we should move the definition of THRUST_DEPRECATED out of this logic
@@ -84,7 +84,7 @@
 #if defined(__CUDA__)
 #define THRUST_DEVICE_COMPILER THRUST_DEVICE_COMPILER_NVCC
 #elif defined(__HCC__) || defined(__HIP__)
-#define THRUST_DEVICE_COMPILER THRUST_DEVICE_COMPILER_HCC
+#define THRUST_DEVICE_COMPILER THRUST_DEVICE_COMPILER_HIP
 #else
 #define THRUST_DEVICE_COMPILER THRUST_DEVICE_COMPILER_CLANG
 #endif

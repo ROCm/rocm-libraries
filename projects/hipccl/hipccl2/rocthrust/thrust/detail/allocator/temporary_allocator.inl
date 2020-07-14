@@ -25,7 +25,7 @@
 #include <thrust/system/cuda/detail/terminate.h>
 #endif
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #include <thrust/system/hip/detail/terminate.h>
 #endif
 
