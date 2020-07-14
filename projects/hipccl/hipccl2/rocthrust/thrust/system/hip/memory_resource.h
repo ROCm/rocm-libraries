@@ -80,13 +80,18 @@ namespace detail
         return ::hipMallocManaged(ptr, bytes, hipMemAttachGlobal);
     }
 
+    inline hipError_t hipHostMalloc(void ** ptr, std::size_t bytes)
+    {
+        return ::hipHostMalloc(ptr, bytes, hipHostMallocMapped);
+    }
+
     typedef detail::hip_memory_resource<hipMalloc, hipFree,
         thrust::hip_rocprim::pointer<void> >
         device_memory_resource;
     typedef detail::hip_memory_resource<detail::hipMallocManaged, hipFree,
         thrust::hip_rocprim::pointer<void> >
         managed_memory_resource;
-    typedef detail::hip_memory_resource<hipMallocHost, hipHostFree,
+    typedef detail::hip_memory_resource<hipHostMalloc, hipHostFree,
         thrust::host_memory_resource::pointer>
         pinned_memory_resource;
 
