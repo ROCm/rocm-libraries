@@ -171,5 +171,4 @@ discard_iterator<> make_discard_iterator(discard_iterator<>::difference_type i =
 
 } // end namespace thrust
 
-THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_END
-
+__THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_END

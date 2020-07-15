@@ -37,7 +37,7 @@ build:rocm:
   script:
     - mkdir build
     - cd build
-    - CXX=hipcc cmake -DBUILD_TEST=ON -DCMAKE_CXX_FLAGS="-w" ../.
+    - CXX=hipcc cmake -DBUILD_TEST=ON ../.
     - make -j $(nproc)
     - make package
   artifacts:
