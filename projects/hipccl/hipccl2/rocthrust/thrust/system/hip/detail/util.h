@@ -100,7 +100,7 @@ trivial_copy_to_device(Type* dst, Type const* src, size_t count, hipStream_t str
     #endif
     return status;
 }
- 
+
 template <class Policy, class Type>
 __host__ __device__ hipError_t
 trivial_copy_device_to_device(Policy& policy, Type* dst, Type const* src, size_t count)
@@ -160,6 +160,11 @@ struct transform_input_iterator_t
         , op(op)
     {
     }
+
+#if THRUST_CPP_DIALECT >= 2011
+    transform_input_iterator_t(const self_t &) = default;
+#endif
+
 
     /// Postfix increment
     THRUST_HIP_FUNCTION self_t operator++(int)
