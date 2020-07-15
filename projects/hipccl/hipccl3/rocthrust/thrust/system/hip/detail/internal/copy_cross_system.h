@@ -251,11 +251,11 @@ cross_system_copy_n(thrust::hip_rocprim::execution_policy<D>& device_s,
   struct workaround
   {
       __host__
-      static OutputIt par(thrust::hip_rocprim::execution_policy<D>& device_s,
-                          thrust::cpp::execution_policy<H>&         host_s,
-                          InputIt                                   first,
-                          Size                                      num_items,
-                          OutputIt                                  result)
+      static void par(thrust::hip_rocprim::execution_policy<D>& device_s,
+                      thrust::cpp::execution_policy<H>&         host_s,
+                      InputIt                                   first,
+                      Size                                      num_items,
+                      OutputIt&                                 result)
       {
 #if __HCC__ && __HIP_DEVICE_COMPILE__
           THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
@@ -266,30 +266,31 @@ cross_system_copy_n(thrust::hip_rocprim::execution_policy<D>& device_s,
           THRUST_UNUSED_VAR(first);
           THRUST_UNUSED_VAR(num_items);
 #else
-          return cross_system_copy_n_dh_nt(device_s, host_s, first, num_items, result);
+          result = cross_system_copy_n_dh_nt(device_s, host_s, first, num_items, result);
 #endif
       }
 
       __device__
-      static OutputIt seq(thrust::hip_rocprim::execution_policy<D>& device_s,
-                          thrust::cpp::execution_policy<H>&         host_s,
-                          InputIt                                   first,
-                          Size                                      num_items,
-                          OutputIt                                  result)
+      static void seq(thrust::hip_rocprim::execution_policy<D>& device_s,
+                      thrust::cpp::execution_policy<H>&         host_s,
+                      InputIt                                   first,
+                      Size                                      num_items,
+                      OutputIt&                                 result)
       {
         THRUST_UNUSED_VAR(device_s);
         THRUST_UNUSED_VAR(host_s);
         THRUST_UNUSED_VAR(first);
         THRUST_UNUSED_VAR(num_items);
-
-        return result;
+        THRUST_UNUSED_VAR(result);
       }
   };
 
 #if __THRUST_HAS_HIPRT__
-  return workaround::par(device_s, host_s, first, num_items, result);
+  workaround::par(device_s, host_s, first, num_items, result);
+  return result;
 #else
-  return workaround::seq(device_s, host_s, first, num_items, result);
+  workaround::seq(device_s, host_s, first, num_items, result);
+  return result;
 #endif
 }
 #endif
