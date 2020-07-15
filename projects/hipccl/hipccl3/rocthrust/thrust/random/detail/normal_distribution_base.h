@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved. 
+ *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -56,7 +56,10 @@ template<typename RealType>
       const uint_type urng_range = UniformRandomNumberGenerator::max - UniformRandomNumberGenerator::min;
 
       // Constants for conversion
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wimplicit-int-float-conversion"
       const RealType S1 = static_cast<RealType>(1) / urng_range;
+#pragma GCC diagnostic pop
       const RealType S2 = S1 / 2;
 
       RealType S3 = static_cast<RealType>(-1.4142135623730950488016887242097); // -sqrt(2)
