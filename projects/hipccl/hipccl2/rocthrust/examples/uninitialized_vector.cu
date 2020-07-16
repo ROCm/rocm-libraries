@@ -46,7 +46,7 @@ template<typename T>
   // note that construct is annotated as
   // a __host__ __device__ function
   __host__ __device__
-  void construct(T *p)
+  void construct(T *)
   {
     // no-op
   }
@@ -76,4 +76,3 @@ int main()
 
   return 0;
 }
-

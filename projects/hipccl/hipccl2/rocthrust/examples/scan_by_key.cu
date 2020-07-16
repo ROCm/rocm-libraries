@@ -6,11 +6,11 @@
 // BinaryPredicate for the head flag segment representation
 // equivalent to thrust::not2(thrust::project2nd<int,int>()));
 template <typename HeadFlagType>
-struct head_flag_predicate 
+struct head_flag_predicate
     : public thrust::binary_function<HeadFlagType,HeadFlagType,bool>
 {
     __host__ __device__
-    bool operator()(HeadFlagType left, HeadFlagType right) const
+    bool operator()(HeadFlagType, HeadFlagType right) const
     {
         return !right;
     }
@@ -36,7 +36,7 @@ int main(void)
     thrust::device_vector<int> d_keys  (keys,   keys   + N);
     thrust::device_vector<int> d_flags (flags,  flags  + N);
     thrust::device_vector<int> d_values(values, values + N);
-    
+
     // allocate storage for output
     thrust::device_vector<int> d_output(N);
 
@@ -45,43 +45,43 @@ int main(void)
       (d_keys.begin(), d_keys.end(),
        d_values.begin(),
        d_output.begin());
-   
+
     std::cout << "Inclusive Segmented Scan w/ Key Sequence\n";
     std::cout << " keys          : ";  print(d_keys);
     std::cout << " input values  : ";  print(d_values);
     std::cout << " output values : ";  print(d_output);
-    
+
     // inclusive scan using head flags
     thrust::inclusive_scan_by_key
       (d_flags.begin(), d_flags.end(),
-       d_values.begin(), 
+       d_values.begin(),
        d_output.begin(),
        head_flag_predicate<int>());
-    
+
     std::cout << "\nInclusive Segmented Scan w/ Head Flag Sequence\n";
     std::cout << " head flags    : ";  print(d_flags);
     std::cout << " input values  : ";  print(d_values);
     std::cout << " output values : ";  print(d_output);
-    
+
     // exclusive scan using keys
     thrust::exclusive_scan_by_key
       (d_keys.begin(), d_keys.end(),
        d_values.begin(),
        d_output.begin());
-   
+
     std::cout << "\nExclusive Segmented Scan w/ Key Sequence\n";
     std::cout << " keys          : ";  print(d_keys);
     std::cout << " input values  : ";  print(d_values);
     std::cout << " output values : ";  print(d_output);
-    
+
     // exclusive scan using head flags
     thrust::exclusive_scan_by_key
       (d_flags.begin(), d_flags.end(),
-       d_values.begin(), 
+       d_values.begin(),
        d_output.begin(),
        0,
        head_flag_predicate<int>());
-    
+
     std::cout << "\nExclusive Segmented Scan w/ Head Flag Sequence\n";
     std::cout << " head flags    : ";  print(d_flags);
     std::cout << " input values  : ";  print(d_values);
@@ -90,4 +90,3 @@ int main(void)
 
     return 0;
 }
-
