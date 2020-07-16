@@ -86,14 +86,14 @@ void TestFillMixedTypes(void)
 {
     Vector v(4);
 
-    thrust::fill(v.begin(), v.end(), (long) 10);
+    thrust::fill(v.begin(), v.end(), bool(true));
 
-    ASSERT_EQUAL(v[0], 10);
-    ASSERT_EQUAL(v[1], 10);
-    ASSERT_EQUAL(v[2], 10);
-    ASSERT_EQUAL(v[3], 10);
+    ASSERT_EQUAL(v[0], 1);
+    ASSERT_EQUAL(v[1], 1);
+    ASSERT_EQUAL(v[2], 1);
+    ASSERT_EQUAL(v[3], 1);
 
-    thrust::fill(v.begin(), v.end(), (float) 20);
+    thrust::fill(v.begin(), v.end(), char(20));
 
     ASSERT_EQUAL(v[0], 20);
     ASSERT_EQUAL(v[1], 20);
@@ -208,16 +208,16 @@ void TestFillNMixedTypes(void)
 {
     Vector v(4);
 
-    typename Vector::iterator iter = thrust::fill_n(v.begin(), v.size(), (long) 10);
-
-    ASSERT_EQUAL(v[0], 10);
-    ASSERT_EQUAL(v[1], 10);
-    ASSERT_EQUAL(v[2], 10);
-    ASSERT_EQUAL(v[3], 10);
+    typename Vector::iterator iter = thrust::fill_n(v.begin(), v.size(), bool(true));
+    
+    ASSERT_EQUAL(v[0], 1);
+    ASSERT_EQUAL(v[1], 1);
+    ASSERT_EQUAL(v[2], 1);
+    ASSERT_EQUAL(v[3], 1);
     ASSERT_EQUAL_QUIET(v.end(), iter);
-
-    iter = thrust::fill_n(v.begin(), v.size(), (float) 20);
-
+    
+    iter = thrust::fill_n(v.begin(), v.size(), char(20));
+    
     ASSERT_EQUAL(v[0], 20);
     ASSERT_EQUAL(v[1], 20);
     ASSERT_EQUAL(v[2], 20);
@@ -350,6 +350,10 @@ struct TypeWithNonTrivialAssigment
 
   __host__ __device__
   TypeWithNonTrivialAssigment() : x(0), y(0), z(0) {}
+
+#if THRUST_CPP_DIALECT >= 2011
+  TypeWithNonTrivialAssigment(const TypeWithNonTrivialAssigment &) = default;
+#endif
 
   __host__ __device__
   TypeWithNonTrivialAssigment& operator=(const TypeWithNonTrivialAssigment& t)
