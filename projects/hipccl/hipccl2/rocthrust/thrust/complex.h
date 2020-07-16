@@ -387,7 +387,7 @@ private:
   /*! \endcond
    */
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC || THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC || THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
   typedef typename detail::conditional<
     detail::is_same<T, float>::value, float2,
     typename detail::conditional<

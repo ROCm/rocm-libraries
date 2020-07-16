@@ -29,7 +29,7 @@ endif()
 
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker search and installed rpath")
 
-# Verify that hcc compiler is used on ROCM platform
+# Verify that hcc or hipcc compiler is used on ROCM platform
 include(cmake/VerifyCompiler.cmake)
 
 # Build options

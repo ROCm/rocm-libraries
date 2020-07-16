@@ -30,7 +30,7 @@
 #include <limits>
 #include <cmath>
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
   #include <thrust/random/detail/erfcinv.h>
 #endif
 
@@ -142,7 +142,7 @@ template<typename RealType>
 template<typename RealType>
   struct normal_distribution_base
 {
-#if (THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC) || (THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC)
+#if (THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC) || (THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP)
   typedef normal_distribution_nvcc<RealType> type;
 #else
   typedef normal_distribution_portable<RealType> type;

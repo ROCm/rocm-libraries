@@ -27,7 +27,7 @@
  ******************************************************************************/
 #pragma once
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #include <thrust/iterator/permutation_iterator.h>
 #include <thrust/system/hip/detail/transform.h>
 
