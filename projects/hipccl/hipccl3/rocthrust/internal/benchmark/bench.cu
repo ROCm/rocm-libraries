@@ -29,7 +29,7 @@
   #include "tbb_algos.h"
 #endif
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HCC // HCC compiler
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP // Hip clang compiler
 #ifdef __HIP_DEVICE_COMPILE__
   using ::abs;
   using ::sqrt;
@@ -37,7 +37,7 @@
   using std::abs;
   using std::sqrt;
 #endif
-#else // Not HCC device compiler
+#else // Not Hip clang device compiler
   using std::abs;
   using std::sqrt;
 #endif
