@@ -49,7 +49,10 @@ void THRUST_HIP_DEVICE_FUNCTION terminate()
 
 void THRUST_HIP_FUNCTION terminate_with_message(const char* message)
 {
-    printf("%s\n", message);
+    THRUST_HIP_PRINTF("%s\n", message);
+#ifndef THRUST_HIP_PRINTF_ENABLED
+    THRUST_UNUSED_VAR(message);
+#endif
     thrust::hip_rocprim::terminate();
 }
 
