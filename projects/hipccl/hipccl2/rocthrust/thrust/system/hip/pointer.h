@@ -22,7 +22,6 @@
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/pointer.h>
 
-
 namespace thrust
 {
 namespace hip_rocprim
@@ -293,9 +292,6 @@ __host__ __device__ void swap(reference<T> x, reference<T> y);
 
 } // end namespace hip_rocprim
 
-
-
-
 namespace system {
 
 /*! \namespace thrust::hip
@@ -315,4 +311,4 @@ using thrust::hip_rocprim::reference;
 
 } // end thrust
 
-#include <thrust/system/hip/detail/memory.inl>
+#include <thrust/system/hip/detail/pointer.inl>
