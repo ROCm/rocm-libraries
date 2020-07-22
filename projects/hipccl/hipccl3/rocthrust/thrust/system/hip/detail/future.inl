@@ -24,17 +24,17 @@
 #include <thrust/allocate_unique.h>
 #include <thrust/detail/static_assert.h>
 #include <thrust/detail/execute_with_dependencies.h>
-#include <thrust/system/cuda/memory.h>
-#include <thrust/system/cuda/future.h>
-#include <thrust/system/cuda/detail/util.h>
-#include <thrust/system/cuda/detail/get_value.h>
+#include <thrust/system/hip/memory.h>
+#include <thrust/system/hip/future.h>
+#include <thrust/system/hip/detail/util.h>
+#include <thrust/system/hip/detail/get_value.h>
 
 #include <type_traits>
 #include <memory>
 
 THRUST_BEGIN_NS
 
-namespace system { namespace cuda { namespace detail
+namespace system { namespace hip { namespace detail
 {
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -51,7 +51,7 @@ struct event_deleter final
   void operator()(CUevent_st* e) const
   {
     if (nullptr != e)
-      thrust::cuda_cub::throw_on_error(cudaEventDestroy(e));
+      thrust::hip_rocprim::throw_on_error(hipEventDestroy(e));
   }
 };
 
@@ -72,8 +72,8 @@ public:
     : handle_(nullptr, event_deleter())
   {
     native_handle_type e;
-    thrust::cuda_cub::throw_on_error(
-      cudaEventCreateWithFlags(&e, cudaEventDisableTiming)
+    thrust::hip_rocprim::throw_on_error(
+      hipEventCreateWithFlags(&e, hipEventDisableTiming)
     );
     handle_.reset(e);
   }
@@ -100,23 +100,23 @@ public:
   bool valid() const THRUST_RETURNS(bool(handle_));
 
   __host__
-  bool ready() const 
+  bool ready() const
   {
-    cudaError_t const err = cudaEventQuery(handle_.get());
+    hipError_t const err = hipEventQuery(handle_.get());
 
-    if (cudaErrorNotReady == err)
+    if (hipErrorNotReady == err)
       return false;
 
     // Throw on any other error.
-    thrust::cuda_cub::throw_on_error(err);
+    thrust::hip_rocprim::throw_on_error(err);
 
     return true;
   }
 
   __host__
-  void wait() const 
+  void wait() const
   {
-    thrust::cuda_cub::throw_on_error(cudaEventSynchronize(handle_.get()));
+    thrust::hip_rocprim::throw_on_error(hipEventSynchronize(handle_.get()));
   }
 
   __host__
@@ -140,7 +140,7 @@ struct stream_deleter final
   void operator()(CUstream_st* s) const
   {
     if (nullptr != s)
-      thrust::cuda_cub::throw_on_error(cudaStreamDestroy(s));
+      thrust::hip_rocprim::throw_on_error(hipStreamDestroy(s));
   }
 };
 
@@ -163,7 +163,7 @@ public:
   {
     if (cond_ && nullptr != s)
     {
-      thrust::cuda_cub::throw_on_error(cudaStreamDestroy(s));
+      thrust::hip_rocprim::throw_on_error(hipStreamDestroy(s));
     }
   }
 };
@@ -185,8 +185,8 @@ public:
     : handle_(nullptr, stream_conditional_deleter())
   {
     native_handle_type s;
-    thrust::cuda_cub::throw_on_error(
-      cudaStreamCreateWithFlags(&s, cudaStreamNonBlocking)
+    thrust::hip_rocprim::throw_on_error(
+      hipStreamCreateWithFlags(&s, hipStreamNonBlocking)
     );
     handle_.reset(s);
   }
@@ -218,39 +218,39 @@ public:
   native_handle_type native_handle() THRUST_RETURNS(handle_.get());
 
   bool valid() const THRUST_RETURNS(bool(handle_));
- 
-  __host__
-  bool ready() const 
-  {
-    cudaError_t const err = cudaStreamQuery(handle_.get());
 
-    if (cudaErrorNotReady == err)
+  __host__
+  bool ready() const
+  {
+    hipError_t const err = hipStreamQuery(handle_.get());
+
+    if (hipErrorNotReady == err)
       return false;
 
     // Throw on any other error.
-    thrust::cuda_cub::throw_on_error(err);
+    thrust::hip_rocprim::throw_on_error(err);
 
     return true;
   }
 
   __host__
-  void wait() const 
+  void wait() const
   {
-    thrust::cuda_cub::throw_on_error(
-      cudaStreamSynchronize(handle_.get())
+    thrust::hip_rocprim::throw_on_error(
+      hipStreamSynchronize(handle_.get())
     );
   }
 
   __host__
-  void depend_on(unique_event& e) 
+  void depend_on(unique_event& e)
   {
-    thrust::cuda_cub::throw_on_error(
-      cudaStreamWaitEvent(handle_.get(), e.get(), 0)
-    ); 
+    thrust::hip_rocprim::throw_on_error(
+      hipStreamWaitEvent(handle_.get(), e.get(), 0)
+    );
   }
 
   __host__
-  void depend_on(unique_stream& s) 
+  void depend_on(unique_stream& s)
   {
     if (s != *this)
     {
@@ -261,9 +261,9 @@ public:
   }
 
   __host__
-  void record(unique_event& e) 
+  void record(unique_event& e)
   {
-    thrust::cuda_cub::throw_on_error(cudaEventRecord(e.get(), handle_.get()));
+    thrust::hip_rocprim::throw_on_error(hipEventRecord(e.get(), handle_.get()));
   }
 
   __host__
@@ -313,24 +313,24 @@ struct acquired_stream final
   // If `acquired_from` is empty, then the stream is newly created.
 };
 
-// Precondition: `device` is the current CUDA device.
+// Precondition: `device` is the current HIP device.
 template <typename X, typename Y, typename Deleter>
 __host__
 optional<unique_stream>
 try_acquire_stream(int device, std::unique_ptr<Y, Deleter>&) noexcept;
 
-// Precondition: `device` is the current CUDA device.
+// Precondition: `device` is the current HIP device.
 inline __host__
 optional<unique_stream>
 try_acquire_stream(int, unique_stream& stream) noexcept;
 
-// Precondition: `device` is the current CUDA device.
+// Precondition: `device` is the current HIP device.
 template <typename T>
 __host__
 optional<unique_stream>
 try_acquire_stream(int device, ready_future<T>&) noexcept;
 
-// Precondition: `device` is the current CUDA device.
+// Precondition: `device` is the current HIP device.
 template <typename X, typename XPointer>
 __host__
 optional<unique_stream>
@@ -371,7 +371,7 @@ public:
   template <typename X, typename XPointer>
   friend __host__
   optional<unique_stream>
-  thrust::system::cuda::detail::try_acquire_stream(
+  thrust::system::hip::detail::try_acquire_stream(
     int device, unique_eager_future<X, XPointer>& parent
     ) noexcept;
 };
@@ -381,10 +381,10 @@ struct async_value : async_value_base
 {
   using pointer
     = typename thrust::detail::pointer_traits<Pointer>::template
-      rebind<T>::other; 
+      rebind<T>::other;
   using const_pointer
     = typename thrust::detail::pointer_traits<Pointer>::template
-      rebind<T const>::other; 
+      rebind<T const>::other;
 
 protected:
   Pointer content_;
@@ -410,10 +410,10 @@ struct async_value<void, Pointer> : async_value_base
 {
   using pointer
     = typename thrust::detail::pointer_traits<Pointer>::template
-      rebind<void>::other; 
+      rebind<void>::other;
   using const_pointer
     = typename thrust::detail::pointer_traits<Pointer>::template
-      rebind<void const>::other; 
+      rebind<void const>::other;
 
   // Constructs an `async_value<void>` which uses `stream`.
   __host__
@@ -458,7 +458,7 @@ public:
     : async_value<T, Pointer>(std::move(stream))
     , keep_alives_(std::move(keep_alives))
   {
-    this->content_ = THRUST_FWD(cc)(std::get<0>(keep_alives_)); 
+    this->content_ = THRUST_FWD(cc)(std::get<0>(keep_alives_));
   }
 };
 
@@ -528,7 +528,7 @@ public:
   >
   friend __host__
   unique_eager_future_promise_pair<X, XPointer>
-  thrust::system::cuda::detail::depend_on(
+  thrust::system::hip::detail::depend_on(
     ComputeContent&& cc, std::tuple<Dependencies...>&& deps
   );
 };
@@ -564,7 +564,7 @@ public:
   >
   friend __host__
   unique_eager_future_promise_pair<X, XPointer>
-  thrust::system::cuda::detail::depend_on(
+  thrust::system::hip::detail::depend_on(
     ComputeContent&& cc, std::tuple<Dependencies...>&& deps
   );
 };
@@ -641,7 +641,7 @@ public:
 
   // Precondition: `true == valid()`.
   __host__
-  detail::unique_stream& stream() 
+  detail::unique_stream& stream()
   {
     assert(true == valid());
     return async_value_->stream();
@@ -657,7 +657,7 @@ public:
   }
 
   __host__
-  void wait() 
+  void wait()
   {
     stream().wait();
   }
@@ -668,11 +668,11 @@ public:
     stream().wait();
     return std::move(*async_value_->data());
   }
-  
+
   template <typename X, typename XPointer>
   __host__
   friend optional<detail::unique_stream>
-  thrust::system::cuda::detail::try_acquire_stream(
+  thrust::system::hip::detail::try_acquire_stream(
     int device, unique_eager_future<X, XPointer>& parent
     ) noexcept;
 
@@ -682,7 +682,7 @@ public:
   >
   friend __host__
   detail::unique_eager_future_promise_pair<X, XPointer>
-  thrust::system::cuda::detail::depend_on(
+  thrust::system::hip::detail::depend_on(
     ComputeContent&& cc, std::tuple<Dependencies...>&& deps
   );
 };
@@ -721,14 +721,14 @@ public:
 
   // Precondition: `true == valid()`.
   __host__
-  detail::unique_stream& stream() 
+  detail::unique_stream& stream()
   {
     assert(true == valid());
     return async_value_->stream();
   }
 
   __host__
-  void wait() 
+  void wait()
   {
     stream().wait();
   }
@@ -737,11 +737,11 @@ public:
   {
     stream().wait();
   }
-  
+
   template <typename X, typename XPointer>
   __host__
   friend optional<detail::unique_stream>
-  thrust::system::cuda::detail::try_acquire_stream(
+  thrust::system::hip::detail::try_acquire_stream(
     int device, unique_eager_future<X, XPointer>& parent
     ) noexcept;
 
@@ -751,7 +751,7 @@ public:
   >
   friend __host__
   detail::unique_eager_future_promise_pair<X, XPointer>
-  thrust::system::cuda::detail::depend_on(
+  thrust::system::hip::detail::depend_on(
     ComputeContent&& cc, std::tuple<Dependencies...>&& deps
   );
 };
@@ -891,8 +891,8 @@ void create_dependencies_impl(
   // stream from it.
   if (!as.acquired_from || *as.acquired_from == I0)
   {
-    create_dependency(as.stream, std::get<I0>(deps)); 
-  }    
+    create_dependency(as.stream, std::get<I0>(deps));
+  }
 
   create_dependencies_impl(as, deps, index_sequence<Is...>{});
 }
@@ -990,7 +990,7 @@ unique_eager_future_promise_pair<X, XPointer>
 depend_on(ComputeContent&& cc, std::tuple<Dependencies...>&& deps)
 {
   int device = 0;
-  thrust::cuda_cub::throw_on_error(cudaGetDevice(&device));
+  thrust::hip_rocprim::throw_on_error(hipGetDevice(&device));
 
   // First, either steal a stream from one of our children or make a new one.
   auto as = acquire_stream(device, deps);
@@ -1005,7 +1005,7 @@ depend_on(ComputeContent&& cc, std::tuple<Dependencies...>&& deps)
   // Next, we create the asynchronous value.
   std::unique_ptr<async_value<X, XPointer>> av(
     new async_value_with_keep_alives<X, XPointer, decltype(ka)>(
-      std::move(as.stream), std::move(cc), std::move(ka) 
+      std::move(as.stream), std::move(cc), std::move(ka)
     )
   );
 
@@ -1021,9 +1021,8 @@ depend_on(ComputeContent&& cc, std::tuple<Dependencies...>&& deps)
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}} // namespace system::cuda
+}} // namespace system::hip
 
 THRUST_END_NS
 
 #endif // THRUST_CPP_DIALECT >= 2011
-
