@@ -187,6 +187,25 @@ public:
     }
 }; // struct pointer
 
+#if THRUST_CPP_DIALECT >= 2011
+template <typename T>
+__host__ __device__
+bool operator!=(decltype(nullptr), pointer<T>);
+
+template <typename T>
+__host__ __device__
+bool operator!=(pointer<T>, decltype(nullptr));
+
+template <typename T>
+__host__ __device__
+bool operator==(decltype(nullptr), pointer<T>);
+
+template <typename T>
+__host__ __device__
+bool operator==(pointer<T>, decltype(nullptr));
+#endif
+
+
 /*! \p reference is a wrapped reference to an object stored in memory available to the \p hip system.
  *  \p reference is the type of the result of dereferencing a \p hip::pointer.
  *
