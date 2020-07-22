@@ -36,6 +36,18 @@
 #include <thrust/system/hip/error.h>
 #include <thrust/system_error.h>
 
+// Define the value to 0, if you want to disable printf on device side.
+#ifndef THRUST_HIP_PRINTF_ENABLED
+#define THRUST_HIP_PRINTF_ENABLED 1
+#endif
+
+#if THRUST_HIP_PRINTF_ENABLED == 1
+  #define THRUST_HIP_PRINTF(text, ...) \
+    printf(text, ##__VA_ARGS__)
+#else
+  #define THRUST_HIP_PRINTF(text, ...)
+#endif
+
 BEGIN_NS_THRUST
 namespace hip_rocprim
 {
@@ -135,7 +147,11 @@ static void __host__ __device__ throw_on_error(hipError_t status, char const* ms
 #if __THRUST_HAS_HIPRT__
         printf("Error after %s: %s\n", msg, hipGetErrorString(status));
 #else
-        printf("Error %d: %s \n", (int)status, msg);
+        THRUST_HIP_PRINTF("Error %d: %s \n", (int)status, msg);
+    #if THRUST_HIP_PRINTF_ENABLED == 0
+        THRUST_UNUSED_VAR(status);
+        THRUST_UNUSED_VAR(msg);
+    #endif
 #endif
         hip_rocprim::terminate();
 #endif
