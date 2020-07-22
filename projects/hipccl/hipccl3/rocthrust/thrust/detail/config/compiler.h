@@ -55,21 +55,21 @@
 #define THRUST_DEVICE_COMPILER_HIP     5
 
 // figure out which host compiler we're using
-// XXX we should move the definition of THRUST_DEPRECATED out of this logic
-#if   defined(_MSC_VER)
-#define THRUST_HOST_COMPILER THRUST_HOST_COMPILER_MSVC
-#define THRUST_DEPRECATED __declspec(deprecated)
+// TODO we should move the definition of THRUST_DEPRECATED out of this logic
+#if defined(_MSC_VER)
+    #define THRUST_HOST_COMPILER THRUST_HOST_COMPILER_MSVC
+    #define THRUST_DEPRECATED __declspec(deprecated)
 #elif defined(__clang__)
-#define THRUST_HOST_COMPILER THRUST_HOST_COMPILER_CLANG
-#define THRUST_DEPRECATED __attribute__ ((deprecated))
-#define THRUST_CLANG_VERSION (__clang_major__ * 10000 + __clang_minor__ * 100 + __clang_patchlevel__)
+    #define THRUST_HOST_COMPILER THRUST_HOST_COMPILER_CLANG
+    #define THRUST_DEPRECATED __attribute__ ((deprecated))
+    #define THRUST_CLANG_VERSION (__clang_major__ * 10000 + __clang_minor__ * 100 + __clang_patchlevel__)
 #elif defined(__GNUC__)
-#define THRUST_HOST_COMPILER THRUST_HOST_COMPILER_GCC
-#define THRUST_DEPRECATED __attribute__ ((deprecated))
-#define THRUST_GCC_VERSION (__GNUC__ * 10000 + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__)
+    #define THRUST_HOST_COMPILER THRUST_HOST_COMPILER_GCC
+    #define THRUST_DEPRECATED __attribute__ ((deprecated))
+    #define THRUST_GCC_VERSION (__GNUC__ * 10000 + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__)
 #else
-#define THRUST_HOST_COMPILER THRUST_HOST_COMPILER_UNKNOWN
-#define THRUST_DEPRECATED
+    #define THRUST_HOST_COMPILER THRUST_HOST_COMPILER_UNKNOWN
+    #define THRUST_DEPRECATED
 #endif // THRUST_HOST_COMPILER
 
 // figure out which device compiler we're using
@@ -195,15 +195,3 @@
   THRUST_DISABLE_CLANG_SELF_ASSIGNMENT_WARNING_END                            \
   /**/
 
-// TODO we should move the definition of THRUST_DEPRECATED out of this logic
-#if   THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
-  #define THRUST_DEPRECATED __declspec(deprecated)
-#elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG
-  #define THRUST_DEPRECATED __attribute__((deprecated))
-#elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC
-  #define THRUST_DEPRECATED __attribute__((deprecated))
-#else
-  #define THRUST_DEPRECATED
-#endif
-
->>>>>>> 14f8a540... Thrust 10.1 asynchronous algorithms (core functionality).
