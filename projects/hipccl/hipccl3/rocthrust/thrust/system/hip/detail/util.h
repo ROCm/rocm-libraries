@@ -36,10 +36,12 @@
 #include <thrust/system/hip/error.h>
 #include <thrust/system_error.h>
 
-// Enable if you want printf on device side
-// #define THRUST_HIP_PRINTF_ENABLED 1
+// Define the value to 0, if you want to disable printf on device side.
+#ifndef THRUST_HIP_PRINTF_ENABLED
+#define THRUST_HIP_PRINTF_ENABLED 1
+#endif
 
-#ifdef THRUST_HIP_PRINTF_ENABLED
+#if THRUST_HIP_PRINTF_ENABLED == 1
   #define THRUST_HIP_PRINTF(text, ...) \
     printf(text, ##__VA_ARGS__)
 #else
@@ -146,7 +148,7 @@ static void __host__ __device__ throw_on_error(hipError_t status, char const* ms
         printf("Error after %s: %s\n", msg, hipGetErrorString(status));
 #else
         THRUST_HIP_PRINTF("Error %d: %s \n", (int)status, msg);
-    #ifndef THRUST_HIP_PRINTF_ENABLED
+    #if THRUST_HIP_PRINTF_ENABLED == 0
         THRUST_UNUSED_VAR(status);
         THRUST_UNUSED_VAR(msg);
     #endif
