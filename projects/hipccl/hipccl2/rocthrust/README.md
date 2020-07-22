@@ -64,6 +64,16 @@ make package
 [sudo] make install
 ```
 
+### Macro options
+
+```
+# Performance improvement option. If you define THRUST_HIP_PRINTF_ENABLED before
+# thrust includes to 0, you can disable printfs on device side and improve
+# performance. The default value is 1
+#define THRUST_HIP_PRINTF_ENABLED 0
+
+```
+
 ### Using rocThrust In A Project
 
 Recommended way of including rocThrust into a CMake project is by using its package
@@ -157,7 +167,7 @@ CXX=hipcc cmake -DBUILD_BENCHMARKS=ON ..
 make -j4
 
 # Run the benchmarks
-./benchmarks/benchmark_thrust_bench 
+./benchmarks/benchmark_thrust_bench
 ```
 
 
