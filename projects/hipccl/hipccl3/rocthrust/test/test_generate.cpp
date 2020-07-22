@@ -21,7 +21,7 @@
 
 #include "test_header.hpp"
 
-__THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_BEGIN
+THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_BEGIN
 
 typedef ::testing::Types<Params<thrust::host_vector<short>>, Params<thrust::host_vector<int>>>
     VectorParams;
@@ -252,4 +252,4 @@ TEST(GenerateTests, TestGenerateTuple)
     ASSERT_EQ_QUIET(h, d);
 }
 
-__THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_END 
+THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_END
