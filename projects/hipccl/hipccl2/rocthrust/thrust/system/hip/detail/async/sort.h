@@ -25,7 +25,7 @@
  *
  ******************************************************************************/
 
-// TODO: Move into system::cuda
+// TODO: Move into system::hip
 
 #pragma once
 
@@ -36,12 +36,12 @@
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 
-#include <thrust/system/cuda/config.h>
+#include <thrust/system/hip/config.h>
 
-#include <thrust/system/cuda/detail/async/customization.h>
-#include <thrust/system/cuda/detail/sort.h>
+#include <thrust/system/hip/detail/async/customization.h>
+#include <thrust/system/hip/detail/sort.h>
 #include <thrust/detail/alignment.h>
-#include <thrust/system/cuda/future.h>
+#include <thrust/system/hip/future.h>
 #include <thrust/type_traits/is_trivially_relocatable.h>
 #include <thrust/type_traits/is_contiguous_iterator.h>
 #include <thrust/type_traits/logical_metafunctions.h>
@@ -53,7 +53,7 @@
 
 THRUST_BEGIN_NS
 
-namespace system { namespace cuda { namespace detail
+namespace system { namespace hip { namespace detail
 {
 
 // Non-ContiguousIterator iterators
@@ -134,8 +134,8 @@ auto async_stable_sort_n(
   // Determine temporary device storage requirements.
 
   size_t tmp_size = 0;
-  thrust::cuda_cub::throw_on_error(
-    thrust::cuda_cub::__merge_sort::doit_step<
+  thrust::hip_rocprim::throw_on_error(
+    thrust::hip_rocprim::__merge_sort::doit_step<
       /* Sort items? */ std::false_type, /* Stable? */ std::true_type
     >(
       nullptr
@@ -157,7 +157,7 @@ auto async_stable_sort_n(
   );
 
   // The array was dynamically allocated, so we assume that it's suitably
-  // aligned for any type of data. `malloc`/`cudaMalloc`/`new`/`std::allocator`
+  // aligned for any type of data. `malloc`/`hipMalloc`/`new`/`std::allocator`
   // make this guarantee.
   auto const content_ptr = content.get();
 
@@ -167,9 +167,9 @@ auto async_stable_sort_n(
 
   // Set up stream with dependencies.
 
-  cudaStream_t const user_raw_stream = thrust::cuda_cub::stream(policy);
+  hipStream_t const user_raw_stream = thrust::hip_rocprim::stream(policy);
 
-  if (thrust::cuda_cub::default_stream() != user_raw_stream)
+  if (thrust::hip_rocprim::default_stream() != user_raw_stream)
   {
     fp = depend_on<void, pointer>(
       nullptr
@@ -191,8 +191,8 @@ auto async_stable_sort_n(
 
   // Run merge sort.
 
-  thrust::cuda_cub::throw_on_error(
-    thrust::cuda_cub::__merge_sort::doit_step<
+  thrust::hip_rocprim::throw_on_error(
+    thrust::hip_rocprim::__merge_sort::doit_step<
       /* Sort items? */ std::false_type, /* Stable? */ std::true_type
     >(
       tmp_ptr
@@ -213,7 +213,7 @@ auto async_stable_sort_n(
 // ContiguousIterator iterators
 // Scalar value type
 // thrust::greater<>
-// TODO (hack up CUB)
+// TODO (hack up rocprim)
 
 // ContiguousIterator iterators
 // Scalar value type
@@ -254,15 +254,15 @@ auto async_stable_sort_n(
 
   unique_eager_future_promise_pair<void, pointer> fp;
 
-  thrust::cuda_cub::cub::DoubleBuffer<T> keys(
+  thrust::hip_rocprim::rocprim::DoubleBuffer<T> keys(
     raw_pointer_cast(&*first), nullptr
   );
 
   // Determine temporary device storage requirements.
 
   size_t tmp_size = 0;
-  thrust::cuda_cub::throw_on_error(
-    thrust::cuda_cub::cub::DeviceRadixSort::SortKeys(
+  thrust::hip_rocprim::throw_on_error(
+    thrust::hip_rocprim::rocprim::DeviceRadixSort::SortKeys(
       nullptr
     , tmp_size
     , keys 
@@ -286,7 +286,7 @@ auto async_stable_sort_n(
   );
 
   // The array was dynamically allocated, so we assume that it's suitably
-  // aligned for any type of data. `malloc`/`cudaMalloc`/`new`/`std::allocator`
+  // aligned for any type of data. `malloc`/`hipMalloc`/`new`/`std::allocator`
   // make this guarantee.
   auto const content_ptr = content.get();
 
@@ -300,9 +300,9 @@ auto async_stable_sort_n(
 
   // Set up stream with dependencies.
 
-  cudaStream_t const user_raw_stream = thrust::cuda_cub::stream(policy);
+  hipStream_t const user_raw_stream = thrust::hip_rocprim::stream(policy);
 
-  if (thrust::cuda_cub::default_stream() != user_raw_stream)
+  if (thrust::hip_rocprim::default_stream() != user_raw_stream)
   {
     fp = depend_on<void, pointer>(
       nullptr
@@ -324,8 +324,8 @@ auto async_stable_sort_n(
 
   // Run radix sort.
 
-  thrust::cuda_cub::throw_on_error(
-    thrust::cuda_cub::cub::DeviceRadixSort::SortKeys(
+  thrust::hip_rocprim::throw_on_error(
+    thrust::hip_rocprim::rocprim::DeviceRadixSort::SortKeys(
       tmp_ptr
     , tmp_size
     , keys
@@ -341,12 +341,12 @@ auto async_stable_sort_n(
   if (0 != keys.selector)
   {
     // TODO: Temporary hack.
-    thrust::cuda_cub::throw_on_error(
-      cudaMemcpyAsync(
+    thrust::hip_rocprim::throw_on_error(
+      hipMemcpyAsync(
         reinterpret_cast<T*>(keys.d_buffers[0])
       , reinterpret_cast<T*>(keys.d_buffers[1])
       , sizeof(T) * n
-      , cudaMemcpyDeviceToDevice
+      , hipMemcpyDeviceToDevice
       , fp.future.stream()
       )
     , "radix sort copy back"
@@ -356,9 +356,9 @@ auto async_stable_sort_n(
   return std::move(fp.future);
 }
 
-}}} // namespace system::cuda::detail
+}}} // namespace system::hip::detail
 
-namespace cuda_cub
+namespace hip_rocprim
 {
 
 // ADL entry point.
@@ -374,12 +374,12 @@ auto async_stable_sort(
   StrictWeakOrdering               comp
 )
 THRUST_DECLTYPE_RETURNS(
-  thrust::system::cuda::detail::async_stable_sort_n(
+  thrust::system::hip::detail::async_stable_sort_n(
     policy, first, thrust::distance(first, last), comp
   )
 );
 
-} // cuda_cub
+} // hip_rocprim
 
 THRUST_END_NS
 
