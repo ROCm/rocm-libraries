@@ -27,7 +27,7 @@
 
 // TODO: Optimize for thrust::plus
 
-// TODO: Move into system::cuda
+// TODO: Move into system::hip
 
 #pragma once
 
@@ -38,11 +38,11 @@
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 
-#include <thrust/system/cuda/config.h>
+#include <thrust/system/hip/config.h>
 
-#include <thrust/system/cuda/detail/async/customization.h>
-#include <thrust/system/cuda/detail/reduce.h>
-#include <thrust/system/cuda/future.h>
+#include <thrust/system/hip/detail/async/customization.h>
+#include <thrust/system/hip/detail/reduce.h>
+#include <thrust/system/hip/future.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/distance.h>
 
@@ -50,7 +50,7 @@
 
 THRUST_BEGIN_NS
 
-namespace system { namespace cuda { namespace detail
+namespace system { namespace hip { namespace detail
 {
 
 template <
@@ -83,8 +83,8 @@ auto async_reduce_n(
   // Determine temporary device storage requirements.
 
   size_t tmp_size = 0;
-  thrust::cuda_cub::throw_on_error(
-    thrust::cuda_cub::cub::DeviceReduce::Reduce(
+  thrust::hip_rocprim::throw_on_error(
+    thrust::hip_rocprim::rocprim::DeviceReduce::Reduce(
       NULL
     , tmp_size
     , first
@@ -105,7 +105,7 @@ auto async_reduce_n(
   );
 
   // The array was dynamically allocated, so we assume that it's suitably
-  // aligned for any type of data. `malloc`/`cudaMalloc`/`new`/`std::allocator`
+  // aligned for any type of data. `malloc`/`hipMalloc`/`new`/`std::allocator`
   // make this guarantee.
   auto const content_ptr = content.get();
   T* const ret_ptr = thrust::detail::aligned_reinterpret_cast<T*>(
@@ -117,9 +117,9 @@ auto async_reduce_n(
 
   // Set up stream with dependencies.
 
-  cudaStream_t const user_raw_stream = thrust::cuda_cub::stream(policy);
+  hipStream_t const user_raw_stream = thrust::hip_rocprim::stream(policy);
 
-  if (thrust::cuda_cub::default_stream() != user_raw_stream)
+  if (thrust::hip_rocprim::default_stream() != user_raw_stream)
   {
     fp = depend_on<T, pointer>(
       [] (decltype(content) const& c)
@@ -165,8 +165,8 @@ auto async_reduce_n(
 
   // Run reduction.
  
-  thrust::cuda_cub::throw_on_error(
-    thrust::cuda_cub::cub::DeviceReduce::Reduce(
+  thrust::hip_rocprim::throw_on_error(
+    thrust::hip_rocprim::rocprim::DeviceReduce::Reduce(
       tmp_ptr
     , tmp_size
     , first
@@ -183,9 +183,9 @@ auto async_reduce_n(
   return std::move(fp.future);
 }
 
-}}} // namespace system::cuda::detail
+}}} // namespace system::hip::detail
 
-namespace cuda_cub
+namespace hip_rocprim
 {
 
 // ADL entry point.
@@ -202,12 +202,12 @@ auto async_reduce(
   BinaryOp                         op
 )
 THRUST_DECLTYPE_RETURNS(
-  thrust::system::cuda::detail::async_reduce_n(
+  thrust::system::hip::detail::async_reduce_n(
     policy, first, thrust::distance(first, last), init, op
   )
 )
 
-} // cuda_cub
+} // hip_rocprim
 
 THRUST_END_NS
 

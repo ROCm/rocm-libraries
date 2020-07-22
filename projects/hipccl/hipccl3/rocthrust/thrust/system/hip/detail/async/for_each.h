@@ -26,7 +26,7 @@
  *
  ******************************************************************************/
 
-// TODO: Move into system::cuda
+// TODO: Move into system::hip
 
 #pragma once
 
@@ -37,11 +37,11 @@
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 
-#include <thrust/system/cuda/config.h>
+#include <thrust/system/hip/config.h>
 
-#include <thrust/system/cuda/detail/async/customization.h>
-#include <thrust/system/cuda/detail/parallel_for.h>
-#include <thrust/system/cuda/future.h>
+#include <thrust/system/hip/detail/async/customization.h>
+#include <thrust/system/hip/detail/parallel_for.h>
+#include <thrust/system/hip/future.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/distance.h>
 
@@ -49,7 +49,7 @@
 
 THRUST_BEGIN_NS
 
-namespace system { namespace cuda { namespace detail
+namespace system { namespace hip { namespace detail
 {
 
 template <typename ForwardIt, typename UnaryFunction>
@@ -89,9 +89,9 @@ auto async_for_each_n(
 
   // Set up stream with dependencies.
 
-  cudaStream_t const user_raw_stream = thrust::cuda_cub::stream(policy);
+  hipStream_t const user_raw_stream = thrust::hip_rocprim::stream(policy);
 
-  if (thrust::cuda_cub::default_stream() != user_raw_stream)
+  if (thrust::hip_rocprim::default_stream() != user_raw_stream)
   {
     fp = depend_on<void, pointer>(
       nullptr
@@ -114,8 +114,8 @@ auto async_for_each_n(
     std::move(first), std::move(f)
   );
 
-  thrust::cuda_cub::throw_on_error(
-    thrust::cuda_cub::__parallel_for::parallel_for(
+  thrust::hip_rocprim::throw_on_error(
+    thrust::hip_rocprim::__parallel_for::parallel_for(
       n, std::move(wrapped), fp.future.stream()
     )
   , "after for_each launch"
@@ -124,9 +124,9 @@ auto async_for_each_n(
   return std::move(fp.future);
 }
 
-}}} // namespace system::cuda::detail
+}}} // namespace system::hip::detail
 
-namespace cuda_cub
+namespace hip_rocprim
 {
 
 // ADL entry point.
@@ -142,12 +142,12 @@ auto async_for_each(
   UnaryFunction&&                  f
 )
 THRUST_DECLTYPE_RETURNS(
-  thrust::system::cuda::detail::async_for_each_n(
+  thrust::system::hip::detail::async_for_each_n(
     policy, first, thrust::distance(first, last), THRUST_FWD(f)
   )
 );
 
-} // cuda_cub
+} // hip_rocprim
 
 THRUST_END_NS
 

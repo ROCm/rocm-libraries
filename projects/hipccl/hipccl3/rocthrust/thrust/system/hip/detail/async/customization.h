@@ -25,7 +25,7 @@
  *
  ******************************************************************************/
 
-// TODO: Move into system::cuda
+// TODO: Move into system::hip
 
 #pragma once
 
@@ -36,12 +36,12 @@
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 
-#include <thrust/system/cuda/config.h>
+#include <thrust/system/hip/config.h>
 
 #include <thrust/detail/type_deduction.h>
 #include <thrust/detail/cstdint.h>
 #include <thrust/detail/execute_with_allocator.h>
-#include <thrust/system/cuda/memory_resource.h>
+#include <thrust/system/hip/memory_resource.h>
 #include <thrust/memory/detail/host_system_resource.h>
 #include <thrust/mr/allocator.h>
 #include <thrust/mr/disjoint_sync_pool.h>
@@ -49,7 +49,7 @@
 
 THRUST_BEGIN_NS
 
-namespace system { namespace cuda { namespace detail
+namespace system { namespace hip { namespace detail
 {
 
 using default_async_host_resource =
@@ -71,7 +71,7 @@ THRUST_DECLTYPE_RETURNS(
 
 using default_async_device_resource =
   thrust::mr::disjoint_synchronized_pool_resource<
-    thrust::system::cuda::memory_resource
+    thrust::system::hip::memory_resource
   , thrust::mr::new_delete_resource
   >;
 
@@ -95,7 +95,7 @@ THRUST_DECLTYPE_RETURNS(exec.get_allocator())
 
 using default_async_universal_host_pinned_resource =
   thrust::mr::synchronized_pool_resource<
-    thrust::system::cuda::universal_host_pinned_memory_resource
+    thrust::system::hip::universal_host_pinned_memory_resource
   >;
 
 template <typename DerivedPolicy>
@@ -108,7 +108,7 @@ THRUST_DECLTYPE_RETURNS(
   >{}
 )
 
-}}} // namespace system::cuda::detail
+}}} // namespace system::hip::detail
 
 THRUST_END_NS
 
