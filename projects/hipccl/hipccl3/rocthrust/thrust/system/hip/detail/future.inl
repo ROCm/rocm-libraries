@@ -48,10 +48,10 @@ constexpr nonowning_t nonowning{};
 struct event_deleter final
 {
   __host__
-  void operator()(CUevent_st* e) const
+  void operator()(hipEvent_t* e) const
   {
     if (nullptr != e)
-      thrust::hip_rocprim::throw_on_error(hipEventDestroy(e));
+      thrust::hip_rocprim::throw_on_error(hipEventDestroy(*e), "");
   }
 };
 
@@ -59,10 +59,10 @@ struct event_deleter final
 
 struct unique_event final
 {
-  using native_handle_type = CUevent_st*;
+  using native_handle_type = hipEvent_t*;
 
 private:
-  std::unique_ptr<CUevent_st, event_deleter> handle_;
+  std::unique_ptr<hipEvent_t, event_deleter> handle_;
 
 public:
   /// \brief Create a new stream and construct a handle to it. When the handle
@@ -71,9 +71,10 @@ public:
   unique_event()
     : handle_(nullptr, event_deleter())
   {
-    native_handle_type e;
+    native_handle_type e = nullptr;
     thrust::hip_rocprim::throw_on_error(
-      hipEventCreateWithFlags(&e, hipEventDisableTiming)
+      hipEventCreateWithFlags(e, hipEventDisableTiming),
+      ""
     );
     handle_.reset(e);
   }
@@ -102,13 +103,13 @@ public:
   __host__
   bool ready() const
   {
-    hipError_t const err = hipEventQuery(handle_.get());
+    hipError_t const err = hipEventQuery(*handle_.get());
 
     if (hipErrorNotReady == err)
       return false;
 
     // Throw on any other error.
-    thrust::hip_rocprim::throw_on_error(err);
+    thrust::hip_rocprim::throw_on_error(err, "");
 
     return true;
   }
@@ -116,7 +117,7 @@ public:
   __host__
   void wait() const
   {
-    thrust::hip_rocprim::throw_on_error(hipEventSynchronize(handle_.get()));
+    thrust::hip_rocprim::throw_on_error(hipEventSynchronize(*handle_.get()), "");
   }
 
   __host__
@@ -137,10 +138,10 @@ public:
 struct stream_deleter final
 {
   __host__
-  void operator()(CUstream_st* s) const
+  void operator()(hipStream_t* s) const
   {
     if (nullptr != s)
-      thrust::hip_rocprim::throw_on_error(hipStreamDestroy(s));
+      thrust::hip_rocprim::throw_on_error(hipStreamDestroy(*s), "");
   }
 };
 
@@ -159,11 +160,11 @@ public:
     : cond_(false) {}
 
   __host__
-  void operator()(CUstream_st* s) const
+  void operator()(hipStream_t* s) const
   {
     if (cond_ && nullptr != s)
     {
-      thrust::hip_rocprim::throw_on_error(hipStreamDestroy(s));
+      thrust::hip_rocprim::throw_on_error(hipStreamDestroy(*s), "");
     }
   }
 };
@@ -172,10 +173,10 @@ public:
 
 struct unique_stream final
 {
-  using native_handle_type = CUstream_st*;
+  using native_handle_type = hipStream_t*;
 
 private:
-  std::unique_ptr<CUstream_st, stream_conditional_deleter> handle_;
+  std::unique_ptr<hipStream_t, stream_conditional_deleter> handle_;
 
 public:
   /// \brief Create a new stream and construct a handle to it. When the handle
@@ -184,9 +185,10 @@ public:
   unique_stream()
     : handle_(nullptr, stream_conditional_deleter())
   {
-    native_handle_type s;
+    native_handle_type s = nullptr;
     thrust::hip_rocprim::throw_on_error(
-      hipStreamCreateWithFlags(&s, hipStreamNonBlocking)
+      hipStreamCreateWithFlags(s, hipStreamNonBlocking),
+      ""
     );
     handle_.reset(s);
   }
@@ -222,13 +224,13 @@ public:
   __host__
   bool ready() const
   {
-    hipError_t const err = hipStreamQuery(handle_.get());
+    hipError_t const err = hipStreamQuery(*handle_.get());
 
     if (hipErrorNotReady == err)
       return false;
 
     // Throw on any other error.
-    thrust::hip_rocprim::throw_on_error(err);
+    thrust::hip_rocprim::throw_on_error(err, "");
 
     return true;
   }
@@ -237,7 +239,8 @@ public:
   void wait() const
   {
     thrust::hip_rocprim::throw_on_error(
-      hipStreamSynchronize(handle_.get())
+      hipStreamSynchronize(*handle_.get()),
+      ""
     );
   }
 
@@ -245,7 +248,8 @@ public:
   void depend_on(unique_event& e)
   {
     thrust::hip_rocprim::throw_on_error(
-      hipStreamWaitEvent(handle_.get(), e.get(), 0)
+      hipStreamWaitEvent(*handle_.get(), *e.get(), 0),
+      ""
     );
   }
 
@@ -263,7 +267,7 @@ public:
   __host__
   void record(unique_event& e)
   {
-    thrust::hip_rocprim::throw_on_error(hipEventRecord(e.get(), handle_.get()));
+    thrust::hip_rocprim::throw_on_error(hipEventRecord(*e.get(), *handle_.get()), "");
   }
 
   __host__
@@ -990,7 +994,7 @@ unique_eager_future_promise_pair<X, XPointer>
 depend_on(ComputeContent&& cc, std::tuple<Dependencies...>&& deps)
 {
   int device = 0;
-  thrust::hip_rocprim::throw_on_error(hipGetDevice(&device));
+  thrust::hip_rocprim::throw_on_error(hipGetDevice(&device), "");
 
   // First, either steal a stream from one of our children or make a new one.
   auto as = acquire_stream(device, deps);

@@ -26,7 +26,7 @@ struct ready_future;
 template <typename T, typename Pointer = pointer<T>>
 struct unique_eager_future;
 
-}} // namespace system::cuda
+}} // namespace system::hip
 
 namespace hip
 {
@@ -37,7 +37,7 @@ using ready_future = thrust::system::hip::ready_future<T>;
 template <typename T, typename Pointer = thrust::system::hip::pointer<T>>
 using unique_eager_future = thrust::system::hip::unique_eager_future<T, Pointer>;
 
-} // namespace cuda
+} // namespace hip
 
 template <typename T, typename Pointer, typename DerivedPolicy>
 __host__ __device__

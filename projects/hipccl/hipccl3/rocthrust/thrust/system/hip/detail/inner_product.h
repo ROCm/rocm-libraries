@@ -61,7 +61,7 @@ inner_product(execution_policy<Derived>& policy,
     typedef transform_pair_of_input_iterators_t<T, InputIt1, InputIt2, ProductOp>
         binop_iterator_t;
 
-    return hip_rocprim::reduce_n(
+    return reduce_n(
         policy, binop_iterator_t(first1, first2, product_op), num_items, init, reduce_op
     );
 }
@@ -74,7 +74,7 @@ inner_product(execution_policy<Derived>& policy,
               InputIt2                   first2,
               T                          init)
 {
-    return hip_rocprim::inner_product(
+    return inner_product(
         policy, first1, last1, first2, init, plus<T>(), multiplies<T>()
     );
 }

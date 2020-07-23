@@ -46,12 +46,13 @@ public:
     typedef typename ptr::reference         reference;
 };
 
+namespace thrust
+{
+
 // specialize thrust::iterator_traits to avoid problems with the name of
 // pointer's constructor shadowing its nested pointer type
 // do this before pointer is defined so the specialization is correctly
 // used inside the definition
-namespace thrust
-{
 
 template <typename Element>
 struct iterator_traits<thrust::hip_rocprim::pointer<Element> >

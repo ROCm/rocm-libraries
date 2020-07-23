@@ -35,13 +35,16 @@
     #ifndef __HIP_DEVICE_COMPILE__
         #define __THRUST_HAS_HIPRT__ 1
         #define THRUST_HIP_RUNTIME_FUNCTION __host__ __device__ __forceinline__
+        #define THRUST_RUNTIME_FUNCTION THRUST_HIP_RUNTIME_FUNCTION
     #else
         #define __THRUST_HAS_HIPRT__ 0
         #define THRUST_HIP_RUNTIME_FUNCTION __host__ __forceinline__
+        #define THRUST_RUNTIME_FUNCTION THRUST_HIP_RUNTIME_FUNCTION
     #endif
 #else
     #define __THRUST_HAS_HIPRT__ 0
     #define THRUST_HIP_RUNTIME_FUNCTION __host__ __forceinline__
+    #define THRUST_RUNTIME_FUNCTION THRUST_HIP_RUNTIME_FUNCTION
 #endif
 
 // TODO: These paremeters should be tuned for NAVI.
