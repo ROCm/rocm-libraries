@@ -38,6 +38,7 @@ add_rocthrust_test("thrust.hip.adjacent_difference" test_adjacent_difference.cpp
 add_rocthrust_test("thrust.hip.advance" test_advance.cpp)
 add_rocthrust_test("thrust.hip.allocator" test_allocator.cpp)
 add_rocthrust_test("thrust.hip.allocator_aware_policies" test_allocator_aware_policies.cpp)
+add_rocthrust_test("thrust.hip.async_reduce" test_async_reduce.cpp)
 add_rocthrust_test("thrust.hip.binary_search" test_binary_search.cpp)
 add_rocthrust_test("thrust.hip.binary_search_descending" test_binary_search_descending.cpp)
 add_rocthrust_test("thrust.hip.binary_search_vector" test_binary_search_vector.cpp)
