@@ -84,7 +84,7 @@ auto async_reduce_n(
 
   size_t tmp_size = 0;
   thrust::hip_rocprim::throw_on_error(
-    thrust::hip_rocprim::rocprim::DeviceReduce::Reduce(
+    rocprim::reduce(
       NULL
     , tmp_size
     , first
@@ -93,7 +93,7 @@ auto async_reduce_n(
     , op
     , init
     , NULL // Null stream, just for sizing.
-    , THRUST_DEBUG_SYNC_FLAG
+    , THRUST_HIP_DEBUG_SYNC_FLAG
     )
   , "after reduction sizing"
   );
@@ -117,7 +117,7 @@ auto async_reduce_n(
 
   // Set up stream with dependencies.
 
-  hipStream_t const user_raw_stream = thrust::hip_rocprim::stream(policy);
+  hipStream_t user_raw_stream = thrust::hip_rocprim::stream(policy);
 
   if (thrust::hip_rocprim::default_stream() != user_raw_stream)
   {
@@ -133,7 +133,7 @@ auto async_reduce_n(
     , std::tuple_cat(
         std::make_tuple(
           std::move(content)
-        , unique_stream(nonowning, user_raw_stream)
+        , unique_stream(nonowning, &user_raw_stream)
         )
       , extract_dependencies(
           std::move(thrust::detail::derived_cast(policy))
@@ -166,7 +166,7 @@ auto async_reduce_n(
   // Run reduction.
  
   thrust::hip_rocprim::throw_on_error(
-    thrust::hip_rocprim::rocprim::DeviceReduce::Reduce(
+    rocprim::reduce(
       tmp_ptr
     , tmp_size
     , first
@@ -175,7 +175,7 @@ auto async_reduce_n(
     , op
     , init
     , fp.future.stream()
-    , THRUST_DEBUG_SYNC_FLAG
+    , THRUST_HIP_DEBUG_SYNC_FLAG
     )
   , "after reduction launch"
   );
