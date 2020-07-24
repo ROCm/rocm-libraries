@@ -90,7 +90,7 @@ TYPED_TEST_CASE(RocprimDeviceSortTests, RocprimDeviceSortTestsParams);
 
 TYPED_TEST(RocprimDeviceSortTests, SortKey)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -204,7 +204,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
 
 TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
     

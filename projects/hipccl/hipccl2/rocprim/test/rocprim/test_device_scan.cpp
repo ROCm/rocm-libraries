@@ -119,7 +119,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanEmptyInput)
     using scan_op_type = typename TestFixture::scan_op_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -177,7 +177,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScan)
     const bool debug_synchronous = TestFixture::debug_synchronous;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
 
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -281,7 +281,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScan)
     const bool debug_synchronous = TestFixture::debug_synchronous;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
 
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -388,7 +388,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanByKey)
     using scan_op_type = typename TestFixture::scan_op_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -535,7 +535,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
     using scan_op_type = typename TestFixture::scan_op_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 

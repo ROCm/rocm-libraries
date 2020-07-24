@@ -57,7 +57,7 @@ void sort_key_kernel(key_type * device_key_output)
 
 TYPED_TEST(RocprimBlockSortTests, SortKey)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -155,7 +155,7 @@ void sort_key_value_kernel(key_type * device_key_output, value_type * device_val
 
 TYPED_TEST(RocprimBlockSortTests, SortKeyValue)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -262,6 +262,9 @@ TYPED_TEST(RocprimBlockSortTests, SortKeyValue)
 
         test_utils::assert_eq(output_key, expected_key);
         test_utils::assert_eq(output_value, expected_value);
+
+        HIP_CHECK(hipFree(device_value_output));
+        HIP_CHECK(hipFree(device_key_output));
     }
 
 }
@@ -296,7 +299,7 @@ void custom_sort_key_value_kernel(key_type * device_key_output, value_type * dev
 
 TYPED_TEST(RocprimBlockSortTests, CustomSortKeyValue)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -403,6 +406,9 @@ TYPED_TEST(RocprimBlockSortTests, CustomSortKeyValue)
 
         test_utils::assert_eq(output_key, expected_key);
         test_utils::assert_eq(output_value, expected_value);
+
+        HIP_CHECK(hipFree(device_value_output));
+        HIP_CHECK(hipFree(device_key_output));
     }
 
 }

@@ -141,7 +141,7 @@ TYPED_TEST_CASE(RocprimDeviceHistogramEven, Params1);
 
 TEST(RocprimDeviceHistogramEven, IncorrectInput)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -161,7 +161,7 @@ TEST(RocprimDeviceHistogramEven, IncorrectInput)
 
 TYPED_TEST(RocprimDeviceHistogramEven, Even)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -348,7 +348,7 @@ TYPED_TEST_CASE(RocprimDeviceHistogramRange, Params2);
 
 TEST(RocprimDeviceHistogramRange, IncorrectInput)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -369,7 +369,7 @@ TEST(RocprimDeviceHistogramRange, IncorrectInput)
 
 TYPED_TEST(RocprimDeviceHistogramRange, Range)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -589,7 +589,7 @@ TYPED_TEST_CASE(RocprimDeviceHistogramMultiEven, Params3);
 
 TYPED_TEST(RocprimDeviceHistogramMultiEven, MultiEven)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -843,10 +843,10 @@ TYPED_TEST_CASE(RocprimDeviceHistogramMultiRange, Params4);
 
 TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
-    
+
     using sample_type = typename TestFixture::params::sample_type;
     using counter_type = typename TestFixture::params::counter_type;
     using level_type = typename TestFixture::params::level_type;
