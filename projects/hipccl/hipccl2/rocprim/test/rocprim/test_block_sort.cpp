@@ -262,6 +262,9 @@ TYPED_TEST(RocprimBlockSortTests, SortKeyValue)
 
         test_utils::assert_eq(output_key, expected_key);
         test_utils::assert_eq(output_value, expected_value);
+
+        HIP_CHECK(hipFree(device_value_output));
+        HIP_CHECK(hipFree(device_key_output));
     }
 
 }
@@ -403,6 +406,9 @@ TYPED_TEST(RocprimBlockSortTests, CustomSortKeyValue)
 
         test_utils::assert_eq(output_key, expected_key);
         test_utils::assert_eq(output_value, expected_value);
+
+        HIP_CHECK(hipFree(device_value_output));
+        HIP_CHECK(hipFree(device_key_output));
     }
 
 }
