@@ -258,7 +258,7 @@ void load_store_kernel(Type* device_input, Type* device_output)
 
 TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClass)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -361,7 +361,7 @@ void load_store_valid_kernel(Type* device_input, Type* device_output, size_t val
 
 TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClassValid)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -478,7 +478,7 @@ void load_store_valid_default_kernel(Type* device_input, Type* device_output, si
 
 TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClassDefault)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
