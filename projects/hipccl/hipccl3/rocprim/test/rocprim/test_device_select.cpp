@@ -84,7 +84,7 @@ TYPED_TEST_CASE(RocprimDeviceSelectTests, RocprimDeviceSelectTestsParams);
 
 TYPED_TEST(RocprimDeviceSelectTests, Flagged)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -250,7 +250,7 @@ struct select_op<rocprim::half>
 
 TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -385,7 +385,7 @@ std::vector<float> get_discontinuity_probabilities()
 
 TYPED_TEST(RocprimDeviceSelectTests, UniqueEmptyInput)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -451,7 +451,7 @@ TYPED_TEST(RocprimDeviceSelectTests, UniqueEmptyInput)
 
 TYPED_TEST(RocprimDeviceSelectTests, Unique)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
     

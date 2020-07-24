@@ -86,7 +86,7 @@ TYPED_TEST_CASE(RocprimDeviceReduceTests, RocprimDeviceReduceTestsParams);
 
 TYPED_TEST(RocprimDeviceReduceTests, ReduceEmptyInput)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -144,7 +144,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceEmptyInput)
 
 TYPED_TEST(RocprimDeviceReduceTests, Reduce)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -254,7 +254,7 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
 
 TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -390,7 +390,7 @@ struct arg_min<int, rocprim::half>
 
 TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
     
