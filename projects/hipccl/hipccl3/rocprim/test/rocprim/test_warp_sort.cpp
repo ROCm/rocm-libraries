@@ -137,6 +137,8 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, Sort)
         );
 
         test_utils::assert_near(output, expected, test_utils::precision_threshold<T>::percentage);
+
+        HIP_CHECK(hipFree(d_output));
     }
 
 }
@@ -283,6 +285,9 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
 
         test_utils::assert_near(output_key, expected_key, test_utils::precision_threshold<T>::percentage);
         test_utils::assert_near(output_value, expected_value, test_utils::precision_threshold<T>::percentage);
+
+        HIP_CHECK(hipFree(d_output_key));
+        HIP_CHECK(hipFree(d_output_value));
     }
 
 }
