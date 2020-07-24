@@ -93,6 +93,7 @@ build:cmake-latest:
       -D BUILD_TEST=ON
       -D BUILD_EXAMPLE=ON
       -D BUILD_BENCHMARK=ON
+      -D AMDGPU_TARGETS="gfx803;gfx900;gfx906"
       -D AMDGPU_TEST_TARGETS="gfx803;gfx900;gfx906"
       -S $CI_PROJECT_DIR
       -B $BUILD_LATEST_DIR
