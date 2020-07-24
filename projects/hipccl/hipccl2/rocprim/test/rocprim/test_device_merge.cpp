@@ -91,7 +91,7 @@ TYPED_TEST_CASE(RocprimDeviceMergeTests, RocprimDeviceMergeTestsParams);
 
 TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -225,7 +225,7 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
 
 TYPED_TEST(RocprimDeviceMergeTests, MergeKeyValue)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
     

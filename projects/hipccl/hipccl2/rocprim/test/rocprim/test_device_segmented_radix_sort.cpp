@@ -141,7 +141,7 @@ std::vector<size_t> get_sizes(int seed_value)
 
 TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeys)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -297,7 +297,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeys)
 
 TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairs)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -494,7 +494,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairs)
 
 TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -655,7 +655,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
 
 TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
     
