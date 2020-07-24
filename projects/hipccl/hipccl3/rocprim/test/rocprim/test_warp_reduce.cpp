@@ -63,7 +63,7 @@ void warp_reduce_sum_kernel(T* device_input, T* device_output)
 
 TYPED_TEST(RocprimWarpReduceTests, ReduceSum)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -170,7 +170,7 @@ void warp_allreduce_sum_kernel(T* device_input, T* device_output)
 
 TYPED_TEST(RocprimWarpReduceTests, AllReduceSum)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -284,7 +284,7 @@ void warp_reduce_sum_kernel(T* device_input, T* device_output, size_t valid)
 
 TYPED_TEST(RocprimWarpReduceTests, ReduceSumValid)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -392,7 +392,7 @@ void warp_allreduce_sum_kernel(T* device_input, T* device_output, size_t valid)
 
 TYPED_TEST(RocprimWarpReduceTests, AllReduceSumValid)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -482,7 +482,7 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSumValid)
 
 TYPED_TEST(RocprimWarpReduceTests, ReduceSumCustomStruct)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -600,7 +600,7 @@ void head_segmented_warp_reduce_kernel(T* input, Flag* flags, T* output)
 
 TYPED_TEST(RocprimWarpReduceTests, HeadSegmentedReduceSum)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -743,7 +743,7 @@ void tail_segmented_warp_reduce_kernel(T* input, Flag* flags, T* output)
 
 TYPED_TEST(RocprimWarpReduceTests, TailSegmentedReduceSum)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 

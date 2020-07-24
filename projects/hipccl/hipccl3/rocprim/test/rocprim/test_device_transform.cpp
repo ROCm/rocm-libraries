@@ -113,7 +113,7 @@ struct transform<rocprim::half>
 
 TYPED_TEST(RocprimDeviceTransformTests, Transform)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -212,7 +212,7 @@ struct binary_transform<rocprim::half, rocprim::half, rocprim::half>
 
 TYPED_TEST(RocprimDeviceTransformTests, BinaryTransform)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
     

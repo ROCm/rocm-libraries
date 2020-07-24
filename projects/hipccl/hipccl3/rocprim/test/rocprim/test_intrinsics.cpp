@@ -106,7 +106,7 @@ void shuffle_up_kernel(T* data, unsigned int delta, unsigned int width)
 
 TYPED_TEST(RocprimIntrinsicsTests, ShuffleUp)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -209,7 +209,7 @@ void shuffle_down_kernel(T* data, unsigned int delta, unsigned int width)
 
 TYPED_TEST(RocprimIntrinsicsTests, ShuffleDown)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -314,7 +314,7 @@ void shuffle_index_kernel(T* data, int* src_lanes, unsigned int width)
 
 TYPED_TEST(RocprimIntrinsicsTests, ShuffleIndex)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -417,7 +417,7 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleIndex)
 
 TEST(RocprimIntrinsicsTests, ShuffleUpCustomStruct)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -517,7 +517,7 @@ TEST(RocprimIntrinsicsTests, ShuffleUpCustomStruct)
 
 TEST(RocprimIntrinsicsTests, ShuffleUpCustomAlignedStruct)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 

@@ -64,7 +64,7 @@ void warp_inclusive_scan_kernel(T* device_input, T* device_output)
 
 TYPED_TEST(RocprimWarpScanTests, InclusiveScan)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -180,7 +180,7 @@ void warp_inclusive_scan_reduce_kernel(
 
 TYPED_TEST(RocprimWarpScanTests, InclusiveScanReduce)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -308,7 +308,7 @@ void warp_exclusive_scan_kernel(T* device_input, T* device_output, T init)
 
 TYPED_TEST(RocprimWarpScanTests, ExclusiveScan)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -427,7 +427,7 @@ void warp_exclusive_scan_reduce_kernel(
 
 TYPED_TEST(RocprimWarpScanTests, ExclusiveReduceScan)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -569,7 +569,7 @@ void warp_scan_kernel(
 
 TYPED_TEST(RocprimWarpScanTests, Scan)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -718,7 +718,7 @@ void warp_scan_reduce_kernel(
 
 TYPED_TEST(RocprimWarpScanTests, ScanReduce)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -855,7 +855,7 @@ TYPED_TEST(RocprimWarpScanTests, ScanReduce)
 
 TYPED_TEST(RocprimWarpScanTests, InclusiveScanCustomType)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
