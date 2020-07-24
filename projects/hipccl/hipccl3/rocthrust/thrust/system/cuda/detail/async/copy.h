@@ -313,7 +313,7 @@ auto async_copy_n(
 , OutputIt                         output
 ) ->
   typename std::enable_if<
-    thrust::is_trivially_relocatable_sequence_copy<ForwardIt, OutputIt>::value 
+    thrust::is_trivially_relocatable_sequence_copy<ForwardIt, OutputIt>::value
   , unique_eager_future<
       OutputIt
     , typename thrust::detail::allocator_traits<
@@ -360,7 +360,7 @@ auto async_copy_n(
       { return c.get(); }
     , std::make_tuple(
         std::move(content)
-      ) 
+      )
     );
   }
 
@@ -410,4 +410,3 @@ THRUST_END_NS
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 
 #endif // THRUST_CPP_DIALECT >= 2011
-

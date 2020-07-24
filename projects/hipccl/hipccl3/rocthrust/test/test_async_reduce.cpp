@@ -8,6 +8,8 @@
 
 #include "test_header.hpp"
 
+TESTS_DEFINE(AsyncReduceTests, NumericalTestsParams);
+
 template <typename T>
 struct custom_plus
 {
@@ -18,234 +20,221 @@ struct custom_plus
   }
 };
 
-#if 0
-template <typename T>
-struct test_async_reduce
-{
-  __host__
-  void operator()(std::size_t n)
-  {
-    thrust::host_vector<T>   h0_data(unittest::random_integers<T>(n));
-    thrust::device_vector<T> d0_data(h0_data);
-
-    ASSERT_EQUAL(h0_data, d0_data);
-
-    auto r0 = thrust::reduce(
-      h0_data.begin(), h0_data.end()
-    );
-
-    auto f0 = thrust::async::reduce(
-      d0_data.begin(), d0_data.end()
-    );
-
-    auto r1 = std::move(f0).get();
-
-    ASSERT_EQUAL(r0, r1);
-  }
-};
-// TODO: Switch to `DECLARE_VARIABLE_UNITTEST` when we add `custom_numeric` to
-// the list of types it covers.
-VariableUnitTest<
-  test_async_reduce
-, NumericTypes
-> test_async_reduce_instance;
-#else
-TESTS_DEFINE(AsyncReduceTests, FullTestsParams);
 TYPED_TEST(AsyncReduceTests, TestAsyncReduce)
 {
     using T = typename TestFixture::input_type;
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
-        /*
-        thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
-                */
-        thrust::host_vector<T> h_data(size);
-        thrust::device_vector<T> d_data = h_data;
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        ASSERT_EQ(h_data, d_data);
+            thrust::host_vector<T>   h0_data = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::device_vector<T> d0_data(h0_data);
 
-        auto r0 = thrust::reduce(
-                h_data.begin(), h_data.end()
-                );
+            ASSERT_EQ(h0_data, d0_data);
 
-        auto f0 = thrust::async::reduce(
-                d_data.begin(), d_data.end()
-                );
+            auto r0 = thrust::reduce(
+              h0_data.begin(), h0_data.end()
+            );
 
-        auto r1 = std::move(f0).get();
+            auto f0 = thrust::async::reduce(
+              d0_data.begin(), d0_data.end()
+            );
 
-        ASSERT_EQ(r0, r1);
+            auto r1 = std::move(f0).get();
+
+            ASSERT_EQ(r0, r1);
+        }
     }
 }
-#endif
 
-#if 0
-template <typename T>
-struct test_async_reduce_with_policy
+TYPED_TEST(AsyncReduceTests, TestAsyncReduceWithPolicy)
 {
-  __host__
-  void operator()(std::size_t n)
-  {
-    thrust::host_vector<T>   h0_data(unittest::random_integers<T>(n));
-    thrust::device_vector<T> d0_data(h0_data);
+    using T = typename TestFixture::input_type;
+    for(auto size : get_sizes())
+    {
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-    ASSERT_EQUAL(h0_data, d0_data);
+            thrust::host_vector<T>   h0_data = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::device_vector<T> d0_data(h0_data);
 
-    auto r0 = thrust::reduce(
-      h0_data.begin(), h0_data.end()
-    );
+            ASSERT_EQ(h0_data, d0_data);
 
-    auto f0 = thrust::async::reduce(
-      thrust::device, d0_data.begin(), d0_data.end()
-    );
+            auto r0 = thrust::reduce(
+              h0_data.begin(), h0_data.end()
+            );
 
-    auto r1 = std::move(f0).get();
+            auto f0 = thrust::async::reduce(
+              thrust::device, d0_data.begin(), d0_data.end()
+            );
 
-    ASSERT_EQUAL(r0, r1);
-  }
-};
-// TODO: Switch to `DECLARE_VARIABLE_UNITTEST` when we add `custom_numeric` to
-// the list of types it covers.
-VariableUnitTest<
-  test_async_reduce_with_policy
-, NumericTypes
-> test_async_reduce_with_policy_instance;
+            auto r1 = std::move(f0).get();
 
-template <typename T>
-struct test_async_reduce_with_init
+            ASSERT_EQ(r0, r1);
+        }
+    }
+}
+
+TYPED_TEST(AsyncReduceTests, TestAsyncReduceWithInit)
 {
-  __host__
-  void operator()(std::size_t n)
-  {
-    thrust::host_vector<T>   h0_data(unittest::random_integers<T>(n));
-    thrust::device_vector<T> d0_data(h0_data);
+    using T = typename TestFixture::input_type;
+    for(auto size : get_sizes())
+    {
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-    ASSERT_EQUAL(h0_data, d0_data);
+            thrust::host_vector<T>   h0_data = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::device_vector<T> d0_data(h0_data);
 
-    T const init = unittest::random_integer<T>();
+            ASSERT_EQ(h0_data, d0_data);
 
-    auto r0 = thrust::reduce(
-      h0_data.begin(), h0_data.end(), init
-    );
+            T const init = get_random_data<T>(
+                1, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value + 1
+            )[0];
 
-    auto f0 = thrust::async::reduce(
-      d0_data.begin(), d0_data.end(), init
-    );
+            auto r0 = thrust::reduce(
+              h0_data.begin(), h0_data.end(), init
+            );
 
-    auto r1 = std::move(f0).get();
+            auto f0 = thrust::async::reduce(
+              d0_data.begin(), d0_data.end(), init
+            );
 
-    ASSERT_EQUAL(r0, r1);
-  }
-};
-// TODO: Switch to `DECLARE_VARIABLE_UNITTEST` when we add `custom_numeric` to
-// the list of types it covers.
-VariableUnitTest<
-  test_async_reduce_with_init
-, NumericTypes
-> test_async_reduce_with_init_instance;
+            auto r1 = std::move(f0).get();
 
-template <typename T>
-struct test_async_reduce_with_policy_init
+            ASSERT_EQ(r0, r1);
+        }
+    }
+}
+
+TYPED_TEST(AsyncReduceTests, TestAsyncReduceWithPolicyInit)
 {
-  __host__
-  void operator()(std::size_t n)
-  {
-    thrust::host_vector<T>   h0_data(unittest::random_integers<T>(n));
-    thrust::device_vector<T> d0_data(h0_data);
+    using T = typename TestFixture::input_type;
+    for(auto size : get_sizes())
+    {
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-    ASSERT_EQUAL(h0_data, d0_data);
+            thrust::host_vector<T>   h0_data = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::device_vector<T> d0_data(h0_data);
 
-    T const init = unittest::random_integer<T>();
+            ASSERT_EQ(h0_data, d0_data);
 
-    auto r0 = thrust::reduce(
-      h0_data.begin(), h0_data.end(), init
-    );
+            T const init = get_random_data<T>(
+                1, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value + 1
+            )[0];
 
-    auto f0 = thrust::async::reduce(
-      thrust::device, d0_data.begin(), d0_data.end(), init
-    );
+            auto r0 = thrust::reduce(
+              h0_data.begin(), h0_data.end(), init
+            );
 
-    auto r1 = std::move(f0).get();
+            auto f0 = thrust::async::reduce(
+              thrust::device, d0_data.begin(), d0_data.end(), init
+            );
 
-    ASSERT_EQUAL(r0, r1);
-  }
-};
-// TODO: Switch to `DECLARE_VARIABLE_UNITTEST` when we add `custom_numeric` to
-// the list of types it covers.
-VariableUnitTest<
-  test_async_reduce_with_policy_init
-, NumericTypes
-> test_async_reduce_with_policy_init_instance;
+            auto r1 = std::move(f0).get();
 
-template <typename T>
-struct test_async_reduce_with_init_op
+            ASSERT_EQ(r0, r1);
+        }
+    }
+}
+
+TYPED_TEST(AsyncReduceTests, TestAsyncReduceWithInitOp)
 {
-  __host__
-  void operator()(std::size_t n)
-  {
-    thrust::host_vector<T>   h0_data(unittest::random_integers<T>(n));
-    thrust::device_vector<T> d0_data(h0_data);
+    using T = typename TestFixture::input_type;
+    for(auto size : get_sizes())
+    {
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-    ASSERT_EQUAL(h0_data, d0_data);
+            thrust::host_vector<T>   h0_data = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::device_vector<T> d0_data(h0_data);
 
-    T const init = unittest::random_integer<T>();
-    custom_plus<T> op{};
+            ASSERT_EQ(h0_data, d0_data);
 
-    auto r0 = thrust::reduce(
-      h0_data.begin(), h0_data.end(), init, op
-    );
+            T const init = get_random_data<T>(
+                1, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value + 1
+            )[0];
+            custom_plus<T> op{};
 
-    auto f0 = thrust::async::reduce(
-      d0_data.begin(), d0_data.end(), init, op
-    );
+            auto r0 = thrust::reduce(
+              h0_data.begin(), h0_data.end(), init, op
+            );
 
-    auto r1 = std::move(f0).get();
+            auto f0 = thrust::async::reduce(
+              d0_data.begin(), d0_data.end(), init, op
+            );
 
-    ASSERT_EQUAL(r0, r1);
-  }
+            auto r1 = std::move(f0).get();
+
+            ASSERT_EQ(r0, r1);
+        }
+    }
 };
-// TODO: Switch to `DECLARE_VARIABLE_UNITTEST` when we add `custom_numeric` to
-// the list of types it covers.
-VariableUnitTest<
-  test_async_reduce_with_init_op
-, NumericTypes
-> test_async_reduce_with_init_op_instance;
 
-template <typename T>
-struct test_async_reduce_with_policy_init_op
+TYPED_TEST(AsyncReduceTests, TestAsyncReduceWithPolicyInitOp)
 {
-  __host__
-  void operator()(std::size_t n)
-  {
-    thrust::host_vector<T>   h0_data(unittest::random_integers<T>(n));
-    thrust::device_vector<T> d0_data(h0_data);
+    using T = typename TestFixture::input_type;
+    for(auto size : get_sizes())
+    {
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
+        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        {
+            unsigned int seed_value
+                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-    ASSERT_EQUAL(h0_data, d0_data);
+            thrust::host_vector<T>   h0_data = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            thrust::device_vector<T> d0_data(h0_data);
 
-    T const init = unittest::random_integer<T>();
-    custom_plus<T> op{};
+            ASSERT_EQ(h0_data, d0_data);
 
-    auto r0 = thrust::reduce(
-      h0_data.begin(), h0_data.end(), init, op
-    );
+            T const init = get_random_data<T>(
+                1, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value + 1
+            )[0];
+            custom_plus<T> op{};
 
-    auto f0 = thrust::async::reduce(
-      thrust::device, d0_data.begin(), d0_data.end(), init, op
-    );
+            auto r0 = thrust::reduce(
+              h0_data.begin(), h0_data.end(), init, op
+            );
 
-    auto r1 = std::move(f0).get();
+            auto f0 = thrust::async::reduce(
+              thrust::device, d0_data.begin(), d0_data.end(), init, op
+            );
 
-    ASSERT_EQUAL(r0, r1);
-  }
-};
-// TODO: Switch to `DECLARE_VARIABLE_UNITTEST` when we add `custom_numeric` to
-// the list of types it covers.
-VariableUnitTest<
-  test_async_reduce_with_policy_init_op
-, NumericTypes
-> test_async_reduce_with_policy_init_op_instance;
+            auto r1 = std::move(f0).get();
+
+            ASSERT_EQ(r0, r1);
+        }
+    }
+}
 
 // TODO: Async copy then reduce.
 
@@ -254,5 +243,3 @@ VariableUnitTest<
 // TODO: Make random_integers more generic.
 
 #endif // THRUST_CPP_DIALECT >= 2011
-
-#endif

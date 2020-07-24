@@ -32,7 +32,7 @@
 
 #if THRUST_CPP_DIALECT >= 2011
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
 #include <thrust/system/hip/config.h>
 
@@ -61,7 +61,7 @@ template <
   typename DerivedPolicy
 , typename ForwardIt, typename OutputIt, typename Size
 >
-THRUST_RUNTIME_FUNCTION
+THRUST_HIP_RUNTIME_FUNCTION
 auto async_copy_n(
   execution_policy<DerivedPolicy>& policy
 , ForwardIt                        first
@@ -97,9 +97,9 @@ auto async_copy_n(
   return {};
 }
 
-// Workaround for an NVCC bug; when two SFINAE-enabled overloads are only
+// Workaround for an HIP bug; when two SFINAE-enabled overloads are only
 // distinguishable by a part of a SFINAE condition that is in a `decltype`,
-// NVCC thinks they are the same overload and emits an error.
+// HIP thinks they are the same overload and emits an error.
 template <typename ExecutionPolicy, typename ForwardIt, typename OutputIt>
 struct is_buffered_trivially_relocatable_host_to_device_copy
   : thrust::integral_constant<
@@ -121,7 +121,7 @@ template <
   typename DerivedPolicy
 , typename ForwardIt, typename OutputIt, typename Size
 >
-THRUST_RUNTIME_FUNCTION
+THRUST_HIP_RUNTIME_FUNCTION
 auto async_copy_n(
   execution_policy<DerivedPolicy>& policy
 , ForwardIt                        first
@@ -152,9 +152,9 @@ auto async_copy_n(
   return {};
 }
 
-// Workaround for an NVCC bug; when two SFINAE-enabled overloads are only
+// Workaround for an HIP bug; when two SFINAE-enabled overloads are only
 // distinguishable by a part of a SFINAE condition that is in a `decltype`,
-// NVCC thinks they are the same overload and emits an error.
+// HIP thinks they are the same overload and emits an error.
 template <typename ExecutionPolicy, typename ForwardIt, typename OutputIt>
 struct is_buffered_trivially_relocatable_device_to_host_copy
   : thrust::integral_constant<
@@ -176,7 +176,7 @@ template <
   typename DerivedPolicy
 , typename ForwardIt, typename OutputIt, typename Size
 >
-THRUST_RUNTIME_FUNCTION
+THRUST_HIP_RUNTIME_FUNCTION
 auto async_copy_n(
   execution_policy<DerivedPolicy>& policy
 , ForwardIt                        first
@@ -223,7 +223,7 @@ template <
   typename DerivedPolicy
 , typename ForwardIt, typename OutputIt, typename Size
 >
-THRUST_RUNTIME_FUNCTION
+THRUST_HIP_RUNTIME_FUNCTION
 auto async_copy_n(
   execution_policy<DerivedPolicy>& policy
 , ForwardIt                        first
@@ -269,7 +269,7 @@ template <
   typename DerivedPolicy
 , typename ForwardIt, typename OutputIt, typename Size
 >
-THRUST_RUNTIME_FUNCTION
+THRUST_HIP_RUNTIME_FUNCTION
 auto async_copy_n(
   execution_policy<DerivedPolicy>& policy
 , ForwardIt                        first
@@ -303,7 +303,7 @@ template <
   typename DerivedPolicy
 , typename ForwardIt, typename OutputIt, typename Size
 >
-THRUST_RUNTIME_FUNCTION
+THRUST_HIP_RUNTIME_FUNCTION
 auto async_copy_n(
   execution_policy<DerivedPolicy>& policy
 , ForwardIt                        first
@@ -338,9 +338,9 @@ auto async_copy_n(
 
   // Set up stream with dependencies.
 
-  hipStream_t const user_raw_stream = thrust::hip_cub::stream(policy);
+  hipStream_t const user_raw_stream = thrust::hip_rocprim::stream(policy);
 
-  if (thrust::hip_cub::default_stream() != user_raw_stream)
+  if (thrust::hip_rocprim::default_stream() != user_raw_stream)
   {
     fp = depend_on<return_type, return_pointer>(
       [] (decltype(content) const& c)
@@ -364,7 +364,7 @@ auto async_copy_n(
 
   // Run copy.
 
-  thrust::hip_cub::throw_on_error(
+  thrust::hip_rocprim::throw_on_error(
     hipMemcpyAsync(
       thrust::raw_pointer_cast(&*output)
     , thrust::raw_pointer_cast(&*first)
@@ -380,7 +380,7 @@ auto async_copy_n(
 
 }}} // namespace system::hip::detail
 
-namespace hip_cub
+namespace hip_rocprim
 {
 
 // ADL entry point.
@@ -388,7 +388,7 @@ template <
   typename DerivedPolicy
 , typename ForwardIt, typename Sentinel, typename OutputIt
 >
-THRUST_RUNTIME_FUNCTION
+THRUST_HIP_RUNTIME_FUNCTION
 auto async_copy(
   execution_policy<DerivedPolicy>& policy
 , ForwardIt                        first
@@ -401,10 +401,10 @@ THRUST_DECLTYPE_RETURNS(
   )
 )
 
-} // hip_cub
+} // hip_rocprim
 
 THRUST_END_NS
 
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
+#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
 #endif // THRUST_CPP_DIALECT >= 2011
