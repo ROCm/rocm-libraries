@@ -39,6 +39,10 @@ TEST(RocprimBasicTests, GetVersion)
 // and there won't be any multiple definitions error
 TEST(RocprimBasicTests, GetVersionOnDevice)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     auto version = get_rocprim_version_on_device();
     ASSERT_EQ(version, ROCPRIM_VERSION);
 }

@@ -136,7 +136,7 @@ std::vector<size_t> get_sizes(int seed_value)
 
 TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -269,7 +269,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
 
 TYPED_TEST(RocprimDeviceRadixSort, SortPairs)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -450,7 +450,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairs)
 
 TYPED_TEST(RocprimDeviceRadixSort, SortKeysDoubleBuffer)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
@@ -569,10 +569,10 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeysDoubleBuffer)
 
 TYPED_TEST(RocprimDeviceRadixSort, SortPairsDoubleBuffer)
 {
-    int device_id = test_utils::obtain_device_from_ctest();
+    int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
-    
+
     using key_type = typename TestFixture::params::key_type;
     using value_type = typename TestFixture::params::value_type;
     constexpr bool descending = TestFixture::params::descending;

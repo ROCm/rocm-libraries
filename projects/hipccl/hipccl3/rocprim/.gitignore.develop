@@ -55,4 +55,7 @@ compile_commands.json
 CTestTestfile.cmake
 build
 
+### Gtilab CI ###
+.gitlab-ci-gputest.yml
+
 # End of https://www.gitignore.io/api/c++,cmake
