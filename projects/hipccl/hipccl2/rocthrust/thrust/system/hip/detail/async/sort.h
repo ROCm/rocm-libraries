@@ -34,7 +34,7 @@
 
 #if THRUST_CPP_DIALECT >= 2011
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
 #include <thrust/system/hip/config.h>
 
@@ -51,6 +51,9 @@
 
 #include <type_traits>
 
+// rocprim include
+#include <rocprim/rocprim.hpp>
+
 THRUST_BEGIN_NS
 
 namespace system { namespace hip { namespace detail
@@ -61,7 +64,7 @@ template <
   typename DerivedPolicy
 , typename ForwardIt, typename Size, typename StrictWeakOrdering
 >
-THRUST_RUNTIME_FUNCTION
+THRUST_HIP_RUNTIME_FUNCTION
 auto async_stable_sort_n(
   execution_policy<DerivedPolicy>& policy,
   ForwardIt                        first,
@@ -85,6 +88,11 @@ auto async_stable_sort_n(
 
   // TODO: Buffer + copy
 
+  THRUST_UNUSEd_VAR(policy);
+  THRUST_UNUSEd_VAR(first);
+  THRUST_UNUSEd_VAR(n);
+  THRUST_UNUSEd_VAR(comp);
+
   return {};
 }
 
@@ -95,7 +103,7 @@ template <
   typename DerivedPolicy
 , typename ForwardIt, typename Size, typename StrictWeakOrdering
 >
-THRUST_RUNTIME_FUNCTION
+THRUST_HIP_RUNTIME_FUNCTION
 auto async_stable_sort_n(
   execution_policy<DerivedPolicy>& policy,
   ForwardIt                        first,
@@ -121,8 +129,6 @@ auto async_stable_sort_n(
     >
 //  >::type
 {
-  using T = typename thrust::iterator_traits<ForwardIt>::value_type;
-
   auto const device_alloc = get_async_device_allocator(policy);
 
   using pointer
@@ -135,17 +141,15 @@ auto async_stable_sort_n(
 
   size_t tmp_size = 0;
   thrust::hip_rocprim::throw_on_error(
-    thrust::hip_rocprim::__merge_sort::doit_step<
-      /* Sort items? */ std::false_type, /* Stable? */ std::true_type
-    >(
+    thrust::hip_rocprim::__merge_sort::dispatch<thrust::detail::false_type>::doit(
       nullptr
     , tmp_size
-    , first 
+    , first
     , static_cast<thrust::detail::uint8_t*>(nullptr) // Items.
     , n
     , comp
     , nullptr // Null stream, just for sizing.
-    , THRUST_DEBUG_SYNC_FLAG
+    , THRUST_HIP_DEBUG_SYNC_FLAG
     )
   , "after merge sort sizing"
   );
@@ -192,17 +196,15 @@ auto async_stable_sort_n(
   // Run merge sort.
 
   thrust::hip_rocprim::throw_on_error(
-    thrust::hip_rocprim::__merge_sort::doit_step<
-      /* Sort items? */ std::false_type, /* Stable? */ std::true_type
-    >(
+    thrust::hip_rocprim::__merge_sort::dispatch<thrust::detail::false_type>::doit(
       tmp_ptr
     , tmp_size
-    , first 
+    , first
     , static_cast<thrust::detail::uint8_t*>(nullptr) // Items.
     , n
     , comp
     , fp.future.stream()
-    , THRUST_DEBUG_SYNC_FLAG
+    , THRUST_HIP_DEBUG_SYNC_FLAG
     )
   , "after merge sort sizing"
   );
@@ -222,7 +224,7 @@ template <
   typename DerivedPolicy
 , typename ForwardIt, typename Size, typename CompareT
 >
-THRUST_RUNTIME_FUNCTION
+THRUST_HIP_RUNTIME_FUNCTION
 auto async_stable_sort_n(
   execution_policy<DerivedPolicy>& policy,
   ForwardIt                        first,
@@ -254,23 +256,21 @@ auto async_stable_sort_n(
 
   unique_eager_future_promise_pair<void, pointer> fp;
 
-  thrust::hip_rocprim::rocprim::DoubleBuffer<T> keys(
-    raw_pointer_cast(&*first), nullptr
-  );
-
   // Determine temporary device storage requirements.
 
   size_t tmp_size = 0;
+  T* first_ptr = raw_pointer_cast(&*first);
   thrust::hip_rocprim::throw_on_error(
-    thrust::hip_rocprim::rocprim::DeviceRadixSort::SortKeys(
+    rocprim::radix_sort_keys(
       nullptr
     , tmp_size
-    , keys 
+    , first_ptr
+    , static_cast<T*>(nullptr)
     , n
     , 0
     , sizeof(T) * 8
     , nullptr // Null stream, just for sizing.
-    , THRUST_DEBUG_SYNC_FLAG
+    , THRUST_HIP_DEBUG_SYNC_FLAG
     )
   , "after radix sort sizing"
   );
@@ -290,7 +290,7 @@ auto async_stable_sort_n(
   // make this guarantee.
   auto const content_ptr = content.get();
 
-  keys.d_buffers[1] = thrust::detail::aligned_reinterpret_cast<T*>(
+  T* keys_pointer = thrust::detail::aligned_reinterpret_cast<T*>(
     thrust::raw_pointer_cast(content_ptr)
   );
 
@@ -323,35 +323,32 @@ auto async_stable_sort_n(
   }
 
   // Run radix sort.
-
   thrust::hip_rocprim::throw_on_error(
-    thrust::hip_rocprim::rocprim::DeviceRadixSort::SortKeys(
+    rocprim::radix_sort_keys(
       tmp_ptr
     , tmp_size
-    , keys
+    , first_ptr
+    , keys_pointer
     , n
     , 0
     , sizeof(T) * 8
     , fp.future.stream()
-    , THRUST_DEBUG_SYNC_FLAG
+    , THRUST_HIP_DEBUG_SYNC_FLAG
     )
   , "after radix sort launch"
   );
 
-  if (0 != keys.selector)
-  {
-    // TODO: Temporary hack.
-    thrust::hip_rocprim::throw_on_error(
-      hipMemcpyAsync(
-        reinterpret_cast<T*>(keys.d_buffers[0])
-      , reinterpret_cast<T*>(keys.d_buffers[1])
-      , sizeof(T) * n
-      , hipMemcpyDeviceToDevice
-      , fp.future.stream()
-      )
-    , "radix sort copy back"
-    );
-  }
+  // TODO: Temporary hack.
+  thrust::hip_rocprim::throw_on_error(
+    hipMemcpyAsync(
+      reinterpret_cast<T*>(first_ptr)
+    , reinterpret_cast<T*>(keys_pointer)
+    , sizeof(T) * n
+    , hipMemcpyDeviceToDevice
+    , fp.future.stream()
+    )
+  , "radix sort copy back"
+  );
 
   return std::move(fp.future);
 }
@@ -366,7 +363,7 @@ template <
   typename DerivedPolicy
 , typename ForwardIt, typename Sentinel, typename StrictWeakOrdering
 >
-THRUST_RUNTIME_FUNCTION
+THRUST_HIP_RUNTIME_FUNCTION
 auto async_stable_sort(
   execution_policy<DerivedPolicy>& policy,
   ForwardIt                        first,
@@ -383,7 +380,6 @@ THRUST_DECLTYPE_RETURNS(
 
 THRUST_END_NS
 
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
+#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
 #endif // THRUST_CPP_DIALECT >= 2011
-

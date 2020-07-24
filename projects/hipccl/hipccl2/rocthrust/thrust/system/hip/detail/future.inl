@@ -48,10 +48,10 @@ constexpr nonowning_t nonowning{};
 struct event_deleter final
 {
   __host__
-  void operator()(hipEvent_t* e) const
+  void operator()(hipEvent_t e) const
   {
     if (nullptr != e)
-      thrust::hip_rocprim::throw_on_error(hipEventDestroy(*e), "");
+      thrust::hip_rocprim::throw_on_error(hipEventDestroy(e), "");
   }
 };
 
@@ -59,10 +59,10 @@ struct event_deleter final
 
 struct unique_event final
 {
-  using native_handle_type = hipEvent_t*;
+  using native_handle_type = hipEvent_t;
 
 private:
-  std::unique_ptr<hipEvent_t, event_deleter> handle_;
+  std::unique_ptr<ihipEvent_t, event_deleter> handle_;
 
 public:
   /// \brief Create a new stream and construct a handle to it. When the handle
@@ -71,9 +71,9 @@ public:
   unique_event()
     : handle_(nullptr, event_deleter())
   {
-    native_handle_type e = nullptr;
+    native_handle_type e;
     thrust::hip_rocprim::throw_on_error(
-      hipEventCreateWithFlags(e, hipEventDisableTiming),
+      hipEventCreateWithFlags(&e, hipEventDisableTiming),
       ""
     );
     handle_.reset(e);
@@ -103,7 +103,7 @@ public:
   __host__
   bool ready() const
   {
-    hipError_t const err = hipEventQuery(*handle_.get());
+    hipError_t const err = hipEventQuery(handle_.get());
 
     if (hipErrorNotReady == err)
       return false;
@@ -117,7 +117,7 @@ public:
   __host__
   void wait() const
   {
-    thrust::hip_rocprim::throw_on_error(hipEventSynchronize(*handle_.get()), "");
+    thrust::hip_rocprim::throw_on_error(hipEventSynchronize(handle_.get()), "");
   }
 
   __host__
@@ -138,10 +138,10 @@ public:
 struct stream_deleter final
 {
   __host__
-  void operator()(hipStream_t* s) const
+  void operator()(hipStream_t s) const
   {
     if (nullptr != s)
-      thrust::hip_rocprim::throw_on_error(hipStreamDestroy(*s), "");
+      thrust::hip_rocprim::throw_on_error(hipStreamDestroy(s), "");
   }
 };
 
@@ -160,11 +160,11 @@ public:
     : cond_(false) {}
 
   __host__
-  void operator()(hipStream_t* s) const
+  void operator()(hipStream_t s) const
   {
     if (cond_ && nullptr != s)
     {
-      thrust::hip_rocprim::throw_on_error(hipStreamDestroy(*s), "");
+      thrust::hip_rocprim::throw_on_error(hipStreamDestroy(s), "");
     }
   }
 };
@@ -173,10 +173,10 @@ public:
 
 struct unique_stream final
 {
-  using native_handle_type = hipStream_t*;
+  using native_handle_type = hipStream_t;
 
 private:
-  std::unique_ptr<hipStream_t, stream_conditional_deleter> handle_;
+  std::unique_ptr<ihipStream_t, stream_conditional_deleter> handle_;
 
 public:
   /// \brief Create a new stream and construct a handle to it. When the handle
@@ -185,9 +185,9 @@ public:
   unique_stream()
     : handle_(nullptr, stream_conditional_deleter())
   {
-    native_handle_type s = nullptr;
+    native_handle_type s;
     thrust::hip_rocprim::throw_on_error(
-      hipStreamCreateWithFlags(s, hipStreamNonBlocking),
+      hipStreamCreateWithFlags(&s, hipStreamNonBlocking),
       ""
     );
     handle_.reset(s);
@@ -224,7 +224,7 @@ public:
   __host__
   bool ready() const
   {
-    hipError_t const err = hipStreamQuery(*handle_.get());
+    hipError_t const err = hipStreamQuery(handle_.get());
 
     if (hipErrorNotReady == err)
       return false;
@@ -239,7 +239,7 @@ public:
   void wait() const
   {
     thrust::hip_rocprim::throw_on_error(
-      hipStreamSynchronize(*handle_.get()),
+      hipStreamSynchronize(handle_.get()),
       ""
     );
   }
@@ -248,7 +248,7 @@ public:
   void depend_on(unique_event& e)
   {
     thrust::hip_rocprim::throw_on_error(
-      hipStreamWaitEvent(*handle_.get(), *e.get(), 0),
+      hipStreamWaitEvent(handle_.get(), e.get(), 0),
       ""
     );
   }
@@ -267,7 +267,7 @@ public:
   __host__
   void record(unique_event& e)
   {
-    thrust::hip_rocprim::throw_on_error(hipEventRecord(*e.get(), *handle_.get()), "");
+    thrust::hip_rocprim::throw_on_error(hipEventRecord(e.get(), handle_.get()), "");
   }
 
   __host__
@@ -547,6 +547,7 @@ private:
   __host__ __device__
   weak_promise(pointer p)
   {
+    THRUST_UNUSED_VAR(p);
     assert(pointer{} == p);
   }
 

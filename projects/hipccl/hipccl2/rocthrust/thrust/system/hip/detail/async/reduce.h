@@ -48,6 +48,9 @@
 
 #include <type_traits>
 
+// rocprim include
+#include <rocprim/rocprim.hpp>
+
 THRUST_BEGIN_NS
 
 namespace system { namespace hip { namespace detail
@@ -57,7 +60,7 @@ template <
   typename DerivedPolicy
 , typename ForwardIt, typename Size, typename T, typename BinaryOp
 >
-THRUST_RUNTIME_FUNCTION
+THRUST_HIP_RUNTIME_FUNCTION
 auto async_reduce_n(
   execution_policy<DerivedPolicy>& policy,
   ForwardIt                        first,
@@ -133,7 +136,7 @@ auto async_reduce_n(
     , std::tuple_cat(
         std::make_tuple(
           std::move(content)
-        , unique_stream(nonowning, &user_raw_stream)
+        , unique_stream(nonowning, user_raw_stream)
         )
       , extract_dependencies(
           std::move(thrust::detail::derived_cast(policy))
@@ -164,7 +167,7 @@ auto async_reduce_n(
   }
 
   // Run reduction.
- 
+
   thrust::hip_rocprim::throw_on_error(
     rocprim::reduce(
       tmp_ptr
@@ -193,7 +196,7 @@ template <
   typename DerivedPolicy
 , typename ForwardIt, typename Sentinel, typename T, typename BinaryOp
 >
-THRUST_RUNTIME_FUNCTION
+THRUST_HIP_RUNTIME_FUNCTION
 auto async_reduce(
   execution_policy<DerivedPolicy>& policy,
   ForwardIt                        first,
@@ -211,7 +214,6 @@ THRUST_DECLTYPE_RETURNS(
 
 THRUST_END_NS
 
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
+#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
 #endif // THRUST_CPP_DIALECT >= 2011
-

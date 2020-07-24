@@ -34,7 +34,7 @@
 
 #if THRUST_CPP_DIALECT >= 2011
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
 #include <thrust/system/hip/config.h>
 
@@ -59,7 +59,7 @@ using default_async_host_resource =
 
 template <typename DerivedPolicy>
 auto get_async_host_allocator(
-  thrust::detail::execution_policy_base<DerivedPolicy>& 
+  thrust::detail::execution_policy_base<DerivedPolicy>&
 )
 THRUST_DECLTYPE_RETURNS(
   thrust::mr::stateless_resource_allocator<
@@ -77,7 +77,7 @@ using default_async_device_resource =
 
 template <typename DerivedPolicy>
 auto get_async_device_allocator(
-  thrust::detail::execution_policy_base<DerivedPolicy>& 
+  thrust::detail::execution_policy_base<DerivedPolicy>&
 )
 THRUST_DECLTYPE_RETURNS(
   thrust::mr::stateless_resource_allocator<
@@ -100,7 +100,7 @@ using default_async_universal_host_pinned_resource =
 
 template <typename DerivedPolicy>
 auto get_async_universal_host_pinned_allocator(
-  thrust::detail::execution_policy_base<DerivedPolicy>& 
+  thrust::detail::execution_policy_base<DerivedPolicy>&
 )
 THRUST_DECLTYPE_RETURNS(
   thrust::mr::stateless_resource_allocator<
@@ -112,7 +112,6 @@ THRUST_DECLTYPE_RETURNS(
 
 THRUST_END_NS
 
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
+#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
 #endif // THRUST_CPP_DIALECT >= 2011
-

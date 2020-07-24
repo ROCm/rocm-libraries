@@ -35,7 +35,7 @@
 
 #if THRUST_CPP_DIALECT >= 2011
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
 #include <thrust/system/hip/config.h>
 
@@ -75,7 +75,7 @@ template <
   typename DerivedPolicy
 , typename ForwardIt, typename Size, typename UnaryFunction
 >
-THRUST_RUNTIME_FUNCTION
+THRUST_HIP_RUNTIME_FUNCTION
 auto async_for_each_n(
   execution_policy<DerivedPolicy>& policy,
   ForwardIt                        first,
@@ -151,7 +151,6 @@ THRUST_DECLTYPE_RETURNS(
 
 THRUST_END_NS
 
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
+#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
 #endif // THRUST_CPP_DIALECT >= 2011
-
