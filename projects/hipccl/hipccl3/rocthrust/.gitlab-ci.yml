@@ -37,7 +37,7 @@ build:rocm:
   script:
     - mkdir build
     - cd build
-    - CXX=hipcc cmake -DBUILD_TEST=ON -DBUILD_EXAMPLES=ON -DBUILD_BENCHMARKS=ON ../.
+    - CXX=hipcc cmake -DBUILD_TEST=ON -DBUILD_EXAMPLES=ON -DBUILD_BENCHMARKS=ON -DAMDGPU_TARGETS="gfx803;gfx900;gfx906" ../.
     - make -j $(nproc)
     - make package
   artifacts:
