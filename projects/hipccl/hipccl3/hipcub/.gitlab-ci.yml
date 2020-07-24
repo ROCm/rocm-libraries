@@ -103,6 +103,7 @@ build:rocm:
       -D CMAKE_BUILD_TYPE=Release
       -D BUILD_TEST=ON
       -D BUILD_EXAMPLE=ON
+      -D AMDGPU_TARGETS="gfx803;gfx900;gfx906"
       -B build
       ../.
     - cmake
