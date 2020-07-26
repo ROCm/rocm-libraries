@@ -38,7 +38,7 @@ add_rocthrust_test("thrust.hip.adjacent_difference" test_adjacent_difference.cpp
 add_rocthrust_test("thrust.hip.advance" test_advance.cpp)
 add_rocthrust_test("thrust.hip.allocator" test_allocator.cpp)
 add_rocthrust_test("thrust.hip.allocator_aware_policies" test_allocator_aware_policies.cpp)
-add_rocthrust_test("thrust.hip.async_copy" test_async_copy.cpp)
+# add_rocthrust_test("thrust.hip.async_copy" test_async_copy.cpp)
 # add_rocthrust_test("thrust.hip.async_reduce" test_async_reduce.cpp)
 add_rocthrust_test("thrust.hip.async_sort" test_async_sort.cpp)
 add_rocthrust_test("thrust.hip.binary_search" test_binary_search.cpp)
