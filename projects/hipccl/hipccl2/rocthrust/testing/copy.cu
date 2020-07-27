@@ -231,25 +231,25 @@ void TestCopyListTo(void)
 
     typename Vector::iterator v_result = thrust::copy(l.begin(), l.end(), v.begin());
 
-    ASSERT_EQUAL(v[0], 0);
-    ASSERT_EQUAL(v[1], 1);
-    ASSERT_EQUAL(v[2], 2);
-    ASSERT_EQUAL(v[3], 3);
-    ASSERT_EQUAL(v[4], 4);
+    ASSERT_EQUAL(v[0], T(0));
+    ASSERT_EQUAL(v[1], T(1));
+    ASSERT_EQUAL(v[2], T(2));
+    ASSERT_EQUAL(v[3], T(3));
+    ASSERT_EQUAL(v[4], T(4));
     ASSERT_EQUAL_QUIET(v_result, v.end());
 
     l.clear();
 
     thrust::copy(v.begin(), v.end(), std::back_insert_iterator< std::list<T> >(l));
 
-    ASSERT_EQUAL(l.size(), 5);
+    ASSERT_EQUAL(l.size(), 5lu);
 
     typename std::list<T>::const_iterator iter = l.begin();
-    ASSERT_EQUAL(*iter, 0);  iter++;
-    ASSERT_EQUAL(*iter, 1);  iter++;
-    ASSERT_EQUAL(*iter, 2);  iter++;
-    ASSERT_EQUAL(*iter, 3);  iter++;
-    ASSERT_EQUAL(*iter, 4);  iter++;
+    ASSERT_EQUAL(*iter, T(0));  iter++;
+    ASSERT_EQUAL(*iter, T(1));  iter++;
+    ASSERT_EQUAL(*iter, T(2));  iter++;
+    ASSERT_EQUAL(*iter, T(3));  iter++;
+    ASSERT_EQUAL(*iter, T(4));  iter++;
 }
 DECLARE_VECTOR_UNITTEST(TestCopyListTo);
 
@@ -561,7 +561,6 @@ DECLARE_UNITTEST(TestCopyDispatchImplicit);
 
 
 template<typename InputIterator, typename OutputIterator, typename Predicate>
-__host__ __device__
 OutputIterator copy_if(my_system &system, InputIterator, InputIterator, OutputIterator result, Predicate)
 {
     system.validate_dispatch();
@@ -585,7 +584,6 @@ DECLARE_UNITTEST(TestCopyIfDispatchExplicit);
 
 
 template<typename InputIterator, typename OutputIterator, typename Predicate>
-__host__ __device__
 OutputIterator copy_if(my_tag, InputIterator, InputIterator, OutputIterator result, Predicate)
 {
     *result = 13;
@@ -607,7 +605,6 @@ DECLARE_UNITTEST(TestCopyIfDispatchImplicit);
 
 
 template<typename InputIterator1, typename InputIterator2, typename OutputIterator, typename Predicate>
-__host__ __device__
 OutputIterator copy_if(my_system &system, InputIterator1, InputIterator1, InputIterator2, OutputIterator result, Predicate)
 {
     system.validate_dispatch();
@@ -632,7 +629,6 @@ DECLARE_UNITTEST(TestCopyIfStencilDispatchExplicit);
 
 
 template<typename InputIterator1, typename InputIterator2, typename OutputIterator, typename Predicate>
-__host__ __device__
 OutputIterator copy_if(my_tag, InputIterator1, InputIterator1, InputIterator2, OutputIterator result, Predicate)
 {
     *result = 13;
