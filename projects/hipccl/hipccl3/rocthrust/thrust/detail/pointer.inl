@@ -101,6 +101,7 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
 } // end pointer::operator=
 #endif
 
+
 template<typename Element, typename Tag, typename Reference, typename Derived>
   template<typename OtherPointer>
     __host__ __device__
@@ -134,6 +135,18 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
 {
   return super_t::base();
 } // end pointer::get
+
+
+#if THRUST_CPP_DIALECT >= 2011
+template<typename Element, typename Tag, typename Reference, typename Derived>
+  __host__ __device__
+  pointer<Element,Tag,Reference,Derived>
+    ::operator bool() const
+{
+  return bool(get());
+} // end pointer::operator bool
+#endif
+
 
 template<typename Element, typename Tag, typename Reference, typename Derived,
          typename charT, typename traits>
