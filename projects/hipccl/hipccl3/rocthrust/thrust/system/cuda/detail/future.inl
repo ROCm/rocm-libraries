@@ -617,7 +617,7 @@ public:
 
 ///////////////////////////////////////////////////////////////////////////////
 
-} // namespace detail
+} // detail
 
 struct ready_event final
 {
@@ -1364,5 +1364,4 @@ THRUST_DECLTYPE_RETURNS(std::move(dependency))
 
 THRUST_END_NS
 
-#endif 
-
+#endif // THRUST_CPP_DIALECT >= 2011
