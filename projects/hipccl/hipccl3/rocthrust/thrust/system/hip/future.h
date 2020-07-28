@@ -13,8 +13,6 @@
 #include <thrust/system/hip/pointer.h>
 #include <thrust/system/hip/detail/execution_policy.h>
 
-#include <thrust/future.h>
-
 THRUST_BEGIN_NS
 
 namespace system { namespace hip
