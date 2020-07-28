@@ -12,16 +12,18 @@
 #include <thrust/detail/cpp11_required.h>
 #include <thrust/detail/modern_gcc_required.h>
 
-#if THRUST_CPP_DIALECT >= 2011
+#if THRUST_CPP_DIALECT >= 2011 && !defined(THRUST_LEGACY_GCC)
 
 #include <thrust/optional.h>
 #include <thrust/detail/type_deduction.h>
 #include <thrust/type_traits/integer_sequence.h>
+#include <thrust/type_traits/remove_cvref.h>
 #include <thrust/detail/type_traits/pointer_traits.h>
-#include <thrust/tuple_algorithms.h>
+#include <thrust/detail/tuple_algorithms.h>
 #include <thrust/allocate_unique.h>
 #include <thrust/detail/static_assert.h>
 #include <thrust/detail/execute_with_dependencies.h>
+#include <thrust/detail/event_error.h>
 #include <thrust/system/hip/memory.h>
 #include <thrust/system/hip/future.h>
 #include <thrust/system/hip/detail/util.h>
@@ -42,7 +44,7 @@ namespace system { namespace hip { namespace detail
 
 struct nonowning_t final {};
 
-constexpr nonowning_t nonowning{};
+THRUST_INLINE_CONSTANT nonowning_t nonowning{};
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -196,7 +198,7 @@ public:
   /// \brief Construct a non-owning handle to an existing stream. When the
   ///        handle is destroyed, the stream is not destroyed.
   __host__
-  unique_stream(nonowning_t, native_handle_type handle)
+  explicit unique_stream(nonowning_t, native_handle_type handle)
     : handle_(handle, stream_conditional_deleter(nonowning))
   {}
 
