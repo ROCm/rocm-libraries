@@ -48,7 +48,7 @@ THRUST_INLINE_CONSTANT nonowning_t nonowning{};
 
 ///////////////////////////////////////////////////////////////////////////////
 
-struct event_deleter final
+struct marker_deleter final
 {
   __host__
   void operator()(hipEvent_t e) const
@@ -60,19 +60,19 @@ struct event_deleter final
 
 ///////////////////////////////////////////////////////////////////////////////
 
-struct unique_event final
+struct unique_marker final
 {
   using native_handle_type = hipEvent_t;
 
 private:
-  std::unique_ptr<ihipEvent_t, event_deleter> handle_;
+  std::unique_ptr<ihipEvent_t, marker_deleter> handle_;
 
 public:
   /// \brief Create a new stream and construct a handle to it. When the handle
   ///        is destroyed, the stream is destroyed.
   __host__
-  unique_event()
-    : handle_(nullptr, event_deleter())
+  unique_marker()
+    : handle_(nullptr, marker_deleter())
   {
     native_handle_type e;
     thrust::hip_rocprim::throw_on_error(
@@ -82,13 +82,13 @@ public:
   }
 
   __thrust_exec_check_disable__
-  unique_event(unique_event const&) = delete;
+  unique_marker(unique_marker const&) = delete;
   __thrust_exec_check_disable__
-  unique_event(unique_event&&) = default;
+  unique_marker(unique_marker&&) = default;
   __thrust_exec_check_disable__
-  unique_event& operator=(unique_event const&) = delete;
+  unique_marker& operator=(unique_marker const&) = delete;
   __thrust_exec_check_disable__
-  unique_event& operator=(unique_event&&) = default;
+  unique_marker& operator=(unique_marker&&) = default;
 
   __thrust_exec_check_disable__
   ~unique_marker() = default;
@@ -124,13 +124,13 @@ public:
   }
 
   __host__
-  bool operator==(unique_event const& other) const
+  bool operator==(unique_marker const& other) const
   {
     return other.handle_ == handle_;
   }
 
   __host__
-  bool operator!=(unique_event const& other) const
+  bool operator!=(unique_marker const& other) const
   {
     return !(other == *this);
   }
@@ -159,7 +159,7 @@ public:
     : cond_(true) {}
 
   __host__
-  constexpr stream_conditional_deleter(nonowning_t) noexcept
+  explicit constexpr stream_conditional_deleter(nonowning_t) noexcept
     : cond_(false) {}
 
   __host__
@@ -247,7 +247,7 @@ public:
   }
 
   __host__
-  void depend_on(unique_event& e)
+  void depend_on(unique_marker& e)
   {
     thrust::hip_rocprim::throw_on_error(
       hipStreamWaitEvent(handle_.get(), e.get(), 0)
@@ -259,14 +259,14 @@ public:
   {
     if (s != *this)
     {
-      unique_event e;
+      unique_marker e;
       s.record(e);
       depend_on(e);
     }
   }
 
   __host__
-  void record(unique_event& e)
+  void record(unique_marker& e)
   {
     thrust::hip_rocprim::throw_on_error(hipEventRecord(e.get(), handle_.get()));
   }
