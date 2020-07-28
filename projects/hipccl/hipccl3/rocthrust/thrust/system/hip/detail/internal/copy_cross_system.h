@@ -34,16 +34,15 @@
 #include <thrust/system/hip/config.h>
 
 
-#include <thrust/detail/dispatch/is_trivial_copy.h>
 #include <thrust/distance.h>
 #include <thrust/advance.h>
 #include <thrust/detail/raw_pointer_cast.h>
 #include <thrust/system/hip/detail/uninitialized_copy.h>
 #include <thrust/system/hip/detail/util.h>
 #include <thrust/detail/temporary_array.h>
+#include <thrust/type_traits/is_trivially_relocatable.h>
 
-
-BEGIN_NS_THRUST
+THRUST_BEGIN_NS
 namespace hip_rocprim
 {
 namespace __copy
@@ -305,7 +304,7 @@ cross_system_copy_n(thrust::hip_rocprim::execution_policy<D>& device_s,
             begin,
             n,
             result,
-            typename thrust::detail::dispatch::is_trivial_copy<InputIt, OutputIt>::type());
+            typename is_trivially_relocatable_sequence_copy<InputIt, OutputIt>::type());
     }
 
     template <class System1, class System2, class InputIterator, class OutputIterator>
@@ -319,4 +318,4 @@ cross_system_copy_n(thrust::hip_rocprim::execution_policy<D>& device_s,
     }
 } // namespace __copy
 } // namespace hip_rocprim
-END_NS_THRUST
+THRUST_END_NS

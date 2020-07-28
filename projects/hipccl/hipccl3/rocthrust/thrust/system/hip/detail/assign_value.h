@@ -24,7 +24,7 @@
 #include <thrust/system/hip/detail/copy.h>
 #include <thrust/system/hip/detail/execution_policy.h>
 
-BEGIN_NS_THRUST
+THRUST_BEGIN_NS
 namespace hip_rocprim
 {
 
@@ -69,5 +69,5 @@ assign_value(cross_system<System1, System2>& systems, Pointer1 dst, Pointer2 src
 
 } // end assign_value()
 } // end hip_rocprim
-END_NS_THRUST
+THRUST_END_NS
 #endif

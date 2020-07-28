@@ -127,7 +127,11 @@ void assert_equal(char a, char b,
     }
 }
 
+<<<<<<< HEAD
 // sometimes its not possible to << a type
+=======
+// sometimes it's not possible to << a type
+>>>>>>> 14f8a540... Thrust 10.1 asynchronous algorithms (core functionality).
 template <typename T1, typename T2>
 void assert_equal_quiet(const T1& a, const T2& b,
                         const std::string& filename = "unknown", int lineno = -1)
@@ -136,6 +140,7 @@ void assert_equal_quiet(const T1& a, const T2& b,
         unittest::UnitTestFailure f;
         f << "[" << filename << ":" << lineno << "] ";
         f << "values are not equal";
+<<<<<<< HEAD
         f << " [type='" << type_name<T1>() << "']";
         throw f;
     }
@@ -177,6 +182,8 @@ void assert_not_equal_quiet(const T1& a, const T2& b,
         unittest::UnitTestFailure f;
         f << "[" << filename << ":" << lineno << "] ";
         f << "values are equal";
+=======
+>>>>>>> 14f8a540... Thrust 10.1 asynchronous algorithms (core functionality).
         f << " [type='" << type_name<T1>() << "']";
         throw f;
     }

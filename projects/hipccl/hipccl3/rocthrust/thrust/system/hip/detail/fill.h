@@ -34,7 +34,7 @@
 #include <thrust/system/hip/detail/execution_policy.h>
 #include <thrust/system/hip/detail/transform.h>
 
-BEGIN_NS_THRUST
+THRUST_BEGIN_NS
 namespace hip_rocprim
 {
 
@@ -63,5 +63,5 @@ fill(execution_policy<Derived>& policy,
 } // func filll
 
 } // namespace hip_rocprim
-END_NS_THRUST
+THRUST_END_NS
 #endif

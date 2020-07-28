@@ -32,7 +32,7 @@
 #include <thrust/distance.h>
 #include <thrust/system/hip/detail/reduce.h>
 
-BEGIN_NS_THRUST
+THRUST_BEGIN_NS
 namespace hip_rocprim
 {
 
@@ -49,11 +49,11 @@ transform_reduce(execution_policy<Derived>& policy,
     size_type num_items = static_cast<size_type>(thrust::distance(first, last));
     typedef transform_input_iterator_t<T, InputIt, TransformOp> transformed_iterator_t;
 
-    return hip_rocprim::reduce_n(
+    return reduce_n(
         policy, transformed_iterator_t(first, transform_op), num_items, init, reduce_op
     );
 }
 
 } // namespace hip_rocprim
-END_NS_THRUST
+THRUST_END_NS
 #endif
