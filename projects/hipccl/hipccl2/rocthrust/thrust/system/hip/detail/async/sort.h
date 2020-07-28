@@ -73,12 +73,7 @@ auto async_stable_sort_n(
 ) ->
   typename std::enable_if<
     negation<is_contiguous_iterator<ForwardIt>>::value
-  , unique_eager_future<
-      void
-    , typename thrust::detail::allocator_traits<
-        decltype(get_async_device_allocator(policy))
-      >::template rebind_traits<void>::pointer
-    >
+  , unique_eager_event
   >::type
 {
   THRUST_STATIC_ASSERT_MSG(
@@ -109,33 +104,13 @@ auto async_stable_sort_n(
   ForwardIt                        first,
   Size                             n,
   StrictWeakOrdering               comp
-) ->
-/*  typename std::enable_if<
-    conjunction<
-      is_contiguous_iterator<ForwardIt>
-    , negation<
-        std::is_scalar<
-          typename thrust::iterator_traits<ForwardIt>::value_type
-        >
-      >
-    >::value
-  ,
-*/
-    unique_eager_future<
-      void
-    , typename thrust::detail::allocator_traits<
-        decltype(get_async_device_allocator(policy))
-      >::template rebind_traits<void>::pointer
-    >
-//  >::type
+)
+    // TODO the return type conditions should match the cuda path
+    -> unique_eager_event
 {
   auto const device_alloc = get_async_device_allocator(policy);
 
-  using pointer
-    = typename thrust::detail::allocator_traits<decltype(device_alloc)>::
-      template rebind_traits<void>::pointer;
-
-  unique_eager_future_promise_pair<void, pointer> fp;
+  unique_eager_event e;
 
   // Determine temporary device storage requirements.
 
@@ -175,22 +150,30 @@ auto async_stable_sort_n(
 
   if (thrust::hip_rocprim::default_stream() != user_raw_stream)
   {
-    fp = depend_on<void, pointer>(
-      nullptr
-    , std::make_tuple(
-        std::move(content)
-      , unique_stream(nonowning, user_raw_stream)
-      )
-    );
+      e = make_dependent_event(
+          std::tuple_cat(
+            std::make_tuple(
+              std::move(content)
+            , unique_stream(nonowning, user_raw_stream)
+            )
+          , extract_dependencies(
+              std::move(thrust::detail::derived_cast(policy))
+            )
+          )
+      );
   }
   else
   {
-    fp = depend_on<void, pointer>(
-      nullptr
-    , std::make_tuple(
-        std::move(content)
-      )
-    );
+      e = make_dependent_event(
+          std::tuple_cat(
+            std::make_tuple(
+              std::move(content)
+            )
+          , extract_dependencies(
+              std::move(thrust::detail::derived_cast(policy))
+            )
+          )
+      );
   }
 
   // Run merge sort.
@@ -203,13 +186,13 @@ auto async_stable_sort_n(
     , static_cast<thrust::detail::uint8_t*>(nullptr) // Items.
     , n
     , comp
-    , fp.future.stream()
+    , e.stream().native_handle()
     , THRUST_HIP_DEBUG_SYNC_FLAG
     )
   , "after merge sort sizing"
   );
 
-  return std::move(fp.future);
+  return e;
 }
 
 // ContiguousIterator iterators
@@ -238,23 +221,14 @@ auto async_stable_sort_n(
         typename thrust::iterator_traits<ForwardIt>::value_type
       >
     >::value
-  , unique_eager_future<
-      void
-    , typename thrust::detail::allocator_traits<
-        decltype(get_async_device_allocator(policy))
-      >::template rebind_traits<void>::pointer
-    >
+  , unique_eager_event
   >::type
 {
   using T = typename thrust::iterator_traits<ForwardIt>::value_type;
 
   auto const device_alloc = get_async_device_allocator(policy);
 
-  using pointer
-    = typename thrust::detail::allocator_traits<decltype(device_alloc)>::
-      template rebind_traits<void>::pointer;
-
-  unique_eager_future_promise_pair<void, pointer> fp;
+  unique_eager_event e;
 
   // Determine temporary device storage requirements.
 
@@ -304,20 +278,28 @@ auto async_stable_sort_n(
 
   if (thrust::hip_rocprim::default_stream() != user_raw_stream)
   {
-    fp = depend_on<void, pointer>(
-      nullptr
-    , std::make_tuple(
-        std::move(content)
-      , unique_stream(nonowning, user_raw_stream)
+    e = make_dependent_event(
+      std::tuple_cat(
+        std::make_tuple(
+          std::move(content)
+        , unique_stream(nonowning, user_raw_stream)
+        )
+      , extract_dependencies(
+          std::move(thrust::detail::derived_cast(policy))
+        )
       )
     );
   }
   else
   {
-    fp = depend_on<void, pointer>(
-      nullptr
-    , std::make_tuple(
-        std::move(content)
+    e = make_dependent_event(
+      std::tuple_cat(
+        std::make_tuple(
+          std::move(content)
+        )
+      , extract_dependencies(
+          std::move(thrust::detail::derived_cast(policy))
+        )
       )
     );
   }
@@ -332,7 +314,7 @@ auto async_stable_sort_n(
     , n
     , 0
     , sizeof(T) * 8
-    , fp.future.stream()
+    , e.stream().native_handle()
     , THRUST_HIP_DEBUG_SYNC_FLAG
     )
   , "after radix sort launch"
@@ -345,12 +327,12 @@ auto async_stable_sort_n(
     , reinterpret_cast<T*>(keys_pointer)
     , sizeof(T) * n
     , hipMemcpyDeviceToDevice
-    , fp.future.stream()
+    , e.stream().native_handle()
     )
   , "radix sort copy back"
   );
 
-  return std::move(fp.future);
+  return e;
 }
 
 }}} // namespace system::hip::detail
