@@ -43,14 +43,15 @@ template<typename DerivedPolicy,
 __host__ __device__
 InputIterator for_each(thrust::execution_policy<DerivedPolicy> &,
                        InputIterator first,
-                       InputIterator ,
-                       UnaryFunction );
-// {
-//   // unimplemented
-//   THRUST_STATIC_ASSERT( (thrust::detail::depend_on_instantiation<InputIterator, false>::value) );
-//   return first;
-// } // end for_each()
-
+                       InputIterator,
+                       UnaryFunction)
+{
+  THRUST_STATIC_ASSERT_MSG(
+    (thrust::detail::depend_on_instantiation<InputIterator, false>::value)
+  , "unimplemented for this system"
+  );
+  return first;
+} // end for_each()
 
 template<typename DerivedPolicy,
          typename InputIterator,
@@ -59,14 +60,15 @@ template<typename DerivedPolicy,
 __host__ __device__
 InputIterator for_each_n(thrust::execution_policy<DerivedPolicy> &,
                          InputIterator first,
-                         Size ,
-                         UnaryFunction );
-// {
-//   // unimplemented
-//   THRUST_STATIC_ASSERT( (thrust::detail::depend_on_instantiation<InputIterator, false>::value) );
-//   return first;
-// } // end for_each_n()
-
+                         Size,
+                         UnaryFunction)
+{
+  THRUST_STATIC_ASSERT_MSG(
+    (thrust::detail::depend_on_instantiation<InputIterator, false>::value)
+  , "unimplemented for this system"
+  );
+  return first;
+} // end for_each_n()
 
 } // end namespace generic
 } // end namespace detail

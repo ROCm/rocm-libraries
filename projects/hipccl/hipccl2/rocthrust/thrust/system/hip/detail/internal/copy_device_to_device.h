@@ -34,7 +34,7 @@
 #include <thrust/functional.h>
 #include <thrust/distance.h>
 
-BEGIN_NS_THRUST
+THRUST_BEGIN_NS
 namespace hip_rocprim
 {
 namespace __copy
@@ -51,5 +51,5 @@ namespace __copy
     }
 } // namespace __copy
 } // namespace hip_rocprim
-END_NS_THRUST
+THRUST_END_NS
 #endif

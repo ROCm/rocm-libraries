@@ -47,7 +47,7 @@
 // rocprim include
 #include <rocprim/rocprim.hpp>
 
-BEGIN_NS_THRUST
+THRUST_BEGIN_NS
 namespace hip_rocprim
 {
 namespace __partition
@@ -634,5 +634,5 @@ is_partitioned(execution_policy<Derived>& policy,
 }
 
 } // namespace hip_rocprim
-END_NS_THRUST
+THRUST_END_NS
 #endif

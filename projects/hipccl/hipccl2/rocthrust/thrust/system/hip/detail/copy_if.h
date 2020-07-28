@@ -41,7 +41,7 @@
 // rocPRIM includes
 #include <rocprim/rocprim.hpp>
 
-BEGIN_NS_THRUST
+THRUST_BEGIN_NS
 
 // XXX declare generic copy_if interface
 // to avoid circulular dependency from thrust/copy.h
@@ -240,7 +240,7 @@ copy_if(execution_policy<Derived>& policy,
 } // func copy_if
 
 } // namespace hip_rocprim
-END_NS_THRUST
+THRUST_END_NS
 
 #include <thrust/copy.h>
 #endif

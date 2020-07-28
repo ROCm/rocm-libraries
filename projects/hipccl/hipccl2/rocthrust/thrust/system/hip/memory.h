@@ -28,7 +28,7 @@
 #include <thrust/mr/allocator.h>
 #include <ostream>
 
-BEGIN_NS_THRUST
+THRUST_BEGIN_NS
 namespace hip_rocprim
 {
 
@@ -189,6 +189,6 @@ namespace hip
     using thrust::hip_rocprim::malloc;
 } // end hip
 
-END_NS_THRUST
+THRUST_END_NS
 
 #include <thrust/system/hip/detail/memory.inl>

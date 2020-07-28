@@ -253,6 +253,10 @@ void TestVectorToAndFromHostVector(void)
 
     ASSERT_EQUAL(v, h);
 
+    THRUST_DISABLE_CLANG_SELF_ASSIGNMENT_WARNING(v = v);
+
+    ASSERT_EQUAL(v, h);
+
     v[0] = 10;
     v[1] = 11;
     v[2] = 12;
@@ -303,6 +307,10 @@ void TestVectorToAndFromDeviceVector(void)
     h[2] = 2;
 
     Vector v(h);
+
+    ASSERT_EQUAL(v, h);
+
+    THRUST_DISABLE_CLANG_SELF_ASSIGNMENT_WARNING(v = v);
 
     ASSERT_EQUAL(v, h);
 

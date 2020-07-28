@@ -47,7 +47,7 @@
 // rocprim include
 #include <rocprim/rocprim.hpp>
 
-BEGIN_NS_THRUST
+THRUST_BEGIN_NS
 
 // forward declare generic reduce
 // to circumvent circular dependency
@@ -182,7 +182,7 @@ reduce(execution_policy<Derived>& policy,
 
 } // namespace  hip_rocprim
 
-END_NS_THRUST
+THRUST_END_NS
 
 #include <thrust/memory.h>
 #include <thrust/reduce.h>

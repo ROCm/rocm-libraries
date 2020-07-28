@@ -286,10 +286,12 @@ bool UnitTestDriver::post_test_sanity_check(const UnitTest &test, bool concise)
 bool UnitTestDriver::run_tests(std::vector<UnitTest *>& tests_to_run, const ArgumentMap& kwargs)
 {
   std::time_t start_time = std::time(0);
-
+  
+  THRUST_DISABLE_MSVC_FORCING_VALUE_TO_BOOL_WARNING_BEGIN
   bool verbose = kwargs.count("verbose");
   bool concise = kwargs.count("concise");
-
+  THRUST_DISABLE_MSVC_FORCING_VALUE_TO_BOOL_WARNING_END
+  
   std::vector< TestResult > test_results;
 
   if(verbose && concise)

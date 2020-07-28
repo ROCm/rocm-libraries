@@ -34,7 +34,7 @@
 #include <thrust/system/hip/detail/reduce.h>
 #include <thrust/system/hip/detail/util.h>
 
-BEGIN_NS_THRUST
+THRUST_BEGIN_NS
 namespace hip_rocprim
 {
 
@@ -48,7 +48,7 @@ count_if(execution_policy<Derived>& policy,
     typedef typename iterator_traits<InputIt>::difference_type        size_type;
     typedef transform_input_iterator_t<size_type, InputIt, UnaryPred> flag_iterator_t;
 
-    return hip_rocprim::reduce_n(policy,
+    return reduce_n(policy,
                                  flag_iterator_t(first, unary_pred),
                                  thrust::distance(first, last),
                                  size_type(0),
@@ -62,11 +62,11 @@ count(execution_policy<Derived>& policy,
       InputIt                    last,
       Value const&               value)
 {
-    return hip_rocprim::count_if(
+    return count_if(
         policy, first, last, thrust::detail::equal_to_value<Value>(value)
     );
 }
 
 } // namespace hip_rocprim
-END_NS_THRUST
+THRUST_END_NS
 #endif

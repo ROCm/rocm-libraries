@@ -34,7 +34,7 @@
 #include <thrust/detail/type_traits/result_of_adaptable_function.h>
 #include <thrust/system/hip/detail/par_to_seq.h>
 
-BEGIN_NS_THRUST
+THRUST_BEGIN_NS
 namespace hip_rocprim
 {
 namespace __parallel_for
@@ -150,5 +150,5 @@ parallel_for(execution_policy<Derived>& policy, F f, Size count)
 }
 
 } // namespace hip_rocprim
-END_NS_THRUST
+THRUST_END_NS
 #endif

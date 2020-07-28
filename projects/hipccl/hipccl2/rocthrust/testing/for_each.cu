@@ -22,7 +22,7 @@
 #include <thrust/iterator/retag.h>
 #include <algorithm>
 
-__THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_BEGIN
+THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_BEGIN
 
 template <typename T>
 class mark_present_for_each
@@ -368,4 +368,4 @@ void TestForEachNWithLargeTypes(void)
 }
 DECLARE_UNITTEST(TestForEachNWithLargeTypes);
 
-__THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_END
+THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_END

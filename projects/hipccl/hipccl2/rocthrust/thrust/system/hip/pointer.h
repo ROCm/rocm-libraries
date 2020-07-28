@@ -22,7 +22,6 @@
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/pointer.h>
 
-
 namespace thrust
 {
 namespace hip_rocprim
@@ -47,12 +46,13 @@ public:
     typedef typename ptr::reference         reference;
 };
 
+namespace thrust
+{
+
 // specialize thrust::iterator_traits to avoid problems with the name of
 // pointer's constructor shadowing its nested pointer type
 // do this before pointer is defined so the specialization is correctly
 // used inside the definition
-namespace thrust
-{
 
 template <typename Element>
 struct iterator_traits<thrust::hip_rocprim::pointer<Element> >
@@ -187,6 +187,25 @@ public:
     }
 }; // struct pointer
 
+#if THRUST_CPP_DIALECT >= 2011
+template <typename T>
+__host__ __device__
+bool operator!=(decltype(nullptr), pointer<T>);
+
+template <typename T>
+__host__ __device__
+bool operator!=(pointer<T>, decltype(nullptr));
+
+template <typename T>
+__host__ __device__
+bool operator==(decltype(nullptr), pointer<T>);
+
+template <typename T>
+__host__ __device__
+bool operator==(pointer<T>, decltype(nullptr));
+#endif
+
+
 /*! \p reference is a wrapped reference to an object stored in memory available to the \p hip system.
  *  \p reference is the type of the result of dereferencing a \p hip::pointer.
  *
@@ -274,9 +293,6 @@ __host__ __device__ void swap(reference<T> x, reference<T> y);
 
 } // end namespace hip_rocprim
 
-
-
-
 namespace system {
 
 /*! \namespace thrust::hip
@@ -296,4 +312,4 @@ using thrust::hip_rocprim::reference;
 
 } // end thrust
 
-#include <thrust/system/hip/detail/memory.inl>
+#include <thrust/system/hip/detail/pointer.inl>

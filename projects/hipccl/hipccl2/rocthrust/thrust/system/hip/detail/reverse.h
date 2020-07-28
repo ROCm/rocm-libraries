@@ -30,7 +30,7 @@
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #include <thrust/system/hip/detail/execution_policy.h>
 
-BEGIN_NS_THRUST
+THRUST_BEGIN_NS
 namespace hip_rocprim
 {
     template <class Derived, class ItemsIt, class ResultIt>
@@ -46,7 +46,7 @@ namespace hip_rocprim
             ItemsIt                    first,
             ItemsIt                    last);
 } // namespace hip_rocprim
-END_NS_THRUST
+THRUST_END_NS
 
 #include <thrust/advance.h>
 #include <thrust/distance.h>
@@ -54,7 +54,7 @@ END_NS_THRUST
 #include <thrust/system/hip/detail/copy.h>
 #include <thrust/system/hip/detail/swap_ranges.h>
 
-BEGIN_NS_THRUST
+THRUST_BEGIN_NS
 namespace hip_rocprim
 {
     template <class Derived, class ItemsIt, class ResultIt>
@@ -83,5 +83,5 @@ namespace hip_rocprim
         hip_rocprim::swap_ranges(policy, first, mid, make_reverse_iterator(last));
     }
 } // namespace hip_rocprim
-END_NS_THRUST
+THRUST_END_NS
 #endif
