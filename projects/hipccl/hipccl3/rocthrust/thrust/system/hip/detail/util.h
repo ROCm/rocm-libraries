@@ -158,6 +158,27 @@ static void __host__ __device__ throw_on_error(hipError_t status, char const* ms
     }
 }
 
+// TODO this overload should be removed and messages should be passed.
+static void __host__ __device__ throw_on_error(hipError_t status)
+{
+    if(hipSuccess != status)
+    {
+#if !defined(__HIP_DEVICE_COMPILE__)
+        throw thrust::system_error(status, thrust::hip_category());
+#else
+#if __THRUST_HAS_HIPRT__
+        printf("Error %s\n", hipGetErrorString(status));
+#else
+        THRUST_HIP_PRINTF("Error %d \n", (int)status);
+    #if THRUST_HIP_PRINTF_ENABLED == 0
+        THRUST_UNUSED_VAR(status);
+    #endif
+#endif
+        hip_rocprim::terminate();
+#endif
+    }
+}
+
 template <class ValueType, class InputIt, class UnaryOp>
 struct transform_input_iterator_t
 {
