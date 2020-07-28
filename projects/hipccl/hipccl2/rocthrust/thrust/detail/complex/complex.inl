@@ -17,9 +17,6 @@
 
 #include <thrust/complex.h>
 
-// TODO: Uncomment after the thrust update
-//#include <thrust/type_traits/is_trivially_relocatable.h>
-
 #include <thrust/type_traits/is_trivially_relocatable.h>
 
 namespace thrust
@@ -27,20 +24,14 @@ namespace thrust
 
 /* --- Constructors --- */
 
+#if THRUST_CPP_DIALECT < 2011
 template <typename T>
 __host__ __device__
 complex<T>::complex()
-#if THRUST_CPP_DIALECT >= 2011
-  // Initialize the storage in the member initializer list using C++ unicorn
-  // initialization. This allows `complex<T const>` to work.
-  // We do a functional-style cast here to suppress conversion warnings.
-  : data{T(), T()}
-{}
-#else
 {
   real(T());
   imag(T());
-} 
+}
 #endif
 
 template <typename T>
@@ -72,17 +63,12 @@ complex<T>::complex(const T& re, const T& im)
   real(re);
   imag(im);
 }
-#endif 
+#endif
 
+#if THRUST_CPP_DIALECT < 2011
 template <typename T>
 __host__ __device__
 complex<T>::complex(const complex<T>& z)
-#if THRUST_CPP_DIALECT >= 2011
-  // Initialize the storage in the member initializer list using C++ unicorn
-  // initialization. This allows `complex<T const>` to work.
-  : data{z.real(), z.imag()}
-{}
-#else
 {
   real(z.real());
   imag(z.imag());
@@ -364,4 +350,3 @@ struct proclaim_trivially_relocatable<complex<T> > : thrust::true_type {};
 #include <thrust/detail/complex/catrig.h>
 #include <thrust/detail/complex/catrigf.h>
 #include <thrust/detail/complex/stream.h>
-
