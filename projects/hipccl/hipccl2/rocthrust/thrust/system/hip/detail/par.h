@@ -30,8 +30,14 @@
 
 #include <thrust/detail/config.h>
 #include <thrust/system/hip/detail/guarded_hip_runtime_api.h>
-#include <thrust/detail/allocator_aware_execution_policy.h>
 #include <thrust/system/hip/detail/execution_policy.h>
+
+#include <thrust/detail/allocator_aware_execution_policy.h>
+
+#if THRUST_CPP_DIALECT >= 2011
+#  include <thrust/detail/dependencies_aware_execution_policy.h>
+#endif
+
 
 THRUST_BEGIN_NS
 namespace hip_rocprim
@@ -52,8 +58,12 @@ namespace hip_rocprim
     template <class Derived>
     hipError_t THRUST_HIP_RUNTIME_FUNCTION synchronize_stream(execution_policy<Derived>&)
     {
+      #if __THRUST_HAS_HIPRT__
         hipDeviceSynchronize();
         return hipGetLastError();
+      #else
+        return hipSuccess;
+      #endif
     }
 
     template <class Derived>
@@ -68,8 +78,8 @@ namespace hip_rocprim
         {
         }
 
-        __host__ __device__ 
-        Derived 
+        THRUST_HIP_RUNTIME_FUNCTION
+        Derived
         on(hipStream_t const& s) const
         {
             Derived result = derived_cast(*this);
@@ -78,7 +88,7 @@ namespace hip_rocprim
         }
 
     private:
-        friend hipStream_t __host__ __device__ 
+        friend hipStream_t __host__ __device__
         get_stream(const execute_on_stream_base& exec)
         {
             return exec.stream;
@@ -111,6 +121,9 @@ namespace hip_rocprim
 
     struct par_t : execution_policy<par_t>,
         thrust::detail::allocator_aware_execution_policy<execute_on_stream_base>
+    #if THRUST_CPP_DIALECT >= 2011
+        , thrust::detail::dependencies_aware_execution_policy<execute_on_stream_base>
+    #endif
     {
         typedef execution_policy<par_t> base_t;
 
@@ -121,7 +134,8 @@ namespace hip_rocprim
 
         typedef execute_on_stream stream_attachment_type;
 
-        stream_attachment_type __device__ __host__ 
+        THRUST_HIP_RUNTIME_FUNCTION
+        stream_attachment_type
         on(hipStream_t const& stream) const
         {
             return execute_on_stream(stream);

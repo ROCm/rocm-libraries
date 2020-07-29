@@ -1,4 +1,5 @@
 // Copyright (c) 2018 NVIDIA Corporation
+// Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
 // Author: Bryce Adelstein Lelbach <brycelelbach@gmail.com>
 //
 // Distributed under the Boost Software License v1.0 (boost.org/LICENSE_1_0.txt)
