@@ -27,6 +27,7 @@
  ******************************************************************************/
 #pragma once
 
+#include <thrust/system/hip/detail/guarded_hip_runtime_api.h>
 #include <thrust/system/cpp/detail/execution_policy.h>
 #include <thrust/system/hip/detail/execution_policy.h>
 
@@ -35,23 +36,19 @@ namespace hip_rocprim
 {
 
 template <class Sys1, class Sys2>
-struct cross_system : thrust::execution_policy<cross_system<Sys1, Sys2>>
+struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
 {
     typedef thrust::execution_policy<Sys1> policy1;
     typedef thrust::execution_policy<Sys2> policy2;
 
-    policy1& sys1;
-    policy2& sys2;
+    policy1 &sys1;
+    policy2 &sys2;
 
     inline __host__ __device__
-    cross_system(policy1& sys1, policy2& sys2):
-        sys1(sys1),
-        sys2(sys2)
-    {
-    }
+    cross_system(policy1 &sys1, policy2 &sys2) : sys1(sys1), sys2(sys2) {}
 
-    inline cross_system<Sys2, Sys1> __host__ __device__
-    rotate() const
+    inline __host__ __device__
+    cross_system<Sys2, Sys1> rotate() const
     {
         return cross_system<Sys2, Sys1>(sys2, sys1);
     }
@@ -308,29 +305,29 @@ struct cross_system : thrust::execution_policy<cross_system<Sys1, Sys2>>
   THRUST_DECLTYPE_RETURNS(sys1)
 #endif
 
-// host interop: (device,host)
-template <class Sys1, class Sys2>
-inline cross_system<Sys1, Sys2> __host__ __device__
-select_system(execution_policy<Sys1> const&              sys1,
-              thrust::cpp::execution_policy<Sys2> const& sys2)
-{
-    thrust::execution_policy<Sys1>& non_const_sys1 = const_cast<execution_policy<Sys1>&>(sys1);
-    thrust::cpp::execution_policy<Sys2>& non_const_sys2
-        = const_cast<thrust::cpp::execution_policy<Sys2>&>(sys2);
+  // Device to host.
+  template <class Sys1, class Sys2>
+  __host__ __device__
+  cross_system<Sys1, Sys2>
+  select_system(execution_policy<Sys1> const &             sys1,
+                thrust::cpp::execution_policy<Sys2> const &sys2)
+  {
+    thrust::execution_policy<Sys1> &     non_const_sys1 = const_cast<execution_policy<Sys1> &>(sys1);
+    thrust::cpp::execution_policy<Sys2> &non_const_sys2 = const_cast<thrust::cpp::execution_policy<Sys2> &>(sys2);
     return cross_system<Sys1, Sys2>(non_const_sys1, non_const_sys2);
-}
+  }
 
-// host interop: (host,device)
-template <class Sys1, class Sys2>
-inline cross_system<Sys1, Sys2> __host__ __device__
-select_system(thrust::cpp::execution_policy<Sys1> const &sys1,
-              execution_policy<Sys2> const &             sys2)
-{
-    thrust::cpp::execution_policy<Sys1>& non_const_sys1
-        = const_cast<thrust::cpp::execution_policy<Sys1>&>(sys1);
-    thrust::execution_policy<Sys2>& non_const_sys2 = const_cast<execution_policy<Sys2>&>(sys2);
+  // Host to device.
+  template <class Sys1, class Sys2>
+  __host__ __device__
+  cross_system<Sys1, Sys2>
+  select_system(thrust::cpp::execution_policy<Sys1> const &sys1,
+                execution_policy<Sys2> const &             sys2)
+  {
+    thrust::cpp::execution_policy<Sys1> &non_const_sys1 = const_cast<thrust::cpp::execution_policy<Sys1> &>(sys1);
+    thrust::execution_policy<Sys2> &     non_const_sys2 = const_cast<execution_policy<Sys2> &>(sys2);
     return cross_system<Sys1, Sys2>(non_const_sys1, non_const_sys2);
-}
+  }
 
 } // namespace hip_rocprim
 THRUST_END_NS

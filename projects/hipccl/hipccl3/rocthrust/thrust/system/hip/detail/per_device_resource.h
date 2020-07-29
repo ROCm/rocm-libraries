@@ -1,7 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019, Advanced Micro Devices, Inc.  All rights reserved.
- *
+ * Modifications Copyright (c) 2020, Advanced Micro Devices, Inc.  All rights reserved.
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
  *     * Redistributions of source code must retain the above copyright
@@ -25,75 +24,46 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  ******************************************************************************/
+
 #pragma once
 
-#include <thrust/version.h>
-
-#include <hip/hip_runtime.h>
-
-#include <thrust/detail/execution_policy.h>
-#include <thrust/iterator/detail/any_system_tag.h>
-#include <thrust/system/hip/config.h>
-#include <thrust/detail/allocator_aware_execution_policy.h>
+#include <thrust/detail/config.h>
+#include <thrust/detail/cpp11_required.h>
 
 #if THRUST_CPP_DIALECT >= 2011
-  #include <thrust/detail/dependencies_aware_execution_policy.h>
-#endif
+
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+
+#include <thrust/system/hip/config.h>
+
+#include <thrust/system/hip/detail/execution_policy.h>
+
+#include <mutex>
+#include <unordered_map>
 
 THRUST_BEGIN_NS
 
 namespace hip_rocprim
 {
-    struct tag;
 
-    template <class>
-    struct execution_policy;
-
-    template <>
-    struct execution_policy<tag> : thrust::execution_policy<tag>
-    {
-        typedef tag tag_type; 
-    };
-
-    struct tag : execution_policy<tag>
-    , thrust::detail::allocator_aware_execution_policy<hip_rocprim::execution_policy>
-    #if THRUST_CPP_DIALECT >= 2011
-    , thrust::detail::dependencies_aware_execution_policy<hip_rocprim::execution_policy>
-    #endif
-    {};
-
-    template <class Derived>
-    struct execution_policy : thrust::execution_policy<Derived>
-    {
-       typedef tag tag_type;
-       operator tag() const { return tag(); }
-    };
-
-} // namespace hip_rocprim
-
-namespace system { namespace hip { namespace detail
+template<typename MR, typename DerivedPolicy>
+__host__
+MR * get_per_device_resource(execution_policy<DerivedPolicy>&)
 {
+    static std::mutex map_lock;
+    static std::unordered_map<int, MR> device_id_to_resource;
 
-  using thrust::hip_rocprim::tag;
-  using thrust::hip_rocprim::execution_policy;
+    int device_id;
+    thrust::hip_rocprim::throw_on_error(hipGetDevice(&device_id));
 
-}}} // namespace system::hip_rocprim::detail
+    std::lock_guard<std::mutex> lock{map_lock};
+    return &device_id_to_resource[device_id];
+}
 
-namespace system { namespace hip
-{
-
-  using thrust::hip_rocprim::tag;
-  using thrust::hip_rocprim::execution_policy;
-
-}} // namespace system::hip
-
-namespace hip
-{
-
-  using thrust::hip_rocprim::tag;
-  using thrust::hip_rocprim::execution_policy;
-
-} // namespace hip
-
+}
 
 THRUST_END_NS
+
+#endif
+
+#endif

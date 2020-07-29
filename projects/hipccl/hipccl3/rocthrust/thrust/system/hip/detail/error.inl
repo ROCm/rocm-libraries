@@ -49,10 +49,13 @@ namespace detail
         }
 
         inline virtual std::string message(int ev) const
-        {
-            static const std::string unknown_err("Unknown error");
-            const char* c_str = ::hipGetErrorString(static_cast<hipError_t>(ev));
-            return c_str ? std::string(c_str) : unknown_err;
+        {      
+            char const* const unknown_str  = "unknown error";
+            char const* const unknown_name = "hipErrorUnknown";
+            char const* c_str  = ::hipGetErrorString(static_cast<hipError_t>(ev));
+            char const* c_name = ::hipGetErrorName(static_cast<hipError_t>(ev));
+            return std::string(c_name ? c_name : unknown_name)
+              + ": " + (c_str ? c_str : unknown_str);
         }
 
         inline virtual error_condition default_error_condition(int ev) const
@@ -69,6 +72,7 @@ namespace detail
     }; // end hip_error_category
 
 } // end detail
+
 } // end namespace hip_rocprim
 
 const error_category& hip_category(void)
