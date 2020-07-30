@@ -14,6 +14,9 @@ endif()
 # Thrust project
 project(rocthrust LANGUAGES CXX)
 
+#Adding CMAKE_PREFIX_PATH
+list( APPEND CMAKE_PREFIX_PATH /opt/rocm/llvm /opt/rocm )
+
 # CMake modules
 list(APPEND CMAKE_MODULE_PATH
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake
