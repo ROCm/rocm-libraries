@@ -4,12 +4,11 @@ import com.amd.project.*
 import com.amd.docker.*
 import java.nio.file.Path;
 
-def runCI = 
+def runCI =
 {
     nodeDetails, jobName->
-
-    def prj = new rocProject('rocPRIM', 'PreCheckin')
-    prj.paths.build_command = './install -c'
+    
+    def prj = new rocProject('rocPRIM', 'Static Library PreCheckin')
 
     def nodes = new dockerNodes(nodeDetails, jobName, prj)
 
@@ -22,9 +21,10 @@ def runCI =
         platform, project->
 
         commonGroovy = load "${project.paths.project_src_prefix}/.jenkins/common.groovy"
-        commonGroovy.runCompileCommand(platform, project, jobName)
+        commonGroovy.runCompileCommand(platform, project, jobName, false)
     }
 
+    
     def testCommand =
     {
         platform, project->
@@ -51,9 +51,9 @@ ci: {
     propertyList = auxiliary.appendPropertyList(propertyList)
 
     def jobNameList = ["compute-rocm-dkms-no-npi":([ubuntu16:['gfx900'],centos7:['gfx906'],sles15sp1:['gfx908']]), 
-                       "compute-rocm-dkms-no-npi-hipclang":([ubuntu16:['gfx900'],centos7:['gfx906'],centos8:['gfx906'],sles15sp1:['gfx908']]), 
-                       "rocm-docker":([ubuntu16:['gfx900'],ubuntu18:['gfx906'],centos7:['gfx906'],sles15sp1:['gfx908']])]
-    jobNameList = auxiliary.appendJobNameList(jobNameList, 'rocPRIM')
+                       "compute-rocm-dkms-no-npi-hipclang":([ubuntu16:['gfx900'],centos7:['gfx906'],sles15sp1:['gfx908']]), 
+                       "rocm-docker":([ubuntu16:['gfx900'],centos7:['gfx906'],sles15sp1:['gfx908']])]
+    jobNameList = auxiliary.appendJobNameList(jobNameList)
 
     propertyList.each 
     {
@@ -61,8 +61,8 @@ ci: {
         if (urlJobName == jobName)
             properties(auxiliary.addCommonProperties(property))
     }
-    
-    jobNameList.each 
+
+    jobNameList.each
     {
         jobName, nodeDetails->
         if (urlJobName == jobName)
