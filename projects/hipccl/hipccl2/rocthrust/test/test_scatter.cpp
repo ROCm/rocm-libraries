@@ -33,6 +33,8 @@ TYPED_TEST(ScatterTests, TestScatterSimple)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector map(5); // scatter indices
     Vector src(5); // source vector
     Vector dst(8); // destination vector
@@ -77,6 +79,8 @@ void scatter(
 
 TEST(ScatterTests, TestScatterDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -93,6 +97,8 @@ void scatter(my_tag, InputIterator1, InputIterator1, InputIterator2, RandomAcces
 
 TEST(ScatterTests, TestScatterDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::scatter(thrust::retag<my_tag>(vec.begin()),
@@ -106,6 +112,8 @@ TEST(ScatterTests, TestScatterDispatchImplicit)
 TYPED_TEST(ScatterPrimitiveTests, TestScatter)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -149,6 +157,8 @@ TYPED_TEST(ScatterPrimitiveTests, TestScatterToDiscardIterator)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
@@ -190,6 +200,8 @@ TYPED_TEST(ScatterTests, TestScatterIfSimple)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector flg(5); // predicate array
     Vector map(5); // scatter indices
@@ -248,6 +260,8 @@ void scatter_if(my_system& system,
 
 TEST(ScatterTests, TestScatterIfDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -272,6 +286,8 @@ void scatter_if(my_tag,
 
 TEST(ScatterTests, TestScatterIfDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::scatter_if(thrust::retag<my_tag>(vec.begin()),
@@ -296,6 +312,8 @@ public:
 TYPED_TEST(ScatterPrimitiveTests, TestScatterIf)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -347,6 +365,8 @@ TYPED_TEST(ScatterPrimitiveTests, TestScatterIfToDiscardIterator)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
@@ -394,6 +414,8 @@ TYPED_TEST(ScatterTests, TestScatterCountingIterator)
 {
     using Vector = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector source(10);
     thrust::sequence(source.begin(), source.end(), 0);
 
@@ -431,6 +453,8 @@ TYPED_TEST(ScatterTests, TestScatterCountingIterator)
 TYPED_TEST(ScatterTests, TestScatterIfCountingIterator)
 {
     using Vector = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector source(10);
     thrust::sequence(source.begin(), source.end(), 0);

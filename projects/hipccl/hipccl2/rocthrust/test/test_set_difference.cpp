@@ -40,6 +40,8 @@ OutputIterator set_difference(my_system& system,
 
 TEST(SetDifferenceTests, TestSetDifferenceDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -58,6 +60,8 @@ OutputIterator set_difference(
 
 TEST(SetDifferenceTests, TestSetDifferenceDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::set_difference(thrust::retag<my_tag>(vec.begin()),
@@ -73,6 +77,8 @@ TYPED_TEST(SetDifferenceTests, TestSetDifferenceSimple)
 {
     using Vector   = typename TestFixture::input_type;
     using Iterator = typename Vector::iterator;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector a(4), b(5);
 
@@ -101,6 +107,8 @@ TYPED_TEST(SetDifferenceTests, TestSetDifferenceSimple)
 TYPED_TEST(SetDifferencePrimitiveTests, TestSetDifference)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -164,6 +172,8 @@ TYPED_TEST(SetDifferencePrimitiveTests, TestSetDifferenceEquivalentRanges)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
 
     for(auto size : sizes)
@@ -207,6 +217,8 @@ TYPED_TEST(SetDifferencePrimitiveTests, TestSetDifferenceEquivalentRanges)
 TYPED_TEST(SetDifferencePrimitiveTests, TestSetDifferenceMultiset)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
 

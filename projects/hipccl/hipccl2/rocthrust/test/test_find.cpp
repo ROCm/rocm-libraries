@@ -78,6 +78,8 @@ TYPED_TEST(FindTests, TestFindSimple)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector vec(5);
     vec[0] = T(1);
     vec[1] = T(2);
@@ -102,6 +104,8 @@ InputIterator find(my_system& system, InputIterator first, InputIterator, const 
 
 TEST(FindTests, TestFindDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -119,6 +123,8 @@ InputIterator find(my_tag, InputIterator first, InputIterator, const T&)
 
 TEST(FindTests, TestFindDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::find(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), 0);
@@ -130,6 +136,8 @@ TYPED_TEST(FindTests, TestFindIfSimple)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector vec(5);
     vec[0] = T(1);
@@ -155,6 +163,8 @@ InputIterator find_if(my_system& system, InputIterator first, InputIterator, Pre
 
 TEST(FindTests, TestFindIfDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -172,6 +182,8 @@ InputIterator find_if(my_tag, InputIterator first, InputIterator, Predicate)
 
 TEST(FindTests, TestFindIfDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::find_if(thrust::retag<my_tag>(vec.begin()),
@@ -185,6 +197,8 @@ TYPED_TEST(FindTests, TestFindIfNotSimple)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector vec(5);
     vec[0] = T(0);
@@ -216,6 +230,8 @@ InputIterator find_if_not(my_system& system, InputIterator first, InputIterator,
 
 TEST(FindTests, TestFindIfNotDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -233,6 +249,8 @@ InputIterator find_if_not(my_tag, InputIterator first, InputIterator, Predicate)
 
 TEST(FindTests, TestFindIfNotDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::find_if_not(thrust::retag<my_tag>(vec.begin()),
@@ -249,6 +267,8 @@ TYPED_TEST(FindTests, TestFind)
 
     using HostIterator   = typename thrust::host_vector<T>::iterator;
     using DeviceIterator = typename thrust::device_vector<T>::iterator;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -288,6 +308,8 @@ TYPED_TEST(FindTests, TestFindIf)
 
     using HostIterator   = typename thrust::host_vector<T>::iterator;
     using DeviceIterator = typename thrust::device_vector<T>::iterator;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -329,6 +351,8 @@ TYPED_TEST(FindTests, TestFindIfNot)
 
     using HostIterator   = typename thrust::host_vector<T>::iterator;
     using DeviceIterator = typename thrust::device_vector<T>::iterator;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)

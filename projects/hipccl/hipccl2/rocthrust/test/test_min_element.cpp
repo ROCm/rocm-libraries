@@ -28,6 +28,8 @@ TYPED_TEST(MinElementTests, TestMinElementSimple)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector data(6);
     data[0] = 3;
     data[1] = 5;
@@ -48,6 +50,8 @@ TYPED_TEST(MinElementTests, TestMinElementWithTransform)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     // We cannot use unsigned types for this test case
     if(std::is_unsigned<T>::value)
@@ -75,6 +79,8 @@ TYPED_TEST(MinElementTests, TestMinElementWithTransform)
 TYPED_TEST(MinElementPrimitiveTests, TestMinElement)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -115,6 +121,8 @@ ForwardIterator min_element(my_system& system, ForwardIterator first, ForwardIte
 
 TEST(MinElementTests, TestMinElementDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -132,6 +140,8 @@ ForwardIterator min_element(my_tag, ForwardIterator first, ForwardIterator)
 
 TEST(MinElementTests, TestMinElementDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     thrust::device_vector<int> vec(1);
 
     thrust::min_element(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()));

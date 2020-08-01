@@ -38,6 +38,8 @@ T clip_infinity(T val)
 
 TEST(InnerProductTests, UsingHip)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
 }
 
@@ -45,6 +47,8 @@ TYPED_TEST(InnerProductTests, InnerProductSimple)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector v1(3);
     Vector v2(3);
@@ -70,6 +74,8 @@ int inner_product(my_system& system, InputIterator1, InputIterator1, InputIterat
 
 TEST(InnerProductTests, InnerProductDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec;
 
     my_system sys(0);
@@ -86,6 +92,8 @@ int inner_product(my_tag, InputIterator1, InputIterator1, InputIterator2, Output
 
 TEST(InnerProductTests, InnerProductDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec;
 
     int result = thrust::inner_product(thrust::retag<my_tag>(vec.begin()),
@@ -100,6 +108,9 @@ TYPED_TEST(InnerProductTests, InnerProductWithOperator)
 {
     using Vector   = typename TestFixture::input_type;
     using T        = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     T error_margin = (T)0.01;
 
     Vector v1(3);
@@ -121,6 +132,8 @@ TYPED_TEST(InnerProductTests, InnerProductWithOperator)
 TYPED_TEST(PrimitiveInnerProductTests, InnerProductWithRandomData)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)

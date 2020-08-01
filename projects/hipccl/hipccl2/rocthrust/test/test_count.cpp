@@ -32,6 +32,8 @@ TYPED_TEST(CountTests, TestCountSimple)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector data(5);
     data[0] = T(1);
     data[1] = T(1);
@@ -47,6 +49,8 @@ TYPED_TEST(CountTests, TestCountSimple)
 TYPED_TEST(CountPrimitiveTests, TestCount)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -83,6 +87,8 @@ TYPED_TEST(CountTests, TestCountIfSimple)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector data(5);
     data[0] = 1;
     data[1] = 6;
@@ -97,6 +103,8 @@ TYPED_TEST(CountTests, TestCountIf)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -125,6 +133,8 @@ TYPED_TEST(CountTests, TestCountFromConstIteratorSimple)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector data(5);
     data[0] = T(1);
     data[1] = T(1);
@@ -146,6 +156,8 @@ int count(my_system& system, InputIterator, InputIterator, EqualityComparable x)
 
 TEST(CountTests, TestCountDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -162,6 +174,8 @@ int count(my_tag, InputIterator, InputIterator, EqualityComparable x)
 
 TEST(CountTests, TestCountDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     thrust::device_vector<int> vec(1);
 
     int result

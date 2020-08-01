@@ -35,6 +35,8 @@ TYPED_TEST(ScanByKeyVectorTests, TestInclusiveScanByKeySimple)
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector keys(7);
     Vector vals(7);
 
@@ -105,6 +107,8 @@ OutputIterator inclusive_scan_by_key(
 
 TEST(ScanByKeyTests, TestInclusiveScanByKeyDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -123,6 +127,8 @@ inclusive_scan_by_key(my_tag, InputIterator1, InputIterator1, InputIterator2, Ou
 
 TEST(ScanByKeyTests, TestInclusiveScanByKeyDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::inclusive_scan_by_key(thrust::retag<my_tag>(vec.begin()),
@@ -138,6 +144,8 @@ TYPED_TEST(ScanByKeyVectorTests, TestExclusiveScanByKeySimple)
     using Vector   = typename TestFixture::input_type;
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector keys(7);
     Vector vals(7);
@@ -220,6 +228,8 @@ OutputIterator exclusive_scan_by_key(
 
 TEST(ScanByKeyTests, TestExclusiveScanByKeyDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -238,6 +248,8 @@ exclusive_scan_by_key(my_tag, InputIterator1, InputIterator1, InputIterator2, Ou
 
 TEST(ScanByKeyTests, TestExclusiveScanByKeyDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::exclusive_scan_by_key(thrust::retag<my_tag>(vec.begin()),
@@ -261,6 +273,8 @@ TYPED_TEST(ScanByKeyVectorTests, TestScanByKeyHeadFlags)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector keys(7);
     Vector vals(7);
@@ -319,6 +333,8 @@ TYPED_TEST(ScanByKeyVectorTests, TestInclusiveScanByKeyTransformIterator)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector keys(7);
     Vector vals(7);
 
@@ -357,6 +373,8 @@ TYPED_TEST(ScanByKeyVectorTests, TestInclusiveScanByKeyTransformIterator)
 TYPED_TEST(ScanByKeyVectorTests, TestScanByKeyReusedKeys)
 {
     using Vector = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     Vector keys(7);
     Vector vals(7);
 
@@ -401,6 +419,8 @@ TYPED_TEST(ScanByKeyVectorTests, TestScanByKeyReusedKeys)
 TYPED_TEST(ScanByKeyVariablesTests, TestInclusiveScanByKey)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     // XXX WAR nvbug 1541533
 #if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
@@ -452,6 +472,8 @@ TYPED_TEST(ScanByKeyVariablesTests, TestExclusiveScanByKey)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
@@ -501,6 +523,8 @@ TYPED_TEST(ScanByKeyVariablesTests, TestExclusiveScanByKey)
 TYPED_TEST(ScanByKeyVariablesTests, TestInclusiveScanByKeyInPlace)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     // XXX WAR nvbug 1541533
 #if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
@@ -555,6 +579,8 @@ TYPED_TEST(ScanByKeyVariablesTests, TestExclusiveScanByKeyInPlace)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
@@ -594,6 +620,8 @@ TYPED_TEST(ScanByKeyVariablesTests, TestExclusiveScanByKeyInPlace)
 
 TEST(ScanByKeyTests, TestScanByKeyMixedTypes)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     const unsigned int size = 113;
 
     thrust::host_vector<int>      h_keys(size);
@@ -658,6 +686,8 @@ TEST(ScanByKeyTests, TestScanByKeyMixedTypes)
 
 TEST(ScanByKeyTests, TestScanByKeyLargeInput)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     const unsigned int N = 1 << 20;
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
@@ -747,6 +777,8 @@ void _TestScanByKeyWithLargeTypes(void)
 
 TEST(ScanByKeyTests, TestScanByKeyWithLargeTypes)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     _TestScanByKeyWithLargeTypes<int, 1>();
     _TestScanByKeyWithLargeTypes<int, 2>();
     _TestScanByKeyWithLargeTypes<int, 4>();

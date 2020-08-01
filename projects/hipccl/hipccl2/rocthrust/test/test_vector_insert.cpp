@@ -28,6 +28,8 @@ TYPED_TEST(VectorInsertTests, TestVectorRangeInsertSimple)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector v1(5);
     thrust::sequence(v1.begin(), v1.end());
 
@@ -152,6 +154,8 @@ TYPED_TEST(VectorInsertPrimitiveTests, TestVectorRangeInsert)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
@@ -198,6 +202,8 @@ TYPED_TEST(VectorInsertTests, TestVectorFillInsertSimple)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector v1(3);
     v1.reserve(10);
@@ -317,6 +323,8 @@ TYPED_TEST(VectorInsertTests, TestVectorFillInsertSimple)
 TYPED_TEST(VectorInsertPrimitiveTests, TestVectorFillInsert)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)

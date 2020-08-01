@@ -47,6 +47,8 @@ thrust::pair<OutputIterator1, OutputIterator2> set_difference_by_key(my_system& 
 
 TEST(setDifferenceByKeyTests, TestSetDifferenceByKeyDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -85,6 +87,8 @@ thrust::pair<OutputIterator1, OutputIterator2> set_difference_by_key(my_tag,
 
 TEST(setDifferenceByKeyTests, TestSetDifferenceByKeyDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::set_difference_by_key(thrust::retag<my_tag>(vec.begin()),
@@ -103,6 +107,8 @@ TYPED_TEST(setDifferenceByKeyTests, TestSetDifferenceByKeySimple)
 {
     using Vector   = typename TestFixture::input_type;
     using Iterator = typename Vector::iterator;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector a_key(4), b_key(5);
     Vector a_val(4), b_val(5);
@@ -153,6 +159,8 @@ TYPED_TEST(setDifferenceByKeyTests, TestSetDifferenceByKeySimple)
 TYPED_TEST(SetDifferenceByKeyPrimitiveTests, TestSetDifferenceByKey)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -252,6 +260,8 @@ TYPED_TEST(SetDifferenceByKeyPrimitiveTests, TestSetDifferenceByKeyEquivalentRan
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();\
     for(auto size : sizes)
     {
@@ -330,6 +340,8 @@ TYPED_TEST(SetDifferenceByKeyPrimitiveTests, TestSetDifferenceByKeyEquivalentRan
 TYPED_TEST(SetDifferenceByKeyPrimitiveTests, TestSetDifferenceByKeyMultiset)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)

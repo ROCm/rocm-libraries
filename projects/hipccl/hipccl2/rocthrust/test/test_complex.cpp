@@ -24,6 +24,9 @@ TESTS_DEFINE(ComplexTests, FloatTestsParams);
 TYPED_TEST(ComplexTests, TestComplexConstructors)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value
@@ -67,6 +70,9 @@ TYPED_TEST(ComplexTests, TestComplexConstructors)
 TYPED_TEST(ComplexTests, TestComplexGetters)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value
@@ -102,6 +108,9 @@ TYPED_TEST(ComplexTests, TestComplexGetters)
 TYPED_TEST(ComplexTests, TestComplexMemberOperators)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value
@@ -143,6 +152,9 @@ TYPED_TEST(ComplexTests, TestComplexMemberOperators)
 TYPED_TEST(ComplexTests, TestComplexBasicArithmetic)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value
@@ -175,6 +187,9 @@ TYPED_TEST(ComplexTests, TestComplexBasicArithmetic)
 TYPED_TEST(ComplexTests, TestComplexBinaryArithmetic)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value
@@ -210,6 +225,9 @@ TYPED_TEST(ComplexTests, TestComplexBinaryArithmetic)
 TYPED_TEST(ComplexTests, TestComplexUnaryArithmetic)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value
@@ -230,6 +248,9 @@ TYPED_TEST(ComplexTests, TestComplexUnaryArithmetic)
 TYPED_TEST(ComplexTests, TestComplexExponentialFunctions)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value
@@ -251,6 +272,9 @@ TYPED_TEST(ComplexTests, TestComplexExponentialFunctions)
 TYPED_TEST(ComplexTests, TestComplexPowerFunctions)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value
@@ -278,6 +302,9 @@ TYPED_TEST(ComplexTests, TestComplexPowerFunctions)
 TYPED_TEST(ComplexTests, TestComplexTrigonometricFunctions)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value
@@ -309,6 +336,9 @@ TYPED_TEST(ComplexTests, TestComplexTrigonometricFunctions)
 TYPED_TEST(ComplexTests, TestComplexStreamOperators)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value

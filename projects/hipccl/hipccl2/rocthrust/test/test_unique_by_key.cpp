@@ -38,6 +38,8 @@ thrust::pair<ForwardIterator1, ForwardIterator2> unique_by_key(my_system&       
 
 TEST(UniqueByKeyTests, TestUniqueByKeyDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -56,6 +58,8 @@ unique_by_key(my_tag, ForwardIterator1 keys_first, ForwardIterator1, ForwardIter
 
 TEST(UniqueByKeyTests, TestUniqueByKeyDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::unique_by_key(thrust::retag<my_tag>(vec.begin()),
@@ -82,6 +86,8 @@ thrust::pair<OutputIterator1, OutputIterator2> unique_by_key_copy(my_system& sys
 
 TEST(UniqueByKeyTests, TestUniqueByKeyCopyDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -108,6 +114,8 @@ thrust::pair<OutputIterator1, OutputIterator2> unique_by_key_copy(my_tag,
 
 TEST(UniqueByKeyTests, TestUniqueByKeyCopyDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::unique_by_key_copy(thrust::retag<my_tag>(vec.begin()),
@@ -163,6 +171,8 @@ TYPED_TEST(UniqueByKeyTests, TestUniqueByKeySimple)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector keys;
     Vector values;
 
@@ -210,6 +220,8 @@ TYPED_TEST(UniqueByKeyTests, TestUniqueCopyByKeySimple)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector keys;
     Vector values;
@@ -267,6 +279,8 @@ TYPED_TEST(UniqueByKeyIntegralTests, TestUniqueByKey)
     using K = typename TestFixture::input_type;
     using V = unsigned int; // ValueType
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
@@ -322,6 +336,8 @@ TYPED_TEST(UniqueByKeyIntegralTests, TestUniqueCopyByKey)
 {
     using K = typename TestFixture::input_type;
     using V = unsigned int; // ValueType
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     for(auto size : get_sizes())
     {
@@ -388,6 +404,8 @@ TYPED_TEST(UniqueByKeyIntegralTests, TestUniqueCopyByKeyToDiscardIterator)
 {
     using K = typename TestFixture::input_type;
     using V = unsigned int; // ValueType
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     for(auto size : get_sizes())
     {

@@ -47,6 +47,8 @@ void simple_copy(Iterator1 first1, Iterator1 last1, Iterator2 first2)
 
 TEST(DereferenceTests, TestDeviceDereferenceDeviceVectorIterator)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value
@@ -65,6 +67,8 @@ TEST(DereferenceTests, TestDeviceDereferenceDeviceVectorIterator)
 
 TEST(DereferenceTests, TestDeviceDereferenceDevicePtr)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value
@@ -87,6 +91,8 @@ TEST(DereferenceTests, TestDeviceDereferenceDevicePtr)
 
 TEST(DereferenceTests, TestDeviceDereferenceTransformIterator)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value
@@ -107,6 +113,8 @@ TEST(DereferenceTests, TestDeviceDereferenceTransformIterator)
 
 TEST(DereferenceTests, TestDeviceDereferenceCountingIterator)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::counting_iterator<int> first(1);
     thrust::counting_iterator<int> last(6);
 
@@ -123,6 +131,8 @@ TEST(DereferenceTests, TestDeviceDereferenceCountingIterator)
 
 TEST(DereferenceTests, TestDeviceDereferenceTransformedCountingIterator)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     thrust::counting_iterator<int> first(1);
     thrust::counting_iterator<int> last(6);
 

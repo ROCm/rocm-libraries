@@ -47,6 +47,8 @@ thrust::pair<OutputIterator1, OutputIterator2> set_union_by_key(my_system& syste
 
 TEST(SetUnionByKeyTests, TestSetUnionByKeyDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -85,6 +87,8 @@ thrust::pair<OutputIterator1, OutputIterator2> set_union_by_key(my_tag,
 
 TEST(SetUnionByKeyTests, TestSetUnionByKeyDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::set_union_by_key(thrust::retag<my_tag>(vec.begin()),
@@ -103,6 +107,8 @@ TYPED_TEST(SetUnionByKeyTests, TestSetUnionByKeySimple)
 {
     using Vector   = typename TestFixture::input_type;
     using Iterator = typename Vector::iterator;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector a_key(3), b_key(4);
     Vector a_val(3), b_val(4);
@@ -155,6 +161,8 @@ TYPED_TEST(SetUnionByKeyTests, TestSetUnionByKeySimple)
 TYPED_TEST(SetUnionByKeyPrimitiveTests, TestSetUnionByKey)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
 
@@ -258,6 +266,8 @@ TYPED_TEST(SetUnionByKeyPrimitiveTests, + seed_value_addition TestSetUnionByKeyE
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
 
     for(auto size : sizes)
@@ -340,6 +350,8 @@ TYPED_TEST(SetUnionByKeyPrimitiveTests, + seed_value_addition TestSetUnionByKeyE
 TYPED_TEST(SetUnionByKeyPrimitiveTests, TestSetUnionByKeyMultiset)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
 

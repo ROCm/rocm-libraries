@@ -31,6 +31,8 @@ TYPED_TEST(EqualTests, TestEqualSimple)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector v1(5);
     Vector v2(5);
     v1[0] = T(5);
@@ -60,6 +62,8 @@ TYPED_TEST(EqualTests, TestEqualSimple)
 TYPED_TEST(EqualsPrimitiveTests, TestEqual)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -133,6 +137,8 @@ bool equal(my_system& system, InputIterator1, InputIterator1, InputIterator2)
 
 TEST(EqualTests, TestEqualDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -150,6 +156,8 @@ bool equal(my_tag, InputIterator1 first, InputIterator1, InputIterator2)
 
 TEST(EqualTests, TestEqualDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     thrust::device_vector<int> vec(1);
 
     thrust::equal(thrust::retag<my_tag>(vec.begin()),

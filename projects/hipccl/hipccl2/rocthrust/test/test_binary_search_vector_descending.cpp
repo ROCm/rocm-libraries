@@ -38,6 +38,9 @@ TYPED_TEST(BinarySearchVectorDescendingTests, TestVectorLowerBoundDescendingSimp
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector vec(5);
 
     vec[0] = 8;
@@ -77,6 +80,9 @@ TYPED_TEST(BinarySearchVectorDescendingTests, TestVectorLowerBoundDescendingSimp
 TYPED_TEST(BinarySearchVectorDescendingTests, TestVectorUpperBoundDescendingSimple)
 {
     using Vector = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector vec(5);
 
     vec[0] = 8;
@@ -116,6 +122,9 @@ TYPED_TEST(BinarySearchVectorDescendingTests, TestVectorUpperBoundDescendingSimp
 TYPED_TEST(BinarySearchVectorDescendingTests, TestVectorBinarySearchDescendingSimple)
 {
     using Vector = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector vec(5);
 
     vec[0] = 8;
@@ -178,6 +187,9 @@ TYPED_TEST(BinarySearchVectorDescendingTests, TestVectorBinarySearchDescendingSi
 TYPED_TEST(BinarySearchVectorDescendingIntegerTests, TestVectorLowerBoundDescending)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
@@ -223,6 +235,9 @@ TYPED_TEST(BinarySearchVectorDescendingIntegerTests, TestVectorLowerBoundDescend
 TYPED_TEST(BinarySearchVectorDescendingIntegerTests, TestVectorUpperBoundDescending)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
@@ -269,6 +284,9 @@ TYPED_TEST(BinarySearchVectorDescendingIntegerTests, TestVectorUpperBoundDescend
 TYPED_TEST(BinarySearchVectorDescendingIntegerTests, TestVectorBinarySearchDescending)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);

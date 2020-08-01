@@ -31,6 +31,8 @@ TYPED_TEST(SetSymmetricDifferenceByKeyDescendingTests,
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector a_key(4), b_key(5);
     Vector a_val(4), b_val(5);
 
@@ -89,6 +91,8 @@ TYPED_TEST(SetSymmetricDifferenceByKeyDescendingPrimitiveTests,
            TestSetSymmetricDifferenceByKeyDescending)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
 

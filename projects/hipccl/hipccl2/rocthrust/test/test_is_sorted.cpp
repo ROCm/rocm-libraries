@@ -28,6 +28,8 @@ TYPED_TEST(IsSortedVectorTests, TestIsSortedSimple)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector v(4);
     v[0] = 0;
     v[1] = 5;
@@ -59,6 +61,9 @@ TYPED_TEST(IsSortedVectorTests, TestIsSortedSimple)
 TYPED_TEST(IsSortedVectorTests, TestIsSortedRepeatedElements)
 {
     using Vector = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector v(10);
 
     v[0] = 0;
@@ -79,6 +84,8 @@ TYPED_TEST(IsSortedVectorTests, TestIsSorted)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const size_t n = (1 << 16) + 13;
 
@@ -111,6 +118,8 @@ bool is_sorted(my_system& system, InputIterator, InputIterator)
 
 TEST(IsSortedTests, TestIsSortedDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -128,6 +137,8 @@ bool is_sorted(my_tag, InputIterator first, InputIterator)
 
 TEST(IsSortedTests, TestIsSortedDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     thrust::device_vector<int> vec(1);
 
     thrust::is_sorted(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()));

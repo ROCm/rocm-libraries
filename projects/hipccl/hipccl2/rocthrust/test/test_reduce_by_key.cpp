@@ -69,6 +69,8 @@ TYPED_TEST(ReduceByKeysTests, TestReduceByKeySimple)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector keys;
     Vector values;
 
@@ -152,6 +154,8 @@ TYPED_TEST(ReduceByKeysIntegralTests, TestReduceByKey)
     using K = typename TestFixture::input_type; // key type
     typedef unsigned int V; // value type
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
@@ -221,6 +225,8 @@ TYPED_TEST(ReduceByKeysIntegralTests, TestReduceByKeyToDiscardIterator)
 {
     using V = typename TestFixture::input_type; // value type
     typedef unsigned int K; // key type
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -300,6 +306,8 @@ thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(my_system& system,
 
 TEST(ReduceByKeysTests, TestReduceByKeyDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -325,6 +333,8 @@ thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(my_tag,
 
 TEST(ReduceByKeysTests, TestReduceByKeyDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::reduce_by_key(thrust::retag<my_tag>(vec.begin()),

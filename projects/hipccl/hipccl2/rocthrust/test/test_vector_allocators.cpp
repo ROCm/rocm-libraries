@@ -148,11 +148,15 @@ void TestVectorAllocatorConstructors()
 
 TEST(VectorAllocatorTests, TestVectorAllocatorConstructorsHost)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     TestVectorAllocatorConstructors<host_vector>();
 }
 
 TEST(VectorAllocatorTests, TestVectorAllocatorConstructorsDevice)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     TestVectorAllocatorConstructors<device_vector>();
 }
 
@@ -177,11 +181,15 @@ void TestVectorAllocatorPropagateOnCopyAssignment()
 
 TEST(VectorAllocatorTests, TestVectorAllocatorPropagateOnCopyAssignmentHost)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     TestVectorAllocatorPropagateOnCopyAssignment<host_vector>();
 }
 
 TEST(VectorAllocatorTests, TestVectorAllocatorPropagateOnCopyAssignmentDevice)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     TestVectorAllocatorPropagateOnCopyAssignment<device_vector>();
 }
 
@@ -211,11 +219,15 @@ void TestVectorAllocatorPropagateOnMoveAssignment()
 
 TEST(VectorAllocatorTests, TestVectorAllocatorPropagateOnMoveAssignmentHost)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     TestVectorAllocatorPropagateOnMoveAssignment<host_vector>();
 }
 
 TEST(VectorAllocatorTests, TestVectorAllocatorPropagateOnMoveAssignmentDevice)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     TestVectorAllocatorPropagateOnMoveAssignment<device_vector>();
 }
 
@@ -242,10 +254,14 @@ void TestVectorAllocatorPropagateOnSwap()
 
 TEST(VectorAllocatorTests, TestVectorAllocatorPropagateOnSwapHost)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     TestVectorAllocatorPropagateOnSwap<host_vector_nsp>();
 }
 
 TEST(VectorAllocatorTests, TestVectorAllocatorPropagateOnSwapDevice)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     TestVectorAllocatorPropagateOnSwap<device_vector_nsp>();
 }

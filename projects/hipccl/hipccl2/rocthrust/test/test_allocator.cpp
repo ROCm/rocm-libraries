@@ -38,6 +38,8 @@ struct my_allocator_with_custom_construct1 : thrust::device_malloc_allocator<int
 
 TEST(AllocatorTests, TestAllocatorCustomDefaultConstruct)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int>                                      ref(10, 13);
     thrust::device_vector<int, my_allocator_with_custom_construct1> vec(10);
 
@@ -57,6 +59,8 @@ struct my_allocator_with_custom_construct2 : thrust::device_malloc_allocator<int
 
 TEST(AllocatorTests, TestAllocatorCustomCopyConstruct)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int>                                      ref(10, 13);
     thrust::device_vector<int>                                      copy_from(10, 7);
     thrust::device_vector<int, my_allocator_with_custom_construct2> vec(copy_from.begin(),
@@ -123,6 +127,8 @@ struct my_allocator_with_custom_destroy
 
 TEST(AllocatorTests, TestAllocatorCustomDestroy)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::cpp::vector<int, my_allocator_with_custom_destroy> vec(10);
 
     // destroy everything
@@ -164,6 +170,8 @@ struct my_minimal_allocator
 
 TEST(AllocatorTests, TestAllocatorMinimal)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     thrust::cpp::vector<int, my_minimal_allocator> vec(10, 13);
 
     // XXX copy to h_vec because ASSERT_EQUAL doesn't know about cpp::vector

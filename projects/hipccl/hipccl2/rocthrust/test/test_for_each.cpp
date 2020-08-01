@@ -43,6 +43,8 @@ TYPED_TEST(ForEachTests, HostPathSimpleTest)
     thrust::device_system_tag tag;
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
@@ -102,6 +104,8 @@ void simple_test_kernel(F func, int size)
 
 TYPED_TEST(ForEachTests, DevicePathSimpleTest)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_system_tag tag;
     using T           = typename TestFixture::input_type;
     const size_t size = 1024;
@@ -162,6 +166,8 @@ TYPED_TEST(ForEachVectorTests, TestForEachSimple)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector input(5);
     Vector output(7, (T)0);
 
@@ -196,6 +202,8 @@ __host__ __device__ InputIterator
 
 TEST(ForEachVectorTests, TestForEachDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -213,6 +221,8 @@ __host__ __device__ InputIterator for_each(my_tag, InputIterator first, InputIte
 
 TEST(ForEachVectorTests, TestForEachDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::for_each(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), 0);
@@ -224,6 +234,8 @@ TYPED_TEST(ForEachVectorTests, TestForEachNSimple)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector input(5);
     Vector output(7, (T)0);
@@ -258,6 +270,8 @@ __host__ __device__ InputIterator for_each_n(my_system& system, InputIterator fi
 
 TEST(ForEachVectorTests, TestForEachNDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -275,6 +289,8 @@ __host__ __device__ InputIterator for_each_n(my_tag, InputIterator first, Size, 
 
 TEST(ForEachVectorTests, TestForEachNDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::for_each_n(thrust::retag<my_tag>(vec.begin()), vec.size(), 0);
@@ -284,6 +300,8 @@ TEST(ForEachVectorTests, TestForEachNDispatchImplicit)
 
 TEST(ForEachVectorTests, TestForEachSimpleAnySystem)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> output(7, 0);
 
     mark_present_for_each<int> f;
@@ -304,6 +322,8 @@ TEST(ForEachVectorTests, TestForEachSimpleAnySystem)
 
 TEST(ForEachVectorTests, TestForEachNSimpleAnySystem)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> output(7, 0);
 
     mark_present_for_each<int> f;
@@ -325,6 +345,8 @@ TEST(ForEachVectorTests, TestForEachNSimpleAnySystem)
 TYPED_TEST(ForEachPrimitiveTests, TestForEach)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     for(auto size : get_sizes())
     {
@@ -368,6 +390,8 @@ TYPED_TEST(ForEachPrimitiveTests, TestForEach)
 TYPED_TEST(ForEachPrimitiveTests, TestForEachN)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     for(auto size : get_sizes())
     {
@@ -446,6 +470,8 @@ void _TestForEachWithLargeTypes(void)
 
 TEST(ForEachVectorTests, TestForEachWithLargeTypes)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     _TestForEachWithLargeTypes<int, 1>();
     _TestForEachWithLargeTypes<int, 2>();
     _TestForEachWithLargeTypes<int, 4>();
@@ -482,6 +508,8 @@ void _TestForEachNWithLargeTypes(void)
 
 TEST(ForEachVectorTests, TestForEachNWithLargeTypes)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     _TestForEachNWithLargeTypes<int, 1>();
     _TestForEachNWithLargeTypes<int, 2>();
     _TestForEachNWithLargeTypes<int, 4>();

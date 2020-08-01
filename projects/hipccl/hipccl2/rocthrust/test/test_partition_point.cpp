@@ -38,6 +38,8 @@ TYPED_TEST(PartitionPointVectorTests, TestPartitionPointSimple)
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector v(4);
     v[0] = 1;
     v[1] = 1;
@@ -60,6 +62,8 @@ TYPED_TEST(PartitionPointVectorTests, TestPartitionPoint)
     using Vector   = typename TestFixture::input_type;
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const size_t n = (1 << 16) + 13;
 
@@ -89,6 +93,8 @@ __host__ __device__ ForwardIterator
 
 TEST(PartitionPointTests, TestPartitionPointDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -107,6 +113,8 @@ __host__ __device__ ForwardIterator
 
 TEST(PartitionPointTests, TestPartitionPointDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     thrust::device_vector<int> vec(1);
 
     thrust::partition_point(

@@ -36,6 +36,8 @@ void stable_sort_by_key(my_system& system,
 
 TEST(StableSortByKeyTests, TestStableSortByKeyDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -55,6 +57,8 @@ void stable_sort_by_key(my_tag,
 
 TEST(StableSortByKeyTests, TestStableSortByKeyDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::stable_sort_by_key(thrust::retag<my_tag>(vec.begin()),
@@ -127,6 +131,8 @@ TYPED_TEST(StableSortByKeyVectorTests, TestStableSortByKeySimple)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector unsorted_keys, unsorted_values;
     Vector sorted_keys, sorted_values;
 
@@ -143,6 +149,8 @@ TYPED_TEST(StableSortByKeyVectorTests, TestStableSortByKeySimple)
 TYPED_TEST(StableSortByKeyVectorPrimitiveTests, TestStableSortByKey)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     for(auto size : get_sizes())
     {

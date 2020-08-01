@@ -32,6 +32,8 @@ TESTS_DEFINE(PrimitiveMergeTests, NumericalTestsParams);
 
 TEST(MergeTests, UsingHip)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
 }
 
@@ -39,6 +41,8 @@ TYPED_TEST(MergeTests, MergeSimple)
 {
     using Vector   = typename TestFixture::input_type;
     using Iterator = typename Vector::iterator;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector a(3), b(4);
 
@@ -81,6 +85,8 @@ OutputIterator merge(my_system& system,
 
 TEST(MergeTests, MergeDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -99,6 +105,8 @@ merge(my_tag, InputIterator1, InputIterator1, InputIterator2, InputIterator2, Ou
 
 TEST(MergeTests, MergeDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::merge(thrust::retag<my_tag>(vec.begin()),
@@ -113,6 +121,8 @@ TEST(MergeTests, MergeDispatchImplicit)
 TYPED_TEST(PrimitiveMergeTests, MergeWithRandomData)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -175,6 +185,8 @@ TYPED_TEST(PrimitiveMergeTests, MergeToDiscardIterator)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
@@ -217,6 +229,8 @@ TYPED_TEST(PrimitiveMergeTests, MergeToDiscardIterator)
 TYPED_TEST(PrimitiveMergeTests, MergeDescending)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)

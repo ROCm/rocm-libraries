@@ -55,6 +55,8 @@ TYPED_TEST(BinarySearchTestsInKernel, TestLowerBound)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<T> d_input(5);
     d_input[0] = 0;
     d_input[1] = 2;
@@ -159,6 +161,8 @@ TYPED_TEST(BinarySearchTestsInKernel, TestBinarySearch)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<T> d_input(5);
     d_input[0] = 0;
     d_input[1] = 2;
@@ -198,6 +202,9 @@ TYPED_TEST(BinarySearchTests, TestScalarLowerBoundSimple)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector vec(5);
 
     vec[0] = 0;
@@ -228,6 +235,8 @@ lower_bound(my_system& system, ForwardIterator first, ForwardIterator, const Les
 
 TEST(BinarySearchTests, TestScalarLowerBoundDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -246,6 +255,8 @@ lower_bound(my_tag, ForwardIterator first, ForwardIterator, const LessThanCompar
 
 TEST(BinarySearchTests, TestScalarLowerBoundDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::lower_bound(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), 0);
@@ -255,6 +266,8 @@ TEST(BinarySearchTests, TestScalarLowerBoundDispatchImplicit)
 
 TYPED_TEST(BinarySearchTests, TestScalarUpperBoundSimple)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
     Vector vec(5);
@@ -287,6 +300,8 @@ upper_bound(my_system& system, ForwardIterator first, ForwardIterator, const Les
 
 TEST(BinarySearchTests, TestScalarUpperBoundDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -305,6 +320,8 @@ upper_bound(my_tag, ForwardIterator first, ForwardIterator, const LessThanCompar
 
 TEST(BinarySearchTests, TestScalarUpperBoundDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::upper_bound(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), 0);
@@ -316,6 +333,9 @@ TYPED_TEST(BinarySearchTests, TestScalarBinarySearchSimple)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector vec(5);
 
     vec[0] = 0;
@@ -345,6 +365,8 @@ bool binary_search(my_system& system, ForwardIterator, ForwardIterator, const Le
 
 TEST(BinarySearchTests, TestScalarBinarySearchDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -362,6 +384,8 @@ bool binary_search(my_tag, ForwardIterator first, ForwardIterator, const LessTha
 
 TEST(BinarySearchTests, TestScalarBinarySearchDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::binary_search(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), 0);
@@ -373,6 +397,9 @@ TYPED_TEST(BinarySearchTests, TestScalarEqualRangeSimple)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector vec(5);
 
     vec[0] = 0;
@@ -414,6 +441,8 @@ equal_range(my_system& system, ForwardIterator first, ForwardIterator, const Les
 
 TEST(BinarySearchTests, TestScalarEqualRangeDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -432,6 +461,8 @@ equal_range(my_tag, ForwardIterator first, ForwardIterator, const LessThanCompar
 
 TEST(BinarySearchTests, TestScalarEqualRangeDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     thrust::device_vector<int> vec(1);
 
     thrust::binary_search(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), 0);

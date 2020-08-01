@@ -48,6 +48,8 @@ set_symmetric_difference_by_key(my_system& system,
 
 TEST(SetSymmetricDifferenceByKeyTests, TestSetSymmetricDifferenceByKeyDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -87,6 +89,8 @@ set_symmetric_difference_by_key(my_tag,
 
 TEST(SetSymmetricDifferenceByKeyTests, TestSetSymmetricDifferenceByKeyDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::set_symmetric_difference_by_key(thrust::retag<my_tag>(vec.begin()),
@@ -105,6 +109,8 @@ TYPED_TEST(SetSymmetricDifferenceByKeyTests, TestSetSymmetricDifferenceByKeySimp
 {
     using Vector   = typename TestFixture::input_type;
     using Iterator = typename Vector::iterator;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector a_key(4), b_key(5);
     Vector a_val(4), b_val(5);
@@ -162,6 +168,8 @@ TYPED_TEST(SetSymmetricDifferenceByKeyTests, TestSetSymmetricDifferenceByKeySimp
 TYPED_TEST(SetSymmetricDifferenceByKeyPrimitiveTests, TestSetSymmetricDifferenceByKey)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
 
@@ -259,6 +267,8 @@ TYPED_TEST(SetSymmetricDifferenceByKeyPrimitiveTests,
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
 
     for(auto size : sizes)
@@ -340,6 +350,8 @@ TYPED_TEST(SetSymmetricDifferenceByKeyPrimitiveTests,
 TYPED_TEST(SetSymmetricDifferenceByKeyPrimitiveTests, TestSetSymmetricDifferenceByKeyMultiset)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
 

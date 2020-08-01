@@ -43,6 +43,8 @@ OutputIterator set_symmetric_difference(my_system& system,
 
 TEST(SetSymmetricDifferenceTests, TestSetSymmetricDifferenceDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -62,6 +64,8 @@ OutputIterator set_symmetric_difference(
 
 TEST(SetSymmetricDifferenceTests, TestSetSymmetricDifferenceDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::set_symmetric_difference(thrust::retag<my_tag>(vec.begin()),
@@ -77,6 +81,8 @@ TYPED_TEST(SetSymmetricDifferenceTests, TestSetSymmetricDifferenceSimple)
 {
     using Vector   = typename TestFixture::input_type;
     using Iterator = typename Vector::iterator;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector a(4), b(5);
 
@@ -109,6 +115,8 @@ TYPED_TEST(SetSymmetricDifferenceTests, TestSetSymmetricDifferenceSimple)
 TYPED_TEST(SetSymmetricDifferencePrimitiveTests, TestSetSymmetricDifference)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
 
@@ -174,6 +182,8 @@ TYPED_TEST(SetSymmetricDifferencePrimitiveTests, TestSetSymmetricDifferenceEquiv
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
 
     for(auto size : sizes)
@@ -217,6 +227,8 @@ TYPED_TEST(SetSymmetricDifferencePrimitiveTests, TestSetSymmetricDifferenceEquiv
 TYPED_TEST(SetSymmetricDifferencePrimitiveTests, TestSetSymmetricDifferenceMultiset)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
 
@@ -272,6 +284,8 @@ TYPED_TEST(SetSymmetricDifferenceIntegerTests, TestSetSymmetricDifferenceKeyValu
 {
     using U = typename TestFixture::input_type;
     typedef key_value<U, U> T;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)

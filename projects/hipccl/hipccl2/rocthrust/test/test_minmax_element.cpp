@@ -27,6 +27,8 @@ TYPED_TEST(MinmaxElementTests, TestMinmaxElementSimple)
 {
     using Vector = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector data(6);
     data[0] = 3;
     data[1] = 5;
@@ -45,6 +47,8 @@ TYPED_TEST(MinmaxElementTests, TestMinmaxElementWithTransform)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     // We cannot use unsigned types for this test case
     if(std::is_unsigned<T>::value)
@@ -73,6 +77,8 @@ TYPED_TEST(MinmaxElementTests, TestMinmaxElementWithTransform)
 TYPED_TEST(MinMaxElementPrimitiveTests, TestMinmaxElement)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -127,6 +133,8 @@ TEST(MinmaxElementTests, TestMinmaxElementDispatchExplicit)
 {
     thrust::device_vector<int> vec(1);
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     my_system sys(0);
     thrust::minmax_element(sys, vec.begin(), vec.end());
 
@@ -143,6 +151,8 @@ minmax_element(my_tag, ForwardIterator first, ForwardIterator)
 
 TEST(MinmaxElementTests, TestMinmaxElementDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     thrust::device_vector<int> vec(1);
 
     thrust::minmax_element(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()));

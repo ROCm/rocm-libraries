@@ -41,6 +41,8 @@ OutputIterator set_intersection(my_system& system,
 
 TEST(SetIntersectionTests, TestSetIntersectionDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -59,6 +61,8 @@ OutputIterator set_intersection(
 
 TEST(SetIntersectionTests, TestSetIntersectionDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::set_intersection(thrust::retag<my_tag>(vec.begin()),
@@ -74,6 +78,8 @@ TYPED_TEST(SetIntersectionTests, TestSetIntersectionSimple)
 {
     using Vector   = typename TestFixture::input_type;
     using Iterator = typename Vector::iterator;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector a(3), b(4);
 
@@ -100,6 +106,8 @@ TYPED_TEST(SetIntersectionTests, TestSetIntersectionSimple)
 TYPED_TEST(SetIntersectionPrimitiveTests, TestSetIntersectionSimple)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -163,6 +171,8 @@ TYPED_TEST(SetIntersectionPrimitiveTests, TestSetIntersectionToDiscardIterator)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
 
     for(auto size : sizes)
@@ -211,6 +221,8 @@ TYPED_TEST(SetIntersectionPrimitiveTests, TestSetIntersectionEquivalentRanges)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
 
     for(auto size : sizes)
@@ -255,6 +267,8 @@ TYPED_TEST(SetIntersectionPrimitiveTests, TestSetIntersectionEquivalentRanges)
 TYPED_TEST(SetIntersectionPrimitiveTests, TestSetIntersectionMultiset)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
 

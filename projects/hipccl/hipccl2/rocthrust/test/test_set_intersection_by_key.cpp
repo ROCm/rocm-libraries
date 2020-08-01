@@ -47,6 +47,8 @@ thrust::pair<OutputIterator1, OutputIterator2> set_difference_by_key(my_system& 
 
 TYPED_TEST(SetIntersectionByKeyTests, TestSetDifferenceByKeyDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -85,6 +87,8 @@ thrust::pair<OutputIterator1, OutputIterator2> set_difference_by_key(my_tag,
 
 TYPED_TEST(SetIntersectionByKeyTests, TestSetDifferenceByKeyDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::set_difference_by_key(thrust::retag<my_tag>(vec.begin()),
@@ -103,6 +107,8 @@ TYPED_TEST(SetIntersectionByKeyTests, TestSetDifferenceByKeySimple)
 {
     using Vector   = typename TestFixture::input_type;
     using Iterator = typename Vector::iterator;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector a_key(4), b_key(5);
     Vector a_val(4), b_val(5);
@@ -153,6 +159,8 @@ TYPED_TEST(SetIntersectionByKeyTests, TestSetDifferenceByKeySimple)
 TYPED_TEST(SetIntersectionByKeyPrimitiveTests, TestSetDifferenceByKey)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -246,6 +254,8 @@ TYPED_TEST(SetIntersectionByKeyPrimitiveTests, TestSetDifferenceByKeyEquivalentR
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
 
     for(auto size : sizes)
@@ -325,6 +335,8 @@ TYPED_TEST(SetIntersectionByKeyPrimitiveTests, TestSetDifferenceByKeyEquivalentR
 TYPED_TEST(SetIntersectionByKeyPrimitiveTests, TestSetDifferenceByKeyMultiset)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
 
