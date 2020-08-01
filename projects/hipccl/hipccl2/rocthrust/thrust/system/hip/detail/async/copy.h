@@ -472,6 +472,10 @@ auto async_copy_n(
 {
   // TODO: We could do more here with hipHostRegister.
 
+  THRUST_UNUSED_VAR(first);
+  THRUST_UNUSED_VAR(n);
+  THRUST_UNUSED_VAR(output);
+
   async_copy_n_compile_failure_non_trivially_relocatable_elements<
     typename thrust::iterator_traits<ForwardIt>::value_type
   , typename std::add_lvalue_reference<
