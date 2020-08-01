@@ -4,111 +4,198 @@
 
 image: rocm/rocm-terminal:latest
 
+stages:
+  #- build:cmake_latest   # Tests if builds succeed (CMake)
+  #- build:cmake_minimum  # Tests if builds succeed (CMake)
+  - build   # Tests if builds succeed (CMake)
+  - test    # Tests if unit tests are passing (CTest)
+  - package
+  - deploy
+
 variables:
-  SUDO_CMD: "" # Must be "sudo" on images which don't use root user
-  DEPS_DIR: "$CI_PROJECT_DIR/__dependencies"
-  CMAKE_URL: "https://cmake.org/files/v3.5/cmake-3.5.1-Linux-x86_64.tar.gz"
-  # General build flags
-  CXXFLAGS: ""
-  CMAKE_OPTIONS: ""
-  # Local build options
-  LOCAL_CXXFLAGS: ""
-  LOCAL_CMAKE_OPTIONS: ""
+  # Tested CMake versions
+  CMAKE_MINIMUM_VERSION: 3.5.2
+  CMAKE_LATEST_VERSION: 3.17.0
+  # Cluster config
 
-before_script:
-  - $SUDO_CMD apt-get update -qq
-  - $SUDO_CMD apt-get install -y -qq libidn11 libnuma-dev libunwind-dev git wget tar xz-utils bzip2 build-essential pkg-config ca-certificates
-  - hipconfig
-  # cmake
-  - mkdir -p $DEPS_DIR/cmake
-  - wget --no-check-certificate --quiet -O - $CMAKE_URL | tar --strip-components=1 -xz -C $DEPS_DIR/cmake
-  - export PATH=$DEPS_DIR/cmake/bin:$PATH
-  # Combine global build options with local options
-  - export CXXFLAGS=$CXXFLAGS" "$LOCAL_CXXFLAGS
-  - export CMAKE_OPTIONS=$CXXFLAGS" "$LOCAL_CMAKE_OPTIONS
-  - echo -e "machine projects.streamhpc.com\nlogin gitlab-ci-token\npassword ${CI_JOB_TOKEN}" > ~/.netrc
+  # Image-specific helper
+  SUDO_CMD: "sudo -E" # Must be "sudo" on images which don't use root user
+  # Helper variables
+  DEPS_DIR: $CI_PROJECT_DIR/deps
+  BUILD_DIR: $CI_PROJECT_DIR/build
+  CMAKE_MINIMUM_URL: "https://cmake.org/files/v3.5/cmake-3.5.1-Linux-x86_64.tar.gz"
+  CMAKE_MINIMUM_PATH: "$CI_PROJECT_DIR/deps/cmake-3.5.2"
+  CMAKE_LATEST_URL: "https://cmake.org/files/v3.16/cmake-3.16.0-Linux-x86_64.tar.gz"
+  CMAKE_LATEST_PATH: "$CI_PROJECT_DIR/deps/cmake-3.17.0"
+  BUILD_MINIMUM_DIR: $CI_PROJECT_DIR/build/cmake-3.5.2
+  BUILD_LATEST_DIR: $CI_PROJECT_DIR/build/cmake-3.17.0
+  PACKAGE_DIR: $CI_PROJECT_DIR/build/package
 
-build:rocm:
+.deps:cmake-minimum:
+  #stage: build:cmake_minimum
   stage: build
+  # Workaround tags until HAL is broken
   tags:
+    - s9300
     - rocm
-  variables:
-    SUDO_CMD: "sudo -E"
+  before_script:
+    - $SUDO_CMD apt update -qq
+    # | Used in the script    | Build tools | Fetch from https:// | rocminfo calls lsmod
+    - $SUDO_CMD apt install -y -qq libidn11 wget tar xz-utils bzip2 libnuma-dev libunwind-dev git build-essential pkg-config ninja-build ca-certificates kmod
+    # Fetch CMake only if the cache has not been restored
+    - if [ ! -d $CMAKE_MINIMUM_PATH ]; then mkdir -p $CMAKE_MINIMUM_PATH; wget --no-check-certificate --quiet -O - $CMAKE_MINIMUM_URL | tar --strip-components=1 -xz -C $CMAKE_MINIMUM_PATH
+    - fi
+    - export PATH=$CMAKE_MINIMUM_PATH/bin:$PATH
+    # Debug printing of environment for context when errors occur
+    - hipconfig
+    # Setup ~/.netrc
+    - echo -e "machine projects.streamhpc.com\nlogin gitlab-ci-token\npassword ${CI_JOB_TOKEN}" > ~/.netrc
+  cache:
+    key: $CMAKE_MINIMUM_VERSION
+    paths:
+      - $CMAKE_MINIMUM_PATH
+
+.deps:cmake-latest:
+  #stage: build:cmake_latest
+  stage: build
+  # Workaround tags until HAL is broken
+  tags:
+    - mi25
+    - rocm
+  before_script:
+    - $SUDO_CMD apt update -qq
+    # | Used in the script    | Build tools | Fetch from https:// | rocminfo calls lsmod
+    - $SUDO_CMD apt install -y -qq wget tar xz-utils bzip2 libnuma-dev libunwind-dev git build-essential pkg-config ninja-build ca-certificates kmod
+    # Fetch CMake only if the cache has not been restored
+    - if [ ! -d $CMAKE_LATEST_PATH ]; then mkdir -p $CMAKE_LATEST_PATH; wget --no-check-certificate --quiet -O - $CMAKE_LATEST_URL | tar --strip-components=1 -xz -C $CMAKE_LATEST_PATH;
+    - fi;
+    - export PATH=$CMAKE_LATEST_PATH/bin:$PATH
+    # Debug printing of environment for context when errors occur
+    - hipconfig
+    # Setup ~/.netrc
+    - echo -e "machine projects.streamhpc.com\nlogin gitlab-ci-token\npassword ${CI_JOB_TOKEN}" > ~/.netrc
+  cache:
+    key: $CMAKE_LATEST_VERSION
+    paths:
+      - $CMAKE_LATEST_PATH
+
+build:cmake-latest:
+  extends:
+    - .deps:cmake-latest
   script:
-    - mkdir build
-    - cd build
-    - CXX=hipcc cmake -DBUILD_TEST=ON -DBUILD_EXAMPLES=ON -DBUILD_BENCHMARKS=ON -DAMDGPU_TARGETS="gfx803;gfx900;gfx906" ../.
-    - make -j $(nproc)
-    - make package
+    - mkdir -p $BUILD_LATEST_DIR
+    - cd $BUILD_LATEST_DIR
+    - cmake
+      -G Ninja
+      -D CMAKE_CXX_COMPILER=hipcc
+      -D CMAKE_BUILD_TYPE=Release
+      -D BUILD_TEST=ON
+      -D BUILD_EXAMPLES=ON
+      -D BUILD_BENCHMARKS=ON
+      -D AMDGPU_TARGETS="gfx803;gfx900;gfx906"
+      -D AMDGPU_TEST_TARGETS="gfx803;gfx900;gfx906"
+      -S $CI_PROJECT_DIR
+      -B $BUILD_LATEST_DIR
+    - cmake
+      --build $BUILD_LATEST_DIR
   artifacts:
     paths:
-      - build/thrust/
-      - build/test/test_*
-      - build/test/CTestTestfile.cmake
-      - build/testing/test_thrust_*
-      - build/testing/CTestTestfile.cmake
-      - build/gtest/
-      - build/CMakeCache.txt
-      - build/CTestTestfile.cmake
-      - build/rocthrust*.deb
-      - build/rocthrust*.zip
+    - $BUILD_LATEST_DIR/test/*
+    - $BUILD_LATEST_DIR/testing/*
+    - $BUILD_LATEST_DIR/gtest/*
+    - $BUILD_LATEST_DIR/CMakeCache.txt
+    - $BUILD_LATEST_DIR/CTestTestfile.cmake
+    exclude:
+    - $BUILD_LATEST_DIR/**/*.o
     expire_in: 2 weeks
 
-.test:
-  stage: test
-  variables:
-    SUDO_CMD: "sudo -E"
-  dependencies:
-    - build:rocm
+build:cmake-minimum:
+  extends:
+    - .deps:cmake-minimum
+  #needs:
+  #  - job: build:cmake-latest
+  #    artifacts: false
   script:
-    - cd build
-    - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 1
+    - mkdir -p $BUILD_MINIMUM_DIR
+    - cd $BUILD_MINIMUM_DIR
+    - cmake
+      -G Ninja
+      -D CMAKE_CXX_COMPILER=hipcc
+      -D CMAKE_BUILD_TYPE=Release
+      -D BUILD_TEST=ON
+      -D BUILD_EXAMPLES=ON
+      -D BUILD_BENCHMARKS=ON
+      -D DISABLE_WERROR=OFF
+      -B $BUILD_MINIMUM_DIR
+      ../../.
+    - cmake
+      --build ./
+  artifacts:
+    paths:
+    - $BUILD_MINIMUM_DIR/*
+    exclude:
+    - $BUILD_MINIMUM_DIR/*test*/*
+    - $BUILD_MINIMUM_DIR/benchmarks/*
+    - $BUILD_MINIMUM_DIR/internal/*
+    - $BUILD_MINIMUM_DIR/examples/*
+    expire_in: 2 weeks
+
+package:deb:
+  stage: package
+  extends:
+    - .deps:cmake-minimum
+  needs:
+    - job: build:cmake-minimum
+      artifacts: true
+  script:
+    - mkdir -p $PACKAGE_DIR
+    - cd $BUILD_MINIMUM_DIR
+    - $SUDO_CMD cpack
+      -G "DEB;ZIP"
+      -B $PACKAGE_DIR
+  artifacts:
+    paths:
+      - $PACKAGE_DIR/rocthrust*.deb
+      - $PACKAGE_DIR/rocthrust*.zip
+    expire_in: 2 weeks
 
 include: '.gitlab-ci-gputest.yml'
 
-test:rocm_package:
-  stage: test
-  tags:
-    - rocm-stable
-  variables:
-    SUDO_CMD: "sudo -E"
-  dependencies:
-    - build:rocm
+deploy:deb:
+  stage: deploy
+  needs:
+    - package:deb
+  extends:
+    - .deps:cmake-minimum
   script:
     # Install rocPRIM package
     - echo ${ROCPRIM_GIT_URL}
     - echo $ROCPRIM_GIT_URL
     - git clone -b develop_stream https://gitlab-ci-token:${CI_JOB_TOKEN}@${ROCPRIM_GIT_URL}
-    - cd rocPRIM
-    - mkdir build
-    - cd build
-    - CXX=hipcc cmake -DBUILD_TEST=OFF ../.
-    - make package
-    - $SUDO_CMD dpkg -i rocprim-*.deb
-    - cd ../..
-    # rocThrust
-    - cd build
-    - $SUDO_CMD dpkg -i rocthrust-*.deb
-    - mkdir ../package_test && cd ../package_test
-    - CXX=hipcc cmake ../extra/. -Drocprim_DIR="/opt/rocm/rocprim"
-    - make VERBOSE=1
-    - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 1
+    - cmake
+      -G Ninja
+      -D CMAKE_CXX_COMPILER=hipcc
+      -D CMAKE_BUILD_TYPE=Release
+      -D ONLY_INSTALL=ON
+      -B $PACKAGE_DIR
+      ./rocPRIM
+    - $SUDO_CMD cpack
+      -G "DEB;ZIP"
+      -B $PACKAGE_DIR
+    # Install rocPRIM and rocThrust
+    - $SUDO_CMD dpkg -i $PACKAGE_DIR/rocprim-*.deb
+    - $SUDO_CMD dpkg -i $PACKAGE_DIR/rocthrust-*.deb
+    # Test install
+    - mkdir -p package_test
+    - cd package_test
+    - cmake
+      -G Ninja
+      -D CMAKE_CXX_COMPILER=hipcc
+      -D CMAKE_BUILD_TYPE=Release
+      -B .
+      $CI_PROJECT_DIR/extra
+    - cmake
+      --build .
+    # Remove rocPRIM and rocThrust
     - $SUDO_CMD dpkg -r rocthrust
     - $SUDO_CMD dpkg -r rocprim
-
-test:rocm_install:
-  stage: test
-  tags:
-    - rocm-stable
-  variables:
-    SUDO_CMD: "sudo -E"
-  dependencies: []
-  script:
-    - mkdir build_only_install
-    - cd build_only_install
-    - CXX=hipcc cmake -DBUILD_TEST=OFF ../.
-    - $SUDO_CMD make install
-    - mkdir ../install_test && cd ../install_test
-    - CXX=hipcc cmake ../extra/.
-    - make VERBOSE=1
-    - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 1

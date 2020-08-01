@@ -39,6 +39,8 @@ TYPED_TEST(ReduceTests, TestReduceSimple)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector v(3);
     v[0] = 1;
     v[1] = -2;
@@ -60,6 +62,8 @@ int reduce(my_system& system, InputIterator, InputIterator)
 
 TEST(ReduceTests, TestReduceDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec;
 
     my_system sys(0);
@@ -76,6 +80,8 @@ int reduce(my_tag, InputIterator, InputIterator)
 
 TEST(ReduceTests, TestReduceDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec;
 
     my_system sys(0);
@@ -87,6 +93,8 @@ TEST(ReduceTests, TestReduceDispatchImplicit)
 TYPED_TEST(ReducePrimitiveTests, TestReduce)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -117,6 +125,8 @@ TYPED_TEST(ReduceTests, TestReduceMixedTypes)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     if(std::is_floating_point<T>::value)
     {
         Vector float_input(4);
@@ -144,6 +154,8 @@ TYPED_TEST(ReduceTests, TestReduceMixedTypes)
 TYPED_TEST(ReduceIntegerTests, TestReduceWithOperator)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -191,6 +203,8 @@ TYPED_TEST(ReduceTests, TestReduceWithIndirection)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector data(7);
     data[0] = 0;
     data[1] = 1;
@@ -217,6 +231,8 @@ TYPED_TEST(ReduceTests, TestReduceWithIndirection)
 TYPED_TEST(ReducePrimitiveTests, TestReduceCountingIterator)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)

@@ -31,6 +31,8 @@ TYPED_TEST(SetUnionByKeyDescendingTests, TestSetUnionByKeyDescendingSimple)
     using Iterator = typename Vector::iterator;
     using T        = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector a_key(3), b_key(4);
     Vector a_val(3), b_val(4);
 
@@ -83,6 +85,8 @@ TYPED_TEST(SetUnionByKeyDescendingTests, TestSetUnionByKeyDescendingSimple)
 TYPED_TEST(SetUnionByKeyDescendingPrimitiveTests, TestSetUnionByKeyDescendingEquivalentRanges)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
 
@@ -170,6 +174,10 @@ TYPED_TEST(SetUnionByKeyDescendingTests, TestSetUnionByKeyDescendingSimple)
     using Vector   = typename TestFixture::input_type;
     using Iterator = typename Vector::iterator;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
   Vector a_key(3), b_key(4);
   Vector a_val(3), b_val(4);
 
@@ -202,6 +210,8 @@ TYPED_TEST(SetUnionByKeyDescendingTests, TestSetUnionByKeyDescendingSimple)
 TYPED_TEST(SetUnionByKeyDescendingPrimitiveTests, TestSetUnionByKeyDescending)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
 
@@ -298,6 +308,8 @@ TYPED_TEST(SetUnionByKeyDescendingPrimitiveTests, TestSetUnionByKeyDescendingEqu
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
 
     for(auto size : sizes)
@@ -369,6 +381,8 @@ SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 TYPED_TEST(SetUnionByKeyDescendingPrimitiveTests, TestSetUnionByKeyDescendingMultiset)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
 

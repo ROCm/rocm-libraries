@@ -31,6 +31,8 @@ TYPED_TEST(AdjacentDifferenceTests, TestAdjacentDifferenceSimple)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector input(3);
     Vector output(3);
     input[0] = 1;
@@ -66,6 +68,8 @@ TYPED_TEST(AdjacentDifferenceTests, TestAdjacentDifferenceSimple)
 TYPED_TEST(AdjacentDifferenceVariableTests, TestAdjacentDifference)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -123,6 +127,8 @@ TYPED_TEST(AdjacentDifferenceVariableTests, TestAdjacentDifferenceInPlaceWithRel
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
@@ -166,6 +172,8 @@ TYPED_TEST(AdjacentDifferenceVariableTests, TestAdjacentDifferenceDiscardIterato
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
@@ -206,6 +214,8 @@ adjacent_difference(my_system& system, InputIterator, InputIterator, OutputItera
 
 TEST(AdjacentDifferenceTests, TestAdjacentDifferenceDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> d_input(1);
 
     my_system sys(0);
@@ -223,6 +233,8 @@ OutputIterator adjacent_difference(my_tag, InputIterator, InputIterator, OutputI
 
 TEST(AdjacentDifferenceTests, TestAdjacentDifferenceDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     thrust::device_vector<int> d_input(1);
 
     thrust::adjacent_difference(thrust::retag<my_tag>(d_input.begin()),

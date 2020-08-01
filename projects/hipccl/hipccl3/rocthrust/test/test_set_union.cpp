@@ -41,6 +41,8 @@ OutputIterator set_union(my_system& system,
 
 TEST(SetUnionTests, TestSetUnionDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -59,6 +61,8 @@ OutputIterator set_union(
 
 TEST(SetUnionTests, TestSetUnionDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::set_union(thrust::retag<my_tag>(vec.begin()),
@@ -74,6 +78,8 @@ TYPED_TEST(SetUnionTests, TestSetUnionSimple)
 {
     using Vector   = typename TestFixture::input_type;
     using Iterator = typename Vector::iterator;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector a(3), b(4);
 
@@ -105,6 +111,8 @@ TYPED_TEST(SetUnionTests, TestSetUnionWithEquivalentElementsSimple)
     using Vector   = typename TestFixture::input_type;
     using Iterator = typename Vector::iterator;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector a(3), b(5);
 
     a[0] = 0;
@@ -134,6 +142,8 @@ TYPED_TEST(SetUnionTests, TestSetUnionWithEquivalentElementsSimple)
 TYPED_TEST(SetUnionPrimitiveTests, TestSetUnion)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
 
@@ -197,6 +207,8 @@ TYPED_TEST(SetUnionPrimitiveTests, TestSetUnion)
 TYPED_TEST(SetUnionPrimitiveTests, TestSetUnionToDiscardIterator)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
 

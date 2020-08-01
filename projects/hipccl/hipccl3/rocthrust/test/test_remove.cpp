@@ -51,6 +51,8 @@ TYPED_TEST(RemoveTests, TestRemoveSimple)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector data(5);
     data[0] = T(1);
     data[1] = T(2);
@@ -76,6 +78,8 @@ ForwardIterator remove(my_system& system, ForwardIterator first, ForwardIterator
 
 TEST(RemoveTests, TestRemoveDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -93,6 +97,7 @@ ForwardIterator remove(my_tag, ForwardIterator first, ForwardIterator, const T&)
 
 TEST(RemoveTests, TestRemoveDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     thrust::device_vector<int> vec(1);
 
     thrust::remove(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.begin()), 0);
@@ -104,6 +109,8 @@ TYPED_TEST(RemoveTests, TestRemoveCopySimple)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector data(5);
     data[0] = T(1);
@@ -134,6 +141,8 @@ remove_copy(my_system& system, InputIterator, InputIterator, OutputIterator resu
 
 TEST(RemoveTests, TestRemoveCopyDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -151,6 +160,8 @@ OutputIterator remove_copy(my_tag, InputIterator, InputIterator, OutputIterator 
 
 TEST(RemoveTests, TestRemoveCopyDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::remove_copy(thrust::retag<my_tag>(vec.begin()),
@@ -165,6 +176,8 @@ TYPED_TEST(RemoveTests, TestRemoveIfSimple)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector data(5);
     data[0] = 1;
@@ -192,6 +205,8 @@ __host__ __device__ ForwardIterator
 
 TEST(RemoveTests, TestRemoveIfDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -210,6 +225,8 @@ __host__ __device__ ForwardIterator
 
 TEST(RemoveTests, TestRemoveIfDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::remove_if(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.begin()), 0);
@@ -221,6 +238,8 @@ TYPED_TEST(RemoveTests, TestRemoveIfStencilSimple)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector data(5);
     data[0] = 1;
@@ -256,6 +275,8 @@ __host__ __device__ ForwardIterator
 
 TEST(RemoveTests, TestRemoveIfStencilDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -274,6 +295,8 @@ __host__ __device__ ForwardIterator
 
 TEST(RemoveTests, TestRemoveIfStencilDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::remove_if(thrust::retag<my_tag>(vec.begin()),
@@ -288,6 +311,8 @@ TYPED_TEST(RemoveTests, TestRemoveCopyIfSimple)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector data(5);
     data[0] = 1;
@@ -318,6 +343,8 @@ __host__ __device__ InputIterator
 
 TEST(RemoveTests, TestRemoveCopyIfDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -336,6 +363,8 @@ __host__ __device__ InputIterator
 
 TEST(RemoveTests, TestRemoveCopyIfDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::remove_copy_if(thrust::retag<my_tag>(vec.begin()),
@@ -350,6 +379,8 @@ TYPED_TEST(RemoveTests, TestRemoveCopyIfStencilSimple)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector data(5);
     data[0] = T(1);
@@ -394,6 +425,8 @@ __host__ __device__ OutputIterator remove_copy_if(my_system& system,
 
 TEST(RemoveTests, TestRemoveCopyIfStencilDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -415,6 +448,8 @@ __host__ __device__ OutputIterator remove_copy_if(
 
 TEST(RemoveTests, TestRemoveCopyIfStencilDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::remove_copy_if(thrust::retag<my_tag>(vec.begin()),
@@ -429,6 +464,8 @@ TEST(RemoveTests, TestRemoveCopyIfStencilDispatchImplicit)
 TYPED_TEST(RemoveVariableTests, TestRemove)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -461,6 +498,8 @@ TYPED_TEST(RemoveVariableTests, TestRemove)
 TYPED_TEST(RemoveVariableTests, TestRemoveIf)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -495,6 +534,8 @@ TYPED_TEST(RemoveVariableTests, TestRemoveIf)
 TYPED_TEST(RemoveVariableTests, TestRemoveIfStencil)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -540,6 +581,8 @@ TYPED_TEST(RemoveVariableTests, TestRemoveCopy)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
@@ -579,6 +622,8 @@ TYPED_TEST(RemoveVariableTests, TestRemoveCopyToDiscardIterator)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
@@ -614,6 +659,8 @@ TYPED_TEST(RemoveVariableTests, TestRemoveCopyToDiscardIterator)
 TYPED_TEST(RemoveVariableTests, TestRemoveCopyToDiscardIteratorZipped)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -672,6 +719,8 @@ TYPED_TEST(RemoveVariableTests, TestRemoveCopyIf)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
@@ -710,6 +759,8 @@ TYPED_TEST(RemoveVariableTests, TestRemoveCopyIfToDiscardIterator)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
@@ -744,6 +795,8 @@ TYPED_TEST(RemoveVariableTests, TestRemoveCopyIfToDiscardIterator)
 TYPED_TEST(RemoveVariableTests, TestRemoveCopyIfStencil)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -795,6 +848,8 @@ TYPED_TEST(RemoveVariableTests, TestRemoveCopyIfStencil)
 TYPED_TEST(RemoveVariableTests, TestRemoveCopyIfStencilToDiscardIterator)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)

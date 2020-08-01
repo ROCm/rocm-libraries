@@ -28,6 +28,9 @@ TYPED_TEST(BinarySearchDescendingTests, TestScalarLowerBoundDescendingSimple)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector vec(5);
 
     vec[0] = 8;
@@ -64,6 +67,8 @@ TYPED_TEST(BinarySearchDescendingTests, TestScalarUpperBoundDescendingSimple)
 
     typedef typename Vector::value_type T;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector vec(5);
 
     vec[0] = 8;
@@ -98,6 +103,9 @@ TYPED_TEST(BinarySearchDescendingTests, TestScalarBinarySearchDescendingSimple)
 {
     using Vector = typename TestFixture::input_type;
     typedef typename Vector::value_type T;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector vec(5);
 
     vec[0] = 8;
@@ -122,6 +130,9 @@ TYPED_TEST(BinarySearchDescendingTests, TestScalarEqualRangeDescendingSimple)
 {
     using Vector = typename TestFixture::input_type;
     typedef typename Vector::value_type T;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     Vector vec(5);
 
     vec[0] = 8;

@@ -28,6 +28,8 @@ TYPED_TEST(DistanceTests, TestDistance)
     using Vector   = typename TestFixture::input_type;
     using Iterator = typename Vector::iterator;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector v(100);
 
     Iterator i = v.begin();
@@ -49,6 +51,8 @@ TYPED_TEST(DistanceTests, TestDistanceLarge)
 {
     using Vector   = typename TestFixture::input_type;
     using Iterator = typename Vector::iterator;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector v(1000);
 

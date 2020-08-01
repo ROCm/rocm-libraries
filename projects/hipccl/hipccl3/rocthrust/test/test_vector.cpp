@@ -27,6 +27,8 @@ TESTS_DEFINE(VectorTests, FullTestsParams);
 TYPED_TEST(VectorTests, TestVectorZeroSize)
 {
     using Vector = typename TestFixture::input_type;
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector v;
 
     ASSERT_EQ(v.size(), 0);
@@ -35,6 +37,8 @@ TYPED_TEST(VectorTests, TestVectorZeroSize)
 
 TEST(VectorTests, TestVectorBool)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::host_vector<bool>   h(3);
     thrust::device_vector<bool> d(3);
 
@@ -59,6 +63,8 @@ TYPED_TEST(VectorTests, TestVectorFrontBack)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector v(3);
     v[0] = T(0);
     v[1] = T(1);
@@ -72,6 +78,8 @@ TYPED_TEST(VectorTests, TestVectorData)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector v(3);
     v[0] = T(0);
@@ -99,6 +107,8 @@ TYPED_TEST(VectorTests, TestVectorElementAssignment)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector v(3);
     v[0] = T(0);
@@ -130,6 +140,8 @@ TYPED_TEST(VectorTests, TestVectorFromSTLVector)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     std::vector<T> stl_vector(3);
     stl_vector[0] = T(0);
     stl_vector[1] = T(1);
@@ -155,6 +167,8 @@ TYPED_TEST(VectorTests, TestVectorFillAssign)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::host_vector<T> v;
     v.assign(3, T(13));
 
@@ -168,6 +182,8 @@ TYPED_TEST(VectorTests, TestVectorAssignFromSTLVector)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     std::vector<T> stl_vector(3);
     stl_vector[0] = T(0);
@@ -188,6 +204,8 @@ TYPED_TEST(VectorTests, TestVectorFromBiDirectionalIterator)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     std::list<T> stl_list;
     stl_list.push_back(T(0));
     stl_list.push_back(T(1));
@@ -205,6 +223,8 @@ TYPED_TEST(VectorTests, TestVectorAssignFromBiDirectionalIterator)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     std::list<T> stl_list;
     stl_list.push_back(T(0));
@@ -225,6 +245,8 @@ TYPED_TEST(VectorTests, TestVectorAssignFromHostVector)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::host_vector<T> h(3);
     h[0] = T(0);
     h[1] = T(1);
@@ -240,6 +262,8 @@ TYPED_TEST(VectorTests, TestVectorToAndFromHostVector)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     thrust::host_vector<T> h(3);
     h[0] = T(0);
@@ -277,6 +301,8 @@ TYPED_TEST(VectorTests, TestVectorAssignFromDeviceVector)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<T> d(3);
     d[0] = T(0);
     d[1] = T(1);
@@ -292,6 +318,8 @@ TYPED_TEST(VectorTests, TestVectorToAndFromDeviceVector)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     thrust::device_vector<T> h(3);
     h[0] = T(0);
@@ -329,6 +357,8 @@ TYPED_TEST(VectorTests, TestVectorWithInitialValue)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const T init = T(17);
 
     Vector v(3, init);
@@ -343,6 +373,8 @@ TYPED_TEST(VectorTests, TestVectorSwap)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector v(3);
     v[0] = T(0);
@@ -368,6 +400,8 @@ TYPED_TEST(VectorTests, TestVectorErasePosition)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector v(5);
     v[0] = T(0);
@@ -412,6 +446,8 @@ TYPED_TEST(VectorTests, TestVectorEraseRange)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector v(6);
     v[0] = T(0);
     v[1] = T(1);
@@ -448,6 +484,8 @@ TYPED_TEST(VectorTests, TestVectorEquality)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     thrust::host_vector<T> h_a(3);
     thrust::host_vector<T> h_b(3);
@@ -573,6 +611,8 @@ TYPED_TEST(VectorTests, TestVectorInequality)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::host_vector<T> h_a(3);
     thrust::host_vector<T> h_b(3);
     thrust::host_vector<T> h_c(3);
@@ -697,6 +737,8 @@ TYPED_TEST(VectorTests, TestVectorResizing)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector v;
 
     v.resize(3);
@@ -736,6 +778,8 @@ TYPED_TEST(VectorTests, TestVectorReserving)
 {
     using Vector = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector v;
 
     v.reserve(3);
@@ -753,6 +797,8 @@ TYPED_TEST(VectorTests, TestVectorShrinkToFit)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector v;
 
@@ -789,6 +835,8 @@ struct LargeStruct
 
 TEST(VectorTests, TestVectorContainingLargeType)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const static int N = 100;
     using T            = LargeStruct<N>;
 
@@ -827,6 +875,8 @@ TYPED_TEST(VectorTests, TestVectorReversed)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector v(3);
     v[0] = T(0);
     v[1] = T(1);
@@ -851,6 +901,8 @@ TYPED_TEST(VectorTests, TestVectorMove)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     //test move construction
     Vector v1(3);

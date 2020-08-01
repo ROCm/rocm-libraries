@@ -32,6 +32,8 @@ TESTS_DEFINE(GenerateVariablesTests, NumericalTestsParams);
 
 TEST(ReplaceTests, UsingHip)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
 }
 
@@ -58,6 +60,8 @@ TYPED_TEST(GenerateVectorTests, TestGenerateSimple)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector result(5);
 
     T value = 13;
@@ -81,6 +85,8 @@ __host__ __device__ void generate(my_system& system, ForwardIterator, ForwardIte
 
 TEST(GenerateTests, TestGenerateDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -97,6 +103,8 @@ __host__ __device__ void generate(my_tag, ForwardIterator first, ForwardIterator
 
 TEST(GenerateTests, TestGenerateDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::generate(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), 0);
@@ -107,6 +115,8 @@ TEST(GenerateTests, TestGenerateDispatchImplicit)
 TYPED_TEST(GenerateVariablesTests, TestGenerate)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -128,6 +138,8 @@ TYPED_TEST(GenerateVariablesTests, TestGenerateToDiscardIterator)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     T               value = 13;
     return_value<T> f(value);
 
@@ -144,6 +156,8 @@ TYPED_TEST(GenerateVectorTests, TestGenerateNSimple)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector result(5);
 
@@ -170,6 +184,8 @@ __host__ __device__ ForwardIterator
 
 TEST(GenerateTests, TestGenerateNDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -187,6 +203,8 @@ __host__ __device__ ForwardIterator generate_n(my_tag, ForwardIterator first, Si
 
 TEST(GenerateTests, TestGenerateNDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::generate_n(thrust::retag<my_tag>(vec.begin()), vec.size(), 0);
@@ -197,6 +215,8 @@ TEST(GenerateTests, TestGenerateNDispatchImplicit)
 TYPED_TEST(GenerateVariablesTests, TestGenerateNToDiscardIterator)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -223,6 +243,8 @@ TYPED_TEST(GenerateVectorTests, TestGenerateZipIterator)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector v1(3, T(0));
     Vector v2(3, T(0));
 
@@ -242,6 +264,8 @@ TEST(GenerateTests, TestGenerateTuple)
 {
     using T     = int;
     using Tuple = thrust::tuple<T, T>;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     thrust::host_vector<Tuple>   h(3, Tuple(0, 0));
     thrust::device_vector<Tuple> d(3, Tuple(0, 0));

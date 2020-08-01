@@ -29,12 +29,16 @@ TESTS_DEFINE(PrimitiveGatherTests, NumericalTestsParams);
 
 TEST(GatherTests, UsingHip)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
 }
 
 TYPED_TEST(GatherTests, GatherSimple)
 {
     using Vector = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector map(5); // gather indices
     Vector src(8); // source vector
@@ -78,6 +82,8 @@ gather(my_system& system, InputIterator, InputIterator, RandomAccessIterator, Ou
 
 TEST(GatherTests, GatherDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -96,6 +102,8 @@ gather(my_tag, InputIterator, InputIterator, RandomAccessIterator, OutputIterato
 
 TEST(GatherTests, GatherDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::gather(thrust::retag<my_tag>(vec.begin()),
@@ -109,6 +117,8 @@ TEST(GatherTests, GatherDispatchImplicit)
 TYPED_TEST(PrimitiveGatherTests, Gather)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     T                         min   = (T)std::numeric_limits<T>::min();
@@ -158,6 +168,8 @@ TYPED_TEST(PrimitiveGatherTests, GatherToDiscardIterator)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     T                         min   = (T)std::numeric_limits<T>::min();
     T                         max   = (T)std::numeric_limits<T>::max();
@@ -206,6 +218,8 @@ TYPED_TEST(PrimitiveGatherTests, GatherToDiscardIterator)
 TYPED_TEST(GatherTests, GatherIfSimple)
 {
     using Vector = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector flg(5); // predicate array
     Vector map(5); // gather indices
@@ -271,6 +285,8 @@ OutputIterator gather_if(my_system& system,
 
 TEST(GatherTests, GatherIfDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -296,6 +312,8 @@ OutputIterator gather_if(my_tag,
 
 TEST(GatherTests, GatherIfDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::gather_if(thrust::retag<my_tag>(vec.begin()),
@@ -310,6 +328,8 @@ TEST(GatherTests, GatherIfDispatchImplicit)
 TYPED_TEST(PrimitiveGatherTests, GatherIf)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     T                         min   = (T)std::numeric_limits<T>::min();
@@ -382,6 +402,8 @@ TYPED_TEST(PrimitiveGatherTests, GatherIfToDiscardIterator)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     T                         min   = (T)std::numeric_limits<T>::min();
     T                         max   = (T)std::numeric_limits<T>::max();
@@ -453,6 +475,8 @@ TYPED_TEST(PrimitiveGatherTests, GatherIfToDiscardIterator)
 TYPED_TEST(GatherTests, TestGatherCountingIterator)
 {
     using Vector = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector source(10);
     thrust::sequence(source.begin(), source.end(), 0);

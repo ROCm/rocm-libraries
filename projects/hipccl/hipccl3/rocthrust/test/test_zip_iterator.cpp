@@ -34,6 +34,8 @@ TESTS_DEFINE(ZipIteratorNumericTests, NumericalTestsParams);
 
 TEST(ZipIterator32BitTests, UsingHip)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
 }
 
@@ -41,6 +43,8 @@ TYPED_TEST(ZipIteratorVectorTests, TestZipIteratorManipulation)
 {
     using T = typename TestFixture::input_type;
     using namespace thrust;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     thrust::device_vector<T> v0(4);
     thrust::device_vector<T> v1(4);
@@ -116,6 +120,8 @@ TYPED_TEST(ZipIteratorVectorTests, TestZipIteratorReference)
     using T = typename TestFixture::input_type;
     using namespace thrust;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     // test host types
     using Iterator1      = typename host_vector<T>::iterator;
     using Iterator2      = typename host_vector<T>::const_iterator;
@@ -161,6 +167,8 @@ TYPED_TEST(ZipIteratorNumericTests, TestZipIteratorTraversal)
     //    using T = typename TestFixture::input_type;
     using namespace thrust;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
 #if 0
     // test host types
     using Iterator1 = typename host_vector<T>::iterator;
@@ -194,6 +202,8 @@ TYPED_TEST(ZipIteratorNumericTests, TestZipIteratorSystem)
 {
     //    using T = typename TestFixture::input_type;
     using namespace thrust;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
 #if 0
     // test host types
@@ -277,6 +287,8 @@ TYPED_TEST(ZipIteratorVectorTests, TestZipIteratorCopy)
     using T = typename TestFixture::input_type;
     using namespace thrust;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<T> input0(4), input1(4);
     thrust::device_vector<T> output0(4), output1(4);
 
@@ -317,6 +329,8 @@ struct SumThreeTuple
 TYPED_TEST(ZipIterator32BitTests, TestZipIteratorTransform)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -381,6 +395,8 @@ TEST(ZipIterator32BitTests, TestZipIteratorCopyAoSToSoA)
 {
     using namespace thrust;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const size_t n = 1;
 
     using structure                  = tuple<int, int>;
@@ -430,6 +446,8 @@ TEST(ZipIterator32BitTests, TestZipIteratorCopyAoSToSoA)
 TEST(ZipIterator32BitTests, TestZipIteratorCopySoAToAoS)
 {
     using namespace thrust;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const size_t n = 1;
 

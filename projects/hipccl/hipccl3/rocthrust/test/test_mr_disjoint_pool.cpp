@@ -172,12 +172,16 @@ void TestDisjointPool()
 
 TEST(MrDisjointPoolTests, TestDisjointUnsynchronizedPool)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     TestDisjointPool<thrust::mr::disjoint_unsynchronized_pool_resource>();
 }
 
 #if __cplusplus >= 201103L
 TEST(MrDisjointPoolTests, TestDisjointSynchronizedPool)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     TestDisjointPool<thrust::mr::disjoint_synchronized_pool_resource>();
 }
 #endif
@@ -253,12 +257,16 @@ void TestDisjointPoolCachingOversized()
 
 TEST(MrDisjointPoolTests, TestDisjointUnsynchronizedPoolCachingOversized)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     TestDisjointPoolCachingOversized<thrust::mr::disjoint_unsynchronized_pool_resource>();
 }
 
 #if __cplusplus >= 201103L
 TEST(MrDisjointPoolTests, TestDisjointSynchronizedPoolCachingOversized)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     TestDisjointPoolCachingOversized<thrust::mr::disjoint_synchronized_pool_resource>();
 }
 #endif
@@ -276,12 +284,16 @@ void TestDisjointGlobalPool()
 
 TEST(MrDisjointPoolTests, TestUnsynchronizedDisjointGlobalPool)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     TestDisjointGlobalPool<thrust::mr::disjoint_unsynchronized_pool_resource>();
 }
 
 #if __cplusplus >= 201103L
 TEST(MrDisjointPoolTests, TestSynchronizedDisjointGlobalPool)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     TestDisjointGlobalPool<thrust::mr::disjoint_synchronized_pool_resource>();
 }
 #endif

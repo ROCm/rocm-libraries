@@ -35,6 +35,8 @@ void sort_by_key(my_system& system,
 
 TEST(SortByKeyTests, TestSortByKeyDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -54,6 +56,8 @@ void sort_by_key(my_tag,
 
 TEST(SortByKeyTests, TestSortByKeyDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::sort_by_key(thrust::retag<my_tag>(vec.begin()),
@@ -110,6 +114,8 @@ TYPED_TEST(SortByKeyTests, TestSortByKeySimple)
 {
     using Vector = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector unsorted_keys, unsorted_values;
     Vector sorted_keys, sorted_values;
 
@@ -124,6 +130,8 @@ TYPED_TEST(SortByKeyTests, TestSortByKeySimple)
 TYPED_TEST(SortByKeyPrimitiveTests, TestSortAscendingKeyValue)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     for(auto size : get_sizes())
     {
@@ -153,6 +161,8 @@ TYPED_TEST(SortByKeyPrimitiveTests, TestSortAscendingKeyValue)
 
 TEST(SortByKeyTests, TestSortDescendingKeyValue)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
@@ -183,6 +193,8 @@ TEST(SortByKeyTests, TestSortDescendingKeyValue)
 
 TEST(SortByKeyTests, TestSortByKeyBool)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     const size_t size = 10027;
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
@@ -214,6 +226,8 @@ TEST(SortByKeyTests, TestSortByKeyBool)
 
 TEST(SortByKeyTests, TestSortByKeyBoolDescending)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     const size_t size = 10027;
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
@@ -257,6 +271,8 @@ void SortByKeyKernel(int const N, int* keys, short* values)
 
 TEST(SortByKeyTests, TestSortByKeyDevice)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     std::vector<size_t> sizes = {0, 1, 2, 4, 6, 12, 16, 24, 32, 64, 84, 128, 160, 256};
 
     for(auto size : sizes)

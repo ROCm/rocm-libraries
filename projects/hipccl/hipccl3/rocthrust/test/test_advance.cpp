@@ -31,6 +31,8 @@ TYPED_TEST(AdvanceVectorTests, TestAdvance)
 
     typedef typename Vector::iterator Iterator;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector v(100);
     thrust::sequence(v.begin(), v.end());
 

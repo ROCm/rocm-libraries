@@ -29,6 +29,8 @@ TESTS_DEFINE(PrimitiveTransformIteratorTests, NumericalTestsParams);
 
 TEST(TransformIteratorTests, UsingHip)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
 }
 
@@ -36,6 +38,8 @@ TYPED_TEST(TransformIteratorTests, TransformIterator)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     using UnaryFunction = thrust::negate<T>;
     using Iterator      = typename Vector::iterator;
@@ -62,6 +66,8 @@ TYPED_TEST(TransformIteratorTests, MakeTransformIterator)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     using UnaryFunction = thrust::negate<T>;
     using Iterator      = typename Vector::iterator;
 
@@ -87,6 +93,8 @@ TYPED_TEST(TransformIteratorTests, MakeTransformIterator)
 TYPED_TEST(PrimitiveTransformIteratorTests, TransformIteratorReduce)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)

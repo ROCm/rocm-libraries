@@ -25,6 +25,8 @@ TYPED_TEST(SortByKeyVariableTests, TestSortVariableBits)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(auto size : get_sizes())
     {
         for(size_t num_bits = 0; num_bits < 8 * sizeof(T); num_bits += 3)

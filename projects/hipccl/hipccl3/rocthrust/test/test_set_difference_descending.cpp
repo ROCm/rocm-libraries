@@ -30,6 +30,8 @@ TYPED_TEST(SetDifferenceDescendingTests, TestSetDifferenceDescendingSimple)
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector a(4), b(5);
 
     a[0] = 5;
@@ -58,6 +60,8 @@ TYPED_TEST(SetDifferenceDescendingTests, TestSetDifferenceDescendingSimple)
 TYPED_TEST(SetDifferenceDescendingPrimitiveTests, TestSetDifferenceDescending)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)

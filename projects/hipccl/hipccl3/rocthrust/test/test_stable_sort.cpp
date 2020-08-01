@@ -32,6 +32,8 @@ void stable_sort(my_system& system, RandomAccessIterator, RandomAccessIterator)
 
 TEST(StableSortTests, TestStableSortDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -48,6 +50,8 @@ void stable_sort(my_tag, RandomAccessIterator first, RandomAccessIterator)
 
 TEST(StableSortTests, TestStableSortDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::stable_sort(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.begin()));
@@ -95,6 +99,8 @@ TYPED_TEST(StableSortVectorTests, TestStableSortSimple)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector unsorted_keys;
     Vector sorted_keys;
 
@@ -108,6 +114,8 @@ TYPED_TEST(StableSortVectorTests, TestStableSortSimple)
 TYPED_TEST(StableSortTests, TestStableSort)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     for(auto size : get_sizes())
     {
@@ -150,6 +158,8 @@ TYPED_TEST(StableSortVectorTests, TestStableSortWithIndirection)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector data(7);
     data[0] = T(1);

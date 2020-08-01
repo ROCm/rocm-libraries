@@ -43,6 +43,8 @@ TYPED_TEST(PartitionVectorTests, TestPartitionSimple)
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector data(5);
     data[0] = 1;
     data[1] = 2;
@@ -68,6 +70,8 @@ TYPED_TEST(PartitionVectorTests, TestPartitionStencilSimple)
     using Vector   = typename TestFixture::input_type;
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector data(5);
     data[0] = 0;
@@ -100,6 +104,8 @@ TYPED_TEST(PartitionVectorTests, TestPartitionCopySimple)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector data(5);
     data[0] = 1;
@@ -134,6 +140,8 @@ TYPED_TEST(PartitionVectorTests, TestPartitionCopyStencilSimple)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector data(5);
     data[0] = 0;
@@ -181,6 +189,8 @@ TYPED_TEST(PartitionVectorTests, TestStablePartitionSimple)
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector data(5);
     data[0] = 1;
     data[1] = 2;
@@ -206,6 +216,8 @@ TYPED_TEST(PartitionVectorTests, TestStablePartitionStencilSimple)
     using Vector   = typename TestFixture::input_type;
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector data(5);
     data[0] = 1;
@@ -240,6 +252,8 @@ TYPED_TEST(PartitionVectorTests, TestStablePartitionCopySimple)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector data(5);
     data[0] = 1;
     data[1] = 2;
@@ -273,6 +287,8 @@ TYPED_TEST(PartitionVectorTests, TestStablePartitionCopyStencilSimple)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector data(5);
     data[0] = 1;
@@ -317,6 +333,9 @@ TYPED_TEST(PartitionVectorTests, TestStablePartitionCopyStencilSimple)
 TYPED_TEST(PartitionIntegerTests, TestPartition)
 {
     using T                         = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
@@ -351,6 +370,9 @@ TYPED_TEST(PartitionIntegerTests, TestPartition)
 TYPED_TEST(PartitionIntegerTests, TestPartitionStencil)
 {
     using T                         = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
@@ -391,6 +413,9 @@ TYPED_TEST(PartitionIntegerTests, TestPartitionStencil)
 TYPED_TEST(PartitionIntegerTests, TestPartitionCopy)
 {
     using T                         = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
@@ -451,6 +476,9 @@ TYPED_TEST(PartitionIntegerTests, TestPartitionCopy)
 TYPED_TEST(PartitionIntegerTests, TestPartitionCopyStencil)
 {
     using T                         = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
@@ -520,6 +548,9 @@ TYPED_TEST(PartitionIntegerTests, TestPartitionCopyStencil)
 TYPED_TEST(PartitionIntegerTests, TestStablePartitionCopyStencil)
 {
     using T                         = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
@@ -589,6 +620,9 @@ TYPED_TEST(PartitionIntegerTests, TestStablePartitionCopyStencil)
 TYPED_TEST(PartitionIntegerTests, TestPartitionCopyToDiscardIterator)
 {
     using T                         = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
@@ -695,6 +729,9 @@ TYPED_TEST(PartitionIntegerTests, TestPartitionCopyToDiscardIterator)
 TYPED_TEST(PartitionIntegerTests, TestPartitionCopyStencilToDiscardIterator)
 {
     using T                         = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
@@ -815,6 +852,9 @@ TYPED_TEST(PartitionIntegerTests, TestPartitionCopyStencilToDiscardIterator)
 TYPED_TEST(PartitionIntegerTests, TestStablePartition)
 {
     using T                         = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
@@ -844,6 +884,9 @@ TYPED_TEST(PartitionIntegerTests, TestStablePartition)
 TYPED_TEST(PartitionIntegerTests, TestStablePartitionStencil)
 {
     using T                         = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
@@ -880,6 +923,9 @@ TYPED_TEST(PartitionIntegerTests, TestStablePartitionStencil)
 TYPED_TEST(PartitionIntegerTests, TestStablePartitionCopy)
 {
     using T                         = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
@@ -936,6 +982,9 @@ TYPED_TEST(PartitionIntegerTests, TestStablePartitionCopy)
 TYPED_TEST(PartitionIntegerTests, TestStablePartitionCopyToDiscardIterator)
 {
     using T                         = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
@@ -1042,6 +1091,9 @@ TYPED_TEST(PartitionIntegerTests, TestStablePartitionCopyToDiscardIterator)
 TYPED_TEST(PartitionIntegerTests, TestStablePartitionCopyStencilToDiscardIterator)
 {
     using T                         = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
@@ -1171,6 +1223,8 @@ TYPED_TEST(PartitionVectorTests, TestPartitionZipIterator)
 {
     using Vector = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector data1(5);
     Vector data2(5);
 
@@ -1216,6 +1270,8 @@ TYPED_TEST(PartitionVectorTests, TestPartitionZipIterator)
 TYPED_TEST(PartitionVectorTests, TestPartitionStencilZipIterator)
 {
     using Vector = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector data(5);
     data[0] = 1;
@@ -1263,6 +1319,8 @@ TYPED_TEST(PartitionVectorTests, TestStablePartitionZipIterator)
 {
     using Vector = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector data1(5);
     Vector data2(5);
 
@@ -1308,6 +1366,8 @@ TYPED_TEST(PartitionVectorTests, TestStablePartitionZipIterator)
 TYPED_TEST(PartitionVectorTests, TestStablePartitionStencilZipIterator)
 {
     using Vector = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector data(5);
     data[0] = 1;
@@ -1361,6 +1421,8 @@ __host__ __device__ ForwardIterator
 
 TEST(PartitionTests, TestPartitionDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -1379,6 +1441,8 @@ __host__ __device__ ForwardIterator
 
 TEST(PartitionTests, TestPartitionStencilDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -1397,6 +1461,8 @@ __host__ __device__ ForwardIterator
 
 TYPED_TEST(PartitionTests, TestPartitionDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::partition(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.begin()), 0);
@@ -1414,6 +1480,8 @@ __host__ __device__ ForwardIterator
 
 TYPED_TEST(PartitionTests, TestPartitionStencilDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::partition(thrust::retag<my_tag>(vec.begin()),
@@ -1442,6 +1510,8 @@ __host__ __device__ thrust::pair<OutputIterator1, OutputIterator2>
 
 TEST(PartitionTests, TestPartitionCopyDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -1470,6 +1540,8 @@ __host__ __device__ thrust::pair<OutputIterator1, OutputIterator2>
 
 TEST(PartitionTests, TestPartitionCopyStencilDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -1496,6 +1568,8 @@ __host__ __device__ thrust::pair<OutputIterator1, OutputIterator2>
 
 TEST(PartitionTests, TestPartitionCopyDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::partition_copy(thrust::retag<my_tag>(vec.begin()),
@@ -1527,6 +1601,8 @@ __host__ __device__ thrust::pair<OutputIterator1, OutputIterator2>
 
 TEST(PartitionTests, TestPartitionCopyStencilDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::partition_copy(thrust::retag<my_tag>(vec.begin()),
@@ -1549,6 +1625,8 @@ __host__ __device__ ForwardIterator
 
 TEST(PartitionTests, TestStablePartitionDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -1567,6 +1645,8 @@ __host__ __device__ ForwardIterator stable_partition(
 
 TEST(PartitionTests, TestStablePartitionStencilDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -1585,6 +1665,8 @@ __host__ __device__ ForwardIterator
 
 TEST(PartitionTests, TestStablePartitionDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::stable_partition(
@@ -1603,6 +1685,8 @@ __host__ __device__ ForwardIterator
 
 TEST(PartitionTests, TestStablePartitionStencilDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::stable_partition(thrust::retag<my_tag>(vec.begin()),
@@ -1631,6 +1715,8 @@ __host__ __device__ thrust::pair<OutputIterator1, OutputIterator2>
 
 TEST(PartitionTests, TestStablePartitionCopyDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -1659,6 +1745,8 @@ __host__ __device__ thrust::pair<OutputIterator1, OutputIterator2>
 
 TEST(PartitionTests, TestStablePartitionCopyStencilDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -1686,6 +1774,8 @@ __host__ __device__ thrust::pair<OutputIterator1, OutputIterator2>
 
 TEST(PartitionTests, TestStablePartitionCopyDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::stable_partition_copy(thrust::retag<my_tag>(vec.begin()),
@@ -1717,6 +1807,8 @@ __host__ __device__ thrust::pair<OutputIterator1, OutputIterator2>
 
 TEST(PartitionTests, TestStablePartitionCopyStencilDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     thrust::device_vector<int> vec(1);
 
     thrust::stable_partition_copy(thrust::retag<my_tag>(vec.begin()),

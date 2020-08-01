@@ -27,11 +27,15 @@ TESTS_DEFINE(PrimitiveReverseIteratorTests, NumericalTestsParams);
 
 TEST(ReverseIteratorTests, UsingHip)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
 }
 
 TEST(ReverseIteratorTests, ReverseIteratorCopyConstructor)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::host_vector<int> h_v(1, 13);
 
     thrust::reverse_iterator<thrust::host_vector<int>::iterator> h_iter0(h_v.end());
@@ -51,6 +55,8 @@ TEST(ReverseIteratorTests, ReverseIteratorCopyConstructor)
 
 TEST(ReverseIteratorTests, ReverseIteratorIncrement)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::host_vector<int> h_v(4);
     thrust::sequence(h_v.begin(), h_v.end());
 
@@ -89,6 +95,8 @@ TYPED_TEST(ReverseIteratorTests, ReverseIteratorCopy)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector source(4);
     source[0] = (T)10;
     source[1] = (T)20;
@@ -110,6 +118,8 @@ TYPED_TEST(ReverseIteratorTests, ReverseIteratorCopy)
 TYPED_TEST(PrimitiveReverseIteratorTests, ReverseIteratorExclusiveScanSimple)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const size_t size = 10;
 
@@ -138,6 +148,8 @@ TYPED_TEST(PrimitiveReverseIteratorTests, ReverseIteratorExclusiveScanSimple)
 TYPED_TEST(PrimitiveReverseIteratorTests, ReverseIteratorExclusiveScan)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)

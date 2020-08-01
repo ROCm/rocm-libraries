@@ -49,6 +49,8 @@ TYPED_TEST(BinarySearchVectorTestsInKernel, TestLowerBound)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<T> d_input(5);
     d_input[0] = 0;
     d_input[1] = 2;
@@ -93,6 +95,8 @@ TYPED_TEST(BinarySearchVectorTestsInKernel, TestUpperBound)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<T> d_input(5);
     d_input[0] = 0;
     d_input[1] = 2;
@@ -136,6 +140,8 @@ void binary_search_kernel(size_t n, T* input, bool* output)
 TYPED_TEST(BinarySearchVectorTestsInKernel, TestBinarySearch)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     thrust::device_vector<T> d_input(5);
     d_input[0] = 0;
@@ -183,6 +189,9 @@ struct vector_like
 TYPED_TEST(BinarySearchVectorTests, TestScalarLowerBoundSimple)
 {
     using Vector = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector vec(5);
 
     vec[0] = 0;
@@ -248,6 +257,8 @@ OutputIterator lower_bound(my_system& system,
 
 TEST(BinarySearchVectorTests, TestVectorLowerBoundDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -266,6 +277,8 @@ OutputIterator lower_bound(
 
 TEST(BinarySearchVectorTests, TestVectorLowerBoundDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::lower_bound(thrust::retag<my_tag>(vec.begin()),
@@ -280,6 +293,9 @@ TEST(BinarySearchVectorTests, TestVectorLowerBoundDispatchImplicit)
 TYPED_TEST(BinarySearchVectorTests, TestVectorUpperBoundSimple)
 {
     using Vector = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector vec(5);
 
     vec[0] = 0;
@@ -342,6 +358,8 @@ OutputIterator upper_bound(my_system& system,
 
 TEST(BinarySearchVectorTests, TestVectorUpperBoundDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -360,6 +378,8 @@ OutputIterator upper_bound(
 
 TEST(BinarySearchVectorTests, TestVectorUpperBoundDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::upper_bound(thrust::retag<my_tag>(vec.begin()),
@@ -374,6 +394,9 @@ TEST(BinarySearchVectorTests, TestVectorUpperBoundDispatchImplicit)
 TYPED_TEST(BinarySearchVectorTests, TestVectorBinarySearchSimple)
 {
     using Vector = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector vec(5);
 
     vec[0] = 0;
@@ -439,6 +462,8 @@ OutputIterator binary_search(my_system& system,
 
 TEST(BinarySearchVectorTests, TestVectorBinarySearchDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -457,6 +482,8 @@ OutputIterator binary_search(
 
 TEST(BinarySearchVectorTests, TestVectorBinarySearchDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::binary_search(thrust::retag<my_tag>(vec.begin()),
@@ -471,6 +498,9 @@ TEST(BinarySearchVectorTests, TestVectorBinarySearchDispatchImplicit)
 TYPED_TEST(BinarySearchVectorIntegerTests, TestVectorLowerBound)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
@@ -508,6 +538,9 @@ TYPED_TEST(BinarySearchVectorIntegerTests, TestVectorLowerBound)
 TYPED_TEST(BinarySearchVectorIntegerTests, TestVectorUpperBound)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
@@ -545,6 +578,9 @@ TYPED_TEST(BinarySearchVectorIntegerTests, TestVectorUpperBound)
 TYPED_TEST(BinarySearchVectorIntegerTests, TestVectorBinarySearch)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
@@ -582,6 +618,9 @@ TYPED_TEST(BinarySearchVectorIntegerTests, TestVectorBinarySearch)
 TYPED_TEST(BinarySearchVectorIntegerTests, TestVectorLowerBoundDiscardIterator)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
@@ -627,6 +666,9 @@ TYPED_TEST(BinarySearchVectorIntegerTests, TestVectorLowerBoundDiscardIterator)
 TYPED_TEST(BinarySearchVectorIntegerTests, TestVectorUpperBoundDiscardIterator)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
@@ -672,6 +714,9 @@ TYPED_TEST(BinarySearchVectorIntegerTests, TestVectorUpperBoundDiscardIterator)
 TYPED_TEST(BinarySearchVectorIntegerTests, TestVectorBinarySearchDiscardIterator)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);

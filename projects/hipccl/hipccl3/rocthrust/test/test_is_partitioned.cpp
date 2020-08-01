@@ -39,6 +39,8 @@ TYPED_TEST(IsPartitionedVectorTests, TestIsPartitionedSimple)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector v(4);
     v[0] = 1;
     v[1] = 1;
@@ -74,6 +76,8 @@ TYPED_TEST(IsPartitionedVectorTests, TestIsPartitioned)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const size_t n = (1 << 16) + 13;
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
@@ -105,6 +109,8 @@ __host__ __device__ bool is_partitioned(my_system& system, InputIterator, InputI
 
 TEST(IsPartitionedTests, TestIsPartitionedDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -122,6 +128,8 @@ __host__ __device__ bool is_partitioned(my_tag, InputIterator first, InputIterat
 
 TEST(IsPartitionedTests, TestIsPartitionedDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     thrust::device_vector<int> vec(1);
 
     thrust::is_partitioned(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), 0);

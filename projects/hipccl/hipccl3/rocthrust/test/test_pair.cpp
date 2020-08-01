@@ -30,6 +30,8 @@ TYPED_TEST(PairTests, TestPairManipulation)
     using T = typename TestFixture::input_type;
     using P = thrust::pair<T, T>;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     // test null constructor
     P p1;
     ASSERT_EQ(T(0), p1.first);
@@ -94,6 +96,8 @@ TYPED_TEST(PairTests, TestPairComparison)
 {
     using T = typename TestFixture::input_type;
     using P = thrust::pair<T, T>;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     P x, y;
 
@@ -239,6 +243,9 @@ TYPED_TEST(PairTests, TestPairComparison)
 TYPED_TEST(PairTests, TestPairGet)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value
@@ -258,6 +265,8 @@ TYPED_TEST(PairTests, TestPairGet)
 
 TEST(PairTests, TestPairTupleSize)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     int result = thrust::tuple_size<thrust::pair<int, int>>::value;
     ASSERT_EQ(2, result);
 }
@@ -267,12 +276,16 @@ TEST(PairTests, TestPairTupleElement)
     using type0 = thrust::tuple_element<0, thrust::pair<int, float>>::type;
     using type1 = thrust::tuple_element<1, thrust::pair<int, float>>::type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     ASSERT_EQ(typeid(int), typeid(type0));
     ASSERT_EQ(typeid(float), typeid(type1));
 }
 
 TEST(PairTests, TestPairSwap)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     int x = 7;
     int y = 13;
 

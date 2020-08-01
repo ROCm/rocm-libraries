@@ -45,6 +45,8 @@ __host__ __device__ OutputIterator transform_inclusive_scan(my_system& system,
 
 TEST(TransformScanTests, TestTransformInclusiveScanDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -66,6 +68,8 @@ __host__ __device__ OutputIterator transform_inclusive_scan(
 
 TEST(TransformScanTests, TestTransformInclusiveScanDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::transform_inclusive_scan(thrust::retag<my_tag>(vec.begin()),
@@ -96,6 +100,8 @@ __host__ __device__ OutputIterator transform_exclusive_scan(my_system& system,
 
 TEST(TransformScanTests, TestTransformExclusiveScanDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -123,6 +129,8 @@ __host__ __device__ OutputIterator transform_exclusive_scan(my_tag,
 
 TEST(TransformScanTests, TestTransformExclusiveScanDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::transform_exclusive_scan(thrust::retag<my_tag>(vec.begin()),
@@ -139,6 +147,8 @@ TYPED_TEST(TransformScanVectorTests, TestTransformScanSimple)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     typename Vector::iterator iter;
 
@@ -218,6 +228,8 @@ TYPED_TEST(TransformScanVectorTests, TestTransformScanSimple)
 TYPED_TEST(TransformScanVariablesTests, TestTransformScan)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -301,6 +313,8 @@ TYPED_TEST(TransformScanVectorTests, TestTransformScanCountingIterator)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     typedef typename thrust::iterator_system<typename Vector::iterator>::type space;
 
     thrust::counting_iterator<T, space> first(1);
@@ -318,6 +332,8 @@ TYPED_TEST(TransformScanVectorTests, TestTransformScanCountingIterator)
 TYPED_TEST(TransformScanVariablesTests, TestTransformScanToDiscardIterator)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)

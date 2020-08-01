@@ -40,6 +40,8 @@ __host__ __device__ OutputType transform_reduce(
 
 TEST(TransformReduceTests, TestTransformReduceDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -61,6 +63,8 @@ __host__ __device__ OutputType transform_reduce(
 
 TEST(TransformReduceTests, TestTransformReduceDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::transform_reduce(
@@ -73,6 +77,8 @@ TYPED_TEST(TransformReduceTests, TestTransformReduceSimple)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector data(3);
     data[0] = T(1);
@@ -89,6 +95,8 @@ TYPED_TEST(TransformReduceTests, TestTransformReduceSimple)
 TYPED_TEST(TransformReduceIntegerPrimitiveTests, TestTransformReduce)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -120,6 +128,8 @@ TYPED_TEST(TransformReduceIntegerPrimitiveTests, TestTransformReduce)
 TYPED_TEST(TransformReduceIntegerPrimitiveTests, TestTransformReduceFromConst)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -153,6 +163,9 @@ TYPED_TEST(TransformReduceIntegerTests, TestTransformReduceCountingIterator)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
     using space  = typename thrust::iterator_system<typename Vector::iterator>::type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     if(std::is_signed<T>::value)
     {
         thrust::counting_iterator<T, space> first(1);

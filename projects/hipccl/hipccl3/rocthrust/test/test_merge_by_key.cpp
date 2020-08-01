@@ -31,6 +31,8 @@ TESTS_DEFINE(PrimitiveMergeByKeyTests, NumericalTestsParams);
 
 TEST(MergeByKeyTests, UsingHip)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
 }
 
@@ -38,6 +40,8 @@ TYPED_TEST(MergeByKeyTests, MergeByKeySimple)
 {
     using Vector   = typename TestFixture::input_type;
     using Iterator = typename Vector::iterator;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector a_key(3), a_val(3), b_key(4), b_val(4);
 
@@ -112,6 +116,8 @@ thrust::pair<OutputIterator1, OutputIterator2> merge_by_key(my_system& system,
 
 TEST(MergeByKeyTests, MergeByKeyDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -150,6 +156,8 @@ thrust::pair<OutputIterator1, OutputIterator2> merge_by_key(my_tag,
 
 TEST(MergeByKeyTests, MergeByKeyDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::merge_by_key(thrust::retag<my_tag>(vec.begin()),
@@ -167,6 +175,8 @@ TEST(MergeByKeyTests, MergeByKeyDispatchImplicit)
 TYPED_TEST(PrimitiveMergeByKeyTests, TestMergeByKeyWithRandomData)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -263,6 +273,8 @@ TYPED_TEST(PrimitiveMergeByKeyTests, MergeByKeyToDiscardIterator)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
@@ -342,6 +354,8 @@ TYPED_TEST(PrimitiveMergeByKeyTests, MergeByKeyToDiscardIterator)
 TYPED_TEST(PrimitiveMergeByKeyTests, MergeByKeyDescending)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)

@@ -23,11 +23,15 @@ using namespace thrust;
 
 TEST(DiscardIteratorTests, UsingHip)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
 }
 
 TEST(DiscardIteratorTests, DiscardIteratorIncrement)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     discard_iterator<> lhs(0);
     discard_iterator<> rhs(0);
 
@@ -53,6 +57,8 @@ TEST(DiscardIteratorTests, DiscardIteratorIncrement)
 
 TEST(DiscardIteratorTests, DiscardIteratorComparison)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     discard_iterator<> iter1(0);
     discard_iterator<> iter2(0);
 
@@ -78,6 +84,8 @@ TEST(DiscardIteratorTests, DiscardIteratorComparison)
 
 TEST(DiscardIteratorTests, MakeDiscardIterator)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     discard_iterator<> iter0 = make_discard_iterator(13);
 
     *iter0 = 7;
@@ -91,6 +99,8 @@ TEST(DiscardIteratorTests, MakeDiscardIterator)
 
 TEST(DiscardIteratorTests, ZippedDiscardIterator)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     using IteratorTuple1 = tuple<discard_iterator<>>;
     using ZipIterator1   = zip_iterator<IteratorTuple1>;
 

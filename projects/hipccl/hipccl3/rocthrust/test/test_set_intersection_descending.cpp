@@ -30,6 +30,8 @@ TYPED_TEST(SetIntersectionDescendingTests, TestSetIntersectionDescendingSimple)
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector a(3), b(4);
 
     a[0] = 4;
@@ -56,6 +58,8 @@ TYPED_TEST(SetIntersectionDescendingTests, TestSetIntersectionDescendingSimple)
 TYPED_TEST(SetIntersectionDescendingPrimitiveTests, TestSetIntersectionDescending)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
 

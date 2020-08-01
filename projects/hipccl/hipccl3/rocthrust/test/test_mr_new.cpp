@@ -25,6 +25,8 @@ static const std::size_t TestedAlignmentShift = 1;
 
 TEST(MrAlignmentTests, TestNewDeleteResourceAlignedAllocation)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     for (std::size_t size = MinTestedSize; size <= MaxTestedSize; size += TestedSizeStep)
     {
         for (std::size_t alignment = MinTestedAlignment; alignment <= MaxTestedAlignment;

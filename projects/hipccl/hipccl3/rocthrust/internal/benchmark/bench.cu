@@ -394,7 +394,7 @@ struct experiment_driver
       , tbb_average_walltime, tbb_walltime_uncertainty
     );
     #endif
-
+/*
     // Round the average walltime and walltime uncertainty to the
     // significant figure of the walltime uncertainty.
     int stl_walltime_precision = std::max(
@@ -412,7 +412,6 @@ struct experiment_driver
     );
     #endif
 
-/*
     stl_average_walltime = round_to_precision(
         stl_average_walltime, stl_walltime_precision
     );
@@ -436,7 +435,6 @@ struct experiment_driver
         tbb_walltime_uncertainty, tbb_walltime_precision
     );
     #endif
-*/
 
     // Round the average throughput and throughput uncertainty to the
     // significant figure of the throughput uncertainty.
@@ -455,7 +453,6 @@ struct experiment_driver
     );
     #endif
 
-/*
     stl_average_throughput = round_to_precision(
         stl_average_throughput, stl_throughput_precision
     );

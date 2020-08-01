@@ -27,6 +27,8 @@ TESTS_DEFINE(PermutationIteratorTests, FullTestsParams);
 
 TEST(PermutationIteratorTests, UsingHip)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
 }
 
@@ -35,6 +37,8 @@ TYPED_TEST(PermutationIteratorTests, PermutationIteratorSimple)
     using Vector   = typename TestFixture::input_type;
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector source(8);
     Vector indices(4);
@@ -82,6 +86,8 @@ TYPED_TEST(PermutationIteratorTests, PermutationIteratorGather)
     using Vector   = typename TestFixture::input_type;
     using Iterator = typename Vector::iterator;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector source(8);
     Vector indices(4);
     Vector output(4, 10);
@@ -108,6 +114,8 @@ TYPED_TEST(PermutationIteratorTests, PermutationIteratorScatter)
 {
     using Vector   = typename TestFixture::input_type;
     using Iterator = typename Vector::iterator;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector source(4, 10);
     Vector indices(4);
@@ -140,6 +148,8 @@ TYPED_TEST(PermutationIteratorTests, MakePermutationIterator)
 {
     using Vector = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector source(8);
     Vector indices(4);
     Vector output(4, 10);
@@ -167,6 +177,8 @@ TYPED_TEST(PermutationIteratorTests, PermutationIteratorReduce)
     using Vector   = typename TestFixture::input_type;
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector source(8);
     Vector indices(4);
@@ -205,6 +217,8 @@ TEST(PermutationIteratorTests, PermutationIteratorHostDeviceGather)
     using DeviceVector   = typename thrust::host_vector<T>;
     using HostIterator   = typename HostVector::iterator;
     using DeviceIterator = typename DeviceVector::iterator;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     HostVector h_source(8);
     HostVector h_indices(4);
@@ -252,6 +266,8 @@ TEST(PermutationIteratorTests, PermutationIteratorHostDeviceScatter)
     using DeviceVector   = typename thrust::host_vector<T>;
     using HostIterator   = typename HostVector::iterator;
     using DeviceIterator = typename DeviceVector::iterator;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     HostVector h_source(4, 10);
     HostVector h_indices(4);
@@ -304,6 +320,8 @@ TYPED_TEST(PermutationIteratorTests, PermutationIteratorWithCountingIterator)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     typename thrust::counting_iterator<T> input(0), index(0);
 

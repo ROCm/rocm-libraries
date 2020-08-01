@@ -30,6 +30,8 @@
 
 TEST(HipThrustMemory, VoidMalloc)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const size_t              size = 9001;
     thrust::device_system_tag dev_tag;
 
@@ -43,6 +45,8 @@ TEST(HipThrustMemory, VoidMalloc)
 
 TEST(HipThrustMemory, TypeMalloc)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const size_t              size = 9001;
     thrust::device_system_tag dev_tag;
 
@@ -55,6 +59,8 @@ TEST(HipThrustMemory, TypeMalloc)
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 TEST(HipThrustMemory, MallocUseMemory)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const size_t              size = 1024;
     thrust::device_system_tag dev_tag;
 
@@ -123,6 +129,8 @@ TEST(MemoryTests, TestSelectSystemDifferentTypes)
 {
     using thrust::system::detail::generic::select_system;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     my_memory_system          my_sys(0);
     thrust::device_system_tag device_sys;
 
@@ -138,6 +146,8 @@ TEST(MemoryTests, TestSelectSystemDifferentTypes)
 TEST(MemoryTests, TestSelectSystemSameTypes)
 {
     using thrust::system::detail::generic::select_system;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     my_memory_system          my_sys(0);
     thrust::device_system_tag device_sys;
@@ -158,6 +168,8 @@ TEST(MemoryTests, TestSelectSystemSameTypes)
 
 TEST(MemoryTests, TestGetTemporaryBuffer)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const size_t size = 9001;
 
     thrust::device_system_tag                               dev_tag;
@@ -181,6 +193,8 @@ TEST(MemoryTests, TestGetTemporaryBuffer)
 
 TEST(MemoryTests, TestMalloc)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const size_t size = 9001;
 
     thrust::device_system_tag                               dev_tag;
@@ -206,6 +220,8 @@ thrust::pointer<void, my_memory_system> malloc(my_memory_system& system, std::si
 
 TEST(MemoryTests, TestMallocDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const size_t size = 0;
 
     my_memory_system sys(0);
@@ -222,6 +238,8 @@ void free(my_memory_system& system, Pointer)
 
 TEST(MemoryTests, TestFreeDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::pointer<my_memory_system, void> ptr;
 
     my_memory_system sys(0);
@@ -245,6 +263,8 @@ get_temporary_buffer(my_memory_system& system, std::ptrdiff_t size)
 
 TEST(MemoryTests, TestGetTemporaryBufferDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const size_t size = 9001;
 
     my_memory_system                                        sys(0);
@@ -268,6 +288,8 @@ TEST(MemoryTests, TestGetTemporaryBufferDispatchImplicit)
 
 TEST(MemoryTests, TestGetTemporaryBufferDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     if(are_same(thrust::device_system_tag(), thrust::system::cpp::tag()))
     {
         // XXX cpp uses the internal scalar backend, which currently elides user tags

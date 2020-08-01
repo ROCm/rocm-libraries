@@ -226,6 +226,8 @@ TYPED_TEST(ComplexTransformTests, TestComplexArithmeticTransform)
     using T    = typename TestFixture::input_type;
     using type = thrust::complex<T>;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
@@ -258,6 +260,8 @@ TYPED_TEST(ComplexTransformTests, TestComplexPlaneTransform)
     using T    = typename TestFixture::input_type;
     using type = thrust::complex<T>;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
@@ -285,6 +289,8 @@ TYPED_TEST(ComplexTransformTests, TestComplexPowerTransform)
 {
     using T    = typename TestFixture::input_type;
     using type = thrust::complex<T>;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -319,6 +325,8 @@ TYPED_TEST(ComplexTransformTests, TestComplexExponentialTransform)
 {
     using T    = typename TestFixture::input_type;
     using type = thrust::complex<T>;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
@@ -355,6 +363,8 @@ TYPED_TEST(ComplexTransformTests, TestComplexTrigonometricTransform)
 {
     using T    = typename TestFixture::input_type;
     using type = thrust::complex<T>;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)

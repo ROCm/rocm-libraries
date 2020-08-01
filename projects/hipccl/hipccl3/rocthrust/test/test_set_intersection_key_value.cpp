@@ -28,6 +28,8 @@ TYPED_TEST(SetIntersectionKeyValueTests, TestSetIntersectionKeyValue)
     using U = typename TestFixture::input_type;
     using T = key_value<U, U>;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
 
     for(auto size : sizes)

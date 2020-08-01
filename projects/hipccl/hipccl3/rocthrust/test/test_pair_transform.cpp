@@ -47,6 +47,8 @@ TYPED_TEST(PairTransformTests, TestPairTransform)
     using T = typename TestFixture::input_type;
     using P = thrust::pair<T, T>;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {

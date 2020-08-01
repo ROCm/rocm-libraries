@@ -33,6 +33,8 @@ TYPED_TEST(SetUnionDescendingTests, TestSetUnionDescendingSimple)
     using Iterator = typename Vector::iterator;
     using T        = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector a(3), b(4);
 
     a[0] = 4;
@@ -62,6 +64,8 @@ TYPED_TEST(SetUnionDescendingTests, TestSetUnionDescendingSimple)
 TYPED_TEST(SetUnionDescendingPrimitiveTests, TestSetUnionDescending)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
 

@@ -28,6 +28,9 @@ TESTS_DEFINE(TupleTests, NumericalTestsParams);
 TYPED_TEST(TupleTests, TestTupleConstructor)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value
@@ -122,6 +125,9 @@ TYPED_TEST(TupleTests, TestTupleConstructor)
 TYPED_TEST(TupleTests, TestMakeTuple)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value
@@ -221,6 +227,9 @@ TYPED_TEST(TupleTests, TestMakeTuple)
 TYPED_TEST(TupleTests, TestTupleGet)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value
@@ -317,6 +326,8 @@ TYPED_TEST(TupleTests, TestTupleGet)
 TYPED_TEST(TupleTests, TestTupleComparison)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     thrust::tuple<T, T, T, T, T> lhs(0, 0, 0, 0, 0), rhs(0, 0, 0, 0, 0);
 
@@ -480,6 +491,8 @@ TYPED_TEST(TupleTests, TestTupleTie)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::host_vector<bool> h_result(1);
     thrust::generate(h_result.begin(), h_result.end(), TestTupleTieFunctor<T>());
 
@@ -492,6 +505,8 @@ TYPED_TEST(TupleTests, TestTupleTie)
 
 TEST(TupleTests, TestTupleSwap)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     int a = 7;
     int b = 13;
     int c = 42;

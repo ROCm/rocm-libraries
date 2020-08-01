@@ -29,6 +29,8 @@ TYPED_TEST(SetUnionKeyValuePrimitiveTests, TestSetUnionKeyValue)
     using U = typename TestFixture::input_type;
     using T = key_value<U, U>;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
 
     for(auto size : sizes)
@@ -99,6 +101,8 @@ TYPED_TEST(SetUnionKeyValuePrimitiveTests, TestSetUnionKeyValueDescending)
 {
     using U = typename TestFixture::input_type;
     typedef key_value<U, U> T;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
 
@@ -179,6 +183,8 @@ TYPED_TEST(SetUnionKeyValueTests, TestSetUnionKeyValueSimple)
     using Vector   = typename TestFixture::input_type;
     using Iterator = typename Vector::iterator;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector a(3), b(4);
 
     a[0] = 0;
@@ -209,6 +215,8 @@ TYPED_TEST(SetUnionKeyValueTests, TestSetUnionKeyValueWithEquivalentElementsSimp
     using Vector   = typename TestFixture::input_type;
     using Iterator = typename Vector::iterator;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector a(3), b(5);
 
     a[0] = 0;
@@ -238,6 +246,8 @@ TYPED_TEST(SetUnionKeyValueTests, TestSetUnionKeyValueWithEquivalentElementsSimp
 TYPED_TEST(SetUnionKeyValuePrimitiveTests, TestSetUnionKeyValue)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
 
@@ -301,6 +311,8 @@ TYPED_TEST(SetUnionKeyValuePrimitiveTests, TestSetUnionKeyValue)
 TYPED_TEST(SetUnionKeyValuePrimitiveTests, TestSetUnionKeyValueToDiscardIterator)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
 
