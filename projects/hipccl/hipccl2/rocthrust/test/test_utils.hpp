@@ -19,7 +19,10 @@
 
 #include <thrust/execution_policy.h>
 #include <thrust/host_vector.h>
+#include <thrust/random.h>
+#include <thrust/limits.h>
 #include <thrust/mr/allocator.h>
+#include <thrust/detail/event_error.h>
 
 #include "test_seed.hpp"
 
@@ -30,6 +33,100 @@
 #include <type_traits>
 #include <vector>
 #include <iterator>
+
+#define TEST_EVENT_WAIT(e) test_event_wait(e)
+
+// for demangling the result of type_info.name()
+// with msvc, type_info.name() is already demangled
+#ifdef __GNUC__
+#include <cxxabi.h>
+#endif // __GNUC__
+
+#include <string>
+#include <cstdlib>
+
+#ifdef __GNUC__
+inline std::string demangle(const char* name)
+{
+  int status = 0;
+  char* realname = abi::__cxa_demangle(name, 0, 0, &status);
+  std::string result(realname);
+  std::free(realname);
+
+  return result;
+}
+#else
+inline std::string demangle(const char* name)
+{
+  return name;
+}
+#endif
+
+class UnitTestException
+{
+    public:
+    std::string message;
+
+    UnitTestException() {}
+    UnitTestException(const std::string& msg) : message(msg) {}
+
+    friend std::ostream& operator<<(std::ostream& os, const UnitTestException& e)
+    {
+        return os << e.message;
+    }
+
+    template <typename T>
+    UnitTestException& operator<<(const T& t)
+    {
+        std::ostringstream oss;
+        oss << t;
+        message += oss.str();
+        return *this;
+    }
+};
+
+
+class UnitTestError   : public UnitTestException
+{
+    public:
+    UnitTestError() {}
+    UnitTestError(const std::string& msg) : UnitTestException(msg) {}
+};
+
+class UnitTestKnownFailure : public UnitTestException
+{
+    public:
+    UnitTestKnownFailure() {}
+    UnitTestKnownFailure(const std::string& msg) : UnitTestException(msg) {}
+};
+
+
+
+class UnitTestFailure : public UnitTestException
+{
+    public:
+    UnitTestFailure() {}
+    UnitTestFailure(const std::string& msg) : UnitTestException(msg) {}
+};
+
+template<typename T>
+  std::string type_name(void)
+{
+  return demangle(typeid(T).name());
+} // end type_name()
+
+template <typename Event>
+__host__
+void test_event_wait(Event&& e)
+{
+  ASSERT_EQ(true, e.valid_stream());
+
+  e.wait();
+  e.wait();
+
+  ASSERT_EQ(true, e.valid_stream());
+  ASSERT_EQ(true, e.ready());
+}
 
 std::vector<size_t> get_sizes()
 {
@@ -259,3 +356,230 @@ struct key_value
     key_type   key;
     value_type value;
 };
+
+inline unsigned int hash(unsigned int a)
+{
+    a = (a+0x7ed55d16) + (a<<12);
+    a = (a^0xc761c23c) ^ (a>>19);
+    a = (a+0x165667b1) + (a<<5);
+    a = (a+0xd3a2646c) ^ (a<<9);
+    a = (a+0xfd7046c5) + (a<<3);
+    a = (a^0xb55a4f09) ^ (a>>16);
+    return a;
+}
+
+template<typename T, typename = void>
+  struct generate_random_integer;
+
+template<typename T>
+  struct generate_random_integer<T,
+    typename thrust::detail::disable_if<
+      thrust::detail::is_non_bool_arithmetic<T>::value
+    >::type
+  >
+{
+  T operator()(unsigned int i) const
+  {
+      thrust::default_random_engine rng(hash(i));
+
+      return static_cast<T>(rng());
+  }
+};
+
+template<typename T>
+  struct generate_random_integer<T,
+    typename thrust::detail::enable_if<
+      thrust::detail::is_non_bool_integral<T>::value
+    >::type
+  >
+{
+  T operator()(unsigned int i) const
+  {
+      thrust::default_random_engine rng(hash(i));
+      thrust::uniform_int_distribution<T> dist;
+
+      return static_cast<T>(dist(rng));
+  }
+};
+
+template<typename T>
+  struct generate_random_integer<T,
+    typename thrust::detail::enable_if<
+      thrust::detail::is_floating_point<T>::value
+    >::type
+  >
+{
+  T operator()(unsigned int i) const
+  {
+      T const min = std::numeric_limits<T>::min();
+      T const max = std::numeric_limits<T>::max();
+
+      thrust::default_random_engine rng(hash(i));
+      thrust::uniform_real_distribution<T> dist(min, max);
+
+      return static_cast<T>(dist(rng));
+  }
+};
+
+template<>
+  struct generate_random_integer<bool>
+{
+  bool operator()(unsigned int i) const
+  {
+      thrust::default_random_engine rng(hash(i));
+      thrust::uniform_int_distribution<unsigned int> dist(0,1);
+
+      return dist(rng) == 1;
+  }
+};
+
+
+template<typename T>
+  struct generate_random_sample
+{
+  T operator()(unsigned int i) const
+  {
+      thrust::default_random_engine rng(hash(i));
+      thrust::uniform_int_distribution<unsigned int> dist(0,20);
+
+      return static_cast<T>(dist(rng));
+  }
+};
+
+
+
+template<typename T>
+thrust::host_vector<T> random_integers(const size_t N)
+{
+    thrust::host_vector<T> vec(N);
+    thrust::transform(thrust::counting_iterator<size_t>(0),
+                      thrust::counting_iterator<size_t>(N),
+                      vec.begin(),
+                      generate_random_integer<T>());
+
+    return vec;
+}
+
+template<typename T>
+T random_integer()
+{
+    return generate_random_integer<T>()(0);
+}
+
+template<typename T>
+thrust::host_vector<T> random_samples(const size_t N)
+{
+    thrust::host_vector<T> vec(N);
+    thrust::transform(thrust::counting_iterator<size_t>(0),
+                      thrust::counting_iterator<size_t>(N),
+                      vec.begin(),
+                      generate_random_sample<T>());
+
+    return vec;
+}
+
+// Use this with counting_iterator to avoid generating a range larger than we
+// can represent.
+template <typename T>
+typename thrust::detail::disable_if<
+  thrust::detail::is_floating_point<T>::value
+, T
+>::type truncate_to_max_representable(std::size_t n)
+{
+  return thrust::min<std::size_t>(
+    n, static_cast<std::size_t>(thrust::numeric_limits<T>::max())
+  );
+}
+
+// TODO: This probably won't work for `half`.
+template <typename T>
+typename thrust::detail::enable_if<
+  thrust::detail::is_floating_point<T>::value
+, T
+>::type truncate_to_max_representable(std::size_t n)
+{
+  return thrust::min<T>(
+    n, thrust::numeric_limits<T>::max()
+  );
+}
+
+enum threw_status
+{
+  did_not_throw
+, threw_wrong_type
+, threw_right_type_but_wrong_value
+, threw_right_type
+};
+
+void check_assert_throws(
+  threw_status s
+, std::string const& exception_name
+, std::string const& file_name = "unknown"
+, int line_number = -1
+)
+{
+  switch (s)
+  {
+    case did_not_throw:
+    {
+      UnitTestFailure f;
+      f << "[" << file_name << ":" << line_number << "] did not throw anything";
+      throw f;
+    }
+    case threw_wrong_type:
+    {
+      UnitTestFailure f;
+      f << "[" << file_name << ":" << line_number << "] did not throw an "
+        << "object of type " << exception_name;
+      throw f;
+    }
+    case threw_right_type_but_wrong_value:
+    {
+      UnitTestFailure f;
+      f << "[" << file_name << ":" << line_number << "] threw an object of the "
+        << "correct type (" << exception_name << ") but wrong value";
+      throw f;
+    }
+    case threw_right_type:
+      break;
+    default:
+    {
+      UnitTestFailure f;
+      f << "[" << file_name << ":" << line_number << "] encountered an "
+        << "unknown error";
+      throw f;
+    }
+  }
+}
+
+template <typename Future>
+__host__
+void test_future_value_retrieval(Future&& f, decltype(f.extract()) &return_value)
+{
+  ASSERT_EQ(true, f.valid_stream());
+  ASSERT_EQ(true, f.valid_content());
+
+  auto const r0 = f.get();
+  auto const r1 = f.get();
+
+  ASSERT_EQ(true, f.ready());
+  ASSERT_EQ(true, f.valid_stream());
+  ASSERT_EQ(true, f.valid_content());
+  ASSERT_EQ(r0, r1);
+
+  auto const r2 = f.extract();
+
+  ASSERT_THROW(
+    auto x = f.extract();
+    THRUST_UNUSED_VAR(x)
+    , thrust::event_error
+  );
+
+  ASSERT_EQ(false, f.ready());
+  ASSERT_EQ(false, f.valid_stream());
+  ASSERT_EQ(false, f.valid_content());
+  ASSERT_EQ(r2, r1);
+  ASSERT_EQ(r2, r0);
+
+  return_value = r2;
+}
