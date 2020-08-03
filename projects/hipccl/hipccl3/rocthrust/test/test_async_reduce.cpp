@@ -142,19 +142,19 @@ DEFINE_SYNC_REDUCE_INVOKER(
 DEFINE_ASYNC_REDUCE_INVOKER(
   reduce_async_invoker_init
 , THRUST_FWD(first), THRUST_FWD(last)
-, unittest::random_integer<T>()
+, random_integer<T>()
 );
 DEFINE_ASYNC_REDUCE_INVOKER(
   reduce_async_invoker_device_init
 , thrust::device
 , THRUST_FWD(first), THRUST_FWD(last)
-, unittest::random_integer<T>()
+, random_integer<T>()
 );
 DEFINE_ASYNC_REDUCE_INVOKER(
   reduce_async_invoker_device_allocator_init
 , thrust::device(thrust::device_allocator<void>{})
 , THRUST_FWD(first), THRUST_FWD(last)
-, unittest::random_integer<T>()
+, random_integer<T>()
 );
 DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
   reduce_async_invoker_device_on_init
@@ -173,7 +173,7 @@ DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
   // Arguments to `thrust::async::reduce`.
 , thrust::device.on(stream_)
 , THRUST_FWD(first), THRUST_FWD(last)
-, unittest::random_integer<T>()
+, random_integer<T>()
 );
 DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
   reduce_async_invoker_device_allocator_on_init
@@ -192,33 +192,33 @@ DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
   // Arguments to `thrust::async::reduce`.
 , thrust::device(thrust::device_allocator<void>{}).on(stream_)
 , THRUST_FWD(first), THRUST_FWD(last)
-, unittest::random_integer<T>()
+, random_integer<T>()
 );
 
 DEFINE_SYNC_REDUCE_INVOKER(
   reduce_sync_invoker_init
 , THRUST_FWD(first), THRUST_FWD(last)
-, unittest::random_integer<T>()
+, random_integer<T>()
 );
 
 DEFINE_ASYNC_REDUCE_INVOKER(
   reduce_async_invoker_init_plus
 , THRUST_FWD(first), THRUST_FWD(last)
-, unittest::random_integer<T>()
+, random_integer<T>()
 , thrust::plus<T>()
 );
 DEFINE_ASYNC_REDUCE_INVOKER(
   reduce_async_invoker_device_init_plus
 , thrust::device
 , THRUST_FWD(first), THRUST_FWD(last)
-, unittest::random_integer<T>()
+, random_integer<T>()
 , thrust::plus<T>()
 );
 DEFINE_ASYNC_REDUCE_INVOKER(
   reduce_async_invoker_device_allocator_init_plus
 , thrust::device(thrust::device_allocator<void>{})
 , THRUST_FWD(first), THRUST_FWD(last)
-, unittest::random_integer<T>()
+, random_integer<T>()
 , thrust::plus<T>()
 );
 DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
@@ -238,7 +238,7 @@ DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
   // Arguments to `thrust::async::reduce`.
 , thrust::device.on(stream_)
 , THRUST_FWD(first), THRUST_FWD(last)
-, unittest::random_integer<T>()
+, random_integer<T>()
 , thrust::plus<T>()
 );
 DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
@@ -258,35 +258,35 @@ DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
   // Arguments to `thrust::async::reduce`.
 , thrust::device(thrust::device_allocator<void>{}).on(stream_)
 , THRUST_FWD(first), THRUST_FWD(last)
-, unittest::random_integer<T>()
+, random_integer<T>()
 , thrust::plus<T>()
 );
 
 DEFINE_SYNC_REDUCE_INVOKER(
   reduce_sync_invoker_init_plus
 , THRUST_FWD(first), THRUST_FWD(last)
-, unittest::random_integer<T>()
+, random_integer<T>()
 , thrust::plus<T>()
 );
 
 DEFINE_ASYNC_REDUCE_INVOKER(
   reduce_async_invoker_init_custom_plus
 , THRUST_FWD(first), THRUST_FWD(last)
-, unittest::random_integer<T>()
+, random_integer<T>()
 , custom_plus<T>()
 );
 DEFINE_ASYNC_REDUCE_INVOKER(
   reduce_async_invoker_device_init_custom_plus
 , thrust::device
 , THRUST_FWD(first), THRUST_FWD(last)
-, unittest::random_integer<T>()
+, random_integer<T>()
 , custom_plus<T>()
 );
 DEFINE_ASYNC_REDUCE_INVOKER(
   reduce_async_invoker_device_allocator_init_custom_plus
 , thrust::device(thrust::device_allocator<void>{})
 , THRUST_FWD(first), THRUST_FWD(last)
-, unittest::random_integer<T>()
+, random_integer<T>()
 , custom_plus<T>()
 );
 DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
@@ -306,7 +306,7 @@ DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
   // Arguments to `thrust::async::reduce`.
 , thrust::device.on(stream_)
 , THRUST_FWD(first), THRUST_FWD(last)
-, unittest::random_integer<T>()
+, random_integer<T>()
 , custom_plus<T>()
 );
 DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
@@ -326,21 +326,21 @@ DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
   // Arguments to `thrust::async::reduce`.
 , thrust::device(thrust::device_allocator<void>{}).on(stream_)
 , THRUST_FWD(first), THRUST_FWD(last)
-, unittest::random_integer<T>()
+, random_integer<T>()
 , custom_plus<T>()
 );
 
 DEFINE_SYNC_REDUCE_INVOKER(
   reduce_sync_invoker_init_custom_plus
 , THRUST_FWD(first), THRUST_FWD(last)
-, unittest::random_integer<T>()
+, random_integer<T>()
 , custom_plus<T>()
 );
 
 ///////////////////////////////////////////////////////////////////////////////
 
 template <
-  T
+  typename T
 , template <typename> class AsyncReduceInvoker
 , template <typename> class SyncReduceInvoker
 >
@@ -384,10 +384,15 @@ void testAsyncReduce()
             // This potentially runs concurrently with the copies.
             auto const r0 = invoke_sync(h0.begin(), h0.end());
 
-            auto const r1a = TEST_FUTURE_VALUE_RETRIEVAL(f0a);
-            auto const r1b = TEST_FUTURE_VALUE_RETRIEVAL(f0b);
-            auto const r1c = TEST_FUTURE_VALUE_RETRIEVAL(f0c);
-            auto const r1d = TEST_FUTURE_VALUE_RETRIEVAL(f0d);
+            T r1a;
+            T r1b;
+            T r1c;
+            T r1d;
+
+            test_future_value_retrieval(f0a, r1a);
+            test_future_value_retrieval(f0b, r1b);
+            test_future_value_retrieval(f0c, r1c);
+            test_future_value_retrieval(f0d, r1d);
 
             ASSERT_EQ(r0, r1a);
             ASSERT_EQ(r0, r1b);
@@ -600,7 +605,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyAllocatorOnInitCustomPlus)
 ///////////////////////////////////////////////////////////////////////////////
 
 template <
-  T
+  typename T
 , template <typename> class AsyncReduceInvoker
 , template <typename> class SyncReduceInvoker
 >
@@ -608,7 +613,7 @@ void testAsyncReduceCountingIterator()
 {
     constexpr std::size_t n = 15 * sizeof(T);
 
-    ASSERT_LEQUAL(T(n), unittest::truncate_to_max_representable<T>(n));
+    ASSERT_LE(T(n), truncate_to_max_representable<T>(n));
 
     thrust::counting_iterator<T> first(0);
     thrust::counting_iterator<T> last(n);
@@ -629,10 +634,15 @@ void testAsyncReduceCountingIterator()
     // This potentially runs concurrently with the copies.
     auto const r0 = invoke_sync(first, last);
 
-    auto const r1a = TEST_FUTURE_VALUE_RETRIEVAL(f0a);
-    auto const r1b = TEST_FUTURE_VALUE_RETRIEVAL(f0b);
-    auto const r1c = TEST_FUTURE_VALUE_RETRIEVAL(f0c);
-    auto const r1d = TEST_FUTURE_VALUE_RETRIEVAL(f0d);
+    T r1a;
+    T r1b;
+    T r1c;
+    T r1d;
+
+    test_future_value_retrieval(f0a, r1a);
+    test_future_value_retrieval(f0b, r1b);
+    test_future_value_retrieval(f0c, r1c);
+    test_future_value_retrieval(f0d, r1d);
 
     ASSERT_EQ(r0, r1a);
     ASSERT_EQ(r0, r1b);
@@ -761,8 +771,11 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReduceUsing)
             // This potentially runs concurrently with the copies.
             T const r0 = reduce(h0.begin(), h0.end());
 
-            T const r1a = TEST_FUTURE_VALUE_RETRIEVAL(f0a);
-            T const r1b = TEST_FUTURE_VALUE_RETRIEVAL(f0b);
+            T r1a;
+            T r1b;
+
+            test_future_value_retrieval(f0a, r1a);
+            test_future_value_retrieval(f0b, r1b);
 
             ASSERT_EQ(r0, r1a);
             ASSERT_EQ(r0, r1b);
@@ -804,13 +817,12 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReduceAfter)
             );
 
             // Verify that double consumption of a future produces an exception.
-            ASSERT_THROWS_EQUAL(
+            ASSERT_THROW(
               auto x = thrust::async::reduce(
                   thrust::device.after(f0), d0.begin(), d0.end()
               );
               THRUST_UNUSED_VAR(x)
             , thrust::event_error
-            , thrust::event_error(thrust::event_errc::no_state)
             );
 
             ASSERT_EQ_QUIET(f0_stream, f1.stream().native_handle());
@@ -822,13 +834,12 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReduceAfter)
             );
 
             // Verify that double consumption of a policy produces an exception.
-            ASSERT_THROWS_EQUAL(
+            ASSERT_THROW(
               auto x = thrust::async::reduce(
                 after_policy2, d0.begin(), d0.end()
               );
               THRUST_UNUSED_VAR(x)
             , thrust::event_error
-            , thrust::event_error(thrust::event_errc::no_state)
             );
 
             ASSERT_EQ_QUIET(f0_stream, f2.stream().native_handle());
@@ -836,7 +847,9 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReduceAfter)
             // This potentially runs concurrently with the copies.
             T const r0 = thrust::reduce(h0.begin(), h0.end());
 
-            T const r1 = TEST_FUTURE_VALUE_RETRIEVAL(f2);
+            T r1;
+
+            test_future_value_retrieval(f2, r1);
 
             ASSERT_EQ(r0, r1);
         }
@@ -880,13 +893,12 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReduceOnThenAfter)
             );
 
             // Verify that double consumption of a future produces an exception.
-            ASSERT_THROWS_EQUAL(
+            ASSERT_THROW(
               auto x = thrust::async::reduce(
                 thrust::device.after(f0), d0.begin(), d0.end()
               );
               THRUST_UNUSED_VAR(x)
             , thrust::event_error
-            , thrust::event_error(thrust::event_errc::no_state)
             );
 
             ASSERT_EQ_QUIET(stream, f1.stream().native_handle());
@@ -898,13 +910,12 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReduceOnThenAfter)
             );
 
             // Verify that double consumption of a policy produces an exception.
-            ASSERT_THROWS_EQUAL(
+            ASSERT_THROW(
               auto x = thrust::async::reduce(
                 after_policy2, d0.begin(), d0.end()
               );
               THRUST_UNUSED_VAR(x)
             , thrust::event_error
-            , thrust::event_error(thrust::event_errc::no_state)
             );
 
             ASSERT_EQ_QUIET(stream, f2.stream().native_handle());
@@ -912,7 +923,9 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReduceOnThenAfter)
             // This potentially runs concurrently with the copies.
             T const r0 = thrust::reduce(h0.begin(), h0.end());
 
-            T const r1 = TEST_FUTURE_VALUE_RETRIEVAL(f2);
+            T r1;
+
+            test_future_value_retrieval(f2, r1);
 
             ASSERT_EQ(r0, r1);
 
@@ -967,14 +980,13 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReduceAllocatorOnThenAfter)
             , d0.begin(), d0.end()
             );
 
-            ASSERT_THROWS_EQUAL(
+            ASSERT_THROW(
               auto x = thrust::async::reduce(
                   thrust::device(thrust::device_allocator<void>{}).after(f0)
               , d0.begin(), d0.end()
               );
               THRUST_UNUSED_VAR(x)
             , thrust::event_error
-            , thrust::event_error(thrust::event_errc::no_state)
             );
 
             ASSERT_EQ_QUIET(stream0, f1.stream().native_handle());
@@ -984,14 +996,13 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReduceAllocatorOnThenAfter)
             , d0.begin(), d0.end()
             );
 
-            ASSERT_THROWS_EQUAL(
+            ASSERT_THROW(
               auto x = thrust::async::reduce(
                   thrust::device(thrust::device_allocator<void>{}).on(stream1).after(f1)
               , d0.begin(), d0.end()
               );
               THRUST_UNUSED_VAR(x)
             , thrust::event_error
-            , thrust::event_error(thrust::event_errc::no_state)
             );
 
             KNOWN_FAILURE;
@@ -1010,7 +1021,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReduceAllocatorOnThenAfter)
             thrust::hip_rocprim::throw_on_error(hipStreamDestroy(stream1));
         }
     }
-}*/
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -1065,6 +1076,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReduceCaching)
         }
     }
 };
+*/
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -1145,10 +1157,15 @@ TYPED_TEST(AsyncReduceTests, TestAsyncCopyThenReduce)
             // This potentially runs concurrently with the copies.
             T const r0 = thrust::reduce(h0a.begin(), h0a.end());
 
-            T const r1a = TEST_FUTURE_VALUE_RETRIEVAL(f1a);
-            T const r1b = TEST_FUTURE_VALUE_RETRIEVAL(f1b);
-            T const r1c = TEST_FUTURE_VALUE_RETRIEVAL(f1c);
-            T const r1d = TEST_FUTURE_VALUE_RETRIEVAL(f1d);
+            T r1a;
+            T r1b;
+            T r1c;
+            T r1d;
+
+            test_future_value_retrieval(f1a, r1a);
+            test_future_value_retrieval(f1b, r1b);
+            test_future_value_retrieval(f1c, r1c);
+            test_future_value_retrieval(f1d, r1d);
 
             ASSERT_EQ(r0, r1a);
             ASSERT_EQ(r0, r1b);

@@ -75,7 +75,7 @@ auto async_reduce_n(
 
   using pointer
     = typename thrust::detail::allocator_traits<decltype(device_alloc)>::
-      rebind_traits<U>::pointer;
+      template rebind_traits<U>::pointer;
 
   unique_eager_future_promise_pair<U, pointer> fp;
 
@@ -88,9 +88,9 @@ auto async_reduce_n(
     , tmp_size
     , first
     , static_cast<U*>(nullptr)
+    , init
     , n
     , op
-    , init
     , NULL // Null stream, just for sizing.
     , THRUST_HIP_DEBUG_SYNC_FLAG
     )
@@ -170,10 +170,10 @@ auto async_reduce_n(
     , tmp_size
     , first
     , ret_ptr
+    , init
     , n
     , op
-    , init
-    , fp.future.stream()
+    , fp.future.stream().native_handle()
     , THRUST_HIP_DEBUG_SYNC_FLAG
     )
   , "after reduction launch"
