@@ -583,3 +583,16 @@ void test_future_value_retrieval(Future&& f, decltype(f.extract()) &return_value
 
   return_value = r2;
 }
+
+template<class T>
+struct precision_threshold
+{
+    static constexpr float percentage = 0.01f;
+};
+
+template<>
+struct precision_threshold<rocprim::half>
+{
+    static constexpr float percentage = 0.075f;
+};
+
