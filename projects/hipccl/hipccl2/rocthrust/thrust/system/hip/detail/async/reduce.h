@@ -242,9 +242,9 @@ auto async_reduce_into_n(
     , tmp_size
     , first
     , static_cast<U*>(nullptr)
+    , init
     , n
     , op
-    , init
     , nullptr // Null stream, just for sizing.
     , THRUST_HIP_DEBUG_SYNC_FLAG
     )
@@ -306,9 +306,9 @@ auto async_reduce_into_n(
     , tmp_size
     , first
     , output
+    , init
     , n
     , op
-    , init
     , e.stream().native_handle()
     , THRUST_HIP_DEBUG_SYNC_FLAG
     )

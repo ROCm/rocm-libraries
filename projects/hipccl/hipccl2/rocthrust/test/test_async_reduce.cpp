@@ -356,7 +356,7 @@ void testAsyncReduce()
             SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
             thrust::host_vector<T> h0 = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, T(-1000), T(1000), seed_value);
 
             thrust::device_vector<T> d0a(h0);
             thrust::device_vector<T> d0b(h0);
@@ -394,10 +394,13 @@ void testAsyncReduce()
             test_future_value_retrieval(f0c, r1c);
             test_future_value_retrieval(f0d, r1d);
 
-            ASSERT_EQ(r0, r1a);
-            ASSERT_EQ(r0, r1b);
-            ASSERT_EQ(r0, r1c);
-            ASSERT_EQ(r0, r1d);
+            auto tolerance =
+                std::max<T>(std::abs(0.1f * r0), T(precision_threshold<T>::percentage));
+
+            ASSERT_NEAR(r0, r1a, tolerance);
+            ASSERT_NEAR(r0, r1b, tolerance);
+            ASSERT_NEAR(r0, r1c, tolerance);
+            ASSERT_NEAR(r0, r1d, tolerance);
         }
     }
 };
@@ -644,10 +647,13 @@ void testAsyncReduceCountingIterator()
     test_future_value_retrieval(f0c, r1c);
     test_future_value_retrieval(f0d, r1d);
 
-    ASSERT_EQ(r0, r1a);
-    ASSERT_EQ(r0, r1b);
-    ASSERT_EQ(r0, r1c);
-    ASSERT_EQ(r0, r1d);
+    auto tolerance =
+        std::max<T>(std::abs(0.1f * r0), T(precision_threshold<T>::percentage));
+
+    ASSERT_NEAR(r0, r1a, tolerance);
+    ASSERT_NEAR(r0, r1b, tolerance);
+    ASSERT_NEAR(r0, r1c, tolerance);
+    ASSERT_NEAR(r0, r1d, tolerance);
 };
 
 TYPED_TEST(AsyncReduceTests, TestAsyncReduceCountingIterator)
@@ -745,7 +751,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReduceUsing)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
             thrust::host_vector<T> h0 = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, T(-1000), T(1000), seed_value);
 
             thrust::device_vector<T> d0a(h0);
             thrust::device_vector<T> d0b(h0);
@@ -777,8 +783,11 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReduceUsing)
             test_future_value_retrieval(f0a, r1a);
             test_future_value_retrieval(f0b, r1b);
 
-            ASSERT_EQ(r0, r1a);
-            ASSERT_EQ(r0, r1b);
+            auto tolerance =
+                std::max<T>(std::abs(0.1f * r0), T(precision_threshold<T>::percentage));
+
+            ASSERT_NEAR(r0, r1a, tolerance);
+            ASSERT_NEAR(r0, r1b, tolerance);
         }
     }
 };
@@ -798,7 +807,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReduceAfter)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
             thrust::host_vector<T> h0 = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, T(-1000), T(1000), seed_value);
 
             thrust::device_vector<T> d0(h0);
 
@@ -851,7 +860,10 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReduceAfter)
 
             test_future_value_retrieval(f2, r1);
 
-            ASSERT_EQ(r0, r1);
+            auto tolerance =
+                std::max<T>(std::abs(0.1f * r0), T(precision_threshold<T>::percentage));
+
+            ASSERT_NEAR(r0, r1, tolerance);
         }
     }
 };
@@ -871,7 +883,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReduceOnThenAfter)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
             thrust::host_vector<T> h0 = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, T(-1000), T(1000), seed_value);
 
             thrust::device_vector<T> d0(h0);
 
@@ -927,7 +939,10 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReduceOnThenAfter)
 
             test_future_value_retrieval(f2, r1);
 
-            ASSERT_EQ(r0, r1);
+            auto tolerance =
+                std::max<T>(std::abs(0.1f * r0), T(precision_threshold<T>::percentage));
+
+            ASSERT_NEAR(r0, r1, tolerance);
 
             thrust::hip_rocprim::throw_on_error(
                 hipStreamDestroy(stream)
@@ -952,7 +967,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReduceAllocatorOnThenAfter)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
             thrust::host_vector<T> h0 = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, T(-1000), T(1000), seed_value);
 
             thrust::device_vector<T> d0(h0);
 
@@ -1038,7 +1053,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReduceCaching)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
             thrust::host_vector<T> h0 = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, T(-1000), T(1000), seed_value);
 
             constexpr std::int64_t m = 32;
             thrust::device_vector<T> d0(h0);
@@ -1092,24 +1107,18 @@ TYPED_TEST(AsyncReduceTests, TestAsyncCopyThenReduce)
                 = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
             SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-            thrust::host_vector<T> h0a = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
-            thrust::host_vector<T> h0b = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value + 1);
-            thrust::host_vector<T> h0c = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value + 2);
-            thrust::host_vector<T> h0d = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value + 3);
+            thrust::host_vector<T> h0 = get_random_data<T>(
+                size, T(-1000), T(1000), seed_value);
 
-            thrust::device_vector<T> d0a(size);
-            thrust::device_vector<T> d0b(size);
-            thrust::device_vector<T> d0c(size);
-            thrust::device_vector<T> d0d(size);
+            thrust::device_vector<T> d0a(h0);
+            thrust::device_vector<T> d0b(h0);
+            thrust::device_vector<T> d0c(h0);
+            thrust::device_vector<T> d0d(h0);
 
-            auto f0a = thrust::async::copy(h0a.begin(), h0a.end(), d0a.begin());
-            auto f0b = thrust::async::copy(h0b.begin(), h0b.end(), d0b.begin());
-            auto f0c = thrust::async::copy(h0c.begin(), h0c.end(), d0c.begin());
-            auto f0d = thrust::async::copy(h0d.begin(), h0d.end(), d0d.begin());
+            auto f0a = thrust::async::copy(h0.begin(), h0.end(), d0a.begin());
+            auto f0b = thrust::async::copy(h0.begin(), h0.end(), d0b.begin());
+            auto f0c = thrust::async::copy(h0.begin(), h0.end(), d0c.begin());
+            auto f0d = thrust::async::copy(h0.begin(), h0.end(), d0d.begin());
 
             ASSERT_EQ(true, f0a.valid_stream());
             ASSERT_EQ(true, f0b.valid_stream());
@@ -1134,6 +1143,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncCopyThenReduce)
               thrust::device.after(f0d), d0d.begin(), d0d.end()
             );
 
+
             ASSERT_EQ(false, f0a.valid_stream());
             ASSERT_EQ(false, f0b.valid_stream());
             ASSERT_EQ(false, f0c.valid_stream());
@@ -1155,7 +1165,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncCopyThenReduce)
             ASSERT_EQ_QUIET(f0d_stream, f1d.stream().native_handle());
 
             // This potentially runs concurrently with the copies.
-            T const r0 = thrust::reduce(h0a.begin(), h0a.end());
+            T const r0 = thrust::reduce(h0.begin(), h0.end());
 
             T r1a;
             T r1b;
@@ -1167,10 +1177,13 @@ TYPED_TEST(AsyncReduceTests, TestAsyncCopyThenReduce)
             test_future_value_retrieval(f1c, r1c);
             test_future_value_retrieval(f1d, r1d);
 
-            ASSERT_EQ(r0, r1a);
-            ASSERT_EQ(r0, r1b);
-            ASSERT_EQ(r0, r1c);
-            ASSERT_EQ(r0, r1d);
+            auto tolerance =
+                std::max<T>(std::abs(0.1f * r0), T(precision_threshold<T>::percentage));
+
+            ASSERT_NEAR(r0, r1a, tolerance);
+            ASSERT_NEAR(r0, r1b, tolerance);
+            ASSERT_NEAR(r0, r1c, tolerance);
+            ASSERT_NEAR(r0, r1d, tolerance);
         }
     }
 }
