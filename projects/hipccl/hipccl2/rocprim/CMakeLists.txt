@@ -73,7 +73,7 @@ set(AMDGPU_TARGETS gfx803;gfx900;gfx906;gfx908 CACHE STRING "List of specific de
 set(AMDGPU_TEST_TARGETS "" CACHE STRING "List of specific device types to test for") # Leave empty for default system device
 
 # Setup VERSION
-set(VERSION_STRING "2.10.2")
+set(VERSION_STRING "2.10.3")
 rocm_setup_version(VERSION ${VERSION_STRING})
 
 # Print configuration summary
