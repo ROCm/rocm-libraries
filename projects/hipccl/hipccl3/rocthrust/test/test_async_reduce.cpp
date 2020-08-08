@@ -407,6 +407,7 @@ void testAsyncReduce()
 
 TYPED_TEST(AsyncReduceTests, TestAsyncReduce)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     testAsyncReduce<
         T,
@@ -417,6 +418,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReduce)
 
 TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicy)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     testAsyncReduce<
         T,
@@ -427,6 +429,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicy)
 
 TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyAllocator)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     testAsyncReduce<
         T,
@@ -437,6 +440,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyAllocator)
 
 TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyOn)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     testAsyncReduce<
         T,
@@ -447,6 +451,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyOn)
 
 TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyAllocatorOn)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     testAsyncReduce<
         T,
@@ -457,6 +462,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyAllocatorOn)
 
 TYPED_TEST(AsyncReduceTests, TestAsyncReduceInit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     testAsyncReduce<
         T,
@@ -467,6 +473,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReduceInit)
 
 TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyInit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     testAsyncReduce<
         T,
@@ -477,6 +484,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyInit)
 
 TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyAllocatorInit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     testAsyncReduce<
         T,
@@ -487,6 +495,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyAllocatorInit)
 
 TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyOnInit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     testAsyncReduce<
         T,
@@ -497,6 +506,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyOnInit)
 
 TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyAllocatorOnInit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     testAsyncReduce<
         T,
@@ -507,6 +517,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyAllocatorOnInit)
 
 TYPED_TEST(AsyncReduceTests, TestAsyncReduceInitPlus)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     testAsyncReduce<
         T,
@@ -517,6 +528,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReduceInitPlus)
 
 TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyInitPlus)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     testAsyncReduce<
         T,
@@ -527,6 +539,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyInitPlus)
 
 TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyAllocatorInitPlus)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     testAsyncReduce<
         T,
@@ -537,6 +550,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyAllocatorInitPlus)
 
 TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyOnInitPlus)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     testAsyncReduce<
         T,
@@ -547,6 +561,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyOnInitPlus)
 
 TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyAllocatorOnInitPlus)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     testAsyncReduce<
         T,
@@ -557,6 +572,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyAllocatorOnInitPlus)
 
 TYPED_TEST(AsyncReduceTests, TestAsyncReduceInitCustomPlus)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     testAsyncReduce<
         T,
@@ -567,6 +583,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReduceInitCustomPlus)
 
 TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyInitCustomPlus)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     testAsyncReduce<
         T,
@@ -577,6 +594,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyInitCustomPlus)
 
 TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyAllocatorInitCustomPlus)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     testAsyncReduce<
         T,
@@ -587,6 +605,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyAllocatorInitCustomPlus)
 
 TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyOnInitCustomPlus)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     testAsyncReduce<
         T,
@@ -597,6 +616,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyOnInitCustomPlus)
 
 TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyAllocatorOnInitCustomPlus)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     testAsyncReduce<
         T,
@@ -658,6 +678,7 @@ void testAsyncReduceCountingIterator()
 
 TYPED_TEST(AsyncReduceTests, TestAsyncReduceCountingIterator)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     testAsyncReduceCountingIterator<
         T,
@@ -668,6 +689,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReduceCountingIterator)
 
 TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyCountingIterator)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     testAsyncReduceCountingIterator<
         T,
@@ -678,6 +700,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyCountingIterator)
 
 TYPED_TEST(AsyncReduceTests, TestAsyncReduceCountingIteratorInit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     testAsyncReduceCountingIterator<
         T,
@@ -688,6 +711,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReduceCountingIteratorInit)
 
 TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyCountingIteratorInit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     testAsyncReduceCountingIterator<
         T,
@@ -698,6 +722,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyCountingIteratorInit)
 
 TYPED_TEST(AsyncReduceTests, TestAsyncReduceCountingIteratorInitPlus)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     testAsyncReduceCountingIterator<
         T,
@@ -708,6 +733,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReduceCountingIteratorInitPlus)
 
 TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyCountingIteratorInitPlus)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     testAsyncReduceCountingIterator<
         T,
@@ -718,6 +744,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyCountingIteratorInitPlus)
 
 TYPED_TEST(AsyncReduceTests, TestAsyncReduceCountingIteratorInitCustomPlus)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     testAsyncReduceCountingIterator<
         T,
@@ -728,6 +755,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReduceCountingIteratorInitCustomPlus)
 
 TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyCountingIteratorInitCustomPlus)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     testAsyncReduceCountingIterator<
         T,
@@ -740,6 +768,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReducePolicyCountingIteratorInitCustomPlus
 
 TYPED_TEST(AsyncReduceTests, TestAsyncReduceUsing)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     for(auto size : get_sizes())
     {
@@ -796,6 +825,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReduceUsing)
 
 TYPED_TEST(AsyncReduceTests, TestAsyncReduceAfter)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     for(auto size : get_sizes())
     {
@@ -872,6 +902,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReduceAfter)
 
 TYPED_TEST(AsyncReduceTests, TestAsyncReduceOnThenAfter)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     for(auto size : get_sizes())
     {
@@ -956,6 +987,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReduceOnThenAfter)
 /*
 TYPED_TEST(AsyncReduceTests, TestAsyncReduceAllocatorOnThenAfter)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     for(auto size : get_sizes())
     {
@@ -1042,6 +1074,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReduceAllocatorOnThenAfter)
 
 TYPED_TEST(AsyncReduceTests, TestAsyncReduceCaching)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     for(auto size : get_sizes())
     {
@@ -1097,6 +1130,7 @@ TYPED_TEST(AsyncReduceTests, TestAsyncReduceCaching)
 
 TYPED_TEST(AsyncReduceTests, TestAsyncCopyThenReduce)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     for(auto size : get_sizes())
     {

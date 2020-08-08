@@ -84,12 +84,14 @@ void AsyncCopyHostToDevice()
 
 TYPED_TEST(AsyncCopyTests, TestAsyncTriviallyRelocatableElementsHostToDevice)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     AsyncCopyHostToDevice<T, invoke_async_copy_fn>();
 };
 
 TYPED_TEST(AsyncCopyTests, TestAsyncTriviallyRelocatableElementsHostToDevicePolicies)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     AsyncCopyHostToDevice<T, invoke_async_copy_host_to_device_fn>();
 };
@@ -129,12 +131,14 @@ void AsyncCopyDeviceToHost()
 
 TYPED_TEST(AsyncCopyTests, TestAsyncCopyTriviallyRelocatableDeviceToHost)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     AsyncCopyDeviceToHost<T, invoke_async_copy_fn>();
 };
 
 TYPED_TEST(AsyncCopyTests, TestAsyncCopyTriviallyRelocatableDeviceToHostPolicies)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());    
     using T = typename TestFixture::input_type;
     AsyncCopyDeviceToHost<T, invoke_async_copy_device_to_host_fn>();
 };
