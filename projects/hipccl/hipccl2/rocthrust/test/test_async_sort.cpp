@@ -227,78 +227,91 @@ void TestAsyncSort()
 
 TYPED_TEST(AsyncSortTests, AsyncSort)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     TestAsyncSort<T, sort_invoker, wait_for_futures>();
 };
 
 TYPED_TEST(AsyncSortTests, AsyncSortNoWait)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     TestAsyncSort<T, sort_invoker, do_not_wait_for_futures>();
 };
 
 TYPED_TEST(AsyncSortTests, AsyncSortPolicy)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     TestAsyncSort<T, sort_invoker_device, wait_for_futures>();
 };
 
 TYPED_TEST(AsyncSortTests, AsyncSortLess)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     TestAsyncSort<T, sort_invoker_less, wait_for_futures>();
 };
 
 TYPED_TEST(AsyncSortTests, AsyncSortLessNoWait)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     TestAsyncSort<T, sort_invoker_less, do_not_wait_for_futures>();
 };
 
 TYPED_TEST(AsyncSortTests, AsyncSortPloicyLess)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     TestAsyncSort<T, sort_invoker_less_device, wait_for_futures>();
 };
 
 TYPED_TEST(AsyncSortTests, AsyncSortGreater)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     TestAsyncSort<T, sort_invoker_greater, wait_for_futures>();
 };
 
 TYPED_TEST(AsyncSortTests, AsyncSortGreaterNoWait)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     TestAsyncSort<T, sort_invoker_greater, do_not_wait_for_futures>();
 };
 
 TYPED_TEST(AsyncSortTests, AsyncSortPolicyGreaterNoWait)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     TestAsyncSort<T, sort_invoker_greater_device, do_not_wait_for_futures>();
 };
 
 TYPED_TEST(AsyncSortTests, AsyncSortCustomGreater)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     TestAsyncSort<T, sort_invoker_custom_greater, wait_for_futures>();
 };
 
 TYPED_TEST(AsyncSortTests, AsyncSortCustomGreaterNoWait)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     TestAsyncSort<T, sort_invoker_custom_greater, do_not_wait_for_futures>();
 };
 
 TYPED_TEST(AsyncSortTests, AsyncSortPolicyCustomGreater)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     TestAsyncSort<T, sort_invoker_custom_greater_device, wait_for_futures>();
 };
 
 TYPED_TEST(AsyncSortTests, AsyncSortPolicyCustomGreaterNoWait)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     TestAsyncSort<T, sort_invoker_custom_greater_device, do_not_wait_for_futures>();
 };

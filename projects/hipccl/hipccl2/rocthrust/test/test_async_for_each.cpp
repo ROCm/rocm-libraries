@@ -70,16 +70,14 @@ void test_async_for_each()
 
       f0.wait();
 
-      for(size_t i = 0; i < size; i++)
-      {
-        ASSERT_EQ(h0_data[i], d0_data[i]);
-      }
+      ASSERT_EQ(h0_data, d0_data);
     }
   }
 };
 
 TYPED_TEST(AsyncForEachTests, TestAsyncForEach)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     test_async_for_each<
         T,
@@ -90,6 +88,7 @@ TYPED_TEST(AsyncForEachTests, TestAsyncForEach)
 
 TYPED_TEST(AsyncForEachTests, TestAsyncForEachPolicy)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     test_async_for_each<
         T,
@@ -99,4 +98,3 @@ TYPED_TEST(AsyncForEachTests, TestAsyncForEachPolicy)
 }
 
 #endif
-
