@@ -74,6 +74,10 @@ variables:
     - hipconfig
     # Setup ~/.netrc
     - echo -e "machine projects.streamhpc.com\nlogin gitlab-ci-token\npassword ${CI_JOB_TOKEN}" > ~/.netrc
+    # Setup env vars for testing
+    - rng_seed_count=0; prng_seeds="0";
+    - if [ $CI_COMMIT_BRANCH == develop_stream ] ; then rng_seed_count=3; prng_seeds="0 1000";
+    - fi;
   cache:
     key: $CMAKE_LATEST_VERSION
     paths:
@@ -94,6 +98,8 @@ build:cmake-latest:
       -D BUILD_BENCHMARKS=ON
       -D AMDGPU_TARGETS="gfx803;gfx900;gfx906"
       -D AMDGPU_TEST_TARGETS="gfx803;gfx900;gfx906"
+      -D RNG_SEED_COUNT=$rng_seed_count
+      -D PRNG_SEEDS=$prng_seeds
       -S $CI_PROJECT_DIR
       -B $BUILD_LATEST_DIR
     - cmake

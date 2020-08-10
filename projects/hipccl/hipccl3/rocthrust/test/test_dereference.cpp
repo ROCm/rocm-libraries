@@ -49,14 +49,12 @@ TEST(DereferenceTests, TestDeviceDereferenceDeviceVectorIterator)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(auto seed : get_seeds())
     {
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
         thrust::device_vector<int> input = get_random_data<int>(
-            100, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed_value);
+            100, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed);
         thrust::device_vector<int> output(input.size(), 0);
 
         simple_copy(input.begin(), input.end(), output.begin());
@@ -69,14 +67,12 @@ TEST(DereferenceTests, TestDeviceDereferenceDevicePtr)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(auto seed : get_seeds())
     {
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
         thrust::device_vector<int> input = get_random_data<int>(
-            100, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed_value);
+            100, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed);
         thrust::device_vector<int> output(input.size(), 0);
 
         thrust::device_ptr<int> _first1 = &input[0];
@@ -93,14 +89,12 @@ TEST(DereferenceTests, TestDeviceDereferenceTransformIterator)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(auto seed : get_seeds())
     {
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
         thrust::device_vector<int> input = get_random_data<int>(
-            100, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed_value);
+            100, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed);
         thrust::device_vector<int> output(input.size(), 0);
 
         simple_copy(thrust::make_transform_iterator(input.begin(), thrust::identity<int>()),

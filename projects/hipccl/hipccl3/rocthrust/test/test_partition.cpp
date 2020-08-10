@@ -336,19 +336,17 @@ TYPED_TEST(PartitionIntegerTests, TestPartition)
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             // setup ranges
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
             thrust::device_vector<T> d_data = h_data;
 
             typename thrust::host_vector<T>::iterator h_iter
@@ -373,24 +371,22 @@ TYPED_TEST(PartitionIntegerTests, TestPartitionStencil)
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             // setup ranges
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
             thrust::host_vector<T> h_stencil = get_random_data<T>(
                 size,
                 std::numeric_limits<T>::min(),
                 std::numeric_limits<T>::max(),
-                seed_value + seed_value_addition);
+                seed + seed_value_addition);
             thrust::device_vector<T> d_data    = h_data;
             thrust::device_vector<T> d_stencil = h_stencil;
 
@@ -416,19 +412,17 @@ TYPED_TEST(PartitionIntegerTests, TestPartitionCopy)
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             // setup input ranges
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
             thrust::device_vector<T> d_data = h_data;
 
             size_t n_true  = thrust::count_if(h_data.begin(), h_data.end(), is_even<T>());
@@ -479,24 +473,22 @@ TYPED_TEST(PartitionIntegerTests, TestPartitionCopyStencil)
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             // setup input ranges
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
             thrust::host_vector<T> h_stencil = get_random_data<T>(
                 size,
                 std::numeric_limits<T>::min(),
                 std::numeric_limits<T>::max(),
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
             thrust::device_vector<T> d_data    = h_data;
             thrust::device_vector<T> d_stencil = h_stencil;
@@ -551,24 +543,22 @@ TYPED_TEST(PartitionIntegerTests, TestStablePartitionCopyStencil)
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             // setup input ranges
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
             thrust::host_vector<T> h_stencil = get_random_data<T>(
                 size,
                 std::numeric_limits<T>::min(),
                 std::numeric_limits<T>::max(),
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
             thrust::device_vector<T> d_data    = h_data;
             thrust::device_vector<T> d_stencil = h_stencil;
@@ -623,19 +613,17 @@ TYPED_TEST(PartitionIntegerTests, TestPartitionCopyToDiscardIterator)
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             // setup input ranges
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
             thrust::device_vector<T> d_data = h_data;
 
             size_t n_true  = thrust::count_if(h_data.begin(), h_data.end(), is_even<T>());
@@ -732,24 +720,22 @@ TYPED_TEST(PartitionIntegerTests, TestPartitionCopyStencilToDiscardIterator)
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             // setup input ranges
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
             thrust::host_vector<T> h_stencil = get_random_data<T>(
                 size,
                 std::numeric_limits<T>::min(),
                 std::numeric_limits<T>::max(),
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
 
             thrust::device_vector<T> d_data    = h_data;
@@ -855,19 +841,17 @@ TYPED_TEST(PartitionIntegerTests, TestStablePartition)
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             // setup ranges
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
             thrust::device_vector<T> d_data = h_data;
 
             typename thrust::host_vector<T>::iterator h_iter
@@ -887,24 +871,22 @@ TYPED_TEST(PartitionIntegerTests, TestStablePartitionStencil)
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             // setup ranges
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
             thrust::host_vector<T> h_stencil = get_random_data<T>(
                 size,
                 std::numeric_limits<T>::min(),
                 std::numeric_limits<T>::max(),
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
             thrust::device_vector<T> d_data    = h_data;
             thrust::device_vector<T> d_stencil = h_stencil;
@@ -926,19 +908,17 @@ TYPED_TEST(PartitionIntegerTests, TestStablePartitionCopy)
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             // setup input ranges
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
             thrust::device_vector<T> d_data = h_data;
 
             size_t n_true  = thrust::count_if(h_data.begin(), h_data.end(), is_even<T>());
@@ -985,19 +965,17 @@ TYPED_TEST(PartitionIntegerTests, TestStablePartitionCopyToDiscardIterator)
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             // setup input ranges
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
             thrust::device_vector<T> d_data = h_data;
 
             size_t n_true  = thrust::count_if(h_data.begin(), h_data.end(), is_even<T>());
@@ -1094,24 +1072,22 @@ TYPED_TEST(PartitionIntegerTests, TestStablePartitionCopyStencilToDiscardIterato
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             // setup input ranges
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
             thrust::host_vector<T> h_stencil = get_random_data<T>(
                 size,
                 std::numeric_limits<T>::min(),
                 std::numeric_limits<T>::max(),
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
             thrust::device_vector<T> d_data    = h_data;
             thrust::device_vector<T> d_stencil = h_stencil;

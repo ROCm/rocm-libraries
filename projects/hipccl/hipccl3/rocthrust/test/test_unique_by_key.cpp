@@ -283,22 +283,20 @@ TYPED_TEST(UniqueByKeyIntegralTests, TestUniqueByKey)
 
     for(auto size : get_sizes())
     {
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
 
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<K> h_keys = get_random_data<K>(
-                size, std::numeric_limits<K>::min(), std::numeric_limits<K>::max(), seed_value);
+                size, std::numeric_limits<K>::min(), std::numeric_limits<K>::max(), seed);
 
             thrust::host_vector<V> h_vals = get_random_data<V>(
                 size,
                 std::numeric_limits<V>::min(),
                 std::numeric_limits<V>::max(),
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
             thrust::device_vector<K> d_keys = h_keys;
             thrust::device_vector<V> d_vals = h_vals;
@@ -341,21 +339,20 @@ TYPED_TEST(UniqueByKeyIntegralTests, TestUniqueCopyByKey)
 
     for(auto size : get_sizes())
     {
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<K> h_keys = get_random_data<K>(
-                size, std::numeric_limits<K>::min(), std::numeric_limits<K>::max(), seed_value);
+                size, std::numeric_limits<K>::min(), std::numeric_limits<K>::max(), seed);
 
             thrust::host_vector<V> h_vals = get_random_data<V>(
                 size,
                 std::numeric_limits<V>::min(),
                 std::numeric_limits<V>::max(),
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
             thrust::device_vector<K> d_keys = h_keys;
             thrust::device_vector<V> d_vals = h_vals;
@@ -409,21 +406,20 @@ TYPED_TEST(UniqueByKeyIntegralTests, TestUniqueCopyByKeyToDiscardIterator)
 
     for(auto size : get_sizes())
     {
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<K> h_keys = get_random_data<K>(
-                size, std::numeric_limits<K>::min(), std::numeric_limits<K>::max(), seed_value);
+                size, std::numeric_limits<K>::min(), std::numeric_limits<K>::max(), seed);
 
             thrust::host_vector<V> h_vals = get_random_data<V>(
                 size,
                 std::numeric_limits<V>::min(),
                 std::numeric_limits<V>::max(),
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
             thrust::device_vector<K> d_keys = h_keys;
             thrust::device_vector<V> d_vals = h_vals;

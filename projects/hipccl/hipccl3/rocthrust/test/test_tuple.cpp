@@ -31,15 +31,12 @@ TYPED_TEST(TupleTests, TestTupleConstructor)
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(auto seed : get_seeds())
     {
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
-
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
         thrust::host_vector<T> data = get_random_data<T>(
-            10, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            10, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
 
         thrust::tuple<T> t1(data[0]);
         ASSERT_EQ(data[0], thrust::get<0>(t1));
@@ -128,17 +125,15 @@ TYPED_TEST(TupleTests, TestMakeTuple)
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(auto seed : get_seeds())
     {
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
         thrust::host_vector<T> data = get_random_data<T>(
             10,
             std::numeric_limits<T>::min(),
             std::numeric_limits<T>::max(),
-            seed_value
+            seed
         );
 
         thrust::tuple<T> t1 = thrust::make_tuple(data[0]);
@@ -230,15 +225,13 @@ TYPED_TEST(TupleTests, TestTupleGet)
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(auto seed : get_seeds())
     {
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
 
         thrust::host_vector<T> data = get_random_data<T>(
-            10, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            10, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
 
         thrust::tuple<T> t1(data[0]);
         ASSERT_EQ(data[0], thrust::get<0>(t1));

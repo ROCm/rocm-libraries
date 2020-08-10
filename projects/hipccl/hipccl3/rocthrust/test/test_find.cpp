@@ -270,17 +270,16 @@ TYPED_TEST(FindTests, TestFind)
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
             thrust::device_vector<T> d_data = h_data;
 
             HostIterator   h_iter;
@@ -311,17 +310,16 @@ TYPED_TEST(FindTests, TestFindIf)
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
             thrust::device_vector<T> d_data = h_data;
 
             HostIterator   h_iter;
@@ -354,17 +352,16 @@ TYPED_TEST(FindTests, TestFindIfNot)
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
             thrust::device_vector<T> d_data = h_data;
 
             HostIterator   h_iter;

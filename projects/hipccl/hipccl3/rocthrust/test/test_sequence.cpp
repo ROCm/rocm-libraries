@@ -108,9 +108,8 @@ TYPED_TEST(PrimitiveSequenceTests, SequencesWithVariableLength)
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    const std::vector<size_t> sizes        = get_sizes();
     T                         error_margin = (T)0.01;
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
         size_t step_size = (size * 0.01) + 1;
 
@@ -153,8 +152,7 @@ TYPED_TEST(PrimitiveSequenceTests, SequenceToDiscardIterator)
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
         thrust::host_vector<T>   h_data(size);
         thrust::device_vector<T> d_data(size);

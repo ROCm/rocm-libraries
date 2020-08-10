@@ -332,58 +332,57 @@ TYPED_TEST(ZipIterator32BitTests, TestZipIteratorTransform)
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
-        using namespace thrust;
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-            host_vector<T> h_data0 = get_random_data<T>(size, 0, 10, seed_value);
-            host_vector<T> h_data1 = get_random_data<T>(
+            thrust::host_vector<T> h_data0 = get_random_data<T>(size, 0, 10, seed);
+            thrust::host_vector<T> h_data1 = get_random_data<T>(
                 size,
                 0,
                 10,
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
-            host_vector<T> h_data2 = get_random_data<T>(
+            thrust::host_vector<T> h_data2 = get_random_data<T>(
                 size,
                 0,
                 10,
-                seed_value + 2 * seed_value_addition
+                seed + 2 * seed_value_addition
             );
 
-            device_vector<T> d_data0 = h_data0;
-            device_vector<T> d_data1 = h_data1;
-            device_vector<T> d_data2 = h_data2;
+            thrust::device_vector<T> d_data0 = h_data0;
+            thrust::device_vector<T> d_data1 = h_data1;
+            thrust::device_vector<T> d_data2 = h_data2;
 
-            host_vector<T>   h_result(size);
-            device_vector<T> d_result(size);
+            thrust::host_vector<T>   h_result(size);
+            thrust::device_vector<T> d_result(size);
 
             // Tuples with 2 elements
-            transform(make_zip_iterator(make_tuple(h_data0.begin(), h_data1.begin())),
-                      make_zip_iterator(make_tuple(h_data0.end(), h_data1.end())),
-                      h_result.begin(),
-                      SumTwoTuple());
-            transform(make_zip_iterator(make_tuple(d_data0.begin(), d_data1.begin())),
-                      make_zip_iterator(make_tuple(d_data0.end(), d_data1.end())),
-                      d_result.begin(),
-                      SumTwoTuple());
+            transform(
+                thrust::make_zip_iterator(thrust::make_tuple(h_data0.begin(), h_data1.begin())),
+                thrust::make_zip_iterator(thrust::make_tuple(h_data0.end(), h_data1.end())),
+                h_result.begin(),
+                SumTwoTuple());
+            transform(
+                thrust::make_zip_iterator(thrust::make_tuple(d_data0.begin(), d_data1.begin())),
+                thrust::make_zip_iterator(thrust::make_tuple(d_data0.end(), d_data1.end())),
+                d_result.begin(),
+                SumTwoTuple());
             ASSERT_EQ_QUIET(h_result, d_result);
 
             // Tuples with 3 elements
             transform(
-                make_zip_iterator(make_tuple(h_data0.begin(), h_data1.begin(), h_data2.begin())),
-                make_zip_iterator(make_tuple(h_data0.end(), h_data1.end(), h_data2.end())),
+                thrust::make_zip_iterator(thrust::make_tuple(h_data0.begin(), h_data1.begin(), h_data2.begin())),
+                thrust::make_zip_iterator(thrust::make_tuple(h_data0.end(), h_data1.end(), h_data2.end())),
                 h_result.begin(),
                 SumThreeTuple());
             transform(
-                make_zip_iterator(make_tuple(d_data0.begin(), d_data1.begin(), d_data2.begin())),
-                make_zip_iterator(make_tuple(d_data0.end(), d_data1.end(), d_data2.end())),
+                thrust::make_zip_iterator(thrust::make_tuple(d_data0.begin(), d_data1.begin(), d_data2.begin())),
+                thrust::make_zip_iterator(thrust::make_tuple(d_data0.end(), d_data1.end(), d_data2.end())),
                 d_result.begin(),
                 SumThreeTuple());
             ASSERT_EQ_QUIET(h_result, d_result);

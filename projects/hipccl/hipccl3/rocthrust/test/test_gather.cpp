@@ -124,18 +124,17 @@ TYPED_TEST(PrimitiveGatherTests, Gather)
     T                         min   = (T)std::numeric_limits<T>::min();
     T                         max   = (T)std::numeric_limits<T>::max();
 
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
-        const size_t source_size = std::min((size_t)10, 2 * size);
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
 
         // source vectors to gather from
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        const size_t source_size = std::min((size_t)10, 2 * size);
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-            thrust::host_vector<T> h_source = get_random_data<T>(source_size, min, max, seed_value);
+            thrust::host_vector<T> h_source = get_random_data<T>(source_size, min, max, seed);
             thrust::device_vector<T> d_source = h_source;
 
             // gather indices
@@ -143,7 +142,7 @@ TYPED_TEST(PrimitiveGatherTests, Gather)
                 size,
                 min,
                 max,
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
 
             for(size_t i = 0; i < size; i++)
@@ -174,18 +173,18 @@ TYPED_TEST(PrimitiveGatherTests, GatherToDiscardIterator)
     T                         min   = (T)std::numeric_limits<T>::min();
     T                         max   = (T)std::numeric_limits<T>::max();
 
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        
+        // source vectors to gather from
         const size_t source_size = std::min((size_t)10, 2 * size);
 
-        // source vectors to gather from
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-            thrust::host_vector<T> h_source = get_random_data<T>(source_size, min, max, seed_value);
+            thrust::host_vector<T> h_source = get_random_data<T>(source_size, min, max, seed);
             thrust::device_vector<T> d_source = h_source;
 
             // gather indices
@@ -193,7 +192,7 @@ TYPED_TEST(PrimitiveGatherTests, GatherToDiscardIterator)
                 size,
                 min,
                 max,
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
 
             for(size_t i = 0; i < size; i++)
@@ -335,18 +334,18 @@ TYPED_TEST(PrimitiveGatherTests, GatherIf)
     T                         min   = (T)std::numeric_limits<T>::min();
     T                         max   = (T)std::numeric_limits<T>::max();
 
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        
+        // source vectors to gather from
         const size_t source_size = std::min((size_t)10, 2 * size);
 
-        // source vectors to gather from
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-            thrust::host_vector<T> h_source = get_random_data<T>(source_size, min, max, seed_value);
+            thrust::host_vector<T> h_source = get_random_data<T>(source_size, min, max, seed);
             thrust::device_vector<T> d_source = h_source;
 
             // gather indices
@@ -354,7 +353,7 @@ TYPED_TEST(PrimitiveGatherTests, GatherIf)
                 size,
                 min,
                 max,
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
 
             for(size_t i = 0; i < size; i++)
@@ -367,7 +366,7 @@ TYPED_TEST(PrimitiveGatherTests, GatherIf)
                 size,
                 min,
                 max,
-                seed_value + 2 * seed_value_addition
+                seed + 2 * seed_value_addition
             );
 
             for(size_t i = 0; i < size; i++)
@@ -408,18 +407,18 @@ TYPED_TEST(PrimitiveGatherTests, GatherIfToDiscardIterator)
     T                         min   = (T)std::numeric_limits<T>::min();
     T                         max   = (T)std::numeric_limits<T>::max();
 
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
-        const size_t source_size = std::min((size_t)10, 2 * size);
-
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        
         // source vectors to gather from
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        const size_t source_size = std::min((size_t)10, 2 * size);
+        
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-            thrust::host_vector<T> h_source = get_random_data<T>(source_size, min, max, seed_value);
+            thrust::host_vector<T> h_source = get_random_data<T>(source_size, min, max, seed);
             thrust::device_vector<T> d_source = h_source;
 
             // gather indices
@@ -427,7 +426,7 @@ TYPED_TEST(PrimitiveGatherTests, GatherIfToDiscardIterator)
                 size,
                 min,
                 max,
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
 
             for(size_t i = 0; i < size; i++)
@@ -440,7 +439,7 @@ TYPED_TEST(PrimitiveGatherTests, GatherIfToDiscardIterator)
                 size,
                 min,
                 max,
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
 
             for(size_t i = 0; i < size; i++)

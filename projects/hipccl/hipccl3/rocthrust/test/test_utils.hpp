@@ -29,6 +29,7 @@
 #include <random>
 #include <type_traits>
 #include <vector>
+#include <iterator>
 
 std::vector<size_t> get_sizes()
 {
@@ -39,13 +40,22 @@ std::vector<size_t> get_sizes()
     return sizes;
 }
 
+std::vector<seed_type> get_seeds()
+{
+    std::vector<seed_type> seeds;
+    std::random_device rng;
+    std::copy(prng_seeds.begin(), prng_seeds.end(), std::back_inserter(seeds));
+    std::generate_n(std::back_inserter(seeds), rng_seed_count, [&](){ return rng(); });
+    return seeds;
+}
+
 template <class T>
-inline auto get_random_data(size_t size, T, T, int seed_value) ->
+inline auto get_random_data(size_t size, T, T, int seed) ->
     typename std::enable_if<std::is_same<T, bool>::value, thrust::host_vector<T>>::type
 {
     std::random_device          rd;
     std::default_random_engine  gen(rd());
-    gen.seed(seed_value);
+    gen.seed(seed);
     std::bernoulli_distribution distribution(0.5);
     thrust::host_vector<T>      data(size);
     std::generate(data.begin(), data.end(), [&]() { return distribution(gen); });
@@ -53,13 +63,13 @@ inline auto get_random_data(size_t size, T, T, int seed_value) ->
 }
 
 template <class T>
-inline auto get_random_data(size_t size, T min, T max, int seed_value) ->
+inline auto get_random_data(size_t size, T min, T max, int seed) ->
     typename std::enable_if<rocprim::is_integral<T>::value && !std::is_same<T, bool>::value,
                             thrust::host_vector<T>>::type
 {
     std::random_device               rd;
     std::default_random_engine       gen(rd());
-    gen.seed(seed_value);
+    gen.seed(seed);
     std::uniform_int_distribution<T> distribution(min, max);
     thrust::host_vector<T>           data(size);
     std::generate(data.begin(), data.end(), [&]() { return distribution(gen); });
@@ -67,12 +77,12 @@ inline auto get_random_data(size_t size, T min, T max, int seed_value) ->
 }
 
 template <class T>
-inline auto get_random_data(size_t size, T min, T max, int seed_value) ->
+inline auto get_random_data(size_t size, T min, T max, int seed) ->
     typename std::enable_if<rocprim::is_floating_point<T>::value, thrust::host_vector<T>>::type
 {
     std::random_device                rd;
     std::default_random_engine        gen(rd());
-    gen.seed(seed_value);
+    gen.seed(seed);
     std::uniform_real_distribution<T> distribution(min, max);
     thrust::host_vector<T>            data(size);
     std::generate(data.begin(), data.end(), [&]() { return distribution(gen); });

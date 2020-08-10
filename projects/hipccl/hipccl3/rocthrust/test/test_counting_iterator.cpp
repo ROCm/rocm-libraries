@@ -203,17 +203,15 @@ TEST(CountingIteratorTests, TestCountingIteratorLowerBound)
     size_t       n = 10000;
     const size_t M = 100;
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(auto seed : get_seeds())
     {
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
         thrust::host_vector<unsigned int> h_data
             = get_random_data<unsigned int>(n,
                                             std::numeric_limits<unsigned int>::min(),
                                             std::numeric_limits<unsigned int>::max(),
-                                            seed_value);
+                                            seed);
         for(unsigned int i = 0; i < n; ++i)
             h_data[i] %= M;
 
