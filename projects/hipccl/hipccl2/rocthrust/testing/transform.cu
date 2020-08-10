@@ -771,10 +771,15 @@ DECLARE_VARIABLE_UNITTEST(TestTransformIfBinaryToDiscardIterator);
 template <typename T>
 void TestTransformUnaryCountingIterator()
 {
-    // GCC 4.4.x has a known failure with auto-vectorization (due to -O3 or -ftree-vectorize) of this test
+    // G++ 4.4.x has a known failure with auto-vectorization (due to -O3 or
+    // -ftree-vectorize) of this test.
     // See https://gcc.gnu.org/bugzilla/show_bug.cgi?id=43251
-#if (__GNUC__ * 10000 + __GNUC_MINOR__ * 100) == 40400
+
+    // ICPC has a known failure with auto-vectorization (due to -O2 or
+    // higher) of this test.
+    // See nvbug 200326708.
     KNOWN_FAILURE;
+}
 #else
 template <typename T>
 void TestTransformUnaryCountingIterator()
@@ -793,18 +798,19 @@ void TestTransformUnaryCountingIterator()
     thrust::transform(d_first, d_first + n, d_result.begin(), thrust::identity<T>());
 
     ASSERT_EQUAL(h_result, d_result);
-#endif
 }
 #endif
 DECLARE_GENERIC_UNITTEST(TestTransformUnaryCountingIterator);
 
+#if (__GNUC__ * 10000 + __GNUC_MINOR__ * 100) == 40400
 template <typename T>
 void TestTransformBinaryCountingIterator()
 {
     // GCC 4.4.x has a known failure with auto-vectorization (due to -O3 or -ftree-vectorize) of this test
     // See https://gcc.gnu.org/bugzilla/show_bug.cgi?id=43251
-#if (__GNUC__ * 10000 + __GNUC_MINOR__ * 100) == 40400
+
     KNOWN_FAILURE;
+}
 #else
 template <typename T>
 void TestTransformBinaryCountingIterator()
@@ -823,7 +829,6 @@ void TestTransformBinaryCountingIterator()
     thrust::transform(d_first, d_first + n, d_first, d_result.begin(), thrust::plus<T>());
 
     ASSERT_EQUAL(h_result, d_result);
-#endif
 }
 #endif
 DECLARE_GENERIC_UNITTEST(TestTransformBinaryCountingIterator);
