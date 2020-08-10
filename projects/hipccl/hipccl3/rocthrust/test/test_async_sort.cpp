@@ -26,72 +26,6 @@ struct custom_greater
   }
 };
 
-<<<<<<< HEAD
-TYPED_TEST(AsyncSortTests, AsyncSortInstance)
-{
-    using T = typename TestFixture::input_type;
-    for(auto size : get_sizes())
-    {
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
-        for(auto seed : get_seeds())
-        {
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
-
-            thrust::host_vector<T>   h0_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
-            thrust::device_vector<T> d0_data(h0_data);
-
-            ASSERT_EQ(h0_data, d0_data);
-
-            thrust::sort(
-                h0_data.begin(), h0_data.end()
-            );
-
-            auto f0 = thrust::async::sort(
-               d0_data.begin(), d0_data.end()
-            );
-
-            f0.wait();
-
-            ASSERT_EQ(h0_data, d0_data);
-        }
-    }
-};
-
-TYPED_TEST(AsyncSortTests, AsyncSortWithPolicyInstance)
-{
-    using T = typename TestFixture::input_type;
-    for(auto size : get_sizes())
-    {
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
-        for(auto seed : get_seeds())
-        {
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
-
-            thrust::host_vector<T>   h0_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
-            thrust::device_vector<T> d0_data(h0_data);
-
-            ASSERT_EQ(h0_data, d0_data);
-
-            thrust::sort(
-                h0_data.begin(), h0_data.end()
-            );
-
-            auto f0 = thrust::async::sort(
-              thrust::device, d0_data.begin(), d0_data.end()
-            );
-
-            f0.wait();
-
-            ASSERT_EQ(h0_data, d0_data);
-        }
-    }
-};
-
-template <typename T, typename Operator>
-void AsyncSortWithOperator()
-=======
 #define DEFINE_SORT_INVOKER(name, ...)                                        \
   template <typename T>                                                       \
   struct name                                                                 \
@@ -190,6 +124,68 @@ DEFINE_SORT_OP_INVOKER(
 
 #undef DEFINE_SORT_INVOKER
 #undef DEFINE_SORT_OP_INVOKER
+
+TYPED_TEST(AsyncSortTests, AsyncSortInstance)
+{
+    using T = typename TestFixture::input_type;
+    for(auto size : get_sizes())
+    {
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+            thrust::host_vector<T>   h0_data = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+            thrust::device_vector<T> d0_data(h0_data);
+
+            ASSERT_EQ(h0_data, d0_data);
+
+            thrust::sort(
+                h0_data.begin(), h0_data.end()
+            );
+
+            auto f0 = thrust::async::sort(
+               d0_data.begin(), d0_data.end()
+            );
+
+            f0.wait();
+
+            ASSERT_EQ(h0_data, d0_data);
+        }
+    }
+};
+
+TYPED_TEST(AsyncSortTests, AsyncSortWithPolicyInstance)
+{
+    using T = typename TestFixture::input_type;
+    for(auto size : get_sizes())
+    {
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+            thrust::host_vector<T>   h0_data = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+            thrust::device_vector<T> d0_data(h0_data);
+
+            ASSERT_EQ(h0_data, d0_data);
+
+            thrust::sort(
+                h0_data.begin(), h0_data.end()
+            );
+
+            auto f0 = thrust::async::sort(
+              thrust::device, d0_data.begin(), d0_data.end()
+            );
+
+            f0.wait();
+
+            ASSERT_EQ(h0_data, d0_data);
+        }
+    }
+};
 
 ///////////////////////////////////////////////////////////////////////////////
 

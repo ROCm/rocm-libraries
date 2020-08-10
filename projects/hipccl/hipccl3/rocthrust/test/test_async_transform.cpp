@@ -168,13 +168,11 @@ void test_async_transform_unary()
   for(auto size : get_sizes())
   {
     SCOPED_TRACE(testing::Message() << "with size = " << size);
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(auto seed : get_seeds())
     {
-      unsigned int seed_value
-        = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-      SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-      thrust::host_vector<T> h0 = get_random_data<T>(size, T(-1000), T(1000), seed_value);
+      thrust::host_vector<T> h0 = get_random_data<T>(size, T(-1000), T(1000), seed);
 
       thrust::device_vector<T> d0a(h0);
       thrust::device_vector<T> d0b(h0);
@@ -299,13 +297,11 @@ void test_async_transform_unary_inplace()
   for(auto size : get_sizes())
   {
     SCOPED_TRACE(testing::Message() << "with size = " << size);
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(auto seed : get_seeds())
     {
-      unsigned int seed_value
-        = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-      SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+      SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-      thrust::host_vector<T> h0 = get_random_data<T>(size, T(-1000), T(1000), seed_value);
+      thrust::host_vector<T> h0 = get_random_data<T>(size, T(-1000), T(1000), seed);
 
       thrust::device_vector<T> d0a(h0);
       thrust::device_vector<T> d0b(h0);
