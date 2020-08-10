@@ -71,6 +71,7 @@ install(
 rocm_export_targets(
   TARGETS roc::rocprim roc::rocprim_hip
   PREFIX rocprim
+  DEPENDS PACKAGE hip
   NAMESPACE roc::
 )
 
