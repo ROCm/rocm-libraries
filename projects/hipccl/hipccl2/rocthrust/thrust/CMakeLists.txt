@@ -62,6 +62,7 @@ include(ROCMExportTargetsHeaderOnly)
 rocm_export_targets_header_only(
   TARGETS roc::rocthrust
   PREFIX rocthrust
+  DEPENDS PACKAGE rocprim
   NAMESPACE roc::
 )
 
