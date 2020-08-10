@@ -87,6 +87,7 @@ include(ROCMExportTargetsHeaderOnly)
 rocm_export_targets_header_only(
   TARGETS hip::hipcub
   PREFIX hipcub
+  DEPENDS PACKAGE rocprim
   NAMESPACE hip::
 )
 
