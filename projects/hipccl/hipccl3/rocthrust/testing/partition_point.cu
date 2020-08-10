@@ -66,6 +66,7 @@ DECLARE_INTEGRAL_VECTOR_UNITTEST(TestPartitionPoint);
 
 
 template<typename ForwardIterator, typename Predicate>
+__host__ __device__
 ForwardIterator partition_point(my_system &system,
                                 ForwardIterator first,
                                 ForwardIterator,
@@ -91,6 +92,7 @@ DECLARE_UNITTEST(TestPartitionPointDispatchExplicit);
 
 
 template<typename ForwardIterator, typename Predicate>
+__host__ __device__
 ForwardIterator partition_point(my_tag,
                                 ForwardIterator first,
                                 ForwardIterator,
