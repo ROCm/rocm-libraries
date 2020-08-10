@@ -108,7 +108,7 @@ add_thrust_test("distance")
 #add_thrust_test("equal") # undefined reference to `thrust::hip_rocprim::reference<int>::operator=(int const&)'
 #add_thrust_test("fill") # lld: error: undefined hidden symbol: thrust::hip_rocprim::reference<int>::operator=(int const&)
 #add_thrust_test("find") # undefined reference to `thrust::hip_rocprim::reference<int>::operator=(int const&)'
-add_thrust_test("for_each")
+#add_thrust_test("for_each")
 add_thrust_test("functional_arithmetic")
 add_thrust_test("functional_bitwise")
 #add_thrust_test("functional") # lld: error: undefined hidden symbol: thrust::hip_rocprim::reference<int>::operator=(int const&)
@@ -139,7 +139,6 @@ add_thrust_test("min_and_max")
 #add_thrust_test("min_element") # undefined reference to `thrust::hip_rocprim::reference<int>::operator=(int const&)'
 #add_thrust_test("minmax_element") # undefined reference to `thrust::hip_rocprim::reference<int>::operator=(int const&)'
 #add_thrust_test("mismatch") # undefined reference to `thrust::hip_rocprim::reference<int>::operator=(int const&)'
-add_thrust_test("mr_new")
 add_thrust_test("mr_disjoint_pool")
 add_thrust_test("mr_new")
 add_thrust_test("mr_pool")
@@ -224,7 +223,6 @@ add_thrust_test("vector_allocators")
 add_thrust_test("vector_insert")
 add_thrust_test("vector_manipulation")
 #add_thrust_test("zip_iterator") # lld: error: undefined hidden symbol: thrust::hip_rocprim::reference<int>::operator=(int const&)
-add_thrust_test("zip_iterator_reduce_by_key")
 add_thrust_test("zip_iterator_reduce")
 add_thrust_test("zip_iterator_reduce_by_key")
 add_thrust_test("zip_iterator_scan")
