@@ -430,10 +430,10 @@ TYPED_TEST(ScanByKeyVariablesTests, TestInclusiveScanByKey)
     }
 #endif
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
+
         thrust::host_vector<int>      h_keys(size);
         thrust::default_random_engine rng;
         for(size_t i = 0, k = 0; i < size; i++)
@@ -444,14 +444,12 @@ TYPED_TEST(ScanByKeyVariablesTests, TestInclusiveScanByKey)
         }
         thrust::device_vector<int> d_keys = h_keys;
 
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<int> h_vals = get_random_data<int>(
-                size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed_value);
+                size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed);
             for(size_t i = 0; i < size; i++)
                 h_vals[i] = i % 10;
             thrust::device_vector<T> d_vals = h_vals;
@@ -474,10 +472,10 @@ TYPED_TEST(ScanByKeyVariablesTests, TestExclusiveScanByKey)
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
+
         thrust::host_vector<int>      h_keys(size);
         thrust::default_random_engine rng;
         for(size_t i = 0, k = 0; i < size; i++)
@@ -488,14 +486,12 @@ TYPED_TEST(ScanByKeyVariablesTests, TestExclusiveScanByKey)
         }
         thrust::device_vector<int> d_keys = h_keys;
 
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<int> h_vals = get_random_data<int>(
-                size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed_value);
+                size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed);
             for(size_t i = 0; i < size; i++)
                 h_vals[i] = i % 10;
             thrust::device_vector<T> d_vals = h_vals;
@@ -534,10 +530,10 @@ TYPED_TEST(ScanByKeyVariablesTests, TestInclusiveScanByKeyInPlace)
     }
 #endif
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
+
         thrust::host_vector<int>      h_keys(size);
         thrust::default_random_engine rng;
         for(size_t i = 0, k = 0; i < size; i++)
@@ -548,14 +544,12 @@ TYPED_TEST(ScanByKeyVariablesTests, TestInclusiveScanByKeyInPlace)
         }
         thrust::device_vector<int> d_keys = h_keys;
 
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_vals = get_random_data<int>(
-                size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed_value);
+                size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed);
             for(size_t i = 0; i < size; i++)
                 h_vals[i] = i % 10;
             thrust::device_vector<T> d_vals = h_vals;
@@ -581,10 +575,10 @@ TYPED_TEST(ScanByKeyVariablesTests, TestExclusiveScanByKeyInPlace)
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
+
         thrust::host_vector<int>      h_keys(size);
         thrust::default_random_engine rng;
         for(size_t i = 0, k = 0; i < size; i++)
@@ -595,14 +589,12 @@ TYPED_TEST(ScanByKeyVariablesTests, TestExclusiveScanByKeyInPlace)
         }
         thrust::device_vector<int> d_keys = h_keys;
 
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_vals = get_random_data<int>(
-                size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed_value);
+                size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed);
             for(size_t i = 0; i < size; i++)
                 h_vals[i] = i % 10;
             thrust::device_vector<T> d_vals = h_vals;
@@ -634,14 +626,12 @@ TEST(ScanByKeyTests, TestScanByKeyMixedTypes)
     }
     thrust::device_vector<int> d_keys = h_keys;
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(auto seed : get_seeds())
     {
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
         thrust::host_vector<unsigned int> h_vals = get_random_data<unsigned int>(
-            size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed_value);
+            size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed);
         for(size_t i = 0; i < size; i++)
             h_vals[i] %= 10;
         thrust::device_vector<unsigned int> d_vals = h_vals;
@@ -690,20 +680,18 @@ TEST(ScanByKeyTests, TestScanByKeyLargeInput)
     
     const unsigned int N = 1 << 20;
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(auto seed : get_seeds())
     {
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
         thrust::host_vector<int> vals_sizes = get_random_data<int>(
-            10, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed_value);
+            10, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed);
 
         thrust::host_vector<int> h_vals = get_random_data<int>(
             N,
             std::numeric_limits<int>::min(),
             std::numeric_limits<int>::max(),
-            seed_value + seed_value_addition
+            seed + seed_value_addition
         );
         thrust::device_vector<unsigned int> d_vals = h_vals;
 

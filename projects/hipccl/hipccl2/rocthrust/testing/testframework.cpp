@@ -15,6 +15,7 @@
  *  limitations under the License.
  */
 
+#include "unittest/ctest.h"
 #include "unittest/testframework.h"
 #include "unittest/exceptions.h"
 #include <thrust/memory.h>
@@ -531,6 +532,8 @@ int main(int argc, char **argv)
   {
     set_test_sizes("default");
   }
+
+  unittest::set_device_from_ctest();
 
   bool passed = UnitTestDriver::s_driver().run_tests(args, kwargs);
 

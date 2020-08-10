@@ -24,6 +24,10 @@ test:vega20:
       --tests-regex "$TEST_GFX_IPS_REGEX"
       --resource-spec-file ./resources.json
       --parallel $PARALLEL_JOBS
+    - $SUDO_CMD $CMAKE_LATEST_PATH/bin/ctest
+      --output-on-failure
+      --repeat-until-fail 2
+      --label-regex upstream
 
 test:s9300:
   extends: .test:cmake-latest
@@ -46,6 +50,10 @@ test:s9300:
       --tests-regex "$TEST_GFX_IPS_REGEX"
       --resource-spec-file ./resources.json
       --parallel $PARALLEL_JOBS
+    - $SUDO_CMD $CMAKE_LATEST_PATH/bin/ctest
+      --output-on-failure
+      --repeat-until-fail 2
+      --label-regex upstream
   allow_failure: true
 
 test:mi25:
@@ -69,3 +77,7 @@ test:mi25:
       --tests-regex "$TEST_GFX_IPS_REGEX"
       --resource-spec-file ./resources.json
       --parallel $PARALLEL_JOBS
+    - $SUDO_CMD $CMAKE_LATEST_PATH/bin/ctest
+      --output-on-failure
+      --repeat-until-fail 2
+      --label-regex upstream

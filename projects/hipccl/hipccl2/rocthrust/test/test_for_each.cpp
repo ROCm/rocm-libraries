@@ -350,16 +350,16 @@ TYPED_TEST(ForEachPrimitiveTests, TestForEach)
 
     for(auto size : get_sizes())
     {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
         const size_t output_size = std::min((size_t)10, 2 * size);
 
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_input = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
 
             for(size_t i = 0; i < size; i++)
                 h_input[i] = ((size_t)h_input[i]) % output_size;
@@ -395,16 +395,16 @@ TYPED_TEST(ForEachPrimitiveTests, TestForEachN)
 
     for(auto size : get_sizes())
     {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
         const size_t output_size = std::min((size_t)10, 2 * size);
 
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_input = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
 
             for(size_t i = 0; i < size; i++)
                 h_input[i] = ((size_t)h_input[i]) % output_size;
