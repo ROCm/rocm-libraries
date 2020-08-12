@@ -1,8 +1,14 @@
 #include <unittest/unittest.h>
 
 #include <thrust/detail/seq.h>
+
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+    #include <thrust/system/hip/detail/par.h>
+#elif THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
+    #include <thrust/system/cuda/detail/par.h>
+#endif
+
 #include <thrust/system/cpp/detail/par.h>
-#include <thrust/system/cuda/detail/par.h>
 #include <thrust/system/omp/detail/par.h>
 #include <thrust/system/tbb/detail/par.h>
 
@@ -121,9 +127,9 @@ typedef policy_info<
     thrust::system::cpp::detail::execution_policy
 > cpp_par_info;
 typedef policy_info<
-    thrust::system::cuda::detail::par_t,
-    thrust::cuda_cub::execute_on_stream_base
-> cuda_par_info;
+    thrust::system::THRUST_DEVICE_BACKEND::detail::par_t,
+    thrust::THRUST_DEVICE_BACKEND_DETAIL::execute_on_stream_base
+> THRUST_DEVICE_BACKEND_par_info;
 typedef policy_info<
     thrust::system::omp::detail::par_t,
     thrust::system::omp::detail::execution_policy
@@ -138,7 +144,7 @@ SimpleUnitTest<
     unittest::type_list<
         sequential_info,
         cpp_par_info,
-        cuda_par_info,
+        THRUST_DEVICE_BACKEND_par_info,
         omp_par_info,
         tbb_par_info
     >
