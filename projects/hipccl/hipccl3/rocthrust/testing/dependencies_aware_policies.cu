@@ -3,12 +3,8 @@
 #include <thrust/detail/seq.h>
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-    #define THRUST_DEVICE_BACKEND hip
-    #define THRUST_DEVICE_BACKEND_DETAIL hip_rocprim
     #include <thrust/system/hip/detail/par.h>
 #elif THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
-    #define THRUST_DEVICE_BACKEND cuda
-    #define THRUST_DEVICE_BACKEND_DETAIL cuda_cub
     #include <thrust/system/cuda/detail/par.h>
 #endif
 

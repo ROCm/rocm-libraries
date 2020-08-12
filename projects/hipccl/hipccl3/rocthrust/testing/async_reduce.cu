@@ -101,14 +101,14 @@ DEFINE_ASYNC_REDUCE_INVOKER(
 DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
   reduce_async_invoker_device_on
   // Members.
-, cudaStream_t stream_;
+, SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
   // Constructor.
-, thrust::cuda_cub::throw_on_error(
-    cudaStreamCreateWithFlags(&stream_, cudaStreamNonBlocking)
+, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
+    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(&stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking))
   );
   // Destructor.
-, thrust::cuda_cub::throw_on_error(
-    cudaStreamDestroy(stream_)
+, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
+    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_)
   );
   // `validate_event` member.
 , ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
@@ -119,14 +119,14 @@ DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
 DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
   reduce_async_invoker_device_allocator_on
   // Members.
-, cudaStream_t stream_;
+, SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
   // Constructor.
-, thrust::cuda_cub::throw_on_error(
-    cudaStreamCreateWithFlags(&stream_, cudaStreamNonBlocking)
+, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
+    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(&stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking))
   );
   // Destructor.
-, thrust::cuda_cub::throw_on_error(
-    cudaStreamDestroy(stream_)
+, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
+    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_)
   );
   // `validate_event` member.
 , ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
@@ -160,14 +160,14 @@ DEFINE_ASYNC_REDUCE_INVOKER(
 DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
   reduce_async_invoker_device_on_init
   // Members.
-, cudaStream_t stream_;
+, SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
   // Constructor.
-, thrust::cuda_cub::throw_on_error(
-    cudaStreamCreateWithFlags(&stream_, cudaStreamNonBlocking)
+, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
+    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(&stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking))
   );
   // Destructor.
-, thrust::cuda_cub::throw_on_error(
-    cudaStreamDestroy(stream_)
+, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
+    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_)
   );
   // `validate_event` member.
 , ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
@@ -179,14 +179,14 @@ DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
 DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
   reduce_async_invoker_device_allocator_on_init
   // Members.
-, cudaStream_t stream_;
+, SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
   // Constructor.
-, thrust::cuda_cub::throw_on_error(
-    cudaStreamCreateWithFlags(&stream_, cudaStreamNonBlocking)
+, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
+    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(&stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking))
   );
   // Destructor.
-, thrust::cuda_cub::throw_on_error(
-    cudaStreamDestroy(stream_)
+, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
+    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_)
   );
   // `validate_event` member.
 , ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
@@ -225,14 +225,14 @@ DEFINE_ASYNC_REDUCE_INVOKER(
 DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
   reduce_async_invoker_device_on_init_plus
   // Members.
-, cudaStream_t stream_;
+, SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
   // Constructor.
-, thrust::cuda_cub::throw_on_error(
-    cudaStreamCreateWithFlags(&stream_, cudaStreamNonBlocking)
+, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
+    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(&stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking))
   );
   // Destructor.
-, thrust::cuda_cub::throw_on_error(
-    cudaStreamDestroy(stream_)
+, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
+    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_)
   );
   // `validate_event` member.
 , ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
@@ -245,14 +245,14 @@ DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
 DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
   reduce_async_invoker_device_allocator_on_init_plus
   // Members.
-, cudaStream_t stream_;
+, SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
   // Constructor.
-, thrust::cuda_cub::throw_on_error(
-    cudaStreamCreateWithFlags(&stream_, cudaStreamNonBlocking)
+, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
+    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(&stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking))
   );
   // Destructor.
-, thrust::cuda_cub::throw_on_error(
-    cudaStreamDestroy(stream_)
+, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
+    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_)
   );
   // `validate_event` member.
 , ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
@@ -293,14 +293,14 @@ DEFINE_ASYNC_REDUCE_INVOKER(
 DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
   reduce_async_invoker_device_on_init_custom_plus
   // Members.
-, cudaStream_t stream_;
+, SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
   // Constructor.
-, thrust::cuda_cub::throw_on_error(
-    cudaStreamCreateWithFlags(&stream_, cudaStreamNonBlocking)
+, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
+    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(&stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking))
   );
   // Destructor.
-, thrust::cuda_cub::throw_on_error(
-    cudaStreamDestroy(stream_)
+, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
+    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_)
   );
   // `validate_event` member.
 , ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
@@ -313,14 +313,14 @@ DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
 DEFINE_STATEFUL_ASYNC_REDUCE_INVOKER(
   reduce_async_invoker_device_allocator_on_init_custom_plus
   // Members.
-, cudaStream_t stream_;
+, SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream_;
   // Constructor.
-, thrust::cuda_cub::throw_on_error(
-    cudaStreamCreateWithFlags(&stream_, cudaStreamNonBlocking)
+, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
+    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(&stream_, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking))
   );
   // Destructor.
-, thrust::cuda_cub::throw_on_error(
-    cudaStreamDestroy(stream_)
+, thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
+    SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_)
   );
   // `validate_event` member.
 , ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
@@ -848,9 +848,9 @@ struct test_async_reduce_on_then_after
 
     ASSERT_EQUAL(h0, d0);
 
-    cudaStream_t stream;
-    thrust::cuda_cub::throw_on_error(
-      cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking)
+    SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream;
+    thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
+      SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(&stream, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking))
     );
 
     auto f0 = thrust::async::reduce(
@@ -900,8 +900,8 @@ struct test_async_reduce_on_then_after
 
     ASSERT_EQUAL(r0, r1);
 
-    thrust::cuda_cub::throw_on_error(
-      cudaStreamDestroy(stream)
+    thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
+      SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream)
     );
   }
 };
@@ -923,14 +923,14 @@ struct test_async_reduce_allocator_on_then_after
 
     ASSERT_EQUAL(h0, d0);
 
-    cudaStream_t stream0;
-    thrust::cuda_cub::throw_on_error(
-      cudaStreamCreateWithFlags(&stream0, cudaStreamNonBlocking)
+    SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream0;
+    thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
+      SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(&stream0, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking))
     );
 
-    cudaStream_t stream1;
-    thrust::cuda_cub::throw_on_error(
-      cudaStreamCreateWithFlags(&stream1, cudaStreamNonBlocking)
+    SPECIALIZE_DEVICE_RESOURCE_NAME(Stream_t) stream1;
+    thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(
+      SPECIALIZE_DEVICE_RESOURCE_NAME(StreamCreateWithFlags)(&stream1, SPECIALIZE_DEVICE_RESOURCE_NAME(StreamNonBlocking))
     );
 
     auto f0 = thrust::async::reduce(
@@ -984,8 +984,8 @@ struct test_async_reduce_allocator_on_then_after
 
     ASSERT_EQUAL(r0, r1);
 
-    thrust::cuda_cub::throw_on_error(cudaStreamDestroy(stream0));
-    thrust::cuda_cub::throw_on_error(cudaStreamDestroy(stream1));
+    thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream0));
+    thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream1));
   }
 };
 DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES(
