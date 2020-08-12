@@ -121,8 +121,10 @@ void test_event_wait(Event&& e)
 {
   ASSERT_EQ(true, e.valid_stream());
 
-  e.wait();
-  e.wait();
+  while(!e.ready())
+  {
+      e.wait();
+  }
 
   ASSERT_EQ(true, e.valid_stream());
   ASSERT_EQ(true, e.ready());

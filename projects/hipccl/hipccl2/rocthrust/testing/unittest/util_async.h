@@ -28,8 +28,10 @@ void test_event_wait(
 {
   ASSERT_EQUAL_WITH_FILE_AND_LINE(true, e.valid_stream(), filename, lineno);
 
-  e.wait();
-  e.wait();
+  while(!e.ready())
+  {
+      e.wait();
+  }
 
   ASSERT_EQUAL_WITH_FILE_AND_LINE(true, e.valid_stream(), filename, lineno);
   ASSERT_EQUAL_WITH_FILE_AND_LINE(true, e.ready(), filename, lineno);
