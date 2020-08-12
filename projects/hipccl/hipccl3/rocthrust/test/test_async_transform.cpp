@@ -209,17 +209,22 @@ void test_async_transform_unary()
       // This potentially runs concurrently with the copies.
       invoke_sync(h0.begin(), h0.end(), h1.begin(), op);
 
-      //TEST_EVENT_WAIT(thrust::when_all(f0a, f0b, f0c, f0d));
+      TEST_EVENT_WAIT(thrust::when_all(f0a, f0b, f0c, f0d));
 
-      ASSERT_EQ(h0, d0a);
-      ASSERT_EQ(h0, d0b);
-      ASSERT_EQ(h0, d0c);
-      ASSERT_EQ(h0, d0d);
+      auto tolerance = T(precision_threshold<T>::percentage);
 
-      ASSERT_EQ(h1, d1a);
-      ASSERT_EQ(h1, d1b);
-      ASSERT_EQ(h1, d1c);
-      ASSERT_EQ(h1, d1d);
+      thrust::host_vector<T> r1a = d1a;
+      thrust::host_vector<T> r1b = d1b;
+      thrust::host_vector<T> r1c = d1c;
+      thrust::host_vector<T> r1d = d1d;
+
+      for(uint32_t i = 0; i < h0.size(); i++)
+      {
+          ASSERT_NEAR(h1[i], r1a[i], tolerance);
+          ASSERT_NEAR(h1[i], r1b[i], tolerance);
+          ASSERT_NEAR(h1[i], r1c[i], tolerance);
+          ASSERT_NEAR(h1[i], r1d[i], tolerance);
+      }
     }
   }
 };
@@ -331,12 +336,22 @@ void test_async_transform_unary_inplace()
       // This potentially runs concurrently with the copies.
       invoke_sync(h0.begin(), h0.end(), h0.begin(), op);
 
-      //TEST_EVENT_WAIT(thrust::when_all(f0a, f0b, f0c, f0d));
+      TEST_EVENT_WAIT(thrust::when_all(f0a, f0b, f0c, f0d));
 
-      ASSERT_EQ(h0, d0a);
-      ASSERT_EQ(h0, d0b);
-      ASSERT_EQ(h0, d0c);
-      ASSERT_EQ(h0, d0d);
+      auto tolerance = T(precision_threshold<T>::percentage);
+
+      thrust::host_vector<T> ra = d0a;
+      thrust::host_vector<T> rb = d0b;
+      thrust::host_vector<T> rc = d0c;
+      thrust::host_vector<T> rd = d0d;
+
+      for(uint32_t i = 0; i < h0.size(); i++)
+      {
+          ASSERT_NEAR(h0[i], ra[i], tolerance);
+          ASSERT_NEAR(h0[i], rb[i], tolerance);
+          ASSERT_NEAR(h0[i], rc[i], tolerance);
+          ASSERT_NEAR(h0[i], rd[i], tolerance);
+      }
     }
   }
 };
