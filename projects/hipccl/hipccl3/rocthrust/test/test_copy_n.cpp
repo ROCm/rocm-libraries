@@ -31,6 +31,8 @@ TYPED_TEST(CopyNPrimitiveTests, TestCopyNFromConstIterator)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     std::vector<T> v(5);
     v[0] = T(0);
     v[1] = T(1);
@@ -66,6 +68,8 @@ TYPED_TEST(CopyNPrimitiveTests, TestCopyNToDiscardIterator)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::host_vector<T>   h_input(5, 1);
     thrust::device_vector<T> d_input = h_input;
 
@@ -87,6 +91,8 @@ TYPED_TEST(CopyNTests, TestCopyNMatchingTypes)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector v(5);
     v[0] = T(0);
@@ -123,6 +129,8 @@ TYPED_TEST(CopyNTests, TestCopyNMixedTypes)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector v(5);
     v[0] = T(0);
     v[1] = T(1);
@@ -156,6 +164,8 @@ TYPED_TEST(CopyNTests, TestCopyNMixedTypes)
 
 TEST(CopyNTests, TestCopyNVectorBool)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     std::vector<bool> v(3);
     v[0] = true;
     v[1] = false;
@@ -180,6 +190,8 @@ TYPED_TEST(CopyNTests, TestCopyNListTo)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     // copy from list to Vector
     std::list<T> l;
@@ -224,6 +236,8 @@ TYPED_TEST(CopyNTests, TestCopyNCountingIterator)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::counting_iterator<T> iter(1);
 
     Vector vec(4);
@@ -240,6 +254,8 @@ TYPED_TEST(CopyNTests, TestCopyNZipIterator)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector v1(3);
     v1[0] = T(1);
@@ -265,6 +281,8 @@ TYPED_TEST(CopyNTests, TestCopyNConstantIteratorToZipIterator)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector v1(3, T(0));
     Vector v2(3, T(0));
 
@@ -289,6 +307,8 @@ OutputIterator copy_n(my_system& system, InputIterator, Size, OutputIterator res
 
 TEST(CopyNTests, TestCopyNDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -306,6 +326,8 @@ OutputIterator copy_n(my_tag, InputIterator, Size, OutputIterator result)
 
 TEST(CopyNTests, TestCopyNDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     thrust::device_vector<int> vec(1);
 
     thrust::copy_n(thrust::retag<my_tag>(vec.begin()), 1, thrust::retag<my_tag>(vec.begin()));

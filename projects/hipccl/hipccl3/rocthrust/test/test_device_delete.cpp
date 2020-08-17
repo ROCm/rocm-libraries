@@ -44,6 +44,8 @@ struct Foo
 // KNOWN_FAILURE
 /*TEST(DeviceDelete, TestDeviceDeleteDestructorInvocation)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     thrust::device_vector<bool> destructor_flag(1, false);
 
     thrust::device_ptr<Foo> foo_ptr = thrust::device_new<Foo>();

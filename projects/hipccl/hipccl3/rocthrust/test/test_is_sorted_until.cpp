@@ -28,6 +28,8 @@ TYPED_TEST(IsSortedUntilVectorTests, TestIsSortedUntilSimple)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     typedef typename Vector::iterator Iterator;
 
     Vector v(4);
@@ -83,6 +85,9 @@ TYPED_TEST(IsSortedUntilVectorTests, TestIsSortedUntilSimple)
 TYPED_TEST(IsSortedUntilVectorTests, TestIsSortedUntilRepeatedElements)
 {
     using Vector = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector v(10);
 
     v[0] = 0;
@@ -104,16 +109,16 @@ TYPED_TEST(IsSortedUntilVectorTests, TestIsSortedUntil)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const size_t n = (1 << 16) + 13;
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(auto seed : get_seeds())
     {
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
         Vector v = get_random_data<T>(
-            n, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            n, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
 
         v[0] = 1;
         v[1] = 0;
@@ -135,6 +140,8 @@ ForwardIterator is_sorted_until(my_system& system, ForwardIterator first, Forwar
 
 TEST(IsSortedUntilTests, TestIsSortedUntilExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -152,6 +159,8 @@ ForwardIterator is_sorted_until(my_tag, ForwardIterator first, ForwardIterator)
 
 TEST(IsSortedUntilTests, TestIsSortedUntilImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     thrust::device_vector<int> vec(1);
 
     thrust::is_sorted_until(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()));

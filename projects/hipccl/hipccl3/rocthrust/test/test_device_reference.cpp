@@ -27,6 +27,8 @@ TYPED_TEST(DeviceReferenceTests, TestDeviceReferenceConstructorFromDeviceReferen
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<T>    v(1, T(0));
     thrust::device_reference<T> ref = v[0];
 
@@ -51,6 +53,8 @@ TYPED_TEST(DeviceReferenceTests, TestDeviceReferenceConstructorFromDevicePointer
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<T>    v(1, T(0));
     thrust::device_ptr<T>       ptr = &v[0];
     thrust::device_reference<T> ref(ptr);
@@ -74,6 +78,8 @@ TYPED_TEST(DeviceReferenceTests, TestDeviceReferenceConstructorFromDevicePointer
 
 TEST(DeviceReferenceTests, TestDeviceReferenceAssignmentFromDeviceReference)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     // test same types
     using T0 = int;
     thrust::device_vector<T0>    v0(2, 0);
@@ -104,6 +110,8 @@ TEST(DeviceReferenceTests, TestDeviceReferenceAssignmentFromDeviceReference)
 TYPED_TEST(DeviceReferenceTests, TestDeviceReferenceManipulation)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     thrust::device_vector<T>    v(1, T(0));
     thrust::device_ptr<T>       ptr = &v[0];
@@ -182,6 +190,8 @@ TYPED_TEST(DeviceReferenceIntegerTests, TestDeviceReferenceIntegerManipulation)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<T>    v(1, T(0));
     thrust::device_ptr<T>       ptr = &v[0];
     thrust::device_reference<T> ref(ptr);
@@ -239,6 +249,8 @@ TYPED_TEST(DeviceReferenceIntegerTests, TestDeviceReferenceIntegerManipulation)
 TYPED_TEST(DeviceReferenceTests, TestDeviceReferenceSwap)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     thrust::device_vector<T>    v(T(2));
     thrust::device_reference<T> ref1 = v.front();

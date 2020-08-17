@@ -55,6 +55,8 @@ TYPED_TEST(TransformTests, UnaryTransform)
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
@@ -85,6 +87,8 @@ TYPED_TEST(TransformTests, BinaryTransform)
 {
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     for(auto size : get_sizes())
     {
@@ -129,6 +133,8 @@ TYPED_TEST(TransformVectorTests, TestTransformUnarySimple)
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Iterator iter;
 
     Vector input(3);
@@ -157,6 +163,8 @@ __host__ __device__ OutputIterator
 
 TEST(TransformVectorTests, TestTransformUnaryDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -175,6 +183,8 @@ __host__ __device__ OutputIterator
 
 TEST(TransformVectorTests, TestTransformUnaryDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::transform(thrust::retag<my_tag>(vec.begin()),
@@ -190,6 +200,8 @@ TYPED_TEST(TransformVectorTests, TestTransformIfUnaryNoStencilSimple)
     using Vector   = typename TestFixture::input_type;
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Iterator iter;
 
@@ -231,6 +243,8 @@ __host__ __device__ ForwardIterator transform_if(my_system& system,
 
 TEST(TransformVectorTests, TestTransformIfUnaryNoStencilDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -252,6 +266,8 @@ __host__ __device__ ForwardIterator
 
 TEST(TransformVectorTests, TestTransformIfUnaryNoStencilDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::transform_if(thrust::retag<my_tag>(vec.begin()),
@@ -268,6 +284,8 @@ TYPED_TEST(TransformVectorTests, TestTransformIfUnarySimple)
     using Vector   = typename TestFixture::input_type;
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Iterator iter;
 
@@ -318,6 +336,8 @@ __host__ __device__ ForwardIterator transform_if(my_system& system,
 
 TEST(TransformVectorTests, TestTransformIfUnaryDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -340,6 +360,8 @@ __host__ __device__ ForwardIterator transform_if(
 
 TEST(TransformVectorTests, TestTransformIfUnaryDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::transform_if(thrust::retag<my_tag>(vec.begin()),
@@ -356,6 +378,8 @@ TYPED_TEST(TransformVectorTests, TestTransformBinarySimple)
     using Vector   = typename TestFixture::input_type;
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Iterator iter;
 
@@ -397,6 +421,8 @@ __host__ __device__ OutputIterator transform(my_system& system,
 
 TEST(TransformVectorTests, TestTransformBinaryDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -418,6 +444,8 @@ __host__ __device__ OutputIterator transform(
 
 TEST(TransformVectorTests, TestTransformBinaryDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::transform(thrust::retag<my_tag>(vec.begin()),
@@ -434,6 +462,8 @@ TYPED_TEST(TransformVectorTests, TestTransformIfBinarySimple)
     using Vector   = typename TestFixture::input_type;
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Iterator iter;
 
@@ -494,6 +524,8 @@ __host__ __device__ ForwardIterator transform_if(my_system& system,
 
 TEST(TransformVectorTests, TestTransformIfBinaryDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -524,6 +556,8 @@ __host__ __device__ ForwardIterator transform_if(my_tag,
 
 TEST(TransformVectorTests, TestTransformIfBinaryDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::transform_if(thrust::retag<my_tag>(vec.begin()),
@@ -542,17 +576,18 @@ TYPED_TEST(TransformTests, TestTransformUnary)
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(auto size : get_sizes())
     {
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_input = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
 
             thrust::device_vector<T> d_input = h_input;
 
@@ -573,17 +608,18 @@ TYPED_TEST(TransformTests, TestTransformUnaryToDiscardIterator)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(auto size : get_sizes())
     {
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_input = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
 
             thrust::device_vector<T> d_input = h_input;
 
@@ -619,17 +655,18 @@ TYPED_TEST(TransformTests, TestTransformUnaryToDiscardIteratorZipped)
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(auto size : get_sizes())
     {
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_input = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
 
             thrust::device_vector<T> d_input = h_input;
 
@@ -678,23 +715,24 @@ TYPED_TEST(TransformTests, TestTransformIfUnaryNoStencil)
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(auto size : get_sizes())
     {
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_input = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
 
             thrust::host_vector<U> h_output = get_random_data<T>(
                 size,
                 std::numeric_limits<T>::min(),
                 std::numeric_limits<T>::max(),
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
 
             thrust::device_vector<T> d_input  = h_input;
@@ -722,29 +760,30 @@ TYPED_TEST(TransformTests, TestTransformIfUnary)
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(auto size : get_sizes())
     {
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_input = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
             thrust::host_vector<T> h_stencil = get_random_data<T>(
                 size,
                 std::numeric_limits<T>::min(),
                 std::numeric_limits<T>::max(),
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
 
             thrust::host_vector<U> h_output = get_random_data<T>(
                 size,
                 std::numeric_limits<T>::min(),
                 std::numeric_limits<T>::max(),
-                seed_value + 2 * seed_value_addition
+                seed + 2 * seed_value_addition
             );
 
             thrust::device_vector<T> d_input   = h_input;
@@ -774,22 +813,23 @@ TYPED_TEST(TransformTests, TestTransformIfUnaryToDiscardIterator)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(auto size : get_sizes())
     {
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_input = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
             thrust::host_vector<T> h_stencil = get_random_data<T>(
                 size,
                 std::numeric_limits<T>::min(),
                 std::numeric_limits<T>::max(),
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
 
             thrust::device_vector<T> d_input   = h_input;
@@ -823,22 +863,23 @@ TYPED_TEST(TransformTests, TestTransformBinary)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(auto size : get_sizes())
     {
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_input1 = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
             thrust::host_vector<T> h_input2 = get_random_data<T>(
                 size,
                 std::numeric_limits<T>::min(),
                 std::numeric_limits<T>::max(),
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
 
             thrust::device_vector<T> d_input1 = h_input1;
@@ -880,22 +921,23 @@ TYPED_TEST(TransformTests, TestTransformBinaryToDiscardIterator)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(auto size : get_sizes())
     {
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_input1 = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
             thrust::host_vector<T> h_input2 = get_random_data<T>(
                 size,
                 std::numeric_limits<T>::min(),
                 std::numeric_limits<T>::max(),
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
 
             thrust::device_vector<T> d_input1 = h_input1;
@@ -924,35 +966,36 @@ TYPED_TEST(TransformTests, TestTransformIfBinary)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(auto size : get_sizes())
     {
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_input1 = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
             thrust::host_vector<T> h_input2 = get_random_data<T>(
                 size,
                 std::numeric_limits<T>::min(),
                 std::numeric_limits<T>::max(),
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
 
             thrust::host_vector<T> h_stencil = get_random_data<T>(
                 size,
                 std::numeric_limits<T>::min(),
                 std::numeric_limits<T>::max(),
-                seed_value + 2 * seed_value_addition
+                seed + 2 * seed_value_addition
             );
             thrust::host_vector<T> h_output = get_random_data<T>(
                 size,
                 std::numeric_limits<T>::min(),
                 std::numeric_limits<T>::max(),
-                seed_value + 3 * seed_value_addition
+                seed + 3 * seed_value_addition
             );
 
             thrust::device_vector<T> d_input1  = h_input1;
@@ -982,7 +1025,7 @@ TYPED_TEST(TransformTests, TestTransformIfBinary)
                 size,
                 std::numeric_limits<T>::min(),
                 std::numeric_limits<T>::max(),
-                seed_value + 4 * seed_value_addition
+                seed + 4 * seed_value_addition
             );
             d_stencil = h_stencil;
 
@@ -1011,33 +1054,34 @@ TYPED_TEST(TransformTests, TestTransformIfBinaryToDiscardIterator)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(auto size : get_sizes())
     {
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_input1 = get_random_data<T>(
                 size,
                 std::numeric_limits<T>::min(),
                 std::numeric_limits<T>::max(),
-                seed_value
+                seed
             );
             thrust::host_vector<T> h_input2 = get_random_data<T>(
                 size,
                 std::numeric_limits<T>::min(),
                 std::numeric_limits<T>::max(),
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
 
             thrust::host_vector<T> h_stencil = get_random_data<T>(
                 size,
                 std::numeric_limits<T>::min(),
                 std::numeric_limits<T>::max(),
-                seed_value + 2 * seed_value_addition
+                seed + 2 * seed_value_addition
             );
 
             thrust::device_vector<T> d_input1  = h_input1;
@@ -1075,6 +1119,8 @@ TYPED_TEST(TransformTests, TestTransformUnaryCountingIterator)
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(auto size : get_sizes())
     {
         size = thrust::min<size_t>(size, std::numeric_limits<T>::max());
@@ -1098,6 +1144,8 @@ TYPED_TEST(TransformTests, TestTransformBinaryCountingIterators)
 {
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     for(auto size : get_sizes())
     {
@@ -1138,6 +1186,8 @@ TYPED_TEST(TransformVectorTests, TestTransformWithIndirection)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector input1(7);
     Vector input2(7);

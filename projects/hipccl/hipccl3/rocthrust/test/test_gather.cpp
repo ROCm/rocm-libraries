@@ -29,12 +29,16 @@ TESTS_DEFINE(PrimitiveGatherTests, NumericalTestsParams);
 
 TEST(GatherTests, UsingHip)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
 }
 
 TYPED_TEST(GatherTests, GatherSimple)
 {
     using Vector = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector map(5); // gather indices
     Vector src(8); // source vector
@@ -78,6 +82,8 @@ gather(my_system& system, InputIterator, InputIterator, RandomAccessIterator, Ou
 
 TEST(GatherTests, GatherDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -96,6 +102,8 @@ gather(my_tag, InputIterator, InputIterator, RandomAccessIterator, OutputIterato
 
 TEST(GatherTests, GatherDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::gather(thrust::retag<my_tag>(vec.begin()),
@@ -110,22 +118,23 @@ TYPED_TEST(PrimitiveGatherTests, Gather)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     T                         min   = (T)std::numeric_limits<T>::min();
     T                         max   = (T)std::numeric_limits<T>::max();
 
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
-        const size_t source_size = std::min((size_t)10, 2 * size);
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
 
         // source vectors to gather from
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        const size_t source_size = std::min((size_t)10, 2 * size);
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-            thrust::host_vector<T> h_source = get_random_data<T>(source_size, min, max, seed_value);
+            thrust::host_vector<T> h_source = get_random_data<T>(source_size, min, max, seed);
             thrust::device_vector<T> d_source = h_source;
 
             // gather indices
@@ -133,7 +142,7 @@ TYPED_TEST(PrimitiveGatherTests, Gather)
                 size,
                 min,
                 max,
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
 
             for(size_t i = 0; i < size; i++)
@@ -158,22 +167,24 @@ TYPED_TEST(PrimitiveGatherTests, GatherToDiscardIterator)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     T                         min   = (T)std::numeric_limits<T>::min();
     T                         max   = (T)std::numeric_limits<T>::max();
 
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        
+        // source vectors to gather from
         const size_t source_size = std::min((size_t)10, 2 * size);
 
-        // source vectors to gather from
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-            thrust::host_vector<T> h_source = get_random_data<T>(source_size, min, max, seed_value);
+            thrust::host_vector<T> h_source = get_random_data<T>(source_size, min, max, seed);
             thrust::device_vector<T> d_source = h_source;
 
             // gather indices
@@ -181,7 +192,7 @@ TYPED_TEST(PrimitiveGatherTests, GatherToDiscardIterator)
                 size,
                 min,
                 max,
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
 
             for(size_t i = 0; i < size; i++)
@@ -206,6 +217,8 @@ TYPED_TEST(PrimitiveGatherTests, GatherToDiscardIterator)
 TYPED_TEST(GatherTests, GatherIfSimple)
 {
     using Vector = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector flg(5); // predicate array
     Vector map(5); // gather indices
@@ -271,6 +284,8 @@ OutputIterator gather_if(my_system& system,
 
 TEST(GatherTests, GatherIfDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -296,6 +311,8 @@ OutputIterator gather_if(my_tag,
 
 TEST(GatherTests, GatherIfDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::gather_if(thrust::retag<my_tag>(vec.begin()),
@@ -311,22 +328,24 @@ TYPED_TEST(PrimitiveGatherTests, GatherIf)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     T                         min   = (T)std::numeric_limits<T>::min();
     T                         max   = (T)std::numeric_limits<T>::max();
 
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        
+        // source vectors to gather from
         const size_t source_size = std::min((size_t)10, 2 * size);
 
-        // source vectors to gather from
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-            thrust::host_vector<T> h_source = get_random_data<T>(source_size, min, max, seed_value);
+            thrust::host_vector<T> h_source = get_random_data<T>(source_size, min, max, seed);
             thrust::device_vector<T> d_source = h_source;
 
             // gather indices
@@ -334,7 +353,7 @@ TYPED_TEST(PrimitiveGatherTests, GatherIf)
                 size,
                 min,
                 max,
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
 
             for(size_t i = 0; i < size; i++)
@@ -347,7 +366,7 @@ TYPED_TEST(PrimitiveGatherTests, GatherIf)
                 size,
                 min,
                 max,
-                seed_value + 2 * seed_value_addition
+                seed + 2 * seed_value_addition
             );
 
             for(size_t i = 0; i < size; i++)
@@ -382,22 +401,24 @@ TYPED_TEST(PrimitiveGatherTests, GatherIfToDiscardIterator)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const std::vector<size_t> sizes = get_sizes();
     T                         min   = (T)std::numeric_limits<T>::min();
     T                         max   = (T)std::numeric_limits<T>::max();
 
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
-        const size_t source_size = std::min((size_t)10, 2 * size);
-
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        
         // source vectors to gather from
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        const size_t source_size = std::min((size_t)10, 2 * size);
+        
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-            thrust::host_vector<T> h_source = get_random_data<T>(source_size, min, max, seed_value);
+            thrust::host_vector<T> h_source = get_random_data<T>(source_size, min, max, seed);
             thrust::device_vector<T> d_source = h_source;
 
             // gather indices
@@ -405,7 +426,7 @@ TYPED_TEST(PrimitiveGatherTests, GatherIfToDiscardIterator)
                 size,
                 min,
                 max,
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
 
             for(size_t i = 0; i < size; i++)
@@ -418,7 +439,7 @@ TYPED_TEST(PrimitiveGatherTests, GatherIfToDiscardIterator)
                 size,
                 min,
                 max,
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
 
             for(size_t i = 0; i < size; i++)
@@ -453,6 +474,8 @@ TYPED_TEST(PrimitiveGatherTests, GatherIfToDiscardIterator)
 TYPED_TEST(GatherTests, TestGatherCountingIterator)
 {
     using Vector = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector source(10);
     thrust::sequence(source.begin(), source.end(), 0);

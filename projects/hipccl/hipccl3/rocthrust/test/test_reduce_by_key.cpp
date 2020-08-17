@@ -69,6 +69,8 @@ TYPED_TEST(ReduceByKeysTests, TestReduceByKeySimple)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector keys;
     Vector values;
 
@@ -152,27 +154,27 @@ TYPED_TEST(ReduceByKeysIntegralTests, TestReduceByKey)
     using K = typename TestFixture::input_type; // key type
     typedef unsigned int V; // value type
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<K> h_keys = get_random_data<bool>(
                 size,
                 std::numeric_limits<bool>::min(),
                 std::numeric_limits<bool>::max(),
-                seed_value
+                seed
             );
             thrust::host_vector<V> h_vals = get_random_data<V>(
                 size,
                 std::numeric_limits<V>::min(),
                 std::numeric_limits<V>::max(),
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
             thrust::device_vector<K> d_keys = h_keys;
             thrust::device_vector<V> d_vals = h_vals;
@@ -222,27 +224,27 @@ TYPED_TEST(ReduceByKeysIntegralTests, TestReduceByKeyToDiscardIterator)
     using V = typename TestFixture::input_type; // value type
     typedef unsigned int K; // key type
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<K> h_keys = get_random_data<bool>(
                 size,
                 std::numeric_limits<bool>::min(),
                 std::numeric_limits<bool>::max(),
-                seed_value
+                seed
             );
             thrust::host_vector<V> h_vals = get_random_data<V>(
                 size,
                 std::numeric_limits<V>::min(),
                 std::numeric_limits<V>::max(),
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
             thrust::device_vector<K> d_keys = h_keys;
             thrust::device_vector<V> d_vals = h_vals;
@@ -300,6 +302,8 @@ thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(my_system& system,
 
 TEST(ReduceByKeysTests, TestReduceByKeyDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -325,6 +329,8 @@ thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(my_tag,
 
 TEST(ReduceByKeysTests, TestReduceByKeyDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::reduce_by_key(thrust::retag<my_tag>(vec.begin()),

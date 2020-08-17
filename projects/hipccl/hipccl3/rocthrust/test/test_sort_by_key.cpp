@@ -35,6 +35,8 @@ void sort_by_key(my_system& system,
 
 TEST(SortByKeyTests, TestSortByKeyDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -54,6 +56,8 @@ void sort_by_key(my_tag,
 
 TEST(SortByKeyTests, TestSortByKeyDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::sort_by_key(thrust::retag<my_tag>(vec.begin()),
@@ -110,6 +114,8 @@ TYPED_TEST(SortByKeyTests, TestSortByKeySimple)
 {
     using Vector = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector unsorted_keys, unsorted_values;
     Vector sorted_keys, sorted_values;
 
@@ -125,17 +131,18 @@ TYPED_TEST(SortByKeyPrimitiveTests, TestSortAscendingKeyValue)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(auto size : get_sizes())
     {
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_keys = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
 
             thrust::device_vector<T> d_keys = h_keys;
 
@@ -153,17 +160,18 @@ TYPED_TEST(SortByKeyPrimitiveTests, TestSortAscendingKeyValue)
 
 TEST(SortByKeyTests, TestSortDescendingKeyValue)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     for(auto size : get_sizes())
     {
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<int> h_keys = get_random_data<int>(
-                size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed_value);
+                size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed);
 
             thrust::device_vector<int> d_keys = h_keys;
 
@@ -183,61 +191,67 @@ TEST(SortByKeyTests, TestSortDescendingKeyValue)
 
 TEST(SortByKeyTests, TestSortByKeyBool)
 {
-    const size_t size = 10027;
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(auto size : { 10027 })
     {
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
 
-        thrust::host_vector<bool> h_keys = get_random_data<bool>(
-            size, std::numeric_limits<bool>::min(), std::numeric_limits<bool>::max(), seed_value);
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-        thrust::host_vector<int> h_values = get_random_data<int>(
-            size,
-            std::numeric_limits<int>::min(),
-            std::numeric_limits<int>::max(),
-            seed_value + seed_value_addition
-        );
+            thrust::host_vector<bool> h_keys = get_random_data<bool>(
+                size, std::numeric_limits<bool>::min(), std::numeric_limits<bool>::max(), seed);
 
-        thrust::device_vector<bool> d_keys   = h_keys;
-        thrust::device_vector<int>  d_values = h_values;
+            thrust::host_vector<int> h_values = get_random_data<int>(
+                size,
+                std::numeric_limits<int>::min(),
+                std::numeric_limits<int>::max(),
+                seed + seed_value_addition
+            );
 
-        thrust::sort_by_key(h_keys.begin(), h_keys.end(), h_values.begin());
-        thrust::sort_by_key(d_keys.begin(), d_keys.end(), d_values.begin());
+            thrust::device_vector<bool> d_keys   = h_keys;
+            thrust::device_vector<int>  d_values = h_values;
 
-        ASSERT_EQ(h_keys, d_keys);
-        ASSERT_EQ(h_values, d_values);
+            thrust::sort_by_key(h_keys.begin(), h_keys.end(), h_values.begin());
+            thrust::sort_by_key(d_keys.begin(), d_keys.end(), d_values.begin());
+
+            ASSERT_EQ(h_keys, d_keys);
+            ASSERT_EQ(h_values, d_values);
+        }
     }
 }
 
 TEST(SortByKeyTests, TestSortByKeyBoolDescending)
 {
-    const size_t size = 10027;
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(auto size : std::vector<size_t>{ 10027 })
     {
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
 
-        thrust::host_vector<bool> h_keys = get_random_data<bool>(
-            size, std::numeric_limits<bool>::min(), std::numeric_limits<bool>::max(), seed_value);
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-        thrust::host_vector<int> h_values = get_random_data<int>(
-            size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed_value);
+            thrust::host_vector<bool> h_keys = get_random_data<bool>(
+                size, std::numeric_limits<bool>::min(), std::numeric_limits<bool>::max(), seed);
 
-        thrust::device_vector<bool> d_keys   = h_keys;
-        thrust::device_vector<int>  d_values = h_values;
+            thrust::host_vector<int> h_values = get_random_data<int>(
+                size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed);
 
-        thrust::sort_by_key(
-            h_keys.begin(), h_keys.end(), h_values.begin(), thrust::greater<bool>());
-        thrust::sort_by_key(
-            d_keys.begin(), d_keys.end(), d_values.begin(), thrust::greater<bool>());
+            thrust::device_vector<bool> d_keys   = h_keys;
+            thrust::device_vector<int>  d_values = h_values;
 
-        ASSERT_EQ(h_keys, d_keys);
-        ASSERT_EQ(h_values, d_values);
+            thrust::sort_by_key(
+                h_keys.begin(), h_keys.end(), h_values.begin(), thrust::greater<bool>());
+            thrust::sort_by_key(
+                d_keys.begin(), d_keys.end(), d_values.begin(), thrust::greater<bool>());
+
+            ASSERT_EQ(h_keys, d_keys);
+            ASSERT_EQ(h_values, d_values);
+        }
     }
 }
 
@@ -257,24 +271,23 @@ void SortByKeyKernel(int const N, int* keys, short* values)
 
 TEST(SortByKeyTests, TestSortByKeyDevice)
 {
-    std::vector<size_t> sizes = {0, 1, 2, 4, 6, 12, 16, 24, 32, 64, 84, 128, 160, 256};
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    for(auto size : sizes)
+    for (auto size: std::vector<size_t>{0, 1, 2, 4, 6, 12, 16, 24, 32, 64, 84, 128, 160, 256} )
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
-        {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-            thrust::host_vector<int> h_keys = get_random_data<int>(size, 0, size, seed_value);
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+            thrust::host_vector<int> h_keys = get_random_data<int>(size, 0, size, seed);
 
             thrust::host_vector<short> h_values
                 = get_random_data<short>(size,
                                          std::numeric_limits<short>::min(),
                                          std::numeric_limits<short>::max(),
-                                         seed_value);
+                                         seed);
 
             thrust::device_vector<int>   d_keys   = h_keys;
             thrust::device_vector<short> d_values = h_values;

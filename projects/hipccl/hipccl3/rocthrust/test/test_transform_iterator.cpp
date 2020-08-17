@@ -29,6 +29,8 @@ TESTS_DEFINE(PrimitiveTransformIteratorTests, NumericalTestsParams);
 
 TEST(TransformIteratorTests, UsingHip)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
 }
 
@@ -36,6 +38,8 @@ TYPED_TEST(TransformIteratorTests, TransformIterator)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     using UnaryFunction = thrust::negate<T>;
     using Iterator      = typename Vector::iterator;
@@ -61,6 +65,8 @@ TYPED_TEST(TransformIteratorTests, MakeTransformIterator)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     using UnaryFunction = thrust::negate<T>;
     using Iterator      = typename Vector::iterator;
@@ -88,18 +94,19 @@ TYPED_TEST(PrimitiveTransformIteratorTests, TransformIteratorReduce)
 {
     using T = typename TestFixture::input_type;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        T error_margin = (T)0.01 * size;
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
-        {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-            thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10, seed_value);
+        T error_margin = (T)0.01 * size;
+
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+            thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10, seed);
             thrust::device_vector<T> d_data = h_data;
 
             // run on host

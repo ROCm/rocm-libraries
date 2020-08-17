@@ -40,6 +40,8 @@ void _TestStableSortWithLargeKeys(void)
 
 TEST(StableSortLargeTests, TestStableSortWithLargeKeys)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     _TestStableSortWithLargeKeys<int, 1>();
     _TestStableSortWithLargeKeys<int, 2>();
     _TestStableSortWithLargeKeys<int, 4>();

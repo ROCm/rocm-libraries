@@ -30,6 +30,8 @@ TYPED_TEST(MismatchTests, TestMismatchSimple)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector a(4);
     Vector b(4);
     a[0] = T(1);
@@ -65,6 +67,8 @@ mismatch(my_system& system, InputIterator1 first, InputIterator1, InputIterator2
 
 TEST(MismatchTests, TestMismatchDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -83,6 +87,8 @@ mismatch(my_tag, InputIterator1 first, InputIterator1, InputIterator2)
 
 TEST(MismatchTests, TestMismatchDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::mismatch(thrust::retag<my_tag>(vec.begin()),

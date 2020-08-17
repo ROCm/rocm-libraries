@@ -4,6 +4,8 @@
 
 TEST(MrPoolOptionsTests, TestPoolOptionsBasicValidity)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::mr::pool_options options = thrust::mr::pool_options();
     ASSERT_EQ(options.validate(), false);
 
@@ -34,6 +36,8 @@ TEST(MrPoolOptionsTests, TestPoolOptionsBasicValidity)
 
 TEST(MrPoolOptionsTests, TestPoolOptionsComplexValidity)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     thrust::mr::pool_options options = thrust::mr::pool_options();
     ASSERT_EQ(options.validate(), false);
 

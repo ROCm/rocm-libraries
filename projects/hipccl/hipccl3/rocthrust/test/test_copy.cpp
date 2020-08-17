@@ -33,6 +33,8 @@ TESTS_DEFINE(CopyIntegerTests, IntegerTestsParams)
 
 TEST(HipThrustCopy, HostToDevice)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const size_t              size = 256;
     thrust::device_system_tag dev_tag;
     thrust::host_system_tag   host_tag;
@@ -58,6 +60,8 @@ TEST(HipThrustCopy, HostToDevice)
 
 TEST(HipThrustCopy, DeviceToDevice)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const size_t              size = 256;
     thrust::device_system_tag dev_tag;
 
@@ -91,6 +95,8 @@ TEST(HipThrustCopy, DeviceToDevice)
 TEST(CopyTests, TestCopyFromConstIterator)
 {
     using T = int;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     std::vector<T> v(5);
     v[0] = T(0);
@@ -127,6 +133,8 @@ TEST(CopyTests, TestCopyToDiscardIterator)
 {
     using T = int;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::host_vector<T>   h_input(5, 1);
     thrust::device_vector<T> d_input = h_input;
 
@@ -147,6 +155,8 @@ TEST(CopyTests, TestCopyToDiscardIterator)
 TEST(CopyTests, TestCopyToDiscardIteratorZipped)
 {
     using T = int;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     thrust::host_vector<T>   h_input(5, 1);
     thrust::device_vector<T> d_input = h_input;
@@ -186,6 +196,8 @@ TYPED_TEST(CopyTests, TestCopyMatchingTypes)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector v(5);
     v[0] = T(0);
     v[1] = T(1);
@@ -221,6 +233,8 @@ TYPED_TEST(CopyTests, TestCopyMixedTypes)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector v(5);
     v[0] = T(0);
     v[1] = T(1);
@@ -254,6 +268,8 @@ TYPED_TEST(CopyTests, TestCopyMixedTypes)
 
 TEST(CopyTests, TestCopyVectorBool)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     std::vector<bool> v(3);
     v[0] = true;
     v[1] = false;
@@ -278,6 +294,8 @@ TYPED_TEST(CopyTests, TestCopyListTo)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     // copy from list to Vector
     std::list<T> l;
@@ -349,6 +367,8 @@ TYPED_TEST(CopyTests, TestCopyIfSimple)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector v(5);
     v[0] = T(0);
     v[1] = T(1);
@@ -371,18 +391,18 @@ TYPED_TEST(CopyIntegerTests, TestCopyIf)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(auto size : get_sizes())
     {
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
 
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
             thrust::device_vector<T> d_data = h_data;
 
             typename thrust::host_vector<T>::iterator   h_new_end;
@@ -427,6 +447,8 @@ TYPED_TEST(CopyIntegerTests, TestCopyIfStencil)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
@@ -436,18 +458,16 @@ TYPED_TEST(CopyIntegerTests, TestCopyIfStencil)
         thrust::device_vector<T> d_data(size);
         thrust::sequence(d_data.begin(), d_data.end());
 
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_stencil = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
             thrust::device_vector<T> d_stencil = get_random_data<T>(
                 size, std::numeric_limits<T>::min(),
                 std::numeric_limits<T>::max(),
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
 
             thrust::host_vector<T>   h_result(size);
@@ -496,6 +516,8 @@ TYPED_TEST(CopyTests, TestCopyCountingIterator)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::counting_iterator<T> iter(1);
 
     Vector vec(4);
@@ -512,6 +534,8 @@ TYPED_TEST(CopyTests, TestCopyZipIterator)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector v1(3);
     v1[0] = T(1);
@@ -537,6 +561,8 @@ TYPED_TEST(CopyTests, TestCopyConstantIteratorToZipIterator)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector v1(3, T(0));
     Vector v2(3, T(0));
 
@@ -561,6 +587,8 @@ OutputIterator copy(my_system& system, InputIterator, InputIterator, OutputItera
 
 TEST(CopyTests, TestCopyDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -578,6 +606,8 @@ OutputIterator copy(my_tag, InputIterator, InputIterator, OutputIterator result)
 
 TEST(CopyTests, TestCopyDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::copy(thrust::retag<my_tag>(vec.begin()),
@@ -597,6 +627,8 @@ __host__ __device__ OutputIterator
 
 TEST(CopyTests, TestCopyIfDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -615,6 +647,8 @@ __host__ __device__ OutputIterator
 
 TEST(CopyTests, TestCopyIfDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::copy_if(thrust::retag<my_tag>(vec.begin()),
@@ -642,6 +676,8 @@ __host__ __device__ OutputIterator copy_if(my_system& system,
 
 TEST(CopyTests, TestCopyIfStencilDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -663,6 +699,8 @@ __host__ __device__ OutputIterator
 
 TEST(CopyTests, TestCopyIfStencilDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     thrust::device_vector<int> vec(1);
 
     thrust::copy_if(thrust::retag<my_tag>(vec.begin()),

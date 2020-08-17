@@ -1,25 +1,83 @@
+.test:cmake-latest:
+  stage: test
+  needs:
+    - build:cmake-latest
+  extends:
+    - .deps:cmake-latest
+
 test:vega20:
-  extends: .test
-  dependencies:
-    - build:rocm
+  extends: .test:cmake-latest
   tags:
     - vega20
     - rocm
+  variables:
+    PARALLEL_JOBS: 2
+    TEST_GFX_IPS_REGEX: gfx906
+  script:
+    - cd $BUILD_LATEST_DIR
+    - $SUDO_CMD $CMAKE_LATEST_PATH/bin/cmake
+      -D CMAKE_PREFIX_PATH=/opt/rocm
+      -P $CI_PROJECT_DIR/cmake/GenerateResourceSpec.cmake
+    - $SUDO_CMD $CMAKE_LATEST_PATH/bin/ctest
+      --output-on-failure
+      --repeat-until-fail 2
+      --tests-regex "$TEST_GFX_IPS_REGEX"
+      --resource-spec-file ./resources.json
+      --parallel $PARALLEL_JOBS
+    - $SUDO_CMD $CMAKE_LATEST_PATH/bin/ctest
+      --output-on-failure
+      --repeat-until-fail 2
+      --label-regex upstream
 
-# Allow Fiji to fail
 test:s9300:
-  extends: .test
-  dependencies:
-    - build:rocm
+  extends: .test:cmake-latest
+  needs:
+    - build:cmake-latest
   tags:
     - s9300
     - rocm
+  variables:
+    PARALLEL_JOBS: 6
+    TEST_GFX_IPS_REGEX: gfx803
+  script:
+    - cd $BUILD_LATEST_DIR
+    - $SUDO_CMD $CMAKE_LATEST_PATH/bin/cmake
+      -D CMAKE_PREFIX_PATH=/opt/rocm
+      -P $CI_PROJECT_DIR/cmake/GenerateResourceSpec.cmake
+    - $SUDO_CMD $CMAKE_LATEST_PATH/bin/ctest
+      --output-on-failure
+      --repeat-until-fail 2
+      --tests-regex "$TEST_GFX_IPS_REGEX"
+      --resource-spec-file ./resources.json
+      --parallel $PARALLEL_JOBS
+    - $SUDO_CMD $CMAKE_LATEST_PATH/bin/ctest
+      --output-on-failure
+      --repeat-until-fail 2
+      --label-regex upstream
   allow_failure: true
 
 test:mi25:
-  extends: .test
-  dependencies:
-    - build:rocm
+  extends: .test:cmake-latest
+  needs:
+    - build:cmake-latest
   tags:
     - mi25
     - rocm
+  variables:
+    PARALLEL_JOBS: 2
+    TEST_GFX_IPS_REGEX: gfx900
+  script:
+    - cd $BUILD_LATEST_DIR
+    - $SUDO_CMD $CMAKE_LATEST_PATH/bin/cmake
+      -D CMAKE_PREFIX_PATH=/opt/rocm
+      -P $CI_PROJECT_DIR/cmake/GenerateResourceSpec.cmake
+    - $SUDO_CMD $CMAKE_LATEST_PATH/bin/ctest
+      --output-on-failure
+      --repeat-until-fail 2
+      --tests-regex "$TEST_GFX_IPS_REGEX"
+      --resource-spec-file ./resources.json
+      --parallel $PARALLEL_JOBS
+    - $SUDO_CMD $CMAKE_LATEST_PATH/bin/ctest
+      --output-on-failure
+      --repeat-until-fail 2
+      --label-regex upstream

@@ -28,6 +28,8 @@ TESTS_DEFINE(PrimitiveSequenceTests, NumericalTestsParams);
 
 TEST(SequenceTests, UsingHip)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
 }
 
@@ -39,6 +41,8 @@ void sequence(my_system& system, ForwardIterator, ForwardIterator)
 
 TEST(SequenceTests, SequenceDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -55,6 +59,8 @@ void sequence(my_tag, ForwardIterator first, ForwardIterator)
 
 TEST(SequenceTests, SequenceDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::sequence(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()));
@@ -66,6 +72,8 @@ TYPED_TEST(SequenceTests, SequenceSimple)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector v(5);
 
@@ -98,9 +106,10 @@ TYPED_TEST(PrimitiveSequenceTests, SequencesWithVariableLength)
 {
     using T = typename TestFixture::input_type;
 
-    const std::vector<size_t> sizes        = get_sizes();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     T                         error_margin = (T)0.01;
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
         size_t step_size = (size * 0.01) + 1;
 
@@ -141,8 +150,9 @@ TYPED_TEST(PrimitiveSequenceTests, SequenceToDiscardIterator)
 {
     using T = typename TestFixture::input_type;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
     {
         thrust::host_vector<T>   h_data(size);
         thrust::device_vector<T> d_data(size);

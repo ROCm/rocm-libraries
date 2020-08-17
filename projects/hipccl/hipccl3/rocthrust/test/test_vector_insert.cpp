@@ -28,6 +28,8 @@ TYPED_TEST(VectorInsertTests, TestVectorRangeInsertSimple)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector v1(5);
     thrust::sequence(v1.begin(), v1.end());
 
@@ -152,23 +154,24 @@ TYPED_TEST(VectorInsertPrimitiveTests, TestVectorRangeInsert)
 {
     using T = typename TestFixture::input_type;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
     {
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_src = get_random_data<T>(
-                size + 3, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size + 3, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
 
             thrust::host_vector<T> h_dst = get_random_data<T>(
                 size,
                 std::numeric_limits<T>::min(),
                 std::numeric_limits<T>::max(),
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
 
             thrust::device_vector<T> d_src = h_src;
@@ -198,6 +201,8 @@ TYPED_TEST(VectorInsertTests, TestVectorFillInsertSimple)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector v1(3);
     v1.reserve(10);
@@ -318,18 +323,18 @@ TYPED_TEST(VectorInsertPrimitiveTests, TestVectorFillInsert)
 {
     using T = typename TestFixture::input_type;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_dst = get_random_data<T>(
-                size + 2, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size + 2, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
 
             thrust::device_vector<T> d_dst = h_dst;
 

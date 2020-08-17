@@ -43,6 +43,8 @@ OutputIterator set_symmetric_difference(my_system& system,
 
 TEST(SetSymmetricDifferenceTests, TestSetSymmetricDifferenceDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -62,6 +64,8 @@ OutputIterator set_symmetric_difference(
 
 TEST(SetSymmetricDifferenceTests, TestSetSymmetricDifferenceDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::set_symmetric_difference(thrust::retag<my_tag>(vec.begin()),
@@ -77,6 +81,8 @@ TYPED_TEST(SetSymmetricDifferenceTests, TestSetSymmetricDifferenceSimple)
 {
     using Vector   = typename TestFixture::input_type;
     using Iterator = typename Vector::iterator;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector a(4), b(5);
 
@@ -110,25 +116,24 @@ TYPED_TEST(SetSymmetricDifferencePrimitiveTests, TestSetSymmetricDifference)
 {
     using T = typename TestFixture::input_type;
 
-    const std::vector<size_t> sizes = get_sizes();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
+
         size_t expanded_sizes[]   = {0, 1, size / 2, size, size + 1, 2 * size};
         size_t num_expanded_sizes = sizeof(expanded_sizes) / sizeof(size_t);
 
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> random = get_random_data<unsigned short int>(
                 size + *thrust::max_element(expanded_sizes, expanded_sizes + num_expanded_sizes),
                 0,
                 255,
-                seed_value
+                seed
             );
 
             thrust::host_vector<T> h_a(random.begin(), random.begin() + size);
@@ -174,19 +179,18 @@ TYPED_TEST(SetSymmetricDifferencePrimitiveTests, TestSetSymmetricDifferenceEquiv
 {
     using T = typename TestFixture::input_type;
 
-    const std::vector<size_t> sizes = get_sizes();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> temp = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
 
             thrust::host_vector<T> h_a = temp;
             thrust::sort(h_a.begin(), h_a.end());
@@ -218,19 +222,18 @@ TYPED_TEST(SetSymmetricDifferencePrimitiveTests, TestSetSymmetricDifferenceMulti
 {
     using T = typename TestFixture::input_type;
 
-    const std::vector<size_t> sizes = get_sizes();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> temp = get_random_data<T>(
-                2 * size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                2 * size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
 
             // restrict elements to [min,13)
             for(typename thrust::host_vector<T>::iterator i = temp.begin(); i != temp.end(); ++i)
@@ -273,37 +276,36 @@ TYPED_TEST(SetSymmetricDifferenceIntegerTests, TestSetSymmetricDifferenceKeyValu
     using U = typename TestFixture::input_type;
     typedef key_value<U, U> T;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
-    {
-        SCOPED_TRACE(testing::Message() << "with size = " << size);
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(auto size : get_sizes())
+    {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<U> h_keys_a = get_random_data<U>(
-                size, std::numeric_limits<U>::min(), std::numeric_limits<U>::max(), seed_value);
+                size, std::numeric_limits<U>::min(), std::numeric_limits<U>::max(), seed);
             thrust::host_vector<U> h_values_a = get_random_data<U>(
                 size,
                 std::numeric_limits<U>::min(),
                 std::numeric_limits<U>::max(),
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
 
             thrust::host_vector<U> h_keys_b = get_random_data<U>(
                 size,
                 std::numeric_limits<U>::min(),
                 std::numeric_limits<U>::max(),
-                seed_value + 2 * seed_value_addition
+                seed + 2 * seed_value_addition
             );
             thrust::host_vector<U> h_values_b = get_random_data<U>(
                 size,
                 std::numeric_limits<U>::min(),
                 std::numeric_limits<U>::max(),
-                seed_value + 3 * seed_value_addition
+                seed + 3 * seed_value_addition
             );
 
             thrust::host_vector<T> h_a(size), h_b(size);

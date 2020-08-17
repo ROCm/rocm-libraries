@@ -31,6 +31,8 @@ TESTS_DEFINE(PrimitiveMergeByKeyTests, NumericalTestsParams);
 
 TEST(MergeByKeyTests, UsingHip)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
 }
 
@@ -38,6 +40,8 @@ TYPED_TEST(MergeByKeyTests, MergeByKeySimple)
 {
     using Vector   = typename TestFixture::input_type;
     using Iterator = typename Vector::iterator;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector a_key(3), a_val(3), b_key(4), b_val(4);
 
@@ -112,6 +116,8 @@ thrust::pair<OutputIterator1, OutputIterator2> merge_by_key(my_system& system,
 
 TEST(MergeByKeyTests, MergeByKeyDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -150,6 +156,8 @@ thrust::pair<OutputIterator1, OutputIterator2> merge_by_key(my_tag,
 
 TEST(MergeByKeyTests, MergeByKeyDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::merge_by_key(thrust::retag<my_tag>(vec.begin()),
@@ -168,27 +176,27 @@ TYPED_TEST(PrimitiveMergeByKeyTests, TestMergeByKeyWithRandomData)
 {
     using T = typename TestFixture::input_type;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> random_keys = get_random_data<unsigned short int>(
                 size,
                 0,
                 255,
-                seed_value
+                seed
             );
             thrust::host_vector<T> random_vals = get_random_data<unsigned short int>(
                 size,
                 0,
                 255,
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
 
             size_t denominators[]   = {1, 2, 3, 4, 5, 6, 7, 8, 9};
@@ -263,40 +271,40 @@ TYPED_TEST(PrimitiveMergeByKeyTests, MergeByKeyToDiscardIterator)
 {
     using T = typename TestFixture::input_type;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_a_keys = get_random_data<T>(
                 size,
                 std::numeric_limits<T>::min(),
                 std::numeric_limits<T>::max(),
-                seed_value
+                seed
             );
             thrust::host_vector<T> h_b_keys = get_random_data<T>(
                 size,
                 std::numeric_limits<T>::min(),
                 std::numeric_limits<T>::max(),
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
 
             thrust::host_vector<T> h_a_vals = get_random_data<T>(
                 size,
                 std::numeric_limits<T>::min(),
                 std::numeric_limits<T>::max(),
-                seed_value + 2 * seed_value_addition
+                seed + 2 * seed_value_addition
             );
             thrust::host_vector<T> h_b_vals = get_random_data<T>(
                 size,
                 std::numeric_limits<T>::min(),
                 std::numeric_limits<T>::max(),
-                seed_value + 3 * seed_value_addition
+                seed + 3 * seed_value_addition
             );
 
             thrust::stable_sort(h_a_keys.begin(), h_a_keys.end());
@@ -343,27 +351,27 @@ TYPED_TEST(PrimitiveMergeByKeyTests, MergeByKeyDescending)
 {
     using T = typename TestFixture::input_type;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> random_keys = get_random_data<unsigned short int>(
                 size,
                 0,
                 255,
-                seed_value
+                seed
             );
             thrust::host_vector<T> random_vals = get_random_data<unsigned short int>(
                 size,
                 0,
                 255,
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
 
             size_t denominators[]   = {1, 2, 3, 4, 5, 6, 7, 8, 9};

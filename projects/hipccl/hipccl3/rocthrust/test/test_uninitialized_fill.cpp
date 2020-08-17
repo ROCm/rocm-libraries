@@ -34,6 +34,8 @@ void uninitialized_fill(my_system& system, ForwardIterator, ForwardIterator, con
 
 TEST(UninitializedFillTests, TestUninitializedFillDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -50,6 +52,8 @@ void uninitialized_fill(my_tag, ForwardIterator first, ForwardIterator, const T&
 
 TEST(UninitializedFillTests, TestUninitializedFillDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::uninitialized_fill(
@@ -67,6 +71,8 @@ ForwardIterator uninitialized_fill_n(my_system& system, ForwardIterator first, S
 
 TEST(UninitializedFillTests, TestUninitializedFillNDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -84,6 +90,8 @@ ForwardIterator uninitialized_fill_n(my_tag, ForwardIterator first, Size, const 
 
 TEST(UninitializedFillTests, TestUninitializedFillNDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -96,6 +104,8 @@ TYPED_TEST(UninitializedFillTests, TestUninitializedFillPOD)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector v(5);
     v[0] = T(0);
@@ -184,6 +194,8 @@ TEST(UninitializedFillTests, TestUninitializedFillNonPOD)
     using T                 = CopyConstructTest;
     thrust::device_ptr<T> v = thrust::device_malloc<T>(5);
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     T exemplar;
     ASSERT_EQ(false, exemplar.copy_constructed_on_device);
     ASSERT_EQ(false, exemplar.copy_constructed_on_host);
@@ -211,6 +223,8 @@ TYPED_TEST(UninitializedFillTests, TestUninitializedFillNPOD)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector v(5);
     v[0] = T(0);
@@ -272,6 +286,8 @@ TEST(UninitializedFillTests, TestUninitializedFillNNonPOD)
 {
     using T                 = CopyConstructTest;
     thrust::device_ptr<T> v = thrust::device_malloc<T>(5);
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     T exemplar;
     ASSERT_EQ(false, exemplar.copy_constructed_on_device);

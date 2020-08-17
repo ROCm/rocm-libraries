@@ -35,6 +35,8 @@ uninitialized_copy(my_system& system, InputIterator, InputIterator, ForwardItera
 
 TEST(UninitializedCopyTests, TestUninitializedCopyDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -52,6 +54,8 @@ ForwardIterator uninitialized_copy(my_tag, InputIterator, InputIterator, Forward
 
 TEST(UninitializedCopyTests, TestUninitializedCopyDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::uninitialized_copy(thrust::retag<my_tag>(vec.begin()),
@@ -70,6 +74,8 @@ ForwardIterator uninitialized_copy_n(my_system& system, InputIterator, Size, For
 
 TEST(UninitializedCopyTests, TestUninitializedCopyNDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -87,6 +93,8 @@ ForwardIterator uninitialized_copy_n(my_tag, InputIterator, Size, ForwardIterato
 
 TEST(UninitializedCopyTests, TestUninitializedCopyNDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::uninitialized_copy_n(
@@ -99,6 +107,8 @@ TYPED_TEST(UninitializedCopyTests, TestUninitializedCopySimplePOD)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector v1(5);
     v1[0] = T(0);
@@ -121,6 +131,8 @@ TYPED_TEST(UninitializedCopyTests, TestUninitializedCopyNSimplePOD)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector v1(5);
     v1[0] = T(0);
@@ -226,6 +238,8 @@ TEST(UninitializedCopyTests, TestUninitializedCopyNonPODHost)
 {
     using T = CopyConstructTest;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::host_vector<T> v1(5), v2(5);
 
     T x;
@@ -246,6 +260,8 @@ TEST(UninitializedCopyTests, TestUninitializedCopyNonPODHost)
 TEST(UninitializedCopyTests, TestUninitializedCopyNNonPODHost)
 {
     using T = CopyConstructTest;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     thrust::host_vector<T> v1(5), v2(5);
 

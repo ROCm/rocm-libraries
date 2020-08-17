@@ -33,6 +33,8 @@ TYPED_TEST(FillTests, TestFillSimple)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector v(5);
     v[0] = T(0);
     v[1] = T(1);
@@ -75,6 +77,8 @@ TYPED_TEST(FillTests, TestFillSimple)
 
 TEST(FillTests, TestFillDiscardIterator)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     // there's no result to check because fill returns void
     thrust::fill(thrust::discard_iterator<thrust::host_system_tag>(),
                  thrust::discard_iterator<thrust::host_system_tag>(10),
@@ -89,6 +93,8 @@ TYPED_TEST(FillTests, TestFillMixedTypes)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector v(4);
 
@@ -111,17 +117,18 @@ TYPED_TEST(FillPrimitiveTests, TestFill)
 {
     using T = typename TestFixture::input_type;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
     {
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
 
             thrust::device_vector<T> d_data = h_data;
 
@@ -171,6 +178,8 @@ TYPED_TEST(FillTests, TestFillNSimple)
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector v(5);
     v[0] = T(0);
     v[1] = T(1);
@@ -217,6 +226,8 @@ TYPED_TEST(FillTests, TestFillNSimple)
 
 TEST(FillTests, TestFillNDiscardIterator)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::discard_iterator<thrust::host_system_tag> h_result
         = thrust::fill_n(thrust::discard_iterator<thrust::host_system_tag>(), 10, 13);
 
@@ -234,6 +245,8 @@ TYPED_TEST(FillTests, TestFillNMixedTypes)
     using Vector   = typename TestFixture::input_type;
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector v(4);
 
@@ -258,17 +271,18 @@ TYPED_TEST(FillPrimitiveTests, TestFillN)
 {
     using T = typename TestFixture::input_type;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
     {
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
 
             thrust::device_vector<T> d_data = h_data;
 
@@ -315,6 +329,8 @@ TYPED_TEST(FillTests, TestFillZipIterator)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector v1(3, T(0));
     Vector v2(3, T(0));
     Vector v3(3, T(0));
@@ -339,6 +355,8 @@ TYPED_TEST(FillPrimitiveTests, TestFillTuple)
     using T     = typename TestFixture::input_type;
     using Tuple = typename thrust::tuple<T, T>;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::host_vector<Tuple>   h(3, Tuple(0, 0));
     thrust::device_vector<Tuple> d(3, Tuple(0, 0));
 
@@ -356,6 +374,8 @@ struct TypeWithTrivialAssigment
 TEST(FillTests, TestFillWithTrivialAssignment)
 {
     using T = TypeWithTrivialAssigment;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     thrust::host_vector<T>   h(1);
     thrust::device_vector<T> d(1);
@@ -416,6 +436,8 @@ TEST(FillTests, TestFillWithNonTrivialAssignment)
 {
     using T = TypeWithNonTrivialAssigment;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::host_vector<T>   h(1);
     thrust::device_vector<T> d(1);
 
@@ -450,6 +472,8 @@ void fill(my_system& system, ForwardIterator, ForwardIterator, const T&)
 
 TEST(FillTests, TestFillDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -466,6 +490,8 @@ void fill(my_tag, ForwardIterator first, ForwardIterator, const T&)
 
 TEST(FillTests, TestFillDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::fill(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), 0);
@@ -482,6 +508,8 @@ OutputIterator fill_n(my_system& system, OutputIterator first, Size, const T&)
 
 TEST(FillTests, TestFillNDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -499,6 +527,8 @@ OutputIterator fill_n(my_tag, OutputIterator first, Size, const T&)
 
 TEST(FillTests, TestFillNDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     thrust::device_vector<int> vec(1);
 
     thrust::fill_n(thrust::retag<my_tag>(vec.begin()), vec.size(), 0);

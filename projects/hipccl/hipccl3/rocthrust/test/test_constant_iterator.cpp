@@ -29,11 +29,15 @@ TESTS_DEFINE(ConstantIteratorTests, VectorSignedTestsParams);
 
 TEST(ConstantIteratorTests, UsingHip)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
 }
 
 TEST(ConstantIteratorTests, ConstantIteratorConstructFromConvertibleSystem)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     constant_iterator<int> default_system(13);
 
     constant_iterator<int, use_default, host_system_tag> host_system = default_system;
@@ -45,6 +49,8 @@ TEST(ConstantIteratorTests, ConstantIteratorConstructFromConvertibleSystem)
 
 TEST(ConstantIteratorTests, ConstantIteratorIncrement)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     constant_iterator<int> lhs(0, 0);
     constant_iterator<int> rhs(0, 0);
 
@@ -66,6 +72,8 @@ TEST(ConstantIteratorTests, ConstantIteratorIncrement)
 
 TEST(ConstantIteratorTests, ConstantIteratorComparison)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     constant_iterator<int> iter1(0);
     constant_iterator<int> iter2(0);
 
@@ -91,6 +99,8 @@ TEST(ConstantIteratorTests, ConstantIteratorComparison)
 
 TEST(ConstantIteratorTests, TestMakeConstantIterator)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     // test one argument version
     constant_iterator<int> iter0 = make_constant_iterator<int>(13);
 
@@ -110,6 +120,8 @@ TYPED_TEST(ConstantIteratorTests, MakeConstantIterator)
 
     using ConstIter = constant_iterator<int>;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector result(4);
 
     ConstIter first = make_constant_iterator<int>(7);
@@ -124,6 +136,8 @@ TYPED_TEST(ConstantIteratorTests, MakeConstantIterator)
 
 TYPED_TEST(ConstantIteratorTests, ConstantIteratorTransform)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
@@ -152,6 +166,8 @@ TYPED_TEST(ConstantIteratorTests, ConstantIteratorTransform)
 
 TYPED_TEST(ConstantIteratorTests, ConstantIteratorReduce)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
