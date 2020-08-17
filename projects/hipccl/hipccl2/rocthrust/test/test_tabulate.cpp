@@ -34,6 +34,8 @@ void tabulate(my_system& system, ForwardIterator, ForwardIterator, UnaryOperatio
 
 TEST(TabulateTests, TestTabulateDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -50,6 +52,8 @@ void tabulate(my_tag, ForwardIterator first, ForwardIterator, UnaryOperation)
 
 TEST(TabulateTests, TestTabulateDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::tabulate(thrust::retag<my_tag>(vec.begin()),
@@ -64,6 +68,8 @@ TYPED_TEST(TabulateTests, TestTabulateSimple)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
     using namespace thrust::placeholders;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector v(5);
 
@@ -107,6 +113,8 @@ TYPED_TEST(TabulateTests, TestTabulateSimpleNonConstOP)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector v(5);
 
     thrust::tabulate(v.begin(), v.end(), nonconst_op<T>());
@@ -122,6 +130,8 @@ TYPED_TEST(TabulatePrimitiveTests, TestTabulate)
 {
     using T = typename TestFixture::input_type;
     using namespace thrust::placeholders;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     for(auto size : get_sizes())
     {
@@ -148,6 +158,8 @@ TYPED_TEST(TabulatePrimitiveTests, TestTabulate)
 
 TEST(TabulateTests, TestTabulateToDiscardIterator)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     for(auto size : get_sizes())
     {
         thrust::tabulate(thrust::discard_iterator<thrust::device_system_tag>(),

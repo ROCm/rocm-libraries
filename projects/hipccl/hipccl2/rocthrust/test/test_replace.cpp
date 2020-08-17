@@ -28,6 +28,8 @@ TESTS_DEFINE(PrimitiveReplaceTests, NumericalTestsParams);
 
 TEST(ReplaceTests, UsingHip)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
 }
 
@@ -35,6 +37,8 @@ TYPED_TEST(ReplaceTests, SimpleReplace)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector data(5);
     data[0] = 1;
@@ -64,6 +68,8 @@ void replace(my_system& system, ForwardIterator, ForwardIterator, const T&, cons
 
 TEST(ReplaceTests, ValidateDispatch)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -80,6 +86,8 @@ void replace(my_tag, ForwardIterator first, ForwardIterator, const T&, const T&)
 
 TEST(ReplaceTests, ValidateDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::replace(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.begin()), 0, 0);
@@ -91,17 +99,17 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceWithRandomDataAndDifferentSizes)
 {
     using T = typename TestFixture::input_type;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
-        {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-            thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10, seed_value);
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+            thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10, seed);
             thrust::device_vector<T> d_data = h_data;
 
             T new_value = (T)0;
@@ -127,6 +135,8 @@ TYPED_TEST(ReplaceTests, SimpleCopyReplace)
     using Vector      = typename TestFixture::input_type;
     using T           = typename Vector::value_type;
     const size_t size = 5;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector data(size);
     data[0] = 1;
@@ -165,6 +175,8 @@ OutputIterator replace_copy(
 
 TEST(ReplaceTests, ReplaceCopyValidateDispatch)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -183,6 +195,8 @@ replace_copy(my_tag, InputIterator, InputIterator, OutputIterator result, const 
 
 TEST(ReplaceTests, ReplaceCopyValidateDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::replace_copy(thrust::retag<my_tag>(vec.begin()),
@@ -198,17 +212,17 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceCopyWithRandomData)
 {
     using T = typename TestFixture::input_type;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
-        {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-            thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10, seed_value);
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+            thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10, seed);
             thrust::device_vector<T> d_data = h_data;
 
             T old_value = (T)0;
@@ -237,17 +251,17 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceCopyToDiscardIterator)
 {
     using T = typename TestFixture::input_type;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
-        {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-            thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10, seed_value);
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+            thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10, seed);
             thrust::device_vector<T> d_data = h_data;
 
             T old_value = 0;
@@ -290,6 +304,8 @@ TYPED_TEST(ReplaceTests, ReplaceIfSimple)
     using T      = typename Vector::value_type;
     size_t size  = 5;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector data(size);
     data[0] = 1;
     data[1] = 3;
@@ -322,6 +338,8 @@ void replace_if(my_system& system, ForwardIterator, ForwardIterator, Predicate, 
 
 TEST(ReplaceTests, ValidateDispatchReplaceIf)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -347,6 +365,8 @@ struct always_true
 
 TEST(ReplaceTests, ValidateDispatchImplicitReplaceIf)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::replace_if(thrust::retag<my_tag>(vec.begin()),
@@ -362,6 +382,8 @@ TYPED_TEST(ReplaceTests, ReplaceIfStencilSimple)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
     size_t size  = 5;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector data(5);
     data[0] = 1;
@@ -403,6 +425,8 @@ void replace_if(
 
 TEST(ReplaceTests, ReplaceIfStencilDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -419,6 +443,8 @@ void replace_if(my_tag, ForwardIterator first, ForwardIterator, InputIterator, P
 
 TEST(ReplaceTests, ReplaceIfStencilDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::replace_if(thrust::retag<my_tag>(vec.begin()),
@@ -434,17 +460,17 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceIfWithRandomData)
 {
     using T = typename TestFixture::input_type;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
-        {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-            thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10, seed_value);
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+            thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10, seed);
             thrust::device_vector<T> d_data = h_data;
 
             thrust::replace_if(h_data.begin(), h_data.end(), less_than_five<T>(), (T)0);
@@ -464,6 +490,8 @@ TYPED_TEST(ReplaceTests, ReplaceCopyIfSimple)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
     size_t size  = 5;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector data(5);
     data[0] = 1;
@@ -500,6 +528,8 @@ OutputIterator replace_copy_if(
 
 TEST(ReplaceTests, ReplaceCopyIfDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -518,6 +548,8 @@ replace_copy_if(my_tag, InputIterator, InputIterator, OutputIterator result, Pre
 
 TEST(ReplaceTests, ReplaceCopyIfDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::replace_copy_if(thrust::retag<my_tag>(vec.begin()),
@@ -534,6 +566,8 @@ TYPED_TEST(ReplaceTests, ReplaceCopyIfStencilSimple)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
     size_t size  = 5;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector data(5);
     data[0] = 1;
@@ -587,6 +621,8 @@ OutputIterator replace_copy_if(my_system& system,
 
 TEST(ReplaceTests, TestReplaceCopyIfStencilDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -615,6 +651,8 @@ OutputIterator replace_copy_if(my_tag,
 
 TEST(ReplaceTests, ReplaceCopyIfStencilDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     thrust::replace_copy_if(thrust::retag<my_tag>(vec.begin()),
@@ -631,17 +669,17 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceCopyIfWithRandomData)
 {
     using T = typename TestFixture::input_type;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
-        {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-            thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10, seed_value);
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+            thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10, seed);
             thrust::device_vector<T> d_data = h_data;
 
             thrust::host_vector<T>   h_dest(size);
@@ -667,17 +705,17 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceCopyIfToDiscardIteratorRandomData)
 {
     using T = typename TestFixture::input_type;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
-        {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-            thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10, seed_value);
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+            thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10, seed);
             thrust::device_vector<T> d_data = h_data;
 
             thrust::discard_iterator<> h_result
@@ -706,20 +744,20 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceCopyIfStencil)
 {
     using T = typename TestFixture::input_type;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
-        {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-            thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10, seed_value);
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+            thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10, seed);
             thrust::device_vector<T> d_data = h_data;
 
-            thrust::host_vector<T>   h_stencil = get_random_data<T>(size, 0, 10, seed_value + seed_value_addition);
+            thrust::host_vector<T>   h_stencil = get_random_data<T>(size, 0, 10, seed + seed_value_addition);
             thrust::device_vector<T> d_stencil = h_stencil;
 
             thrust::host_vector<T>   h_dest(size);
@@ -753,20 +791,20 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceCopyIfStencilToDiscardIteratorRandomDat
 {
     using T = typename TestFixture::input_type;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
-        {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-            thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10, seed_value);
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+            thrust::host_vector<T>   h_data = get_random_data<T>(size, 0, 10, seed);
             thrust::device_vector<T> d_data = h_data;
 
-            thrust::host_vector<T>   h_stencil = get_random_data<T>(size, 0, 10, seed_value + seed_value_addition);
+            thrust::host_vector<T>   h_stencil = get_random_data<T>(size, 0, 10, seed + seed_value_addition);
             thrust::device_vector<T> d_stencil = h_stencil;
 
             thrust::discard_iterator<> h_result

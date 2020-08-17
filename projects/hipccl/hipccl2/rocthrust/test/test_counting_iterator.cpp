@@ -25,6 +25,8 @@
 
 TEST(CountingIteratorTests, TestCountingIteratorCopyConstructor)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::counting_iterator<int> iter0(100);
 
     thrust::counting_iterator<int> iter1(iter0);
@@ -42,6 +44,8 @@ TEST(CountingIteratorTests, TestCountingIteratorCopyConstructor)
 
 TEST(CountingIteratorTests, TestCountingIteratorIncrement)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::counting_iterator<int> iter(0);
 
     ASSERT_EQ(*iter, 0);
@@ -66,6 +70,8 @@ TEST(CountingIteratorTests, TestCountingIteratorIncrement)
 
 TEST(CountingIteratorTests, TestCountingIteratorComparison)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::counting_iterator<int> iter1(0);
     thrust::counting_iterator<int> iter2(0);
 
@@ -91,6 +97,8 @@ TEST(CountingIteratorTests, TestCountingIteratorComparison)
 
 TEST(CountingIteratorTests, TestCountingIteratorFloatComparison)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::counting_iterator<float> iter1(0);
     thrust::counting_iterator<float> iter2(0);
 
@@ -154,6 +162,8 @@ TEST(CountingIteratorTests, TestCountingIteratorFloatComparison)
 
 TEST(CountingIteratorTests, TestCountingIteratorDistance)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::counting_iterator<int> iter1(0);
     thrust::counting_iterator<int> iter2(5);
 
@@ -174,6 +184,8 @@ TEST(CountingIteratorTests, TestCountingIteratorDistance)
 
 TEST(CountingIteratorTests, TestCountingIteratorUnsignedType)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::counting_iterator<unsigned int> iter0(0);
     thrust::counting_iterator<unsigned int> iter1(5);
 
@@ -186,20 +198,20 @@ TEST(CountingIteratorTests, TestCountingIteratorUnsignedType)
 
 TEST(CountingIteratorTests, TestCountingIteratorLowerBound)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     size_t       n = 10000;
     const size_t M = 100;
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(auto seed : get_seeds())
     {
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
         thrust::host_vector<unsigned int> h_data
             = get_random_data<unsigned int>(n,
                                             std::numeric_limits<unsigned int>::min(),
                                             std::numeric_limits<unsigned int>::max(),
-                                            seed_value);
+                                            seed);
         for(unsigned int i = 0; i < n; ++i)
             h_data[i] %= M;
 
@@ -227,6 +239,8 @@ TEST(CountingIteratorTests, TestCountingIteratorDifference)
 {
     using Iterator   = typename thrust::counting_iterator<thrust::detail::uint64_t>;
     using Difference = typename thrust::iterator_difference<Iterator>::type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Difference diff = std::numeric_limits<thrust::detail::uint32_t>::max() + 1;
 

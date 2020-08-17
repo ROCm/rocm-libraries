@@ -46,65 +46,63 @@ TYPED_TEST(ZipIteratorReduceByKeyTests, TestZipIteratorReduceByKey)
 {
     using T = typename TestFixture::input_type;
 
-    const std::vector<size_t> sizes = get_sizes();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
-        using namespace thrust;
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_data0 = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
             thrust::host_vector<T> h_data1 = get_random_data<T>(
                 size,
                 std::numeric_limits<T>::min(),
                 std::numeric_limits<T>::max(),
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
             thrust::host_vector<T> h_data2 = get_random_data<T>(
                 size,
                 std::numeric_limits<T>::min(),
                 std::numeric_limits<T>::max(),
-                seed_value + 2 * seed_value_addition
+                seed + 2 * seed_value_addition
             );
 
-            device_vector<T> d_data0 = h_data0;
-            device_vector<T> d_data1 = h_data1;
-            device_vector<T> d_data2 = h_data2;
+            thrust::device_vector<T> d_data0 = h_data0;
+            thrust::device_vector<T> d_data1 = h_data1;
+            thrust::device_vector<T> d_data2 = h_data2;
 
-            typedef tuple<T, T> Tuple;
+            typedef thrust::tuple<T, T> Tuple;
 
             // integer key, tuple value
             {
-                host_vector<T>   h_data3(size, 0);
-                host_vector<T>   h_data4(size, 0);
-                host_vector<T>   h_data5(size, 0);
-                device_vector<T> d_data3(size, 0);
-                device_vector<T> d_data4(size, 0);
-                device_vector<T> d_data5(size, 0);
+                thrust::host_vector<T>   h_data3(size, 0);
+                thrust::host_vector<T>   h_data4(size, 0);
+                thrust::host_vector<T>   h_data5(size, 0);
+                thrust::device_vector<T> d_data3(size, 0);
+                thrust::device_vector<T> d_data4(size, 0);
+                thrust::device_vector<T> d_data5(size, 0);
 
                 // run on host
-                reduce_by_key(h_data0.begin(),
-                              h_data0.end(),
-                              make_zip_iterator(make_tuple(h_data1.begin(), h_data2.begin())),
-                              h_data3.begin(),
-                              make_zip_iterator(make_tuple(h_data4.begin(), h_data5.begin())),
-                              equal_to<T>(),
-                              TuplePlus<Tuple>());
+                thrust::reduce_by_key(
+                    h_data0.begin(), h_data0.end(),
+                    thrust::make_zip_iterator(thrust::make_tuple(h_data1.begin(), h_data2.begin())),
+                    h_data3.begin(),
+                    thrust::make_zip_iterator(thrust::make_tuple(h_data4.begin(), h_data5.begin())),
+                    thrust::equal_to<T>(),
+                    TuplePlus<Tuple>());
 
                 // run on device
-                reduce_by_key(d_data0.begin(),
-                              d_data0.end(),
-                              make_zip_iterator(make_tuple(d_data1.begin(), d_data2.begin())),
-                              d_data3.begin(),
-                              make_zip_iterator(make_tuple(d_data4.begin(), d_data5.begin())),
-                              equal_to<T>(),
-                              TuplePlus<Tuple>());
+                thrust::reduce_by_key(
+                    d_data0.begin(), d_data0.end(),
+                    thrust::make_zip_iterator(thrust::make_tuple(d_data1.begin(), d_data2.begin())),
+                    d_data3.begin(),
+                    thrust::make_zip_iterator(thrust::make_tuple(d_data4.begin(), d_data5.begin())),
+                    thrust::equal_to<T>(),
+                    TuplePlus<Tuple>());
 
                 ASSERT_EQ(h_data3, d_data3);
                 ASSERT_EQ(h_data4, d_data4);
@@ -126,31 +124,31 @@ TYPED_TEST(ZipIteratorReduceByKeyTests, TestZipIteratorReduceByKey)
 
             // tuple key, tuple value
             {
-                host_vector<T>   h_data3(size, 0);
-                host_vector<T>   h_data4(size, 0);
-                host_vector<T>   h_data5(size, 0);
-                host_vector<T>   h_data6(size, 0);
-                device_vector<T> d_data3(size, 0);
-                device_vector<T> d_data4(size, 0);
-                device_vector<T> d_data5(size, 0);
-                device_vector<T> d_data6(size, 0);
+                thrust::host_vector<T>   h_data3(size, 0);
+                thrust::host_vector<T>   h_data4(size, 0);
+                thrust::host_vector<T>   h_data5(size, 0);
+                thrust::host_vector<T>   h_data6(size, 0);
+                thrust::device_vector<T> d_data3(size, 0);
+                thrust::device_vector<T> d_data4(size, 0);
+                thrust::device_vector<T> d_data5(size, 0);
+                thrust::device_vector<T> d_data6(size, 0);
 
                 // run on host
-                reduce_by_key(make_zip_iterator(make_tuple(h_data0.begin(), h_data0.begin())),
-                              make_zip_iterator(make_tuple(h_data0.end(), h_data0.end())),
-                              make_zip_iterator(make_tuple(h_data1.begin(), h_data2.begin())),
-                              make_zip_iterator(make_tuple(h_data3.begin(), h_data4.begin())),
-                              make_zip_iterator(make_tuple(h_data5.begin(), h_data6.begin())),
-                              equal_to<Tuple>(),
+                reduce_by_key(thrust::make_zip_iterator(thrust::make_tuple(h_data0.begin(), h_data0.begin())),
+                              thrust::make_zip_iterator(thrust::make_tuple(h_data0.end(), h_data0.end())),
+                              thrust::make_zip_iterator(thrust::make_tuple(h_data1.begin(), h_data2.begin())),
+                              thrust::make_zip_iterator(thrust::make_tuple(h_data3.begin(), h_data4.begin())),
+                              thrust::make_zip_iterator(thrust::make_tuple(h_data5.begin(), h_data6.begin())),
+                              thrust::equal_to<Tuple>(),
                               TuplePlus<Tuple>());
 
                 // run on device
-                reduce_by_key(make_zip_iterator(make_tuple(d_data0.begin(), d_data0.begin())),
-                              make_zip_iterator(make_tuple(d_data0.end(), d_data0.end())),
-                              make_zip_iterator(make_tuple(d_data1.begin(), d_data2.begin())),
-                              make_zip_iterator(make_tuple(d_data3.begin(), d_data4.begin())),
-                              make_zip_iterator(make_tuple(d_data5.begin(), d_data6.begin())),
-                              equal_to<Tuple>(),
+                reduce_by_key(thrust::make_zip_iterator(thrust::make_tuple(d_data0.begin(), d_data0.begin())),
+                              thrust::make_zip_iterator(thrust::make_tuple(d_data0.end(), d_data0.end())),
+                              thrust::make_zip_iterator(thrust::make_tuple(d_data1.begin(), d_data2.begin())),
+                              thrust::make_zip_iterator(thrust::make_tuple(d_data3.begin(), d_data4.begin())),
+                              thrust::make_zip_iterator(thrust::make_tuple(d_data5.begin(), d_data6.begin())),
+                              thrust::equal_to<Tuple>(),
                               TuplePlus<Tuple>());
 
                 ASSERT_EQ(h_data3, d_data3);

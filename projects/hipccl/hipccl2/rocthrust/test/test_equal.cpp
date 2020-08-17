@@ -31,6 +31,8 @@ TYPED_TEST(EqualTests, TestEqualSimple)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector v1(5);
     Vector v2(5);
     v1[0] = T(5);
@@ -61,21 +63,22 @@ TYPED_TEST(EqualsPrimitiveTests, TestEqual)
 {
     using T = typename TestFixture::input_type;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
     {
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_data1 = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
             thrust::host_vector<T> h_data2 = get_random_data<T>(
                 size, std::numeric_limits<T>::min(),
                 std::numeric_limits<T>::max(),
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
 
             thrust::device_vector<T> d_data1 = h_data1;
@@ -133,6 +136,8 @@ bool equal(my_system& system, InputIterator1, InputIterator1, InputIterator2)
 
 TEST(EqualTests, TestEqualDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -150,6 +155,8 @@ bool equal(my_tag, InputIterator1 first, InputIterator1, InputIterator2)
 
 TEST(EqualTests, TestEqualDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     thrust::device_vector<int> vec(1);
 
     thrust::equal(thrust::retag<my_tag>(vec.begin()),

@@ -84,6 +84,8 @@ TYPED_TEST(SortPermutationIteratorsTests, TestSortPermutationIterator)
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector A(10);
     A[0] = T(2);
     A[1] = T(9);
@@ -118,6 +120,8 @@ TYPED_TEST(SortPermutationIteratorsTests, TestStableSortPermutationIterator)
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector A(10);
     A[0] = T(2);
     A[1] = T(9);
@@ -151,6 +155,8 @@ TYPED_TEST(SortPermutationIteratorsTests, TestSortByKeyPermutationIterator)
     using Vector    = typename TestFixture::input_type;
     using ValueType = typename Vector::value_type;
     using Iterator  = typename Vector::iterator;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector A(10), B(10);
     A[0] = ValueType(2);
@@ -207,6 +213,8 @@ TYPED_TEST(SortPermutationIteratorsTests, TestStableSortByKeyPermutationIterator
     using Vector    = typename TestFixture::input_type;
     using ValueType = typename Vector::value_type;
     using Iterator  = typename Vector::iterator;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector A(10), B(10);
     A[0] = ValueType(2);

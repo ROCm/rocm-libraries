@@ -28,37 +28,36 @@ TYPED_TEST(SetIntersectionKeyValueTests, TestSetIntersectionKeyValue)
     using U = typename TestFixture::input_type;
     using T = key_value<U, U>;
 
-    const std::vector<size_t> sizes = get_sizes();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<U> h_keys_a = get_random_data<U>(
-                size, std::numeric_limits<U>::min(), std::numeric_limits<U>::max(), seed_value);
+                size, std::numeric_limits<U>::min(), std::numeric_limits<U>::max(), seed);
             thrust::host_vector<U> h_values_a = get_random_data<U>(
                 size,
                 std::numeric_limits<U>::min(),
                 std::numeric_limits<U>::max(),
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
 
             thrust::host_vector<U> h_keys_b = get_random_data<U>(
                 size,
                 std::numeric_limits<U>::min(),
                 std::numeric_limits<U>::max(),
-                seed_value + 2 * seed_value_addition
+                seed + 2 * seed_value_addition
             );
             thrust::host_vector<U> h_values_b = get_random_data<U>(
                 size,
                 std::numeric_limits<U>::min(),
                 std::numeric_limits<U>::max(),
-                seed_value + 3 * seed_value_addition
+                seed + 3 * seed_value_addition
             );
 
             thrust::host_vector<T> h_a(size), h_b(size);

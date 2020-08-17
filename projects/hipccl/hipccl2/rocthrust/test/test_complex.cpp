@@ -24,14 +24,14 @@ TESTS_DEFINE(ComplexTests, FloatTestsParams);
 TYPED_TEST(ComplexTests, TestComplexConstructors)
 {
     using T = typename TestFixture::input_type;
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto seed : get_seeds())
     {
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-
-        thrust::host_vector<T> data = get_random_data<T>(2, T(-1000), T(1000), seed_value);
+        thrust::host_vector<T> data = get_random_data<T>(2, T(-1000), T(1000), seed);
 
         thrust::complex<T>     a(data[0], data[1]);
         thrust::complex<T>     b(a);
@@ -67,15 +67,15 @@ TYPED_TEST(ComplexTests, TestComplexConstructors)
 TYPED_TEST(ComplexTests, TestComplexGetters)
 {
     using T = typename TestFixture::input_type;
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
-    {
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto seed : get_seeds())
+    {
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
         thrust::host_vector<T> data = get_random_data<T>(
-            2, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            2, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
 
         thrust::complex<T> z(data[0], data[1]);
 
@@ -102,16 +102,16 @@ TYPED_TEST(ComplexTests, TestComplexGetters)
 TYPED_TEST(ComplexTests, TestComplexMemberOperators)
 {
     using T = typename TestFixture::input_type;
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto seed : get_seeds())
     {
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
+        thrust::host_vector<T> data_a = get_random_data<T>(2, 10000, 10000, seed);
 
-        thrust::host_vector<T> data_a = get_random_data<T>(2, 10000, 10000, seed_value);
-
-        thrust::host_vector<T> data_b = get_random_data<T>(2, 10000, 10000, seed_value + seed_value_addition);
+        thrust::host_vector<T> data_b = get_random_data<T>(2, 10000, 10000, seed + seed_value_addition);
 
         thrust::complex<T> a(data_a[0], data_a[1]);
         thrust::complex<T> b(data_b[0], data_b[1]);
@@ -143,14 +143,14 @@ TYPED_TEST(ComplexTests, TestComplexMemberOperators)
 TYPED_TEST(ComplexTests, TestComplexBasicArithmetic)
 {
     using T = typename TestFixture::input_type;
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto seed : get_seeds())
     {
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-
-        thrust::host_vector<T> data = get_random_data<T>(2, T(-100), T(100), seed_value);
+        thrust::host_vector<T> data = get_random_data<T>(2, T(-100), T(100), seed);
 
         thrust::complex<T> a(data[0], data[1]);
         std::complex<T>    b(a);
@@ -175,16 +175,16 @@ TYPED_TEST(ComplexTests, TestComplexBasicArithmetic)
 TYPED_TEST(ComplexTests, TestComplexBinaryArithmetic)
 {
     using T = typename TestFixture::input_type;
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto seed : get_seeds())
     {
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
+        thrust::host_vector<T> data_a = get_random_data<T>(2, -10000, 10000, seed);
 
-        thrust::host_vector<T> data_a = get_random_data<T>(2, -10000, 10000, seed_value);
-
-        thrust::host_vector<T> data_b = get_random_data<T>(2, -10000, 10000, seed_value + seed_value_addition);
+        thrust::host_vector<T> data_b = get_random_data<T>(2, -10000, 10000, seed + seed_value_addition);
 
         thrust::complex<T> a(data_a[0], data_a[1]);
         thrust::complex<T> b(data_b[0], data_b[1]);
@@ -210,15 +210,15 @@ TYPED_TEST(ComplexTests, TestComplexBinaryArithmetic)
 TYPED_TEST(ComplexTests, TestComplexUnaryArithmetic)
 {
     using T = typename TestFixture::input_type;
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
-    {
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto seed : get_seeds())
+    {
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
         thrust::host_vector<T> data_a = get_random_data<T>(
-            2, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            2, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
 
         thrust::complex<T> a(data_a[0], data_a[1]);
 
@@ -230,14 +230,14 @@ TYPED_TEST(ComplexTests, TestComplexUnaryArithmetic)
 TYPED_TEST(ComplexTests, TestComplexExponentialFunctions)
 {
     using T = typename TestFixture::input_type;
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto seed : get_seeds())
     {
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-
-        thrust::host_vector<T> data_a = get_random_data<T>(2, -100, 100, seed_value);
+        thrust::host_vector<T> data_a = get_random_data<T>(2, -100, 100, seed);
 
         thrust::complex<T> a(data_a[0], data_a[1]);
         std::complex<T>    b(a);
@@ -251,16 +251,16 @@ TYPED_TEST(ComplexTests, TestComplexExponentialFunctions)
 TYPED_TEST(ComplexTests, TestComplexPowerFunctions)
 {
     using T = typename TestFixture::input_type;
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto seed : get_seeds())
     {
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
+        thrust::host_vector<T> data_a = get_random_data<T>(2, -100, 100, seed);
 
-        thrust::host_vector<T> data_a = get_random_data<T>(2, -100, 100, seed_value);
-
-        thrust::host_vector<T> data_b = get_random_data<T>(2, -100, 100, seed_value + seed_value_addition);
+        thrust::host_vector<T> data_b = get_random_data<T>(2, -100, 100, seed + seed_value_addition);
 
         thrust::complex<T> a(data_a[0], data_a[1]);
         thrust::complex<T> b(data_b[0], data_b[1]);
@@ -278,14 +278,14 @@ TYPED_TEST(ComplexTests, TestComplexPowerFunctions)
 TYPED_TEST(ComplexTests, TestComplexTrigonometricFunctions)
 {
     using T = typename TestFixture::input_type;
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto seed : get_seeds())
     {
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-
-        thrust::host_vector<T> data_a = get_random_data<T>(2, T(-1), T(1), seed_value);
+        thrust::host_vector<T> data_a = get_random_data<T>(2, T(-1), T(1), seed);
 
         thrust::complex<T> a(data_a[0], data_a[1]);
         std::complex<T>    c(a);
@@ -309,14 +309,14 @@ TYPED_TEST(ComplexTests, TestComplexTrigonometricFunctions)
 TYPED_TEST(ComplexTests, TestComplexStreamOperators)
 {
     using T = typename TestFixture::input_type;
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
+    for(auto seed : get_seeds())
     {
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-
-        thrust::host_vector<T> data_a = get_random_data<T>(2, T(-1000), T(1000), seed_value);
+        thrust::host_vector<T> data_a = get_random_data<T>(2, T(-1000), T(1000), seed);
 
         thrust::complex<T> a(data_a[0], data_a[1]);
         std::stringstream  out;

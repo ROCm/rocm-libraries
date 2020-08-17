@@ -170,12 +170,16 @@ class steady_timer
     {
         int const r = clock_gettime(CLOCK_MONOTONIC, &start_);
         assert(0 == r);
+        (void)r; // Silence unused variable 'r' in Release builds, when
+                 // the assertion evaporates.
     }
 
     void stop()
     {
         int const r = clock_gettime(CLOCK_MONOTONIC, &stop_);
         assert(0 == r);
+        (void)r; // Silence unused variable 'r' in Release builds, when
+                 // the assertion evaporates.
     }
 
     double seconds_elapsed()

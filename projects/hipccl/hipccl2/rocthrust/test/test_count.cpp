@@ -32,6 +32,8 @@ TYPED_TEST(CountTests, TestCountSimple)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector data(5);
     data[0] = T(1);
     data[1] = T(1);
@@ -48,17 +50,18 @@ TYPED_TEST(CountPrimitiveTests, TestCount)
 {
     using T = typename TestFixture::input_type;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
     {
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
             thrust::device_vector<T> d_data = h_data;
 
             size_t cpu_result = thrust::count(h_data.begin(), h_data.end(), T(5));
@@ -83,6 +86,8 @@ TYPED_TEST(CountTests, TestCountIfSimple)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector data(5);
     data[0] = 1;
     data[1] = 6;
@@ -98,17 +103,18 @@ TYPED_TEST(CountTests, TestCountIf)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
     {
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
             thrust::device_vector<T> d_data = h_data;
             size_t                   cpu_result
                 = thrust::count_if(h_data.begin(), h_data.end(), greater_than_five<T>());
@@ -124,6 +130,8 @@ TYPED_TEST(CountTests, TestCountFromConstIteratorSimple)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector data(5);
     data[0] = T(1);
@@ -146,6 +154,8 @@ int count(my_system& system, InputIterator, InputIterator, EqualityComparable x)
 
 TEST(CountTests, TestCountDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -162,6 +172,8 @@ int count(my_tag, InputIterator, InputIterator, EqualityComparable x)
 
 TEST(CountTests, TestCountDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     thrust::device_vector<int> vec(1);
 
     int result

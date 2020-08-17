@@ -208,10 +208,10 @@ thrust::complex<T> epsilonComplex()
 };
 
 template <typename T>
-thrust::host_vector<thrust::complex<T>> random_complex_samples(size_t size, unsigned int seed_value)
+thrust::host_vector<thrust::complex<T>> random_complex_samples(size_t size, unsigned int seed)
 {
     thrust::host_vector<T> real = get_random_data<T>(
-        2 * size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+        2 * size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
     thrust::host_vector<thrust::complex<T>> h_p1(size);
     for(size_t i = 0; i < size; i++)
     {
@@ -226,18 +226,18 @@ TYPED_TEST(ComplexTransformTests, TestComplexArithmeticTransform)
     using T    = typename TestFixture::input_type;
     using type = thrust::complex<T>;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
-        {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-            thrust::host_vector<type> h_p1 = random_complex_samples<T>(size, seed_value);
-            thrust::host_vector<type> h_p2 = random_complex_samples<T>(size, seed_value + seed_value_addition);
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+            thrust::host_vector<type> h_p1 = random_complex_samples<T>(size, seed);
+            thrust::host_vector<type> h_p2 = random_complex_samples<T>(size, seed + seed_value_addition);
             thrust::host_vector<type> h_result(size);
 
             thrust::device_vector<type> d_p1 = h_p1;
@@ -258,17 +258,17 @@ TYPED_TEST(ComplexTransformTests, TestComplexPlaneTransform)
     using T    = typename TestFixture::input_type;
     using type = thrust::complex<T>;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
-        {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-            thrust::host_vector<type> h_p1 = random_complex_samples<T>(size, seed_value);
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+            thrust::host_vector<type> h_p1 = random_complex_samples<T>(size, seed);
             thrust::host_vector<type> h_result(size);
 
             thrust::device_vector<type> d_p1 = h_p1;
@@ -286,18 +286,18 @@ TYPED_TEST(ComplexTransformTests, TestComplexPowerTransform)
     using T    = typename TestFixture::input_type;
     using type = thrust::complex<T>;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
-        {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-            thrust::host_vector<type> h_p1 = random_complex_samples<T>(size, seed_value);
-            thrust::host_vector<type> h_p2 = random_complex_samples<T>(size, seed_value + seed_value_addition);
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+            thrust::host_vector<type> h_p1 = random_complex_samples<T>(size, seed);
+            thrust::host_vector<type> h_p2 = random_complex_samples<T>(size, seed + seed_value_addition);
             thrust::host_vector<type> h_result(size);
 
             thrust::device_vector<type> d_p1 = h_p1;
@@ -320,17 +320,17 @@ TYPED_TEST(ComplexTransformTests, TestComplexExponentialTransform)
     using T    = typename TestFixture::input_type;
     using type = thrust::complex<T>;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
-        {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-            thrust::host_vector<type> h_p1 = random_complex_samples<T>(size, seed_value);
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+            thrust::host_vector<type> h_p1 = random_complex_samples<T>(size, seed);
             thrust::host_vector<type> h_result(size);
 
             thrust::device_vector<type> d_p1 = h_p1;
@@ -356,17 +356,17 @@ TYPED_TEST(ComplexTransformTests, TestComplexTrigonometricTransform)
     using T    = typename TestFixture::input_type;
     using type = thrust::complex<T>;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
-        {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-            thrust::host_vector<type> h_p1 = random_complex_samples<T>(size, seed_value);
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+            thrust::host_vector<type> h_p1 = random_complex_samples<T>(size, seed);
             thrust::host_vector<type> h_result(size);
 
             thrust::device_vector<type> d_p1 = h_p1;

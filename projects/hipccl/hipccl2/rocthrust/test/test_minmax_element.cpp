@@ -27,6 +27,8 @@ TYPED_TEST(MinmaxElementTests, TestMinmaxElementSimple)
 {
     using Vector = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector data(6);
     data[0] = 3;
     data[1] = 5;
@@ -45,6 +47,8 @@ TYPED_TEST(MinmaxElementTests, TestMinmaxElementWithTransform)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     // We cannot use unsigned types for this test case
     if(std::is_unsigned<T>::value)
@@ -74,17 +78,18 @@ TYPED_TEST(MinMaxElementPrimitiveTests, TestMinmaxElement)
 {
     using T = typename TestFixture::input_type;
 
-    const std::vector<size_t> sizes = get_sizes();
-    for(auto size : sizes)
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
     {
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
             thrust::device_vector<T> d_data = h_data;
 
             typename thrust::host_vector<T>::iterator   h_min;
@@ -127,6 +132,8 @@ TEST(MinmaxElementTests, TestMinmaxElementDispatchExplicit)
 {
     thrust::device_vector<int> vec(1);
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     my_system sys(0);
     thrust::minmax_element(sys, vec.begin(), vec.end());
 
@@ -143,6 +150,8 @@ minmax_element(my_tag, ForwardIterator first, ForwardIterator)
 
 TEST(MinmaxElementTests, TestMinmaxElementDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     thrust::device_vector<int> vec(1);
 
     thrust::minmax_element(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()));

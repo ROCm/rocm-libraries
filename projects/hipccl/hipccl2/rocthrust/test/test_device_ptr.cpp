@@ -35,6 +35,8 @@ struct mark_processed_functor
 
 TEST(DevicePtrTests, TestDevicePointerManipulation)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> data(5);
 
     thrust::device_ptr<int> begin(&data[0]);
@@ -82,6 +84,8 @@ TYPED_TEST(DevicePtrPrimitiveTests, MakeDevicePointer)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     T*                    raw_ptr = 0;
     thrust::device_ptr<T> p0      = thrust::device_pointer_cast(raw_ptr);
 
@@ -94,6 +98,8 @@ TYPED_TEST(DevicePtrTests, TestRawPointerCast)
 {
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector vec(3);
 
@@ -112,6 +118,8 @@ TYPED_TEST(DevicePtrTests, TestRawPointerCast)
 TYPED_TEST(DevicePtrPrimitiveTests, TestDevicePointerValue)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)

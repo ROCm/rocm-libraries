@@ -64,6 +64,8 @@ void _TestStableSortByKeyWithLargeKeys(void)
 
 TEST(StableSortByKeyLargeTests, TestStableSortByKeyWithLargeKeys)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     _TestStableSortByKeyWithLargeKeys<int, 4>();
     _TestStableSortByKeyWithLargeKeys<int, 8>();
     // XXX these take too long to compile
@@ -114,6 +116,8 @@ void _TestStableSortByKeyWithLargeValues(void)
 
 TEST(StableSortByKeyLargeTests, TestStableSortByKeyWithLargeValues)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     _TestStableSortByKeyWithLargeValues<int, 4>();
     _TestStableSortByKeyWithLargeValues<int, 8>();
     // XXX these take too long to compile
@@ -155,6 +159,8 @@ void _TestStableSortByKeyWithLargeKeysAndValues(void)
 
 TEST(StableSortByKeyLargeTests, TestStableSortByKeyWithLargeKeysAndValues)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     _TestStableSortByKeyWithLargeKeysAndValues<int, 4>();
     _TestStableSortByKeyWithLargeKeysAndValues<int, 8>();
     // XXX these take too long to compile,

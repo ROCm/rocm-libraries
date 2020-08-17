@@ -38,6 +38,8 @@ TYPED_TEST(PartitionPointVectorTests, TestPartitionPointSimple)
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector v(4);
     v[0] = 1;
     v[1] = 1;
@@ -61,16 +63,16 @@ TYPED_TEST(PartitionPointVectorTests, TestPartitionPoint)
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     const size_t n = (1 << 16) + 13;
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(auto seed : get_seeds())
     {
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
         Vector v = get_random_data<T>(
-            n, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            n, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
 
         Iterator ref = thrust::stable_partition(v.begin(), v.end(), is_even<T>());
 
@@ -89,6 +91,8 @@ __host__ __device__ ForwardIterator
 
 TEST(PartitionPointTests, TestPartitionPointDispatchExplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -107,6 +111,8 @@ __host__ __device__ ForwardIterator
 
 TEST(PartitionPointTests, TestPartitionPointDispatchImplicit)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     thrust::device_vector<int> vec(1);
 
     thrust::partition_point(

@@ -18,10 +18,14 @@
 #ifndef TEST_SEED_HPP_
 #define TEST_SEED_HPP_
 
-static constexpr int random_seeds_count = 2;
-static constexpr unsigned int seeds [] = {0, 2, 1000};
-static constexpr size_t seed_size = sizeof(seeds) / sizeof(seeds[0]);
+#include <random>
+#include <initializer_list>
 
-static constexpr unsigned int seed_value_addition = 100;
+using random_engine = std::minstd_rand;
+using seed_type = random_engine::result_type;
+
+static constexpr size_t rng_seed_count = ${RNG_SEED_COUNT};
+static const std::initializer_list<uint32_t> prng_seeds = { ${PRNG_SEEDS_INITIALIZER} };
+static constexpr seed_type seed_value_addition = 100;
 
 #endif // TEST_SEED_HPP_

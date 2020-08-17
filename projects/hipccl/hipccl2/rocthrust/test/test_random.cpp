@@ -241,6 +241,8 @@ struct ValidateDistributionUnqual
 
 TEST(RandomTests, UsingHip)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
 }
 
@@ -360,12 +362,16 @@ TEST(RandomTests, TestRanlux24BaseValidation)
 {
     typedef thrust::random::ranlux24_base Engine;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     TestEngineValidation<Engine, 7937952u>();
 }
 
 TEST(RandomTests, TestRanlux24BaseMin)
 {
     typedef thrust::random::ranlux24_base Engine;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     TestEngineMin<Engine>();
 }
@@ -374,12 +380,16 @@ TEST(RandomTests, TestRanlux24BaseMax)
 {
     typedef thrust::random::ranlux24_base Engine;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     TestEngineMax<Engine>();
 }
 
 TEST(RandomTests, TestRanlux24BaseSaveRestore)
 {
     typedef thrust::random::ranlux24_base Engine;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     TestEngineSaveRestore<Engine>();
 }
@@ -388,12 +398,16 @@ TEST(RandomTests, TestRanlux24BaseEqual)
 {
     typedef thrust::random::ranlux24_base Engine;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     TestEngineEqual<Engine>();
 }
 
 TEST(RandomTests, TestRanlux24BaseUnequal)
 {
     typedef thrust::random::ranlux24_base Engine;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     TestEngineUnequal<Engine>();
 }
@@ -402,12 +416,16 @@ TEST(RandomTests, TestRanlux48BaseValidation)
 {
     typedef thrust::random::ranlux48_base Engine;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     TestEngineValidation<Engine, 192113843633948ull>();
 }
 
 TEST(RandomTests, TestRanlux48BaseMin)
 {
     typedef thrust::random::ranlux48_base Engine;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     TestEngineMin<Engine>();
 }
@@ -416,12 +434,16 @@ TEST(RandomTests, TestRanlux48BaseMax)
 {
     typedef thrust::random::ranlux48_base Engine;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     TestEngineMax<Engine>();
 }
 
 TEST(RandomTests, TestRanlux48BaseSaveRestore)
 {
     typedef thrust::random::ranlux48_base Engine;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     TestEngineSaveRestore<Engine>();
 }
@@ -430,12 +452,16 @@ TEST(RandomTests, TestRanlux48BaseEqual)
 {
     typedef thrust::random::ranlux48_base Engine;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     TestEngineEqual<Engine>();
 }
 
 TEST(RandomTests, TestRanlux48BaseUnequal)
 {
     typedef thrust::random::ranlux48_base Engine;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     TestEngineUnequal<Engine>();
 }
@@ -444,12 +470,16 @@ TEST(RandomTests, TestMinstdRandValidation)
 {
     typedef thrust::random::minstd_rand Engine;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     TestEngineValidation<Engine, 399268537u>();
 }
 
 TEST(RandomTests, TestMinstdRandMin)
 {
     typedef thrust::random::minstd_rand Engine;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     TestEngineMin<Engine>();
 }
@@ -458,12 +488,16 @@ TEST(RandomTests, TestMinstdRandMax)
 {
     typedef thrust::random::minstd_rand Engine;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     TestEngineMax<Engine>();
 }
 
 TEST(RandomTests, TestMinstdRandSaveRestore)
 {
     typedef thrust::random::minstd_rand Engine;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     TestEngineSaveRestore<Engine>();
 }
@@ -472,12 +506,16 @@ TEST(RandomTests, TestMinstdRandEqual)
 {
     typedef thrust::random::minstd_rand Engine;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     TestEngineEqual<Engine>();
 }
 
 TEST(RandomTests, TestMinstdRandUnequal)
 {
     typedef thrust::random::minstd_rand Engine;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     TestEngineUnequal<Engine>();
 }
@@ -486,12 +524,16 @@ TEST(RandomTests, TestMinstdRand0Validation)
 {
     typedef thrust::random::minstd_rand0 Engine;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     TestEngineValidation<Engine, 1043618065u>();
 }
 
 TEST(RandomTests, TestMinstdRand0Min)
 {
     typedef thrust::random::minstd_rand0 Engine;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     TestEngineMin<Engine>();
 }
@@ -500,12 +542,16 @@ TEST(RandomTests, TestMinstdRand0Max)
 {
     typedef thrust::random::minstd_rand0 Engine;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     TestEngineMax<Engine>();
 }
 
 TEST(RandomTests, TestMinstdRand0SaveRestore)
 {
     typedef thrust::random::minstd_rand0 Engine;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     TestEngineSaveRestore<Engine>();
 }
@@ -514,12 +560,16 @@ TEST(RandomTests, TestMinstdRand0Equal)
 {
     typedef thrust::random::minstd_rand0 Engine;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     TestEngineEqual<Engine>();
 }
 
 TEST(RandomTests, TestMinstdRand0Unequal)
 {
     typedef thrust::random::minstd_rand0 Engine;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     TestEngineUnequal<Engine>();
 }
@@ -528,12 +578,16 @@ TEST(RandomTests, TestTaus88Validation)
 {
     typedef thrust::random::taus88 Engine;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     TestEngineValidation<Engine, 3535848941ull>();
 }
 
 TEST(RandomTests, TestTaus88Min)
 {
     typedef thrust::random::taus88 Engine;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     TestEngineMin<Engine>();
 }
@@ -542,12 +596,16 @@ TEST(RandomTests, TestTaus88Max)
 {
     typedef thrust::random::taus88 Engine;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     TestEngineMax<Engine>();
 }
 
 TEST(RandomTests, TestTaus88SaveRestore)
 {
     typedef thrust::random::taus88 Engine;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     TestEngineSaveRestore<Engine>();
 }
@@ -556,12 +614,16 @@ TEST(RandomTests, TestTaus88Equal)
 {
     typedef thrust::random::taus88 Engine;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     TestEngineEqual<Engine>();
 }
 
 TEST(RandomTests, TestTaus88Unequal)
 {
     typedef thrust::random::taus88 Engine;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     TestEngineUnequal<Engine>();
 }
@@ -570,12 +632,16 @@ TEST(RandomTests, TestRanlux24Validation)
 {
     typedef thrust::random::ranlux24 Engine;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     TestEngineValidation<Engine, 9901578>();
 }
 
 TEST(RandomTests, TestRanlux24Min)
 {
     typedef thrust::random::ranlux24 Engine;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     TestEngineMin<Engine>();
 }
@@ -584,12 +650,16 @@ TEST(RandomTests, TestRanlux24Max)
 {
     typedef thrust::random::ranlux24 Engine;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     TestEngineMax<Engine>();
 }
 
 TEST(RandomTests, TestRanlux24SaveRestore)
 {
     typedef thrust::random::ranlux24 Engine;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     TestEngineSaveRestore<Engine>();
 }
@@ -598,12 +668,16 @@ TEST(RandomTests, TestRanlux24Equal)
 {
     typedef thrust::random::ranlux24 Engine;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     TestEngineEqual<Engine>();
 }
 
 TEST(RandomTests, TestRanlux24Unequal)
 {
     typedef thrust::random::ranlux24 Engine;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     TestEngineUnequal<Engine>();
 }
@@ -612,12 +686,16 @@ TEST(RandomTests, TestRanlux48Validation)
 {
     typedef thrust::random::ranlux48 Engine;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     TestEngineValidation<Engine, 88229545517833ull>();
 }
 
 TEST(RandomTests, TestRanlux48Min)
 {
     typedef thrust::random::ranlux48 Engine;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     TestEngineMin<Engine>();
 }
@@ -626,12 +704,16 @@ TEST(RandomTests, TestRanlux48Max)
 {
     typedef thrust::random::ranlux48 Engine;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     TestEngineMax<Engine>();
 }
 
 TEST(RandomTests, TestRanlux48SaveRestore)
 {
     typedef thrust::random::ranlux48 Engine;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     TestEngineSaveRestore<Engine>();
 }
@@ -640,12 +722,16 @@ TEST(RandomTests, TestRanlux48Equal)
 {
     typedef thrust::random::ranlux48 Engine;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     TestEngineEqual<Engine>();
 }
 
 TEST(RandomTests, TestRanlux48Unequal)
 {
     typedef thrust::random::ranlux48 Engine;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     TestEngineUnequal<Engine>();
 }
@@ -737,6 +823,8 @@ TEST(RandomTests, TestUniformIntDistributionMin)
     typedef thrust::random::uniform_int_distribution<int>          int_dist;
     typedef thrust::random::uniform_int_distribution<unsigned int> uint_dist;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     ValidateDistributionCharacteristic<int_dist,
                                        ValidateDistributionMin<int_dist, thrust::minstd_rand>>();
     ValidateDistributionCharacteristic<uint_dist,
@@ -747,6 +835,8 @@ TEST(RandomTests, TestUniformIntDistributionMax)
 {
     typedef thrust::random::uniform_int_distribution<int>          int_dist;
     typedef thrust::random::uniform_int_distribution<unsigned int> uint_dist;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     ValidateDistributionCharacteristic<int_dist,
                                        ValidateDistributionMax<int_dist, thrust::minstd_rand>>();
@@ -759,6 +849,8 @@ TEST(RandomTests, TestUniformIntDistributionSaveRestore)
     typedef thrust::random::uniform_int_distribution<int>          int_dist;
     typedef thrust::random::uniform_int_distribution<unsigned int> uint_dist;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     TestDistributionSaveRestore<int_dist>();
     TestDistributionSaveRestore<uint_dist>();
 }
@@ -767,6 +859,8 @@ TEST(RandomTests, TestUniformRealDistributionMin)
 {
     typedef thrust::random::uniform_real_distribution<float>  float_dist;
     typedef thrust::random::uniform_real_distribution<double> double_dist;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     ValidateDistributionCharacteristic<float_dist,
                                        ValidateDistributionMin<float_dist, thrust::minstd_rand>>();
@@ -779,6 +873,8 @@ TEST(RandomTests, TestUniformRealDistributionMax)
     typedef thrust::random::uniform_real_distribution<float>  float_dist;
     typedef thrust::random::uniform_real_distribution<double> double_dist;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     ValidateDistributionCharacteristic<float_dist,
                                        ValidateDistributionMax<float_dist, thrust::minstd_rand>>();
     ValidateDistributionCharacteristic<double_dist,
@@ -790,6 +886,8 @@ TEST(RandomTests, TestUniformRealDistributionSaveRestore)
     typedef thrust::random::uniform_real_distribution<float>  float_dist;
     typedef thrust::random::uniform_real_distribution<double> double_dist;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     TestDistributionSaveRestore<float_dist>();
     TestDistributionSaveRestore<double_dist>();
 }
@@ -798,6 +896,8 @@ TEST(RandomTests, TestNormalDistributionMin)
 {
     typedef thrust::random::normal_distribution<float>  float_dist;
     typedef thrust::random::normal_distribution<double> double_dist;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     ValidateDistributionCharacteristic<float_dist,
                                        ValidateDistributionMin<float_dist, thrust::minstd_rand>>();
@@ -810,6 +910,8 @@ TEST(RandomTests, TestNormalDistributionMax)
     typedef thrust::random::normal_distribution<float>  float_dist;
     typedef thrust::random::normal_distribution<double> double_dist;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     ValidateDistributionCharacteristic<float_dist,
                                        ValidateDistributionMax<float_dist, thrust::minstd_rand>>();
     ValidateDistributionCharacteristic<double_dist,
@@ -821,12 +923,16 @@ TEST(RandomTests, TestNormalDistributionSaveRestore)
     typedef thrust::random::normal_distribution<float>  float_dist;
     typedef thrust::random::normal_distribution<double> double_dist;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     TestDistributionSaveRestore<float_dist>();
     TestDistributionSaveRestore<double_dist>();
 }
 
 TEST(RandomTests, erfcinvFunction)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     double inf = std::numeric_limits<double>::infinity();
     double nan = std::nan("undefined");
 

@@ -132,6 +132,9 @@ TESTS_DEFINE(AllocatorAwarePoliciesTests, PolicyTestsParams);
 TYPED_TEST(AllocatorAwarePoliciesTests, TestAllocatorAttachmentInstance)
 {
   using T = typename TestFixture::input_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  
   TestAllocatorAttachment<T> test;
   test();
 }

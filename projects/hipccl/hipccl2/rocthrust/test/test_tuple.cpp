@@ -28,15 +28,15 @@ TESTS_DEFINE(TupleTests, NumericalTestsParams);
 TYPED_TEST(TupleTests, TestTupleConstructor)
 {
     using T = typename TestFixture::input_type;
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
-    {
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto seed : get_seeds())
+    {
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
         thrust::host_vector<T> data = get_random_data<T>(
-            10, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            10, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
 
         thrust::tuple<T> t1(data[0]);
         ASSERT_EQ(data[0], thrust::get<0>(t1));
@@ -122,17 +122,18 @@ TYPED_TEST(TupleTests, TestTupleConstructor)
 TYPED_TEST(TupleTests, TestMakeTuple)
 {
     using T = typename TestFixture::input_type;
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto seed : get_seeds())
     {
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
         thrust::host_vector<T> data = get_random_data<T>(
             10,
             std::numeric_limits<T>::min(),
             std::numeric_limits<T>::max(),
-            seed_value
+            seed
         );
 
         thrust::tuple<T> t1 = thrust::make_tuple(data[0]);
@@ -221,15 +222,16 @@ TYPED_TEST(TupleTests, TestMakeTuple)
 TYPED_TEST(TupleTests, TestTupleGet)
 {
     using T = typename TestFixture::input_type;
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto seed : get_seeds())
     {
-        unsigned int seed_value
-            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
 
         thrust::host_vector<T> data = get_random_data<T>(
-            10, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+            10, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
 
         thrust::tuple<T> t1(data[0]);
         ASSERT_EQ(data[0], thrust::get<0>(t1));
@@ -317,6 +319,8 @@ TYPED_TEST(TupleTests, TestTupleGet)
 TYPED_TEST(TupleTests, TestTupleComparison)
 {
     using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     thrust::tuple<T, T, T, T, T> lhs(0, 0, 0, 0, 0), rhs(0, 0, 0, 0, 0);
 
@@ -480,6 +484,8 @@ TYPED_TEST(TupleTests, TestTupleTie)
 {
     using T = typename TestFixture::input_type;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     thrust::host_vector<bool> h_result(1);
     thrust::generate(h_result.begin(), h_result.end(), TestTupleTieFunctor<T>());
 
@@ -492,6 +498,8 @@ TYPED_TEST(TupleTests, TestTupleTie)
 
 TEST(TupleTests, TestTupleSwap)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
     int a = 7;
     int b = 13;
     int c = 42;

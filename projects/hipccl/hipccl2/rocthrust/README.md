@@ -43,7 +43,9 @@ cd rocThrust; mkdir build; cd build
 #   BUILD_TEST       - OFF by default,
 #   BUILD_EXAMPLES   - OFF by default,
 #   BUILD_BENCHMARKS - OFF by default,
-#   DOWNLOAD_ROCPRIM - OFF by default and at ON the rocPRIM will be downloaded to build folder,
+#   DOWNLOAD_ROCPRIM - OFF by default, when ON rocPRIM will be downloaded to the build folder,
+#   RNG_SEED_COUNT   - 0 by default, controls non-repeatable random dataset count
+#   PRNG_SEEDS       - 1 by default, reproducible seeds to generate random data
 #
 # ! IMPORTANT !
 # On ROCm platform set C++ compiler to HipCC. You can do it by adding 'CXX=<path-to-hipcc>'
@@ -71,7 +73,6 @@ make package
 # thrust includes to 0, you can disable printfs on device side and improve
 # performance. The default value is 1
 #define THRUST_HIP_PRINTF_ENABLED 0
-
 ```
 
 ### Using rocThrust In A Project
@@ -110,30 +111,61 @@ ctest
 ./test/<unit-test-name>
 ```
 
+### Using multiple GPUs concurrently for testing
+
+This feature requires CMake 3.16+ to be used for building / testing. _(Prior versions of CMake cannot assign ids to tests when running in parallel. Assigning tests to distinct devices could only be done at the cost of extreme complexity._)
+
+The unit tests can make use of [CTest Resource Allocation](https://cmake.org/cmake/help/latest/manual/ctest.1.html#resource-allocation) feature enabling distributing tests across multiple GPUs in an intelligent manner. The feature can accelerate testing when multiple GPUs of the same family are in a system as well as test multiple family of products from one invocation without having to resort to `HIP_VISIBLE_DEVICES` environment variable. The feature relies on the presence of a resource spec file.
+
+> IMPORTANT: trying to use `RESOURCE_GROUPS` and `--resource-spec-file` with CMake/CTest respectively of versions prior to 3.16 omits the feature silently. No warnings issued about unknown properties or command-line arguments. Make sure that `cmake`/`ctest` invoked are sufficiently recent.
+
+#### Auto resource spec generation
+
+There is a utility script in the repo that may be called independently:
+
+```shell
+# Go to rocThrust build directory
+cd rocThrust; cd build
+
+# Invoke directly or use CMake script mode via cmake -P
+../cmake/GenerateResourceSpec.cmake
+
+# Assuming you have 2 compatible GPUs in the system
+ctest --resource-spec-file ./resources.json --parallel 2
+```
+
+#### Manual
+
+Assuming the user has 2 GPUs from the gfx900 family and they are the first devices enumerated by the system one may specify during configuration `-D AMDGPU_TEST_TARGETS=gfx900` stating only one family will be tested. Leaving this var empty (default) results in targeting the default device in the system. To let CMake know there are 2 GPUs that should be targeted, one has to feed CTest a JSON file via the `--resource-spec-file <path_to_file>` flag. For example:
+
+```json
+{
+  "version": {
+    "major": 1,
+    "minor": 0
+  },
+  "local": [
+    {
+      "gfx900": [
+        {
+          "id": "0"
+        },
+        {
+          "id": "1"
+        }
+      ]
+    }
+  ]
+}
+```
+
 ## Using custom seeds for the tests
 
-Go to the `rocPRIM/test/rocprim/test_seed.hpp` file.
-```cpp
-//(1)
-static constexpr int random_seeds_count = 10;
+There are 2 CMake configuration-time options that control random data fed to unit tests.
 
-//(2)
-static constexpr unsigned int seeds [] = {0, 2, 10, 1000};
-
-//(3)
-static constexpr size_t seed_size = sizeof(seeds) / sizeof(seeds[0]);
-```
-
-(1) defines a constant that sets how many passes over the tests will be done with runtime-generated seeds. Modify at will.
-
-(2) defines the user generated seeds. Each of the elements of the array will be used as seed for all tests. Modify at will. If no static seeds are desired, the array should be left empty.
-
-```cpp
-static constexpr unsigned int seeds [] = {};
-```
-
-(3) this line should never be modified.
-
+- `RNG_SEED_COUNT`, (0 by default) controls non-repeatable random dataset count. It draws values from a default constructed `std::random_device`. Should tests fail, the actual seed producing the failure are reported by Gtest, enabling reproducibility.
+- `PRNG_SEEDS`, (1 by default) controls repeatable dataset seeds. It is a CMake formatted (semi-colon delimited) array of 32-bit unsigned integrals.
+  - _(Note: semi-colons often collide with shell command parsing. It is advised to escape the entire CMake CLI argument to avoid the variable itself picking up quotation marks. Pass `cmake "-DPRNG_SEEDS=1;2;3;4"` instead of `cmake -DPRNG_SEEDS="1;2;3;4"`, the two cases differ in how the CMake executable receives its arguments from the OS.)_
 
 ## Running Examples
 ```sh

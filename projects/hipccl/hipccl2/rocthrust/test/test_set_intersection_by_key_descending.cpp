@@ -30,6 +30,8 @@ TYPED_TEST(SetIntersectionByKeyDescendingTests, TestSetIntersectionByKeyDescendi
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
 
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     Vector a_key(3), b_key(4);
     Vector a_val(3), b_val(4);
 
@@ -72,19 +74,18 @@ TYPED_TEST(SetIntersectionByKeyDescendingPrimitiveTests, TestSetIntersectionByKe
 {
     using T = typename TestFixture::input_type;
 
-    const std::vector<size_t> sizes = get_sizes();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    for(auto size : sizes)
+    for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
-        for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+
+        for(auto seed : get_seeds())
         {
-            unsigned int seed_value
-                = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> temp = get_random_data<T>(
-                2 * size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed_value);
+                2 * size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
 
             thrust::host_vector<T> h_a_key(temp.begin(), temp.begin() + size);
             thrust::host_vector<T> h_b_key(temp.begin() + size, temp.end());
@@ -96,7 +97,7 @@ TYPED_TEST(SetIntersectionByKeyDescendingPrimitiveTests, TestSetIntersectionByKe
                 h_a_key.size(),
                 std::numeric_limits<T>::min(),
                 std::numeric_limits<T>::max(),
-                seed_value + seed_value_addition
+                seed + seed_value_addition
             );
 
             thrust::device_vector<T> d_a_key = h_a_key;
