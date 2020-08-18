@@ -404,7 +404,7 @@ DECLARE_UNITTEST(TestFillWithNonTrivialAssignment);
 
 
 template<typename ForwardIterator, typename T>
-void fill(my_system &system, ForwardIterator, ForwardIterator, const T&)
+void fill(my_system &system, ForwardIterator /*first*/, ForwardIterator, const T&)
 {
     system.validate_dispatch();
 }

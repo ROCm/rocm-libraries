@@ -73,9 +73,10 @@ add_subdirectory(thrust)
 
 # Tests
 if(BUILD_TEST)
+  # We still want the testing to be compiled to catch some errors
+  add_subdirectory(testing)
   enable_testing()
   add_subdirectory(test)
-  add_subdirectory(testing)
 endif()
 
 # Examples

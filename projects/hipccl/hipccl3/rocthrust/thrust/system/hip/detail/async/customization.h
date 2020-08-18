@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
- *
+ * Modifications Copyright© 2020 Advanced Micro Devices, Inc. All rights reserved.
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
  *     * Redistributions of source code must retain the above copyright
@@ -31,8 +31,9 @@
 
 #include <thrust/detail/config.h>
 #include <thrust/detail/cpp11_required.h>
+#include <thrust/detail/modern_gcc_required.h>
 
-#if THRUST_CPP_DIALECT >= 2011
+#if THRUST_CPP_DIALECT >= 2011 && !defined(THRUST_LEGACY_GCC)
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
@@ -46,6 +47,7 @@
 #include <thrust/mr/allocator.h>
 #include <thrust/mr/disjoint_sync_pool.h>
 #include <thrust/mr/sync_pool.h>
+#include <thrust/per_device_resource.h>
 
 THRUST_BEGIN_NS
 
@@ -80,14 +82,22 @@ auto get_async_device_allocator(
   thrust::detail::execution_policy_base<DerivedPolicy>&
 )
 THRUST_DECLTYPE_RETURNS(
-  thrust::mr::stateless_resource_allocator<
-    thrust::detail::uint8_t, default_async_device_resource
+  thrust::per_device_allocator<
+    thrust::detail::uint8_t, default_async_device_resource, par_t
   >{}
 )
 
 template <typename Allocator, template <typename> class BaseSystem>
 auto get_async_device_allocator(
   thrust::detail::execute_with_allocator<Allocator, BaseSystem>& exec
+)
+THRUST_DECLTYPE_RETURNS(exec.get_allocator())
+
+template <typename Allocator, template <typename> class BaseSystem>
+auto get_async_device_allocator(
+  thrust::detail::execute_with_allocator_and_dependencies<
+    Allocator, BaseSystem
+  >& exec
 )
 THRUST_DECLTYPE_RETURNS(exec.get_allocator())
 
@@ -114,4 +124,4 @@ THRUST_END_NS
 
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
-#endif // THRUST_CPP_DIALECT >= 2011
+#endif

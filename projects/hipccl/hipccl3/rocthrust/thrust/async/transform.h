@@ -22,14 +22,16 @@
 
 #include <thrust/detail/config.h>
 #include <thrust/detail/cpp11_required.h>
+#include <thrust/detail/modern_gcc_required.h>
 
-#if THRUST_CPP_DIALECT >= 2011
+#if THRUST_CPP_DIALECT >= 2011 && !defined(THRUST_LEGACY_GCC)
 
 #include <thrust/detail/static_assert.h>
 #include <thrust/detail/select_system.h>
+#include <thrust/type_traits/remove_cvref.h>
 #include <thrust/system/detail/adl/async/transform.h>
 
-#include <thrust/future.h>
+#include <thrust/event.h>
 
 THRUST_BEGIN_NS
 
@@ -44,75 +46,68 @@ template <
 , typename ForwardIt, typename Sentinel, typename OutputIt
 , typename UnaryOperation
 >
-__host__ __device__
-future<
-  OutputIt, DerivedPolicy
-, typename thrust::detail::pointer_traits<
-    thrust::host_memory_resource::pointer
-  >::template rebind<OutputIt>::other
->
+__host__
+event<DerivedPolicy>
 async_transform(
   thrust::execution_policy<DerivedPolicy>& exec
 , ForwardIt first, Sentinel last, OutputIt output, UnaryOperation op
 )
 {
+  (void) exec; (void) first; (void) last; (void) output; (void) op;
   THRUST_STATIC_ASSERT_MSG(
     (thrust::detail::depend_on_instantiation<ForwardIt, false>::value)
-  , "unimplemented for this system"
+  , "this algorithm is not implemented for the specified system"
   );
   return {};
-} 
+}
 
 } // namespace unimplemented
 
+namespace transform_detail
+{
+
+using thrust::async::unimplemented::async_transform;
+
 struct transform_fn final
 {
-  __thrust_exec_check_disable__
   template <
     typename DerivedPolicy
   , typename ForwardIt, typename Sentinel, typename OutputIt
   , typename UnaryOperation
   >
-  __host__ __device__
-  future<
-    OutputIt, DerivedPolicy
-  , typename thrust::detail::pointer_traits<
-      thrust::host_memory_resource::pointer
-    >::template rebind<OutputIt>::other
-  >
-  static call(
+  __host__
+  static auto
+  call(
     thrust::detail::execution_policy_base<DerivedPolicy> const& exec
   , ForwardIt&& first, Sentinel&& last
-  , OutputIt&& output 
+  , OutputIt&& output
   , UnaryOperation&& op
   )
-  {
-    // ADL dispatch.
-    using thrust::async::unimplemented::async_transform;
-    return async_transform(
+  // ADL dispatch.
+  THRUST_DECLTYPE_RETURNS(
+    async_transform(
       thrust::detail::derived_cast(thrust::detail::strip_const(exec))
     , THRUST_FWD(first), THRUST_FWD(last)
     , THRUST_FWD(output)
     , THRUST_FWD(op)
-    );
-  } 
+    )
+  )
 
-  __thrust_exec_check_disable__
   template <
     typename ForwardIt, typename Sentinel, typename OutputIt
   , typename UnaryOperation
   >
-  __host__ __device__
+  __host__
   static auto call(
     ForwardIt&& first, Sentinel&& last
   , OutputIt&& output
   , UnaryOperation&& op
-  ) 
+  )
   THRUST_DECLTYPE_RETURNS(
     transform_fn::call(
       thrust::detail::select_system(
-        typename thrust::iterator_system<ForwardIt>::type{}
-      , typename thrust::iterator_system<OutputIt>::type{}
+        typename iterator_system<remove_cvref_t<ForwardIt>>::type{}
+      , typename iterator_system<remove_cvref_t<OutputIt>>::type{}
       )
     , THRUST_FWD(first), THRUST_FWD(last)
     , THRUST_FWD(output)
@@ -121,18 +116,20 @@ struct transform_fn final
   )
 
   template <typename... Args>
-  __host__ __device__
+  THRUST_NODISCARD __host__
   auto operator()(Args&&... args) const
   THRUST_DECLTYPE_RETURNS(
     call(THRUST_FWD(args)...)
   )
 };
 
-THRUST_INLINE_CONSTANT transform_fn transform{};
+} // namespace tranform_detail
+
+THRUST_INLINE_CONSTANT transform_detail::transform_fn transform{};
 
 } // namespace async
 
 THRUST_END_NS
 
-#endif // THRUST_CPP_DIALECT >= 2011
+#endif
 

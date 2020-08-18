@@ -147,6 +147,13 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
     __host__ __device__
     pointer();
 
+    #if THRUST_CPP_DIALECT >= 2011
+    // NOTE: This is needed so that Thrust smart pointers can be used in
+    // `std::unique_ptr`.
+    __host__ __device__
+    pointer(decltype(nullptr));
+    #endif
+
     // OtherValue shall be convertible to Value
     // XXX consider making the pointer implementation a template parameter which defaults to Element *
     template<typename OtherElement>
@@ -180,6 +187,13 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
 
     // assignment
 
+    #if THRUST_CPP_DIALECT >= 2011
+    // NOTE: This is needed so that Thrust smart pointers can be used in
+    // `std::unique_ptr`.
+    __host__ __device__
+    derived_type& operator=(decltype(nullptr));
+    #endif
+
     // OtherPointer's element_type shall be convertible to Element
     // OtherPointer's system shall be convertible to Tag
     template<typename OtherPointer>
@@ -195,14 +209,42 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
 
     __host__ __device__
     Element *get() const;
+
+    #if THRUST_CPP_DIALECT >= 2011
+    // NOTE: This is needed so that Thrust smart pointers can be used in
+    // `std::unique_ptr`.
+    __host__ __device__
+    explicit operator bool() const;
+    #endif
 }; // end pointer
 
 // Output stream operator
 template<typename Element, typename Tag, typename Reference, typename Derived,
          typename charT, typename traits>
+__host__
 std::basic_ostream<charT, traits> &
 operator<<(std::basic_ostream<charT, traits> &os,
            const pointer<Element, Tag, Reference, Derived> &p);
+
+#if THRUST_CPP_DIALECT >= 2011
+// NOTE: This is needed so that Thrust smart pointers can be used in
+// `std::unique_ptr`.
+template <typename Element, typename Tag, typename Reference, typename Derived>
+__host__ __device__
+bool operator==(decltype(nullptr), pointer<Element, Tag, Reference, Derived> p);
+
+template <typename Element, typename Tag, typename Reference, typename Derived>
+__host__ __device__
+bool operator==(pointer<Element, Tag, Reference, Derived> p, decltype(nullptr));
+
+template <typename Element, typename Tag, typename Reference, typename Derived>
+__host__ __device__
+bool operator!=(decltype(nullptr), pointer<Element, Tag, Reference, Derived> p);
+
+template <typename Element, typename Tag, typename Reference, typename Derived>
+__host__ __device__
+bool operator!=(pointer<Element, Tag, Reference, Derived> p, decltype(nullptr));
+#endif
 
 } // end thrust
 

@@ -32,8 +32,9 @@
 
 #include <thrust/detail/config.h>
 #include <thrust/detail/cpp11_required.h>
+#include <thrust/detail/modern_gcc_required.h>
 
-#if THRUST_CPP_DIALECT >= 2011
+#if THRUST_CPP_DIALECT >= 2011 && !defined(THRUST_LEGACY_GCC)
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 
@@ -80,12 +81,10 @@ auto async_for_each_n(
   execution_policy<DerivedPolicy>& policy,
   ForwardIt                        first,
   Size                             n,
-  UnaryFunction                    f
-) -> unique_eager_future<void>
+  UnaryFunction                    func
+) -> unique_eager_event
 {
-  using pointer = typename unique_eager_future<void>::pointer;
-
-  unique_eager_future_promise_pair<void> fp;
+  unique_eager_event e;
 
   // Set up stream with dependencies.
 
@@ -93,35 +92,40 @@ auto async_for_each_n(
 
   if (thrust::cuda_cub::default_stream() != user_raw_stream)
   {
-    fp = depend_on<void, pointer>(
-      nullptr
-    , std::make_tuple(
-        unique_stream(nonowning, user_raw_stream)
+    e = make_dependent_event(
+      std::tuple_cat(
+        std::make_tuple(
+          unique_stream(nonowning, user_raw_stream)
+        )
+      , extract_dependencies(
+          std::move(thrust::detail::derived_cast(policy))
+        )
       )
     );
   }
   else
   {
-    fp = depend_on<void, pointer>(
-      nullptr
-    , std::make_tuple()
+    e = make_dependent_event(
+      extract_dependencies(
+        std::move(thrust::detail::derived_cast(policy))
+      )
     );
   }
 
   // Run for_each.
 
   async_for_each_fn<ForwardIt, UnaryFunction> wrapped(
-    std::move(first), std::move(f)
+    std::move(first), std::move(func)
   );
 
   thrust::cuda_cub::throw_on_error(
     thrust::cuda_cub::__parallel_for::parallel_for(
-      n, std::move(wrapped), fp.future.stream()
+      n, std::move(wrapped), e.stream().native_handle()
     )
   , "after for_each launch"
   );
 
-  return std::move(fp.future);
+  return e;
 }
 
 }}} // namespace system::cuda::detail
@@ -139,11 +143,11 @@ auto async_for_each(
   execution_policy<DerivedPolicy>& policy,
   ForwardIt                        first,
   Sentinel                         last,
-  UnaryFunction&&                  f
+  UnaryFunction&&                  func
 )
 THRUST_DECLTYPE_RETURNS(
   thrust::system::cuda::detail::async_for_each_n(
-    policy, first, thrust::distance(first, last), THRUST_FWD(f)
+    policy, first, distance(first, last), THRUST_FWD(func)
   )
 );
 
@@ -153,5 +157,5 @@ THRUST_END_NS
 
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 
-#endif // THRUST_CPP_DIALECT >= 2011
+#endif
 

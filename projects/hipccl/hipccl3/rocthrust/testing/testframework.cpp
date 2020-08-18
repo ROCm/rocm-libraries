@@ -56,7 +56,7 @@ const size_t default_threshold = 1 << 16;  //  64K
 const size_t large_threshold   = 1 << 20;  //   1M
 const size_t huge_threshold    = 1 << 24;  //  16M
 const size_t epic_threshold    = 1 << 26;  //  64M
-const size_t max_threshold     = std::numeric_limits<size_t>::max();
+const size_t max_threshold     = (std::numeric_limits<size_t>::max)();
 
 
 std::vector<size_t> test_sizes;
@@ -150,9 +150,8 @@ void process_args(int argc, char ** argv,
 }
 
 
-void usage(int argc, char** argv)
+void usage(int /*argc*/, char** argv)
 {
-  (void)argc;
   std::string indent = "  ";
 
   std::cout << "Example Usage:\n";
@@ -276,10 +275,8 @@ void UnitTestDriver::list_tests(void)
 }
 
 
-bool UnitTestDriver::post_test_sanity_check(const UnitTest &test, bool concise)
+bool UnitTestDriver::post_test_sanity_check(const UnitTest &/*test*/, bool /*concise*/)
 {
-  (void)test;
-  (void)concise;
   return true;
 }
 
@@ -328,19 +325,19 @@ bool UnitTestDriver::run_tests(std::vector<UnitTest *>& tests_to_run, const Argu
      }
      catch(unittest::UnitTestFailure& f)
      {
-       record_result(TestResult(Failure, std::numeric_limits<std::clock_t>::max(), test, f.message), test_results);
+       record_result(TestResult(Failure, (std::numeric_limits<std::clock_t>::max)(), test, f.message), test_results);
      }
      catch(unittest::UnitTestKnownFailure& f)
      {
-       record_result(TestResult(KnownFailure, std::numeric_limits<std::clock_t>::max(), test, f.message), test_results);
+       record_result(TestResult(KnownFailure, (std::numeric_limits<std::clock_t>::max)(), test, f.message), test_results);
      }
      catch(std::bad_alloc& e)
      {
-       record_result(TestResult(Error, std::numeric_limits<std::clock_t>::max(), test, e.what()), test_results);
+       record_result(TestResult(Error, (std::numeric_limits<std::clock_t>::max)(), test, e.what()), test_results);
      }
      catch(unittest::UnitTestError& e)
      {
-       record_result(TestResult(Error, std::numeric_limits<std::clock_t>::max(), test, e.message), test_results);
+       record_result(TestResult(Error, (std::numeric_limits<std::clock_t>::max)(), test, e.message), test_results);
      }
 
      // immediate report
@@ -489,9 +486,8 @@ bool UnitTestDriver::run_tests(const ArgumentSet& args, const ArgumentMap& kwarg
 
 // driver_instance maps a DeviceSystem to a singleton UnitTestDriver
 template<typename DeviceSystem>
-UnitTestDriver &driver_instance(DeviceSystem tag)
+UnitTestDriver &driver_instance(DeviceSystem)
 {
-  (void)tag;
   static UnitTestDriver s_instance;
   return s_instance;
 }

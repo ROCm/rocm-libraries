@@ -31,19 +31,22 @@
 
 #include <thrust/detail/config.h>
 #include <thrust/detail/cpp11_required.h>
+#include <thrust/detail/modern_gcc_required.h>
 
-#if THRUST_CPP_DIALECT >= 2011
+#if THRUST_CPP_DIALECT >= 2011 && !defined(THRUST_LEGACY_GCC)
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 
 #include <thrust/system/cuda/config.h>
 
 #include <thrust/system/cuda/detail/async/customization.h>
+#include <thrust/system/cuda/detail/async/copy.h>
 #include <thrust/system/cuda/detail/sort.h>
 #include <thrust/detail/alignment.h>
 #include <thrust/system/cuda/future.h>
 #include <thrust/type_traits/is_trivially_relocatable.h>
 #include <thrust/type_traits/is_contiguous_iterator.h>
+#include <thrust/type_traits/is_operator_less_or_greater_function_object.h>
 #include <thrust/type_traits/logical_metafunctions.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/detail/static_assert.h>
@@ -56,7 +59,7 @@ THRUST_BEGIN_NS
 namespace system { namespace cuda { namespace detail
 {
 
-// Non-ContiguousIterator iterators
+// Non-ContiguousIterator input and output iterators
 template <
   typename DerivedPolicy
 , typename ForwardIt, typename Size, typename StrictWeakOrdering
@@ -70,27 +73,101 @@ auto async_stable_sort_n(
 ) ->
   typename std::enable_if<
     negation<is_contiguous_iterator<ForwardIt>>::value
-  , unique_eager_future<
-      void
-    , typename thrust::detail::allocator_traits<
-        decltype(get_async_device_allocator(policy))
-      >::template rebind_traits<void>::pointer
-    >
+  , unique_eager_event
   >::type
 {
-  THRUST_STATIC_ASSERT_MSG(
-    (thrust::detail::depend_on_instantiation<ForwardIt, false>::value)
-  , "unimplemented"
+  using T = typename iterator_traits<ForwardIt>::value_type;
+
+  auto const device_alloc = get_async_device_allocator(policy);
+
+  // Create device-side buffer.
+
+  // FIXME: Combine this temporary allocation with the main one for CUB.
+  auto device_buffer = uninitialized_allocate_unique_n<T>(device_alloc, n);
+
+  auto const device_buffer_ptr = device_buffer.get();
+
+  // Synthesize a suitable new execution policy, because we don't want to 
+  // try and extract twice from the one we were passed.
+  typename remove_cvref_t<decltype(policy)>::tag_type tag_policy{};
+
+  // Copy from the input into the buffer.
+
+  auto new_policy0 = thrust::detail::derived_cast(policy).rebind_after(
+    std::move(device_buffer)
   );
 
-  // TODO: Buffer + copy
+  THRUST_STATIC_ASSERT((
+    std::tuple_size<decltype(
+      extract_dependencies(policy)
+    )>::value + 1
+    <=
+    std::tuple_size<decltype(
+      extract_dependencies(new_policy0)
+    )>::value
+  ));
 
-  return {};
+  auto f0 = async_copy_n(
+    new_policy0
+  , tag_policy
+  , first
+  , n
+  , device_buffer_ptr
+  );
+
+  // Sort the buffer.
+
+  auto new_policy1 = thrust::detail::derived_cast(policy).rebind_after(
+    std::move(f0)
+  );
+
+  THRUST_STATIC_ASSERT((
+    std::tuple_size<decltype(
+      extract_dependencies(policy)
+    )>::value + 1
+    <=
+    std::tuple_size<decltype(
+      extract_dependencies(new_policy1)
+    )>::value
+  ));
+
+  auto f1 = async_sort_n(
+    new_policy1
+  , tag_policy
+  , device_buffer_ptr
+  , n
+  , comp
+  );
+
+  // Copy from the buffer into the input.
+  // FIXME: Combine this with the potential memcpy at the end of the main sort
+  // routine.
+
+  auto new_policy2 = thrust::detail::derived_cast(policy).rebind_after(
+    std::move(f1)
+  );
+
+  THRUST_STATIC_ASSERT((
+    std::tuple_size<decltype(
+      extract_dependencies(policy)
+    )>::value + 1
+    <=
+    std::tuple_size<decltype(
+      extract_dependencies(new_policy2)
+    )>::value
+  ));
+
+  return async_copy_n(
+    new_policy2
+  , tag_policy
+  , device_buffer_ptr
+  , n
+  , first
+  );
 }
 
 // ContiguousIterator iterators
-// Non-Scalar value type
-// User-defined StrictWeakOrdering
+// Non-Scalar value type or user-defined StrictWeakOrdering
 template <
   typename DerivedPolicy
 , typename ForwardIt, typename Size, typename StrictWeakOrdering
@@ -102,34 +179,26 @@ auto async_stable_sort_n(
   Size                             n,
   StrictWeakOrdering               comp
 ) ->
-/*  typename std::enable_if<
+  typename std::enable_if<
     conjunction<
       is_contiguous_iterator<ForwardIt>
-    , negation<
-        std::is_scalar<
-          typename thrust::iterator_traits<ForwardIt>::value_type
+    , disjunction<
+        negation<
+          std::is_scalar<
+            typename iterator_traits<ForwardIt>::value_type
+          >
+        >
+      , negation<
+          is_operator_less_or_greater_function_object<StrictWeakOrdering>
         >
       >
     >::value
-  ,
-*/
-    unique_eager_future<
-      void
-    , typename thrust::detail::allocator_traits<
-        decltype(get_async_device_allocator(policy))
-      >::template rebind_traits<void>::pointer
-    >
-//  >::type
+  , unique_eager_event
+  >::type
 {
-  using T = typename thrust::iterator_traits<ForwardIt>::value_type;
-
   auto const device_alloc = get_async_device_allocator(policy);
 
-  using pointer
-    = typename thrust::detail::allocator_traits<decltype(device_alloc)>::
-      template rebind_traits<void>::pointer;
-
-  unique_eager_future_promise_pair<void, pointer> fp;
+  unique_eager_event e;
 
   // Determine temporary device storage requirements.
 
@@ -140,7 +209,7 @@ auto async_stable_sort_n(
     >(
       nullptr
     , tmp_size
-    , first 
+    , first
     , static_cast<thrust::detail::uint8_t*>(nullptr) // Items.
     , n
     , comp
@@ -162,7 +231,7 @@ auto async_stable_sort_n(
   auto const content_ptr = content.get();
 
   void* const tmp_ptr = static_cast<void*>(
-    thrust::raw_pointer_cast(content_ptr)
+    raw_pointer_cast(content_ptr)
   );
 
   // Set up stream with dependencies.
@@ -171,20 +240,28 @@ auto async_stable_sort_n(
 
   if (thrust::cuda_cub::default_stream() != user_raw_stream)
   {
-    fp = depend_on<void, pointer>(
-      nullptr
-    , std::make_tuple(
-        std::move(content)
-      , unique_stream(nonowning, user_raw_stream)
+    e = make_dependent_event(
+      std::tuple_cat(
+        std::make_tuple(
+          std::move(content)
+        , unique_stream(nonowning, user_raw_stream)
+        )
+      , extract_dependencies(
+          std::move(thrust::detail::derived_cast(policy))
+        )
       )
     );
   }
   else
   {
-    fp = depend_on<void, pointer>(
-      nullptr
-    , std::make_tuple(
-        std::move(content)
+    e = make_dependent_event(
+      std::tuple_cat(
+        std::make_tuple(
+          std::move(content)
+        )
+      , extract_dependencies(
+          std::move(thrust::detail::derived_cast(policy))
+        )
       )
     );
   }
@@ -197,62 +274,103 @@ auto async_stable_sort_n(
     >(
       tmp_ptr
     , tmp_size
-    , first 
+    , first
     , static_cast<thrust::detail::uint8_t*>(nullptr) // Items.
     , n
     , comp
-    , fp.future.stream()
+    , e.stream().native_handle()
     , THRUST_DEBUG_SYNC_FLAG
     )
   , "after merge sort sizing"
   );
 
-  return std::move(fp.future);
+  return e;
+}
+
+template <typename T, typename Size, typename StrictWeakOrdering>
+THRUST_RUNTIME_FUNCTION
+typename std::enable_if<
+  is_operator_less_function_object<StrictWeakOrdering>::value
+, cudaError_t
+>::type
+invoke_radix_sort(
+  cudaStream_t                            stream
+, void*                                   tmp_ptr
+, std::size_t&                            tmp_size
+, thrust::cuda_cub::cub::DoubleBuffer<T>& keys
+, Size&                                   n
+, StrictWeakOrdering
+)
+{
+  return thrust::cuda_cub::cub::DeviceRadixSort::SortKeys(
+    tmp_ptr
+  , tmp_size
+  , keys
+  , n
+  , 0
+  , sizeof(T) * 8
+  , stream
+  , THRUST_DEBUG_SYNC_FLAG
+  );
+}
+
+template <typename T, typename Size, typename StrictWeakOrdering>
+THRUST_RUNTIME_FUNCTION
+typename std::enable_if<
+  is_operator_greater_function_object<StrictWeakOrdering>::value
+, cudaError_t
+>::type
+invoke_radix_sort(
+  cudaStream_t                            stream
+, void*                                   tmp_ptr
+, std::size_t&                            tmp_size
+, thrust::cuda_cub::cub::DoubleBuffer<T>& keys
+, Size&                                   n
+, StrictWeakOrdering
+)
+{
+  return thrust::cuda_cub::cub::DeviceRadixSort::SortKeysDescending(
+    tmp_ptr
+  , tmp_size
+  , keys
+  , n
+  , 0
+  , sizeof(T) * 8
+  , stream
+  , THRUST_DEBUG_SYNC_FLAG
+  );
 }
 
 // ContiguousIterator iterators
 // Scalar value type
-// thrust::greater<>
-// TODO (hack up CUB)
-
-// ContiguousIterator iterators
-// Scalar value type
-// thrust::less<>
+// operator< or operator>
 template <
   typename DerivedPolicy
-, typename ForwardIt, typename Size, typename CompareT
+, typename ForwardIt, typename Size, typename StrictWeakOrdering
 >
 THRUST_RUNTIME_FUNCTION
 auto async_stable_sort_n(
-  execution_policy<DerivedPolicy>& policy,
-  ForwardIt                        first,
-  Size                             n,
-  thrust::less<CompareT>
+  execution_policy<DerivedPolicy>& policy
+, ForwardIt                        first
+, Size                             n
+, StrictWeakOrdering               comp
 ) ->
   typename std::enable_if<
     conjunction<
       is_contiguous_iterator<ForwardIt>
     , std::is_scalar<
-        typename thrust::iterator_traits<ForwardIt>::value_type
+        typename iterator_traits<ForwardIt>::value_type
       >
+    , is_operator_less_or_greater_function_object<StrictWeakOrdering>
     >::value
-  , unique_eager_future<
-      void
-    , typename thrust::detail::allocator_traits<
-        decltype(get_async_device_allocator(policy))
-      >::template rebind_traits<void>::pointer
-    >
+  , unique_eager_event
   >::type
 {
-  using T = typename thrust::iterator_traits<ForwardIt>::value_type;
+  using T = typename iterator_traits<ForwardIt>::value_type;
 
   auto const device_alloc = get_async_device_allocator(policy);
 
-  using pointer
-    = typename thrust::detail::allocator_traits<decltype(device_alloc)>::
-      template rebind_traits<void>::pointer;
-
-  unique_eager_future_promise_pair<void, pointer> fp;
+  unique_eager_event e;
 
   thrust::cuda_cub::cub::DoubleBuffer<T> keys(
     raw_pointer_cast(&*first), nullptr
@@ -262,15 +380,13 @@ auto async_stable_sort_n(
 
   size_t tmp_size = 0;
   thrust::cuda_cub::throw_on_error(
-    thrust::cuda_cub::cub::DeviceRadixSort::SortKeys(
-      nullptr
+    invoke_radix_sort(
+      nullptr // Null stream, just for sizing.
+    , nullptr
     , tmp_size
-    , keys 
+    , keys
     , n
-    , 0
-    , sizeof(T) * 8
-    , nullptr // Null stream, just for sizing.
-    , THRUST_DEBUG_SYNC_FLAG
+    , comp
     )
   , "after radix sort sizing"
   );
@@ -291,11 +407,11 @@ auto async_stable_sort_n(
   auto const content_ptr = content.get();
 
   keys.d_buffers[1] = thrust::detail::aligned_reinterpret_cast<T*>(
-    thrust::raw_pointer_cast(content_ptr)
+    raw_pointer_cast(content_ptr)
   );
 
   void* const tmp_ptr = static_cast<void*>(
-    thrust::raw_pointer_cast(content_ptr + keys_temp_storage)
+    raw_pointer_cast(content_ptr + keys_temp_storage)
   );
 
   // Set up stream with dependencies.
@@ -304,20 +420,28 @@ auto async_stable_sort_n(
 
   if (thrust::cuda_cub::default_stream() != user_raw_stream)
   {
-    fp = depend_on<void, pointer>(
-      nullptr
-    , std::make_tuple(
-        std::move(content)
-      , unique_stream(nonowning, user_raw_stream)
+    e = make_dependent_event(
+      std::tuple_cat(
+        std::make_tuple(
+          std::move(content)
+        , unique_stream(nonowning, user_raw_stream)
+        )
+      , extract_dependencies(
+          std::move(thrust::detail::derived_cast(policy))
+        )
       )
     );
   }
   else
   {
-    fp = depend_on<void, pointer>(
-      nullptr
-    , std::make_tuple(
-        std::move(content)
+    e = make_dependent_event(
+      std::tuple_cat(
+        std::make_tuple(
+          std::move(content)
+        )
+      , extract_dependencies(
+          std::move(thrust::detail::derived_cast(policy))
+        )
       )
     );
   }
@@ -325,35 +449,48 @@ auto async_stable_sort_n(
   // Run radix sort.
 
   thrust::cuda_cub::throw_on_error(
-    thrust::cuda_cub::cub::DeviceRadixSort::SortKeys(
-      tmp_ptr
+    invoke_radix_sort(
+      e.stream().native_handle()
+    , tmp_ptr
     , tmp_size
     , keys
     , n
-    , 0
-    , sizeof(T) * 8
-    , fp.future.stream()
-    , THRUST_DEBUG_SYNC_FLAG
+    , comp
     )
   , "after radix sort launch"
   );
 
   if (0 != keys.selector)
   {
-    // TODO: Temporary hack.
-    thrust::cuda_cub::throw_on_error(
-      cudaMemcpyAsync(
-        reinterpret_cast<T*>(keys.d_buffers[0])
-      , reinterpret_cast<T*>(keys.d_buffers[1])
-      , sizeof(T) * n
-      , cudaMemcpyDeviceToDevice
-      , fp.future.stream()
-      )
-    , "radix sort copy back"
+    auto new_policy0 = thrust::detail::derived_cast(policy).rebind_after(
+      std::move(e)
     );
-  }
 
-  return std::move(fp.future);
+    THRUST_STATIC_ASSERT((
+      std::tuple_size<decltype(
+        extract_dependencies(policy)
+      )>::value + 1
+      <=
+      std::tuple_size<decltype(
+        extract_dependencies(new_policy0)
+      )>::value
+    ));
+
+    // Synthesize a suitable new execution policy, because we don't want to 
+    // try and extract twice from the one we were passed.
+    typename remove_cvref_t<decltype(policy)>::tag_type tag_policy{};
+
+    using return_future = decltype(e);
+    return return_future(async_copy_n(
+      new_policy0
+    , tag_policy
+    , keys.d_buffers[1]
+    , n
+    , keys.d_buffers[0]
+    ));
+  }
+  else
+    return e;
 }
 
 }}} // namespace system::cuda::detail
@@ -375,9 +512,9 @@ auto async_stable_sort(
 )
 THRUST_DECLTYPE_RETURNS(
   thrust::system::cuda::detail::async_stable_sort_n(
-    policy, first, thrust::distance(first, last), comp
+    policy, first, distance(first, last), comp
   )
-);
+)
 
 } // cuda_cub
 
@@ -385,5 +522,5 @@ THRUST_END_NS
 
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 
-#endif // THRUST_CPP_DIALECT >= 2011
+#endif
 

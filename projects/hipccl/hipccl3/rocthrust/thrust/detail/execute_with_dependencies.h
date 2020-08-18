@@ -21,12 +21,34 @@
 
 #if THRUST_CPP_DIALECT >= 2011
 
+#include <thrust/detail/type_deduction.h>
+#include <thrust/type_traits/remove_cvref.h>
+
 #include <tuple>
+#include <type_traits>
 
 namespace thrust
 {
 namespace detail
 {
+
+struct capture_as_dependency_fn
+{
+  template<typename Dependency>
+  auto operator()(Dependency&& dependency) const
+  THRUST_DECLTYPE_RETURNS(capture_as_dependency(THRUST_FWD(dependency)))
+};
+
+// Default implementation: universal forwarding.
+template<typename Dependency>
+auto capture_as_dependency(Dependency&& dependency)
+THRUST_DECLTYPE_RETURNS(THRUST_FWD(dependency))
+
+template<typename... Dependencies>
+auto capture_as_dependency(std::tuple<Dependencies...>& dependencies)
+THRUST_DECLTYPE_RETURNS(
+  tuple_for_each(THRUST_FWD(dependencies), capture_as_dependency_fn{})
+)
 
 template<template<typename> class BaseSystem, typename... Dependencies>
 struct execute_with_dependencies
@@ -35,7 +57,7 @@ struct execute_with_dependencies
 private:
     using super_t = BaseSystem<execute_with_dependencies<BaseSystem, Dependencies...>>;
 
-    std::tuple<Dependencies...> dependencies;
+    std::tuple<remove_cvref_t<Dependencies>...> dependencies;
 
 public:
     __host__
@@ -44,17 +66,64 @@ public:
     {
     }
 
+    template <typename... UDependencies>
     __host__
-    execute_with_dependencies(Dependencies && ...dependencies)
-        : dependencies(std::forward<Dependencies>(dependencies)...)
+    execute_with_dependencies(super_t const &super, UDependencies && ...deps)
+        : super_t(super), dependencies(THRUST_FWD(deps)...)
     {
     }
 
-    std::tuple<Dependencies...>
+    template <typename... UDependencies>
     __host__
-    extract_dependencies() &&
+    execute_with_dependencies(UDependencies && ...deps)
+        : dependencies(THRUST_FWD(deps)...)
+    {
+    }
+
+    template <typename... UDependencies>
+    __host__
+    execute_with_dependencies(super_t const &super, std::tuple<UDependencies...>&& deps)
+        : super_t(super), dependencies(std::move(deps))
+    {
+    }
+
+    template <typename... UDependencies>
+    __host__
+    execute_with_dependencies(std::tuple<UDependencies...>&& deps)
+        : dependencies(std::move(deps))
+    {
+    }
+
+    std::tuple<remove_cvref_t<Dependencies>...>
+    __host__
+    extract_dependencies() 
     {
         return std::move(dependencies);
+    }
+
+    // Rebinding.
+    template<typename ...UDependencies>
+    __host__
+    execute_with_dependencies<BaseSystem, UDependencies...>
+    rebind_after(UDependencies&& ...udependencies) const
+    {
+        return { capture_as_dependency(THRUST_FWD(udependencies))... };
+    }
+
+    // Rebinding.
+    template<typename ...UDependencies>
+    __host__
+    execute_with_dependencies<BaseSystem, UDependencies...>
+    rebind_after(std::tuple<UDependencies...>& udependencies) const
+    {
+        return { capture_as_dependency(udependencies) };
+    }
+    template<typename ...UDependencies>
+    __host__
+    execute_with_dependencies<BaseSystem, UDependencies...>
+    rebind_after(std::tuple<UDependencies...>&& udependencies) const
+    {
+        return { capture_as_dependency(std::move(udependencies)) };
     }
 };
 
@@ -81,49 +150,104 @@ private:
         >
     >;
 
-    std::tuple<Dependencies...> dependencies;
+    std::tuple<remove_cvref_t<Dependencies>...> dependencies;
     Allocator alloc;
 
 public:
+    template <typename... UDependencies>
     __host__
-    execute_with_allocator_and_dependencies(super_t const &super, Allocator alloc, Dependencies && ...dependencies)
-        : super_t(super), alloc(alloc), dependencies(std::forward<Dependencies>(dependencies)...)
+    execute_with_allocator_and_dependencies(super_t const &super, Allocator a, UDependencies && ...deps)
+        : super_t(super), alloc(a), dependencies(THRUST_FWD(deps)...)
     {
     }
 
+    template <typename... UDependencies>
     __host__
-    execute_with_allocator_and_dependencies(Allocator alloc, Dependencies && ...dependencies)
-        : alloc(alloc), dependencies(std::forward<Dependencies>(dependencies)...)
+    execute_with_allocator_and_dependencies(Allocator a, UDependencies && ...deps)
+        : alloc(a), dependencies(THRUST_FWD(deps)...)
     {
     }
 
-    std::tuple<Dependencies...>
+    template <typename... UDependencies>
     __host__
-    extract_dependencies() &&
+    execute_with_allocator_and_dependencies(super_t const &super, Allocator a, std::tuple<UDependencies...>&& deps)
+        : super_t(super), alloc(a), dependencies(std::move(deps))
+    {
+    }
+
+    template <typename... UDependencies>
+    __host__
+    execute_with_allocator_and_dependencies(Allocator a, std::tuple<UDependencies...>&& deps)
+        : alloc(a), dependencies(std::move(deps))
+    {
+    }
+
+    std::tuple<remove_cvref_t<Dependencies>...>
+    __host__
+    extract_dependencies() 
     {
         return std::move(dependencies);
     }
 
-    Allocator
+    typename std::remove_reference<Allocator>::type&
     __host__
     get_allocator()
     {
         return alloc;
     }
+
+    // Rebinding.
+    template<typename ...UDependencies>
+    __host__
+    execute_with_allocator_and_dependencies<Allocator, BaseSystem, UDependencies...>
+    rebind_after(UDependencies&& ...udependencies) const
+    {
+        return { alloc, capture_as_dependency(THRUST_FWD(udependencies))... };
+    }
+
+    // Rebinding.
+    template<typename ...UDependencies>
+    __host__
+    execute_with_allocator_and_dependencies<Allocator, BaseSystem, UDependencies...>
+    rebind_after(std::tuple<UDependencies...>& udependencies) const
+    {
+        return { alloc, capture_as_dependency(udependencies) };
+    }
+    template<typename ...UDependencies>
+    __host__
+    execute_with_allocator_and_dependencies<Allocator, BaseSystem, UDependencies...>
+    rebind_after(std::tuple<UDependencies...>&& udependencies) const
+    {
+        return { alloc, capture_as_dependency(std::move(udependencies)) };
+    }
 };
 
 template<template<typename> class BaseSystem, typename ...Dependencies>
 __host__
-std::tuple<Dependencies...>
+std::tuple<remove_cvref_t<Dependencies>...>
 extract_dependencies(thrust::detail::execute_with_dependencies<BaseSystem, Dependencies...>&& system)
+{
+    return std::move(system).extract_dependencies();
+}
+template<template<typename> class BaseSystem, typename ...Dependencies>
+__host__
+std::tuple<remove_cvref_t<Dependencies>...>
+extract_dependencies(thrust::detail::execute_with_dependencies<BaseSystem, Dependencies...>& system)
 {
     return std::move(system).extract_dependencies();
 }
 
 template<typename Allocator, template<typename> class BaseSystem, typename ...Dependencies>
 __host__
-std::tuple<Dependencies...>
+std::tuple<remove_cvref_t<Dependencies>...>
 extract_dependencies(thrust::detail::execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>&& system)
+{
+    return std::move(system).extract_dependencies();
+}
+template<typename Allocator, template<typename> class BaseSystem, typename ...Dependencies>
+__host__
+std::tuple<remove_cvref_t<Dependencies>...>
+extract_dependencies(thrust::detail::execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>& system)
 {
     return std::move(system).extract_dependencies();
 }

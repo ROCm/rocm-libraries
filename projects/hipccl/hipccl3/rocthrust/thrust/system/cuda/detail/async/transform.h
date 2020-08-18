@@ -31,8 +31,9 @@
 
 #include <thrust/detail/config.h>
 #include <thrust/detail/cpp11_required.h>
+#include <thrust/detail/modern_gcc_required.h>
 
-#if THRUST_CPP_DIALECT >= 2011
+#if THRUST_CPP_DIALECT >= 2011 && !defined(THRUST_LEGACY_GCC)
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 
@@ -43,6 +44,7 @@
 #include <thrust/system/cuda/future.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/distance.h>
+#include <thrust/advance.h>
 
 #include <type_traits>
 
@@ -82,29 +84,9 @@ auto async_transform_n(
   Size                             n,
   OutputIt                         output,
   UnaryOperation                   op
-) ->
-  unique_eager_future<
-    OutputIt
-  , typename thrust::detail::allocator_traits<
-      decltype(get_async_universal_host_pinned_allocator(policy))
-    >::template rebind_traits<OutputIt>::pointer
-  >
+) -> unique_eager_event
 {
-  using T = typename thrust::iterator_traits<ForwardIt>::value_type;
-
-  auto const uhp_alloc = get_async_universal_host_pinned_allocator(policy);
-
-  using return_type = OutputIt;
-
-  using return_pointer =
-    typename thrust::detail::allocator_traits<decltype(uhp_alloc)>::
-      template rebind_traits<return_type>::pointer;
-
-  unique_eager_future_promise_pair<return_type, return_pointer> fp;
-
-  // Create result storage.
-
-  auto content = allocate_unique<OutputIt>(uhp_alloc, std::next(output, n));
+  unique_eager_event e;
 
   // Set up stream with dependencies.
 
@@ -112,22 +94,22 @@ auto async_transform_n(
 
   if (thrust::cuda_cub::default_stream() != user_raw_stream)
   {
-    fp = depend_on<return_type, return_pointer>(
-      [] (decltype(content) const& c)
-      { return c.get(); }
-    , std::make_tuple(
-        std::move(content)
-      , unique_stream(nonowning, user_raw_stream)
+    e = make_dependent_event(
+      std::tuple_cat(
+        std::make_tuple(
+          unique_stream(nonowning, user_raw_stream)
+        )
+      , extract_dependencies(
+          std::move(thrust::detail::derived_cast(policy))
+        )
       )
     );
   }
   else
   {
-    fp = depend_on<return_type, return_pointer>(
-      [] (decltype(content) const& c)
-      { return c.get(); }
-    , std::make_tuple(
-        std::move(content)
+    e = make_dependent_event(
+      extract_dependencies(
+        std::move(thrust::detail::derived_cast(policy))
       )
     );
   }
@@ -140,12 +122,12 @@ auto async_transform_n(
 
   thrust::cuda_cub::throw_on_error(
     thrust::cuda_cub::__parallel_for::parallel_for(
-      n, std::move(wrapped), fp.future.stream()
+      n, std::move(wrapped), e.stream().native_handle()
     )
   , "after transform launch"
   );
 
-  return std::move(fp.future);
+  return e;
 }
 
 }}} // namespace system::cuda::detail
@@ -169,7 +151,7 @@ auto async_transform(
 )
 THRUST_DECLTYPE_RETURNS(
   thrust::system::cuda::detail::async_transform_n(
-    policy, first, thrust::distance(first, last), output, THRUST_FWD(op)
+    policy, first, distance(first, last), output, THRUST_FWD(op)
   )
 );
 
@@ -179,5 +161,5 @@ THRUST_END_NS
 
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 
-#endif // THRUST_CPP_DIALECT >= 2011
+#endif
 

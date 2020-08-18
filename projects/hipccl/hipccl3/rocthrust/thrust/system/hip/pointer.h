@@ -133,6 +133,14 @@ public:
     {
     }
 
+    #if THRUST_CPP_DIALECT >= 2011
+    // NOTE: This is needed so that Thrust smart pointers can be used in
+    // `std::unique_ptr`.
+    __host__ __device__
+    pointer(decltype(nullptr)) : super_t(nullptr) {}
+    #endif
+
+
     template <typename OtherT>
     __host__ __device__ explicit pointer(OtherT* ptr)
         : super_t(ptr)

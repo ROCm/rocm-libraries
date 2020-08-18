@@ -28,7 +28,7 @@
 
 #pragma once
 
-//  This is the only Thrust header that is guaranteed to 
+//  This is the only Thrust header that is guaranteed to
 //  change with every Thrust release.
 //
 //  THRUST_VERSION % 100 is the sub-minor version
@@ -47,7 +47,7 @@
  *         <tt>THRUST_VERSION / 100 % 1000</tt> is the minor version.
  *         <tt>THRUST_VERSION / 100000</tt> is the major version.
  */
-#define THRUST_VERSION 100903
+#define THRUST_VERSION 100904
 
 /*! \def THRUST_MAJOR_VERSION
  *  \brief The preprocessor macro \p THRUST_MAJOR_VERSION encodes the
