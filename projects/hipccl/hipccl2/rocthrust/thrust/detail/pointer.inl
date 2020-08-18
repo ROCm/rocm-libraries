@@ -27,8 +27,24 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
   __host__ __device__
   pointer<Element,Tag,Reference,Derived>
     ::pointer()
-      : super_t(static_cast<Element*>(0))
+      : super_t(static_cast<Element*>(
+          #if THRUST_CPP_DIALECT >= 2011
+          nullptr
+          #else
+          0
+          #endif
+        ))
 {} // end pointer::pointer
+
+
+#if THRUST_CPP_DIALECT >= 2011
+template<typename Element, typename Tag, typename Reference, typename Derived>
+  __host__ __device__
+  pointer<Element,Tag,Reference,Derived>
+    ::pointer(decltype(nullptr))
+      : super_t(static_cast<Element*>(nullptr))
+{} // end pointer::pointer
+#endif
 
 
 template<typename Element, typename Tag, typename Reference, typename Derived>
@@ -73,6 +89,19 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
 {} // end pointer::pointer
 
 
+#if THRUST_CPP_DIALECT >= 2011
+template<typename Element, typename Tag, typename Reference, typename Derived>
+  __host__ __device__
+  typename pointer<Element,Tag,Reference,Derived>::derived_type &
+    pointer<Element,Tag,Reference,Derived>
+      ::operator=(decltype(nullptr))
+{
+  super_t::base_reference() = nullptr;
+  return static_cast<derived_type&>(*this);
+} // end pointer::operator=
+#endif
+
+
 template<typename Element, typename Tag, typename Reference, typename Derived>
   template<typename OtherPointer>
     __host__ __device__
@@ -107,13 +136,58 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
   return super_t::base();
 } // end pointer::get
 
+
+#if THRUST_CPP_DIALECT >= 2011
+template<typename Element, typename Tag, typename Reference, typename Derived>
+  __host__ __device__
+  pointer<Element,Tag,Reference,Derived>
+    ::operator bool() const
+{
+  return bool(get());
+} // end pointer::operator bool
+#endif
+
+
 template<typename Element, typename Tag, typename Reference, typename Derived,
          typename charT, typename traits>
+__host__
 std::basic_ostream<charT, traits> &
 operator<<(std::basic_ostream<charT, traits> &os,
            const pointer<Element, Tag, Reference, Derived> &p) {
   return os << p.get();
 }
+
+#if THRUST_CPP_DIALECT >= 2011
+// NOTE: These are needed so that Thrust smart pointers work with
+// `std::unique_ptr`.
+template <typename Element, typename Tag, typename Reference, typename Derived>
+__host__ __device__
+bool operator==(decltype(nullptr), pointer<Element, Tag, Reference, Derived> p)
+{
+  return nullptr == p.get();
+}
+
+template <typename Element, typename Tag, typename Reference, typename Derived>
+__host__ __device__
+bool operator==(pointer<Element, Tag, Reference, Derived> p, decltype(nullptr))
+{
+  return nullptr == p.get();
+}
+
+template <typename Element, typename Tag, typename Reference, typename Derived>
+__host__ __device__
+bool operator!=(decltype(nullptr), pointer<Element, Tag, Reference, Derived> p)
+{
+  return !(nullptr == p);
+}
+
+template <typename Element, typename Tag, typename Reference, typename Derived>
+__host__ __device__
+bool operator!=(pointer<Element, Tag, Reference, Derived> p, decltype(nullptr))
+{
+  return !(nullptr == p);
+}
+#endif
 
 namespace detail
 {

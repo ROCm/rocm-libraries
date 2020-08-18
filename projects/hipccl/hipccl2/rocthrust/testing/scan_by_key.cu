@@ -261,7 +261,7 @@ struct head_flag_predicate
 {
     template <typename T>
     __host__ __device__
-    bool operator()(const T&, const T& b) const
+    bool operator()(const T&, const T& b)
     {
         return b ? false : true;
     }

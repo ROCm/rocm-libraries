@@ -35,7 +35,7 @@
 #if defined(__HCC__) || defined(__HIP__)
 // Macro enables Device Malloc
 #ifndef __HIP_ENABLE_DEVICE_MALLOC__
-#define __HIP_ENABLE_DEVICE_MALLOC__ 1 
+#define __HIP_ENABLE_DEVICE_MALLOC__ 1
 #endif
 #include <hip/hip_runtime.h>
 #endif
@@ -67,6 +67,11 @@
     #define THRUST_HOST_COMPILER THRUST_HOST_COMPILER_GCC
     #define THRUST_DEPRECATED __attribute__ ((deprecated))
     #define THRUST_GCC_VERSION (__GNUC__ * 10000 + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__)
+    #if (THRUST_GCC_VERSION >= 50000)
+        #define THRUST_MODERN_GCC
+    #else
+        #define THRUST_LEGACY_GCC
+    #endif
 #else
     #define THRUST_HOST_COMPILER THRUST_HOST_COMPILER_UNKNOWN
     #define THRUST_DEPRECATED
@@ -99,7 +104,7 @@
 #define THRUST_DEVICE_COMPILER_IS_OMP_CAPABLE THRUST_FALSE
 #endif // _OPENMP
 
-// Disable specific MSVC warnings.
+
 #if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC) && !defined(__CUDA_ARCH__)
   #define THRUST_DISABLE_MSVC_WARNING_BEGIN(x)                                \
     __pragma(warning(push))                                                   \
@@ -195,3 +200,16 @@
   THRUST_DISABLE_CLANG_SELF_ASSIGNMENT_WARNING_END                            \
   /**/
 
+#define THRUST_DISABLE_CLANG_AND_GCC_INITIALIZER_REORDERING_WARNING_BEGIN     \
+  THRUST_DISABLE_CLANG_WARNING_BEGIN(-Wreorder)                               \
+  THRUST_DISABLE_GCC_WARNING_BEGIN(-Wreorder)                                 \
+  /**/
+#define THRUST_DISABLE_CLANG_AND_GCC_INITIALIZER_REORDERING_WARNING_END       \
+  THRUST_DISABLE_CLANG_WARNING_END(-Wreorder)                                 \
+  THRUST_DISABLE_GCC_WARNING_END(-Wreorder)                                   \
+  /**/
+#define THRUST_DISABLE_CLANG_AND_GCC_INITIALIZER_REORDERING_WARNING(x)        \
+  THRUST_DISABLE_CLANG_AND_GCC_INITIALIZER_REORDERING_WARNING_BEGIN           \
+  x;                                                                          \
+  THRUST_DISABLE_CLANG_AND_GCC_INITIALIZER_REORDERING_WARNING_END             \
+  /**/

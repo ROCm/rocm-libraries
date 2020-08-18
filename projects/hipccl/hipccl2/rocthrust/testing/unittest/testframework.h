@@ -28,6 +28,7 @@
 #include "meta.h"
 #include "util.h"
 
+#include <thrust/limits.h>
 #include <thrust/detail/integer_traits.h>
 #include <thrust/memory/detail/device_system_resource.h>
 #include <thrust/memory/detail/host_system_resource.h>
@@ -82,8 +83,9 @@ typedef unittest::type_list<long long,
 typedef unittest::type_list<float,
                             double> FloatingPointTypes;
 
-// a type that behaves as if it was a normal numeric type,
-// so it can be used in the same tests as "normal" numeric types
+// A type that behaves as if it was a normal numeric type,
+// so it can be used in the same tests as "normal" numeric types.
+// NOTE: This is explicitly NOT proclaimed trivially reloctable.
 class custom_numeric
 {
 public:
@@ -239,7 +241,13 @@ private:
     }
 };
 
-namespace thrust { namespace detail
+namespace thrust
+{
+
+template <>
+struct numeric_limits<custom_numeric> : numeric_limits<int> {};
+
+namespace detail
 {
 
 // For random number generation
@@ -276,7 +284,8 @@ typedef unittest::type_list<char,
                             unsigned long,
                             long long,
                             unsigned long long,
-                            float> RandomizableTypes;
+                            float,
+                            double> BuiltinNumericTypes;
 
 inline void chop_prefix(std::string& str, const std::string& prefix)
 {
@@ -443,10 +452,47 @@ class TEST##UnitTest : public UnitTest {                         \
             TEST<int>(sizes[i]);                                 \
             TEST<unsigned int>(sizes[i]);                        \
             TEST<float>(sizes[i]);                               \
+            TEST<double>(sizes[i]);                              \
         }                                                        \
     }                                                            \
 };                                                               \
 TEST##UnitTest TEST##Instance
+
+#define DECLARE_INTEGRAL_VARIABLE_UNITTEST(TEST)                 \
+class TEST##UnitTest : public UnitTest {                         \
+    public:                                                      \
+    TEST##UnitTest() : UnitTest(#TEST) {}                        \
+    void run()                                                   \
+    {                                                            \
+        std::vector<size_t> sizes = get_test_sizes();            \
+        for(size_t i = 0; i != sizes.size(); ++i)                \
+        {                                                        \
+            TEST<char>(sizes[i]);                                \
+            TEST<unsigned char>(sizes[i]);                       \
+            TEST<short>(sizes[i]);                               \
+            TEST<unsigned short>(sizes[i]);                      \
+            TEST<int>(sizes[i]);                                 \
+            TEST<unsigned int>(sizes[i]);                        \
+        }                                                        \
+    }                                                            \
+};                                                               \
+TEST##UnitTest TEST##Instance
+
+#define DECLARE_GENERIC_UNITTEST_WITH_TYPES_AND_NAME(TEST, TYPES, NAME)       \
+  ::SimpleUnitTest<TEST, TYPES> NAME##_instance(#NAME)                        \
+  /**/
+
+#define DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(TEST, TYPES, NAME) \
+  ::VariableUnitTest<TEST, TYPES> NAME##_instance(#NAME)                      \
+  /**/
+
+#define DECLARE_GENERIC_UNITTEST_WITH_TYPES(TEST, TYPES)                      \
+  ::SimpleUnitTest<TEST, TYPES> TEST##_instance(#TEST)                        \
+  /**/
+
+#define DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES(TEST, TYPES)                \
+  ::VariableUnitTest<TEST, TYPES> TEST##_instance(#TEST)                      \
+  /**/
 
 template<template <typename> class TestName, typename TypeList>
   class SimpleUnitTest : public UnitTest
@@ -454,6 +500,9 @@ template<template <typename> class TestName, typename TypeList>
   public:
     SimpleUnitTest()
       : UnitTest(base_class_name(unittest::type_name<TestName<int> >()).c_str()) {}
+
+    SimpleUnitTest(const char * name)
+      : UnitTest(name) {}
 
     void run()
     {
@@ -505,6 +554,9 @@ template<template <typename> class TestName,
     : UnitTest((base_class_name(unittest::type_name<TestName< Vector<int, Alloc<int> > > >()) + "<" +
                 base_class_name(unittest::type_name<Vector<int, Alloc<int> > >()) + ">").c_str())
   { }
+
+  VectorUnitTest(const char * name)
+    : UnitTest(name) {}
 
   void run()
   {

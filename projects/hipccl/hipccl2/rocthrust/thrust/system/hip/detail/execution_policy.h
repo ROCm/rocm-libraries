@@ -1,5 +1,5 @@
 /******************************************************************************
- * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
  * Modifications Copyright (c) 2019, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,13 +27,21 @@
  ******************************************************************************/
 #pragma once
 
+#include <thrust/version.h>
+
 #include <hip/hip_runtime.h>
 
 #include <thrust/detail/execution_policy.h>
 #include <thrust/iterator/detail/any_system_tag.h>
 #include <thrust/system/hip/config.h>
+#include <thrust/detail/allocator_aware_execution_policy.h>
+
+#if THRUST_CPP_DIALECT >= 2011
+  #include <thrust/detail/dependencies_aware_execution_policy.h>
+#endif
 
 THRUST_BEGIN_NS
+
 namespace hip_rocprim
 {
     struct tag;
@@ -44,35 +52,48 @@ namespace hip_rocprim
     template <>
     struct execution_policy<tag> : thrust::execution_policy<tag>
     {
+        typedef tag tag_type; 
     };
 
     struct tag : execution_policy<tag>
-    {
-    };
+    , thrust::detail::allocator_aware_execution_policy<hip_rocprim::execution_policy>
+    #if THRUST_CPP_DIALECT >= 2011
+    , thrust::detail::dependencies_aware_execution_policy<hip_rocprim::execution_policy>
+    #endif
+    {};
 
     template <class Derived>
     struct execution_policy : thrust::execution_policy<Derived>
     {
-        inline operator tag() const
-        {
-            return tag();
-        }
+       typedef tag tag_type;
+       operator tag() const { return tag(); }
     };
+
 } // namespace hip_rocprim
 
-namespace system
+namespace system { namespace hip { namespace detail
 {
-namespace hip
+
+  using thrust::hip_rocprim::tag;
+  using thrust::hip_rocprim::execution_policy;
+
+}}} // namespace system::hip_rocprim::detail
+
+namespace system { namespace hip
 {
-    using thrust::hip_rocprim::execution_policy;
-    using thrust::hip_rocprim::tag;
-} // namespace hip
-} // namespace system
+
+  using thrust::hip_rocprim::tag;
+  using thrust::hip_rocprim::execution_policy;
+
+}} // namespace system::hip
 
 namespace hip
 {
-    using thrust::hip_rocprim::execution_policy;
-    using thrust::hip_rocprim::tag;
+
+  using thrust::hip_rocprim::tag;
+  using thrust::hip_rocprim::execution_policy;
+
 } // namespace hip
+
 
 THRUST_END_NS

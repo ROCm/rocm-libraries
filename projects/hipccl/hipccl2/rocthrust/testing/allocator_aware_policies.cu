@@ -1,8 +1,14 @@
 #include <unittest/unittest.h>
 
 #include <thrust/detail/seq.h>
+
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+    #include <thrust/system/hip/detail/par.h>
+#elif THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
+    #include <thrust/system/cuda/detail/par.h>
+#endif
+
 #include <thrust/system/cpp/detail/par.h>
-#include <thrust/system/cuda/detail/par.h>
 #include <thrust/system/omp/detail/par.h>
 #include <thrust/system/tbb/detail/par.h>
 
@@ -70,15 +76,45 @@ struct TestAllocatorAttachment
             >::value), true);
     }
 
+    template<typename Policy>
+    void test_temporary_allocation_valid(Policy policy)
+    {
+        using thrust::detail::get_temporary_buffer;
+
+        return_temporary_buffer(
+            policy,
+            get_temporary_buffer<int>(
+                policy,
+                123
+            ).first
+        );
+    }
+
     void operator()()
     {
         typename PolicyInfo::policy policy;
 
+        // test correctness of attachment
         assert_correct<test_allocator_t<int> >(policy(test_allocator_t<int>()));
         assert_correct<test_allocator_t<int>&>(policy(test_allocator));
         assert_correct<test_allocator_t<int> >(policy(const_test_allocator));
 
         assert_npa_correct<test_memory_resource_t>(policy(&test_memory_resource));
+
+        // test whether the resulting policy is actually usable
+        // a real allocator is necessary here, unlike above
+        std::allocator<int> alloc;
+        const std::allocator<int> const_alloc;
+
+        test_temporary_allocation_valid(policy(std::allocator<int>()));
+        test_temporary_allocation_valid(policy(alloc));
+        test_temporary_allocation_valid(policy(const_alloc));
+
+        #if THRUST_CPP_DIALECT >= 2011 
+        test_temporary_allocation_valid(policy(std::allocator<int>()).after(1));
+        test_temporary_allocation_valid(policy(alloc).after(1));
+        test_temporary_allocation_valid(policy(const_alloc).after(1));
+        #endif
     }
 };
 
@@ -91,9 +127,9 @@ typedef policy_info<
     thrust::system::cpp::detail::execution_policy
 > cpp_par_info;
 typedef policy_info<
-    thrust::system::cuda::detail::par_t,
-    thrust::cuda_cub::execute_on_stream_base
-> cuda_par_info;
+    thrust::system::THRUST_DEVICE_BACKEND::detail::par_t,
+    thrust::THRUST_DEVICE_BACKEND_DETAIL::execute_on_stream_base
+> THRUST_DEVICE_BACKEND_par_info;
 typedef policy_info<
     thrust::system::omp::detail::par_t,
     thrust::system::omp::detail::execution_policy
@@ -108,7 +144,7 @@ SimpleUnitTest<
     unittest::type_list<
         sequential_info,
         cpp_par_info,
-        cuda_par_info,
+        THRUST_DEVICE_BACKEND_par_info,
         omp_par_info,
         tbb_par_info
     >

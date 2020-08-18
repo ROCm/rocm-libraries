@@ -21,6 +21,8 @@
 
 #if THRUST_CPP_DIALECT >= 2011
 
+#include <tuple>
+
 #include <thrust/detail/execute_with_dependencies.h>
 
 namespace thrust
@@ -38,10 +40,49 @@ struct dependencies_aware_execution_policy
     >;
 
     template<typename ...Dependencies>
+    __host__
     execute_with_dependencies_type<Dependencies...>
-    after(Dependencies ...dependencies) const
+    after(Dependencies&& ...dependencies) const
     {
-        return { std::move(dependencies)... };
+        return { capture_as_dependency(THRUST_FWD(dependencies))... };
+    }
+
+    template<typename ...Dependencies>
+    __host__
+    execute_with_dependencies_type<Dependencies...>
+    after(std::tuple<Dependencies...>& dependencies) const
+    {
+        return { capture_as_dependency(dependencies) };
+    }
+    template<typename ...Dependencies>
+    __host__
+    execute_with_dependencies_type<Dependencies...>
+    after(std::tuple<Dependencies...>&& dependencies) const
+    {
+        return { capture_as_dependency(std::move(dependencies)) };
+    }
+
+    template<typename ...Dependencies>
+    __host__
+    execute_with_dependencies_type<Dependencies...>
+    rebind_after(Dependencies&& ...dependencies) const
+    {
+        return { capture_as_dependency(THRUST_FWD(dependencies))... };
+    }
+
+    template<typename ...Dependencies>
+    __host__
+    execute_with_dependencies_type<Dependencies...>
+    rebind_after(std::tuple<Dependencies...>& dependencies) const
+    {
+        return { capture_as_dependency(dependencies) };
+    }
+    template<typename ...Dependencies>
+    __host__
+    execute_with_dependencies_type<Dependencies...>
+    rebind_after(std::tuple<Dependencies...>&& dependencies) const
+    {
+        return { capture_as_dependency(std::move(dependencies)) };
     }
 };
 

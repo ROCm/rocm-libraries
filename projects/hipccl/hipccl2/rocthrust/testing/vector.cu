@@ -27,7 +27,7 @@ template <class Vector>
 void TestVectorZeroSize(void)
 {
     Vector v;
-    ASSERT_EQUAL(v.size(), 0);
+    ASSERT_EQUAL(v.size(), 0lu);
     ASSERT_EQUAL((v.begin() == v.end()), true);
 }
 DECLARE_VECTOR_UNITTEST(TestVectorZeroSize);
@@ -55,11 +55,13 @@ DECLARE_UNITTEST(TestVectorBool);
 template <class Vector>
 void TestVectorFrontBack(void)
 {
+    typedef typename Vector::value_type T;
+
     Vector v(3);
     v[0] = 0; v[1] = 1; v[2] = 2;
 
-    ASSERT_EQUAL(v.front(), 0);
-    ASSERT_EQUAL(v.back(),  2);
+    ASSERT_EQUAL(v.front(), T(0));
+    ASSERT_EQUAL(v.back(),  T(2));
 }
 DECLARE_VECTOR_UNITTEST(TestVectorFrontBack);
 
@@ -128,14 +130,14 @@ void TestVectorFromSTLVector(void)
 
     thrust::host_vector<T> v(stl_vector);
 
-    ASSERT_EQUAL(v.size(), 3);
+    ASSERT_EQUAL(v.size(), 3lu);
     ASSERT_EQUAL(v[0], 0);
     ASSERT_EQUAL(v[1], 1);
     ASSERT_EQUAL(v[2], 2);
 
     v = stl_vector;
 
-    ASSERT_EQUAL(v.size(), 3);
+    ASSERT_EQUAL(v.size(), 3lu);
     ASSERT_EQUAL(v[0], 0);
     ASSERT_EQUAL(v[1], 1);
     ASSERT_EQUAL(v[2], 2);
@@ -151,7 +153,7 @@ void TestVectorFillAssign(void)
     thrust::host_vector<T> v;
     v.assign(3, 13);
 
-    ASSERT_EQUAL(v.size(), 3);
+    ASSERT_EQUAL(v.size(), 3lu);
     ASSERT_EQUAL(v[0], 13);
     ASSERT_EQUAL(v[1], 13);
     ASSERT_EQUAL(v[2], 13);
@@ -172,7 +174,7 @@ void TestVectorAssignFromSTLVector(void)
     thrust::host_vector<T> v;
     v.assign(stl_vector.begin(), stl_vector.end());
 
-    ASSERT_EQUAL(v.size(), 3);
+    ASSERT_EQUAL(v.size(), 3lu);
     ASSERT_EQUAL(v[0], 0);
     ASSERT_EQUAL(v[1], 1);
     ASSERT_EQUAL(v[2], 2);
@@ -192,7 +194,7 @@ void TestVectorFromBiDirectionalIterator(void)
 
     Vector v(stl_list.begin(), stl_list.end());
 
-    ASSERT_EQUAL(v.size(), 3);
+   ASSERT_EQUAL(v.size(), 3lu);
     ASSERT_EQUAL(v[0], 0);
     ASSERT_EQUAL(v[1], 1);
     ASSERT_EQUAL(v[2], 2);
@@ -213,7 +215,7 @@ void TestVectorAssignFromBiDirectionalIterator(void)
     Vector v;
     v.assign(stl_list.begin(), stl_list.end());
 
-    ASSERT_EQUAL(v.size(), 3);
+    ASSERT_EQUAL(v.size(), 3lu);
     ASSERT_EQUAL(v[0], 0);
     ASSERT_EQUAL(v[1], 1);
     ASSERT_EQUAL(v[2], 2);
@@ -344,7 +346,7 @@ void TestVectorWithInitialValue(void)
 
     Vector v(3, init);
 
-    ASSERT_EQUAL(v.size(), 3);
+    ASSERT_EQUAL(v.size(), 3lu);
     ASSERT_EQUAL(v[0], init);
     ASSERT_EQUAL(v[1], init);
     ASSERT_EQUAL(v[2], init);
@@ -378,7 +380,7 @@ void TestVectorErasePosition(void)
 
     v.erase(v.begin() + 2);
 
-    ASSERT_EQUAL(v.size(), 4);
+    ASSERT_EQUAL(v.size(), 4lu);
     ASSERT_EQUAL(v[0], 0);
     ASSERT_EQUAL(v[1], 1);
     ASSERT_EQUAL(v[2], 3);
@@ -386,25 +388,25 @@ void TestVectorErasePosition(void)
 
     v.erase(v.begin() + 0);
 
-    ASSERT_EQUAL(v.size(), 3);
+    ASSERT_EQUAL(v.size(), 3lu);
     ASSERT_EQUAL(v[0], 1);
     ASSERT_EQUAL(v[1], 3);
     ASSERT_EQUAL(v[2], 4);
 
     v.erase(v.begin() + 2);
 
-    ASSERT_EQUAL(v.size(), 2);
+    ASSERT_EQUAL(v.size(), 2lu); 
     ASSERT_EQUAL(v[0], 1);
     ASSERT_EQUAL(v[1], 3);
 
     v.erase(v.begin() + 1);
 
-    ASSERT_EQUAL(v.size(), 1);
+    ASSERT_EQUAL(v.size(), 1lu); 
     ASSERT_EQUAL(v[0], 1);
 
     v.erase(v.begin() + 0);
 
-    ASSERT_EQUAL(v.size(), 0);
+    ASSERT_EQUAL(v.size(), 0lu);
 }
 DECLARE_VECTOR_UNITTEST(TestVectorErasePosition);
 
@@ -417,7 +419,7 @@ void TestVectorEraseRange(void)
 
     v.erase(v.begin() + 1, v.begin() + 3);
 
-    ASSERT_EQUAL(v.size(), 4);
+    ASSERT_EQUAL(v.size(), 4lu); 
     ASSERT_EQUAL(v[0], 0);
     ASSERT_EQUAL(v[1], 3);
     ASSERT_EQUAL(v[2], 4);
@@ -425,18 +427,18 @@ void TestVectorEraseRange(void)
 
     v.erase(v.begin() + 2, v.end());
 
-    ASSERT_EQUAL(v.size(), 2);
+    ASSERT_EQUAL(v.size(), 2lu); 
     ASSERT_EQUAL(v[0], 0);
     ASSERT_EQUAL(v[1], 3);
 
     v.erase(v.begin() + 0, v.begin() + 1);
 
-    ASSERT_EQUAL(v.size(), 1);
+    ASSERT_EQUAL(v.size(), 1lu); 
     ASSERT_EQUAL(v[0], 3);
 
     v.erase(v.begin(), v.end());
 
-    ASSERT_EQUAL(v.size(), 0);
+    ASSERT_EQUAL(v.size(), 0lu); 
 }
 DECLARE_VECTOR_UNITTEST(TestVectorEraseRange);
 
@@ -573,13 +575,13 @@ void TestVectorResizing(void)
 
     v.resize(3);
 
-    ASSERT_EQUAL(v.size(), 3);
+    ASSERT_EQUAL(v.size(), 3lu);
 
     v[0] = 0; v[1] = 1; v[2] = 2;
 
     v.resize(5);
 
-    ASSERT_EQUAL(v.size(), 5);
+    ASSERT_EQUAL(v.size(), 5lu);
 
     ASSERT_EQUAL(v[0], 0);
     ASSERT_EQUAL(v[1], 1);
@@ -589,7 +591,7 @@ void TestVectorResizing(void)
 
     v.resize(4);
 
-    ASSERT_EQUAL(v.size(), 4);
+    ASSERT_EQUAL(v.size(), 4lu);
 
     ASSERT_EQUAL(v[0], 0);
     ASSERT_EQUAL(v[1], 1);
@@ -598,7 +600,7 @@ void TestVectorResizing(void)
 
     v.resize(0);
 
-    ASSERT_EQUAL(v.size(), 0);
+    ASSERT_EQUAL(v.size(), 0lu);
 
 // TODO remove this WAR
 #if defined(__CUDACC__) && CUDA_VERSION==3000
@@ -616,7 +618,7 @@ void TestVectorResizing(void)
     } // end catch
 #endif // defined(__CUDACC__) && CUDA_VERSION==3000
 
-    ASSERT_EQUAL(v.size(), 0);
+    ASSERT_EQUAL(v.size(), 0lu);
 }
 DECLARE_VECTOR_UNITTEST(TestVectorResizing);
 
@@ -629,7 +631,7 @@ void TestVectorReserving(void)
 
     v.reserve(3);
 
-    ASSERT_GEQUAL(v.capacity(), 3);
+    ASSERT_GEQUAL(v.capacity(), 3lu);
 
     size_t old_capacity = v.capacity();
 
@@ -656,11 +658,13 @@ DECLARE_VECTOR_UNITTEST(TestVectorReserving)
 template <class Vector>
 void TestVectorShrinkToFit(void)
 {
+    typedef typename Vector::value_type T;
+
     Vector v;
 
     v.reserve(200);
 
-    ASSERT_GEQUAL(v.capacity(), 200);
+    ASSERT_GEQUAL(v.capacity(), 200lu);
 
     v.push_back(1);
     v.push_back(2);
@@ -668,11 +672,11 @@ void TestVectorShrinkToFit(void)
 
     v.shrink_to_fit();
 
-    ASSERT_EQUAL(1, v[0]);
-    ASSERT_EQUAL(2, v[1]);
-    ASSERT_EQUAL(3, v[2]);
-    ASSERT_EQUAL(3, v.size());
-    ASSERT_EQUAL(3, v.capacity());
+    ASSERT_EQUAL(T(1), v[0]);
+    ASSERT_EQUAL(T(2), v[1]);
+    ASSERT_EQUAL(T(3), v[2]);
+    ASSERT_EQUAL(3lu, v.size());
+    ASSERT_EQUAL(3lu, v.capacity());
 }
 DECLARE_VECTOR_UNITTEST(TestVectorShrinkToFit)
 

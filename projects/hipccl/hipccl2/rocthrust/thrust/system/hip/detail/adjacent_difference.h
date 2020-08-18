@@ -169,7 +169,7 @@ namespace __adjacent_difference
         {
             typename block_load_type::storage_type  load;
             typename block_store_type::storage_type store;
-            input_type                              last_items[BlockSize];
+            input_type                              last_items[BlockSize] = {};
         } storage;
 
         constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;

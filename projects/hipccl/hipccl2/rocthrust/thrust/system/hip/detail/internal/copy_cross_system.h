@@ -304,7 +304,7 @@ cross_system_copy_n(thrust::hip_rocprim::execution_policy<D>& device_s,
             begin,
             n,
             result,
-            typename is_trivially_relocatable_sequence_copy<InputIt, OutputIt>::type());
+            typename is_indirectly_trivially_relocatable_to<InputIt, OutputIt>::type());
     }
 
     template <class System1, class System2, class InputIterator, class OutputIterator>

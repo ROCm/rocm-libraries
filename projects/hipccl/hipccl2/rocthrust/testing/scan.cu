@@ -51,35 +51,35 @@ void TestScanSimple(void)
     // inclusive scan
     iter = thrust::inclusive_scan(input.begin(), input.end(), output.begin());
     result[0] = 1; result[1] = 4; result[2] = 2; result[3] = 6; result[4] = 1;
-    ASSERT_EQUAL(iter - output.begin(), input.size());
+    ASSERT_EQUAL(std::size_t(iter - output.begin()), input.size());
     ASSERT_EQUAL(input,  input_copy);
     ASSERT_EQUAL(output, result);
 
     // exclusive scan
     iter = thrust::exclusive_scan(input.begin(), input.end(), output.begin(), T(0));
     result[0] = 0; result[1] = 1; result[2] = 4; result[3] = 2; result[4] = 6;
-    ASSERT_EQUAL(iter - output.begin(), input.size());
+    ASSERT_EQUAL(std::size_t(iter - output.begin()), input.size());
     ASSERT_EQUAL(input,  input_copy);
     ASSERT_EQUAL(output, result);
 
     // exclusive scan with init
     iter = thrust::exclusive_scan(input.begin(), input.end(), output.begin(), T(3));
     result[0] = 3; result[1] = 4; result[2] = 7; result[3] = 5; result[4] = 9;
-    ASSERT_EQUAL(iter - output.begin(), input.size());
+    ASSERT_EQUAL(std::size_t(iter - output.begin()), input.size());
     ASSERT_EQUAL(input,  input_copy);
     ASSERT_EQUAL(output, result);
 
     // inclusive scan with op
     iter = thrust::inclusive_scan(input.begin(), input.end(), output.begin(), thrust::plus<T>());
     result[0] = 1; result[1] = 4; result[2] = 2; result[3] = 6; result[4] = 1;
-    ASSERT_EQUAL(iter - output.begin(), input.size());
+    ASSERT_EQUAL(std::size_t(iter - output.begin()), input.size());
     ASSERT_EQUAL(input,  input_copy);
     ASSERT_EQUAL(output, result);
 
     // exclusive scan with init and op
     iter = thrust::exclusive_scan(input.begin(), input.end(), output.begin(), T(3), thrust::plus<T>());
     result[0] = 3; result[1] = 4; result[2] = 7; result[3] = 5; result[4] = 9;
-    ASSERT_EQUAL(iter - output.begin(), input.size());
+    ASSERT_EQUAL(std::size_t(iter - output.begin()), input.size());
     ASSERT_EQUAL(input,  input_copy);
     ASSERT_EQUAL(output, result);
 
@@ -87,21 +87,21 @@ void TestScanSimple(void)
     input = input_copy;
     iter = thrust::inclusive_scan(input.begin(), input.end(), input.begin());
     result[0] = 1; result[1] = 4; result[2] = 2; result[3] = 6; result[4] = 1;
-    ASSERT_EQUAL(iter - input.begin(), input.size());
+    ASSERT_EQUAL(std::size_t(iter - input.begin()), input.size());
     ASSERT_EQUAL(input, result);
 
     // inplace exclusive scan with init
     input = input_copy;
     iter = thrust::exclusive_scan(input.begin(), input.end(), input.begin(), T(3));
     result[0] = 3; result[1] = 4; result[2] = 7; result[3] = 5; result[4] = 9;
-    ASSERT_EQUAL(iter - input.begin(), input.size());
+    ASSERT_EQUAL(std::size_t(iter - input.begin()), input.size());
     ASSERT_EQUAL(input, result);
 
     // inplace exclusive scan with implicit init=0
     input = input_copy;
     iter = thrust::exclusive_scan(input.begin(), input.end(), input.begin());
     result[0] = 0; result[1] = 1; result[2] = 4; result[3] = 2; result[4] = 6;
-    ASSERT_EQUAL(iter - input.begin(), input.size());
+    ASSERT_EQUAL(std::size_t(iter - input.begin()), input.size());
     ASSERT_EQUAL(input, result);
 }
 DECLARE_VECTOR_UNITTEST(TestScanSimple);
@@ -274,7 +274,7 @@ void TestScanMixedTypes(void)
 
     // float -> float with plus<int> operator (int accumulator)
     thrust::inclusive_scan(float_input.begin(), float_input.end(), float_output.begin(), thrust::plus<int>());
-    ASSERT_EQUAL(float_output[0],  1.0);
+    ASSERT_EQUAL(float_output[0],  1.5);
     ASSERT_EQUAL(float_output[1],  3.0);
     ASSERT_EQUAL(float_output[2],  6.0);
     ASSERT_EQUAL(float_output[3], 10.0);
@@ -513,13 +513,12 @@ void TestScanWithLargeTypes(void)
 {
   _TestScanWithLargeTypes<int,  1>();
 
-  // XXX these are too big for sm_1x
-/*#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA && !defined(__QNX__)
+#if !defined(__QNX__)
   _TestScanWithLargeTypes<int,  8>();
   _TestScanWithLargeTypes<int, 64>();
 #else
   KNOWN_FAILURE;
-#endif*/
+#endif
 }
 DECLARE_UNITTEST(TestScanWithLargeTypes);
 
@@ -537,7 +536,7 @@ struct plus_mod3
         return table[(int) (a + b)];
     }
 };
-/*
+
 template <typename Vector>
 void TestInclusiveScanWithIndirection(void)
 {

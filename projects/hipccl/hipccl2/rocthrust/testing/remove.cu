@@ -68,6 +68,7 @@ DECLARE_VECTOR_UNITTEST(TestRemoveSimple);
 
 template<typename ForwardIterator,
          typename T>
+__host__ __device__
 ForwardIterator remove(my_system &system,
                        ForwardIterator first,
                        ForwardIterator,
@@ -91,6 +92,7 @@ DECLARE_UNITTEST(TestRemoveDispatchExplicit);
 
 template<typename ForwardIterator,
          typename T>
+__host__ __device__
 ForwardIterator remove(my_tag,
                        ForwardIterator first,
                        ForwardIterator,
@@ -144,6 +146,7 @@ DECLARE_VECTOR_UNITTEST(TestRemoveCopySimple);
 template<typename InputIterator,
          typename OutputIterator,
          typename T>
+__host__ __device__
 OutputIterator remove_copy(my_system &system,
                            InputIterator,
                            InputIterator,
@@ -173,6 +176,7 @@ DECLARE_UNITTEST(TestRemoveCopyDispatchExplicit);
 template<typename InputIterator,
          typename OutputIterator,
          typename T>
+__host__ __device__
 OutputIterator remove_copy(my_tag,
                            InputIterator,
                            InputIterator,
@@ -652,6 +656,7 @@ void TestRemoveCopyToDiscardIterator(const size_t n)
 }
 DECLARE_VARIABLE_UNITTEST(TestRemoveCopyToDiscardIterator);
 
+
 template<typename T>
 void TestRemoveCopyToDiscardIteratorZipped(const size_t n)
 {
@@ -689,6 +694,7 @@ void TestRemoveCopyToDiscardIteratorZipped(const size_t n)
     ASSERT_EQUAL_QUIET(reference, thrust::get<1>(d_result.get_iterator_tuple()));
 }
 DECLARE_VARIABLE_UNITTEST(TestRemoveCopyToDiscardIteratorZipped);
+
 
 template<typename T>
 void TestRemoveCopyIf(const size_t n)
