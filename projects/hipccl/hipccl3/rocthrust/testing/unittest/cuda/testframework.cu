@@ -1,7 +1,7 @@
 #include <unittest/testframework.h>
+#include <unittest/cuda/testframework.h>
 #include <thrust/system/cuda/memory.h>
 #include <cuda_runtime.h>
-#include "testframework.h"
 
 __global__ void dummy_kernel() {}
 
