@@ -385,3 +385,54 @@ TYPED_TEST(FindTests, TestFindIfNot)
         }
     }
 }
+
+__global__
+THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
+void FindKernel(int const N, int* in_array, int value, int *out_array)
+{
+    if(threadIdx.x == 0)
+    {
+        thrust::device_ptr<int> in_begin(in_array);
+        thrust::device_ptr<int> in_end(in_array + N);
+        
+        auto x = thrust::find(thrust::hip::par, in_begin, in_end,value);
+    }
+}
+TEST(FindTests, TestFindDevice)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    for(auto size : get_sizes())
+    {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+            thrust::host_vector<int> h_data = get_random_data<int>(size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed);
+            thrust::device_vector<int> d_data = h_data;
+            thrust::device_vector<int> d_output(1);
+
+
+            int h_index = thrust::find(h_data.begin(), h_data.end(), 0) - h_data.begin();
+
+            hipLaunchKernelGGL(FindKernel,
+                               dim3(1, 1, 1),
+                               dim3(128, 1, 1),
+                               0,
+                               0,
+                               size,
+                               thrust::raw_pointer_cast(&d_data[0]),
+                               0,
+                               thrust::raw_pointer_cast(&d_output[0]));
+            ASSERT_EQ(h_index,d_output[0]);
+
+            // for(size_t i = 1; i < size; i *= 2)
+            // {
+            //     T sample = h_data[i];
+            //     h_iter   = thrust::find(h_data.begin(), h_data.end(), sample);
+            //     d_iter   = thrust::find(d_data.begin(), d_data.end(), sample);
+            //     ASSERT_EQ(h_iter - h_data.begin(), d_iter - d_data.begin());
+            // }
+        }
+    }
+}
