@@ -700,7 +700,7 @@ __host__ __device__ OutputIterator
 TEST(CopyTests, TestCopyIfStencilDispatchImplicit)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-    
+
     thrust::device_vector<int> vec(1);
 
     thrust::copy_if(thrust::retag<my_tag>(vec.begin()),

@@ -528,10 +528,57 @@ OutputIterator fill_n(my_tag, OutputIterator first, Size, const T&)
 TEST(FillTests, TestFillNDispatchImplicit)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-    
+
     thrust::device_vector<int> vec(1);
 
     thrust::fill_n(thrust::retag<my_tag>(vec.begin()), vec.size(), 0);
 
     ASSERT_EQ(13, vec.front());
+}
+
+
+
+__global__
+THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
+void FillKernel(int const N, int* array, int fill_value)
+{
+    if(threadIdx.x == 0)
+    {
+        thrust::device_ptr<int> begin(array);
+        thrust::device_ptr<int> end(array + N);
+        thrust::fill(thrust::hip::par, begin, end,fill_value);
+    }
+}
+
+TEST(FillTests, TestFillDevice)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size: {0, 1, 2, 4, 6, 12, 16, 24, 32, 64, 84, 128, 160, 256} )
+    {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+            thrust::host_vector<int> h_data = get_random_data<int>(size, 0, size, seed);
+            thrust::device_vector<int> d_data = h_data;
+
+            int fill_value = get_random_data<int>(1,0,size,seed)[0];
+            SCOPED_TRACE(testing::Message() << "with fill_value= " <<fill_value);
+
+            thrust::fill(h_data.begin(), h_data.end(),fill_value);
+            hipLaunchKernelGGL(FillKernel,
+                               dim3(1, 1, 1),
+                               dim3(128, 1, 1),
+                               0,
+                               0,
+                               size,
+                               thrust::raw_pointer_cast(&d_data[0]),
+                               fill_value);
+
+            ASSERT_EQ(h_data, d_data);
+        }
+    }
 }
