@@ -161,7 +161,7 @@ TYPED_TEST(SortByKeyPrimitiveTests, TestSortAscendingKeyValue)
 TEST(SortByKeyTests, TestSortDescendingKeyValue)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-    
+
     for(auto size : get_sizes())
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);

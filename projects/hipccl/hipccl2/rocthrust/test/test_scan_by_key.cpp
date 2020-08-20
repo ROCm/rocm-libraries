@@ -613,7 +613,7 @@ TYPED_TEST(ScanByKeyVariablesTests, TestExclusiveScanByKeyInPlace)
 TEST(ScanByKeyTests, TestScanByKeyMixedTypes)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-    
+
     const unsigned int size = 113;
 
     thrust::host_vector<int>      h_keys(size);
@@ -677,7 +677,7 @@ TEST(ScanByKeyTests, TestScanByKeyMixedTypes)
 TEST(ScanByKeyTests, TestScanByKeyLargeInput)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-    
+
     const unsigned int N = 1 << 20;
 
     for(auto seed : get_seeds())
@@ -766,7 +766,7 @@ void _TestScanByKeyWithLargeTypes(void)
 TEST(ScanByKeyTests, TestScanByKeyWithLargeTypes)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-    
+
     _TestScanByKeyWithLargeTypes<int, 1>();
     _TestScanByKeyWithLargeTypes<int, 2>();
     _TestScanByKeyWithLargeTypes<int, 4>();
@@ -778,4 +778,133 @@ TEST(ScanByKeyTests, TestScanByKeyWithLargeTypes)
     //_TestScanByKeyWithLargeTypes<int,  256>();
     //_TestScanByKeyWithLargeTypes<int,  512>();
     //_TestScanByKeyWithLargeTypes<int, 1024>();
+}
+
+__global__
+THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
+void InclusiveScanByKeyKernel(int const N, int* in_array, int* keys_array, int *out_array)
+{
+    if(threadIdx.x == 0)
+    {
+        thrust::device_ptr<int> in_begin(in_array);
+        thrust::device_ptr<int> in_end(in_array + N);
+        thrust::device_ptr<int> keys_begin(keys_array);
+        thrust::device_ptr<int> keys_end(keys_array+N);
+        thrust::device_ptr<int> out_begin(out_array);
+
+        thrust::inclusive_scan_by_key(thrust::hip::par, keys_begin, keys_end, in_begin, out_begin);
+    }
+}
+
+TEST(ScanByKeyTests, TestInclusiveScanByKeyDevice)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    for(auto size : get_sizes())
+    {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        thrust::host_vector<int>      h_keys(size);
+        thrust::default_random_engine rng;
+        for(size_t i = 0, k = 0; i < size; i++)
+        {
+            h_keys[i] = k;
+            if(rng() % 10 == 0)
+                k++;
+        }
+        thrust::device_vector<int> d_keys = h_keys;
+
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+            thrust::host_vector<int> h_vals = get_random_data<int>(size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed);
+            for(size_t i = 0; i < size; i++)
+            {
+              h_vals[i] = i % 10;
+            }
+            thrust::device_vector<int> d_vals = h_vals;
+
+            thrust::host_vector<int>   h_output(size);
+            thrust::device_vector<int> d_output(size);
+
+            thrust::inclusive_scan_by_key(h_keys.begin(), h_keys.end(), h_vals.begin(), h_output.begin());
+
+            hipLaunchKernelGGL(InclusiveScanByKeyKernel,
+                               dim3(1, 1, 1),
+                               dim3(128, 1, 1),
+                               0,
+                               0,
+                               size,
+                               thrust::raw_pointer_cast(&d_vals[0]),
+                               thrust::raw_pointer_cast(&d_keys[0]),
+                               thrust::raw_pointer_cast(&d_output[0]));
+
+            ASSERT_EQ(d_output, h_output);
+        }
+    }
+}
+
+
+__global__
+THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
+void ExclusiveScanByKeyKernel(int const N, int* in_array, int* keys_array, int *out_array)
+{
+    if(threadIdx.x == 0)
+    {
+        thrust::device_ptr<int> in_begin(in_array);
+        thrust::device_ptr<int> in_end(in_array + N);
+        thrust::device_ptr<int> keys_begin(keys_array);
+        thrust::device_ptr<int> keys_end(keys_array+N);
+        thrust::device_ptr<int> out_begin(out_array);
+
+        thrust::exclusive_scan_by_key(thrust::hip::par, keys_begin, keys_end, in_begin, out_begin);
+    }
+}
+
+TEST(ScanByKeyTests, TestExclusiveScanByKeyDevice)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    for(auto size : get_sizes())
+    {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        thrust::host_vector<int>      h_keys(size);
+        thrust::default_random_engine rng;
+        for(size_t i = 0, k = 0; i < size; i++)
+        {
+            h_keys[i] = k;
+            if(rng() % 10 == 0)
+                k++;
+        }
+        thrust::device_vector<int> d_keys = h_keys;
+
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+            thrust::host_vector<int> h_vals = get_random_data<int>(size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed);
+            for(size_t i = 0; i < size; i++)
+            {
+              h_vals[i] = i % 10;
+            }
+            thrust::device_vector<int> d_vals = h_vals;
+
+            thrust::host_vector<int>   h_output(size);
+            thrust::device_vector<int> d_output(size);
+
+            thrust::exclusive_scan_by_key(h_keys.begin(), h_keys.end(), h_vals.begin(), h_output.begin());
+
+            hipLaunchKernelGGL(ExclusiveScanByKeyKernel,
+                               dim3(1, 1, 1),
+                               dim3(128, 1, 1),
+                               0,
+                               0,
+                               size,
+                               thrust::raw_pointer_cast(&d_vals[0]),
+                               thrust::raw_pointer_cast(&d_keys[0]),
+                               thrust::raw_pointer_cast(&d_output[0]));
+
+            ASSERT_EQ(d_output, h_output);
+        }
+    }
 }

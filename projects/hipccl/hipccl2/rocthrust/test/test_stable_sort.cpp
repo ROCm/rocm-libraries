@@ -188,3 +188,46 @@ TYPED_TEST(StableSortVectorTests, TestStableSortWithIndirection)
     ASSERT_EQ(data[5], T(5));
     ASSERT_EQ(data[6], T(2));
 }
+
+
+__global__
+THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
+void StableSortKernel(int const N, int* array)
+{
+    if(threadIdx.x == 0)
+    {
+        thrust::device_ptr<int> begin(array);
+        thrust::device_ptr<int> end(array + N);
+        thrust::stable_sort(thrust::hip::par, begin, end);
+    }
+}
+
+TEST(StableSortTests, TestStableSortDevice)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size: {0, 1, 2, 4, 6, 12, 16, 24, 32, 64, 84, 128, 160, 256} )
+    {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+            thrust::host_vector<int> h_data = get_random_data<int>(size, 0, size, seed);
+
+            thrust::device_vector<int> d_data = h_data;
+
+            thrust::stable_sort(h_data.begin(), h_data.end());
+            hipLaunchKernelGGL(StableSortKernel,
+                               dim3(1, 1, 1),
+                               dim3(128, 1, 1),
+                               0,
+                               0,
+                               size,
+                               thrust::raw_pointer_cast(&d_data[0]));
+
+            ASSERT_EQ(h_data, d_data);
+        }
+    }
+}

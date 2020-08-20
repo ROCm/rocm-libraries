@@ -394,8 +394,9 @@ void FindKernel(int const N, int* in_array, int value, int *out_array)
     {
         thrust::device_ptr<int> in_begin(in_array);
         thrust::device_ptr<int> in_end(in_array + N);
-        
+
         auto x = thrust::find(thrust::hip::par, in_begin, in_end,value);
+        out_array[0] = x - in_begin;
     }
 }
 TEST(FindTests, TestFindDevice)
