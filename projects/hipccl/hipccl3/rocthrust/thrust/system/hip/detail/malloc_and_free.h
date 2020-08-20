@@ -65,8 +65,8 @@ malloc(execution_policy<DerivedPolicy>&, std::size_t n)
 
     if(status != hipSuccess)
     {
-        //  hip_rocprim::throw_on_error(status, "device malloc failed");
-        thrust::system::detail::bad_alloc(thrust::hip_category().message(status).c_str());
+        hipGetLastError(); // Clear global hip error state.
+        throw thrust::system::detail::bad_alloc(thrust::hip_category().message(status).c_str());
     }
 #else
     result = thrust::raw_pointer_cast(thrust::malloc(thrust::seq, n));
