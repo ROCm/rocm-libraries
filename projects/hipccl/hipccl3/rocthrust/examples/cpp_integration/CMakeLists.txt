@@ -7,17 +7,21 @@
 
 set(EXAMPLE_SOURCE host.cpp device.cu device.h)
 set(EXAMPLE_TARGET example_thrust_linking)
-set_source_files_properties(device.cu PROPERTIES LANGUAGE CXX COMPILE_FLAGS "-x c++")
+set_source_files_properties(device.cu
+    PROPERTIES
+        LANGUAGE CXX
+)
 add_executable(${EXAMPLE_TARGET} ${EXAMPLE_SOURCE})
 
 target_link_libraries(${EXAMPLE_TARGET}
     PRIVATE
         rocthrust
+        roc::rocprim_hip
 )
 foreach(amdgpu_target ${AMDGPU_TARGETS})
     target_link_libraries(${EXAMPLE_TARGET}
-        PRIVATE
-            --amdgpu-target=${amdgpu_target}
+        INTERFACE
+            --cuda-gpu-arch=${amdgpu_target}
     )
 endforeach()
 set_target_properties(${EXAMPLE_TARGET}
