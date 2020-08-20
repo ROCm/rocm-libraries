@@ -476,7 +476,7 @@ struct experiment_driver
         tbb_throughput_uncertainty, tbb_throughput_precision
     );
     #endif
-
+*/
     std::cout << THRUST_VERSION                // Thrust Version.
       << ","  << test_name                     // Algorithm.
       << ","  << element_type_name             // Element Type.
