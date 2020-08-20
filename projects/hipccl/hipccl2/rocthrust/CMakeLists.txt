@@ -94,10 +94,6 @@ if ("TBB" STREQUAL "${THRUST_DEVICE_SYSTEM}")
     set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${TBB_LD_FLAGS}")
     set (THRUST_ADDITIONAL_LIBRARIES "${TBB_LIBRARIES}")
   endif ()
-
-  # There's a ton of these in the TBB backend, even though the code is correct.
-  # TODO: silence these warnings in code instead
-  append_option_if_available("-Wno-unused-parameter" THRUST_CXX_WARNINGS)
 endif ()
 
 if ("MSVC" STREQUAL "${CMAKE_CXX_COMPILER_ID}")
@@ -159,13 +155,13 @@ if (("Clang" STREQUAL "${CMAKE_CXX_COMPILER_ID}") OR
   # (and thus has unused parameters) when you aren't using it.
   append_option_if_available("-Wno-unused-parameters" THRUST_CXX_WARNINGS)
 endif ()
-        
+
 if ("Clang" STREQUAL "${CMAKE_CXX_COMPILER_ID}")
   # -Wunneeded-internal-declaration misfires in the unit test framework
   # on older versions of Clang.
   append_option_if_available("-Wno-unneeded-internal-declaration" THRUST_CXX_WARNINGS)
 endif ()
-  
+
 append_option_if_available(CUDA "-rdc=true" THRUST_OPTIONS_RDC)
 
 set(THRUST_OPTIONS_DEBUG ${THRUST_OPTIONS_WARNINGS})
@@ -198,13 +194,13 @@ if (CMAKE_VERSION VERSION_LESS 3.12)
     RELATIVE ${PROJECT_SOURCE_DIR}/testing
     ${THRUST_TEST_GLOBS}
     CONFIGURE_DEPENDS
-  ) 
+  )
 else ()
   file(
     GLOB THRUST_TESTS
     RELATIVE ${PROJECT_SOURCE_DIR}/testing
     ${THRUST_TEST_GLOBS}
-  ) 
+  )
 endif ()
 
 foreach (THRUST_TEST_SOURCE IN LISTS THRUST_TESTS)
@@ -213,7 +209,7 @@ foreach (THRUST_TEST_SOURCE IN LISTS THRUST_TESTS)
   get_filename_component(THRUST_TEST_CATEGORY ${THRUST_TEST_SOURCE} DIRECTORY)
   if (NOT ("" STREQUAL "${THRUST_TEST_CATEGORY}"))
     set(THRUST_TEST_CATEGORY "${THRUST_TEST_CATEGORY}.")
-  endif () 
+  endif ()
 
   get_filename_component(THRUST_TEST ${THRUST_TEST_SOURCE} NAME_WE)
 
@@ -256,4 +252,3 @@ foreach (THRUST_TEST_SOURCE IN LISTS THRUST_TESTS)
   add_test(run.${THRUST_TEST}     ${THRUST_TEST})
   add_test(run.${THRUST_TEST_RDC} ${THRUST_TEST_RDC})
 endforeach ()
-
