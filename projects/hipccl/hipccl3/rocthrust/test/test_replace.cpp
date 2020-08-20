@@ -830,3 +830,52 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceCopyIfStencilToDiscardIteratorRandomDat
         }
     }
 }
+
+
+__global__
+THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
+void ReplaceKernel(int const N, int* array, int old_value,int new_value)
+{
+    if(threadIdx.x == 0)
+    {
+        thrust::device_ptr<int> begin(array);
+        thrust::device_ptr<int> end(array + N);
+        thrust::replace(thrust::hip::par, begin, end,old_value,new_value);
+    }
+}
+
+TEST(ReplaceTests, TestReplaceDevice)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size: {0, 1, 2, 4, 6, 12, 16, 24, 32, 64, 84, 128, 160, 256} )
+    {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+            thrust::host_vector<int> h_data = get_random_data<int>(size, 0, size, seed);
+            thrust::device_vector<int> d_data = h_data;
+
+            int old_value = get_random_data<int>(1,0,size,seed)[0];
+            int new_value = get_random_data<int>(1,-size,size,seed)[0];
+
+            SCOPED_TRACE(testing::Message() << "with old_value= " <<old_value);
+
+            thrust::replace(h_data.begin(), h_data.end(),old_value,new_value);
+            hipLaunchKernelGGL(ReplaceKernel,
+                               dim3(1, 1, 1),
+                               dim3(128, 1, 1),
+                               0,
+                               0,
+                               size,
+                               thrust::raw_pointer_cast(&d_data[0]),
+                               old_value,
+                               new_value);
+
+            ASSERT_EQ(h_data, d_data);
+        }
+    }
+}
