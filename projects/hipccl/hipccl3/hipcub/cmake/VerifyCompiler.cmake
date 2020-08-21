@@ -25,10 +25,10 @@ if(CMAKE_CXX_COMPILER MATCHES ".*/nvcc$" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL 
     find_package(hip QUIET CONFIG PATHS /opt/rocm)
     if(NOT hip_FOUND)
         find_package(HIP REQUIRED)
-        if((HIP_COMPILER STREQUAL "hcc") AND (HIP_PLATFORM STREQUAL "nvcc"))
-           # TODO: The HIP package on NVIDIA platform is incorrect at few versions
-           set(HIP_COMPILER "nvcc" CACHE STRING "HIP Compiler" FORCE)
-        endif()
+    endif()
+    if((HIP_COMPILER STREQUAL "hcc") AND (HIP_PLATFORM STREQUAL "nvcc"))
+       # TODO: The HIP package on NVIDIA platform is incorrect at few versions
+       set(HIP_COMPILER "nvcc" CACHE STRING "HIP Compiler" FORCE)
     endif()
 else()
   find_package(hip REQUIRED CONFIG PATHS /opt/rocm)
