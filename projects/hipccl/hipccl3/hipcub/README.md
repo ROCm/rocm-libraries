@@ -27,7 +27,6 @@ Optional:
 * [Google Benchmark](https://github.com/google/benchmark)
   * Required only for benchmarks. Building benchmarks is off by default.
   * It will be automatically downloaded and built by cmake script.
-  * At nvcc + gcc the google benchmarks require gcc8 or higher version
 
 ## Build And Install
 
@@ -54,8 +53,8 @@ cd hipCUB; mkdir build; cd build
 [CXX=nvcc] cmake -DBUILD_TEST=ON ../. # or cmake-gui ../.
 # or
 cmake -DBUILD_TEST=ON ../. # or cmake-gui ../.
-# To configure to build benchmarks, you should set the C compiler at nvcc build case
-cmake -DBUILD_BENCHMARK=ON -DCMAKE_C_COMPILER:FILEPATH=/usr/bin/gcc-8
+# or to build benchmarks
+cmake -DBUILD_BENCHMARK=ON ../.
 
 # Build
 make -j4
