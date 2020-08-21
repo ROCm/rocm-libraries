@@ -93,13 +93,17 @@ endif()
 if(BUILD_TEST)
   # Google Test (https://github.com/google/googletest)
   message(STATUS "Downloading and building GTest.")
+  if(CMAKE_CXX_COMPILER MATCHES ".*/hipcc$|.*/nvcc$")
+    # hip-clang cannot compile googletest for some reason
+    set(COMPILER_OVERRIDE "-DCMAKE_CXX_COMPILER=g++")
+  endif()
   set(GTEST_ROOT ${CMAKE_CURRENT_BINARY_DIR}/gtest CACHE PATH "")
   download_project(
     PROJ                googletest
     GIT_REPOSITORY      https://github.com/google/googletest.git
     GIT_TAG             release-1.8.1
     INSTALL_DIR         ${GTEST_ROOT}
-    CMAKE_ARGS          -DBUILD_GTEST=ON -DINSTALL_GTEST=ON -Dgtest_force_shared_crt=ON -DBUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
+    CMAKE_ARGS          -DBUILD_GTEST=ON -DINSTALL_GTEST=ON -Dgtest_force_shared_crt=ON -DBUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> ${COMPILER_OVERRIDE}
     LOG_DOWNLOAD        TRUE
     LOG_CONFIGURE       TRUE
     LOG_BUILD           TRUE
@@ -114,7 +118,7 @@ endif()
 if(BUILD_BENCHMARK)
   # Google Benchmark (https://github.com/google/benchmark.git)
   message(STATUS "Downloading and building Google Benchmark.")
-  if(CMAKE_CXX_COMPILER MATCHES ".*/hipcc$")
+  if(CMAKE_CXX_COMPILER MATCHES ".*/hipcc$|.*/nvcc$")
     # hip-clang cannot compile googlebenchmark for some reason
     set(COMPILER_OVERRIDE "-DCMAKE_CXX_COMPILER=g++")
   endif()

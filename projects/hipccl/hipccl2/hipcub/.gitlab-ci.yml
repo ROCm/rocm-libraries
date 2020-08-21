@@ -35,7 +35,7 @@ variables:
   # Local build options
   LOCAL_CXXFLAGS: ""
   LOCAL_CMAKE_OPTIONS: ""
-  ROCM_LATEST_PATH: "/opt/rocm-3.5.0/"
+  ROCM_LATEST_PATH: "/opt/rocm-3.7.0/"
 
 # hipCUB with rocPRIM backend
 .rocm:
@@ -342,6 +342,7 @@ build:nvcc:
     - cmake
       -G Ninja
       -D CMAKE_BUILD_TYPE=Release
+      -D CMAKE_CXX_COMPILER=nvcc
       -D BUILD_TEST=ON
       -D BUILD_EXAMPLE=ON
       -B build
@@ -376,8 +377,8 @@ build:nvcc-benchmark:
     - cmake
       -G Ninja
       -D CMAKE_BUILD_TYPE=Release
+      -D CMAKE_CXX_COMPILER=nvcc
       -D BUILD_BENCHMARK=ON
-      -D CMAKE_C_COMPILER:FILEPATH=/usr/bin/gcc-8
       -B build
       ../.
     - cmake
