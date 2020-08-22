@@ -887,7 +887,7 @@ void RemoveKernel(int const N, int* array, int remove_value)
     {
         thrust::device_ptr<int> begin(array);
         thrust::device_ptr<int> end(array + N);
-        int size = thrust::remove(thrust::hip::par, begin, end,remove_value) - begin;
+        int size = thrust::remove(thrust::seq, begin, end,remove_value) - begin;
     }
 }
 

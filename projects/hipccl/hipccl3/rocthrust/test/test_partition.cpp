@@ -1805,7 +1805,7 @@ void PartitionKernel(int const N, int* array)
     {
         thrust::device_ptr<int> begin(array);
         thrust::device_ptr<int> end(array + N);
-        thrust::partition(thrust::hip::par, begin, end,is_even<int>());
+        thrust::partition(thrust::seq, begin, end,is_even<int>());
 
     }
 }

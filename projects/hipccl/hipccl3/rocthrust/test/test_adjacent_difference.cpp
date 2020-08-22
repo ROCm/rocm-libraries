@@ -246,8 +246,8 @@ void AdjacentDifferenceKernel(int const N, int* array)
   {
       thrust::device_ptr<int> begin(array);
       thrust::device_ptr<int> end(array + N);
-      thrust::advance(begin,2);
-      thrust::adjacent_difference(thrust::hip::par, begin,end,begin);
+      // thrust::advance(begin,2);
+      thrust::adjacent_difference(thrust::seq, begin,end,begin);
   }
 }
 

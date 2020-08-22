@@ -792,7 +792,7 @@ void InclusiveScanByKeyKernel(int const N, int* in_array, int* keys_array, int *
         thrust::device_ptr<int> keys_end(keys_array+N);
         thrust::device_ptr<int> out_begin(out_array);
 
-        thrust::inclusive_scan_by_key(thrust::hip::par, keys_begin, keys_end, in_begin, out_begin);
+        thrust::inclusive_scan_by_key(thrust::seq, keys_begin, keys_end, in_begin, out_begin);
     }
 }
 
@@ -857,7 +857,7 @@ void ExclusiveScanByKeyKernel(int const N, int* in_array, int* keys_array, int *
         thrust::device_ptr<int> keys_end(keys_array+N);
         thrust::device_ptr<int> out_begin(out_array);
 
-        thrust::exclusive_scan_by_key(thrust::hip::par, keys_begin, keys_end, in_begin, out_begin);
+        thrust::exclusive_scan_by_key(thrust::seq, keys_begin, keys_end, in_begin, out_begin);
     }
 }
 
