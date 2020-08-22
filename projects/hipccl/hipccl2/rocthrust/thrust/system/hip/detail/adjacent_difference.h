@@ -414,54 +414,18 @@ adjacent_difference(execution_policy<Derived>& policy,
                     OutputIt                   result,
                     BinaryOp                   binary_op)
 {
-    // struct workaround is required for HIP-clang
-    // THRUST_HIP_PRESERVE_KERNELS_WORKAROUND is required for HCC
-    struct workaround
-    {
-        __host__
-        static void par(execution_policy<Derived>& policy,
-                        InputIt                    first,
-                        InputIt                    last,
-                        OutputIt&                  result,
-                        BinaryOp                   binary_op)
-        {
-        #if __HCC__ && __HIP_DEVICE_COMPILE__
-        THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-            (__adjacent_difference::adjacent_difference<Derived, InputIt, OutputIt, BinaryOp>)
-        );
-        #else
-        result = __adjacent_difference::adjacent_difference(
-            policy,
-            first,
-            last,
-            result,
-            binary_op
-        );
-        #endif
-        }
-        __device__
-        static void seq(execution_policy<Derived>& policy,
-                        InputIt                    first,
-                        InputIt                    last,
-                        OutputIt&                  result,
-                        BinaryOp                   binary_op)
-        {
-            result = thrust::adjacent_difference(
-               cvt_to_seq(derived_cast(policy)),
-               first,
-               last,
-               result,
-               binary_op
-            );
-        }
-    };
-    #if __THRUST_HAS_HIPRT__
-    workaround::par(policy, first, last, result, binary_op);
-    #else
-    workaround::seq(policy, first, last, result, binary_op);
-    #endif
+    OutputIt ret = result;
+  THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+      (__adjacent_difference::adjacent_difference<Derived, InputIt, OutputIt, BinaryOp>)
+  );
+  #if __THRUST_HAS_HIPRT__
+  ret = __adjacent_difference::adjacent_difference(policy, first, last, result, binary_op);
+  #else // __THRUST_HAS_HIPRT__
+  ret = thrust::adjacent_difference(
+      cvt_to_seq(derived_cast(policy)), first, last, result, binary_op);
+  #endif // __THRUST_HAS_HIPRT__
 
-    return result;
+  return ret;
 }
 
 template <class Derived, class InputIt, class OutputIt>
