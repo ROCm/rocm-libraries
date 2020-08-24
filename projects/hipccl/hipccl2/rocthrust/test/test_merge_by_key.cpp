@@ -440,3 +440,107 @@ TYPED_TEST(PrimitiveMergeByKeyTests, MergeByKeyDescending)
         }
     }
 }
+
+
+
+template<class T>
+__global__
+THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
+void MergeByKeyKernel(int const N, T* keys_A, T* keys_B, T * values_A, T* values_B, T* keys_result, T* values_result)
+{
+    if(threadIdx.x == 0)
+    {
+        thrust::device_ptr<int> keyA_begin(keys_A);
+        thrust::device_ptr<int> keyA_end(keys_A + N);
+        thrust::device_ptr<int> keyB_begin(keys_B);
+        thrust::device_ptr<int> keyB_end(keys_B + N);
+        thrust::device_ptr<int> valuesA_begin(values_A);
+        thrust::device_ptr<int> valuesB_begin(values_B);
+        thrust::device_ptr<int> keys_result_begin(keys_result);
+        thrust::device_ptr<int> values_result_begin(values_result);
+
+
+        thrust::merge_by_key(thrust::seq, keyA_begin,     keyA_end,
+                                          keyB_begin,     keyB_end,
+                                          valuesA_begin,  valuesB_begin,
+                                          keys_result_begin,
+                                          values_result_begin);
+
+    }
+}
+TEST(MergeByKeyTests, TestMergeByKeyDevice)
+{
+    using T = int;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
+    {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+            thrust::host_vector<T> h_keys_a = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+            thrust::host_vector<T> h_keys_b = get_random_data<T>(
+                size,
+                std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed + seed_value_addition
+            );
+
+            thrust::host_vector<T> h_values_a = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+            thrust::host_vector<T> h_values_b = get_random_data<T>(
+                size,
+                std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed + seed_value_addition
+            );
+
+
+            thrust::stable_sort(h_keys_a.begin(), h_keys_a.end(), thrust::greater<T>());
+            thrust::stable_sort(h_keys_b.begin(), h_keys_b.end(), thrust::greater<T>());
+
+            thrust::device_vector<T> d_keys_a = h_keys_a;
+            thrust::device_vector<T> d_keys_b = h_keys_b;
+
+            thrust::device_vector<T> d_values_a = h_values_a;
+            thrust::device_vector<T> d_values_b = h_values_b;
+
+            thrust::host_vector<T>   h_keys_result(h_keys_a.size() + h_keys_b.size());
+            thrust::device_vector<T> d_keys_result(d_keys_a.size() + d_keys_b.size());
+
+            thrust::host_vector<T>   h_values_result(h_values_a.size() + h_values_b.size());
+            thrust::device_vector<T> d_values_result(d_values_a.size() + d_values_b.size());
+
+            typename thrust::host_vector<T>::iterator   h_end;
+            typename thrust::device_vector<T>::iterator d_end;
+
+            thrust::merge_by_key(h_keys_a.begin(),h_keys_a.end(),
+                                         h_keys_b.begin(),h_keys_b.end(),
+                                         h_values_a.begin(),h_values_b.begin(),
+                                         h_keys_result.begin(),
+                                         h_values_result.begin());
+
+              hipLaunchKernelGGL(MergeByKeyKernel,
+                                 dim3(1, 1, 1),
+                                 dim3(128, 1, 1),
+                                 0,
+                                 0,
+                                 size,
+                                 thrust::raw_pointer_cast(&d_keys_a[0]),
+                                 thrust::raw_pointer_cast(&d_keys_b[0]),
+                                 thrust::raw_pointer_cast(&d_values_a[0]),
+                                 thrust::raw_pointer_cast(&d_values_b[0]),
+                                 thrust::raw_pointer_cast(&d_keys_result[0]),
+                                 thrust::raw_pointer_cast(&d_values_result[0]));
+
+            ASSERT_EQ(h_keys_result, d_keys_result);
+            ASSERT_EQ(h_values_result, d_values_result);
+
+        }
+    }
+}

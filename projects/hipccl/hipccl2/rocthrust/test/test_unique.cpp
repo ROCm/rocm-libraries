@@ -319,7 +319,7 @@ void UniqueKernel(int const N, int *in_array, int *out_size)
 }
 
 
-TEST(UniqueIntegralTests, TestUniqueDevice)
+TEST(UniqueTests, TestUniqueDevice)
 {
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
