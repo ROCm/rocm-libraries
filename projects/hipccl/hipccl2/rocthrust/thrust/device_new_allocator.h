@@ -32,8 +32,7 @@
 namespace thrust
 {
 
-/*! \addtogroup memory_management Memory Management
- *  \addtogroup memory_management_classes Memory Management Classes
+/*! \addtogroup memory_management_classes Memory Management Classes
  *  \ingroup memory_management
  *  \{
  */
@@ -137,9 +136,10 @@ template<typename T>
      *        allocated with \p allocate.
      */
     __host__
-    inline void deallocate(pointer p, size_type)
+    inline void deallocate(pointer p, size_type cnt)
     {
       // use "::operator delete" rather than keyword delete
+      (void)cnt;
       device_delete(p);
     } // end deallocate()
 

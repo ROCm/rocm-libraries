@@ -917,7 +917,7 @@ public:
 
     value_type tmp(async_signal_->extract());
     async_signal_.reset();
-    return std::move(tmp);
+    return tmp;
   }
 
   // For testing only.
@@ -1121,7 +1121,7 @@ void create_dependencies_impl(
 {
   // We only need to wait on the current dependency if we didn't steal our
   // stream from it.
-  if (!as.acquired_from || *as.acquired_from == I0)
+  if (!as.acquired_from || *as.acquired_from != I0)
   {
     create_dependency(as.stream, std::get<I0>(deps));
   }

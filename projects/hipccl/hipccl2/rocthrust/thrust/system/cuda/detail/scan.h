@@ -1,4 +1,4 @@
-/******************************************************************************§/a
+/******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -37,12 +37,14 @@
 #include <thrust/detail/cstdint.h>
 #include <thrust/detail/temporary_array.h>
 #include <thrust/system/cuda/detail/util.h>
-#include <thrust/system/cuda/detail/cub/device/device_scan.cuh>
+#include <cub/device/device_scan.cuh>
 #include <thrust/system/cuda/detail/core/agent_launcher.h>
 #include <thrust/system/cuda/detail/par_to_seq.h>
+#include <thrust/system/cuda/detail/dispatch.h>
 #include <thrust/detail/mpl/math.h>
 #include <thrust/detail/minmax.h>
 #include <thrust/distance.h>
+#include <thrust/iterator/iterator_traits.h>
 
 THRUST_BEGIN_NS
 template <typename DerivedPolicy,
@@ -85,8 +87,7 @@ namespace __scan {
             cub::BlockLoadAlgorithm  _LOAD_ALGORITHM   = cub::BLOCK_LOAD_DIRECT,
             cub::CacheLoadModifier   _LOAD_MODIFIER    = cub::LOAD_DEFAULT,
             cub::BlockStoreAlgorithm _STORE_ALGORITHM  = cub::BLOCK_STORE_DIRECT,
-            cub::BlockScanAlgorithm  _SCAN_ALGORITHM   = cub::BLOCK_SCAN_WARP_SCANS,
-            int                      _MIN_BLOCKS       = 1>
+            cub::BlockScanAlgorithm  _SCAN_ALGORITHM   = cub::BLOCK_SCAN_WARP_SCANS>
   struct PtxPolicy
   {
     enum
@@ -94,7 +95,6 @@ namespace __scan {
       BLOCK_THREADS    = _BLOCK_THREADS,
       ITEMS_PER_THREAD = _ITEMS_PER_THREAD,
       ITEMS_PER_TILE   = BLOCK_THREADS * ITEMS_PER_THREAD,
-      MIN_BLOCKS       = _MIN_BLOCKS
     };
 
     static const cub::BlockLoadAlgorithm  LOAD_ALGORITHM  = _LOAD_ALGORITHM;
@@ -153,7 +153,7 @@ namespace __scan {
 
   template <class Arch, class T, class U>
   struct Tuning;
-  
+
   template<class T, class U>
   struct Tuning<sm30,T,U>
   {
@@ -177,7 +177,7 @@ namespace __scan {
                       cub::BLOCK_SCAN_RAKING_MEMOIZE>
         type;
   };    // struct Tuning for sm30
-  
+
   template<class T, class U>
   struct Tuning<sm35,T,U>
   {
@@ -201,7 +201,7 @@ namespace __scan {
                       cub::BLOCK_SCAN_RAKING>
         type;
   };    // struct Tuning for sm35
-  
+
   template<class T, class U>
   struct Tuning<sm52,T,U>
   {
@@ -363,7 +363,7 @@ namespace __scan {
         BlockScan(storage.scan).ExclusiveScan(items, items, scan_op, prefix_op);
         block_aggregate = prefix_op.GetBlockAggregate();
       }
-  
+
       // Exclusive sum specialization (with prefix from predecessors)
       //
       template <class PrefixCallback>
@@ -473,12 +473,12 @@ namespace __scan {
           BlockStore(storage.store).Store(output_it + tile_base, items, num_remaining);
         }
       }
-      
+
 
       //---------------------------------------------------------------------
       // Constructor
       //---------------------------------------------------------------------
-      
+
       // Dequeue and scan tiles of items as part of a dynamic chained scan
       // with Init
       template <class AddInitToExclusiveScan>
@@ -551,7 +551,7 @@ namespace __scan {
   {
     template <class Arch>
     struct PtxPlan : PtxPolicy<128> {};
-   
+
     typedef core::specialize_plan<PtxPlan> ptx_plan;
 
     //---------------------------------------------------------------------
@@ -667,13 +667,13 @@ namespace __scan {
     {
       return status;
     }
-    
+
     ScanTileState tile_state;
     status = tile_state.Init(static_cast<int>(num_tiles), allocations[0], allocation_sizes[0]);
     CUDA_CUB_RET_IF_FAIL(status);
 
     char *vshmem_ptr = vshmem_size > 0 ? (char*)allocations[1] : NULL;
-    
+
     init_agent ia(init_plan, num_tiles, stream, "scan::init_agent", debug_sync);
     ia.launch(tile_state, num_tiles);
     CUDA_CUB_RET_IF_FAIL(cudaPeekAtLastError());
@@ -712,15 +712,18 @@ namespace __scan {
     bool         debug_sync   = THRUST_DEBUG_SYNC_FLAG;
 
     cudaError_t status;
-    status = doit_step<Inclusive>(NULL,
-                                  storage_size,
-                                  input_it,
-                                  num_items,
-                                  add_init_to_exclusive_scan,
-                                  output_it,
-                                  scan_op,
-                                  stream,
-                                  debug_sync);
+    THRUST_INDEX_TYPE_DISPATCH(status,
+                                doit_step<Inclusive>,
+                                num_items,
+                                (NULL,
+                                storage_size,
+                                input_it,
+                                num_items_fixed,
+                                add_init_to_exclusive_scan,
+                                output_it,
+                                scan_op,
+                                stream,
+                                debug_sync));
     cuda_cub::throw_on_error(status, "scan failed on 1st step");
 
     // Allocate temporary storage.
@@ -728,15 +731,18 @@ namespace __scan {
       tmp(policy, storage_size);
     void *ptr = static_cast<void*>(tmp.data().get());
 
-    status = doit_step<Inclusive>(ptr,
-                                  storage_size,
-                                  input_it,
-                                  num_items,
-                                  add_init_to_exclusive_scan,
-                                  output_it,
-                                  scan_op,
-                                  stream,
-                                  debug_sync);
+    THRUST_INDEX_TYPE_DISPATCH(status,
+                                doit_step<Inclusive>,
+                                num_items,
+                                (ptr,
+                                storage_size,
+                                input_it,
+                                num_items_fixed,
+                                add_init_to_exclusive_scan,
+                                output_it,
+                                scan_op,
+                                stream,
+                                debug_sync));
     cuda_cub::throw_on_error(status, "scan failed on 2nd step");
 
     status = cuda_cub::synchronize(policy);
@@ -800,7 +806,8 @@ inclusive_scan(execution_policy<Derived> &policy,
                OutputIt                   result,
                ScanOp                     scan_op)
 {
-  int num_items = static_cast<int>(thrust::distance(first, last));
+  typedef typename thrust::iterator_traits<InputIt>::difference_type diff_t;
+  diff_t num_items = thrust::distance(first, last);
   return cuda_cub::inclusive_scan_n(policy, first, num_items, result, scan_op);
 }
 
@@ -875,7 +882,8 @@ exclusive_scan(execution_policy<Derived> &policy,
                T                          init,
                ScanOp                   scan_op)
 {
-  int num_items = static_cast<int>(thrust::distance(first, last));
+  typedef typename thrust::iterator_traits<InputIt>::difference_type diff_t;
+  diff_t num_items = thrust::distance(first, last);
   return cuda_cub::exclusive_scan_n(policy, first, num_items, result, init, scan_op);
 }
 

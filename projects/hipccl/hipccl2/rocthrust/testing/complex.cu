@@ -29,6 +29,28 @@
  */
 
 template<typename T>
+struct TestComplexSizeAndAlignment
+{
+  void operator()()
+  {
+    THRUST_STATIC_ASSERT(
+      sizeof(thrust::complex<T>) == sizeof(T) * 2
+    );
+    THRUST_STATIC_ASSERT(
+      THRUST_ALIGNOF(thrust::complex<T>) == THRUST_ALIGNOF(T) * 2
+    );
+
+    THRUST_STATIC_ASSERT(
+      sizeof(thrust::complex<T const>) == sizeof(T) * 2
+    );
+    THRUST_STATIC_ASSERT(
+      THRUST_ALIGNOF(thrust::complex<T const>) == THRUST_ALIGNOF(T) * 2
+    );
+  }
+};
+SimpleUnitTest<TestComplexSizeAndAlignment, FloatingPointTypes> TestComplexSizeAndAlignmentInstance;
+
+template<typename T>
 struct TestComplexConstructors
 {
   void operator()(void)
@@ -299,7 +321,6 @@ struct TestComplexStreamOperators
     ASSERT_ALMOST_EQUAL(a,b);
   }
 };
-
 SimpleUnitTest<TestComplexStreamOperators, FloatingPointTypes> TestComplexStreamOperatorsInstance;
 
 #if THRUST_CPP_DIALECT >= 2011
@@ -325,3 +346,4 @@ struct TestComplexStdComplexDeviceInterop
 };
 SimpleUnitTest<TestComplexStdComplexDeviceInterop, FloatingPointTypes> TestComplexStdComplexDeviceInteropInstance;
 #endif
+

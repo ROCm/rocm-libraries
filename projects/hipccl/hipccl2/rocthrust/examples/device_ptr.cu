@@ -37,6 +37,7 @@ int main(void)
 
   // back to where we started
   assert(wrapped_ptr == d_ptr);
+  (void)wrapped_ptr; // for when NDEBUG is defined
 
   // Avoid warning
   THRUST_UNUSED_VAR(wrapped_ptr);

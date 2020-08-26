@@ -19,6 +19,8 @@
 #include <thrust/adjacent_difference.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
+#include <thrust/device_malloc.h>
+#include <thrust/device_free.h>
 
 template <class Vector>
 void TestAdjacentDifferenceSimple(void)

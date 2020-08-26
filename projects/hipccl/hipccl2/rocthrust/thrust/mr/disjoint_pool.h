@@ -25,6 +25,7 @@
 
 #include <thrust/host_vector.h>
 #include <thrust/binary_search.h>
+#include <thrust/detail/seq.h>
 
 #include <thrust/mr/memory_resource.h>
 #include <thrust/mr/allocator.h>
@@ -37,10 +38,8 @@ namespace thrust
 namespace mr
 {
 
-/*! \addtogroup memory_management Memory Management
- *  \addtogroup memory_management_classes Memory Management Classes
- *  \addtogroup memory_resources Memory Resources
- *  \ingroup memory_resources
+/** \addtogroup memory_resources Memory Resources
+ *  \ingroup memory_management_classes
  *  \{
  */
 

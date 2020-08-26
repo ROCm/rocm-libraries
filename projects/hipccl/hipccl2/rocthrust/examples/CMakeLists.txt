@@ -5,17 +5,21 @@
 function(add_thrust_example EXAMPLE)
     set(EXAMPLE_SOURCE "${EXAMPLE}.cu")
     set(EXAMPLE_TARGET "example_thrust_${EXAMPLE}")
-    set_source_files_properties(${EXAMPLE_SOURCE} PROPERTIES LANGUAGE CXX COMPILE_FLAGS "-x c++")
+    set_source_files_properties(${EXAMPLE_SOURCE}
+        PROPERTIES
+            LANGUAGE CXX
+    )
     add_executable(${EXAMPLE_TARGET} ${EXAMPLE_SOURCE})
 
     target_link_libraries(${EXAMPLE_TARGET}
         PRIVATE
             rocthrust
+            roc::rocprim_hip
     )
     foreach(amdgpu_target ${AMDGPU_TARGETS})
         target_link_libraries(${EXAMPLE_TARGET}
-            PRIVATE
-                --amdgpu-target=${amdgpu_target}
+            INTERFACE
+                --cuda-gpu-arch=${amdgpu_target}
         )
     endforeach()
     set_target_properties(${EXAMPLE_TARGET}
@@ -78,6 +82,6 @@ add_thrust_example("transform_iterator")
 add_thrust_example("transform_output_iterator")
 add_thrust_example("uninitialized_vector")
 add_thrust_example("version")
+add_thrust_example("scan_matrix_by_rows")
 # add_thrust_example("weld_vertices") // this example does not work yet.
 add_thrust_example("word_count")
-

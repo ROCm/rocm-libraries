@@ -28,7 +28,7 @@ template<typename T>
     : thrust::device_allocator<T>(other) {}
   __host__
   ~uninitialized_allocator() {}
-  
+
 #if THRUST_CPP_DIALECT >= 2011
   uninitialized_allocator & operator=(const uninitialized_allocator &) = default;
 #endif

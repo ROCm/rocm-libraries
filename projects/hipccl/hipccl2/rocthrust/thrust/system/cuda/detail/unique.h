@@ -30,7 +30,7 @@
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 #include <thrust/system/cuda/config.h>
 
-#include <thrust/system/cuda/detail/cub/device/device_select.cuh>
+#include <cub/device/device_select.cuh>
 #include <thrust/system/cuda/detail/core/agent_launcher.h>
 #include <thrust/system/cuda/detail/par_to_seq.h>
 #include <thrust/detail/cstdint.h>
@@ -77,15 +77,13 @@ namespace __unique {
             int                     _ITEMS_PER_THREAD = 1,
             cub::BlockLoadAlgorithm _LOAD_ALGORITHM   = cub::BLOCK_LOAD_DIRECT,
             cub::CacheLoadModifier  _LOAD_MODIFIER    = cub::LOAD_LDG,
-            cub::BlockScanAlgorithm _SCAN_ALGORITHM   = cub::BLOCK_SCAN_WARP_SCANS,
-            int                     _MIN_BLOCKS       = 1>
+            cub::BlockScanAlgorithm _SCAN_ALGORITHM   = cub::BLOCK_SCAN_WARP_SCANS>
   struct PtxPolicy
   {
     enum
     {
       BLOCK_THREADS    = _BLOCK_THREADS,
       ITEMS_PER_THREAD = _ITEMS_PER_THREAD,
-      MIN_BLOCKS       = _MIN_BLOCKS,
       ITEMS_PER_TILE   = _BLOCK_THREADS * _ITEMS_PER_THREAD,
     };
     static const cub::BlockLoadAlgorithm LOAD_ALGORITHM = _LOAD_ALGORITHM;
@@ -95,7 +93,7 @@ namespace __unique {
 
   template<class,class>
   struct Tuning;
-  
+
   namespace mpl = thrust::detail::mpl::math;
 
   template<class T, size_t NOMINAL_4B_ITEMS_PER_THREAD>
@@ -153,7 +151,7 @@ namespace __unique {
                       cub::BLOCK_SCAN_WARP_SCANS>
         type;
   };    // Tuning for sm35
-  
+
   template<class T>
   struct Tuning<sm30,T>
   {
@@ -173,7 +171,7 @@ namespace __unique {
                       cub::BLOCK_SCAN_WARP_SCANS>
         type;
   };    // Tuning for sm30
-  
+
   template <class ItemsIt,
             class ItemsOutputIt,
             class BinaryPred,
@@ -228,12 +226,12 @@ namespace __unique {
 
         typename BlockLoadItems::TempStorage  load_items;
         shared_items_t shared_items;
-        
+
       };    // union TempStorage
     };      // struct PtxPlan
-    
+
     typedef typename core::specialize_plan_msvc10_war<PtxPlan>::type::type ptx_plan;
-   
+
     typedef typename ptx_plan::ItemsLoadIt             ItemsLoadIt;
     typedef typename ptx_plan::BlockLoadItems          BlockLoadItems;
     typedef typename ptx_plan::BlockDiscontinuityItems BlockDiscontinuityItems;
@@ -248,7 +246,7 @@ namespace __unique {
       ITEMS_PER_THREAD = ptx_plan::ITEMS_PER_THREAD,
       ITEMS_PER_TILE   = ptx_plan::ITEMS_PER_TILE
     };
-    
+
     struct impl
     {
       //---------------------------------------------------------------------
@@ -265,7 +263,7 @@ namespace __unique {
       //---------------------------------------------------------------------
       // Utility functions
       //---------------------------------------------------------------------
-      
+
       THRUST_DEVICE_FUNCTION
       shared_items_t &get_shared()
       {
@@ -513,7 +511,7 @@ namespace __unique {
            num_selected_out);
     }
   };    // struct UniqueAgent
-  
+
   template <class ScanTileState,
             class NumSelectedIt,
             class Size>
@@ -605,12 +603,12 @@ namespace __unique {
     ScanTileState tile_status;
     status =  tile_status.Init(static_cast<int>(num_tiles), allocations[0], allocation_sizes[0]);
     CUDA_CUB_RET_IF_FAIL(status);
-   
+
     num_tiles = max<size_t>(1,num_tiles);
     init_agent ia(init_plan, num_tiles, stream, "unique_by_key::init_agent", debug_sync);
     ia.launch(tile_status, num_tiles, num_selected_out);
     CUDA_CUB_RET_IF_FAIL(cudaPeekAtLastError());
-    
+
     if (num_items == 0) { return status; }
 
     char *vshmem_ptr = vshmem_size > 0 ? (char *)allocations[1] : NULL;

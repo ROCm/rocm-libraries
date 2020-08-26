@@ -36,7 +36,7 @@
 #include <thrust/system/cuda/detail/reverse.h>
 #include <thrust/system/cuda/detail/find.h>
 #include <thrust/system/cuda/detail/uninitialized_copy.h>
-#include <thrust/system/cuda/detail/cub/device/device_partition.cuh>
+#include <cub/device/device_partition.cuh>
 #include <thrust/system/cuda/detail/core/agent_launcher.h>
 #include <thrust/system/cuda/detail/par_to_seq.h>
 #include <thrust/partition.h>
@@ -50,7 +50,6 @@ namespace __partition {
 
   template <int                     _BLOCK_THREADS,
             int                     _ITEMS_PER_THREAD = 1,
-            int                     _MIN_BLOCKS       = 1,
             cub::BlockLoadAlgorithm _LOAD_ALGORITHM   = cub::BLOCK_LOAD_DIRECT,
             cub::CacheLoadModifier  _LOAD_MODIFIER    = cub::LOAD_LDG,
             cub::BlockScanAlgorithm _SCAN_ALGORITHM   = cub::BLOCK_SCAN_WARP_SCANS>
@@ -60,8 +59,7 @@ namespace __partition {
     {
       BLOCK_THREADS      = _BLOCK_THREADS,
       ITEMS_PER_THREAD   = _ITEMS_PER_THREAD,
-      MIN_BLOCKS         = _MIN_BLOCKS,
-      ITEMS_PER_TILE     = _BLOCK_THREADS * _ITEMS_PER_THREAD,
+      ITEMS_PER_TILE     = _BLOCK_THREADS * _ITEMS_PER_THREAD
     };
     static const cub::BlockLoadAlgorithm LOAD_ALGORITHM = _LOAD_ALGORITHM;
     static const cub::CacheLoadModifier  LOAD_MODIFIER  = _LOAD_MODIFIER;
@@ -84,13 +82,12 @@ namespace __partition {
 
     typedef PtxPolicy<128,
                       ITEMS_PER_THREAD,
-                      1,
                       cub::BLOCK_LOAD_WARP_TRANSPOSE,
                       cub::LOAD_LDG,
                       cub::BLOCK_SCAN_WARP_SCANS>
         type;
   };    // Tuning<350>
-  
+
   template<class T>
   struct Tuning<sm30, T>
   {
@@ -104,19 +101,18 @@ namespace __partition {
 
     typedef PtxPolicy<128,
                       ITEMS_PER_THREAD,
-                      1,
                       cub::BLOCK_LOAD_WARP_TRANSPOSE,
                       cub::LOAD_DEFAULT,
                       cub::BLOCK_SCAN_WARP_SCANS>
         type;
   };    // Tuning<300>
-  
+
   template<int T>
   struct __tag{};
 
 
   struct no_stencil_tag_    {};
-  struct single_output_tag_ 
+  struct single_output_tag_
   {
     template<class T>
     THRUST_DEVICE_FUNCTION T const& operator=(T const& t) const { return t; }
@@ -358,7 +354,7 @@ namespace __partition {
       }
 
       //---------------------------------------------------------------------
-      // Tile processing 
+      // Tile processing
       //---------------------------------------------------------------------
 
       template <bool IS_LAST_TILE, bool IS_FIRST_TILE>
@@ -582,7 +578,7 @@ namespace __partition {
   {
     template <class Arch>
     struct PtxPlan : PtxPolicy<128> {};
-   
+
 
     typedef core::specialize_plan<PtxPlan> ptx_plan;
 
@@ -660,7 +656,7 @@ namespace __partition {
     size_t allocation_sizes[2] = {0, vshmem_storage};
     status = ScanTileState::AllocationSize(static_cast<int>(num_tiles), allocation_sizes[0]);
     CUDA_CUB_RET_IF_FAIL(status);
-    
+
 
     void* allocations[2] = {NULL, NULL};
     status = cub::AliasTemporaries(d_temp_storage,
@@ -668,7 +664,7 @@ namespace __partition {
                                    allocations,
                                    allocation_sizes);
     CUDA_CUB_RET_IF_FAIL(status);
-    
+
     if (d_temp_storage == NULL)
     {
       return status;
@@ -831,7 +827,7 @@ namespace __partition {
 // Thrust API entry points
 //-------------------------
 
-__thrust_exec_check_disable__ 
+__thrust_exec_check_disable__
 template <class Derived,
           class InputIt,
           class StencilIt,

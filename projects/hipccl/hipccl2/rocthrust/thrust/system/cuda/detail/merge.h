@@ -85,7 +85,7 @@ namespace __merge {
   }
 
   template <class It, class T2, class CompareOp, int ITEMS_PER_THREAD>
-  THRUST_DEVICE_FUNCTION void 
+  THRUST_DEVICE_FUNCTION void
   serial_merge(It  keys_shared,
                int keys1_beg,
                int keys2_beg,
@@ -97,7 +97,7 @@ namespace __merge {
   {
     int keys1_end = keys1_beg + keys1_count;
     int keys2_end = keys2_beg + keys2_count;
-    
+
     typedef typename iterator_value<It>::type key_type;
 
     key_type key1 = keys_shared[keys1_beg];
@@ -129,15 +129,13 @@ namespace __merge {
             int                      _ITEMS_PER_THREAD = 1,
             cub::BlockLoadAlgorithm  _LOAD_ALGORITHM   = cub::BLOCK_LOAD_DIRECT,
             cub::CacheLoadModifier   _LOAD_MODIFIER    = cub::LOAD_LDG,
-            cub::BlockStoreAlgorithm _STORE_ALGORITHM  = cub::BLOCK_STORE_DIRECT,
-            int                      _MIN_BLOCKS       = 1>
+            cub::BlockStoreAlgorithm _STORE_ALGORITHM  = cub::BLOCK_STORE_DIRECT>
   struct PtxPolicy
   {
     enum
     {
       BLOCK_THREADS      = _BLOCK_THREADS,
       ITEMS_PER_THREAD   = _ITEMS_PER_THREAD,
-      MIN_BLOCKS         = _MIN_BLOCKS,
       ITEMS_PER_TILE     = _BLOCK_THREADS * _ITEMS_PER_THREAD,
     };
 
@@ -186,7 +184,7 @@ namespace __merge {
 
   template <class Arch, class TSize>
   struct Tuning;
-  
+
   namespace mpl = thrust::detail::mpl::math;
 
   template<size_t NOMINAL_4B_ITEMS_PER_THREAD, size_t INPUT_SIZE>
@@ -207,7 +205,7 @@ namespace __merge {
                   : ITEMS_PER_THREAD + 1
     };
   };
-  
+
   template<class TSize>
   struct Tuning<sm30,TSize>
   {
@@ -226,9 +224,9 @@ namespace __merge {
                       cub::BLOCK_STORE_WARP_TRANSPOSE>
         type;
   };    // Tuning sm300
-  
 
-  
+
+
   template<class TSize>
   struct Tuning<sm60,TSize> : Tuning<sm30,TSize>
   {
@@ -265,7 +263,7 @@ namespace __merge {
                       cub::BLOCK_STORE_WARP_TRANSPOSE>
         type;
   };    // Tuning sm52
-  
+
   template<class TSize>
   struct Tuning<sm35,TSize> : Tuning<sm30,TSize>
   {
@@ -286,7 +284,7 @@ namespace __merge {
         type;
   };    // Tuning sm350
 
- 
+
   template<size_t VALUE>
   struct integer_constant : thrust::detail::integral_constant<size_t, VALUE> {};
 
@@ -447,7 +445,7 @@ namespace __merge {
       }
 
       //---------------------------------------------------------------------
-      // Tile processing 
+      // Tile processing
       //---------------------------------------------------------------------
 
       template <bool IS_FULL_TILE>
@@ -576,9 +574,9 @@ namespace __merge {
           }
         }
       }
-      
+
       //---------------------------------------------------------------------
-      // Constructor 
+      // Constructor
       //---------------------------------------------------------------------
 
       THRUST_DEVICE_FUNCTION
@@ -661,7 +659,7 @@ namespace __merge {
   };    // struct MergeAgent;
 
   //---------------------------------------------------------------------
-  // Two-step internal API 
+  // Two-step internal API
   //---------------------------------------------------------------------
 
   template <class MERGE_ITEMS,
@@ -673,7 +671,7 @@ namespace __merge {
             class KeysOutputIt,
             class ItemsOutputIt,
             class CompareOp>
-  cudaError_t CUB_RUNTIME_FUNCTION
+  cudaError_t THRUST_RUNTIME_FUNCTION
   doit_step(void*         d_temp_storage,
             size_t&       temp_storage_bytes,
             KeysIt1       keys1,
@@ -810,7 +808,7 @@ namespace __merge {
     size_t       storage_size = 0;
     cudaStream_t stream       = cuda_cub::stream(policy);
     bool         debug_sync   = THRUST_DEBUG_SYNC_FLAG;
-    
+
     cudaError_t status;
     status = doit_step<MERGE_ITEMS>(NULL,
                                     storage_size,
@@ -846,7 +844,7 @@ namespace __merge {
                                     stream,
                                     debug_sync);
     cuda_cub::throw_on_error(status, "merge: failed on 2nd step");
-    
+
     status = cuda_cub::synchronize(policy);
     cuda_cub::throw_on_error(status, "merge: failed to synchronize");
 
