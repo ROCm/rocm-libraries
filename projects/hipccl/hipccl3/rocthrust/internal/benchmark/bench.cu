@@ -477,7 +477,6 @@ struct experiment_driver
     );
     #endif
 */
-
     std::cout << THRUST_VERSION                // Thrust Version.
       << ","  << test_name                     // Algorithm.
       << ","  << element_type_name             // Element Type.

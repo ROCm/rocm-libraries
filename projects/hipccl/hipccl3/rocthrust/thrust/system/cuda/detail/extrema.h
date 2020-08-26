@@ -108,7 +108,7 @@ namespace __extrema {
   struct arg_minmax_f
   {
     Predicate predicate;
-    
+
     typedef tuple<InputType, IndexType> pair_type;
     typedef tuple<pair_type, pair_type> two_pairs_type;
 
@@ -161,6 +161,8 @@ namespace __extrema {
     using core::get_agent_plan;
     using core::cuda_optional;
 
+    typedef typename detail::make_unsigned_special<Size>::type UnsignedSize;
+
     if (num_items == 0)
       return cudaErrorNotSupported;
 
@@ -195,16 +197,14 @@ namespace __extrema {
       cuda_optional<int> sm_count = core::get_sm_count();
       CUDA_CUB_RET_IF_FAIL(sm_count.status());
 
-      typedef __reduce::GridSizeType GridSizeType;
-
       // reduction will not use more cta counts than requested
       cuda_optional<int> max_blocks_per_sm =
           reduce_agent::
               template get_max_blocks_per_sm<InputIt,
                                              OutputIt,
                                              Size,
-                                             cub::GridEvenShare<GridSizeType>,
-                                             cub::GridQueue<GridSizeType>,
+                                             cub::GridEvenShare<Size>,
+                                             cub::GridQueue<UnsignedSize>,
                                              ReductionOp>(reduce_plan);
       CUDA_CUB_RET_IF_FAIL(max_blocks_per_sm.status());
 
@@ -215,8 +215,8 @@ namespace __extrema {
       int sm_oversubscription = 5;
       int max_blocks          = reduce_device_occupancy * sm_oversubscription;
 
-      cub::GridEvenShare<GridSizeType> even_share;
-      even_share.DispatchInit(static_cast<int>(num_items), max_blocks,
+      cub::GridEvenShare<Size> even_share;
+      even_share.DispatchInit(num_items, max_blocks,
                               reduce_plan.items_per_tile);
 
       // we will launch at most "max_blocks" blocks in a grid
@@ -230,7 +230,7 @@ namespace __extrema {
       size_t allocation_sizes[3] =
           {
               max_blocks * sizeof(T),                            // bytes needed for privatized block reductions
-              cub::GridQueue<GridSizeType>::AllocationSize(),    // bytes needed for grid queue descriptor0
+              cub::GridQueue<UnsignedSize>::AllocationSize(),    // bytes needed for grid queue descriptor0
               vshmem_size                                        // size of virtualized shared memory storage
           };
       status = cub::AliasTemporaries(d_temp_storage,
@@ -244,7 +244,7 @@ namespace __extrema {
       }
 
       T *d_block_reductions = (T*) allocations[0];
-      cub::GridQueue<GridSizeType> queue(allocations[1]);
+      cub::GridQueue<UnsignedSize> queue(allocations[1]);
       char *vshmem_ptr = vshmem_size > 0 ? (char *)allocations[2] : NULL;
 
 
@@ -321,14 +321,10 @@ namespace __extrema {
     bool         debug_sync         = THRUST_DEBUG_SYNC_FLAG;
 
     cudaError_t status;
-    status = doit_step<T>(NULL,
-                          temp_storage_bytes,
-                          first,
-                          num_items,
-                          binary_op,
-                          reinterpret_cast<T*>(NULL),
-                          stream,
-                          debug_sync);
+    THRUST_INDEX_TYPE_DISPATCH(status, doit_step<T>, num_items,
+        (NULL, temp_storage_bytes, first, num_items_fixed,
+            binary_op, reinterpret_cast<T*>(NULL), stream,
+            debug_sync));
     cuda_cub::throw_on_error(status, "extrema failed on 1st step");
 
     size_t allocation_sizes[2] = {sizeof(T*), temp_storage_bytes};
@@ -345,7 +341,7 @@ namespace __extrema {
     thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
       tmp(policy, storage_size);
     void *ptr = static_cast<void*>(tmp.data().get());
-    
+
     status = core::alias_storage(ptr,
                                  storage_size,
                                  allocations,
@@ -354,16 +350,12 @@ namespace __extrema {
 
     T* d_result = thrust::detail::aligned_reinterpret_cast<T*>(allocations[0]);
 
-    status = doit_step<T>(allocations[1],
-                          temp_storage_bytes,
-                          first,
-                          num_items,
-                          binary_op,
-                          d_result,
-                          stream,
-                          debug_sync);
+    THRUST_INDEX_TYPE_DISPATCH(status, doit_step<T>, num_items,
+        (allocations[1], temp_storage_bytes, first,
+            num_items_fixed, binary_op, d_result, stream,
+            debug_sync));
     cuda_cub::throw_on_error(status, "extrema failed on 2nd step");
-    
+
     status = cuda_cub::synchronize(policy);
     cuda_cub::throw_on_error(status, "extrema failed to synchronize");
 
@@ -376,7 +368,7 @@ namespace __extrema {
             class Derived,
             class ItemsIt,
             class BinaryPred>
-  ItemsIt CUB_RUNTIME_FUNCTION
+  ItemsIt THRUST_RUNTIME_FUNCTION
   element(execution_policy<Derived> &policy,
           ItemsIt                    first,
           ItemsIt                    last,

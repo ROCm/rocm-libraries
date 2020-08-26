@@ -1401,7 +1401,7 @@ template<typename BinaryPredicate>
  */
 
 
-/*! \namespace placeholders
+/*! \namespace thrust::placeholders
  *  \brief Facilities for constructing simple functions inline.
  *
  *  Objects in the \p thrust::placeholders namespace may be used to create simple arithmetic functions inline

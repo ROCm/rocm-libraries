@@ -43,8 +43,7 @@ namespace cuda_cub {
 namespace __parallel_for {
 
   template <int _BLOCK_THREADS,
-            int _ITEMS_PER_THREAD = 1,
-            int _MIN_BLOCKS       = 1>
+            int _ITEMS_PER_THREAD = 1>
   struct PtxPolicy
   {
     enum
@@ -52,7 +51,6 @@ namespace __parallel_for {
       BLOCK_THREADS    = _BLOCK_THREADS,
       ITEMS_PER_THREAD = _ITEMS_PER_THREAD,
       ITEMS_PER_TILE   = BLOCK_THREADS * ITEMS_PER_THREAD,
-      MIN_BLOCKS       = _MIN_BLOCKS
     };
   };    // struct PtxPolicy
 
@@ -93,7 +91,7 @@ namespace __parallel_for {
 #pragma unroll
       for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ++ITEM)
       {
-        int idx = BLOCK_THREADS * ITEM + threadIdx.x;
+        Size idx = BLOCK_THREADS * ITEM + threadIdx.x;
         if (IS_FULL_TILE || idx < items_in_tile)
           f(tile_base + idx);
       }
@@ -103,9 +101,9 @@ namespace __parallel_for {
                        Size  num_items,
                        char * /*shmem*/ )
     {
-      Size tile_base     = blockIdx.x * ITEMS_PER_TILE;
+      Size tile_base     = static_cast<Size>(blockIdx.x) * ITEMS_PER_TILE;
       Size num_remaining = num_items - tile_base;
-      int  items_in_tile = static_cast<int>(
+      Size items_in_tile = static_cast<Size>(
           num_remaining < ITEMS_PER_TILE ? num_remaining : ITEMS_PER_TILE);
 
       if (items_in_tile == ITEMS_PER_TILE)
@@ -146,7 +144,7 @@ namespace __parallel_for {
   }
 }    // __parallel_for
 
-__thrust_exec_check_disable__ 
+__thrust_exec_check_disable__
 template <class Derived,
           class F,
           class Size>

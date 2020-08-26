@@ -29,8 +29,6 @@
 
 #include <thrust/detail/config.h>
 
-#define THRUST_UNUSED_VAR(expr) do { (void)(expr); } while (0)
-
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
     #ifndef __HIP_DEVICE_COMPILE__
         #define __THRUST_HAS_HIPRT__ 1

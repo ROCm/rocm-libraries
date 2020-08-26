@@ -32,6 +32,9 @@ endif()
 
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker search and installed rpath")
 
+# AMD targets
+set(AMDGPU_TARGETS gfx803;gfx900;gfx906;gfx908 CACHE STRING "List of specific machine types for library to target")
+
 # Verify that hcc or hipcc compiler is used on ROCM platform
 include(cmake/VerifyCompiler.cmake)
 
@@ -45,6 +48,20 @@ option(DOWNLOAD_ROCPRIM "Download rocPRIM and do not search for rocPRIM package"
 set(RNG_SEED_COUNT 0 CACHE STRING "Number of true random sequences to test each input size for")
 set(PRNG_SEEDS 1 CACHE STRING "Seeds of pseudo random sequences to test each input size for")
 
+set(THRUST_HOST_SYSTEM_OPTIONS CPP OMP TBB)
+set(THRUST_HOST_SYSTEM CPP CACHE STRING "The device backend to target.")
+set_property(
+  CACHE THRUST_HOST_SYSTEM
+  PROPERTY STRINGS ${THRUST_HOST_SYSTEM_OPTIONS}
+)
+
+if (NOT THRUST_HOST_SYSTEM IN_LIST THRUST_HOST_SYSTEM_OPTIONS)
+  message(
+    FATAL_ERROR
+    "THRUST_HOST_SYSTEM must be one of ${THRUST_HOST_SYSTEM_OPTIONS}"
+  )
+endif ()
+
 # Set CXX flags
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -57,9 +74,6 @@ endif()
 
 # Get dependencies
 include(cmake/Dependencies.cmake)
-
-# AMD targets
-set(AMDGPU_TARGETS gfx803;gfx900;gfx906;gfx908 CACHE STRING "List of specific machine types for library to target")
 
 # Setup VERSION
 rocm_setup_version(VERSION "2.10.4")
@@ -88,6 +102,9 @@ endif()
 if(BUILD_BENCHMARKS)
   add_subdirectory(internal/benchmark)
 endif()
+
+set(THRUST_OPTIONS_DEBUG ${THRUST_OPTIONS_WARNINGS})
+set(THRUST_OPTIONS_RELEASE ${THRUST_OPTIONS_WARNINGS})
 
 # Package
 set(CPACK_DEBIAN_ARCHIVE_TYPE "gnutar")

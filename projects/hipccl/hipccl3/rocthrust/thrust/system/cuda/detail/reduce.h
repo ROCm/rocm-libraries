@@ -35,9 +35,11 @@
 #include <thrust/system/cuda/detail/util.h>
 #include <thrust/detail/raw_reference_cast.h>
 #include <thrust/detail/type_traits/iterator/is_output_iterator.h>
-#include <thrust/system/cuda/detail/cub/device/device_reduce.cuh>
+#include <cub/device/device_reduce.cuh>
 #include <thrust/system/cuda/detail/par_to_seq.h>
 #include <thrust/system/cuda/detail/get_value.h>
+#include <thrust/system/cuda/detail/dispatch.h>
+#include <thrust/system/cuda/detail/make_unsigned_special.h>
 #include <thrust/functional.h>
 #include <thrust/system/cuda/detail/core/agent_launcher.h>
 #include <thrust/detail/minmax.h>
@@ -47,8 +49,8 @@
 THRUST_BEGIN_NS
 
 // forward declare generic reduce
-// to circumvent circular dependency 
-template <typename DerivedPolicy, 
+// to circumvent circular dependency
+template <typename DerivedPolicy,
           typename InputIterator,
           typename T,
           typename BinaryFunction>
@@ -63,9 +65,6 @@ namespace cuda_cub {
 
 namespace __reduce {
 
-  // XXX should GridSizeType also be able accomodate 64 bit integers
-  typedef int GridSizeType;
-
   template<bool>
   struct is_true : thrust::detail::false_type {};
   template<>
@@ -76,27 +75,25 @@ namespace __reduce {
             int                       _VECTOR_LOAD_LENGTH = 1,
             cub::BlockReduceAlgorithm _BLOCK_ALGORITHM    = cub::BLOCK_REDUCE_RAKING,
             cub::CacheLoadModifier    _LOAD_MODIFIER      = cub::LOAD_DEFAULT,
-            cub::GridMappingStrategy  _GRID_MAPPING       = cub::GRID_MAPPING_DYNAMIC,
-            int                       _MIN_BLOCKS         = 1>
+            cub::GridMappingStrategy  _GRID_MAPPING       = cub::GRID_MAPPING_DYNAMIC>
   struct PtxPolicy
   {
     enum
     {
-      BLOCK_THREADS      = _BLOCK_THREADS,        
-      ITEMS_PER_THREAD   = _ITEMS_PER_THREAD,    
-      VECTOR_LOAD_LENGTH = _VECTOR_LOAD_LENGTH, 
-      MIN_BLOCKS         = _MIN_BLOCKS,
+      BLOCK_THREADS      = _BLOCK_THREADS,
+      ITEMS_PER_THREAD   = _ITEMS_PER_THREAD,
+      VECTOR_LOAD_LENGTH = _VECTOR_LOAD_LENGTH,
       ITEMS_PER_TILE     = _BLOCK_THREADS * _ITEMS_PER_THREAD
     };
 
-    static const cub::BlockReduceAlgorithm BLOCK_ALGORITHM = _BLOCK_ALGORITHM;    
-    static const cub::CacheLoadModifier    LOAD_MODIFIER   = _LOAD_MODIFIER;     
-    static const cub::GridMappingStrategy  GRID_MAPPING    = _GRID_MAPPING;     
+    static const cub::BlockReduceAlgorithm BLOCK_ALGORITHM = _BLOCK_ALGORITHM;
+    static const cub::CacheLoadModifier    LOAD_MODIFIER   = _LOAD_MODIFIER;
+    static const cub::GridMappingStrategy  GRID_MAPPING    = _GRID_MAPPING;
   }; // struct PtxPolicy
 
   template<class,class>
   struct Tuning;
-  
+
   template <class T>
   struct Tuning<sm30, T>
   {
@@ -108,34 +105,34 @@ namespace __reduce {
       SCALE_FACTOR_1B = sizeof(T),
     };
 
-    typedef PtxPolicy<256,                                 
-                      CUB_MAX(1, 20 / SCALE_FACTOR_4B),   
-                      2,                                 
-                      cub::BLOCK_REDUCE_WARP_REDUCTIONS,    
-                      cub::LOAD_DEFAULT,                   
-                      cub::GRID_MAPPING_RAKE>       
+    typedef PtxPolicy<256,
+                      CUB_MAX(1, 20 / SCALE_FACTOR_4B),
+                      2,
+                      cub::BLOCK_REDUCE_WARP_REDUCTIONS,
+                      cub::LOAD_DEFAULT,
+                      cub::GRID_MAPPING_RAKE>
         type;
   }; // Tuning sm30
-  
+
   template <class T>
   struct Tuning<sm35, T> : Tuning<sm30,T>
   {
     // ReducePolicy1B (GTX Titan: 228.7 GB/s @ 192M 1B items)
-    typedef PtxPolicy<128,                                 
-                      CUB_MAX(1, 24 / Tuning::SCALE_FACTOR_1B),   
-                      4,                                 
-                      cub::BLOCK_REDUCE_WARP_REDUCTIONS,    
-                      cub::LOAD_LDG,                       
-                      cub::GRID_MAPPING_DYNAMIC>          
+    typedef PtxPolicy<128,
+                      CUB_MAX(1, 24 / Tuning::SCALE_FACTOR_1B),
+                      4,
+                      cub::BLOCK_REDUCE_WARP_REDUCTIONS,
+                      cub::LOAD_LDG,
+                      cub::GRID_MAPPING_DYNAMIC>
         ReducePolicy1B;
 
     // ReducePolicy4B types (GTX Titan: 255.1 GB/s @ 48M 4B items)
-    typedef PtxPolicy<256,                                 
-                      CUB_MAX(1, 20 / Tuning::SCALE_FACTOR_4B),   
-                      4,                                 
-                      cub::BLOCK_REDUCE_WARP_REDUCTIONS,     
-                      cub::LOAD_LDG,                        
-                      cub::GRID_MAPPING_DYNAMIC>           
+    typedef PtxPolicy<256,
+                      CUB_MAX(1, 20 / Tuning::SCALE_FACTOR_4B),
+                      4,
+                      cub::BLOCK_REDUCE_WARP_REDUCTIONS,
+                      cub::LOAD_LDG,
+                      cub::GRID_MAPPING_DYNAMIC>
         ReducePolicy4B;
 
     typedef typename thrust::detail::conditional<(sizeof(T) < 4),
@@ -150,6 +147,8 @@ namespace __reduce {
             class ReductionOp>
   struct ReduceAgent
   {
+    typedef typename detail::make_unsigned_special<Size>::type UnsignedSize;
+
     template<class Arch>
     struct PtxPlan : Tuning<Arch,T>::type
     {
@@ -201,7 +200,7 @@ namespace __reduce {
       {
       }
     };
-   
+
     // this specialized PtxPlan for a device-compiled Arch
     // ptx_plan type *must* only be used from device code
     // Its use from host code will result in *undefined behaviour*
@@ -458,8 +457,8 @@ namespace __reduce {
       //
       THRUST_DEVICE_FUNCTION T
       consume_tiles(Size /*num_items*/,
-                    cub::GridEvenShare<GridSizeType> &even_share,
-                    cub::GridQueue<GridSizeType> & /*queue*/,
+                    cub::GridEvenShare<Size> &even_share,
+                    cub::GridQueue<UnsignedSize> & /*queue*/,
                     thrust::detail::integral_constant<cub::GridMappingStrategy, cub::GRID_MAPPING_RAKE> /*is_rake*/)
       {
         typedef is_true<ATTEMPT_VECTORIZATION>          attempt_vec;
@@ -489,7 +488,7 @@ namespace __reduce {
       template <class CAN_VECTORIZE>
       THRUST_DEVICE_FUNCTION T
       consume_tiles_impl(Size                         num_items,
-                         cub::GridQueue<GridSizeType> queue,
+                         cub::GridQueue<UnsignedSize> queue,
                          CAN_VECTORIZE                can_vectorize)
       {
         using core::sync_threadblock;
@@ -576,8 +575,8 @@ namespace __reduce {
       THRUST_DEVICE_FUNCTION T
       consume_tiles(
           Size                              num_items,
-          cub::GridEvenShare<GridSizeType> &/*even_share*/,
-          cub::GridQueue<GridSizeType> &    queue,
+          cub::GridEvenShare<Size> &/*even_share*/,
+          cub::GridQueue<UnsignedSize> &    queue,
           thrust::detail::integral_constant<cub::GridMappingStrategy, cub::GRID_MAPPING_DYNAMIC>)
       {
         typedef is_true<ATTEMPT_VECTORIZATION>         attempt_vec;
@@ -589,7 +588,7 @@ namespace __reduce {
                    : consume_tiles_impl(num_items, queue, path_b());
       }
     };    // struct impl
-    
+
     //---------------------------------------------------------------------
     // Agent entry points
     //---------------------------------------------------------------------
@@ -644,8 +643,8 @@ namespace __reduce {
     THRUST_AGENT_ENTRY(InputIt                          input_it,
                        OutputIt                         output_it,
                        Size                             num_items,
-                       cub::GridEvenShare<GridSizeType> even_share,
-                       cub::GridQueue<GridSizeType>     queue,
+                       cub::GridEvenShare<Size> even_share,
+                       cub::GridQueue<UnsignedSize>     queue,
                        ReductionOp                      reduction_op,
                        char *                           shmem)
     {
@@ -665,6 +664,8 @@ namespace __reduce {
   template<class Size>
   struct DrainAgent
   {
+    typedef typename detail::make_unsigned_special<Size>::type UnsignedSize;
+
     template <class Arch>
     struct PtxPlan : PtxPolicy<1> {};
     typedef core::specialize_plan<PtxPlan> ptx_plan;
@@ -673,7 +674,7 @@ namespace __reduce {
     // Agent entry point
     //---------------------------------------------------------------------
 
-    THRUST_AGENT_ENTRY(cub::GridQueue<GridSizeType> grid_queue,
+    THRUST_AGENT_ENTRY(cub::GridQueue<UnsignedSize> grid_queue,
                        Size                         num_items,
                        char * /*shmem*/)
     {
@@ -702,6 +703,8 @@ namespace __reduce {
     using core::AgentLauncher;
     using core::get_agent_plan;
     using core::cuda_optional;
+
+    typedef typename detail::make_unsigned_special<Size>::type UnsignedSize;
 
     if (num_items == 0)
       return cudaErrorNotSupported;
@@ -743,8 +746,8 @@ namespace __reduce {
               template get_max_blocks_per_sm<InputIt,
                                              OutputIt,
                                              Size,
-                                             cub::GridEvenShare<GridSizeType>,
-                                             cub::GridQueue<GridSizeType>,
+                                             cub::GridEvenShare<Size>,
+                                             cub::GridQueue<UnsignedSize>,
                                              ReductionOp>(reduce_plan);
       CUDA_CUB_RET_IF_FAIL(max_blocks_per_sm.status());
 
@@ -755,7 +758,7 @@ namespace __reduce {
       int sm_oversubscription = 5;
       int max_blocks          = reduce_device_occupancy * sm_oversubscription;
 
-      cub::GridEvenShare<GridSizeType> even_share;
+      cub::GridEvenShare<Size> even_share;
       even_share.DispatchInit(static_cast<int>(num_items), max_blocks,
                               reduce_plan.items_per_tile);
 
@@ -770,7 +773,7 @@ namespace __reduce {
       size_t allocation_sizes[3] =
           {
               max_blocks * sizeof(T),                            // bytes needed for privatized block reductions
-              cub::GridQueue<GridSizeType>::AllocationSize(),    // bytes needed for grid queue descriptor0
+              cub::GridQueue<UnsignedSize>::AllocationSize(),    // bytes needed for grid queue descriptor0
               vshmem_size                                        // size of virtualized shared memory storage
           };
       status = cub::AliasTemporaries(d_temp_storage,
@@ -784,7 +787,7 @@ namespace __reduce {
       }
 
       T *d_block_reductions = (T*) allocations[0];
-      cub::GridQueue<GridSizeType> queue(allocations[1]);
+      cub::GridQueue<UnsignedSize> queue(allocations[1]);
       char *vshmem_ptr = vshmem_size > 0 ? (char *)allocations[2] : NULL;
 
 
@@ -932,21 +935,22 @@ T reduce_n_impl(execution_policy<Derived>& policy,
                 BinaryOp                   binary_op)
 {
   cudaStream_t stream = cuda_cub::stream(policy);
+  cudaError_t status;
 
   // Determine temporary device storage requirements.
 
   size_t tmp_size = 0;
-  cuda_cub::throw_on_error(
-    cub::DeviceReduce::Reduce(NULL,
-                              tmp_size,
-                              first,
-                              reinterpret_cast<T*>(NULL),
-                              num_items,
-                              binary_op,
-                              init,
-                              stream,
-                              THRUST_DEBUG_SYNC_FLAG),
-    "after reduction step 1");
+
+  THRUST_INDEX_TYPE_DISPATCH2(status,
+    cub::DeviceReduce::Reduce,
+    (cub::DispatchReduce<
+        InputIt, T*, Size, BinaryOp
+    >::Dispatch),
+    num_items,
+    (NULL, tmp_size, first, reinterpret_cast<T*>(NULL),
+        num_items_fixed, binary_op, init, stream,
+        THRUST_DEBUG_SYNC_FLAG));
+  cuda_cub::throw_on_error(status, "after reduction step 1");
 
   // Allocate temporary storage.
 
@@ -965,17 +969,16 @@ T reduce_n_impl(execution_policy<Derived>& policy,
   // make this guarantee.
   T* ret_ptr = thrust::detail::aligned_reinterpret_cast<T*>(tmp.data().get());
   void* tmp_ptr = static_cast<void*>((tmp.data() + sizeof(T)).get());
-  cuda_cub::throw_on_error(
-    cub::DeviceReduce::Reduce(tmp_ptr,
-                              tmp_size,
-                              first,
-                              ret_ptr,
-                              num_items,
-                              binary_op,
-                              init,
-                              stream,
-                              THRUST_DEBUG_SYNC_FLAG),
-    "after reduction step 2");
+  THRUST_INDEX_TYPE_DISPATCH2(status,
+    cub::DeviceReduce::Reduce,
+    (cub::DispatchReduce<
+        InputIt, T*, Size, BinaryOp
+    >::Dispatch),
+    num_items,
+    (tmp_ptr, tmp_size, first, ret_ptr,
+        num_items_fixed, binary_op, init, stream,
+        THRUST_DEBUG_SYNC_FLAG));
+  cuda_cub::throw_on_error(status, "after reduction step 2");
 
   // Synchronize the stream and get the value.
 
@@ -1000,7 +1003,7 @@ T reduce_n_impl(execution_policy<Derived>& policy,
 // Thrust API entry points
 //-------------------------
 
-__thrust_exec_check_disable__ 
+__thrust_exec_check_disable__
 template <typename Derived,
           typename InputIt,
           typename Size,

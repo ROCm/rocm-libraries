@@ -124,7 +124,7 @@ __host__ __device__ inline int isfinite(double x){
 // sometimes the CUDA toolkit provides these these names as macros,
 // sometimes functions in the global scope
 
-#    if (CUDA_VERSION >= 6500)
+#    if (CUDART_VERSION >= 6500)
 using ::isinf;
 using ::isnan;
 using ::signbit;
@@ -133,7 +133,7 @@ using ::isfinite;
 #    else
 // these names are macros, we don't need to define them
 
-#    endif // CUDA_VERSION
+#    endif // CUDART_VERSION
 
 #  else
 
@@ -234,3 +234,4 @@ inline double hypot(double x, double y){
 } // namespace detail
 
 } // namespace thrust
+

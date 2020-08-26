@@ -5,17 +5,21 @@
 function(add_thrust_benchmark BENCHMARK)
     set(BENCHMARK_SOURCE "${BENCHMARK}.cu")
     set(BENCHMARK_TARGET "benchmark_thrust_${BENCHMARK}")
-    set_source_files_properties(${BENCHMARK_SOURCE} PROPERTIES LANGUAGE CXX COMPILE_FLAGS "-x c++")
+    set_source_files_properties(${BENCHMARK_SOURCE}
+        PROPERTIES
+            LANGUAGE CXX
+    )
     add_executable(${BENCHMARK_TARGET} ${BENCHMARK_SOURCE})
 
     target_link_libraries(${BENCHMARK_TARGET}
         PRIVATE
             rocthrust
+            roc::rocprim_hip
     )
     foreach(amdgpu_target ${AMDGPU_TARGETS})
         target_link_libraries(${BENCHMARK_TARGET}
-            PRIVATE
-                --amdgpu-target=${amdgpu_target}
+            INTERFACE
+                --cuda-gpu-arch=${amdgpu_target}
         )
     endforeach()
     set_target_properties(${BENCHMARK_TARGET}

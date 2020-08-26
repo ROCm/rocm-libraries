@@ -19,7 +19,9 @@
 #if THRUST_CPP_DIALECT >= 2011
 
 #include <type_traits>
+#include <utility>
 #include <cstdint>
+#include <utility>
 
 THRUST_BEGIN_NS
 

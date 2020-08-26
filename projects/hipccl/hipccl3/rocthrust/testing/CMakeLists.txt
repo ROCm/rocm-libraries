@@ -24,9 +24,17 @@ foreach(amdgpu_target ${AMDGPU_TARGETS})
 endforeach()
 
 if(NOT CMAKE_VERSION VERSION_LESS 3.13)
-    add_library(testframework OBJECT testframework.cpp)
+    set_source_files_properties(unittest/testframework.cu
+        PROPERTIES
+            LANGUAGE CXX
+    )
+    add_library(testframework OBJECT unittest/testframework.cu)
 else() # Workaround
-    add_library(testframework STATIC testframework.cpp)
+    set_source_files_properties(unittest/testframework.cu
+        PROPERTIES
+            LANGUAGE CXX
+    )
+    add_library(testframework STATIC unittest/testframework.cu)
 endif()
 target_link_libraries(testframework
     PUBLIC
@@ -55,7 +63,7 @@ function(add_thrust_test TEST)
                 testing_common
         )
     else() # Workaround
-        add_executable(${TEST_TARGET} ${TEST_SOURCE} testframework.cpp)
+        add_executable(${TEST_TARGET} ${TEST_SOURCE} unittest/testframework.cu)
         target_link_libraries(${TEST_TARGET}
             PRIVATE
                 testing_common
@@ -147,6 +155,7 @@ add_thrust_test("mr_disjoint_pool")
 add_thrust_test("mr_new")
 add_thrust_test("mr_pool")
 add_thrust_test("mr_pool_options")
+add_thrust_test("out_of_memory_recovery")
 add_thrust_test("pair")
 add_thrust_test("pair_reduce")
 add_thrust_test("pair_scan")
