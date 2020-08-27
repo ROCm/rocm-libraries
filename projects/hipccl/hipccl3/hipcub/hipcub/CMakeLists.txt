@@ -83,13 +83,22 @@ install(
 )
 
 include(ROCMExportTargetsHeaderOnly)
+
 # Export targets
-rocm_export_targets_header_only(
-  TARGETS hip::hipcub
-  PREFIX hipcub
-  DEPENDS PACKAGE rocprim
-  NAMESPACE hip::
-)
+if(HIP_COMPILER STREQUAL "hcc" OR HIP_COMPILER STREQUAL "clang")
+  rocm_export_targets_header_only(
+    TARGETS hip::hipcub
+    PREFIX hipcub
+    DEPENDS PACKAGE rocprim
+    NAMESPACE hip::
+  )
+else()
+  rocm_export_targets_header_only(
+    TARGETS hip::hipcub
+    PREFIX hipcub
+    NAMESPACE hip::
+  )
+endif()
 
 # Create symlinks
 rocm_install_symlink_subdir(hipcub)
