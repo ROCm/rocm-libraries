@@ -460,11 +460,11 @@ void MergeByKeyKernel(int const N, T* keys_A, T* keys_B, T * values_A, T* values
         thrust::device_ptr<int> values_result_begin(values_result);
 
 
-        thrust::merge_by_key(thrust::seq, keyA_begin,     keyA_end,
-                                          keyB_begin,     keyB_end,
-                                          valuesA_begin,  valuesB_begin,
-                                          keys_result_begin,
-                                          values_result_begin);
+        thrust::merge_by_key(thrust::hip::par, keyA_begin,           keyA_end,
+                                               keyB_begin,           keyB_end,
+                                               valuesA_begin,        valuesB_begin,
+                                               keys_result_begin,
+                                               values_result_begin);
 
     }
 }

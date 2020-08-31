@@ -290,7 +290,7 @@ void MergeKernel(int const N, T* inA_array, T* inB_array, T *out_array)
         thrust::device_ptr<int> inB_end(inB_array + N);
         thrust::device_ptr<int> out_begin(out_array);
 
-        thrust::merge(thrust::seq, inA_begin, inA_end, inB_begin, inB_end,out_begin);
+        thrust::merge(thrust::hip::par, inA_begin, inA_end, inB_begin, inB_end,out_begin);
 
     }
 }

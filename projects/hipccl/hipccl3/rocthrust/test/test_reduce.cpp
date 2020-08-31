@@ -266,7 +266,7 @@ void ReduceKernel(int const N, int *in_array, int *result)
         thrust::device_ptr<int> in_begin(in_array);
         thrust::device_ptr<int> in_end(in_array + N);
 
-        result[0]= thrust::reduce(thrust::seq, in_begin, in_end);
+        result[0]= thrust::reduce(thrust::hip::par, in_begin, in_end);
     }
 }
 

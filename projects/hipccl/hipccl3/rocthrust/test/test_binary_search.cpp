@@ -479,7 +479,7 @@ void BinarySearchKernel(int const N, int* in_array, int*result_array, int search
   {
       thrust::device_ptr<int> begin(in_array);
       thrust::device_ptr<int> end(in_array + N);
-      result_array[search_value]=thrust::binary_search(thrust::seq, begin,end,search_value);
+      result_array[search_value]=thrust::binary_search(thrust::hip::par, begin,end,search_value);
   }
 }
 
