@@ -556,16 +556,59 @@ partition(execution_policy<Derived>& policy,
           Iterator                   last,
           Predicate                  predicate)
 {
-    Iterator ret = first;
-    THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-        (__partition::partition_inplace<Derived, Iterator, Predicate>)
-    );
-#if __THRUST_HAS_HIPRT__
-    ret = __partition::partition_inplace(policy, first, last, predicate);
-#else // __THRUST_HAS_HIPRT__
-    ret = thrust::partition(cvt_to_seq(derived_cast(policy)), first, last, predicate);
-#endif // __THRUST_HAS_HIPRT__
-    return ret;
+
+  struct workaround
+  {
+      __host__
+      static Iterator par(execution_policy<Derived>& policy,
+                          Iterator                   first,
+                          Iterator                   last,
+                          Predicate                  predicate)
+      {
+      #if __HCC__ && __HIP_DEVICE_COMPILE__
+      THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+          (__partition::partition<Derived, Iterator, Iterator, StencilIt, Predicate>)
+      );
+      #else
+
+      return __partition::partition_inplace(policy,
+                                    first,
+                                    last,
+                                    predicate
+      );
+      #endif
+      }
+      __device__
+      static Iterator seq(execution_policy<Derived>& policy,
+                          Iterator                   first,
+                          Iterator                   last,
+                          Predicate                  predicate)
+      {
+          return thrust::partition(
+             cvt_to_seq(derived_cast(policy)),
+             first,
+             last,
+             predicate
+          );
+      }
+  };
+  #if __THRUST_HAS_HIPRT__
+  return workaround::par(policy, first, last, predicate);
+  #else
+  return workaround::seq(policy, first, last, predicate);
+  #endif
+//
+//
+//     Iterator ret = first;
+//     THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+//         (__partition::partition_inplace<Derived, Iterator, Predicate>)
+//     );
+// #if __THRUST_HAS_HIPRT__
+//     ret = __partition::partition_inplace(policy, first, last, predicate);
+// #else // __THRUST_HAS_HIPRT__
+//     ret = thrust::partition(cvt_to_seq(derived_cast(policy)), first, last, predicate);
+// #endif // __THRUST_HAS_HIPRT__
+//     return ret;
 }
 
 __thrust_exec_check_disable__ template <class Derived,
