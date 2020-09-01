@@ -236,6 +236,7 @@ pair<KeyOutputIt, ValOutputIt>
               );
         }
     };
+    
     #if __THRUST_HAS_HIPRT__
       return workaround::par(policy, keys_first, keys_last, values_first, keys_result, values_result, binary_pred);
     #else
@@ -243,29 +244,6 @@ pair<KeyOutputIt, ValOutputIt>
     #endif
 
 
-//     pair<KeyOutputIt, ValOutputIt> ret = thrust::make_pair(keys_result, values_result);
-//     THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-//         (__unique_by_key::unique_by_key<Derived,
-//                                         KeyInputIt,
-//                                         ValInputIt,
-//                                         KeyOutputIt,
-//                                         ValOutputIt,
-//                                         BinaryPred>)
-//     );
-// #if __THRUST_HAS_HIPRT__
-//     ret = __unique_by_key::unique_by_key(
-//         policy, keys_first, keys_last, values_first, keys_result, values_result, binary_pred
-//     );
-// #else
-//     ret = thrust::unique_by_key_copy(cvt_to_seq(derived_cast(policy)),
-//                                      keys_first,
-//                                      keys_last,
-//                                      values_first,
-//                                      keys_result,
-//                                      values_result,
-//                                      binary_pred);
-// #endif
-//     return ret;
 }
 
 template <class Derived,
