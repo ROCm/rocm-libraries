@@ -705,7 +705,7 @@ void InclusiveScanKernel(int const N, int* in_array, int *out_array)
 TEST(ScanTests, TestInclusiveScanDevice)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-    for(auto size: {0, 1, 2, 4, 6, 12, 16, 24, 32, 64, 84, 128, 160, 256} )
+    for(auto size : get_sizes() )
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
 
@@ -751,7 +751,7 @@ void ExclusiveScanKernel(int const N, int* in_array, int *out_array)
 TEST(ScanTests, TestExclusiveScanDevice)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-    for(auto size: {0, 1, 2, 4, 6, 12, 16, 24, 32, 64, 84, 128, 160, 256} )
+    for(auto size : get_sizes() )
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
 
