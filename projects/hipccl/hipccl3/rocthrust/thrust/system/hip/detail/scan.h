@@ -305,24 +305,14 @@ OutputIt THRUST_HIP_FUNCTION exclusive_scan_n(execution_policy<Derived>& policy,
         return thrust::exclusive_scan(cvt_to_seq(derived_cast(policy)), first, first + num_items, result, init, scan_op);
       }
   };
+  
   #if __THRUST_HAS_HIPRT__
-  return workaround::par(policy, first, num_items, result, init, scan_op);
+    return workaround::par(policy, first, num_items, result, init, scan_op);
   #else
-  return workaround::seq(policy, first, num_items, result, init, scan_op);
+    return workaround::seq(policy, first, num_items, result, init, scan_op);
   #endif
 
 
-//     OutputIt ret = result;
-//     THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-//         (rocprim::exclusive_scan<rocprim::default_config, InputIt, OutputIt, T, ScanOp>));
-// #if __THRUST_HAS_HIPRT__
-//
-//         ret = __scan::exclusive_scan(policy, first, result, num_items, init, scan_op);
-// #else // __THRUST_HAS_HIPRT__
-//         ret = thrust::exclusive_scan(
-//             cvt_to_seq(derived_cast(policy)), first, first + num_items, result, init, scan_op);
-// #endif // __THRUST_HAS_HIPRT__
-//         return ret;
     }
 
     template <class Derived, class InputIt, class OutputIt, class T, class ScanOp>

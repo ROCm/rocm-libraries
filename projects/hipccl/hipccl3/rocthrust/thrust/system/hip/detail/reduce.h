@@ -173,23 +173,14 @@ T reduce_n(execution_policy<Derived>& policy,
           );
       }
   };
+
   #if __THRUST_HAS_HIPRT__
-  return workaround::par(policy, first, num_items, init, binary_op);
+    return workaround::par(policy, first, num_items, init, binary_op);
   #else
-  return workaround::seq(policy, first, num_items, init, binary_op);
+    return workaround::seq(policy, first, num_items, init, binary_op);
   #endif
 
 
-//     THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-//         (__reduce::reduce<Derived, InputIt, Size, T, BinaryOp>)
-//     );
-// #if __THRUST_HAS_HIPRT__
-//     return __reduce::reduce(policy, first, num_items, init, binary_op);
-// #else // __THRUST_HAS_HIPRT__
-//     return thrust::reduce(
-//         cvt_to_seq(derived_cast(policy)), first, first + num_items, init, binary_op
-//     );
-// #endif // __THRUST_HAS_HIPRT__
 }
 
 template <class Derived, class InputIt, class T, class BinaryOp>

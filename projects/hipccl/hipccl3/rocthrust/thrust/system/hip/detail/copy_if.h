@@ -239,24 +239,15 @@ copy_if(execution_policy<Derived>& policy,
           );
       }
   };
+
   #if __THRUST_HAS_HIPRT__
-  return workaround::par(policy, first, last, result, pred);
+    return workaround::par(policy, first, last, result, pred);
   #else
-  return workaround::seq(policy, first, last, result, pred);
+    return workaround::seq(policy, first, last, result, pred);
   #endif
 
 
-//     THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-//         (__copy_if::copy_if<Derived,
-//                             InputIterator,
-//                             OutputIterator,
-//                             Predicate>)
-//     );
-// #if __THRUST_HAS_HIPRT__
-//     return __copy_if::copy_if(policy, first, last, result, pred);
-// #else
-//     return thrust::copy_if(cvt_to_seq(derived_cast(policy)), first, last, result, pred);
-// #endif
+
 } // func copy_if
 
 template <class Derived,

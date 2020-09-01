@@ -380,49 +380,13 @@ merge_by_key(execution_policy<Derived>& policy,
             );
         }
     };
+    
     #if __THRUST_HAS_HIPRT__
-    return workaround::par(policy, keys1_first, keys1_last, keys2_first, keys2_last, items1_first, items2_first, keys_result, items_result, compare_op);
+      return workaround::par(policy, keys1_first, keys1_last, keys2_first, keys2_last, items1_first, items2_first, keys_result, items_result, compare_op);
     #else
-    return workaround::seq(policy, keys1_first, keys1_last, keys2_first, keys2_last, items1_first, items2_first, keys_result, items_result, compare_op);
+      return workaround::seq(policy, keys1_first, keys1_last, keys2_first, keys2_last, items1_first, items2_first, keys_result, items_result, compare_op);
     #endif
 
-
-//     pair<KeysOutputIt, ItemsOutputIt> ret = thrust::make_pair(keys_result, items_result);
-//     THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-//       (__merge::merge<Derived,
-//                       KeysIt1,
-//                       KeysIt2,
-//                       ItemsIt1,
-//                       ItemsIt2,
-//                       KeysOutputIt,
-//                       ItemsOutputIt,
-//                       CompareOp>)
-//     );
-// #if __THRUST_HAS_HIPRT__
-//     return __merge::merge(policy,
-//                           keys1_first,
-//                           keys1_last,
-//                           keys2_first,
-//                           keys2_last,
-//                           items1_first,
-//                           items2_first,
-//                           keys_result,
-//                           items_result,
-//                           compare_op);
-//
-// #else
-//     ret = thrust::merge_by_key(cvt_to_seq(derived_cast(policy)),
-//                                keys1_first,
-//                                keys1_last,
-//                                keys2_first,
-//                                keys2_last,
-//                                items1_first,
-//                                items2_first,
-//                                keys_result,
-//                                items_result,
-//                                compare_op);
-// #endif
-//     return ret;
 }
 
 __thrust_exec_check_disable__ template <class Derived,

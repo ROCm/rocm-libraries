@@ -178,18 +178,7 @@ unique_copy(execution_policy<Derived>& policy,
   #endif
 
 
-//     OutputIt ret = result;
-//     THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-//         (__unique::unique<Derived, InputIt, OutputIt, BinaryPred>)
-//     );
-// #if __THRUST_HAS_HIPRT__
-//     ret = __unique::unique(policy, first, last, result, binary_pred);
-// #else
-//     ret = thrust::unique_copy(
-//         cvt_to_seq(derived_cast(policy)), first, last, result, binary_pred
-//     );
-// #endif
-//     return ret;
+
 }
 
 template <class Derived, class InputIt, class OutputIt>
