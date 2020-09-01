@@ -131,9 +131,9 @@ copy(execution_policy<System>& system,
   };
 
 #if __THRUST_HAS_HIPRT__
-    return workaround::par(policy, first, last, result);
+    return workaround::par(system, first, last, result);
 #else
-    return workaround::seq(policy, first, last, result);
+    return workaround::seq(system, first, last, result);
 #endif
 } // end copy()
 
@@ -176,6 +176,11 @@ copy_n(execution_policy<System>& system,
           return thrust::copy_n(cvt_to_seq(derived_cast(system)), first, n, result);
       }
   };
+  #if __THRUST_HAS_HIPRT__
+      return workaround::par(system, first, n, result);
+  #else
+      return workaround::seq(system, first, n, result);
+  #endif
 } // end copy_n()
 #endif
 
