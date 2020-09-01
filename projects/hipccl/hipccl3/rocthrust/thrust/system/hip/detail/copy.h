@@ -100,20 +100,41 @@ copy(execution_policy<System>& system,
      InputIterator             last,
      OutputIterator            result)
 {
-    OutputIterator ret = result;
-    THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-        (__copy::device_to_device<System, InputIterator, OutputIterator>)
-    );
+  // struct workaround is required for HIP-clang
+  // THRUST_HIP_PRESERVE_KERNELS_WORKAROUND is required for HCC
+  struct workaround
+  {
+      __host__
+      static OutputIterator par(
+          execution_policy<System>& system,
+          InputIterator             first,
+          InputIterator             last,
+          OutputIterator            result)
+      {
+      #if __HCC__ && __HIP_DEVICE_COMPILE__
+      THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+          (__copy::device_to_device<System, InputIterator, OutputIterator>)
+      );
+      #else
+      return __copy::device_to_device(system, first, last, result);
+      #endif
+      }
+      __device__
+      static OutputIterator seq(
+          execution_policy<System>& system,
+          InputIterator             first,
+          InputIterator             last,
+          OutputIterator            result)
+      {
+          return thrust::copy(cvt_to_seq(derived_cast(system)), first, last, result);
+      }
+  };
+
 #if __THRUST_HAS_HIPRT__
-    {
-        ret = __copy::device_to_device(system, first, last, result);
-    }
+    return workaround::par(policy, first, last, result);
 #else
-    {
-        ret = thrust::copy(cvt_to_seq(derived_cast(system)), first, last, result);
-    }
+    return workaround::seq(policy, first, last, result);
 #endif
-    return ret;
 } // end copy()
 
 __thrust_exec_check_disable__ template <class System,
@@ -126,20 +147,35 @@ copy_n(execution_policy<System>& system,
        Size                      n,
        OutputIterator            result)
 {
-    OutputIterator ret = result;
-    THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-        (__copy::device_to_device<System, InputIterator, OutputIterator>)
-    );
-#if __THRUST_HAS_HIPRT__
-    {
-        ret = __copy::device_to_device(system, first, first + n, result);
-    }
-#else
-    {
-        ret = thrust::copy_n(cvt_to_seq(derived_cast(system)), first, n, result);
-    }
-#endif
-    return ret;
+  // struct workaround is required for HIP-clang
+  // THRUST_HIP_PRESERVE_KERNELS_WORKAROUND is required for HCC
+  struct workaround
+  {
+      __host__
+      static OutputIterator par(
+          execution_policy<System>& system,
+          InputIterator             first,
+          Size                      n,
+          OutputIterator            result)
+      {
+      #if __HCC__ && __HIP_DEVICE_COMPILE__
+      THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+          (__copy::device_to_device<System, InputIterator, OutputIterator>)
+      );
+      #else
+      return __copy::device_to_device(system, first, first + n, result);
+      #endif
+      }
+      __device__
+      static OutputIterator seq(
+          execution_policy<System>& system,
+          InputIterator             first,
+          Size                      n,
+          OutputIterator            result)
+      {
+          return thrust::copy_n(cvt_to_seq(derived_cast(system)), first, n, result);
+      }
+  };
 } // end copy_n()
 #endif
 

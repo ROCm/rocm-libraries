@@ -722,7 +722,7 @@ void CopyKernel(int const N, int* in_array, int *out_array)
         thrust::device_ptr<int> in_end(in_array + N);
         thrust::device_ptr<int> out_begin(out_array);
 
-        thrust::copy(thrust::hip::par, in_begin, in_end,out_begin);
+        thrust::copy(thrust::hip::par, in_begin, in_end, out_begin);
     }
 }
 

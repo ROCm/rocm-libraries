@@ -1933,7 +1933,6 @@ TEST(PartitionTests,TestStablePartitionDevice)
               SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
               thrust::host_vector<int> h_data = get_random_data<int>(size, 0, size, seed);
-
               thrust::device_vector<int> d_data = h_data;
 
               thrust::stable_partition(h_data.begin(), h_data.end(),is_even<int>());
