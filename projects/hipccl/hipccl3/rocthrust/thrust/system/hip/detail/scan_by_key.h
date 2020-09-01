@@ -194,29 +194,68 @@ inclusive_scan_by_key(execution_policy<Derived>& policy,
                       BinaryPred                 binary_pred,
                       ScanOp                     scan_op)
 {
-    ValOutputIt ret = value_result;
-    THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-        (__scan_by_key::inclusive_scan_by_key<Derived,
-                                              KeyInputIt,
-                                              ValInputIt,
-                                              ValOutputIt,
-                                              BinaryPred,
-                                              ScanOp>)
-    );
-#if __THRUST_HAS_HIPRT__
-    ret = __scan_by_key::inclusive_scan_by_key(
-        policy, key_first, key_last, value_first, value_result, binary_pred, scan_op
-    );
-#else
-    ret = thrust::inclusive_scan_by_key(cvt_to_seq(derived_cast(policy)),
-                                        key_first,
-                                        key_last,
-                                        value_first,
-                                        value_result,
-                                        binary_pred,
-                                        scan_op);
-#endif
-    return ret;
+  struct workaround
+  {
+      __host__
+      static ValOutputIt par(execution_policy<Derived>& policy,
+                          KeyInputIt                 key_first,
+                          KeyInputIt                 key_last,
+                          ValInputIt                 value_first,
+                          ValOutputIt                value_result,
+                          BinaryPred                 binary_pred,
+                          ScanOp                     scan_op)
+      {
+        #if __HCC__ && __HIP_DEVICE_COMPILE__
+        THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+               (__scan_by_key::inclusive_scan_by_key<Derived,KeyInputIt,ValInputIt,ValOutputIt,BinaryPred,ScanOp>)
+        );
+        #else
+        return __scan_by_key::inclusive_scan_by_key(policy,key_first, key_last, value_first, value_result, binary_pred, scan_op);
+        #endif
+      }
+
+      __device__
+      static ValOutputIt seq(execution_policy<Derived>& policy,
+                          KeyInputIt                 key_first,
+                          KeyInputIt                 key_last,
+                          ValInputIt                 value_first,
+                          ValOutputIt                value_result,
+                          BinaryPred                 binary_pred,
+                          ScanOp                     scan_op)
+      {
+        return thrust::inclusive_scan_by_key( cvt_to_seq(derived_cast(policy)), key_first, key_last, value_first, value_result, binary_pred, scan_op);
+      }
+  };
+  #if __THRUST_HAS_HIPRT__
+  return workaround::par(policy, key_first, key_last, value_first, value_result, binary_pred, scan_op);
+  #else
+  return workaround::seq(policy, key_first, key_last, value_first, value_result, binary_pred, scan_op);
+  #endif
+
+
+//     ValOutputIt ret = value_result;
+//     THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+//         (__scan_by_key::inclusive_scan_by_key<Derived,
+//                                               KeyInputIt,
+//                                               ValInputIt,
+//                                               ValOutputIt,
+//                                               BinaryPred,
+//                                               ScanOp>)
+//     );
+// #if __THRUST_HAS_HIPRT__
+//     ret = __scan_by_key::inclusive_scan_by_key(
+//         policy, key_first, key_last, value_first, value_result, binary_pred, scan_op
+//     );
+// #else
+//     ret = thrust::inclusive_scan_by_key(cvt_to_seq(derived_cast(policy)),
+//                                         key_first,
+//                                         key_last,
+//                                         value_first,
+//                                         value_result,
+//                                         binary_pred,
+//                                         scan_op);
+// #endif
+//     return ret;
 }
 
 template <class Derived,
@@ -277,30 +316,73 @@ exclusive_scan_by_key(execution_policy<Derived>& policy,
                       BinaryPred                 binary_pred,
                       ScanOp                     scan_op)
 {
-    ValOutputIt ret = value_result;
-    THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-        (__scan_by_key::exclusive_scan_by_key<Derived,
-                                              KeyInputIt,
-                                              ValInputIt,
-                                              ValOutputIt,
-                                              Init,
-                                              BinaryPred,
-                                              ScanOp>)
-    );
-#if __THRUST_HAS_HIPRT__
-    ret = __scan_by_key::exclusive_scan_by_key(
-        policy, key_first, key_last, value_first, value_result, init, binary_pred, scan_op);
-#else
-    ret = thrust::exclusive_scan_by_key(cvt_to_seq(derived_cast(policy)),
-                                        key_first,
-                                        key_last,
-                                        value_first,
-                                        value_result,
-                                        init,
-                                        binary_pred,
-                                        scan_op);
-#endif // __THRUST_HAS_HIPRT__
-    return ret;
+
+  struct workaround
+  {
+      __host__
+      static ValOutputIt par(execution_policy<Derived>& policy,
+                            KeyInputIt                 key_first,
+                            KeyInputIt                 key_last,
+                            ValInputIt                 value_first,
+                            ValOutputIt                value_result,
+                            Init                       init,
+                            BinaryPred                 binary_pred,
+                            ScanOp                     scan_op)
+      {
+        #if __HCC__ && __HIP_DEVICE_COMPILE__
+        THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+               (__scan_by_key::inclusive_scan_by_key<Derived,KeyInputIt,ValInputIt,ValOutputIt,Init,BinaryPred,ScanOp>)
+        );
+        #else
+        return __scan_by_key::exclusive_scan_by_key(policy,key_first, key_last, value_first, value_result, init, binary_pred, scan_op);
+        #endif
+      }
+
+      __device__
+      static ValOutputIt seq(execution_policy<Derived>& policy,
+                            KeyInputIt                 key_first,
+                            KeyInputIt                 key_last,
+                            ValInputIt                 value_first,
+                            ValOutputIt                value_result,
+                            Init                       init,
+                            BinaryPred                 binary_pred,
+                            ScanOp                     scan_op)
+      {
+        return thrust::exclusive_scan_by_key( cvt_to_seq(derived_cast(policy)), key_first, key_last, value_first, value_result, init, binary_pred, scan_op);
+      }
+  };
+  #if __THRUST_HAS_HIPRT__
+  return workaround::par(policy, key_first, key_last, value_first, value_result, init, binary_pred, scan_op);
+  #else
+  return workaround::seq(policy, key_first, key_last, value_first, value_result, init, binary_pred, scan_op);
+  #endif
+
+
+
+//     ValOutputIt ret = value_result;
+//     THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+//         (__scan_by_key::exclusive_scan_by_key<Derived,
+//                                               KeyInputIt,
+//                                               ValInputIt,
+//                                               ValOutputIt,
+//                                               Init,
+//                                               BinaryPred,
+//                                               ScanOp>)
+//     );
+// #if __THRUST_HAS_HIPRT__
+//     ret = __scan_by_key::exclusive_scan_by_key(
+//         policy, key_first, key_last, value_first, value_result, init, binary_pred, scan_op);
+// #else
+//     ret = thrust::exclusive_scan_by_key(cvt_to_seq(derived_cast(policy)),
+//                                         key_first,
+//                                         key_last,
+//                                         value_first,
+//                                         value_result,
+//                                         init,
+//                                         binary_pred,
+//                                         scan_op);
+// #endif // __THRUST_HAS_HIPRT__
+//     return ret;
 }
 
 template <class Derived,

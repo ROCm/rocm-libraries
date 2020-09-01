@@ -313,7 +313,7 @@ void UniqueKernel(int const N, int *in_array, int *out_size)
         thrust::device_ptr<int> in_begin(in_array);
         thrust::device_ptr<int> in_end(in_array + N);
 
-        thrust::device_vector<int>::iterator last = thrust::unique(thrust::seq, in_begin, in_end);
+        thrust::device_vector<int>::iterator last = thrust::unique(thrust::hip::par, in_begin, in_end);
         out_size[0] = last - thrust::device_vector<int>::iterator(in_begin);
     }
 }

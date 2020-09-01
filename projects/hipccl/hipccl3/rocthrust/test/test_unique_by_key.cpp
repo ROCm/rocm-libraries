@@ -527,7 +527,7 @@ void UniqueByKeyKernel(int const N, int *in_array, int *in_keys, int *out_size)
         thrust::device_ptr<int> keys_begin(in_keys);
         thrust::device_ptr<int> keys_end(in_keys + N);
 
-        thrust::pair<thrust::device_vector<int>::iterator,thrust::device_vector<int>::iterator>  d_result = thrust::unique_by_key(thrust::seq,keys_begin, keys_end, in_begin);
+        thrust::pair<thrust::device_vector<int>::iterator,thrust::device_vector<int>::iterator>  d_result = thrust::unique_by_key(thrust::hip::par,keys_begin, keys_end, in_begin);
         out_size[0] = d_result.second - thrust::device_vector<int>::iterator(in_begin);
         out_size[1] = d_result.first - thrust::device_vector<int>::iterator(keys_begin);
 

@@ -198,17 +198,65 @@ copy_if(execution_policy<Derived>& policy,
         OutputIterator             result,
         Predicate                  pred)
 {
-    THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-        (__copy_if::copy_if<Derived,
-                            InputIterator,
-                            OutputIterator,
-                            Predicate>)
-    );
-#if __THRUST_HAS_HIPRT__
-    return __copy_if::copy_if(policy, first, last, result, pred);
-#else
-    return thrust::copy_if(cvt_to_seq(derived_cast(policy)), first, last, result, pred);
-#endif
+  // struct workaround is required for HIP-clang
+  // THRUST_HIP_PRESERVE_KERNELS_WORKAROUND is required for HCC
+  struct workaround
+  {
+      __host__
+      static OutputIterator par(execution_policy<Derived>& policy,
+                      InputIterator              first,
+                      InputIterator              last,
+                      OutputIterator             result,
+                      Predicate                  pred)
+      {
+      #if __HCC__ && __HIP_DEVICE_COMPILE__
+      THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+          (__copy_if::copy_if<Derived, InputIterator, OutputIterator, Predicate>)
+      );
+      #else
+      return __copy_if::copy_if(
+          policy,
+          first,
+          last,
+          result,
+          pred
+      );
+      #endif
+      }
+      __device__
+      static OutputIterator seq(execution_policy<Derived>& policy,
+                      InputIterator              first,
+                      InputIterator              last,
+                      OutputIterator             result,
+                      Predicate                  pred)
+      {
+          return thrust::copy_if(
+             cvt_to_seq(derived_cast(policy)),
+             first,
+             last,
+             result,
+             pred
+          );
+      }
+  };
+  #if __THRUST_HAS_HIPRT__
+  return workaround::par(policy, first, last, result, pred);
+  #else
+  return workaround::seq(policy, first, last, result, pred);
+  #endif
+
+
+//     THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+//         (__copy_if::copy_if<Derived,
+//                             InputIterator,
+//                             OutputIterator,
+//                             Predicate>)
+//     );
+// #if __THRUST_HAS_HIPRT__
+//     return __copy_if::copy_if(policy, first, last, result, pred);
+// #else
+//     return thrust::copy_if(cvt_to_seq(derived_cast(policy)), first, last, result, pred);
+// #endif
 } // func copy_if
 
 template <class Derived,

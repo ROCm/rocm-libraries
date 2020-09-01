@@ -355,7 +355,7 @@ void ReduceByKeyKernel(int const N, int *in_keys, int * in_values, int * out_key
         thrust::device_ptr<int> out_keys_begin(out_keys);
         thrust::device_ptr<int> out_values_begin(out_values);
 
-        auto end_pair = thrust::reduce_by_key(thrust::seq, in_keys_begin,in_keys_end,
+        auto end_pair = thrust::reduce_by_key(thrust::hip::par, in_keys_begin,in_keys_end,
                                                       in_values_begin,
                                                       out_keys_begin,
                                                       out_values_begin);
