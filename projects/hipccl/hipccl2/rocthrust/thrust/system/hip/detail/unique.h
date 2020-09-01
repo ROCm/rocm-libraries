@@ -142,7 +142,8 @@ unique_copy(execution_policy<Derived>& policy,
             OutputIt                   result,
             BinaryPred                 binary_pred)
 {
-
+  // struct workaround is required for HIP-clang
+  // THRUST_HIP_PRESERVE_KERNELS_WORKAROUND is required for HCC
   struct workaround
   {
       __host__
@@ -176,9 +177,6 @@ unique_copy(execution_policy<Derived>& policy,
   #else
     return workaround::seq(policy, first, last, result, binary_pred);
   #endif
-
-
-
 }
 
 template <class Derived, class InputIt, class OutputIt>
@@ -196,16 +194,40 @@ unique(execution_policy<Derived>& policy,
        InputIt                    last,
        BinaryPred                 binary_pred)
 {
-    InputIt ret = first;
-    THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-        (unique_copy<Derived, InputIt, InputIt, BinaryPred>)
-    );
-#if __THRUST_HAS_HIPRT__
-    ret = hip_rocprim::unique_copy(policy, first, last, first, binary_pred);
-#else
-    ret = thrust::unique(cvt_to_seq(derived_cast(policy)), first, last, binary_pred);
-#endif
-    return ret;
+  // struct workaround is required for HIP-clang
+  // THRUST_HIP_PRESERVE_KERNELS_WORKAROUND is required for HCC
+  struct workaround
+  {
+      __host__
+      static InputIt par(execution_policy<Derived>& policy,
+                         InputIt                    first,
+                         InputIt                    last,
+                         BinaryPred                 binary_pred)
+      {
+      #if __HCC__ && __HIP_DEVICE_COMPILE__
+          THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+              (unique_copy<Derived, InputIt, InputIt, BinaryPred>)
+          );
+      #else
+          return hip_rocprim::unique_copy(policy, first, last, first, binary_pred);
+      #endif
+      }
+      __device__
+      static InputIt seq(execution_policy<Derived>& policy,
+                         InputIt                    first,
+                         InputIt                    last,
+                         BinaryPred                 binary_pred)
+      {
+          return thrust::unique(
+              cvt_to_seq(derived_cast(policy)), first, last, binary_pred
+          );
+      }
+  };
+  #if __THRUST_HAS_HIPRT__
+      return workaround::par(policy, first, last, binary_pred);
+  #else
+      return workaround::seq(policy, first, last, binary_pred);
+  #endif
 }
 
 template <class Derived, class InputIt>
