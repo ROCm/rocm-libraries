@@ -421,28 +421,76 @@ partition_copy(execution_policy<Derived>& policy,
                RejectedOutIt              rejected_result,
                Predicate                  predicate)
 {
-    pair<SelectedOutIt, RejectedOutIt> ret
-        = thrust::make_pair(selected_result, rejected_result);
-    THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-        (__partition::partition<detail::false_type,
-                                Derived,
-                                InputIt,
-                                SelectedOutIt,
-                                RejectedOutIt,
-                                Predicate>)
-    );
-#if __THRUST_HAS_HIPRT__
-    ret = __partition::partition<detail::false_type>(
-        policy, first, last, selected_result, rejected_result, predicate);
-#else // __THRUST_HAS_HIPRT__
-    ret = thrust::partition_copy(cvt_to_seq(derived_cast(policy)),
-                                 first,
-                                 last,
-                                 selected_result,
-                                 rejected_result,
-                                 predicate);
-#endif // __THRUST_HAS_HIPRT__
-    return ret;
+
+
+    struct workaround
+    {
+        __host__
+        static pair<SelectedOutIt, RejectedOutIt> par(execution_policy<Derived>& policy,
+                            InputIt                    first,
+                            InputIt                    last,
+                            SelectedOutIt              selected_result,
+                            RejectedOutIt              rejected_result,
+                            Predicate                  predicate)
+        {
+        #if __HCC__ && __HIP_DEVICE_COMPILE__
+        THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+          (__partition::partition<detail::false_type,
+                                          Derived,
+                                          InputIt,
+                                          SelectedOutIt,
+                                          RejectedOutIt,
+                                          Predicate>)
+        #else
+
+        return __partition::partition<detail::false_type>(  policy, first, last, selected_result, rejected_result, predicate);
+
+        #endif
+        }
+        __device__
+        static pair<SelectedOutIt, RejectedOutIt> seq(execution_policy<Derived>& policy,
+                            InputIt                    first,
+                            InputIt                    last,
+                            SelectedOutIt              selected_result,
+                            RejectedOutIt              rejected_result,
+                            Predicate                  predicate)
+        {
+          return thrust::partition_copy(cvt_to_seq(derived_cast(policy)),
+                                        first,
+                                        last,
+                                        selected_result,
+                                        rejected_result,
+                                        predicate);
+        }
+    };
+    #if __THRUST_HAS_HIPRT__
+    return workaround::par(policy, first, last, selected_result, rejected_result, predicate);
+    #else
+    return workaround::seq(policy, first, last, selected_result, rejected_result, predicate);
+    #endif
+
+//     pair<SelectedOutIt, RejectedOutIt> ret
+//         = thrust::make_pair(selected_result, rejected_result);
+//     THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+//         (__partition::partition<detail::false_type,
+//                                 Derived,
+//                                 InputIt,
+//                                 SelectedOutIt,
+//                                 RejectedOutIt,
+//                                 Predicate>)
+//     );
+// #if __THRUST_HAS_HIPRT__
+//     ret = __partition::partition<detail::false_type>(
+//         policy, first, last, selected_result, rejected_result, predicate);
+// #else // __THRUST_HAS_HIPRT__
+//     ret = thrust::partition_copy(cvt_to_seq(derived_cast(policy)),
+//                                  first,
+//                                  last,
+//                                  selected_result,
+//                                  rejected_result,
+//                                  predicate);
+// #endif // __THRUST_HAS_HIPRT__
+//     return ret;
 }
 
 __thrust_exec_check_disable__ template <class Derived,
@@ -647,21 +695,69 @@ stable_partition(execution_policy<Derived>& policy,
                  Iterator                   last,
                  Predicate                  predicate)
 {
-    Iterator result = first;
-    THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-        (__partition::partition_inplace<Derived, Iterator, Predicate>)
-    );
-    THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((hip_rocprim::reverse<Derived, Iterator>));
-#if __THRUST_HAS_HIPRT__
-    result = __partition::partition_inplace(policy, first, last, predicate);
 
-    // partition returns rejected values in reverse order
-    // so reverse the rejected elements to make it stable
-    hip_rocprim::reverse(policy, result, last);
-#else // __THRUST_HAS_HIPRT__
-    result = thrust::stable_partition(cvt_to_seq(derived_cast(policy)), first, last, predicate);
-#endif // __THRUST_HAS_HIPRT__
-    return result;
+  struct workaround
+  {
+      __host__
+      static Iterator par(execution_policy<Derived>& policy,
+                          Iterator                   first,
+                          Iterator                   last,
+                          Predicate                  predicate)
+      {
+        #if __HCC__ && __HIP_DEVICE_COMPILE__
+        THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+            (__partition::partition_inplace<Derived, Iterator, Predicate>)
+        );
+        THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+            (hip_rocprim::reverse<Derived, Iterator>)
+        );
+        #else
+
+        Iterator result =  __partition::partition_inplace(policy,
+                                      first,
+                                      last,
+                                      predicate
+        );
+        hip_rocprim::reverse<Derived,Iterator>(policy, result, last);
+        return result;
+        #endif
+      }
+      __device__
+      static Iterator seq(execution_policy<Derived>& policy,
+                          Iterator                   first,
+                          Iterator                   last,
+                          Predicate                  predicate)
+      {
+          return thrust::stable_partition(
+             cvt_to_seq(derived_cast(policy)),
+             first,
+             last,
+             predicate
+          );
+      }
+  };
+  #if __THRUST_HAS_HIPRT__
+  return workaround::par(policy, first, last, predicate);
+  #else
+  return workaround::seq(policy, first, last, predicate);
+  #endif
+
+//
+//     Iterator result = first;
+//     THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+//         (__partition::partition_inplace<Derived, Iterator, Predicate>)
+//     );
+//     THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((hip_rocprim::reverse<Derived, Iterator>));
+// #if __THRUST_HAS_HIPRT__
+//     result = __partition::partition_inplace(policy, first, last, predicate);
+//
+//     // partition returns rejected values in reverse order
+//     // so reverse the rejected elements to make it stable
+//     hip_rocprim::reverse(policy, result, last);
+// #else // __THRUST_HAS_HIPRT__
+//     result = thrust::stable_partition(cvt_to_seq(derived_cast(policy)), first, last, predicate);
+// #endif // __THRUST_HAS_HIPRT__
+//     return result;
 }
 
 template <class Derived, class ItemsIt, class Predicate>

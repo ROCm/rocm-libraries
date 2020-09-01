@@ -140,7 +140,7 @@ namespace __unique_by_key
         thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
             tmp(policy, temp_storage_bytes + sizeof(size_type));
         void *ptr = static_cast<void*>(tmp.data().get());
-        
+
         size_type* d_num_selected_out = reinterpret_cast<size_type*>(
             reinterpret_cast<char*>(ptr) + temp_storage_bytes);
 
@@ -182,29 +182,90 @@ pair<KeyOutputIt, ValOutputIt>
                                            ValOutputIt                values_result,
                                            BinaryPred                 binary_pred)
 {
-    pair<KeyOutputIt, ValOutputIt> ret = thrust::make_pair(keys_result, values_result);
-    THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-        (__unique_by_key::unique_by_key<Derived,
-                                        KeyInputIt,
-                                        ValInputIt,
-                                        KeyOutputIt,
-                                        ValOutputIt,
-                                        BinaryPred>)
-    );
-#if __THRUST_HAS_HIPRT__
-    ret = __unique_by_key::unique_by_key(
-        policy, keys_first, keys_last, values_first, keys_result, values_result, binary_pred
-    );
-#else
-    ret = thrust::unique_by_key_copy(cvt_to_seq(derived_cast(policy)),
-                                     keys_first,
-                                     keys_last,
-                                     values_first,
-                                     keys_result,
-                                     values_result,
-                                     binary_pred);
-#endif
-    return ret;
+
+    struct workaround
+    {
+        __host__
+        static pair<KeyOutputIt, ValOutputIt> par(execution_policy<Derived>& policy,
+                                                  KeyInputIt                 keys_first,
+                                                  KeyInputIt                 keys_last,
+                                                  ValInputIt                 values_first,
+                                                  KeyOutputIt                keys_result,
+                                                  ValOutputIt                values_result,
+                                                  BinaryPred                 binary_pred)
+        {
+        #if __HCC__ && __HIP_DEVICE_COMPILE__
+          THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+           __unique_by_key::unique_by_key<Derived,
+                                          KeyInputIt,
+                                          ValInputIt,
+                                          KeyOutputIt,
+                                          ValOutputIt,
+                                          BinaryPred>));
+        #else
+          return __unique_by_key::unique_by_key
+              (
+                  policy,
+                  keys_first,
+                  keys_last,
+                  values_first,
+                  keys_result,
+                  values_result,
+                  binary_pred
+              );
+        #endif
+        }
+        __device__
+        static pair<KeyOutputIt, ValOutputIt> seq(execution_policy<Derived>& policy,
+                                                  KeyInputIt                 keys_first,
+                                                  KeyInputIt                 keys_last,
+                                                  ValInputIt                 values_first,
+                                                  KeyOutputIt                keys_result,
+                                                  ValOutputIt                values_result,
+                                                  BinaryPred                 binary_pred)
+        {
+          return thrust::unique_by_key_copy
+              (
+                  cvt_to_seq(derived_cast(policy)),
+                             keys_first,
+                             keys_last,
+                             values_first,
+                             keys_result,
+                             values_result,
+                             binary_pred
+              );
+        }
+    };
+    #if __THRUST_HAS_HIPRT__
+      return workaround::par(policy, keys_first, keys_last, values_first, keys_result, values_result, binary_pred);
+    #else
+      return workaround::seq(policy, keys_first, keys_last, values_first, keys_result, values_result, binary_pred);
+    #endif
+
+
+//     pair<KeyOutputIt, ValOutputIt> ret = thrust::make_pair(keys_result, values_result);
+//     THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+//         (__unique_by_key::unique_by_key<Derived,
+//                                         KeyInputIt,
+//                                         ValInputIt,
+//                                         KeyOutputIt,
+//                                         ValOutputIt,
+//                                         BinaryPred>)
+//     );
+// #if __THRUST_HAS_HIPRT__
+//     ret = __unique_by_key::unique_by_key(
+//         policy, keys_first, keys_last, values_first, keys_result, values_result, binary_pred
+//     );
+// #else
+//     ret = thrust::unique_by_key_copy(cvt_to_seq(derived_cast(policy)),
+//                                      keys_first,
+//                                      keys_last,
+//                                      values_first,
+//                                      keys_result,
+//                                      values_result,
+//                                      binary_pred);
+// #endif
+//     return ret;
 }
 
 template <class Derived,

@@ -1840,3 +1840,113 @@ TEST(PartitionTests,TestPartitionDevice)
           }
       }
 }
+
+__global__
+THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
+void PartitionCopyKernel(int const N, int* array, int* true_arr, int* false_arr, int* size_array)
+{
+    if(threadIdx.x == 0)
+    {
+        thrust::device_ptr<int> begin(array);
+        thrust::device_ptr<int> end(array + N);
+        thrust::device_ptr<int> true_begin(true_arr);
+        thrust::device_ptr<int> false_begin(false_arr);
+        typedef thrust::device_vector<int>::iterator iter;
+
+        thrust::pair<iter,iter> end_pair = thrust::partition_copy(thrust::hip::par, begin, end, true_begin, false_begin, is_even<int>());
+        size_array[0] = end_pair.first - iter(true_begin);
+        size_array[1] = end_pair.second - iter(false_begin);
+
+
+    }
+}
+
+TEST(PartitionTests,TestPartitionCopyDevice)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+      for(auto size: {0, 1, 2, 4, 6, 12, 16, 24, 32, 64, 84, 128, 160, 256} )
+      {
+          SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+          for(auto seed : get_seeds())
+          {
+              SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+              thrust::host_vector<int> h_data = get_random_data<int>(size, 0, size, seed);
+              thrust::host_vector<int> h_true(size);
+              thrust::host_vector<int> h_false(size);
+
+              thrust::device_vector<int> d_data = h_data;
+              thrust::device_vector<int> d_true = h_true;
+              thrust::device_vector<int> d_false = h_false;
+              thrust::device_vector<int> d_output_sizes(2,0);
+
+              auto end_pair =  thrust::partition_copy(h_data.begin(), h_data.end(), h_true.begin(), h_false.begin(), is_even<int>());
+              h_true.resize(end_pair.first - h_true.begin());
+              h_false.resize(end_pair.second - h_false.begin());
+
+              hipLaunchKernelGGL(PartitionCopyKernel,
+                                 dim3(1, 1, 1),
+                                 dim3(128, 1, 1),
+                                 0,
+                                 0,
+                                 size,
+                                 thrust::raw_pointer_cast(&d_data[0]),
+                                 thrust::raw_pointer_cast(&d_true[0]),
+                                 thrust::raw_pointer_cast(&d_false[0]),
+                                 thrust::raw_pointer_cast(&d_output_sizes[0]));
+
+              d_true.resize(d_output_sizes[0]);
+              d_false.resize(d_output_sizes[1]);
+
+              ASSERT_EQ(h_true, d_true);
+              ASSERT_EQ(h_false, d_false);
+          }
+      }
+}
+
+
+__global__
+THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
+void StablePartitionKernel(int const N, int* array)
+{
+    if(threadIdx.x == 0)
+    {
+        thrust::device_ptr<int> begin(array);
+        thrust::device_ptr<int> end(array + N);
+        thrust::stable_partition(thrust::hip::par, begin, end,is_even<int>());
+
+    }
+}
+
+TEST(PartitionTests,TestStablePartitionDevice)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+      for(auto size: {0, 1, 2, 4, 6, 12, 16, 24, 32, 64, 84, 128, 160, 256} )
+      {
+          SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+          for(auto seed : get_seeds())
+          {
+              SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+              thrust::host_vector<int> h_data = get_random_data<int>(size, 0, size, seed);
+
+              thrust::device_vector<int> d_data = h_data;
+
+              thrust::stable_partition(h_data.begin(), h_data.end(),is_even<int>());
+
+              hipLaunchKernelGGL(StablePartitionKernel,
+                                 dim3(1, 1, 1),
+                                 dim3(128, 1, 1),
+                                 0,
+                                 0,
+                                 size,
+                                 thrust::raw_pointer_cast(&d_data[0]));
+
+              ASSERT_EQ(h_data, d_data);
+          }
+      }
+}
