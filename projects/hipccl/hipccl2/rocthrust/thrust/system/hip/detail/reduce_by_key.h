@@ -167,14 +167,15 @@ reduce_by_key(execution_policy<Derived>& policy,
   struct workaround
   {
       __host__
-      static pair<KeyOutputIt, ValOutputIt> par(execution_policy<Derived>& policy,
-                    KeyInputIt                 keys_first,
-                    KeyInputIt                 keys_last,
-                    ValInputIt                 values_first,
-                    KeyOutputIt                keys_output,
-                    ValOutputIt                values_output,
-                    BinaryPred                 binary_pred,
-                    BinaryOp                   binary_op)
+      static pair<KeyOutputIt, ValOutputIt> par(
+        execution_policy<Derived>& policy,
+        KeyInputIt                 keys_first,
+        KeyInputIt                 keys_last,
+        ValInputIt                 values_first,
+        KeyOutputIt                keys_output,
+        ValOutputIt                values_output,
+        BinaryPred                 binary_pred,
+        BinaryOp                   binary_op)
       {
       #if __HCC__ && __HIP_DEVICE_COMPILE__
       THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
@@ -194,14 +195,15 @@ reduce_by_key(execution_policy<Derived>& policy,
       #endif
       }
       __device__
-      static pair<KeyOutputIt, ValOutputIt> seq(execution_policy<Derived>& policy,
-                    KeyInputIt                 keys_first,
-                    KeyInputIt                 keys_last,
-                    ValInputIt                 values_first,
-                    KeyOutputIt                keys_output,
-                    ValOutputIt                values_output,
-                    BinaryPred                 binary_pred,
-                    BinaryOp                   binary_op)
+      static pair<KeyOutputIt, ValOutputIt> seq(
+        execution_policy<Derived>& policy,
+        KeyInputIt                 keys_first,
+        KeyInputIt                 keys_last,
+        ValInputIt                 values_first,
+        KeyOutputIt                keys_output,
+        ValOutputIt                values_output,
+        BinaryPred                 binary_pred,
+        BinaryOp                   binary_op)
       {
         return thrust::reduce_by_key(cvt_to_seq(derived_cast(policy)),
                                      keys_first,
@@ -214,7 +216,6 @@ reduce_by_key(execution_policy<Derived>& policy,
                                      );
       }
   };
-  
   #if __THRUST_HAS_HIPRT__
     return workaround::par(policy,  keys_first, keys_last, values_first, keys_output, values_output, binary_pred, binary_op);
   #else

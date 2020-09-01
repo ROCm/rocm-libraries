@@ -241,14 +241,14 @@ merge(execution_policy<Derived>& policy,
           (__merge::merge<Derived, KeysIt1, KeysIt2, ResultIt, CompareOp>)
       );
       #else
-
-      return __merge::merge(policy,
-                            keys1_first,
-                            keys1_last,
-                            keys2_first,
-                            keys2_last,
-                            result,
-                            compare_op
+      return __merge::merge(
+        policy,
+        keys1_first,
+        keys1_last,
+        keys2_first,
+        keys2_last,
+        result,
+        compare_op
       );
       #endif
       }
@@ -277,27 +277,6 @@ merge(execution_policy<Derived>& policy,
   #else
   return workaround::seq(policy, keys1_first, keys1_last, keys2_first, keys2_last, result, compare_op);
   #endif
-
-
-//     ResultIt ret = result;
-//     THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-//         (__merge::merge<Derived, KeysIt1, KeysIt2, ResultIt, CompareOp>)
-//     );
-// #if __THRUST_HAS_HIPRT__
-//     ret = __merge::merge(
-//         policy, keys1_first, keys1_last, keys2_first, keys2_last, result, compare_op
-//     );
-// #else
-//     ret = thrust::merge(cvt_to_seq(derived_cast(policy)),
-//                         keys1_first,
-//                         keys1_last,
-//                         keys2_first,
-//                         keys2_last,
-//                         result,
-//                         compare_op);
-//
-// #endif
-//     return ret;
 }
 
 __thrust_exec_check_disable__ template <class Derived,
@@ -340,17 +319,17 @@ merge_by_key(execution_policy<Derived>& policy,
             (__merge::merge<Derived, KeysIt1, KeysIt2, ResultIt, CompareOp>)
         );
         #else
-
-        return __merge::merge(policy,
-                              keys1_first,
-                              keys1_last,
-                              keys2_first,
-                              keys2_last,
-                              items1_first,
-                              items2_first,
-                              keys_result,
-                              items_result,
-                              compare_op
+        return __merge::merge(
+          policy,
+          keys1_first,
+          keys1_last,
+          keys2_first,
+          keys2_last,
+          items1_first,
+          items2_first,
+          keys_result,
+          items_result,
+          compare_op
         );
         #endif
         }
@@ -380,7 +359,7 @@ merge_by_key(execution_policy<Derived>& policy,
             );
         }
     };
-    
+
     #if __THRUST_HAS_HIPRT__
       return workaround::par(policy, keys1_first, keys1_last, keys2_first, keys2_last, items1_first, items2_first, keys_result, items_result, compare_op);
     #else
