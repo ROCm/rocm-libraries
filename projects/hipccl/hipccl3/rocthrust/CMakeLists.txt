@@ -49,7 +49,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Set XNACK flags
-set(XNACK_FLAGS "-mno-xnack -msram-ecc")
+set(XNACK_FLAGS "-mno-xnack -Xarch_gfx900 -mno-sram-ecc -Xarch_gfx906 -msram-ecc -Xarch_gfx908 -msram-ecc")
 
 if(DISABLE_WERROR)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wno-unused-function ${XNACK_FLAGS}")
