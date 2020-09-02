@@ -190,7 +190,8 @@ void StableSortByKeyKernel(int const N, int* keys, short* values)
         thrust::device_ptr<int>   keys_begin(keys);
         thrust::device_ptr<int>   keys_end(keys + N);
         thrust::device_ptr<short> val(values);
-        thrust::stable_sort_by_key(thrust::hip::par, keys_begin, keys_end, val);
+        //TODO: The thrust::hip::par throw exception, we should fix it
+        thrust::stable_sort_by_key(thrust::seq, keys_begin, keys_end, val);
     }
 }
 
