@@ -228,7 +228,7 @@ OutputIterator adjacent_difference(my_tag, InputIterator, InputIterator, OutputI
 TEST(AdjacentDifferenceTests, TestAdjacentDifferenceDispatchImplicit)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-    
+
     thrust::device_vector<int> d_input(1);
 
     thrust::adjacent_difference(thrust::retag<my_tag>(d_input.begin()),
@@ -236,6 +236,46 @@ TEST(AdjacentDifferenceTests, TestAdjacentDifferenceDispatchImplicit)
                                 thrust::retag<my_tag>(d_input.begin()));
 
     ASSERT_EQ(13, d_input.front());
+}
+
+__global__
+THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
+void AdjacentDifferenceKernel(int const N, int* array)
+{
+  if(threadIdx.x == 0)
+  {
+      thrust::device_ptr<int> begin(array);
+      thrust::device_ptr<int> end(array + N);
+      // thrust::advance(begin,2);
+      thrust::adjacent_difference(thrust::hip::par, begin,end,begin);
+  }
+}
+
+TEST(AdjacentDifferenceTests, TestAdjacentDifferenceDevice)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    for(auto size : get_sizes() )
+    {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+            thrust::host_vector<int> h_data = get_random_data<int>(size, 0, size, seed);
+            thrust::device_vector<int> d_data = h_data;
+            thrust::adjacent_difference(h_data.begin(),h_data.end(),h_data.begin());
+            hipLaunchKernelGGL(AdjacentDifferenceKernel,
+                               dim3(1, 1, 1),
+                               dim3(128, 1, 1),
+                               0,
+                               0,
+                               size,
+                               thrust::raw_pointer_cast(&d_data[0]));
+
+            ASSERT_EQ(h_data, d_data);
+        }
+    }
 }
 
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP

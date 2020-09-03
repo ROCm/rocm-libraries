@@ -1229,3 +1229,111 @@ TYPED_TEST(TransformVectorTests, TestTransformWithIndirection)
     ASSERT_EQ(output[5], T(1));
     ASSERT_EQ(output[6], T(1));
 }
+
+
+__global__
+THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
+void UnaryTransformKernel(int const N, int* input, int *output)
+{
+    if(threadIdx.x == 0)
+    {
+        thrust::device_ptr<int>   in_begin(input);
+        thrust::device_ptr<int>   in_end(input + N);
+        thrust::device_ptr<int>   out_begin(output);
+        thrust::transform(thrust::hip::par, in_begin, in_end, out_begin, unary_transform<int>());
+    }
+}
+TEST(TransformTests, TestUnaryTransformDevice)
+{
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
+    {
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+        thrust::host_vector<int> h_input(size);
+        for(size_t i = 0; i < size; i++)
+        {
+            h_input[i] = i;
+        }
+
+        // Calculate expected results on host
+        thrust::host_vector<int> expected(size);
+        thrust::transform(h_input.begin(), h_input.end(), expected.begin(), unary_transform<int>());
+
+        thrust::device_vector<int> d_input(h_input);
+        thrust::device_vector<int> d_output(size);
+
+        hipLaunchKernelGGL(UnaryTransformKernel,
+                           dim3(1, 1, 1),
+                           dim3(128, 1, 1),
+                           0,
+                           0,
+                           size,
+                           thrust::raw_pointer_cast(&d_input[0]),
+                           thrust::raw_pointer_cast(&d_output[0]));
+
+
+        ASSERT_EQ(expected,d_output);
+    }
+}
+
+
+__global__
+THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
+void BinaryTransformKernel(int const N, int* input1, int* input2, int *output)
+{
+    if(threadIdx.x == 0)
+    {
+        thrust::device_ptr<int>   in1_begin(input1);
+        thrust::device_ptr<int>   in1_end(input1 + N);
+        thrust::device_ptr<int>   in2_begin(input2);
+
+        thrust::device_ptr<int>   out_begin(output);
+        thrust::transform(thrust::hip::par, in1_begin, in1_end,in2_begin, out_begin, binary_transform<int>());
+    }
+}
+
+
+TEST(TransformTests, TestBinaryTransformDevice)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
+    {
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+        thrust::host_vector<int> h_input1(size);
+        thrust::host_vector<int> h_input2(size);
+        for(size_t i = 0; i < size; i++)
+        {
+            h_input1[i] = i * 3;
+            h_input2[i] = i;
+        }
+
+        // Calculate expected results on host
+        thrust::host_vector<int> expected(size);
+        thrust::transform(h_input1.begin(),
+                          h_input1.end(),
+                          h_input2.begin(),
+                          expected.begin(),
+                          binary_transform<int>());
+
+        thrust::device_vector<int> d_input1(h_input1);
+        thrust::device_vector<int> d_input2(h_input2);
+        thrust::device_vector<int> d_output(size);
+        hipLaunchKernelGGL(BinaryTransformKernel,
+                           dim3(1, 1, 1),
+                           dim3(128, 1, 1),
+                           0,
+                           0,
+                           size,
+                           thrust::raw_pointer_cast(&d_input1[0]),
+                           thrust::raw_pointer_cast(&d_input2[0]),
+                           thrust::raw_pointer_cast(&d_output[0]));
+
+        ASSERT_EQ(expected,d_output);
+
+    }
+}
