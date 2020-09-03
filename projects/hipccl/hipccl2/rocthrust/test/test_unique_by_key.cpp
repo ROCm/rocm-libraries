@@ -514,3 +514,80 @@ TYPED_TEST(UniqueByKeyIntegralTests, TestUniqueCopyByKeyToDiscardIterator)
         }
     }
 }
+
+__global__
+THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
+void UniqueByKeyKernel(int const N, int *in_array, int *in_keys, int *out_size)
+{
+    if(threadIdx.x == 0)
+    {
+        thrust::device_ptr<int> in_begin(in_array);
+        thrust::device_ptr<int> in_end(in_array + N);
+
+        thrust::device_ptr<int> keys_begin(in_keys);
+        thrust::device_ptr<int> keys_end(in_keys + N);
+
+        thrust::pair<thrust::device_vector<int>::iterator,thrust::device_vector<int>::iterator>  d_result = thrust::unique_by_key(thrust::hip::par,keys_begin, keys_end, in_begin);
+        out_size[0] = d_result.second - thrust::device_vector<int>::iterator(in_begin);
+        out_size[1] = d_result.first - thrust::device_vector<int>::iterator(keys_begin);
+
+    }
+}
+
+
+TEST(UniqueIntegralTests, TestUniqueDevice)
+{
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
+    {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+            thrust::host_vector<int> h_data = get_random_data<int>(
+                size, 0, 15, seed);
+            thrust::host_vector<int> h_keys = get_random_data<int>(
+                size, 0, 15, seed);
+            thrust::device_vector<int> d_data = h_data;
+            thrust::device_vector<int> d_keys = h_keys;
+
+            thrust::device_vector<int> d_output_size(2,0);
+
+            thrust::pair<thrust::host_vector<int>::iterator,thrust::host_vector<int>::iterator>   h_new_last;
+            // thrust::pair<thrust::device_vector<int>::iterator,thrust::device_vector<int>::iterator> d_new_last;
+
+            h_new_last = thrust::unique_by_key(h_keys.begin(),h_keys.end(),h_data.begin());
+            auto h_values_last = h_new_last.second;
+            auto h_values_keys = h_new_last.first;
+
+            hipLaunchKernelGGL(UniqueByKeyKernel,
+                               dim3(1, 1, 1),
+                               dim3(128, 1, 1),
+                               0,
+                               0,
+                               size,
+                               thrust::raw_pointer_cast(&d_data[0]),
+                               thrust::raw_pointer_cast(&d_keys[0]),
+                               thrust::raw_pointer_cast(&d_output_size[0]));
+
+
+            ASSERT_EQ(h_values_last - h_data.begin(),d_output_size[0]);
+            ASSERT_EQ(h_values_keys - h_keys.begin(),d_output_size[1]);
+
+            h_data.resize(h_values_last - h_data.begin());
+            h_keys.resize(h_values_last - h_data.begin());
+
+            d_data.resize(d_output_size[0]);
+            d_keys.resize(d_output_size[1]);
+
+
+            ASSERT_EQ(h_data, d_data);
+            ASSERT_EQ(h_keys, d_keys);
+
+        }
+    }
+}

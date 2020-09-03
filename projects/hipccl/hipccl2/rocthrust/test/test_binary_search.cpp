@@ -462,7 +462,7 @@ equal_range(my_tag, ForwardIterator first, ForwardIterator, const LessThanCompar
 TEST(BinarySearchTests, TestScalarEqualRangeDispatchImplicit)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-    
+
     thrust::device_vector<int> vec(1);
 
     thrust::binary_search(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), 0);
@@ -470,4 +470,53 @@ TEST(BinarySearchTests, TestScalarEqualRangeDispatchImplicit)
     ASSERT_EQ(13, vec.front());
 }
 
+
+__global__
+THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
+void BinarySearchKernel(int const N, int* in_array, int*result_array, int search_value)
+{
+  if(threadIdx.x == 0)
+  {
+      thrust::device_ptr<int> begin(in_array);
+      thrust::device_ptr<int> end(in_array + N);
+      result_array[search_value]=thrust::binary_search(thrust::hip::par, begin,end,search_value);
+  }
+}
+
+TEST(BinarySearchTests, TestBinarySearchDevice)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    for(auto size : get_sizes() )
+    {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+            thrust::host_vector<int> h_data = get_random_data<int>(size, 0, size, seed);
+            thrust::device_vector<int> d_data = h_data;
+
+            thrust::host_vector<int> h_result(size*2,-1);
+            thrust::device_vector<int> d_result(size*2,-1);
+
+            for(int search_value = 0; search_value < (int)size*2; search_value++)
+            {
+              SCOPED_TRACE(testing::Message() << "searching for " <<search_value);
+
+              h_result[search_value] = thrust::binary_search(h_data.begin(),h_data.end(),search_value);
+              hipLaunchKernelGGL(BinarySearchKernel,
+                                 dim3(1, 1, 1),
+                                 dim3(128, 1, 1),
+                                 0,
+                                 0,
+                                 size,
+                                 thrust::raw_pointer_cast(&d_data[0]),
+                                 thrust::raw_pointer_cast(&d_result[0]),
+                                 search_value);
+            }
+            ASSERT_EQ(h_result,d_result);
+        }
+    }
+}
 THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_END

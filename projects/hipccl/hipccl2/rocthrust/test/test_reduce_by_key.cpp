@@ -303,7 +303,7 @@ thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(my_system& system,
 TEST(ReduceByKeysTests, TestReduceByKeyDispatchExplicit)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-    
+
     thrust::device_vector<int> vec(1);
 
     my_system sys(0);
@@ -340,4 +340,89 @@ TEST(ReduceByKeysTests, TestReduceByKeyDispatchImplicit)
                           thrust::retag<my_tag>(vec.begin()));
 
     ASSERT_EQ(13, vec.front());
+}
+
+
+__global__
+THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
+void ReduceByKeyKernel(int const N, int *in_keys, int * in_values, int * out_keys, int * out_values, int * out_sizes)
+{
+    if(threadIdx.x == 0)
+    {
+        thrust::device_ptr<int> in_keys_begin(in_keys);
+        thrust::device_ptr<int> in_keys_end(in_keys + N);
+        thrust::device_ptr<int> in_values_begin(in_values);
+        thrust::device_ptr<int> out_keys_begin(out_keys);
+        thrust::device_ptr<int> out_values_begin(out_values);
+
+        auto end_pair = thrust::reduce_by_key(thrust::hip::par, in_keys_begin,in_keys_end,
+                                                      in_values_begin,
+                                                      out_keys_begin,
+                                                      out_values_begin);
+       out_sizes[0] = end_pair.first - out_keys_begin;
+       out_sizes[1] = end_pair.second - out_values_begin;
+    }
+}
+
+
+TEST(ReduceByKeyTests, TestReduceByKeyDevice)
+{
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
+    {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+            thrust::host_vector<int> h_values = get_random_data<int>(
+                size,
+                std::numeric_limits<int>::min(),
+                std::numeric_limits<int>::max(),
+                seed);
+            thrust::host_vector<int> h_keys = get_random_data<int>(
+                size, 0, 13, seed);
+            thrust::device_vector<int> d_values = h_values;
+            thrust::device_vector<int> d_keys = h_keys;
+
+            thrust::host_vector<int> h_keys_result(size);
+            thrust::host_vector<int> h_values_result(size);
+
+            thrust::device_vector<int> d_keys_result(size);
+            thrust::device_vector<int> d_values_result(size);
+            thrust::device_vector<int> d_output_sizes(2);
+
+
+
+
+            auto end_pair = thrust::reduce_by_key(h_keys.begin(), h_keys.end(),
+                                                 h_values.begin(),
+                                                 h_keys_result.begin(),
+                                                 h_values_result.begin());
+
+            hipLaunchKernelGGL(ReduceByKeyKernel,
+                               dim3(1, 1, 1),
+                               dim3(128, 1, 1),
+                               0,
+                               0,
+                               size,
+                               thrust::raw_pointer_cast(&d_keys[0]),
+                               thrust::raw_pointer_cast(&d_values[0]),
+                               thrust::raw_pointer_cast(&d_keys_result[0]),
+                               thrust::raw_pointer_cast(&d_values_result[0]),
+                               thrust::raw_pointer_cast(&d_output_sizes[0]));
+
+            h_keys_result.resize(end_pair.first - h_keys_result.begin());
+            h_values_result.resize(end_pair.second - h_values_result.begin());
+            d_keys_result.resize(d_output_sizes[0]);
+            d_values_result.resize(d_output_sizes[1]);
+
+            ASSERT_EQ(h_keys_result,d_keys_result);
+            ASSERT_EQ(h_values_result,d_values_result);
+
+        }
+    }
 }
