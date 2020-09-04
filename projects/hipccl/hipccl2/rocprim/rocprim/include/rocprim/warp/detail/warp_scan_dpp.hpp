@@ -74,6 +74,14 @@ public:
             T t = scan_op(warp_move_dpp<T, 0x118>(output), output); // row_shr:8
             if(row_lane_id >= 8) output = t;
         }
+// gfx10+
+#if 1
+        if(WarpSize > 16)
+        {
+            T t = scan_op(warp_move_dpp<T, 0x125>(output), output); // row_shr:15
+            if(lane_id % 32 >= 16) output = t;
+        }
+#else
         if(WarpSize > 16)
         {
             T t = scan_op(warp_move_dpp<T, 0x142>(output), output); // row_bcast:15
@@ -84,6 +92,7 @@ public:
             T t = scan_op(warp_move_dpp<T, 0x143>(output), output); // row_bcast:31
             if(lane_id >= 32) output = t;
         }
+#endif
     }
 
     template<class BinaryFunction>
