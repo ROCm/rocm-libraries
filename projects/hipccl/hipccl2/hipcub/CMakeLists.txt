@@ -53,7 +53,11 @@ include(cmake/VerifyCompiler.cmake)
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
+
+# Set XNACK flags
+set(XNACK_FLAGS "-mno-xnack -Xarch_gfx906 -msram-ecc -Xarch_gfx908 -msram-ecc")
+
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra ${XNACK_FLAGS}")
 
 # Build options
 option(BUILD_TEST "Build tests (requires googletest)" OFF)
