@@ -401,7 +401,7 @@ binary_search(execution_policy<Derived>& policy,
       {
         #if __HCC__ && __HIP_DEVICE_COMPILE__
           THRUST_HIP_PRESERVE_KERNELS_WORKAROUND
-          (__binary_search::upper_bound<Derived,
+          (__binary_search::binary_search<Derived,
                                         HaystackIt,
                                         NeedlesIt,
                                         OutputIt,
@@ -629,7 +629,7 @@ bool binary_search(execution_policy<Derived>& policy,
         {
           #if __HCC__ && __HIP_DEVICE_COMPILE__
             THRUST_HIP_PRESERVE_KERNELS_WORKAROUND
-            (__binary_search::lower_bound<Derived,
+            (__binary_search::binary_search<Derived,
                                           HaystackIt,
                                           typename values_type::iterator,
                                           typename results_type::iterator,
@@ -641,7 +641,7 @@ bool binary_search(execution_policy<Derived>& policy,
 
           values[0] = value;
 
-          __binary_search::lower_bound(
+          __binary_search::binary_search(
               policy, first, last, values.begin(), values.end(), result.begin(), compare_op
           );
 
@@ -658,7 +658,7 @@ bool binary_search(execution_policy<Derived>& policy,
                             CompareOp                  compare_op)
         {
           bool result;
-          thrust::lower_bound(cvt_to_seq(derived_cast(policy)),
+          thrust::binary_search(cvt_to_seq(derived_cast(policy)),
                               first,
                               last,
                               &value,
