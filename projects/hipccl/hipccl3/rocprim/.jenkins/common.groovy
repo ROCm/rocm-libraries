@@ -14,7 +14,7 @@ def runCompileCommand(platform, project, jobName, boolean debug=false)
                 set -x
                 cd ${project.paths.project_build_prefix}
                 mkdir -p build/${buildTypeDir} && cd build/${buildTypeDir}
-                ${cmake} -DCMAKE_CXX_COMPILER=/opt/rocm/bin/hipcc ${buildTypeArg} -DBUILD_TEST=ON -DBUILD_BENCHMARK=ON ../..
+                ${cmake} -DCMAKE_CXX_COMPILER=/opt/rocm/bin/hipcc ${buildTypeArg} -DBUILD_TEST=ON -DBUILD_BENCHMARK=OFF ../..
                 make -j\$(nproc)
                 """
     
