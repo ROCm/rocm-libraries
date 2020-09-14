@@ -47,7 +47,7 @@ endif()
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker search and installed rpath")
 
 # AMD targets
-set(AMDGPU_TARGETS gfx803;gfx900;gfx906;gfx1010 CACHE STRING "List of specific device types to build for")
+set(AMDGPU_TARGETS gfx803;gfx900;gfx906;gfx908;gfx1010 CACHE STRING "List of specific device types to build for")
 set(AMDGPU_TEST_TARGETS "" CACHE STRING "List of specific device types to test for") # Leave empty for default system device
 
 # Verify that hcc compiler is used on ROCM platform
