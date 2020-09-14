@@ -73,14 +73,6 @@ public:
             // row_shr:8
             output = reduce_op(warp_move_dpp<T, 0x118>(output), output);
         }
-// gfx10+
-#if 1
-        if(WarpSize > 16)
-        {
-            // row_shr:15
-            output = reduce_op(warp_move_dpp<T, 0x125>(output), output);
-        }
-#else
         if(WarpSize > 16)
         {
             // row_bcast:15
@@ -91,7 +83,6 @@ public:
             // row_bcast:31
             output = reduce_op(warp_move_dpp<T, 0x143>(output), output);
         }
-#endif
 
         // Read the result from the last lane of the logical warp
         output = warp_shuffle(output, WarpSize - 1, WarpSize);
