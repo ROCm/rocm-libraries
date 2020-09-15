@@ -276,3 +276,76 @@ TYPED_TEST(PrimitiveMergeTests, MergeDescending)
         }
     }
 }
+
+template<class T>
+__global__
+THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
+void MergeKernel(int const N, T* inA_array, T* inB_array, T *out_array)
+{
+    if(threadIdx.x == 0)
+    {
+        thrust::device_ptr<int> inA_begin(inA_array);
+        thrust::device_ptr<int> inA_end(inA_array + N);
+        thrust::device_ptr<int> inB_begin(inB_array);
+        thrust::device_ptr<int> inB_end(inB_array + N);
+        thrust::device_ptr<int> out_begin(out_array);
+
+        thrust::merge(thrust::hip::par, inA_begin, inA_end, inB_begin, inB_end,out_begin);
+
+    }
+}
+TEST(PrimitiveMergeTests, TestMergeDevice)
+{
+    using T = int;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
+    {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+            thrust::host_vector<T> h_a = get_random_data<T>(
+                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+            thrust::host_vector<T> h_b = get_random_data<T>(
+                size,
+                std::numeric_limits<T>::min(),
+                std::numeric_limits<T>::max(),
+                seed + seed_value_addition
+            );
+
+            thrust::stable_sort(h_a.begin(), h_a.end(), thrust::greater<T>());
+            thrust::stable_sort(h_b.begin(), h_b.end(), thrust::greater<T>());
+
+            thrust::device_vector<T> d_a = h_a;
+            thrust::device_vector<T> d_b = h_b;
+
+            thrust::host_vector<T>   h_result(h_a.size() + h_b.size());
+            thrust::device_vector<T> d_result(d_a.size() + d_b.size());
+
+            typename thrust::host_vector<T>::iterator   h_end;
+            typename thrust::device_vector<T>::iterator d_end;
+
+            h_end = thrust::merge(h_a.begin(),
+                                  h_a.end(),
+                                  h_b.begin(),
+                                  h_b.end(),
+                                  h_result.begin());
+
+              hipLaunchKernelGGL(MergeKernel,
+                                 dim3(1, 1, 1),
+                                 dim3(128, 1, 1),
+                                 0,
+                                 0,
+                                 size,
+                                 thrust::raw_pointer_cast(&d_a[0]),
+                                 thrust::raw_pointer_cast(&d_b[0]),
+                                 thrust::raw_pointer_cast(&d_result[0]));
+
+            ASSERT_EQ(h_result, d_result);
+        }
+    }
+}

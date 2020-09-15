@@ -365,7 +365,7 @@ TYPED_TEST(SortVectorPrimitives, TestSortAscendingKey)
 TEST(SortTests, TestSortDescendingKey)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-    
+
     for(auto size : { 10027 })
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
@@ -389,7 +389,7 @@ TEST(SortTests, TestSortDescendingKey)
 TEST(SortTests, TestSortBool)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-    
+
     for(auto size : { 10027 })
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
@@ -452,8 +452,8 @@ void SortKernel(int const N, int* array)
 TEST(SortTests, TestSortDevice)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-    
-    for(auto size: {0, 1, 2, 4, 6, 12, 16, 24, 32, 64, 84, 128, 160, 256} )
+
+    for(auto size : get_sizes() )
     {
         SCOPED_TRACE(testing::Message() << "with size= " << size);
 
