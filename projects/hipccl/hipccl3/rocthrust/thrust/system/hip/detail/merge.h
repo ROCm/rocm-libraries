@@ -136,8 +136,8 @@ namespace __merge
               typename KeysOutputIt,
               typename ItemsOutputIt,
               typename CompareOp>
-    THRUST_HIP_RUNTIME_FUNCTION		  
-    pair<KeysOutputIt, ItemsOutputIt> 
+    THRUST_HIP_RUNTIME_FUNCTION
+    pair<KeysOutputIt, ItemsOutputIt>
     merge(execution_policy<Derived>& policy,
           KeysIt1                    keys1_first,
           KeysIt1                    keys1_last,
@@ -224,25 +224,59 @@ merge(execution_policy<Derived>& policy,
       CompareOp                  compare_op)
 
 {
-    ResultIt ret = result;
-    THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-        (__merge::merge<Derived, KeysIt1, KeysIt2, ResultIt, CompareOp>)
-    );
-#if __THRUST_HAS_HIPRT__
-    ret = __merge::merge(
-        policy, keys1_first, keys1_last, keys2_first, keys2_last, result, compare_op
-    );
-#else
-    ret = thrust::merge(cvt_to_seq(derived_cast(policy)),
-                        keys1_first,
-                        keys1_last,
-                        keys2_first,
-                        keys2_last,
-                        result,
-                        compare_op);
 
-#endif
-    return ret;
+  struct workaround
+  {
+      __host__
+      static ResultIt par(execution_policy<Derived>& policy,
+                      KeysIt1                    keys1_first,
+                      KeysIt1                    keys1_last,
+                      KeysIt2                    keys2_first,
+                      KeysIt2                    keys2_last,
+                      ResultIt                   result,
+                      CompareOp                  compare_op)
+      {
+      #if __HCC__ && __HIP_DEVICE_COMPILE__
+      THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+          (__merge::merge<Derived, KeysIt1, KeysIt2, ResultIt, CompareOp>)
+      );
+      #else
+      return __merge::merge(
+        policy,
+        keys1_first,
+        keys1_last,
+        keys2_first,
+        keys2_last,
+        result,
+        compare_op
+      );
+      #endif
+      }
+      __device__
+      static ResultIt seq(execution_policy<Derived>& policy,
+                      KeysIt1                    keys1_first,
+                      KeysIt1                    keys1_last,
+                      KeysIt2                    keys2_first,
+                      KeysIt2                    keys2_last,
+                      ResultIt                   result,
+                      CompareOp                  compare_op)
+      {
+          return thrust::merge(
+             cvt_to_seq(derived_cast(policy)),
+             keys1_first,
+             keys1_last,
+             keys2_first,
+             keys2_last,
+             result,
+             compare_op
+          );
+      }
+  };
+  #if __THRUST_HAS_HIPRT__
+  return workaround::par(policy, keys1_first, keys1_last, keys2_first, keys2_last, result, compare_op);
+  #else
+  return workaround::seq(policy, keys1_first, keys1_last, keys2_first, keys2_last, result, compare_op);
+  #endif
 }
 
 __thrust_exec_check_disable__ template <class Derived,
@@ -265,19 +299,54 @@ merge_by_key(execution_policy<Derived>& policy,
              ItemsOutputIt              items_result,
              CompareOp                  compare_op)
 {
-    pair<KeysOutputIt, ItemsOutputIt> ret = thrust::make_pair(keys_result, items_result);
-    THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-      (__merge::merge<Derived,
-                      KeysIt1,
-                      KeysIt2,
-                      ItemsIt1,
-                      ItemsIt2,
-                      KeysOutputIt,
-                      ItemsOutputIt,
-                      CompareOp>)
-    );
-#if __THRUST_HAS_HIPRT__
-    return __merge::merge(policy,
+
+    struct workaround
+    {
+        __host__
+        static pair<KeysOutputIt, ItemsOutputIt> par(execution_policy<Derived>& policy,
+                            KeysIt1                    keys1_first,
+                            KeysIt1                    keys1_last,
+                            KeysIt2                    keys2_first,
+                            KeysIt2                    keys2_last,
+                            ItemsIt1                   items1_first,
+                            ItemsIt2                   items2_first,
+                            KeysOutputIt               keys_result,
+                            ItemsOutputIt              items_result,
+                            CompareOp                  compare_op)
+        {
+        #if __HCC__ && __HIP_DEVICE_COMPILE__
+        THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+            (__merge::merge<Derived, KeysIt1, KeysIt2, ResultIt, CompareOp>)
+        );
+        #else
+        return __merge::merge(
+          policy,
+          keys1_first,
+          keys1_last,
+          keys2_first,
+          keys2_last,
+          items1_first,
+          items2_first,
+          keys_result,
+          items_result,
+          compare_op
+        );
+        #endif
+        }
+        __device__
+        static pair<KeysOutputIt, ItemsOutputIt> seq(execution_policy<Derived>& policy,
+                            KeysIt1                    keys1_first,
+                            KeysIt1                    keys1_last,
+                            KeysIt2                    keys2_first,
+                            KeysIt2                    keys2_last,
+                            ItemsIt1                   items1_first,
+                            ItemsIt2                   items2_first,
+                            KeysOutputIt               keys_result,
+                            ItemsOutputIt              items_result,
+                            CompareOp                  compare_op)
+        {
+            return thrust::merge_by_key(
+               cvt_to_seq(derived_cast(policy)),
                           keys1_first,
                           keys1_last,
                           keys2_first,
@@ -286,21 +355,17 @@ merge_by_key(execution_policy<Derived>& policy,
                           items2_first,
                           keys_result,
                           items_result,
-                          compare_op);
+                          compare_op
+            );
+        }
+    };
 
-#else
-    ret = thrust::merge_by_key(cvt_to_seq(derived_cast(policy)),
-                               keys1_first,
-                               keys1_last,
-                               keys2_first,
-                               keys2_last,
-                               items1_first,
-                               items2_first,
-                               keys_result,
-                               items_result,
-                               compare_op);
-#endif
-    return ret;
+    #if __THRUST_HAS_HIPRT__
+      return workaround::par(policy, keys1_first, keys1_last, keys2_first, keys2_last, items1_first, items2_first, keys_result, items_result, compare_op);
+    #else
+      return workaround::seq(policy, keys1_first, keys1_last, keys2_first, keys2_last, items1_first, items2_first, keys_result, items_result, compare_op);
+    #endif
+
 }
 
 __thrust_exec_check_disable__ template <class Derived,

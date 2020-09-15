@@ -96,7 +96,7 @@ THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
 void simple_test_kernel(F func, int size)
 {
     // (void) func; (void) size;
-    thrust::for_each(thrust::seq,
+    thrust::for_each(thrust::hip::par,
                      thrust::make_counting_iterator<int>(0),
                      thrust::make_counting_iterator<int>(size),
                      func);
@@ -509,7 +509,7 @@ void _TestForEachNWithLargeTypes(void)
 TEST(ForEachVectorTests, TestForEachNWithLargeTypes)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-    
+
     _TestForEachNWithLargeTypes<int, 1>();
     _TestForEachNWithLargeTypes<int, 2>();
     _TestForEachNWithLargeTypes<int, 4>();

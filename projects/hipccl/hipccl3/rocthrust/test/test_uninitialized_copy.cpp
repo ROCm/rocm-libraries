@@ -279,3 +279,47 @@ TEST(UninitializedCopyTests, TestUninitializedCopyNNonPODHost)
     ASSERT_EQ(false, x.copy_constructed_on_device);
     ASSERT_EQ(true, x.copy_constructed_on_host);
 }
+
+
+__global__
+THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
+void UninitializedCopyKernel(int const N, int* in_array, int *out_array)
+{
+    if(threadIdx.x == 0)
+    {
+        thrust::device_ptr<int> in_begin(in_array);
+        thrust::device_ptr<int> in_end(in_array + N);
+        thrust::device_ptr<int> out_begin(out_array);
+
+        thrust::uninitialized_copy(thrust::hip::par, in_begin, in_end,out_begin);
+    }
+}
+
+TEST(UninitializedCopyTests, TestUninitializedCopyDevice)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    for(auto size : get_sizes() )
+    {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+            thrust::host_vector<int> h_data = get_random_data<int>(size, 0, size, seed);
+
+            thrust::device_vector<int> d_data = h_data;
+            thrust::device_vector<int> d_output(size);
+            hipLaunchKernelGGL(UninitializedCopyKernel,
+                               dim3(1, 1, 1),
+                               dim3(128, 1, 1),
+                               0,
+                               0,
+                               size,
+                               thrust::raw_pointer_cast(&d_data[0]),
+                               thrust::raw_pointer_cast(&d_output[0]));
+
+            ASSERT_EQ(h_data, d_output);
+        }
+    }
+}

@@ -153,7 +153,7 @@ __thrust_exec_check_disable__ template <class Derived,
                                         class ValOutputIt,
                                         class BinaryPred,
                                         class BinaryOp>
-THRUST_HIP_FUNCTION 
+THRUST_HIP_FUNCTION
 pair<KeyOutputIt, ValOutputIt>
 reduce_by_key(execution_policy<Derived>& policy,
               KeyInputIt                 keys_first,
@@ -164,37 +164,64 @@ reduce_by_key(execution_policy<Derived>& policy,
               BinaryPred                 binary_pred,
               BinaryOp                   binary_op)
 {
-    pair<KeyOutputIt, ValOutputIt> ret = thrust::make_pair(keys_output, values_output);
+  struct workaround
+  {
+      __host__
+      static pair<KeyOutputIt, ValOutputIt> par(
+        execution_policy<Derived>& policy,
+        KeyInputIt                 keys_first,
+        KeyInputIt                 keys_last,
+        ValInputIt                 values_first,
+        KeyOutputIt                keys_output,
+        ValOutputIt                values_output,
+        BinaryPred                 binary_pred,
+        BinaryOp                   binary_op)
+      {
+      #if __HCC__ && __HIP_DEVICE_COMPILE__
+      THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
+          (__reduce_by_key::reduce_by_key<Derived, KeyInputIt, ValInputIt, KeyOutputIt, ValOutputIt, BinaryPred, BinaryOp>)
+      );
+      #else
+      return __reduce_by_key::reduce_by_key(
+        policy,
+        keys_first,
+        keys_last,
+        values_first,
+        keys_output,
+        values_output,
+        binary_pred,
+        binary_op
+      );
+      #endif
+      }
+      __device__
+      static pair<KeyOutputIt, ValOutputIt> seq(
+        execution_policy<Derived>& policy,
+        KeyInputIt                 keys_first,
+        KeyInputIt                 keys_last,
+        ValInputIt                 values_first,
+        KeyOutputIt                keys_output,
+        ValOutputIt                values_output,
+        BinaryPred                 binary_pred,
+        BinaryOp                   binary_op)
+      {
+        return thrust::reduce_by_key(cvt_to_seq(derived_cast(policy)),
+                                     keys_first,
+                                     keys_last,
+                                     values_first,
+                                     keys_output,
+                                     values_output,
+                                     binary_pred,
+                                     binary_op
+                                     );
+      }
+  };
+  #if __THRUST_HAS_HIPRT__
+    return workaround::par(policy,  keys_first, keys_last, values_first, keys_output, values_output, binary_pred, binary_op);
+  #else
+    return workaround::seq(policy,  keys_first, keys_last, values_first, keys_output, values_output, binary_pred, binary_op);
+  #endif
 
-    THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-        (__reduce_by_key::reduce_by_key<Derived,
-                                        KeyInputIt,
-                                        ValInputIt,
-                                        KeyOutputIt,
-                                        ValOutputIt,
-                                        BinaryPred,
-                                        BinaryOp>)
-    );
-#if __THRUST_HAS_HIPRT__
-    ret = __reduce_by_key::reduce_by_key(policy,
-                                         keys_first,
-                                         keys_last,
-                                         values_first,
-                                         keys_output,
-                                         values_output,
-                                         binary_pred,
-                                         binary_op);
-#else // __THRUST_HAS_HIPRT__
-    ret = thrust::reduce_by_key(cvt_to_seq(derived_cast(policy)),
-                                keys_first,
-                                keys_last,
-                                values_first,
-                                keys_output,
-                                values_output,
-                                binary_pred,
-                                binary_op);
-#endif // __THRUST_HAS_HIPRT__
-    return ret;
 }
 
 __thrust_exec_check_disable__ template <class Derived,

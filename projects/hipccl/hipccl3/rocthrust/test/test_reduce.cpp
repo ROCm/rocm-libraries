@@ -255,3 +255,53 @@ TYPED_TEST(ReducePrimitiveTests, TestReduceCountingIterator)
         }
     }
 }
+
+
+__global__
+THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
+void ReduceKernel(int const N, int *in_array, int *result)
+{
+    if(threadIdx.x == 0)
+    {
+        thrust::device_ptr<int> in_begin(in_array);
+        thrust::device_ptr<int> in_end(in_array + N);
+
+        result[0]= thrust::reduce(thrust::hip::par, in_begin, in_end);
+    }
+}
+
+
+TEST(ReduceTests, TestReduceDevice)
+{
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
+    {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+            thrust::host_vector<int> h_data = get_random_data<int>(
+                size, 0, 15, seed);
+            thrust::device_vector<int> d_data = h_data;
+            thrust::device_vector<int> d_output(1,0);
+
+
+            int h_output = thrust::reduce(h_data.begin(), h_data.end());
+
+            hipLaunchKernelGGL(ReduceKernel,
+                               dim3(1, 1, 1),
+                               dim3(128, 1, 1),
+                               0,
+                               0,
+                               size,
+                               thrust::raw_pointer_cast(&d_data[0]),
+                               thrust::raw_pointer_cast(&d_output[0]));
+
+            ASSERT_EQ(h_output, d_output[0]);
+        }
+    }
+}
