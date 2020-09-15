@@ -55,10 +55,6 @@ T warp_shuffle_op(T input, ShuffleOp&& op)
     return output;
 }
 
-ROCPRIM_DEVICE
-int __amdgcn_update_dpp(int old, int src, int dpp_ctrl, int row_mask, int bank_mask, bool bound_ctrl)
-    __asm("llvm.amdgcn.update.dpp.i32");
-
 template<class T, int dpp_ctrl, int row_mask = 0xf, int bank_mask = 0xf, bool bound_ctrl = false>
 ROCPRIM_DEVICE inline
 T warp_move_dpp(T input)
@@ -71,8 +67,8 @@ T warp_move_dpp(T input)
     #pragma unroll
     for(int i = 0; i < words_no; i++)
     {
-        words[i] = __amdgcn_update_dpp(
-            0, words[i],
+        words[i] = ::__builtin_amdgcn_mov_dpp(
+            words[i],
             dpp_ctrl, row_mask, bank_mask, bound_ctrl
         );
     }

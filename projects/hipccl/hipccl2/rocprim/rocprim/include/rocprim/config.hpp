@@ -44,10 +44,20 @@
     #endif
 #endif
 
-#ifdef ROCPRIM_DISABLE_DPP
-    #define ROCPRIM_DETAIL_USE_DPP false
-#else
+#if ( defined(__gfx801__) || \
+      defined(__gfx802__) || \
+      defined(__gfx803__) || \
+      defined(__gfx810__) || \
+      defined(__gfx900__) || \
+      defined(__gfx902__) || \
+      defined(__gfx904__) || \
+      defined(__gfx906__) || \
+      defined(__gfx908__) || \
+      defined(__gfx909__) ) && \
+      !defined(ROCPRIM_DISABLE_DPP)
     #define ROCPRIM_DETAIL_USE_DPP true
+#else
+    #define ROCPRIM_DETAIL_USE_DPP false
 #endif
 
 #ifdef ROCPRIM_DISABLE_LOOKBACK_SCAN
