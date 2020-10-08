@@ -80,7 +80,7 @@ endif()
 include(cmake/Dependencies.cmake)
 
 # Setup VERSION
-rocm_setup_version(VERSION "2.10.5")
+rocm_setup_version(VERSION "2.10.6")
 
 # Print configuration summary
 include(cmake/Summary.cmake)
