@@ -67,8 +67,8 @@ T warp_move_dpp(T input)
     #pragma unroll
     for(int i = 0; i < words_no; i++)
     {
-        words[i] = ::__builtin_amdgcn_mov_dpp(
-            words[i],
+        words[i] = ::__builtin_amdgcn_update_dpp(
+            0, words[i],
             dpp_ctrl, row_mask, bank_mask, bound_ctrl
         );
     }
