@@ -46,6 +46,11 @@ void inplace_merge(sequential::execution_policy<DerivedPolicy> &exec,
 {
   typedef typename thrust::iterator_value<RandomAccessIterator>::type value_type;
 
+  #ifdef __HIP_DEVICE_COMPILE__
+    THRUST_HIP_PRINTF("ERROR:In Place Merge is not currently supported on the device. \n");
+    abort();
+  #endif
+
   thrust::detail::temporary_array<value_type, DerivedPolicy> a(exec, first, middle);
   thrust::detail::temporary_array<value_type, DerivedPolicy> b(exec, middle, last);
 
@@ -70,6 +75,11 @@ void inplace_merge_by_key(sequential::execution_policy<DerivedPolicy> &exec,
 
   RandomAccessIterator2 middle2 = first2 + (middle1 - first1);
   RandomAccessIterator2 last2   = first2 + (last1   - first1);
+
+  #ifdef __HIP_DEVICE_COMPILE__
+    THRUST_HIP_PRINTF("ERROR:Inplace Merge by Key is not currently supported on the device. \n");
+    abort();
+  #endif
 
   thrust::detail::temporary_array<value_type1, DerivedPolicy> lhs1(exec, first1, middle1);
   thrust::detail::temporary_array<value_type1, DerivedPolicy> rhs1(exec, middle1, last1);
@@ -219,6 +229,10 @@ void iterative_stable_merge_sort(sequential::execution_policy<DerivedPolicy> &ex
   }
   else
   {
+    #ifdef __HIP_DEVICE_COMPILE__
+      THRUST_HIP_PRINTF("ERROR:Iterative Stable Merge Sort is not currently supported on the device. \n");
+      abort();
+    #endif
     thrust::detail::temporary_array<value_type, DerivedPolicy> temp(exec, n);
 
     // insertion sort each 32 element partition
@@ -277,6 +291,10 @@ void iterative_stable_merge_sort_by_key(sequential::execution_policy<DerivedPoli
   }
   else
   {
+    #ifdef __HIP_DEVICE_COMPILE__
+      THRUST_HIP_PRINTF("ERROR:Iterative Iterative Stable Merge Sort by Key is not currently supported on the device. \n");
+      abort();
+    #endif
     thrust::detail::temporary_array<value_type1, DerivedPolicy> keys_temp(exec, n);
     thrust::detail::temporary_array<value_type2, DerivedPolicy> values_temp(exec, n);
 
