@@ -754,3 +754,57 @@ TEST(CopyTests, TestCopyDevice)
         }
     }
 }
+
+
+__global__
+THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
+void CopyIfKernel(int const N, int* in_array, int *out_array, int * out_size)
+{
+    if(threadIdx.x == 0)
+    {
+        thrust::device_ptr<int> in_begin(in_array);
+        thrust::device_ptr<int> in_end(in_array + N);
+        thrust::device_ptr<int> out_begin(out_array);
+
+        thrust::device_vector<int>::iterator last = thrust::copy_if(thrust::hip::par, in_begin, in_end, out_begin,is_even<int>());
+        out_size[0] = last - thrust::device_vector<int>::iterator(out_begin);
+    }
+}
+
+TEST(CopyTests, TestCopyIfDevice)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    for(auto size : get_sizes() )
+    {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+            thrust::host_vector<int> h_data = get_random_data<int>(size, 0, size, seed);
+
+            thrust::host_vector<int> h_output(size, 0);
+            auto host_output_last = thrust::copy_if(h_data.begin(), h_data.end(), h_output.begin(),is_even<int>());
+            thrust::device_vector<int> d_data = h_data;
+            thrust::device_vector<int> d_output_size(1,0);
+            thrust::device_vector<int> d_output(size);
+
+            hipLaunchKernelGGL(CopyIfKernel,
+                               dim3(1, 1, 1),
+                               dim3(128, 1, 1),
+                               0,
+                               0,
+                               size,
+                               thrust::raw_pointer_cast(&d_data[0]),
+                               thrust::raw_pointer_cast(&d_output[0]),
+                               thrust::raw_pointer_cast(&d_output_size[0]));
+
+
+            h_output.resize(host_output_last - h_output.begin());
+            d_output.resize(d_output_size[0]);
+
+            ASSERT_EQ(h_output, d_output);
+        }
+    }
+}
