@@ -175,6 +175,11 @@ __host__ __device__
   typedef thrust::detail::temporary_array<T,DerivedPolicy> TempRange;
   typedef typename TempRange::iterator                     TempIterator;
 
+  #ifdef  __HIP_DEVICE_COMPILE__
+    THRUST_HIP_PRINTF("ERROR:Stable Partition is not currently supported on the device. \n");
+    abort();
+  #endif
+
   TempRange temp(exec, first, last);
 
   for(TempIterator iter = temp.begin(); iter != temp.end(); ++iter)
@@ -336,4 +341,3 @@ __host__ __device__
 } // end namespace detail
 } // end namespace system
 } // end namespace thrust
-
