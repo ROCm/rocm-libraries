@@ -137,7 +137,7 @@ inline void __host__ __device__ terminate()
 #endif
 }
 
-static void __host__ __device__ throw_on_error(hipError_t status, char const* msg)
+inline void __host__ __device__ throw_on_error(hipError_t status, char const* msg)
 {
     if(hipSuccess != status)
     {
@@ -159,7 +159,7 @@ static void __host__ __device__ throw_on_error(hipError_t status, char const* ms
 }
 
 // TODO this overload should be removed and messages should be passed.
-static void __host__ __device__ throw_on_error(hipError_t status)
+inline void __host__ __device__ throw_on_error(hipError_t status)
 {
     if(hipSuccess != status)
     {

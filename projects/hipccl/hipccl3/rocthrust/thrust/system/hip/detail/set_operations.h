@@ -51,12 +51,12 @@ namespace hip_rocprim
 
 namespace __set_operations
 {
-    template <bool UpperBound, class IntT, class It, class T, class Comp>
+    template <bool UpperBound, class IntT, class Size, class It, class T, class Comp>
     THRUST_HIP_DEVICE_FUNCTION void
-    binary_search_iteration(It data, int& begin, int& end, T key, int shift, Comp comp)
+    binary_search_iteration(It data, Size &begin, Size &end, T key, int shift, Comp comp)
     {
         IntT scale = (1 << shift) - 1;
-        int  mid   = (int)((begin + scale * end) >> shift);
+        Size  mid   = ((begin + scale * end) >> shift);
 
         T    key2 = data[mid];
         bool pred = UpperBound ? !comp(key, key2) : comp(key2, key);
@@ -66,23 +66,23 @@ namespace __set_operations
             end = mid;
     }
 
-    template <bool UpperBound, class T, class It, class Comp>
+    template <bool UpperBound, class Size, class T, class It, class Comp>
     THRUST_HIP_DEVICE_FUNCTION int
-    binary_search(It data, int count, T key, Comp comp)
+    binary_search(It data, Size count, T key, Comp comp)
     {
-        int begin = 0;
-        int end   = count;
+        Size begin = 0;
+        Size end   = count;
         while(begin < end)
             binary_search_iteration<UpperBound, int>(data, begin, end, key, 1, comp);
         return begin;
     }
 
-    template <bool UpperBound, class IntT, class T, class It, class Comp>
-    THRUST_HIP_DEVICE_FUNCTION int
-    biased_binary_search(It data, int count, T key, IntT levels, Comp comp)
+    template <bool UpperBound, class Size, class IntT, class T, class It, class Comp>
+    THRUST_HIP_DEVICE_FUNCTION Size
+    biased_binary_search(It data, Size count, T key, IntT levels, Comp comp)
     {
-        int begin = 0;
-        int end   = count;
+        Size begin = 0;
+        Size end   = count;
 
         if(levels >= 4 && begin < end)
             binary_search_iteration<UpperBound, IntT>(data, begin, end, key, 9, comp);
@@ -98,18 +98,18 @@ namespace __set_operations
         return begin;
     }
 
-    template <bool UpperBound, class It1, class It2, class Comp>
-    THRUST_HIP_DEVICE_FUNCTION int
-    merge_path(It1 a, int aCount, It2 b, int bCount, int diag, Comp comp)
+    template <bool UpperBound, class Size, class It1, class It2, class Comp>
+    THRUST_HIP_DEVICE_FUNCTION Size
+    merge_path(It1 a, Size aCount, It2 b, Size bCount, Size diag, Comp comp)
     {
         typedef typename thrust::iterator_traits<It1>::value_type T;
 
-        int begin = thrust::max(0, diag - bCount);
-        int end   = thrust::min(diag, aCount);
+        Size begin = thrust::max((Size)0, diag - bCount);
+        Size end   = thrust::min(diag, aCount);
 
         while(begin < end)
         {
-            int  mid  = (begin + end) >> 1;
+            Size  mid  = (begin + end) >> 1;
             T    aKey = a[mid];
             T    bKey = b[diag - 1 - mid];
             bool pred = UpperBound ? comp(aKey, bKey) : !comp(bKey, aKey);
