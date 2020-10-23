@@ -34,14 +34,22 @@ public:
     using params = Params;
 };
 
-#define warp_sort_param_type(type) \
-    warp_params<type, 2U>, \
-    warp_params<type, 4U>, \
-    warp_params<type, 8U>, \
-    warp_params<type, 16U>, \
-    warp_params<type, 32U>, \
-    warp_params<type, 64U>
-
+#if (defined(__gfx1030__))
+    #define warp_sort_param_type(type) \
+        warp_params<type, 2U>, \
+        warp_params<type, 4U>, \
+        warp_params<type, 8U>, \
+        warp_params<type, 16U>, \
+        warp_params<type, 32U>
+#else
+    #define warp_sort_param_type(type) \
+       warp_params<type, 2U>, \
+       warp_params<type, 4U>, \
+       warp_params<type, 8U>, \
+       warp_params<type, 16U>, \
+       warp_params<type, 32U>, \
+       warp_params<type, 64U>
+#endif
 typedef ::testing::Types<
     warp_sort_param_type(int),
     warp_sort_param_type(test_utils::custom_test_type<int>),
