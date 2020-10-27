@@ -34,7 +34,7 @@ BEGIN_ROCPRIM_NAMESPACE
 ///
 /// \param predicate - input to be evaluated for all active lanes
 ROCPRIM_DEVICE inline
-unsigned long long ballot(int predicate)
+lane_mask_type ballot(int predicate)
 {
     return ::__ballot(predicate);
 }
@@ -44,15 +44,23 @@ unsigned long long ballot(int predicate)
 /// For each thread, this function returns the number of active threads which
 /// have <tt>i</tt>-th bit of \p x set and come before the current thread.
 ROCPRIM_DEVICE inline
-unsigned int masked_bit_count(unsigned long long x, unsigned int add = 0)
+unsigned int masked_bit_count(lane_mask_type x, unsigned int add = 0)
 {
     int c;
-    #ifdef __HIP__
-    c = ::__builtin_amdgcn_mbcnt_lo(static_cast<int>(x), add);
-    c = ::__builtin_amdgcn_mbcnt_hi(static_cast<int>(x >> 32), c);
+    #if __AMDGCN_WAVEFRONT_SIZE == 32
+        #ifdef __HIP__
+        c = ::__builtin_amdgcn_mbcnt_lo(x, add);
+        #else
+        c = ::__mbcnt_lo(x, add);
+        #endif
     #else
-    c = ::__mbcnt_lo(static_cast<int>(x), add);
-    c = ::__mbcnt_hi(static_cast<int>(x >> 32), c);
+        #ifdef __HIP__
+        c = ::__builtin_amdgcn_mbcnt_lo(static_cast<int>(x), add);
+        c = ::__builtin_amdgcn_mbcnt_hi(static_cast<int>(x >> 32), c);
+        #else
+        c = ::__mbcnt_lo(static_cast<int>(x), add);
+        c = ::__mbcnt_hi(static_cast<int>(x >> 32), c);
+        #endif
     #endif
     return c;
 }
