@@ -112,6 +112,12 @@ struct empty_type
 /// \brief Half-precision floating point type
 using half = ::__half;
 
+#if __AMDGCN_WAVEFRONT_SIZE == 32
+using lane_mask_type = unsigned int;
+#else
+using lane_mask_type = unsigned long long int;
+#endif
+
 END_ROCPRIM_NAMESPACE
 
 /// @}
