@@ -1,9 +1,9 @@
 # hipCUB
 
 hipCUB is a thin wrapper library on top of [rocPRIM](https://github.com/ROCmSoftwarePlatform/rocPRIM) or
-[CUB](https://github.com/thrust/cub). It enables developers to port project using CUB library to the
-[HIP](https://github.com/ROCm-Developer-Tools/HIP) layer and to run them on AMD hardware. In [ROCm](https://rocm.github.io/)
-environment hipCUB uses rocPRIM library as the backend, however, on CUDA platforms it uses CUB instead.
+[CUB](https://github.com/thrust/cub). It enables developers to port a project using the CUB library to the
+[HIP](https://github.com/ROCm-Developer-Tools/HIP) layer to run on AMD hardware. In the [ROCm](https://rocm.github.io/)
+environment, hipCUB uses the rocPRIM library as the backend.  However, on CUDA platforms it uses CUB instead.
 
 ## Requirements
 
