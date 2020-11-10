@@ -15,7 +15,7 @@ Full documentation for rocThrust is available at [https://rocthrust.readthedocs.
 
 ## [rocThrust-2.10.5 for ROCm 3.9.0]
 ### Added
-- Updated to upstream Thrust 1.9.4
+- Updated to upstream Thrust 1.9.8
 - New test cases for device-side algorithms
 ### Fixes
 - Bugfix for binary search
@@ -31,7 +31,7 @@ Full documentation for rocThrust is available at [https://rocthrust.readthedocs.
 
 ## [rocThrust-2.10.3 for ROCm 3.7.0]
 ### Added
-- Updated to upstream Thrust 1.9.3
+- Updated to upstream Thrust 1.9.4
 ### Changed
 - Package dependecy change to rocprim only
 ### Known issues
