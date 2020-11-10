@@ -54,10 +54,7 @@ set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Set XNACK flags
-set(XNACK_FLAGS "-mno-xnack -Xarch_gfx906 -msram-ecc -Xarch_gfx908 -msram-ecc")
-
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra ${XNACK_FLAGS}")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
 
 # Build options
 option(BUILD_TEST "Build tests (requires googletest)" OFF)
@@ -68,11 +65,11 @@ option(BUILD_BENCHMARK "Build benchmarks" OFF)
 include(cmake/Dependencies.cmake)
 
 # Setup VERSION
-set(VERSION_STRING "2.10.5")
+set(VERSION_STRING "2.10.7")
 rocm_setup_version(VERSION ${VERSION_STRING})
 
 # AMD targets
-set(AMDGPU_TARGETS gfx803;gfx900;gfx906;gfx908 CACHE STRING "List of specific machine types for library to target")
+set(AMDGPU_TARGETS gfx900:xnack-;gfx906:xnack-;gfx908:xnack- CACHE STRING "List of specific machine types for library to target")
 
 # Print configuration summary
 include(cmake/Summary.cmake)
