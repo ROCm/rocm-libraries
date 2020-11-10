@@ -37,7 +37,7 @@ if(NOT rocprim_FOUND)
     BUILD_PROJECT       TRUE
     UPDATE_DISCONNECTED TRUE # Never update automatically from the remote repository
   )
-  find_package(rocprim REQUIRED CONFIG PATHS ${CMAKE_CURRENT_BINARY_DIR}/deps/rocprim)
+  find_package(rocprim REQUIRED CONFIG PATHS ${CMAKE_CURRENT_BINARY_DIR}/deps/rocprim NO_DEFAULT_PATH)
 endif()
 
 # Test dependencies

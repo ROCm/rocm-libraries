@@ -33,7 +33,7 @@ endif()
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker search and installed rpath")
 
 # AMD targets
-set(AMDGPU_TARGETS gfx803;gfx900;gfx906;gfx908 CACHE STRING "List of specific machine types for library to target")
+set(AMDGPU_TARGETS gfx900:xnack-;gfx906:xnack-;gfx908:xnack- CACHE STRING "List of specific machine types for library to target")
 
 # Verify that hcc or hipcc compiler is used on ROCM platform
 include(cmake/VerifyCompiler.cmake)
@@ -67,20 +67,11 @@ set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Set XNACK flags
-set(XNACK_FLAGS "-mno-xnack -Xarch_gfx900 -mno-sram-ecc -Xarch_gfx906 -msram-ecc -Xarch_gfx908 -msram-ecc")
-
-if(DISABLE_WERROR)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wno-unused-function ${XNACK_FLAGS}")
-else()
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wno-unused-function -Werror ${XNACK_FLAGS}")
-endif()
-
 # Get dependencies
 include(cmake/Dependencies.cmake)
 
 # Setup VERSION
-rocm_setup_version(VERSION "2.10.5")
+rocm_setup_version(VERSION "2.10.7")
 
 # Print configuration summary
 include(cmake/Summary.cmake)

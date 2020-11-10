@@ -266,8 +266,7 @@ TEST(SortByKeyTests, TestSortByKeyBoolDescending)
 //         thrust::device_ptr<int>   keys_begin(keys);
 //         thrust::device_ptr<int>   keys_end(keys + N);
 //         thrust::device_ptr<short> val(values);
-//         //TODO: The thrust::hip::par throw exception, we should fix it
-//         thrust::sort_by_key(thrust::seq, keys_begin, keys_end, val);
+//         thrust::sort_by_key(thrust::hip::par, keys_begin, keys_end, val);
 //     }
 // }
 //
