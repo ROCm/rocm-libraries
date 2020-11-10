@@ -75,7 +75,7 @@ if(HIP_COMPILER STREQUAL "hcc" OR HIP_COMPILER STREQUAL "clang")
     download_project(
       PROJ                rocprim
       GIT_REPOSITORY      https://github.com/ROCmSoftwarePlatform/rocPRIM.git
-      GIT_TAG             develop
+      GIT_TAG             gfx1030
       INSTALL_DIR         ${CMAKE_CURRENT_BINARY_DIR}/deps/rocprim
       CMAKE_ARGS          -DBUILD_TEST=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm
       LOG_DOWNLOAD        TRUE

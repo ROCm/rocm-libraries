@@ -49,7 +49,17 @@ typedef ::testing::Types<
     params<int, 8U>,
     params<int, 16U>,
     params<int, 32U>,
-    #ifdef HIPCUB_ROCPRIM_API
+    #if (defined(HIPCUB_ROCPRIM_API) && \
+        (defined(__HIP_ARCH_GFX801__) || \
+         defined(__HIP_ARCH_GFX802__) || \
+         defined(__HIP_ARCH_GFX803__) || \
+         defined(__HIP_ARCH_GFX810__) || \
+         defined(__HIP_ARCH_GFX900__) || \
+         defined(__HIP_ARCH_GFX902__) || \
+         defined(__HIP_ARCH_GFX904__) || \
+         defined(__HIP_ARCH_GFX906__) || \
+         defined(__HIP_ARCH_GFX908__) || \
+         defined(__HIP_ARCH_GFX909__)))
         params<int, 64U>,
     #endif
     // Float
@@ -58,7 +68,17 @@ typedef ::testing::Types<
     params<float, 8U>,
     params<float, 16U>,
     params<float, 32U>,
-    #ifdef HIPCUB_ROCPRIM_API
+    #if (defined(HIPCUB_ROCPRIM_API) && \
+        (defined(__HIP_ARCH_GFX801__) || \
+         defined(__HIP_ARCH_GFX802__) || \
+         defined(__HIP_ARCH_GFX803__) || \
+         defined(__HIP_ARCH_GFX810__) || \
+         defined(__HIP_ARCH_GFX900__) || \
+         defined(__HIP_ARCH_GFX902__) || \
+         defined(__HIP_ARCH_GFX904__) || \
+         defined(__HIP_ARCH_GFX906__) || \
+         defined(__HIP_ARCH_GFX908__) || \
+         defined(__HIP_ARCH_GFX909__)))
         params<float, 64U>,
     #endif
 
@@ -67,7 +87,17 @@ typedef ::testing::Types<
     params<int, 3U>,
     params<int, 7U>,
     params<int, 15U>,
-    #ifdef HIPCUB_ROCPRIM_API
+    #if (defined(HIPCUB_ROCPRIM_API) && \
+        (defined(__HIP_ARCH_GFX801__) || \
+         defined(__HIP_ARCH_GFX802__) || \
+         defined(__HIP_ARCH_GFX803__) || \
+         defined(__HIP_ARCH_GFX810__) || \
+         defined(__HIP_ARCH_GFX900__) || \
+         defined(__HIP_ARCH_GFX902__) || \
+         defined(__HIP_ARCH_GFX904__) || \
+         defined(__HIP_ARCH_GFX906__) || \
+         defined(__HIP_ARCH_GFX908__) || \
+         defined(__HIP_ARCH_GFX909__)))
         params<int, 37U>,
         params<int, 61U>,
     #endif
@@ -75,7 +105,17 @@ typedef ::testing::Types<
     params<float, 3U>,
     params<float, 7U>,
     params<float, 15U>
-    #ifdef HIPCUB_ROCPRIM_API
+    #if (defined(HIPCUB_ROCPRIM_API) && \
+        (defined(__HIP_ARCH_GFX801__) || \
+         defined(__HIP_ARCH_GFX802__) || \
+         defined(__HIP_ARCH_GFX803__) || \
+         defined(__HIP_ARCH_GFX810__) || \
+         defined(__HIP_ARCH_GFX900__) || \
+         defined(__HIP_ARCH_GFX902__) || \
+         defined(__HIP_ARCH_GFX904__) || \
+         defined(__HIP_ARCH_GFX906__) || \
+         defined(__HIP_ARCH_GFX908__) || \
+         defined(__HIP_ARCH_GFX909__)))
         ,params<float, 37U>,
         params<float, 61U>
     #endif
