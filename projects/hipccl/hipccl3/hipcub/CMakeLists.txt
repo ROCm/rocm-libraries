@@ -65,7 +65,7 @@ option(BUILD_BENCHMARK "Build benchmarks" OFF)
 include(cmake/Dependencies.cmake)
 
 # Setup VERSION
-set(VERSION_STRING "2.10.5")
+set(VERSION_STRING "2.10.7")
 rocm_setup_version(VERSION ${VERSION_STRING})
 
 # AMD targets
