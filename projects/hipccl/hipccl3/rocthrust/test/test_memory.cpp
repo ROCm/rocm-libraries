@@ -188,7 +188,7 @@ TEST(MemoryTests, TestGetTemporaryBuffer)
               thrust::all_of(
                   ptr_and_sz.first, ptr_and_sz.first + size, thrust::placeholders::_1 == ref_val));
 
-    thrust::return_temporary_buffer(dev_tag, ptr_and_sz.first);
+    thrust::return_temporary_buffer(dev_tag, ptr_and_sz.first, ptr_and_sz.second);
 }
 
 TEST(MemoryTests, TestMalloc)
@@ -283,7 +283,7 @@ TEST(MemoryTests, TestGetTemporaryBufferDispatchImplicit)
               thrust::all_of(
                   ptr_and_sz.first, ptr_and_sz.first + size, thrust::placeholders::_1 == ref_val));
 
-    thrust::return_temporary_buffer(sys, ptr_and_sz.first);
+    thrust::return_temporary_buffer(sys, ptr_and_sz.first, ptr_and_sz.second);
 }
 
 TEST(MemoryTests, TestGetTemporaryBufferDispatchExplicit)
