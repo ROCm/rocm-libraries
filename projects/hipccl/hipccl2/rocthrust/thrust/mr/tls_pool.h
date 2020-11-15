@@ -61,4 +61,3 @@ thrust::mr::unsynchronized_pool_resource<Upstream> & tls_pool(Upstream * upstrea
 } // end thrust
 
 #endif // THRUST_CPP_DIALECT >= 2011
-

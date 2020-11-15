@@ -14,11 +14,11 @@
  *  limitations under the License.
  */
 
-#include <thrust/detail/config.h>
-#include <thrust/functional.h>
-#include <thrust/system/detail/generic/replace.h>
-#include <thrust/transform.h>
-#include <thrust/replace.h>
+ #include <thrust/detail/config.h>
+ #include <thrust/functional.h>
+ #include <thrust/system/detail/generic/replace.h>
+ #include <thrust/transform.h>
+ #include <thrust/replace.h>
 
 namespace thrust
 {
@@ -55,7 +55,7 @@ template<typename Predicate, typename NewType, typename OutputType>
   {
     return pred(y) ? new_value : x;
   } // end operator()()
-  
+
   Predicate pred;
   NewType new_value;
 }; // end new_value_if
@@ -175,4 +175,3 @@ __host__ __device__
 } // end namespace detail
 } // end namespace system
 } // end namespace thrust
-

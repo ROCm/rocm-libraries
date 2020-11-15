@@ -48,7 +48,8 @@
 #include <rocprim/rocprim.hpp>
 
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 template <typename DerivedPolicy,
           typename InputIterator,
           typename OutputIterator,
@@ -354,7 +355,7 @@ OutputIt THRUST_HIP_FUNCTION exclusive_scan_n(execution_policy<Derived>& policy,
 
 } // namespace  hip_rocprim
 
-THRUST_END_NS
+} // end namespace thrust
 
 #include <thrust/scan.h>
 

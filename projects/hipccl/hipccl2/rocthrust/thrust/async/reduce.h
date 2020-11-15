@@ -47,7 +47,7 @@ template <
   typename DerivedPolicy
 , typename ForwardIt, typename Sentinel, typename T, typename BinaryOp
 >
-__host__ 
+__host__
 future<DerivedPolicy, T>
 async_reduce(
   thrust::execution_policy<DerivedPolicy>&, ForwardIt, Sentinel, T, BinaryOp
@@ -58,7 +58,7 @@ async_reduce(
   , "this algorithm is not implemented for the specified system"
   );
   return {};
-} 
+}
 
 } // namespace unimplemented
 
@@ -207,7 +207,7 @@ struct reduce_fn final
   )
 
   template <typename... Args>
-  THRUST_NODISCARD __host__ 
+  THRUST_NODISCARD __host__
   auto operator()(Args&&... args) const
   THRUST_RETURNS(
     call(THRUST_FWD(args)...)
@@ -240,7 +240,7 @@ async_reduce_into(
   , "this algorithm is not implemented for the specified system"
   );
   return {};
-} 
+}
 
 } // namespace unimplemented
 
@@ -422,7 +422,7 @@ struct reduce_into_fn final
   )
 
   template <typename... Args>
-  THRUST_NODISCARD __host__ 
+  THRUST_NODISCARD __host__
   auto operator()(Args&&... args) const
   THRUST_RETURNS(
     call(THRUST_FWD(args)...)
@@ -438,4 +438,3 @@ THRUST_INLINE_CONSTANT reduce_into_detail::reduce_into_fn reduce_into{};
 } // end namespace thrust
 
 #endif
-

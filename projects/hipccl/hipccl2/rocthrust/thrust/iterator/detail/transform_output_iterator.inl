@@ -23,7 +23,7 @@ namespace thrust
 template <typename UnaryFunction, typename OutputIterator>
   class transform_output_iterator;
 
-namespace detail 
+namespace detail
 {
 
 // Proxy reference that uses Unary Function to transform the rhs of assigment
@@ -73,6 +73,6 @@ struct is_proxy_reference<
     transform_output_iterator_proxy<UnaryFunction, OutputIterator> >
     : public thrust::detail::true_type {};
 
+
 } // end detail
 } // end thrust
-

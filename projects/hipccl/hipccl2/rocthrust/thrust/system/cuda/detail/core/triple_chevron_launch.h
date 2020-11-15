@@ -845,6 +845,7 @@ namespace launcher {
 #  define THRUST_TRIPLE_LAUNCHER_HOSTDEVICE doit_host
 #endif
 
+
 #if 0
     __thrust_exec_check_disable__
     template <class K, class... Args>

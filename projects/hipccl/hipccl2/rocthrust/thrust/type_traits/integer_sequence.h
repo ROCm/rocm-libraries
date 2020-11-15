@@ -238,7 +238,7 @@ struct make_reversed_integer_sequence_impl<T, 1>
 
 ///////////////////////////////////////////////////////////////////////////////
 
-template <typename T, T I0, T... Is> 
+template <typename T, T I0, T... Is>
 struct integer_sequence_push_front_impl<T, I0, integer_sequence<T, Is...> >
 {
   using type = integer_sequence<T, I0, Is...>;
@@ -246,7 +246,7 @@ struct integer_sequence_push_front_impl<T, I0, integer_sequence<T, Is...> >
 
 ///////////////////////////////////////////////////////////////////////////////
 
-template <typename T, T I0, T... Is> 
+template <typename T, T I0, T... Is>
 struct integer_sequence_push_back_impl<T, I0, integer_sequence<T, Is...> >
 {
   using type = integer_sequence<T, Is..., I0>;
@@ -259,4 +259,3 @@ struct integer_sequence_push_back_impl<T, I0, integer_sequence<T, Is...> >
 } // end namespace thrust
 
 #endif // THRUST_CPP_DIALECT >= 2011
-

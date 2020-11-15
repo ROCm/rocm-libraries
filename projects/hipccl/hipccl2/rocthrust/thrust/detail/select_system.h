@@ -79,7 +79,6 @@ THRUST_INLINE_CONSTANT select_system_detail::select_system_fn select_system{};
 
 } // detail
 
-} // end namespace thrust
+} //end namespace thrust
 
 #endif // THRUST_CPP_DIALECT >= 2011
-

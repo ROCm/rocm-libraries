@@ -537,4 +537,3 @@ adjacent_difference(execution_policy<Derived> &policy,
 #include <thrust/memory.h>
 #include <thrust/adjacent_difference.h>
 #endif
-

@@ -13,14 +13,13 @@
 
 namespace thrust
 {
-
 ///////////////////////////////////////////////////////////////////////////////
 
 /*! Obtains the actual address of the object or function arg, even in presence of overloaded operator&.
  */
 template <typename T>
 __host__ __device__
-T* addressof(T& arg) 
+T* addressof(T& arg)
 {
   return reinterpret_cast<T*>(
     &const_cast<char&>(reinterpret_cast<const volatile char&>(arg))
@@ -30,4 +29,3 @@ T* addressof(T& arg)
 ///////////////////////////////////////////////////////////////////////////////
 
 } // end namespace thrust
-

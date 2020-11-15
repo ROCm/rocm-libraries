@@ -96,4 +96,3 @@ using thrust::system::tbb::allocator;
 } // end thrust
 
 #include <thrust/system/tbb/detail/memory.inl>
-

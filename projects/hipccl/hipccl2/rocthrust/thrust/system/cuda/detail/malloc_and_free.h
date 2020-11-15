@@ -97,7 +97,6 @@ void free(execution_policy<DerivedPolicy> &, Pointer ptr)
     #if THRUST_INCLUDE_DEVICE_CODE
       thrust::free(thrust::seq, ptr);
     #endif
-  }
 } // end free()
 
 }    // namespace cuda_cub

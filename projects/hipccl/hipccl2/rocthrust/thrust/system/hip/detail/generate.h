@@ -34,7 +34,8 @@
 #include <thrust/system/hip/config.h>
 #include <thrust/system/hip/detail/for_each.h>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 namespace hip_rocprim
 {
 
@@ -81,5 +82,5 @@ generate(execution_policy<Derived>& policy,
 }
 
 } // namespace hip_rocprim
-THRUST_END_NS
+} // end namespace thrust
 #endif //THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP

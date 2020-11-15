@@ -122,4 +122,3 @@ using thrust::cuda_cub::par;
 } // namespace cuda
 
 } // end namespace thrust
-

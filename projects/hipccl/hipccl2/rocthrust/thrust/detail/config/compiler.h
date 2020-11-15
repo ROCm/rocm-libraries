@@ -21,17 +21,6 @@
 
 #pragma once
 
-#ifdef __CUDACC__
-
-#include <cuda.h>
-
-// Thrust supports CUDA >= 3.0
-#if CUDA_VERSION < 3000
-#error "CUDA v3.0 or newer is required"
-#endif // CUDA_VERSION
-
-#endif // __CUDACC__
-
 #if defined(__HCC__) || defined(__HIP__)
 // Macro enables Device Malloc
 #ifndef __HIP_ENABLE_DEVICE_MALLOC__
@@ -55,18 +44,15 @@
 #define THRUST_DEVICE_COMPILER_HIP     5
 
 // figure out which host compiler we're using
-// XXX we should move the definition of THRUST_DEPRECATED out of this logic
-#if   defined(_MSC_VER)
-#define THRUST_HOST_COMPILER THRUST_HOST_COMPILER_MSVC
-#define THRUST_MSVC_VERSION _MSC_VER
-#define THRUST_MSVC_VERSION_FULL _MSC_FULL_VER
+#if defined(_MSC_VER)
+    #define THRUST_HOST_COMPILER THRUST_HOST_COMPILER_MSVC
+    #define THRUST_MSVC_VERSION _MSC_VER
+    #define THRUST_MSVC_VERSION_FULL _MSC_FULL_VER
 #elif defined(__clang__)
     #define THRUST_HOST_COMPILER THRUST_HOST_COMPILER_CLANG
-    #define THRUST_DEPRECATED __attribute__ ((deprecated))
     #define THRUST_CLANG_VERSION (__clang_major__ * 10000 + __clang_minor__ * 100 + __clang_patchlevel__)
 #elif defined(__GNUC__)
     #define THRUST_HOST_COMPILER THRUST_HOST_COMPILER_GCC
-    #define THRUST_DEPRECATED __attribute__ ((deprecated))
     #define THRUST_GCC_VERSION (__GNUC__ * 10000 + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__)
     #if (THRUST_GCC_VERSION >= 50000)
         #define THRUST_MODERN_GCC
@@ -75,7 +61,6 @@
     #endif
 #else
     #define THRUST_HOST_COMPILER THRUST_HOST_COMPILER_UNKNOWN
-    #define THRUST_DEPRECATED
 #endif // THRUST_HOST_COMPILER
 
 // figure out which device compiler we're using
@@ -117,12 +102,6 @@
 #else
   #define THRUST_DISABLE_MSVC_WARNING_BEGIN(x)
   #define THRUST_DISABLE_MSVC_WARNING_END(x)
-#endif
-
-#if __cplusplus >= 201103L
-  #define THRUST_NOEXCEPT noexcept
-#else
-  #define THRUST_NOEXCEPT throw()
 #endif
 
 #if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG) && !defined(__CUDA_ARCH__)
@@ -214,5 +193,3 @@
   x;                                                                          \
   THRUST_DISABLE_CLANG_AND_GCC_INITIALIZER_REORDERING_WARNING_END             \
   /**/
-
-

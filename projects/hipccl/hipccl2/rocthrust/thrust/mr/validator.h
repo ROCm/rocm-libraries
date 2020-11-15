@@ -47,4 +47,3 @@ struct validator2<T, T> : private validator<T>
 
 } // end mr
 } // end thrust
-

@@ -26,7 +26,6 @@
 namespace thrust
 {
 
-
 __thrust_exec_check_disable__
 template<typename InputIterator>
 inline __host__ __device__
@@ -38,4 +37,3 @@ inline __host__ __device__
 
 
 } // end namespace thrust
-

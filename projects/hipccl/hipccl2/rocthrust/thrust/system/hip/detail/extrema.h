@@ -20,7 +20,7 @@
  * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
  * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
  * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
- * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * ON ANY THEORY OF LIABILITY, WHthrust::ETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
@@ -42,7 +42,8 @@
 // rocprim include
 #include <rocprim/rocprim.hpp>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 namespace hip_rocprim
 {
 namespace __extrema
@@ -142,7 +143,7 @@ namespace __extrema
             pair_type const& lhs_min = get<0>(lhs);
             pair_type const& rhs_max = get<1>(rhs);
             pair_type const& lhs_max = get<1>(lhs);
-            return make_tuple(arg_min_t(predicate)(lhs_min, rhs_min),
+            return thrust::make_tuple(arg_min_t(predicate)(lhs_min, rhs_min),
                               arg_max_t(predicate)(lhs_max, rhs_max));
         }
 
@@ -230,7 +231,7 @@ namespace __extrema
         typedef tuple<ItemsIt, counting_iterator_t<IndexType>> iterator_tuple;
         typedef zip_iterator<iterator_tuple>                   zip_iterator;
 
-        iterator_tuple iter_tuple = make_tuple(first, counting_iterator_t<IndexType>(0));
+        iterator_tuple iter_tuple = thrust::make_tuple(first, counting_iterator_t<IndexType>(0));
 
         typedef ArgFunctor<InputType, IndexType, BinaryPred> arg_min_t;
         typedef tuple<InputType, IndexType>                  T;
@@ -336,7 +337,7 @@ minmax_element(execution_policy<Derived>& policy,
 
     IndexType num_items = static_cast<IndexType>(thrust::distance(first, last));
 
-    iterator_tuple iter_tuple = make_tuple(first, counting_iterator_t<IndexType>(0));
+    iterator_tuple iter_tuple = thrust::make_tuple(first, counting_iterator_t<IndexType>(0));
 
     zip_iterator   begin  = make_zip_iterator(iter_tuple);
     two_pairs_type result = __extrema::extrema(policy,
@@ -363,5 +364,5 @@ minmax_element(execution_policy<Derived>& policy,
 }
 
 } // namespace hip_rocprim
-THRUST_END_NS
+} // end namespace thrust
 #endif

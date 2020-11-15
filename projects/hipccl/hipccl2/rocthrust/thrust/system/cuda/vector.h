@@ -50,8 +50,8 @@ namespace cuda_cub
  *                   shared by \p cuda_bulk::vector
  *  \see device_vector
  */
-template<typename T, typename Allocator = allocator<T> >
-using vector = thrust::detail::vector_base<T, Allocator>;
+ template<typename T, typename Allocator = allocator<T> >
+ using vector = thrust::detail::vector_base<T, Allocator>;
 
 } // end cuda_cub
 
@@ -70,3 +70,5 @@ using thrust::cuda_cub::vector;
 }
 
 } // end thrust
+
+#include <thrust/system/cuda/detail/vector.inl>

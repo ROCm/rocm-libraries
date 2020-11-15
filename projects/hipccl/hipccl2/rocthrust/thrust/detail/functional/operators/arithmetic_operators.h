@@ -429,4 +429,3 @@ operator--(const actor<Eval> &_1, int)
 } // end functional
 } // end detail
 } // end thrust
-

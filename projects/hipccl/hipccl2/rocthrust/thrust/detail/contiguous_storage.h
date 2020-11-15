@@ -46,6 +46,7 @@ template<typename T, typename Alloc>
     typedef typename alloc_traits::reference           reference;
     typedef typename alloc_traits::const_reference     const_reference;
 
+
     typedef thrust::detail::normal_iterator<pointer>       iterator;
     typedef thrust::detail::normal_iterator<const_pointer> const_iterator;
 
@@ -233,4 +234,3 @@ void swap(detail::contiguous_storage<T,Alloc> &lhs, detail::contiguous_storage<T
 } // end thrust
 
 #include <thrust/detail/contiguous_storage.inl>
-

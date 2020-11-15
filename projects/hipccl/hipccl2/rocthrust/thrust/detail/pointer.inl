@@ -142,6 +142,7 @@ Reference pointer_dereference_impl(const Derived& ptr,
 
 } // namespace detail
 
+
 template<typename Element, typename Tag, typename Reference, typename Derived>
   __host__ __device__
   typename pointer<Element,Tag,Reference,Derived>::super_t::reference
@@ -156,6 +157,7 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
 
   return detail::pointer_dereference_impl<RefT>(derivedPtr, IsCppRef());
 } // end pointer::dereference
+
 
 
 template<typename Element, typename Tag, typename Reference, typename Derived>
@@ -278,4 +280,3 @@ template<typename Element, typename Tag, typename Reference, typename Derived, t
 
 
 } // end thrust
-

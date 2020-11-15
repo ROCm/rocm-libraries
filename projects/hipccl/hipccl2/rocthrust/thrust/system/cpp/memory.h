@@ -64,16 +64,16 @@ inline pointer<T> malloc(std::size_t n);
  *  \see cpp::malloc
  *  \see std::free
  */
-inline void free(pointer<void> ptr);
+ inline void free(pointer<void> ptr);
 
-/*! \p cpp::allocator is the default allocator used by the \p cpp system's containers such as
- *  <tt>cpp::vector</tt> if no user-specified allocator is provided. \p cpp::allocator allocates
- *  (deallocates) storage with \p cpp::malloc (\p cpp::free).
- */
-template<typename T>
-using allocator = thrust::mr::stateless_resource_allocator<T, memory_resource>;
+ /*! \p cpp::allocator is the default allocator used by the \p cpp system's containers such as
+  *  <tt>cpp::vector</tt> if no user-specified allocator is provided. \p cpp::allocator allocates
+  *  (deallocates) storage with \p cpp::malloc (\p cpp::free).
+  */
+ template<typename T>
+ using allocator = thrust::mr::stateless_resource_allocator<T, memory_resource>;
 
-} // end cpp
+ } // end cpp
 
 } // end system
 
@@ -92,4 +92,3 @@ using thrust::system::cpp::allocator;
 } // end thrust
 
 #include <thrust/system/cpp/detail/memory.inl>
-

@@ -32,7 +32,7 @@ namespace generic
 template <typename InputType, typename Predicate, typename CountType>
 struct count_if_transform
 {
-  __host__ __device__ 
+  __host__ __device__
   count_if_transform(Predicate _pred) : pred(_pred){}
 
   __thrust_exec_check_disable__
@@ -67,7 +67,7 @@ count_if(thrust::execution_policy<DerivedPolicy> &exec, InputIterator first, Inp
 {
   typedef typename thrust::iterator_traits<InputIterator>::value_type InputType;
   typedef typename thrust::iterator_traits<InputIterator>::difference_type CountType;
-  
+
   thrust::system::detail::generic::count_if_transform<InputType, Predicate, CountType> unary_op(pred);
   thrust::plus<CountType> binary_op;
   return thrust::transform_reduce(exec, first, last, unary_op, CountType(0), binary_op);
@@ -78,4 +78,3 @@ count_if(thrust::execution_policy<DerivedPolicy> &exec, InputIterator first, Inp
 } // end detail
 } // end system
 } // end thrust
-

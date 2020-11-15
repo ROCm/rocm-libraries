@@ -34,7 +34,8 @@
 #include <thrust/system/hip/detail/util.h>
 #include <thrust/system/hip/detail/parallel_for.h>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 namespace hip_rocprim
 {
 namespace __uninitialized_copy
@@ -95,5 +96,5 @@ uninitialized_copy(execution_policy<Derived>& policy,
 
 } // namespace hip_rocprim
 
-THRUST_END_NS
+} // end namespace thrust
 #endif

@@ -82,7 +82,7 @@ namespace thrust
       template<class T, class A>
       struct is_trivially_copy_constructible<std::vector<T,A>>
           : std::is_trivially_copy_constructible<T>{};
-#endif      
+#endif
   }
 } // end namespace thrust
 #endif
@@ -215,17 +215,17 @@ struct is_pointer_to_non_const_member_func<Ret (T::*) (Args...)> : std::true_typ
 template <class T, class Ret, class... Args>
 struct is_pointer_to_non_const_member_func<Ret (T::*) (Args...)&> : std::true_type{};
 template <class T, class Ret, class... Args>
-struct is_pointer_to_non_const_member_func<Ret (T::*) (Args...)&&> : std::true_type{};        
+struct is_pointer_to_non_const_member_func<Ret (T::*) (Args...)&&> : std::true_type{};
 template <class T, class Ret, class... Args>
 struct is_pointer_to_non_const_member_func<Ret (T::*) (Args...) volatile> : std::true_type{};
 template <class T, class Ret, class... Args>
 struct is_pointer_to_non_const_member_func<Ret (T::*) (Args...) volatile&> : std::true_type{};
 template <class T, class Ret, class... Args>
-struct is_pointer_to_non_const_member_func<Ret (T::*) (Args...) volatile&&> : std::true_type{};        
+struct is_pointer_to_non_const_member_func<Ret (T::*) (Args...) volatile&&> : std::true_type{};
 
 template <class T> struct is_const_or_const_ref : std::false_type{};
 template <class T> struct is_const_or_const_ref<T const&> : std::true_type{};
-template <class T> struct is_const_or_const_ref<T const> : std::true_type{};    
+template <class T> struct is_const_or_const_ref<T const> : std::true_type{};
 #endif
 
 // std::invoke from C++17
@@ -233,8 +233,8 @@ template <class T> struct is_const_or_const_ref<T const> : std::true_type{};
 __thrust_exec_check_disable__
 template <typename Fn, typename... Args,
 #ifdef THRUST_OPTIONAL_LIBCXX_MEM_FN_WORKAROUND
-          typename = enable_if_t<!(is_pointer_to_non_const_member_func<Fn>::value 
-                                 && is_const_or_const_ref<Args...>::value)>, 
+          typename = enable_if_t<!(is_pointer_to_non_const_member_func<Fn>::value
+                                 && is_const_or_const_ref<Args...>::value)>,
 #endif
           typename = enable_if_t<std::is_member_pointer<decay_t<Fn>>::value>,
           int = 0>
@@ -1608,7 +1608,7 @@ public:
   emplace(std::initializer_list<U> il, Args &&... args) {
     *this = nullopt;
     this->construct(il, std::forward<Args>(args)...);
-    return value();    
+    return value();
   }
 
   /// Swaps this optional with the other.
@@ -1852,58 +1852,58 @@ inline constexpr bool operator!=(nullopt_t, const optional<T> &rhs) noexcept {
   return rhs.has_value();
 }
 /// \group relop_nullopt
-__thrust_exec_check_disable__                                                    
-template <class T>                                                               
-__host__ __device__       
+__thrust_exec_check_disable__
+template <class T>
+__host__ __device__
 inline constexpr bool operator<(const optional<T> &, nullopt_t) noexcept {
   return false;
 }
 /// \group relop_nullopt
-__thrust_exec_check_disable__                                                    
-template <class T>                                                               
-__host__ __device__       
+__thrust_exec_check_disable__
+template <class T>
+__host__ __device__
 inline constexpr bool operator<(nullopt_t, const optional<T> &rhs) noexcept {
   return rhs.has_value();
 }
 /// \group relop_nullopt
-__thrust_exec_check_disable__                                                    
-template <class T>                                                               
-__host__ __device__       
+__thrust_exec_check_disable__
+template <class T>
+__host__ __device__
 inline constexpr bool operator<=(const optional<T> &lhs, nullopt_t) noexcept {
   return !lhs.has_value();
 }
 /// \group relop_nullopt
-__thrust_exec_check_disable__                                                    
-template <class T>                                                               
-__host__ __device__       
+__thrust_exec_check_disable__
+template <class T>
+__host__ __device__
 inline constexpr bool operator<=(nullopt_t, const optional<T> &) noexcept {
   return true;
 }
 /// \group relop_nullopt
-__thrust_exec_check_disable__                                                    
-template <class T>                                                               
-__host__ __device__       
+__thrust_exec_check_disable__
+template <class T>
+__host__ __device__
 inline constexpr bool operator>(const optional<T> &lhs, nullopt_t) noexcept {
   return lhs.has_value();
 }
 /// \group relop_nullopt
-__thrust_exec_check_disable__                                                    
-template <class T>                                                               
-__host__ __device__       
+__thrust_exec_check_disable__
+template <class T>
+__host__ __device__
 inline constexpr bool operator>(nullopt_t, const optional<T> &) noexcept {
   return false;
 }
 /// \group relop_nullopt
-__thrust_exec_check_disable__                                                    
-template <class T>                                                               
-__host__ __device__       
+__thrust_exec_check_disable__
+template <class T>
+__host__ __device__
 inline constexpr bool operator>=(const optional<T> &, nullopt_t) noexcept {
   return true;
 }
 /// \group relop_nullopt
-__thrust_exec_check_disable__                                                    
-template <class T>                                                               
-__host__ __device__       
+__thrust_exec_check_disable__
+template <class T>
+__host__ __device__
 inline constexpr bool operator>=(nullopt_t, const optional<T> &rhs) noexcept {
   return !rhs.has_value();
 }
@@ -2883,4 +2883,3 @@ template <class T> struct hash<thrust::optional<T>> {
 } // namespace std
 
 #endif // THRUST_CPP_DIALECT >= 2011
-

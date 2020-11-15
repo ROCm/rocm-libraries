@@ -91,7 +91,6 @@ replace(execution_policy<Derived> &policy,
         T const &                  new_value)
 {
   using thrust::placeholders::_1;
-
   cuda_cub::transform_if(policy,
                       first,
                       last,

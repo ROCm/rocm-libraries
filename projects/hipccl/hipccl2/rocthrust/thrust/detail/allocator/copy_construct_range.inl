@@ -306,4 +306,3 @@ __host__ __device__
 
 } // end detail
 } // end thrust
-

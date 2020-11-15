@@ -63,7 +63,7 @@ namespace thrust
  *    // Iterator that returns negated values and writes squared values
  *    auto iter = thrust::make_transform_input_output_iterator(v.begin(),
  *        thrust::negate<float>{}, thrust::square<float>{});
- * 
+ *
  *    // Iterator negates values when reading
  *    std::cout << iter[0] << " ";  // -1.0f;
  *    std::cout << iter[1] << " ";  // -2.0f;
@@ -160,4 +160,3 @@ make_transform_input_output_iterator(Iterator io, InputFunction input_function, 
  */
 
 } // end thrust
-

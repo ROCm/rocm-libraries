@@ -119,8 +119,7 @@ template<typename T, typename Allocator>
   super_t::operator=(x);
   return *this;
 }
-      
+
 } // end cpp
 } // end system
 } // end thrust
-

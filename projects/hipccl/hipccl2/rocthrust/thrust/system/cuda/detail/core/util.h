@@ -42,29 +42,29 @@ namespace thrust
 namespace cuda_cub {
 namespace core {
 
-#ifdef __NVCOMPILER_CUDA__
-#  if (__NVCOMPILER_CUDA_ARCH__ >= 600)
-#    define THRUST_TUNING_ARCH sm60
-#  elif (__NVCOMPILER_CUDA_ARCH__ >= 520)
-#    define THRUST_TUNING_ARCH sm52
-#  elif (__NVCOMPILER_CUDA_ARCH__ >= 350)
-#    define THRUST_TUNING_ARCH sm35
-#  else
-#    define THRUST_TUNING_ARCH sm30
-#  endif
-#else
-#  if (__CUDA_ARCH__ >= 600)
-#    define THRUST_TUNING_ARCH sm60
-#  elif (__CUDA_ARCH__ >= 520)
-#    define THRUST_TUNING_ARCH sm52
-#  elif (__CUDA_ARCH__ >= 350)
-#    define THRUST_TUNING_ARCH sm35
-#  elif (__CUDA_ARCH__ >= 300)
-#    define THRUST_TUNING_ARCH sm30
-#  elif !defined (__CUDA_ARCH__)
-#    define THRUST_TUNING_ARCH sm30
-#  endif
-#endif
+  #ifdef __NVCOMPILER_CUDA__
+  #  if (__NVCOMPILER_CUDA_ARCH__ >= 600)
+  #    define THRUST_TUNING_ARCH sm60
+  #  elif (__NVCOMPILER_CUDA_ARCH__ >= 520)
+  #    define THRUST_TUNING_ARCH sm52
+  #  elif (__NVCOMPILER_CUDA_ARCH__ >= 350)
+  #    define THRUST_TUNING_ARCH sm35
+  #  else
+  #    define THRUST_TUNING_ARCH sm30
+  #  endif
+  #else
+  #  if (__CUDA_ARCH__ >= 600)
+  #    define THRUST_TUNING_ARCH sm60
+  #  elif (__CUDA_ARCH__ >= 520)
+  #    define THRUST_TUNING_ARCH sm52
+  #  elif (__CUDA_ARCH__ >= 350)
+  #    define THRUST_TUNING_ARCH sm35
+  #  elif (__CUDA_ARCH__ >= 300)
+  #    define THRUST_TUNING_ARCH sm30
+  #  elif !defined (__CUDA_ARCH__)
+  #    define THRUST_TUNING_ARCH sm30
+  #  endif
+  #endif
 
   // Typelist - a container of types, supports up to 10 types
   // --------------------------------------------------------------------------
@@ -651,11 +651,11 @@ namespace core {
     cub::CTA_SYNC();
   }
 
-#define CUDA_CUB_RET_IF_FAIL(e) \
-  {                             \
-    auto const error = (e);     \
-    if (cub::Debug(error, __FILE__, __LINE__)) return error; \
-  }
+  #define CUDA_CUB_RET_IF_FAIL(e) \
+    {                             \
+      auto const error = (e);     \
+      if (cub::Debug(error, __FILE__, __LINE__)) return error; \
+    }
 
   // uninitialized
   // -------

@@ -105,7 +105,6 @@ THRUST_DECLTYPE_RETURNS(
   )
 );
 
-} // end namespace thrust
+} //end namespace thrust
 
 #endif // THRUST_CPP_DIALECT >= 2011
-

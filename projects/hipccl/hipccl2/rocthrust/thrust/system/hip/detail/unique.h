@@ -45,7 +45,8 @@
 // rocPRIM includes
 #include <rocprim/rocprim.hpp>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 
 template <typename DerivedPolicy, typename ForwardIterator, typename BinaryPredicate>
 ForwardIterator __host__ __device__
@@ -240,7 +241,7 @@ InputIt THRUST_HIP_FUNCTION unique(execution_policy<Derived>& policy,
 }
 
 } // namespace hip_rocprim
-THRUST_END_NS
+} // end namespace thrust
 
 #include <thrust/memory.h>
 #include <thrust/unique.h>

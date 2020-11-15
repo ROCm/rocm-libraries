@@ -56,13 +56,13 @@ async_for_each(
   , "this algorithm is not implemented for the specified system"
   );
   return {};
-} 
+}
 
 } // namespace unimplemented
 
 namespace for_each_detail
 {
-    
+
 using thrust::async::unimplemented::async_for_each;
 
 struct for_each_fn final
@@ -75,7 +75,7 @@ struct for_each_fn final
   static auto call(
     thrust::detail::execution_policy_base<DerivedPolicy> const& exec
   , ForwardIt&& first, Sentinel&& last
-  , UnaryFunction&& f 
+  , UnaryFunction&& f
   )
   // ADL dispatch.
   THRUST_RETURNS(
@@ -88,7 +88,7 @@ struct for_each_fn final
 
   template <typename ForwardIt, typename Sentinel, typename UnaryFunction>
   __host__
-  static auto call(ForwardIt&& first, Sentinel&& last, UnaryFunction&& f) 
+  static auto call(ForwardIt&& first, Sentinel&& last, UnaryFunction&& f)
   THRUST_RETURNS(
     for_each_fn::call(
       thrust::detail::select_system(
@@ -116,4 +116,3 @@ THRUST_INLINE_CONSTANT for_each_detail::for_each_fn for_each{};
 } // end namespace thrust
 
 #endif
-

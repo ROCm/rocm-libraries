@@ -35,7 +35,7 @@ namespace thrust
 namespace cuda_cub {
 
 // in-place
-  
+
 template <class Derived,
           class InputIt,
           class StencilIt,
@@ -75,7 +75,6 @@ remove(execution_policy<Derived> &policy,
        const T &                  value)
 {
   using thrust::placeholders::_1;
-
   return cuda_cub::remove_if(policy, first, last, _1 == value);
 }
 

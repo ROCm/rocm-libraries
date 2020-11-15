@@ -141,4 +141,3 @@ operator!(const actor<Eval> &_1)
 } // end functional
 } // end detail
 } // end thrust
-

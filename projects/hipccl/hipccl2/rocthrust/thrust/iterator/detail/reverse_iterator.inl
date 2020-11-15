@@ -112,4 +112,3 @@ reverse_iterator<BidirectionalIterator> make_reverse_iterator(BidirectionalItera
 
 
 } // end thrust
-

@@ -15,5 +15,4 @@ namespace thrust
 template <typename T>
 struct numeric_limits : std::numeric_limits<T> {};
 
-} // end namespace thrust
-
+} //end namespace thrust

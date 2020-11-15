@@ -21,8 +21,7 @@
 #include <thrust/system/detail/bad_alloc.h>
 #include <cassert>
 
-#if (defined(__NVCOMPILER_CUDA__) || defined(__CUDA_ARCH__)) && \
-    THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#if (defined(__NVCOMPILER_CUDA__) || defined(__CUDA_ARCH__)) && THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #include <thrust/system/cuda/detail/terminate.h>
 #endif
 
@@ -55,9 +54,12 @@ __host__ __device__
       #if THRUST_INCLUDE_HOST_CODE
         throw thrust::system::detail::bad_alloc("temporary_buffer::allocate: get_temporary_buffer failed");
       #endif
-    } else {
+    }
+    else {
       #if THRUST_INCLUDE_DEVICE_CODE && THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
         thrust::system::cuda::detail::terminate_with_message("temporary_buffer::allocate: get_temporary_buffer failed");
+      #elif THRUST_INCLUDE_DEVICE_CODE && THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
+            thrust::system::hip::detail::terminate_with_message("temporary_buffer::allocate: get_temporary_buffer failed");
       #endif
     }
   } // end if

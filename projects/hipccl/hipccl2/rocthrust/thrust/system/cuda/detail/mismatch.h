@@ -90,7 +90,7 @@ mismatch(execution_policy<Derived>& policy,
                                           identity());
 
   return thrust::make_pair(first1 + thrust::distance(transform_first,result),
-                           first2 + thrust::distance(transform_first,result));
+                   first2 + thrust::distance(transform_first,result));
 }
 
 template <class Derived,

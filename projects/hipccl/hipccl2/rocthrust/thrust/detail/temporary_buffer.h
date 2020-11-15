@@ -31,6 +31,7 @@ namespace detail
 {
 
 
+
 template<typename T, typename DerivedPolicy, typename Pair>
 __host__ __device__
   thrust::pair<thrust::pointer<T,DerivedPolicy>, typename thrust::pointer<T,DerivedPolicy>::difference_type>
@@ -73,4 +74,3 @@ __host__ __device__
 
 
 } // end thrust
-

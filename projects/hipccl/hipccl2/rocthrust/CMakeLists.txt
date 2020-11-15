@@ -1,161 +1,91 @@
-# Support adding Thrust to a parent project via add_subdirectory.
-# See examples/cmake/add_subdir/CMakeLists.txt for details.
-if (NOT "${CMAKE_SOURCE_DIR}" STREQUAL "${CMAKE_CURRENT_LIST_DIR}")
-  include(cmake/ThrustAddSubdir.cmake)
-  return()
+# ########################################################################
+# Copyright 2019-2020 Advanced Micro Devices, Inc.
+# ########################################################################
+
+cmake_minimum_required(VERSION 3.5.1 FATAL_ERROR)
+
+# Install prefix
+if(WIN32)
+  set(CMAKE_INSTALL_PREFIX ${PROJECT_BINARY_DIR}/package CACHE PATH "Install path prefix, prepended onto install directories")
+else()
+  set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended onto install directories")
 endif()
 
-# 3.15 is the minimum.
-# 3.17 for nvc++/Feta
-# 3.18 for C++17 + CUDA
-cmake_minimum_required(VERSION 3.15)
+# Thrust project
+project(rocthrust LANGUAGES CXX)
 
-# Remove this when we use the new CUDA_ARCHITECTURES properties with both
-# nvcc and nvc++.
-if (CMAKE_VERSION VERSION_GREATER_EQUAL 3.18)
-  cmake_policy(SET CMP0104 OLD)
+#Adding CMAKE_PREFIX_PATH
+list( APPEND CMAKE_PREFIX_PATH /opt/rocm/llvm /opt/rocm )
+
+# CMake modules
+list(APPEND CMAKE_MODULE_PATH
+  ${CMAKE_CURRENT_SOURCE_DIR}/cmake
+  ${HIP_PATH}/cmake /opt/rocm/hip/cmake # FindHIP.cmake
+)
+
+# Set a default build type if none was specified
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  message(STATUS "Setting build type to 'Release' as none was specified.")
+  set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
+  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "" "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
 endif()
 
-project(Thrust NONE)
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker search and installed rpath")
 
-include(cmake/AppendOptionIfAvailable.cmake)
+# AMD targets
+set(AMDGPU_TARGETS gfx900;gfx906;gfx908 CACHE STRING "List of specific machine types for library to target")
 
-include(cmake/ThrustBuildCompilerTargets.cmake)
-include(cmake/ThrustBuildTargetList.cmake)
-include(cmake/ThrustMultiConfig.cmake)
-include(cmake/ThrustInstallRules.cmake)
-include(cmake/ThrustUtilities.cmake)
+# Verify that hcc or hipcc compiler is used on ROCM platform
+include(cmake/VerifyCompiler.cmake)
 
-option(THRUST_ENABLE_HEADER_TESTING "Test that all public headers compile." "ON")
-option(THRUST_ENABLE_TESTING "Build Thrust testing suite." "ON")
-option(THRUST_ENABLE_EXAMPLES "Build Thrust examples." "ON")
-option(THRUST_INCLUDE_CUB_CMAKE "Build CUB tests and examples. (Requires CUDA)." "OFF")
+# Build options
+# Disable -Werror
+option(DISABLE_WERROR "Disable building with Werror" ON)
+option(BUILD_TEST "Build tests" OFF)
+option(BUILD_EXAMPLES "Build examples" OFF)
+option(BUILD_BENCHMARKS "Build benchmarks" OFF)
+option(DOWNLOAD_ROCPRIM "Download rocPRIM and do not search for rocPRIM package" OFF)
+set(RNG_SEED_COUNT 0 CACHE STRING "Number of true random sequences to test each input size for")
+set(PRNG_SEEDS 1 CACHE STRING "Seeds of pseudo random sequences to test each input size for")
 
-# Check if we're actually building anything before continuing. If not, no need
-# to search for deps, etc. This is a common approach for packagers that just
-# need the install rules. See GH issue thrust/thrust#1211.
-if (NOT (THRUST_ENABLE_HEADER_TESTING OR
-         THRUST_ENABLE_TESTING OR
-         THRUST_ENABLE_EXAMPLES OR
-         THRUST_INCLUDE_CUB_CMAKE))
-  return()
-endif()
+set(THRUST_HOST_SYSTEM_OPTIONS CPP OMP TBB)
+set(THRUST_HOST_SYSTEM CPP CACHE STRING "The device backend to target.")
+set_property(
+  CACHE THRUST_HOST_SYSTEM
+  PROPERTY STRINGS ${THRUST_HOST_SYSTEM_OPTIONS}
+)
 
-# Add cache string options for CMAKE_BUILD_TYPE and default to RelWithDebInfo.
-if ("" STREQUAL "${CMAKE_BUILD_TYPE}")
-  set(CMAKE_BUILD_TYPE "RelWithDebInfo" CACHE STRING "Choose the type of build." FORCE)
-
-  set_property(
-    CACHE CMAKE_BUILD_TYPE
-    PROPERTY STRINGS Debug Release RelWithDebInfo MinSizeRel
+if (NOT THRUST_HOST_SYSTEM IN_LIST THRUST_HOST_SYSTEM_OPTIONS)
+  message(
+    FATAL_ERROR
+    "THRUST_HOST_SYSTEM must be one of ${THRUST_HOST_SYSTEM_OPTIONS}"
   )
 endif ()
 
-# Disable compiler extensions:
+# Set CXX flags
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Where to put build outputs. Use CMAKE_BINARY_DIR so they'll show up in the
-# top-level project's dir when building Thrust via add_subdirectory.
-set(THRUST_LIBRARY_OUTPUT_DIR "${CMAKE_BINARY_DIR}/lib")
-set(THRUST_EXECUTABLE_OUTPUT_DIR "${CMAKE_BINARY_DIR}/bin")
+# Get dependencies
+include(cmake/Dependencies.cmake)
 
-# Temporary hacks to make Feta work; this requires you to define
-# `CMAKE_CUDA_COMPILER_ID=Feta` and `CMAKE_CUDA_COMPILER_FORCED`.
-if ("Feta" STREQUAL "${CMAKE_CUDA_COMPILER_ID}")
-  # If using Feta, don't set CXX compiler
-  if (NOT "${CMAKE_CXX_COMPILER}" STREQUAL "")
-    unset(CMAKE_CXX_COMPILER CACHE)
-    message(FATAL_ERROR "You are using Feta as your CUDA C++ compiler, but have"
-      " specified a different ISO C++ compiler; Feta acts as both, so please"
-      " unset the CMAKE_CXX_COMPILER variable.")
-  endif ()
+# Setup VERSION
+rocm_setup_version(VERSION "2.10.6")
 
-  # We don't set CMAKE_CUDA_HOST_COMPILER for Feta; if we do, CMake tries to
-  # pass `-ccbin ${CMAKE_CUDA_HOST_COMPILER}` to Feta, which it doesn't
-  # understand.
-  if (NOT "${CMAKE_CUDA_HOST_COMPILER}" STREQUAL "")
-    unset(CMAKE_CUDA_HOST_COMPILER CACHE)
-    message(FATAL_ERROR "You are using Feta as your CUDA C++ compiler, but have"
-      " specified a different host ISO C++ compiler; Feta acts as both, so"
-      " please unset the CMAKE_CUDA_HOST_COMPILER variable.")
-  endif ()
+# Print configuration summary
+include(cmake/Summary.cmake)
+print_configuration_summary()
 
-  set(CMAKE_CXX_COMPILER "${CMAKE_CUDA_COMPILER}")
-  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -stdpar")
-  set(CMAKE_CUDA_HOST_LINK_LAUNCHER "${CMAKE_CUDA_COMPILER}")
-  set(CMAKE_CUDA_LINK_EXECUTABLE
-      "<CMAKE_CUDA_HOST_LINK_LAUNCHER> ${CMAKE_CUDA_FLAGS} <LINK_FLAGS> <OBJECTS> -o <TARGET> <LINK_LIBRARIES>")
-endif ()
+# Thrust (with HIP backend)
+add_subdirectory(thrust)
 
-# This must appear after any changes to CMAKE_CXX_COMPILER or else CMake will
-# delete the cache and reconfigure from scratch.
-enable_language(CXX)
-
-# We don't set CMAKE_CUDA_HOST_COMPILER for Feta; if we do, CMake tries to
-# pass `-ccbin ${CMAKE_CUDA_HOST_COMPILER}` to Feta, which it doesn't
-# understand.
-if (NOT "Feta" STREQUAL "${CMAKE_CUDA_COMPILER_ID}")
-  if (NOT ("${CMAKE_CUDA_HOST_COMPILER}" STREQUAL "" OR
-           "${CMAKE_CUDA_HOST_COMPILER}" STREQUAL "${CMAKE_CXX_COMPILER}"))
-    unset(CMAKE_CUDA_HOST_COMPILER CACHE)
-    message(FATAL_ERROR "Thrust tests and examples require the C++ compiler"
-      " and the CUDA host compiler to be the same; to set this compiler, please"
-      " use the CMAKE_CXX_COMPILER variable, not the CMAKE_CUDA_HOST_COMPILER"
-      " variable.")
-  endif ()
-  set(CMAKE_CUDA_HOST_COMPILER "${CMAKE_CXX_COMPILER}")
-endif ()
-
-# Temporary hacks to make Feta work; this requires you to define
-# `CMAKE_CUDA_COMPILER_ID=Feta` and `CMAKE_CUDA_COMPILER_FORCED`.
-if ("Feta" STREQUAL "${CMAKE_CUDA_COMPILER_ID}")
-  # Need 3.17 for the properties used below.
-  cmake_minimum_required(VERSION 3.17)
-
-  set(CMAKE_CUDA_STANDARD_DEFAULT 03)
-
-  set(CMAKE_CUDA03_STANDARD_COMPILE_OPTION "-std=c++03")
-  set(CMAKE_CUDA03_EXTENSION_COMPILE_OPTION "-std=c++03")
-  set(CMAKE_CUDA03_STANDARD__HAS_FULL_SUPPORT TRUE)
-  set_property(GLOBAL PROPERTY CMAKE_CUDA03_KNOWN_FEATURES)
-
-  set(CMAKE_CUDA11_STANDARD_COMPILE_OPTION "-std=c++11")
-  set(CMAKE_CUDA11_EXTENSION_COMPILE_OPTION "-std=c++11")
-  set(CMAKE_CUDA11_STANDARD__HAS_FULL_SUPPORT TRUE)
-  set_property(GLOBAL PROPERTY CMAKE_CUDA11_KNOWN_FEATURES)
-
-  set(CMAKE_CUDA14_STANDARD_COMPILE_OPTION "-std=c++14")
-  set(CMAKE_CUDA14_EXTENSION_COMPILE_OPTION "-std=c++14")
-  set(CMAKE_CUDA14_STANDARD__HAS_FULL_SUPPORT TRUE)
-  set_property(GLOBAL PROPERTY CMAKE_CUDA14_KNOWN_FEATURES)
-
-  set(CMAKE_CUDA17_STANDARD_COMPILE_OPTION "-std=c++17")
-  set(CMAKE_CUDA17_EXTENSION_COMPILE_OPTION "-std=c++17")
-  set(CMAKE_CUDA17_STANDARD__HAS_FULL_SUPPORT TRUE)
-  set_property(GLOBAL PROPERTY CMAKE_CUDA17_KNOWN_FEATURES)
-
-  cmake_record_cuda_compile_features()
-
-  set(CMAKE_CUDA_COMPILE_FEATURES
-    ${CMAKE_CUDA03_COMPILE_FEATURES}
-    ${CMAKE_CUDA11_COMPILE_FEATURES}
-    ${CMAKE_CUDA14_COMPILE_FEATURES}
-    ${CMAKE_CUDA17_COMPILE_FEATURES}
-    ${CMAKE_CUDA20_COMPILE_FEATURES}
-  )
-endif ()
-
-thrust_configure_multiconfig()
-thrust_build_target_list()
-
-thrust_update_system_found_flags()
-message(STATUS "CPP system found?  ${THRUST_CPP_FOUND}")
-message(STATUS "CUDA system found? ${THRUST_CUDA_FOUND}")
-message(STATUS "TBB system found?  ${THRUST_TBB_FOUND}")
-message(STATUS "OMP system found?  ${THRUST_OMP_FOUND}")
-
-if (THRUST_CUDA_FOUND)
-  include(cmake/ThrustCudaConfig.cmake)
+# Tests
+if(BUILD_TEST)
+  # We still want the testing to be compiled to catch some errors
+  add_subdirectory(testing)
+  enable_testing()
+  add_subdirectory(test)
 endif()
 
 # Setup VERSION
@@ -165,30 +95,37 @@ rocm_setup_version(VERSION "2.10.7")
 include(cmake/Summary.cmake)
 print_configuration_summary()
 
-option(THRUST_ENABLE_HEADER_TESTING "Test that all public headers compile." "ON")
-option(THRUST_ENABLE_TESTING "Build Thrust testing suite." "ON")
-option(THRUST_ENABLE_EXAMPLES "Build Thrust examples." "ON")
-option(THRUST_INCLUDE_CUB_CMAKE "Build CUB tests and examples. (Requires CUDA)." "OFF")
-
-if (THRUST_ENABLE_HEADER_TESTING)
-  include(cmake/ThrustHeaderTesting.cmake)
-endif()
-
-# Both testing and examples use ctest
-if (THRUST_ENABLE_TESTING OR THRUST_ENABLE_EXAMPLES)
-  include(CTest)
-  enable_testing()
-endif()
-
-if (THRUST_ENABLE_TESTING)
-  add_subdirectory(testing)
-endif()
-
-if (THRUST_ENABLE_EXAMPLES)
+# Examples
+if(BUILD_EXAMPLES)
   add_subdirectory(examples)
 endif()
 
-if (THRUST_INCLUDE_CUB_CMAKE AND THRUST_CUDA_FOUND)
-  set(CUB_IN_THRUST ON)
-  add_subdirectory(dependencies/cub)
+# Benchmarks
+if(BUILD_BENCHMARKS)
+  add_subdirectory(internal/benchmark)
 endif()
+
+set(THRUST_OPTIONS_DEBUG ${THRUST_OPTIONS_WARNINGS})
+set(THRUST_OPTIONS_RELEASE ${THRUST_OPTIONS_WARNINGS})
+
+# Package
+set(CPACK_DEBIAN_ARCHIVE_TYPE "gnutar")
+
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "rocprim (>= 2.10.1)") # 1.5.18263 is HIP version in ROCm 1.8.2
+set(CPACK_DEBIAN_PACKAGE_CONFLICTS "hip-thrust, thrust")
+set(CPACK_RPM_PACKAGE_CONFLICTS "hip-thrust, thrust")
+set(CPACK_RPM_PACKAGE_REQUIRES "rocprim >= 2.10.1")
+
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+
+if(NOT CPACK_PACKAGING_INSTALL_PREFIX)
+  set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
+endif()
+
+set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" "\${CPACK_PACKAGING_INSTALL_PREFIX}/include")
+
+rocm_create_package(
+  NAME rocthrust
+  DESCRIPTION "Radeon Open Compute Thrust library"
+  MAINTAINER "rocthrust-maintainer@amd.com"
+)
