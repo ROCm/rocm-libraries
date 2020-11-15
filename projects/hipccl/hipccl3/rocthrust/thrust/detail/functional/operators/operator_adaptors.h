@@ -134,4 +134,3 @@ struct transparent_binary_operator
 } // end functional
 } // end detail
 } // end thrust
-

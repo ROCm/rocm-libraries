@@ -67,7 +67,7 @@ struct async_transform_fn
 
   template <typename Index>
   __host__ __device__
-  void operator()(Index idx)
+  void operator()(Index idxTHRUST_RETURNS
   {
     output_[idx] = op_(thrust::raw_reference_cast(first_[idx]));
   }
@@ -160,4 +160,3 @@ THRUST_RETURNS(
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 
 #endif
-

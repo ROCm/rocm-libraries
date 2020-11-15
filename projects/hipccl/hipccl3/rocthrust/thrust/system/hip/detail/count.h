@@ -34,7 +34,8 @@
 #include <thrust/system/hip/detail/reduce.h>
 #include <thrust/system/hip/detail/util.h>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 namespace hip_rocprim
 {
 
@@ -68,5 +69,5 @@ count(execution_policy<Derived>& policy,
 }
 
 } // namespace hip_rocprim
-THRUST_END_NS
+} // end namespace thrust
 #endif

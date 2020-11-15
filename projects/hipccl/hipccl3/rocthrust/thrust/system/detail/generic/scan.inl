@@ -45,7 +45,7 @@ __host__ __device__
                                 InputIterator last,
                                 OutputIterator result)
 {
-  // assume plus as the associative operator
+
   return thrust::inclusive_scan(exec, first, last, result, thrust::plus<>());
 } // end inclusive_scan()
 
@@ -79,7 +79,7 @@ __host__ __device__
                                 T init)
 {
   // assume plus as the associative operator
-  return thrust::exclusive_scan(exec, first, last, result, init, thrust::plus<>());
+  return thrust::exclusive_scan(exec, first, last, result, init, thrust::plus<T>());
 } // end exclusive_scan()
 
 
@@ -127,4 +127,3 @@ __host__ __device__
 } // end namespace detail
 } // end namespace system
 } // end namespace thrust
-

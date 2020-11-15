@@ -163,4 +163,3 @@ inline bool operator<(event_error const& lhs, event_error const& rhs) noexcept
 } // end namespace thrust
 
 #endif
-

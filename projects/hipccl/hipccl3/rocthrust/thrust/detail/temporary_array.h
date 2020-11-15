@@ -41,6 +41,7 @@ template<typename T, typename System>
 #include <thrust/detail/allocator/no_throw_allocator.h>
 #include <thrust/detail/memory_wrapper.h>
 
+
 namespace thrust
 {
 namespace detail
@@ -178,4 +179,3 @@ template<typename Iterator, typename FromSystem, typename ToSystem>
 } // end thrust
 
 #include <thrust/detail/temporary_array.inl>
-

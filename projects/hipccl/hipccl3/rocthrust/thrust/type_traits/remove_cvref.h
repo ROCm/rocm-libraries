@@ -45,4 +45,3 @@ using remove_cvref_t = typename remove_cvref<T>::type;
 #endif // THRUST_CPP_DIALECT >= 2020
 
 } // end namespace thrust
-

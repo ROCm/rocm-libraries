@@ -46,5 +46,3 @@ constexpr bool is_execution_policy_v = is_execution_policy<T>::value;
 #endif
 
 } // end namespace thrust
-
-

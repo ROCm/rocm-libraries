@@ -22,7 +22,7 @@ namespace thrust
 template <typename InputFunction, typename OutputFunction, typename Iterator>
   class transform_input_output_iterator;
 
-namespace detail 
+namespace detail
 {
 
 // Proxy reference that invokes InputFunction when reading from and
@@ -111,4 +111,3 @@ struct is_proxy_reference<
 
 } // end detail
 } // end thrust
-

@@ -145,4 +145,3 @@ return_temporary_buffer(
 #endif
 
 }} // namespace thrust::detail
-

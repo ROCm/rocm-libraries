@@ -75,6 +75,7 @@ template<typename Eval>
   typename apply_actor<eval_type, thrust::tuple<eval_ref<Ts>...>>::type
   operator()(Ts&&... ts) const;
 
+
   template<typename T>
   __host__ __device__
   typename assign_result<Eval,T>::type
@@ -153,4 +154,3 @@ template<typename Eval, typename Arg1, typename Arg2>
 } // end thrust
 
 #include <thrust/detail/functional/actor.inl>
-

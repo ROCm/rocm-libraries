@@ -53,7 +53,6 @@ async_transform(
 , ForwardIt first, Sentinel last, OutputIt output, UnaryOperation op
 )
 {
-  (void) exec; (void) first; (void) last; (void) output; (void) op;
   THRUST_STATIC_ASSERT_MSG(
     (thrust::detail::depend_on_instantiation<ForwardIt, false>::value)
   , "this algorithm is not implemented for the specified system"
@@ -132,4 +131,3 @@ THRUST_INLINE_CONSTANT transform_detail::transform_fn transform{};
 } // end namespace thrust
 
 #endif
-

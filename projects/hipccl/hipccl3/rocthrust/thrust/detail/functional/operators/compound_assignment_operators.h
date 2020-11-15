@@ -510,4 +510,3 @@ operator>>=(const actor<T1> &_1, const actor<T2> &_2)
 } // end functional
 } // end detail
 } // end thrust
-

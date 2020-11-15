@@ -108,4 +108,3 @@ typedef detail::pinned_memory_resource universal_host_pinned_memory_resource;
 } // end system
 
 } // end namespace thrust
-

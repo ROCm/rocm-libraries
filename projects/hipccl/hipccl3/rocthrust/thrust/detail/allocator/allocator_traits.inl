@@ -30,8 +30,7 @@ namespace thrust
 {
 namespace detail
 {
-
-#if THRUST_CPP_DIALECT >= 2011
+  #if THRUST_CPP_DIALECT >= 2011
 
 // std::allocator's member functions are deprecated in C++17 and removed in
 // C++20, so we can't just use the generic implementation for allocator_traits
@@ -362,7 +361,7 @@ __host__ __device__
   struct workaround_warnings
   {
     __thrust_exec_check_disable__
-    static __host__ __device__ 
+    static __host__ __device__
     typename allocator_traits<Alloc>::pointer
       allocate(Alloc &a, typename allocator_traits<Alloc>::size_type n)
     {
@@ -461,4 +460,3 @@ __host__ __device__
 
 } // end detail
 } // end thrust
-

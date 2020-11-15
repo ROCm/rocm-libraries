@@ -75,6 +75,7 @@ template<typename T>
 using allocator = thrust::mr::stateless_resource_allocator<T, memory_resource>;
 
 } // end omp
+
 } // end system
 
 /*! \namespace thrust::omp
@@ -92,4 +93,3 @@ using thrust::system::omp::allocator;
 } // end thrust
 
 #include <thrust/system/omp/detail/memory.inl>
-

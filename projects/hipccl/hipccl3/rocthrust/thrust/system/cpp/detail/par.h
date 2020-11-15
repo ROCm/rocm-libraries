@@ -59,4 +59,3 @@ using thrust::system::cpp::par;
 
 } // end cpp
 } // end thrust
-

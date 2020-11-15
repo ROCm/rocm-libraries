@@ -68,8 +68,8 @@ inline __host__ __device__ void free(pointer<void> ptr);
  *  <tt>cuda::vector</tt> if no user-specified allocator is provided. \p cuda::allocator allocates
  *  (deallocates) storage with \p cuda::malloc (\p cuda::free).
  */
-template<typename T>
-using allocator = thrust::mr::stateless_resource_allocator<T, system::cuda::memory_resource>;
+ template<typename T>
+ using allocator = thrust::mr::stateless_resource_allocator<T, system::cuda::memory_resource>;
 
 }    // namespace cuda_cub
 
@@ -90,4 +90,3 @@ using thrust::cuda_cub::allocator;
 } // end namespace thrust
 
 #include <thrust/system/cuda/detail/memory.inl>
-

@@ -406,7 +406,7 @@ template<typename T, typename Alloc>
      *  \param x The exemplar element to copy & insert.
      *  \return An iterator pointing to the newly inserted element.
      */
-    iterator insert(iterator position, const T &x); 
+    iterator insert(iterator position, const T &x);
 
     /*! This method inserts a copy of an exemplar value to a range at the
      *  specified position in this vector_base.
@@ -459,10 +459,10 @@ template<typename T, typename Alloc>
   private:
     // these methods resolve the ambiguity of the constructor template of form (Iterator, Iterator)
     template<typename IteratorOrIntegralType>
-      void init_dispatch(IteratorOrIntegralType begin, IteratorOrIntegralType end, false_type); 
+      void init_dispatch(IteratorOrIntegralType begin, IteratorOrIntegralType end, false_type);
 
     template<typename IteratorOrIntegralType>
-      void init_dispatch(IteratorOrIntegralType n, IteratorOrIntegralType value, true_type); 
+      void init_dispatch(IteratorOrIntegralType n, IteratorOrIntegralType value, true_type);
 
     template<typename InputIterator>
       void range_init(InputIterator first, InputIterator last);
@@ -550,7 +550,7 @@ template<typename T1, typename Alloc1,
          typename T2, typename Alloc2>
 bool operator==(const detail::vector_base<T1,Alloc1>& lhs,
                 const detail::vector_base<T2,Alloc2>& rhs);
-    
+
 template<typename T1, typename Alloc1,
          typename T2, typename Alloc2>
 bool operator==(const detail::vector_base<T1,Alloc1>& lhs,
@@ -571,7 +571,7 @@ template<typename T1, typename Alloc1,
          typename T2, typename Alloc2>
 bool operator!=(const detail::vector_base<T1,Alloc1>& lhs,
                 const detail::vector_base<T2,Alloc2>& rhs);
-    
+
 template<typename T1, typename Alloc1,
          typename T2, typename Alloc2>
 bool operator!=(const detail::vector_base<T1,Alloc1>& lhs,
@@ -585,4 +585,3 @@ bool operator!=(const std::vector<T1,Alloc1>&         lhs,
 } // end thrust
 
 #include <thrust/detail/vector_base.inl>
-

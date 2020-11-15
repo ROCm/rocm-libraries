@@ -182,4 +182,3 @@ struct is_contiguous_iterator_impl
 } // namespace detail
 
 } // end namespace thrust
-

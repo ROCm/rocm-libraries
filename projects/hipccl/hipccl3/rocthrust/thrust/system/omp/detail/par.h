@@ -59,4 +59,3 @@ using thrust::system::omp::par;
 
 } // end omp
 } // end thrust
-

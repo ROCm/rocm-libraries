@@ -58,6 +58,16 @@ transform_inclusive_scan(execution_policy<Derived> &policy,
   using result_type = std::invoke_result_t<TransformOp, input_type>;
 #endif
 
+  typedef typename thrust::detail::eval_if<
+    thrust::detail::has_result_type<TransformOp>::value,
+    thrust::detail::result_type<TransformOp>,
+    thrust::detail::eval_if<
+      thrust::detail::is_output_iterator<OutputIt>::value,
+      iterator_value<InputIt>,
+      iterator_value<OutputIt>
+    >
+  >::type result_type;
+
   typedef typename iterator_traits<InputIt>::difference_type size_type;
   size_type num_items = static_cast<size_type>(thrust::distance(first, last));
   typedef transform_input_iterator_t<result_type,
@@ -84,11 +94,12 @@ transform_exclusive_scan(execution_policy<Derived> &policy,
                          InputIt                    last,
                          OutputIt                   result,
                          TransformOp                transform_op,
-                         InitialValueType           init,
+                         T                          init,
                          ScanOp                     scan_op)
 {
   // Use the initial value type per https://wg21.link/P0571
   using result_type = InitialValueType;
+
 
   typedef typename iterator_traits<InputIt>::difference_type size_type;
   size_type num_items = static_cast<size_type>(thrust::distance(first, last));

@@ -43,11 +43,11 @@ inline __host__ __device__
 cudaStream_t
 default_stream()
 {
-#ifdef CUDA_API_PER_THREAD_DEFAULT_STREAM
-  return cudaStreamPerThread;
-#else
-  return cudaStreamLegacy;
-#endif
+  #ifdef CUDA_API_PER_THREAD_DEFAULT_STREAM
+    return cudaStreamPerThread;
+  #else
+    return cudaStreamLegacy;
+  #endif
 }
 
 // Fallback implementation of the customization point.
@@ -72,27 +72,27 @@ __thrust_exec_check_disable__
 template <class Derived>
 __host__ __device__
 cudaError_t
-synchronize_stream(execution_policy<Derived> &policy)
+synchronize_stream(execution_policy<Derived> &)
 {
   cudaError_t result;
-  if (THRUST_IS_HOST_CODE) {
-    #if THRUST_INCLUDE_HOST_CODE
-      cudaStreamSynchronize(stream(policy));
-      result = cudaGetLastError();
-    #endif
-  } else {
-    #if THRUST_INCLUDE_DEVICE_CODE
-      #if __THRUST_HAS_CUDART__
-        THRUST_UNUSED_VAR(policy);
-        cudaDeviceSynchronize();
+    if (THRUST_IS_HOST_CODE) {
+      #if THRUST_INCLUDE_HOST_CODE
+        cudaStreamSynchronize(stream(policy));
         result = cudaGetLastError();
-      #else
-        THRUST_UNUSED_VAR(policy);
-        result = cudaSuccess;
       #endif
-    #endif
-  }
-  return result;
+    } else {
+      #if THRUST_INCLUDE_DEVICE_CODE
+        #if __THRUST_HAS_CUDART__
+          THRUST_UNUSED_VAR(policy);
+          cudaDeviceSynchronize();
+          result = cudaGetLastError();
+        #else
+          THRUST_UNUSED_VAR(policy);
+          result = cudaSuccess;
+        #endif
+      #endif
+    }
+    return result;
 }
 
 // Entry point/interface.
@@ -177,6 +177,7 @@ terminate()
   }
 }
 
+
 __host__  __device__
 inline void throw_on_error(cudaError_t status)
 {
@@ -241,6 +242,7 @@ inline void throw_on_error(cudaError_t status, char const *msg)
   }
 }
 
+
 // FIXME: Move the iterators elsewhere.
 
 template <class ValueType,
@@ -262,17 +264,17 @@ struct transform_input_iterator_t
   transform_input_iterator_t(InputIt input, UnaryOp op)
       : input(input), op(op) {}
 
-#if THRUST_CPP_DIALECT >= 2011
-  transform_input_iterator_t(const self_t &) = default;
-#endif
+  #if THRUST_CPP_DIALECT >= 2011
+    transform_input_iterator_t(const self_t &) = default;
+  #endif
 
-  // UnaryOp might not be copy assignable, such as when it is a lambda.  Define
-  // an explicit copy assignment operator that doesn't try to assign it.
-  self_t& operator=(const self_t& o)
-  {
-    input = o.input;
-    return *this;
-  }
+    // UnaryOp might not be copy assignable, such as when it is a lambda.  Define
+    // an explicit copy assignment operator that doesn't try to assign it.
+    self_t& operator=(const self_t& o)
+    {
+      input = o.input;
+      return *this;
+    }
 
   /// Postfix increment
   __host__ __device__ __forceinline__ self_t operator++(int)
@@ -351,6 +353,7 @@ struct transform_input_iterator_t
   {
     return (input != rhs.input);
   }
+
 };    // struct transform_input_iterarot_t
 
 template <class ValueType,
@@ -376,18 +379,18 @@ struct transform_pair_of_input_iterators_t
                                       BinaryOp op_)
       : input1(input1_), input2(input2_), op(op_) {}
 
-#if THRUST_CPP_DIALECT >= 2011
-  transform_pair_of_input_iterators_t(const self_t &) = default;
-#endif
+  #if THRUST_CPP_DIALECT >= 2011
+    transform_pair_of_input_iterators_t(const self_t &) = default;
+  #endif
 
-  // BinaryOp might not be copy assignable, such as when it is a lambda.
-  // Define an explicit copy assignment operator that doesn't try to assign it.
-  self_t& operator=(const self_t& o)
-  {
-    input1 = o.input1;
-    input2 = o.input2;
-    return *this;
-  }
+    // BinaryOp might not be copy assignable, such as when it is a lambda.
+    // Define an explicit copy assignment operator that doesn't try to assign it.
+    self_t& operator=(const self_t& o)
+    {
+      input1 = o.input1;
+      input2 = o.input2;
+      return *this;
+    }
 
   /// Postfix increment
   __host__ __device__ __forceinline__ self_t operator++(int)
@@ -488,7 +491,6 @@ struct identity
     return t;
   }
 };
-
 
 template <class T>
 struct counting_iterator_t

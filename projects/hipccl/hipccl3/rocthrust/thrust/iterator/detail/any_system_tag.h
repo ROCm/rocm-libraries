@@ -31,4 +31,3 @@ struct any_system_tag
 };
 
 } // end thrust
-

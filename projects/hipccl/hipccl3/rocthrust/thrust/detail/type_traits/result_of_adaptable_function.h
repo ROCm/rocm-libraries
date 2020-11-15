@@ -35,7 +35,7 @@ namespace detail
 template <typename Signature, typename Enable = void>
 struct result_of_adaptable_function : std::result_of<Signature> {};
 #else  /* cxx11 */
-template<typename Signature, typename Enable = void> 
+template<typename Signature, typename Enable = void>
 struct result_of_adaptable_function;
 #endif  /* cxx11 */
 
@@ -62,4 +62,3 @@ template<typename Functor, typename Arg1, typename Arg2>
 
 } // end detail
 } // end thrust
-

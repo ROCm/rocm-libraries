@@ -30,7 +30,8 @@
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #include <thrust/system/hip/detail/execution_policy.h>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 namespace hip_rocprim
 {
     template <class Derived, class ItemsIt, class ResultIt>
@@ -46,7 +47,7 @@ namespace hip_rocprim
             ItemsIt                    first,
             ItemsIt                    last);
 } // namespace hip_rocprim
-THRUST_END_NS
+} // end namespace thrust
 
 #include <thrust/advance.h>
 #include <thrust/distance.h>
@@ -54,7 +55,8 @@ THRUST_END_NS
 #include <thrust/system/hip/detail/copy.h>
 #include <thrust/system/hip/detail/swap_ranges.h>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 namespace hip_rocprim
 {
     template <class Derived, class ItemsIt, class ResultIt>
@@ -78,10 +80,10 @@ namespace hip_rocprim
         // find the midpoint of [first,last)
         difference_type N = thrust::distance(first, last);
         ItemsIt         mid(first);
-        advance(mid, N / 2);
+        thrust::advance(mid, N / 2);
 
         hip_rocprim::swap_ranges(policy, first, mid, make_reverse_iterator(last));
     }
 } // namespace hip_rocprim
-THRUST_END_NS
+} // end namespace thrust
 #endif

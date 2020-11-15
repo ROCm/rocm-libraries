@@ -96,7 +96,7 @@ public:
 
     std::tuple<remove_cvref_t<Dependencies>...>
     __host__
-    extract_dependencies() 
+    extract_dependencies()
     {
         return std::move(dependencies);
     }
@@ -184,7 +184,7 @@ public:
 
     std::tuple<remove_cvref_t<Dependencies>...>
     __host__
-    extract_dependencies() 
+    extract_dependencies()
     {
         return std::move(dependencies);
     }
@@ -264,4 +264,3 @@ extract_dependencies(System &&)
 } // end thrust
 
 #endif // THRUST_CPP_DIALECT >= 2011
-

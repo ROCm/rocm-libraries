@@ -59,4 +59,3 @@ using thrust::system::tbb::par;
 
 } // end tbb
 } // end thrust
-

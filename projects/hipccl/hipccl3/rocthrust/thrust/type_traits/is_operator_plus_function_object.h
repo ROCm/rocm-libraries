@@ -74,4 +74,3 @@ struct is_operator_plus_function_object_impl<std::plus<T>    > : true_type {};
 } // namespace detail
 
 } // end namespace thrust
-

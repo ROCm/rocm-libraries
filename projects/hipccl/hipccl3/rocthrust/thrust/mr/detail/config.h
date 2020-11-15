@@ -33,4 +33,3 @@
 #    define THRUST_MR_STD_MR_NS std::experimental::pmr
 #  endif
 #endif
-

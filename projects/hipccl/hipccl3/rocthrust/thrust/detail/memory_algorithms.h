@@ -206,5 +206,4 @@ void uninitialized_construct_n_with_allocator(
 
 ///////////////////////////////////////////////////////////////////////////////
 
-} // end namespace thrust
-
+} //end namespace thrust

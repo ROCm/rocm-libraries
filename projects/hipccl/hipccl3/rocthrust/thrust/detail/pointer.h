@@ -222,6 +222,7 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
     {
       return thrust::detail::pointer_traits<derived_type>::pointer_to(r);
     }
+    
 }; // end pointer
 
 // Output stream operator
@@ -255,4 +256,3 @@ bool operator!=(pointer<Element, Tag, Reference, Derived> p, decltype(nullptr));
 } // end thrust
 
 #include <thrust/detail/pointer.inl>
-

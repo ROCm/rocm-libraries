@@ -127,6 +127,17 @@ using ::isnan;
 using ::signbit;
 using ::isfinite;
 #  else
+
+#    ifdef __HIP_DEVICE_COMPILE__
+
+// hip_runtime.h provides these functions in the global scope
+using ::isinf;
+using ::isnan;
+using ::signbit;
+using ::isfinite;
+
+#    else
+
 // Some compilers do not provide these in the global scope, because they are
 // supposed to be macros. The versions in `std` are supposed to be functions.
 // Since we're not compiling with nvcc, it's safe to use the functions in std::
@@ -214,4 +225,3 @@ inline double hypot(double x, double y){
 } // namespace detail
 
 } // namespace thrust
-

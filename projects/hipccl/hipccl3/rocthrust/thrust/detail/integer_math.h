@@ -152,4 +152,3 @@ Integer0 round_z(Integer0 const x, Integer1 const y)
 
 } // end detail
 } // end thrust
-

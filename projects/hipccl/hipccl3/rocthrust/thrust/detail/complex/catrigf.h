@@ -56,10 +56,10 @@
 
 namespace thrust{
 namespace detail{
-namespace complex{		      	
+namespace complex{
 
 using thrust::complex;
-  
+
 __host__ __device__ inline
       complex<float> clog_for_large_values(complex<float> z);
 
@@ -98,7 +98,7 @@ f(float a, float b, float hypot_a_b)
  * If returning sqrt_A2my2 has potential to result in an underflow, it is
  * rescaled, and new_y is similarly rescaled.
  */
-__host__ __device__ 
+__host__ __device__
 inline void
 do_hard_work(float x, float y, float *rx, int *B_is_usable, float *B,
 	     float *sqrt_A2my2, float *new_y)

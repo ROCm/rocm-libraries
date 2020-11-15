@@ -153,6 +153,7 @@ template<typename T, typename Alloc = thrust::device_allocator<T> >
     /*! Move assign operator moves from another \p device_vector.
      *  \param v The device_vector to move.
      */
+
      device_vector &operator=(device_vector &&v)
      { Parent::operator=(std::move(v)); return *this; }
   #endif // THRUST_CPP_DIALECT >= 2011
@@ -160,9 +161,9 @@ template<typename T, typename Alloc = thrust::device_allocator<T> >
     /*! Copy constructor copies from an exemplar \p device_vector with different type.
      *  \param v The \p device_vector to copy.
      */
-    template<typename OtherT, typename OtherAlloc>
-    explicit device_vector(const device_vector<OtherT,OtherAlloc> &v)
-      :Parent(v) {}
+   template<typename OtherT, typename OtherAlloc>
+   explicit device_vector(const device_vector<OtherT,OtherAlloc> &v)
+     :Parent(v) {}
 
     /*! Assign operator copies from an exemplar \p device_vector with different type.
      *  \param v The \p device_vector to copy.
@@ -431,7 +432,7 @@ template<typename T, typename Alloc = thrust::device_allocator<T> >
      *  \param x The exemplar element to copy & insert.
      *  \return An iterator pointing to the newly inserted element.
      */
-    iterator insert(iterator position, const T &x); 
+    iterator insert(iterator position, const T &x);
 
     /*! This method inserts a copy of an exemplar value to a range at the
      *  specified position in this vector.
@@ -492,5 +493,3 @@ template<typename T, typename Alloc>
 } // end thrust
 
 #include <thrust/detail/device_vector.inl>
-
-

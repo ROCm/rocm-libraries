@@ -23,6 +23,7 @@
 
 #include <thrust/mr/memory_resource.h>
 #include <thrust/system/hip/detail/guarded_hip_runtime_api.h>
+#include <thrust/system/hip/detail/managed_memory_pointer.h>
 #include <thrust/system/hip/pointer.h>
 #include <thrust/system/detail/bad_alloc.h>
 #include <thrust/system/hip/error.h>
@@ -30,7 +31,8 @@
 
 #include <thrust/memory/detail/host_system_resource.h>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 
 namespace system
 {
@@ -89,7 +91,7 @@ namespace detail
         thrust::hip_rocprim::pointer<void> >
         device_memory_resource;
     typedef detail::hip_memory_resource<detail::hipMallocManaged, hipFree,
-        thrust::hip_rocprim::pointer<void> >
+        detail::managed_memory_pointer<void> >
         managed_memory_resource;
     typedef detail::hip_memory_resource<hipHostMalloc, hipHostFree,
         thrust::host_memory_resource::pointer>
@@ -104,4 +106,4 @@ typedef detail::pinned_memory_resource universal_host_pinned_memory_resource;
 } // end hip
 } // end system
 
-THRUST_END_NS
+} // end namespace thrust

@@ -53,12 +53,6 @@ async_copy(
 , ForwardIt first, Sentinel last, OutputIt output
 )
 {
-  THRUST_UNUSED_VAR(from_exec);
-  THRUST_UNUSED_VAR(to_exec);
-  THRUST_UNUSED_VAR(first);
-  THRUST_UNUSED_VAR(last);
-  THRUST_UNUSED_VAR(output);
-
   THRUST_STATIC_ASSERT_MSG(
     (thrust::detail::depend_on_instantiation<ForwardIt, false>::value)
   , "this algorithm is not implemented for the specified system"

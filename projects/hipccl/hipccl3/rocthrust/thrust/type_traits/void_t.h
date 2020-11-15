@@ -15,7 +15,7 @@
  */
 
 /*! \file void_t.h
- *  \brief C++17's `void_t`. 
+ *  \brief C++17's `void_t`.
  */
 
 #pragma once
@@ -61,4 +61,3 @@ struct voider
 #endif
 
 } // end namespace thrust
-
