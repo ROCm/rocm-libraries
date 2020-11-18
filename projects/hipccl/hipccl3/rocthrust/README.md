@@ -2,9 +2,7 @@
 
 HIP back-end for Thrust (alpha release).
 
-Thrust is included in the NVIDIA HPC SDK and the CUDA Toolkit.
-
-Refer to the [Quick Start Guide](http://github.com/thrust/thrust/wiki/Quick-Start-Guide) page for further information and examples.
+## Introduction
 
 Thrust is a parallel algorithm library. This library has been ported to [HIP](https://github.com/ROCm-Developer-Tools/HIP)/[ROCm](https://rocm.github.io/) platform, which uses the [rocPRIM](https://github.com/ROCmSoftwarePlatform/rocPRIM) library. The HIP ported library works on HIP/ROCm platforms. Currently there is no CUDA backend in place.
 
@@ -68,18 +66,79 @@ make package
 [sudo] make install
 ```
 
-This code sample computes the sum of 100 random numbers in parallel:
+### Macro options
 
-```c++
-#include <thrust/host_vector.h>
-#include <thrust/device_vector.h>
-#include <thrust/generate.h>
-#include <thrust/reduce.h>
-#include <thrust/functional.h>
-#include <algorithm>
-#include <cstdlib>
+```
+# Performance improvement option. If you define THRUST_HIP_PRINTF_ENABLED before
+# thrust includes to 0, you can disable printfs on device side and improve
+# performance. The default value is 1
+#define THRUST_HIP_PRINTF_ENABLED 0
+```
 
-int main(void)
+### Using rocThrust In A Project
+
+Recommended way of including rocThrust into a CMake project is by using its package
+configuration files.
+
+```cmake
+# On ROCm rocThrust requires rocPRIM
+find_package(rocprim REQUIRED CONFIG PATHS "/opt/rocm/rocprim")
+
+# "/opt/rocm" - default install prefix
+find_package(rocthrust REQUIRED CONFIG PATHS "/opt/rocm/rocthrust")
+
+...
+includes rocThrust headers and roc::rocprim_hip target
+target_link_libraries(<your_target> roc::rocthrust)
+```
+
+## Running Unit Tests
+
+```sh
+# Go to rocThrust build directory
+cd rocThrust; cd build
+
+# Configure with examples flag on
+CXX=hipcc cmake -DBUILD_TEST=ON ..
+
+# Build tests
+make -j4
+
+# To run all tests
+ctest
+
+# To run unit tests for rocThrust
+./test/<unit-test-name>
+```
+
+### Using multiple GPUs concurrently for testing
+
+This feature requires CMake 3.16+ to be used for building / testing. _(Prior versions of CMake cannot assign ids to tests when running in parallel. Assigning tests to distinct devices could only be done at the cost of extreme complexity._)
+
+The unit tests can make use of [CTest Resource Allocation](https://cmake.org/cmake/help/latest/manual/ctest.1.html#resource-allocation) feature enabling distributing tests across multiple GPUs in an intelligent manner. The feature can accelerate testing when multiple GPUs of the same family are in a system as well as test multiple family of products from one invocation without having to resort to `HIP_VISIBLE_DEVICES` environment variable. The feature relies on the presence of a resource spec file.
+
+> IMPORTANT: trying to use `RESOURCE_GROUPS` and `--resource-spec-file` with CMake/CTest respectively of versions prior to 3.16 omits the feature silently. No warnings issued about unknown properties or command-line arguments. Make sure that `cmake`/`ctest` invoked are sufficiently recent.
+
+#### Auto resource spec generation
+
+There is a utility script in the repo that may be called independently:
+
+```shell
+# Go to rocThrust build directory
+cd rocThrust; cd build
+
+# Invoke directly or use CMake script mode via cmake -P
+../cmake/GenerateResourceSpec.cmake
+
+# Assuming you have 2 compatible GPUs in the system
+ctest --resource-spec-file ./resources.json --parallel 2
+```
+
+#### Manual
+
+Assuming the user has 2 GPUs from the gfx900 family and they are the first devices enumerated by the system one may specify during configuration `-D AMDGPU_TEST_TARGETS=gfx900` stating only one family will be tested. Leaving this var empty (default) results in targeting the default device in the system. To let CMake know there are 2 GPUs that should be targeted, one has to feed CTest a JSON file via the `--resource-spec-file <path_to_file>` flag. For example:
+
+```json
 {
   "version": {
     "major": 1,
@@ -100,92 +159,59 @@ int main(void)
 }
 ```
 
-Releases
---------
+## Using custom seeds for the tests
 
-Thrust is distributed with the NVIDIA HPC SDK and the CUDA Toolkit in addition
-to GitHub.
+There are 2 CMake configuration-time options that control random data fed to unit tests.
 
-See the [changelog](CHANGELOG.md) for details about specific releases.
+- `RNG_SEED_COUNT`, (0 by default) controls non-repeatable random dataset count. It draws values from a default constructed `std::random_device`. Should tests fail, the actual seed producing the failure are reported by Gtest, enabling reproducibility.
+- `PRNG_SEEDS`, (1 by default) controls repeatable dataset seeds. It is a CMake formatted (semi-colon delimited) array of 32-bit unsigned integrals.
+  - _(Note: semi-colons often collide with shell command parsing. It is advised to escape the entire CMake CLI argument to avoid the variable itself picking up quotation marks. Pass `cmake "-DPRNG_SEEDS=1;2;3;4"` instead of `cmake -DPRNG_SEEDS="1;2;3;4"`, the two cases differ in how the CMake executable receives its arguments from the OS.)_
 
-| Thrust Release    | Included In                             |
-| ----------------- | --------------------------------------- |
-| 1.10.0            | NVIDIA HPC SDK 20.9                     |
-| 1.9.10-1          | NVIDIA HPC SDK 20.7 & CUDA Toolkit 11.1 |
-| 1.9.10            | NVIDIA HPC SDK 20.5                     |
-| 1.9.9             | CUDA Toolkit 11.0                       |
-| 1.9.8-1           | NVIDIA HPC SDK 20.3                     |
-| 1.9.8             | CUDA Toolkit 11.0 Early Access          |
-| 1.9.7-1           | CUDA Toolkit 10.2 for Tegra             |
-| 1.9.7             | CUDA Toolkit 10.2                       |
-| 1.9.6-1           | NVIDIA HPC SDK 20.3                     |
-| 1.9.6             | CUDA Toolkit 10.1 Update 2              |
-| 1.9.5             | CUDA Toolkit 10.1 Update 1              |
-| 1.9.4             | CUDA Toolkit 10.1                       |
-| 1.9.3             | CUDA Toolkit 10.0                       |
-| 1.9.2             | CUDA Toolkit 9.2                        |
-| 1.9.1-2           | CUDA Toolkit 9.1                        |
-| 1.9.0-5           | CUDA Toolkit 9.0                        |
-| 1.8.3             | CUDA Toolkit 8.0                        |
-| 1.8.2             | CUDA Toolkit 7.5                        |
-| 1.8.1             | CUDA Toolkit 7.0                        |
-| 1.8.0             |                                         |
-| 1.7.2             | CUDA Toolkit 6.5                        |
-| 1.7.1             | CUDA Toolkit 6.0                        |
-| 1.7.0             | CUDA Toolkit 5.5                        |
-| 1.6.0             |                                         |
-| 1.5.3             | CUDA Toolkit 5.0                        |
-| 1.5.2             | CUDA Toolkit 4.2                        |
-| 1.5.1             | CUDA Toolkit 4.1                        |
-| 1.5.0             |                                         |
-| 1.4.0             | CUDA Toolkit 4.0                        |
-| 1.3.0             |                                         |
-| 1.2.1             |                                         |
-| 1.2.0             |                                         |
-| 1.1.1             |                                         |
-| 1.1.0             |                                         |
-| 1.0.0             |                                         |
+## Running Examples
+```sh
+# Go to rocThrust build directory
+cd rocThrust; cd build
 
-Adding Thrust To A CMake Project
---------------------------------
+# Configure with examples flag on
+CXX=hipcc cmake -DBUILD_EXAMPLES=ON ..
 
-Since Thrust is a header library, there is no need to build or install Thrust
-to use it. The `thrust` directory contains a complete, ready-to-use Thrust
-package upon checkout.
+# Build examples
+make -j4
 
-We provide CMake configuration files that make it easy to include Thrust
-from other CMake projects. See the [CMake README](thrust/cmake/README.md)
-for details.
+# Run the example you want to run
+# ./examples/example_thrust_<example-name>
+# For example:
+./examples/example_thrust_version
 
-Development Process
--------------------
-
-Thrust uses the [CMake build system](https://cmake.org/) to build unit tests,
-examples, and header tests. To build Thrust as a developer, the following
-recipe should be followed:
-
-```
-# Clone Thrust and CUB repos recursively:
-git clone --recursive https://github.com/thrust/thrust.git
-cd thrust
-
-# Create build directory:
-mkdir build
-cd build
-
-# Configure -- use one of the following:
-cmake ..   # Command line interface.
-ccmake ..  # ncurses GUI (Linux only)
-cmake-gui  # Graphical UI, set source/build directories in the app
-
-# Build:
-cmake --build . -j <num jobs>   # invokes make (or ninja, etc)
-
-# Run tests and examples:
-ctest
+# Example for linking with cpp files
+./examples/cpp_integration/example_thrust_linking
 ```
 
-By default, a serial `CPP` host system, `CUDA` accelerated device system, and
-C++14 standard are used. This can be changed in CMake. More information on
-configuring your Thrust build and creating a pull request can be found in
-[CONTRIBUTING.md](CONTRIBUTING.md).
+## Running Benchmarks
+```sh
+# Go to rocThrust build directory
+cd rocThrust; cd build
+
+# Configure with benchmarks flag on
+CXX=hipcc cmake -DBUILD_BENCHMARKS=ON ..
+
+# Build benchmarks
+make -j4
+
+# Run the benchmarks
+./benchmarks/benchmark_thrust_bench
+```
+
+
+## Documentation
+
+Documentation is available [here](https://rocthrust.readthedocs.io/en/latest/).
+
+## Support
+
+Bugs and feature requests can be reported through [the issue tracker](https://github.com/ROCmSoftwarePlatform/rocThrust/issues).
+
+## Contributions and License
+
+Contributions of any kind are most welcome! More details are found at [CONTRIBUTING](./CONTRIBUTING.md)
+and [LICENSE](./LICENSE.txt).
