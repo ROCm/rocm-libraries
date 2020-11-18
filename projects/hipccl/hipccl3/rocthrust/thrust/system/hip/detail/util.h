@@ -52,9 +52,13 @@ namespace thrust
 namespace hip_rocprim
 {
 
-  __host__ __device__ inline hipStream_t default_stream()
+  inline __host__ __device__ hipStream_t default_stream()
   {
+    #ifdef HIP_API_PER_THREAD_DEFAULT_STREAM
+      return hipStreamPerThread;
+    #else
       return hipStreamDefault; // There's not hipStreamLegacy
+    #endif
   }
 
   template <class Derived>
@@ -179,6 +183,12 @@ inline void __host__ __device__ terminate()
 
 inline void __host__ __device__ throw_on_error(hipError_t status, char const* msg)
 {
+#if __THRUST_HAS_HIPRT__
+  // Clear the global HIP error state which may have been set by the last
+  // call. Otherwise, errors may "leak" to unrelated kernel launches.
+  hipGetLastError();
+ #endif
+
   if(hipSuccess != status)
   {
     if (THRUST_IS_HOST_CODE) {
@@ -193,6 +203,7 @@ inline void __host__ __device__ throw_on_error(hipError_t status, char const* ms
         THRUST_HIP_PRINTF("Error %d :%s \n", (int)status, msg);
         #if THRUST_HIP_PRINTF_ENABLED == 0
         THRUST_UNUSED_VAR(status);
+        THRUST_UNUSED_VAR(msg);
         #endif
       #endif
       hip_rocprim::terminate();
@@ -204,6 +215,12 @@ inline void __host__ __device__ throw_on_error(hipError_t status, char const* ms
 // TODO this overload should be removed and messages should be passed.
 inline void __host__ __device__ throw_on_error(hipError_t status)
 {
+#if __THRUST_HAS_HIPRT__
+  // Clear the global HIP error state which may have been set by the last
+  // call. Otherwise, errors may "leak" to unrelated kernel launches.
+  hipGetLastError();
+ #endif
+
     if(hipSuccess != status)
     {
       if (THRUST_IS_HOST_CODE) {

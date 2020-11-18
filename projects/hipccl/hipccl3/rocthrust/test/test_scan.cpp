@@ -312,7 +312,7 @@ void TestScanMixedTypes(void)
     thrust::inclusive_scan(float_input.begin(), float_input.end(), int_output.begin());
     ASSERT_EQ(int_output[0],  1); // in: 1.5 accum: 1.5f out: 1
     ASSERT_EQ(int_output[1],  4); // in: 2.5 accum: 4.0f out: 4
-    ASSERT_EQL(int_output[2],  7); // in: 3.5 accum: 7.5f out: 7
+    ASSERT_EQ(int_output[2],  7); // in: 3.5 accum: 7.5f out: 7
     ASSERT_EQ(int_output[3], 12); // in: 4.5 accum: 12.f out: 12
 
     // float -> float with plus<int> operator (float accumulator)

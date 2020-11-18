@@ -141,6 +141,7 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
             // MSVC2015 WAR: put decltype here instead of in trailing return type
             typename Direction =
               decltype(direction_of_copy(std::declval<ExecutionPolicy>()))>
+  THRUST_CONSTEXPR __host__ __device__
   auto is_device_to_host_copy(ExecutionPolicy const& exec)
     noexcept ->
       thrust::detail::integral_constant<
