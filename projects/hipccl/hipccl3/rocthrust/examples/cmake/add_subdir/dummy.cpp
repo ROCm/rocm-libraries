@@ -22,6 +22,8 @@ int main()
             << "CPP\n";
 #elif THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
             << "CUDA\n";
+#elif THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
+            << "HIP\n";
 #elif THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_OMP
             << "OMP\n";
 #elif THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_TBB
