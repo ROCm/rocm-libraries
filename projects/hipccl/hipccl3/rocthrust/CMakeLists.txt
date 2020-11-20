@@ -71,7 +71,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 include(cmake/Dependencies.cmake)
 
 # Setup VERSION
-rocm_setup_version(VERSION "2.10.6")
+rocm_setup_version(VERSION "2.10.7")
 
 # Print configuration summary
 include(cmake/Summary.cmake)
@@ -87,13 +87,6 @@ if(BUILD_TEST)
   enable_testing()
   add_subdirectory(test)
 endif()
-
-# Setup VERSION
-rocm_setup_version(VERSION "2.10.7")
-
-# Print configuration summary
-include(cmake/Summary.cmake)
-print_configuration_summary()
 
 # Examples
 if(BUILD_EXAMPLES)
