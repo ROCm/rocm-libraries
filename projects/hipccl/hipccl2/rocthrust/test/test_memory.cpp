@@ -113,6 +113,69 @@ private:
     my_memory_system();
 };
 
+namespace my_old_namespace
+{
+
+struct my_old_temporary_allocation_system
+  : public thrust::device_execution_policy<my_old_temporary_allocation_system>
+{
+};
+
+template <typename T>
+thrust::pair<thrust::pointer<T, my_old_temporary_allocation_system>, std::ptrdiff_t>
+get_temporary_buffer(my_old_temporary_allocation_system, std::ptrdiff_t)
+{
+  thrust::pointer<T, my_old_temporary_allocation_system> const
+    result(reinterpret_cast<T*>(4217));
+
+  return thrust::make_pair(result, 314);
+}
+
+template<typename Pointer>
+void return_temporary_buffer(my_old_temporary_allocation_system, Pointer p)
+{
+  typedef typename thrust::detail::pointer_traits<Pointer>::raw_pointer RP;
+  ASSERT_EQ(p.get(), reinterpret_cast<RP>(4217));
+}
+
+} // my_old_namespace
+
+namespace my_new_namespace
+{
+
+struct my_new_temporary_allocation_system
+  : public thrust::device_execution_policy<my_new_temporary_allocation_system>
+{
+};
+
+template <typename T>
+thrust::pair<thrust::pointer<T, my_new_temporary_allocation_system>, std::ptrdiff_t>
+get_temporary_buffer(my_new_temporary_allocation_system, std::ptrdiff_t)
+{
+  thrust::pointer<T, my_new_temporary_allocation_system> const
+    result(reinterpret_cast<T*>(1742));
+
+  return thrust::make_pair(result, 413);
+}
+
+template<typename Pointer>
+void return_temporary_buffer(my_new_temporary_allocation_system, Pointer p)
+{
+  // This should never be called (the three-argument with size overload below
+  // should be preferred) and shouldn't be ambiguous.
+  ASSERT_EQ(true, false);
+}
+
+template<typename Pointer>
+void return_temporary_buffer(my_new_temporary_allocation_system, Pointer p, std::ptrdiff_t n)
+{
+  typedef typename thrust::detail::pointer_traits<Pointer>::raw_pointer RP;
+  ASSERT_EQ(p.get(), reinterpret_cast<RP>(1742));
+  ASSERT_EQ(n, 413);
+}
+
+} // my_new_namespace
+
 template <typename T1, typename T2>
 bool are_same(const T1&, const T2&)
 {
@@ -289,7 +352,7 @@ TEST(MemoryTests, TestGetTemporaryBufferDispatchImplicit)
 TEST(MemoryTests, TestGetTemporaryBufferDispatchExplicit)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-    
+
     if(are_same(thrust::device_system_tag(), thrust::system::cpp::tag()))
     {
         // XXX cpp uses the internal scalar backend, which currently elides user tags
@@ -309,4 +372,44 @@ TEST(MemoryTests, TestGetTemporaryBufferDispatchExplicit)
         ASSERT_EQ(true, thrust::is_sorted(vec.begin(), vec.end()));
         ASSERT_EQ(true, sys.is_valid());
     }
+}
+
+TEST(MemoryTests, TestTemporaryBufferOldCustomization)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  typedef my_old_namespace::my_old_temporary_allocation_system system;
+  typedef thrust::pointer<int, system> pointer;
+  typedef thrust::pair<pointer, std::ptrdiff_t> pointer_and_size;
+
+  system sys;
+
+  {
+    pointer_and_size ps = thrust::get_temporary_buffer<int>(sys, 0);
+
+    // The magic values are defined in `my_old_namespace` above.
+    ASSERT_EQ(ps.first.get(), reinterpret_cast<int*>(4217));
+    ASSERT_EQ(ps.second, 314);
+
+    thrust::return_temporary_buffer(sys, ps.first, ps.second);
+  }
+}
+
+
+TEST(MemoryTests,TestTemporaryBufferNewCustomization)
+{
+  typedef my_new_namespace::my_new_temporary_allocation_system system;
+  typedef thrust::pointer<int, system> pointer;
+  typedef thrust::pair<pointer, std::ptrdiff_t> pointer_and_size;
+
+  system sys;
+
+  {
+    pointer_and_size ps = thrust::get_temporary_buffer<int>(sys, 0);
+
+    // The magic values are defined in `my_new_namespace` above.
+    ASSERT_EQ(ps.first.get(), reinterpret_cast<int*>(1742));
+    ASSERT_EQ(ps.second, 413);
+
+    thrust::return_temporary_buffer(sys, ps.first, ps.second);
+  }
 }
