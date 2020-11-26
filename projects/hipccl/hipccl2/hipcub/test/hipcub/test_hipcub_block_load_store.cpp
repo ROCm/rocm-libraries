@@ -490,15 +490,6 @@ TYPED_TEST(HipcubBlockLoadStoreClassTests, LoadStoreClassDefault)
     }
 }
 
-
-template <bool IF, typename ThenType, typename ElseType>
-struct If
-{
-    /// Conditional type result
-    typedef ThenType Type;      // true
-};
-
-
 template <
     typename            InputIteratorT,
     typename            OutputIteratorT,
@@ -522,9 +513,9 @@ __global__ void load_store_guarded_kernel(
     typedef typename std::iterator_traits<InputIteratorT>::value_type InputT;
 
     // The output value type
-    typedef typename If<(std::is_same<typename std::iterator_traits<OutputIteratorT>::value_type, void>::value),  // OutputT =  (if output iterator's value type is void) ?
+    typedef typename std::conditional<(std::is_same<typename std::iterator_traits<OutputIteratorT>::value_type, void>::value),  // OutputT =  (if output iterator's value type is void) ?
         typename std::iterator_traits<InputIteratorT>::value_type,                                          // ... then the input iterator's value type,
-        typename std::iterator_traits<OutputIteratorT>::value_type>::Type OutputT;                          // ... else the output iterator's value type
+        typename std::iterator_traits<OutputIteratorT>::value_type>::type OutputT;                          // ... else the output iterator's value type
 
     // Threadblock load/store abstraction types
     typedef hipcub::BlockLoad<InputT, BlockSize, ItemsPerThread, LoadMethod> BlockLoad;
