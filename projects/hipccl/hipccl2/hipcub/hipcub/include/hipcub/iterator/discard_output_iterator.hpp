@@ -27,8 +27,8 @@
  *
  ******************************************************************************/
 
-#ifndef HIPCUB_ITERATOR_TRANSFORM_INPUT_ITERATOR_HPP_
-#define HIPCUB_ITERATOR_TRANSFORM_INPUT_ITERATOR_HPP_
+#ifndef HIPCUB_ITERATOR_DISCARD_OUTPUT_HPP_
+#define HIPCUB_ITERATOR_DISCARD_OUTPUT_HPP_
 
 #ifdef __HIP_PLATFORM_HCC__
     #include "../backend/rocprim/iterator/discard_output_iterator.hpp"
@@ -37,4 +37,4 @@
     #include <cub/iterator/discard_output_iterator.cuh>
 #endif
 
-#endif // HIPCUB_ITERATOR_TRANSFORM_INPUT_ITERATOR_HPP_
+#endif // HIPCUB_ITERATOR_DISCARD_OUTPUT__HPP_
