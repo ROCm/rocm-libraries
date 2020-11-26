@@ -25,6 +25,7 @@
 // hipcub API
 #include "hipcub/block/block_load.hpp"
 #include "hipcub/block/block_store.hpp"
+#include "hipcub/iterator/discard_output_iterator.hpp"
 
 template<
     class Type,
@@ -479,5 +480,198 @@ TYPED_TEST(HipcubBlockLoadStoreClassTests, LoadStoreClassDefault)
 
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_output));
+    }
+}
+
+
+template <bool IF, typename ThenType, typename ElseType>
+struct If
+{
+    /// Conditional type result
+    typedef ThenType Type;      // true
+};
+
+
+template <
+    typename            InputIteratorT,
+    typename            OutputIteratorT,
+    hipcub::BlockLoadAlgorithm LoadMethod,
+    hipcub::BlockStoreAlgorithm StoreMethod,
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread>
+__launch_bounds__ (BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__global__ void load_store_guarded_kernel(
+    InputIteratorT    d_in,
+    OutputIteratorT   d_out_unguarded,
+    OutputIteratorT   d_out_guarded,
+    int               num_items)
+{
+    enum
+    {
+        TileSize = BlockSize * ItemsPerThread
+    };
+
+    // The input value type
+    typedef typename std::iterator_traits<InputIteratorT>::value_type InputT;
+
+    // The output value type
+    typedef typename If<(std::is_same<typename std::iterator_traits<OutputIteratorT>::value_type, void>::value),  // OutputT =  (if output iterator's value type is void) ?
+        typename std::iterator_traits<InputIteratorT>::value_type,                                          // ... then the input iterator's value type,
+        typename std::iterator_traits<OutputIteratorT>::value_type>::Type OutputT;                          // ... else the output iterator's value type
+
+    // Threadblock load/store abstraction types
+    typedef hipcub::BlockLoad<InputT, BlockSize, ItemsPerThread, LoadMethod> BlockLoad;
+    typedef hipcub::BlockStore<OutputT, BlockSize, ItemsPerThread, StoreMethod> BlockStore;
+
+    // Shared memory type for this thread block
+    union TempStorage
+    {
+        typename BlockLoad::TempStorage     load;
+        typename BlockStore::TempStorage    store;
+    };
+
+    // Allocate temp storage in shared memory
+    __shared__ TempStorage temp_storage;
+
+    // Threadblock work bounds
+    int block_offset = blockIdx.x * TileSize;
+    int guarded_elements = std::max(num_items - block_offset, 0);
+
+    // Tile of items
+    OutputT data[ItemsPerThread];
+
+    // Load data
+    BlockLoad(temp_storage.load).Load(d_in + block_offset, data);
+
+    __syncthreads();
+
+    // Store data
+    BlockStore(temp_storage.store).Store(d_out_unguarded + block_offset, data);
+
+    __syncthreads();
+
+    // reset data
+    #pragma unroll
+    for (unsigned int item = 0; item < ItemsPerThread; ++item)
+        data[item] = OutputT();
+
+    __syncthreads();
+
+    // Load data
+    BlockLoad(temp_storage.load).Load(d_in + block_offset, data, guarded_elements);
+
+    __syncthreads();
+
+    // Store data
+    BlockStore(temp_storage.store).Store(d_out_guarded + block_offset, data, guarded_elements);
+}
+
+TYPED_TEST(HipcubBlockLoadStoreClassTests, LoadStoreDiscardIterator)
+{
+    using Type = typename TestFixture::params::type;
+    constexpr size_t block_size = TestFixture::params::block_size;
+    constexpr hipcub::BlockLoadAlgorithm load_method = TestFixture::params::load_method;
+    constexpr hipcub::BlockStoreAlgorithm store_method = TestFixture::params::store_method;
+    const size_t items_per_thread = TestFixture::params::items_per_thread;
+    constexpr auto items_per_block = block_size * items_per_thread;
+    const auto grid_size = 113;
+    const size_t size = items_per_block * grid_size;
+
+    constexpr double fraction_valid = 0.8f;
+
+    // Given block size not supported
+    if(block_size > test_utils::get_max_block_size() || (block_size & (block_size - 1)) != 0)
+    {
+        return;
+    }
+
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+        const size_t unguarded_elements = size;
+        const size_t guarded_elements   = size_t(fraction_valid * double(unguarded_elements));
+
+        // Generate data
+        std::vector<Type> input = test_utils::get_random_data<Type>(unguarded_elements, -100, 100, seed_value);
+        std::vector<Type> unguarded(unguarded_elements, 0);
+        std::vector<Type> guarded(guarded_elements, 0);
+
+        // Calculate expected results on host
+        std::vector<Type> unguarded_expected(unguarded_elements);
+        std::vector<Type> guarded_expected(guarded_elements);
+        for (size_t i = 0; i < unguarded_elements; i++)
+        {
+            unguarded_expected[i] = input[i];
+        }
+
+        for (size_t i = 0; i < guarded_elements; i++)
+        {
+            guarded_expected[i] = input[i];
+        }
+
+        // Preparing device
+        Type* device_input;
+        HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
+        Type* device_guarded_elements;
+        HIP_CHECK(hipMalloc(&device_guarded_elements, guarded_expected.size() * sizeof(typename decltype(unguarded)::value_type)));
+        Type* device_unguarded_elements;
+        HIP_CHECK(hipMalloc(&device_unguarded_elements, unguarded_expected.size() * sizeof(typename decltype(guarded)::value_type)));
+
+        HIP_CHECK(
+            hipMemcpy(
+                device_input, input.data(),
+                input.size() * sizeof(typename decltype(input)::value_type),
+                hipMemcpyHostToDevice
+            )
+        );
+
+        // Test with discard output iterator
+        //typedef typename std::iterator_traits<Type>::difference_type OffsetT;
+        hipcub::DiscardOutputIterator<size_t> discard_itr;
+
+        // Running kernel
+        load_store_guarded_kernel<Type*, hipcub::DiscardOutputIterator<size_t>, load_method, store_method, block_size, items_per_thread>
+            <<<dim3(grid_size), dim3(block_size)>>>(
+            device_input, discard_itr, discard_itr, guarded_elements
+        );
+
+        // Running kernel
+        load_store_guarded_kernel<Type*, Type*, load_method, store_method, block_size, items_per_thread>
+            <<<dim3(grid_size), dim3(block_size)>>>(
+            device_input, device_unguarded_elements, device_guarded_elements, guarded_elements
+        );
+
+        // Reading results from device
+        HIP_CHECK(
+            hipMemcpy(
+                unguarded.data(), device_unguarded_elements,
+                unguarded.size() * sizeof(typename decltype(unguarded)::value_type),
+                hipMemcpyDeviceToHost
+            )
+        );
+
+        HIP_CHECK(
+            hipMemcpy(
+                guarded.data(), device_guarded_elements,
+                guarded.size() * sizeof(typename decltype(guarded)::value_type),
+                hipMemcpyDeviceToHost
+            )
+        );
+
+        // Validating results
+        for(size_t i = 0; i < guarded_expected.size(); i++)
+        {
+            ASSERT_EQ(guarded[i], guarded_expected[i]) << "where index = " << i;
+        }
+        for(size_t i = 0; i < unguarded_expected.size(); i++)
+        {
+            ASSERT_EQ(unguarded[i], unguarded_expected[i]) << "where index = " << i;
+        }
+
+        HIP_CHECK(hipFree(device_input));
+        HIP_CHECK(hipFree(device_guarded_elements));
+        HIP_CHECK(hipFree(device_unguarded_elements));
     }
 }
