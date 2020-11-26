@@ -32,7 +32,8 @@
 
 #include "../../../config.hpp"
 
-#include <rocprim/iterator/discard_iterator.hpp>
+// TODO: Check, if we can update rocPRIM, to use the rocPRIM discard iterator.
+//#include <rocprim/iterator/discard_iterator.hpp>
 
 BEGIN_HIPCUB_NAMESPACE
 
