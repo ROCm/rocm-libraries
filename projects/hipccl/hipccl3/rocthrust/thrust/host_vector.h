@@ -22,7 +22,7 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <memory>
+#include <thrust/detail/memory_wrapper.h>
 #include <thrust/detail/vector_base.h>
 #include <vector>
 #include <utility>
@@ -135,7 +135,7 @@ template<typename T, typename Alloc = std::allocator<T> >
     host_vector(const host_vector &v, const Alloc &alloc)
       :Parent(v,alloc) {}
 
-  #if __cplusplus >= 201103L
+  #if THRUST_CPP_DIALECT >= 2011
     /*! Move constructor moves from another host_vector.
      *  \param v The host_vector to move.
      */
@@ -159,7 +159,7 @@ template<typename T, typename Alloc = std::allocator<T> >
   host_vector &operator=(const host_vector &v)
   { Parent::operator=(v); return *this; }
 
-  #if __cplusplus >= 201103L
+  #if THRUST_CPP_DIALECT >= 2011
     /*! Move assign operator moves from another host_vector.
      *  \param v The host_vector to move.
      */
@@ -450,7 +450,7 @@ template<typename T, typename Alloc = std::allocator<T> >
      *  \param x The exemplar element to copy & insert.
      *  \return An iterator pointing to the newly inserted element.
      */
-    iterator insert(iterator position, const T &x); 
+    iterator insert(iterator position, const T &x);
 
     /*! This method inserts a copy of an exemplar value to a range at the
      *  specified position in this vector.
@@ -511,4 +511,3 @@ template<typename T, typename Alloc>
 } // end thrust
 
 #include <thrust/detail/host_vector.inl>
-

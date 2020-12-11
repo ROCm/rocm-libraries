@@ -64,73 +64,16 @@ inline pointer<T> malloc(std::size_t n);
  *  \see cpp::malloc
  *  \see std::free
  */
-inline void free(pointer<void> ptr);
+ inline void free(pointer<void> ptr);
 
-// XXX upon c++11
-// template<typename T>
-// using allocator = thrust::mr::stateless_resource_allocator<T, memory_resource>;
+ /*! \p cpp::allocator is the default allocator used by the \p cpp system's containers such as
+  *  <tt>cpp::vector</tt> if no user-specified allocator is provided. \p cpp::allocator allocates
+  *  (deallocates) storage with \p cpp::malloc (\p cpp::free).
+  */
+ template<typename T>
+ using allocator = thrust::mr::stateless_resource_allocator<T, memory_resource>;
 
-/*! \p cpp::allocator is the default allocator used by the \p cpp system's containers such as
- *  <tt>cpp::vector</tt> if no user-specified allocator is provided. \p cpp::allocator allocates
- *  (deallocates) storage with \p cpp::malloc (\p cpp::free).
- */
-template<typename T>
-  struct allocator
-    : thrust::mr::stateless_resource_allocator<
-        T,
-        memory_resource
-    >
-{
-private:
-    typedef thrust::mr::stateless_resource_allocator<
-        T,
-        memory_resource
-    > base;
-
-public:
-  /*! The \p rebind metafunction provides the type of an \p allocator
-   *  instantiated with another type.
-   *
-   *  \tparam U The other type to use for instantiation.
-   */
-  template<typename U>
-    struct rebind
-  {
-    /*! The typedef \p other gives the type of the rebound \p allocator.
-     */
-    typedef allocator<U> other;
-  };
-
-  /*! No-argument constructor has no effect.
-   */
-  __host__ __device__
-  inline allocator() {}
-
-  /*! Copy constructor has no effect.
-   */
-  __host__ __device__
-  inline allocator(const allocator & other) : base(other) {}
-
-  /*! Constructor from other \p allocator has no effect.
-   */
-  template<typename U>
-  __host__ __device__
-  inline allocator(const allocator<U> & other) : base(other) {}
-
-#if THRUST_CPP_DIALECT >= 2011
-  allocator & operator=(const allocator &) = default;
-#endif
-
-  /*! Destructor has no effect.
-   */
-  __host__ __device__
-  inline ~allocator() {}
-}; // end allocator
-
-} // end cpp
-
-/*! \}
- */
+ } // end cpp
 
 } // end system
 
@@ -149,4 +92,3 @@ using thrust::system::cpp::allocator;
 } // end thrust
 
 #include <thrust/system/cpp/detail/memory.inl>
-

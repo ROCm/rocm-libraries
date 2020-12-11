@@ -24,7 +24,8 @@
 #include <thrust/system/cuda/detail/copy.h>
 
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 namespace cuda_cub {
 
 
@@ -78,16 +79,20 @@ inline __host__ __device__
     }
   };
 
-#if __CUDA_ARCH__
-  war_nvbugs_881631::device_path(systems,dst,src);
-#else
-  war_nvbugs_881631::host_path(systems,dst,src);
-#endif
+  if (THRUST_IS_HOST_CODE) {
+     #if THRUST_INCLUDE_HOST_CODE
+       war_nvbugs_881631::host_path(systems,dst,src);
+     #endif
+   } else {
+     #if THRUST_INCLUDE_DEVICE_CODE
+       war_nvbugs_881631::device_path(systems,dst,src);
+     #endif
+   }
 } // end assign_value()
 
 
 
-  
+
 } // end cuda_cub
-THRUST_END_NS
+} // end namespace thrust
 #endif

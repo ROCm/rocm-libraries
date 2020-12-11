@@ -30,7 +30,8 @@
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #include <thrust/system/hip/detail/copy_if.h>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 namespace hip_rocprim
 {
 
@@ -64,8 +65,8 @@ remove(execution_policy<Derived>& policy,
        InputIt                    last,
        const T&                   value)
 {
-    thrust::detail::equal_to_value<T> pred(value);
-    return hip_rocprim::remove_if(policy, first, last, pred);
+    using thrust::placeholders::_1;
+    return hip_rocprim::remove_if(policy, first, last, _1 == value);
 }
 
 // copy
@@ -106,5 +107,5 @@ remove_copy(execution_policy<Derived>& policy,
 }
 
 } // namespace hip_rocprim
-THRUST_END_NS
+} // end namespace thrust
 #endif

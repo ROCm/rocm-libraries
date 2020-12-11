@@ -15,7 +15,7 @@
  */
 
 /*! \file void_t.h
- *  \brief C++17's `void_t`. 
+ *  \brief C++17's `void_t`.
  */
 
 #pragma once
@@ -26,7 +26,8 @@
 #  include <type_traits>
 #endif
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 
 #if THRUST_CPP_DIALECT >= 2011
 
@@ -59,5 +60,4 @@ struct voider
 
 #endif
 
-THRUST_END_NS
-
+} // end namespace thrust

@@ -66,11 +66,11 @@ namespace thrust
 
 namespace detail
 {
-  
+
 template <typename T, std::size_t Align>
 struct complex_storage;
 
-#if __cplusplus >= 201103L                                                    \
+#if THRUST_CPP_DIALECT >= 2011                                                    \
   && (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC)                       \
   && (THRUST_GCC_VERSION >= 40800)
   // C++11 implementation, excluding GCC 4.7, which doesn't have `alignas`.
@@ -83,9 +83,9 @@ struct complex_storage;
     || (   (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC)                 \
         && (THRUST_GCC_VERSION < 40600))
   // C++03 implementation for MSVC and GCC <= 4.5.
-  // 
+  //
   // We have to implement `aligned_type` with specializations for MSVC
-  // and GCC 4.2 and older because they require literals as arguments to 
+  // and GCC 4.2 and older because they require literals as arguments to
   // their alignment attribute.
 
   #if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC)
@@ -116,7 +116,7 @@ struct complex_storage;
   {
     T x; T y;
   };
-  
+
   THRUST_DEFINE_COMPLEX_STORAGE_SPECIALIZATION(1);
   THRUST_DEFINE_COMPLEX_STORAGE_SPECIALIZATION(2);
   THRUST_DEFINE_COMPLEX_STORAGE_SPECIALIZATION(4);
@@ -177,7 +177,6 @@ public:
 #if THRUST_CPP_DIALECT >= 2011
   /*! Default construct a complex number.
    */
-   __host__ __device__
   complex() = default;
 
   /*! This copy constructor copies from a \p complex with a type that is
@@ -185,7 +184,6 @@ public:
    *
    *  \param z The \p complex to copy from.
    */
-   __host__ __device__
   complex(const complex<T>& z) = default;
 #else
   /*! Default construct a complex number.
@@ -250,7 +248,6 @@ public:
    *
    *  \param z The \p complex to copy from.
    */
-   __host__ __device__
   complex& operator=(const complex<T>& z) = default;
 #else
   /*! Assign `z.real()` and `z.imag()` to the real and imaginary parts of this
@@ -451,35 +448,11 @@ public:
 
   /*! Casts this \p complex to a <tt>std::complex</tt> of the same type.
    */
-  __host__ __device__
+  __host__
   operator std::complex<T>() const { return std::complex<T>(real(), imag()); }
 
 private:
-  /*! \cond
-   */
-  struct generic_storage_type { T x; T y; };
-  /*! \endcond
-   */
-
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC || THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-  typedef typename detail::conditional<
-    detail::is_same<T, float>::value, float2,
-    typename detail::conditional<
-      detail::is_same<T, float const>::value, float2 const,
-      typename detail::conditional<
-        detail::is_same<T, double>::value, double2,
-        typename detail::conditional<
-          detail::is_same<T, double const>::value, double2 const,
-          generic_storage_type
-        >::type
-      >::type
-    >::type
-  >::type storage_type;
-#else
-  typedef generic_storage_type storage_type;
-#endif
-
-  storage_type data;
+  typename detail::complex_storage<T, sizeof(T) * 2>::type data;
 };
 
 
@@ -952,6 +925,7 @@ operator<<(std::basic_ostream<CharT, Traits>& os, const complex<T>& z);
  *  \param z The \p complex number to set.
  */
 template <typename T, typename CharT, typename Traits>
+__host__
 std::basic_istream<CharT, Traits>&
 operator>>(std::basic_istream<CharT, Traits>& is, complex<T>& z);
 

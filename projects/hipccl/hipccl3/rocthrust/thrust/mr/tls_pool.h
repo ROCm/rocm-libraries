@@ -43,7 +43,7 @@ namespace mr
  *  \param upstream the argument to the constructor, if invoked
  */
 template<typename Upstream, typename Bookkeeper>
-__host__ __device__
+__host__
 thrust::mr::unsynchronized_pool_resource<Upstream> & tls_pool(Upstream * upstream = NULL)
 {
     static thread_local auto adaptor = [&]{
@@ -61,4 +61,3 @@ thrust::mr::unsynchronized_pool_resource<Upstream> & tls_pool(Upstream * upstrea
 } // end thrust
 
 #endif // THRUST_CPP_DIALECT >= 2011
-

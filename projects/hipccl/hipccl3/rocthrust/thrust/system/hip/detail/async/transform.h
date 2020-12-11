@@ -30,10 +30,9 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/detail/cpp11_required.h>
-#include <thrust/detail/modern_gcc_required.h>
+#include <thrust/detail/cpp14_required.h>
 
-#if THRUST_CPP_DIALECT >= 2011 && !defined(THRUST_LEGACY_GCC)
+#if THRUST_CPP_DIALECT >= 2014
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
@@ -48,7 +47,8 @@
 
 #include <type_traits>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 
 namespace system { namespace hip { namespace detail
 {
@@ -77,7 +77,6 @@ template <
   typename DerivedPolicy
 , typename ForwardIt, typename Size, typename OutputIt, typename UnaryOperation
 >
-THRUST_HIP_RUNTIME_FUNCTION
 auto async_transform_n(
   execution_policy<DerivedPolicy>& policy,
   ForwardIt                        first,
@@ -141,7 +140,6 @@ template <
 , typename ForwardIt, typename Sentinel, typename OutputIt
 , typename UnaryOperation
 >
-THRUST_HIP_RUNTIME_FUNCTION
 auto async_transform(
   execution_policy<DerivedPolicy>& policy,
   ForwardIt                        first,
@@ -149,7 +147,7 @@ auto async_transform(
   OutputIt                         output,
   UnaryOperation&&                 op
 )
-THRUST_DECLTYPE_RETURNS(
+THRUST_RETURNS(
   thrust::system::hip::detail::async_transform_n(
     policy, first, thrust::distance(first, last), output, THRUST_FWD(op)
   )
@@ -157,7 +155,7 @@ THRUST_DECLTYPE_RETURNS(
 
 } // hip_rocprim
 
-THRUST_END_NS
+} // end namespace thrust
 
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 

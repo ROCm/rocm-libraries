@@ -31,9 +31,10 @@
 #include <thrust/system/hip/detail/get_value.h>
 
 #include <type_traits>
-#include <memory>
+#include <thrust/detail/memory_wrapper.h>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 
 // Forward declaration.
 struct new_stream_t;
@@ -1363,6 +1364,6 @@ THRUST_DECLTYPE_RETURNS(std::move(dependency))
 
 }} // namespace system::hip
 
-THRUST_END_NS
+} // end namespace thrust
 
 #endif

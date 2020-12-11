@@ -18,7 +18,7 @@
 #include <thrust/detail/allocator/allocator_traits.h>
 #include <thrust/detail/type_traits/pointer_traits.h>
 #include <thrust/for_each.h>
-#include <memory>
+#include <thrust/detail/memory_wrapper.h>
 
 namespace thrust
 {
@@ -161,4 +161,3 @@ __host__ __device__
 
 } // end detail
 } // end thrust
-

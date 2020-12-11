@@ -25,7 +25,8 @@
 #include <thrust/system/hip/config.h>
 #include <thrust/system/hip/detail/cross_system.h>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 namespace hip_rocprim
 {
 
@@ -57,6 +58,6 @@ get_value(execution_policy<DerivedPolicy>& exec, Pointer ptr)
 } // end get_value()
 
 } // end hip_rocprim
-THRUST_END_NS
+} // end namespace thrust
 
 #endif

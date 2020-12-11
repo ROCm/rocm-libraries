@@ -30,11 +30,12 @@
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 #include <thrust/system/cuda/detail/copy_if.h>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 namespace cuda_cub {
 
 // in-place
-  
+
 template <class Derived,
           class InputIt,
           class StencilIt,
@@ -73,8 +74,8 @@ remove(execution_policy<Derived> &policy,
        InputIt                    last,
        const T &                  value)
 {
-  thrust::detail::equal_to_value<T> pred(value);
-  return cuda_cub::remove_if(policy, first, last, pred);
+  using thrust::placeholders::_1;
+  return cuda_cub::remove_if(policy, first, last, _1 == value);
 }
 
 // copy
@@ -128,5 +129,5 @@ remove_copy(execution_policy<Derived> &policy,
 }
 
 }    // namespace cuda_cub
-THRUST_END_NS
+} // end namespace thrust
 #endif

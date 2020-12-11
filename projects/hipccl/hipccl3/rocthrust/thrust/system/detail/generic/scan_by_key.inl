@@ -42,12 +42,12 @@ template <typename OutputType, typename HeadFlagType, typename AssociativeOperat
 struct segmented_scan_functor
 {
   AssociativeOperator binary_op;
-  
+
   typedef typename thrust::tuple<OutputType, HeadFlagType> result_type;
-  
+
   __host__ __device__
   segmented_scan_functor(AssociativeOperator _binary_op) : binary_op(_binary_op) {}
-  
+
   __host__ __device__
   result_type operator()(result_type a, result_type b)
   {
@@ -89,8 +89,7 @@ __host__ __device__
                                        OutputIterator result,
                                        BinaryPredicate binary_pred)
 {
-  typedef typename thrust::iterator_traits<OutputIterator>::value_type OutputType;
-  return thrust::inclusive_scan_by_key(exec, first1, last1, first2, result, binary_pred, thrust::plus<OutputType>());
+  return thrust::inclusive_scan_by_key(exec, first1, last1, first2, result, binary_pred, thrust::plus<>());
 }
 
 
@@ -120,7 +119,7 @@ __host__ __device__
     thrust::detail::temporary_array<HeadFlagType,DerivedPolicy> flags(exec, n);
     flags[0] = 1; thrust::transform(exec, first1, last1 - 1, first1 + 1, flags.begin() + 1, thrust::detail::not2(binary_pred));
 
-    // scan key-flag tuples, 
+    // scan key-flag tuples,
     // For additional details refer to Section 2 of the following paper
     //    S. Sengupta, M. Harris, and M. Garland. "Efficient parallel scan algorithms for GPUs"
     //    NVIDIA Technical Report NVR-2008-003, December 2008
@@ -185,8 +184,7 @@ __host__ __device__
                                        T init,
                                        BinaryPredicate binary_pred)
 {
-  typedef typename thrust::iterator_traits<OutputIterator>::value_type OutputType;
-  return thrust::exclusive_scan_by_key(exec, first1, last1, first2, result, init, binary_pred, thrust::plus<OutputType>());
+  return thrust::exclusive_scan_by_key(exec, first1, last1, first2, result, init, binary_pred, thrust::plus<>());
 }
 
 
@@ -225,7 +223,7 @@ __host__ __device__
     thrust::replace_copy_if(exec, first2, last2 - 1, flags.begin() + 1, temp.begin() + 1, thrust::negate<HeadFlagType>(), init);
     temp[0] = init;
 
-    // scan key-flag tuples, 
+    // scan key-flag tuples,
     // For additional details refer to Section 2 of the following paper
     //    S. Sengupta, M. Harris, and M. Garland. "Efficient parallel scan algorithms for GPUs"
     //    NVIDIA Technical Report NVR-2008-003, December 2008
@@ -245,4 +243,3 @@ __host__ __device__
 } // end namespace detail
 } // end namespace system
 } // end namespace thrust
-

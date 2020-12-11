@@ -55,7 +55,8 @@
   #include __THRUST_DEVICE_SYSTEM_FUTURE_HEADER
 #undef __THRUST_DEVICE_SYSTEM_FUTURE_HEADER
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -71,14 +72,14 @@ namespace unimplemented
 
 struct no_unique_eager_event_type_found {};
 
-inline __host__ 
+inline __host__
 no_unique_eager_event_type_found
 unique_eager_event_type(...) noexcept;
 
 struct no_unique_eager_future_type_found {};
 
 template <typename T>
-__host__ 
+__host__
 no_unique_eager_future_type_found
 unique_eager_future_type(...) noexcept;
 
@@ -172,7 +173,6 @@ using thrust::system::__THRUST_DEVICE_SYSTEM_NAMESPACE::when_all;
 
 ///////////////////////////////////////////////////////////////////////////////
 
-THRUST_END_NS
+} //end namespace thrust
 
 #endif
-

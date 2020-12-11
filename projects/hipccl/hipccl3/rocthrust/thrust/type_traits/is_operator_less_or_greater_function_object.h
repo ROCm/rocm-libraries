@@ -27,7 +27,8 @@
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/pointer_traits.h>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 
 namespace detail
 {
@@ -93,7 +94,7 @@ using is_operator_less_or_greater_function_object =
 struct is_operator_less_or_greater_function_object :
 #endif
   integral_constant<
-    bool 
+    bool
   ,    detail::is_operator_less_function_object_impl<FunctionObject>::value
     || detail::is_operator_greater_function_object_impl<FunctionObject>::value
   >
@@ -131,5 +132,4 @@ struct is_operator_greater_function_object_impl<std::greater<T>    > : true_type
 
 } // namespace detail
 
-THRUST_END_NS
-
+} // end namespace thrust

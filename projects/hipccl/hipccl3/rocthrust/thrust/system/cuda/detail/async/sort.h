@@ -30,10 +30,9 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/detail/cpp11_required.h>
-#include <thrust/detail/modern_gcc_required.h>
+#include <thrust/detail/cpp14_required.h>
 
-#if THRUST_CPP_DIALECT >= 2011 && !defined(THRUST_LEGACY_GCC)
+#if THRUST_CPP_DIALECT >= 2014
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 
@@ -54,7 +53,8 @@
 
 #include <type_traits>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 
 namespace system { namespace cuda { namespace detail
 {
@@ -64,7 +64,6 @@ template <
   typename DerivedPolicy
 , typename ForwardIt, typename Size, typename StrictWeakOrdering
 >
-THRUST_RUNTIME_FUNCTION
 auto async_stable_sort_n(
   execution_policy<DerivedPolicy>& policy,
   ForwardIt                        first,
@@ -172,7 +171,6 @@ template <
   typename DerivedPolicy
 , typename ForwardIt, typename Size, typename StrictWeakOrdering
 >
-THRUST_RUNTIME_FUNCTION
 auto async_stable_sort_n(
   execution_policy<DerivedPolicy>& policy,
   ForwardIt                        first,
@@ -288,7 +286,6 @@ auto async_stable_sort_n(
 }
 
 template <typename T, typename Size, typename StrictWeakOrdering>
-THRUST_RUNTIME_FUNCTION
 typename std::enable_if<
   is_operator_less_function_object<StrictWeakOrdering>::value
 , cudaError_t
@@ -315,7 +312,6 @@ invoke_radix_sort(
 }
 
 template <typename T, typename Size, typename StrictWeakOrdering>
-THRUST_RUNTIME_FUNCTION
 typename std::enable_if<
   is_operator_greater_function_object<StrictWeakOrdering>::value
 , cudaError_t
@@ -348,7 +344,6 @@ template <
   typename DerivedPolicy
 , typename ForwardIt, typename Size, typename StrictWeakOrdering
 >
-THRUST_RUNTIME_FUNCTION
 auto async_stable_sort_n(
   execution_policy<DerivedPolicy>& policy
 , ForwardIt                        first
@@ -503,13 +498,14 @@ template <
   typename DerivedPolicy
 , typename ForwardIt, typename Sentinel, typename StrictWeakOrdering
 >
-THRUST_RUNTIME_FUNCTION
 auto async_stable_sort(
   execution_policy<DerivedPolicy>& policy,
   ForwardIt                        first,
   Sentinel                         last,
   StrictWeakOrdering               comp
 )
+// A GCC 5 bug requires an explicit trailing return type here, so stick with
+// THRUST_DECLTYPE_RETURNS for now.
 THRUST_DECLTYPE_RETURNS(
   thrust::system::cuda::detail::async_stable_sort_n(
     policy, first, distance(first, last), comp
@@ -518,9 +514,8 @@ THRUST_DECLTYPE_RETURNS(
 
 } // cuda_cub
 
-THRUST_END_NS
+} // end namespace thrust
 
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 
 #endif
-

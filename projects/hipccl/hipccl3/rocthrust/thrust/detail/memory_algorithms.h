@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <thrust/detail/config.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/detail/allocator/allocator_traits.h>
@@ -15,9 +16,10 @@
 
 #include <utility>
 #include <new>
-#include <memory>
+#include <thrust/detail/memory_wrapper.h>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -101,7 +103,7 @@ ForwardIt destroy_n(Allocator const& alloc, ForwardIt first, Size n)
   return first;
 }
 
-#if __cplusplus >= 201103L
+#if THRUST_CPP_DIALECT >= 2011
 template <typename ForwardIt, typename... Args>
 __host__ __device__
 void uninitialized_construct(
@@ -204,5 +206,4 @@ void uninitialized_construct_n_with_allocator(
 
 ///////////////////////////////////////////////////////////////////////////////
 
-THRUST_END_NS
-
+} //end namespace thrust

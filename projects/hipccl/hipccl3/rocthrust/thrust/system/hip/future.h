@@ -14,7 +14,8 @@
 #include <thrust/system/hip/pointer.h>
 #include <thrust/system/hip/detail/execution_policy.h>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 
 namespace system { namespace hip
 {
@@ -66,7 +67,7 @@ unique_eager_future_type(
   thrust::hip::execution_policy<DerivedPolicy> const&
 ) noexcept;
 
-THRUST_END_NS
+} // end namespace thrust
 
 #include <thrust/system/hip/detail/future.inl>
 

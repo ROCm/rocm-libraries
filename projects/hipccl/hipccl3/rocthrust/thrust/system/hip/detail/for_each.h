@@ -36,7 +36,8 @@
 #include <thrust/detail/function.h>
 #include <thrust/distance.h>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 
 namespace hip_rocprim
 {
@@ -92,5 +93,5 @@ for_each(execution_policy<Derived>& policy, Input first, Input last, UnaryOp op)
 
 } // namespace hip_rocprim
 
-THRUST_END_NS
+} // end namespace thrust
 #endif

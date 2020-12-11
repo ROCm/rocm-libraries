@@ -169,7 +169,7 @@ struct get_class
     // XXX we may not need to deal with this for any compiler we care about -jph
     //return get_class<N-1>::BOOST_NESTED_TEMPLATE get<RET>(t.tail);
     return get_class<N-1>::template get<RET>(t.tail);
-    
+
     // gcc 4.3 couldn't compile this:
     //return get_class<N-1>::get<RET>(t.tail);
   }
@@ -598,7 +598,7 @@ inline typename access_traits<
 get(detail::cons<HT, TT>& c)
 {
   //return detail::get_class<N>::BOOST_NESTED_TEMPLATE
-  
+
   // gcc 4.3 couldn't compile this:
   //return detail::get_class<N>::
 
@@ -957,4 +957,3 @@ inline bool operator>=(const detail::cons<T1, T2>& lhs, const detail::cons<S1, S
 } // end operator>=()
 
 } // end thrust
-

@@ -33,7 +33,8 @@
 #include <thrust/system/hip/config.h>
 #include <thrust/system/hip/detail/execution_policy.h>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 namespace hip_rocprim
 {
 
@@ -52,11 +53,12 @@ namespace hip_rocprim
              InputIt1                   last1,
              InputIt2                   first2);
 } // namespace hip_rocprim
-THRUST_END_NS
+} // end namespace thrust
 
 #include <thrust/system/hip/detail/find.h>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 namespace hip_rocprim
 {
 
@@ -76,7 +78,7 @@ namespace hip_rocprim
         transform_t result = hip_rocprim::find_if_not(
             policy, transform_first, transform_first + thrust::distance(first1, last1), identity());
 
-        return make_pair(first1 + thrust::distance(transform_first, result),
+        return thrust::make_pair(first1 + thrust::distance(transform_first, result),
                          first2 + thrust::distance(transform_first, result));
     }
 
@@ -92,5 +94,5 @@ namespace hip_rocprim
     }
 
 } // namespace hip_rocprim
-THRUST_END_NS
+} // end namespace thrust
 #endif

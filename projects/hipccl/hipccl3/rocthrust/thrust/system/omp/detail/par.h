@@ -35,7 +35,7 @@ struct par_t : thrust::system::omp::detail::execution_policy<par_t>,
     thrust::system::omp::detail::execution_policy>
 {
   __host__ __device__
-  par_t() : thrust::system::omp::detail::execution_policy<par_t>() {}
+  THRUST_CONSTEXPR par_t() : thrust::system::omp::detail::execution_policy<par_t>() {}
 };
 
 
@@ -59,4 +59,3 @@ using thrust::system::omp::par;
 
 } // end omp
 } // end thrust
-

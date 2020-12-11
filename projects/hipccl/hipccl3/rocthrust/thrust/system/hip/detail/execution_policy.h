@@ -40,7 +40,8 @@
   #include <thrust/detail/dependencies_aware_execution_policy.h>
 #endif
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 
 namespace hip_rocprim
 {
@@ -96,4 +97,4 @@ namespace hip
 } // namespace hip
 
 
-THRUST_END_NS
+} // end namespace thrust

@@ -21,10 +21,9 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/detail/cpp11_required.h>
-#include <thrust/detail/modern_gcc_required.h>
+#include <thrust/detail/cpp14_required.h>
 
-#if THRUST_CPP_DIALECT >= 2011 && !defined(THRUST_LEGACY_GCC)
+#if THRUST_CPP_DIALECT >= 2014
 
 #include <thrust/detail/static_assert.h>
 #include <thrust/detail/select_system.h>
@@ -33,7 +32,8 @@
 
 #include <thrust/event.h>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 
 namespace async
 {
@@ -53,7 +53,6 @@ async_transform(
 , ForwardIt first, Sentinel last, OutputIt output, UnaryOperation op
 )
 {
-  (void) exec; (void) first; (void) last; (void) output; (void) op;
   THRUST_STATIC_ASSERT_MSG(
     (thrust::detail::depend_on_instantiation<ForwardIt, false>::value)
   , "this algorithm is not implemented for the specified system"
@@ -84,7 +83,7 @@ struct transform_fn final
   , UnaryOperation&& op
   )
   // ADL dispatch.
-  THRUST_DECLTYPE_RETURNS(
+  THRUST_RETURNS(
     async_transform(
       thrust::detail::derived_cast(thrust::detail::strip_const(exec))
     , THRUST_FWD(first), THRUST_FWD(last)
@@ -103,7 +102,7 @@ struct transform_fn final
   , OutputIt&& output
   , UnaryOperation&& op
   )
-  THRUST_DECLTYPE_RETURNS(
+  THRUST_RETURNS(
     transform_fn::call(
       thrust::detail::select_system(
         typename iterator_system<remove_cvref_t<ForwardIt>>::type{}
@@ -118,7 +117,7 @@ struct transform_fn final
   template <typename... Args>
   THRUST_NODISCARD __host__
   auto operator()(Args&&... args) const
-  THRUST_DECLTYPE_RETURNS(
+  THRUST_RETURNS(
     call(THRUST_FWD(args)...)
   )
 };
@@ -129,7 +128,6 @@ THRUST_INLINE_CONSTANT transform_detail::transform_fn transform{};
 
 } // namespace async
 
-THRUST_END_NS
+} // end namespace thrust
 
 #endif
-

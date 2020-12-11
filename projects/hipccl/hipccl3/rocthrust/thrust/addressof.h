@@ -8,18 +8,18 @@
 #include <thrust/detail/config.h>
 
 #if THRUST_CPP_DIALECT >= 2011
-#  include <memory>
+#  include <thrust/detail/memory_wrapper.h>
 #endif
 
-THRUST_BEGIN_NS
-
+namespace thrust
+{
 ///////////////////////////////////////////////////////////////////////////////
 
 /*! Obtains the actual address of the object or function arg, even in presence of overloaded operator&.
  */
 template <typename T>
 __host__ __device__
-T* addressof(T& arg) 
+T* addressof(T& arg)
 {
   return reinterpret_cast<T*>(
     &const_cast<char&>(reinterpret_cast<const volatile char&>(arg))
@@ -28,5 +28,4 @@ T* addressof(T& arg)
 
 ///////////////////////////////////////////////////////////////////////////////
 
-THRUST_END_NS
-
+} // end namespace thrust

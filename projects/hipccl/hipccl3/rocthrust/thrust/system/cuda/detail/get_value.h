@@ -23,7 +23,8 @@
 #include <thrust/detail/raw_pointer_cast.h>
 #include <thrust/iterator/iterator_traits.h>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 namespace cuda_cub {
 
 
@@ -61,14 +62,24 @@ inline __host__ __device__
     }
   };
 
-#ifndef __CUDA_ARCH__
-  return war_nvbugs_881631::host_path(exec, ptr);
-#else
-  return war_nvbugs_881631::device_path(exec, ptr);
-#endif // __CUDA_ARCH__
-} // end get_value_msvc2005_war()
-
-
+  // The usual pattern for separating host and device code doesn't work here
+  // because it would result in a compiler warning, either about falling off
+  // the end of a non-void function, or about result_type's default constructor
+  // being a host-only function.
+  #ifdef __NVCOMPILER_CUDA__
+  if (THRUST_IS_HOST_CODE) {
+    return war_nvbugs_881631::host_path(exec, ptr);
+  } else {
+    return war_nvbugs_881631::device_path(exec, ptr);
+  }
+  #else
+    #ifndef __CUDA_ARCH__
+      return war_nvbugs_881631::host_path(exec, ptr);
+    #else
+      return war_nvbugs_881631::device_path(exec, ptr);
+    #endif // __CUDA_ARCH__
+  #endif
+  } // end get_value_msvc2005_war()
 } // end anon namespace
 
 
@@ -82,6 +93,6 @@ inline __host__ __device__
 
 
 } // end cuda_cub
-THRUST_END_NS
+} // end namespace thrust
 
 #endif

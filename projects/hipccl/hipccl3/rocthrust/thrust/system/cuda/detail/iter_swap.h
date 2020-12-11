@@ -24,7 +24,8 @@
 #include <thrust/system/cuda/detail/execution_policy.h>
 #include <thrust/swap.h>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 namespace cuda_cub {
 
 
@@ -48,14 +49,18 @@ void iter_swap(thrust::cuda::execution_policy<DerivedPolicy> &, Pointer1 a, Poin
     }
   };
 
-#ifndef __CUDA_ARCH__
-  return war_nvbugs_881631::host_path(a, b);
-#else
-  return war_nvbugs_881631::device_path(a, b);
-#endif // __CUDA_ARCH__
+  if (THRUST_IS_HOST_CODE) {
+    #if THRUST_INCLUDE_HOST_CODE
+      war_nvbugs_881631::host_path(a, b);
+    #endif
+  } else {
+    #if THRUST_INCLUDE_DEVICE_CODE
+      war_nvbugs_881631::device_path(a, b);
+    #endif
+  }
 } // end iter_swap()
 
 
 } // end cuda_cub
-THRUST_END_NS
+} // end namespace thrust
 #endif
