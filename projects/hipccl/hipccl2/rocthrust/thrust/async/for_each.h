@@ -21,10 +21,9 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/detail/cpp11_required.h>
-#include <thrust/detail/modern_gcc_required.h>
+#include <thrust/detail/cpp14_required.h>
 
-#if THRUST_CPP_DIALECT >= 2011 && !defined(THRUST_LEGACY_GCC)
+#if THRUST_CPP_DIALECT >= 2014
 
 #include <thrust/detail/static_assert.h>
 #include <thrust/detail/select_system.h>
@@ -33,7 +32,8 @@
 
 #include <thrust/event.h>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 
 namespace async
 {
@@ -56,13 +56,13 @@ async_for_each(
   , "this algorithm is not implemented for the specified system"
   );
   return {};
-} 
+}
 
 } // namespace unimplemented
 
 namespace for_each_detail
 {
-    
+
 using thrust::async::unimplemented::async_for_each;
 
 struct for_each_fn final
@@ -75,10 +75,10 @@ struct for_each_fn final
   static auto call(
     thrust::detail::execution_policy_base<DerivedPolicy> const& exec
   , ForwardIt&& first, Sentinel&& last
-  , UnaryFunction&& f 
+  , UnaryFunction&& f
   )
   // ADL dispatch.
-  THRUST_DECLTYPE_RETURNS(
+  THRUST_RETURNS(
     async_for_each(
       thrust::detail::derived_cast(thrust::detail::strip_const(exec))
     , THRUST_FWD(first), THRUST_FWD(last)
@@ -88,8 +88,8 @@ struct for_each_fn final
 
   template <typename ForwardIt, typename Sentinel, typename UnaryFunction>
   __host__
-  static auto call(ForwardIt&& first, Sentinel&& last, UnaryFunction&& f) 
-  THRUST_DECLTYPE_RETURNS(
+  static auto call(ForwardIt&& first, Sentinel&& last, UnaryFunction&& f)
+  THRUST_RETURNS(
     for_each_fn::call(
       thrust::detail::select_system(
         typename iterator_system<remove_cvref_t<ForwardIt>>::type{}
@@ -102,7 +102,7 @@ struct for_each_fn final
   template <typename... Args>
   THRUST_NODISCARD __host__
   auto operator()(Args&&... args) const
-  THRUST_DECLTYPE_RETURNS(
+  THRUST_RETURNS(
     call(THRUST_FWD(args)...)
   )
 };
@@ -113,7 +113,6 @@ THRUST_INLINE_CONSTANT for_each_detail::for_each_fn for_each{};
 
 } // namespace async
 
-THRUST_END_NS
+} // end namespace thrust
 
 #endif
-

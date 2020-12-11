@@ -46,7 +46,8 @@
 #include <thrust/detail/alignment.h>
 #include <thrust/type_traits/is_contiguous_iterator.h>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 namespace cuda_cub {
 
 namespace __merge_sort {
@@ -311,18 +312,18 @@ namespace __merge_sort {
                                 item_type (&items)[ITEMS_PER_THREAD])
       {
 #pragma unroll
-        for (int I = 0; I < ITEMS_PER_THREAD; ++I)
+        for (int i = 0; i < ITEMS_PER_THREAD; ++i)
         {
 #pragma unroll
-          for (int J = 1 & I; J < ITEMS_PER_THREAD - 1; J += 2)
+          for (int j = 1 & i; j < ITEMS_PER_THREAD - 1; j += 2)
           {
-            if (compare_op(keys[J + 1], keys[J]))
+            if (compare_op(keys[j + 1], keys[j]))
             {
               using thrust::swap;
-              swap(keys[J], keys[J + 1]);
+              swap(keys[j], keys[j + 1]);
               if (SORT_ITEMS::value)
               {
-                swap(items[J], items[J + 1]);
+                swap(items[j], items[j + 1]);
               }
             }
           }    // inner loop
@@ -1213,7 +1214,7 @@ namespace __merge_sort {
       return status;
     };
 
-    int num_passes = thrust::detail::log2_ri(num_tiles);
+    int num_passes = static_cast<int>(thrust::detail::log2_ri(num_tiles));
     bool ping = !(1 & num_passes);
 
     Size*      merge_partitions = (Size*)allocations[0];
@@ -1597,6 +1598,10 @@ namespace __smart_sort {
     {
       cuda_cub::copy(policy, keys.begin(), keys.end(), keys_first);
     }
+
+    cuda_cub::throw_on_error(
+      cuda_cub::synchronize(policy),
+      "merge_sort: failed to synchronize");
   }
 }    // namespace __smart_sort
 
@@ -1743,5 +1748,5 @@ stable_sort_by_key(
 
 
 }    // namespace cuda_cub
-THRUST_END_NS
+} // end namespace thrust
 #endif

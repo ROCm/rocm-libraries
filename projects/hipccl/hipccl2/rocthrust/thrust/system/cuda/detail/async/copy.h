@@ -30,10 +30,9 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/detail/cpp11_required.h>
-#include <thrust/detail/modern_gcc_required.h>
+#include <thrust/detail/cpp14_required.h>
 
-#if THRUST_CPP_DIALECT >= 2011 && !defined(THRUST_LEGACY_GCC)
+#if THRUST_CPP_DIALECT >= 2014
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 
@@ -54,7 +53,8 @@
 
 #include <type_traits>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 
 namespace system { namespace cuda { namespace detail
 {
@@ -66,7 +66,6 @@ template <
   typename FromPolicy, typename ToPolicy
 , typename ForwardIt, typename OutputIt, typename Size
 >
-THRUST_RUNTIME_FUNCTION
 auto async_copy_n(
   FromPolicy& from_exec
 , ToPolicy&   to_exec
@@ -149,7 +148,6 @@ template <
   typename FromPolicy, typename ToPolicy
 , typename ForwardIt, typename OutputIt, typename Size
 >
-THRUST_RUNTIME_FUNCTION
 auto async_copy_n(
   thrust::cuda::execution_policy<FromPolicy>& from_exec
 , thrust::cuda::execution_policy<ToPolicy>&   to_exec
@@ -193,7 +191,6 @@ template <
   typename FromPolicy, typename ToPolicy
 , typename ForwardIt, typename OutputIt, typename Size
 >
-THRUST_RUNTIME_FUNCTION
 auto async_copy_n(
   FromPolicy& from_exec
 , ToPolicy&   to_exec
@@ -228,6 +225,10 @@ auto async_copy_n(
 template <
   typename FromPolicy, typename ToPolicy
 , typename ForwardIt, typename OutputIt
+// MSVC2015 WAR: doesn't like decltype(...)::value in superclass definition
+, typename IsH2DCopy = decltype(is_host_to_device_copy(
+  std::declval<FromPolicy const&>()
+, std::declval<ToPolicy const&>()))
 >
 struct is_buffered_trivially_relocatable_host_to_device_copy
   : thrust::integral_constant<
@@ -238,12 +239,7 @@ struct is_buffered_trivially_relocatable_host_to_device_copy
             typename iterator_traits<ForwardIt>::value_type
           , typename iterator_traits<OutputIt>::value_type
           >::value
-      && decltype(
-           is_host_to_device_copy(
-             std::declval<FromPolicy const&>()
-           , std::declval<ToPolicy const&>()
-           )
-         )::value
+      && IsH2DCopy::value
     >
 {};
 
@@ -254,7 +250,6 @@ template <
   typename FromPolicy, typename ToPolicy
 , typename ForwardIt, typename OutputIt, typename Size
 >
-THRUST_RUNTIME_FUNCTION
 auto async_copy_n(
   FromPolicy&                               from_exec
 , thrust::cuda::execution_policy<ToPolicy>& to_exec
@@ -333,6 +328,10 @@ auto async_copy_n(
 template <
   typename FromPolicy, typename ToPolicy
 , typename ForwardIt, typename OutputIt
+// MSVC2015 WAR: doesn't like decltype(...)::value in superclass definition
+, typename IsD2HCopy = decltype(is_device_to_host_copy(
+  std::declval<FromPolicy const&>()
+, std::declval<ToPolicy const&>()))
 >
 struct is_buffered_trivially_relocatable_device_to_host_copy
   : thrust::integral_constant<
@@ -343,12 +342,7 @@ struct is_buffered_trivially_relocatable_device_to_host_copy
             typename iterator_traits<ForwardIt>::value_type
           , typename iterator_traits<OutputIt>::value_type
           >::value
-      && decltype(
-           is_device_to_host_copy(
-             std::declval<FromPolicy const&>()
-           , std::declval<ToPolicy const&>()
-           )
-         )::value
+      && IsD2HCopy::value
     >
 {};
 
@@ -359,7 +353,6 @@ template <
   typename FromPolicy, typename ToPolicy
 , typename ForwardIt, typename OutputIt, typename Size
 >
-THRUST_RUNTIME_FUNCTION
 auto async_copy_n(
   thrust::cuda::execution_policy<FromPolicy>& from_exec
 , ToPolicy&                                   to_exec
@@ -441,7 +434,6 @@ template <
   typename FromPolicy, typename ToPolicy
 , typename ForwardIt, typename OutputIt, typename Size
 >
-THRUST_RUNTIME_FUNCTION
 auto async_copy_n(
   FromPolicy& from_exec
 , ToPolicy&   to_exec
@@ -487,7 +479,6 @@ template <
   typename FromPolicy, typename ToPolicy
 , typename ForwardIt, typename Sentinel, typename OutputIt
 >
-THRUST_RUNTIME_FUNCTION
 auto async_copy(
   thrust::cuda::execution_policy<FromPolicy>&         from_exec
 , thrust::cpp::execution_policy<ToPolicy>&            to_exec
@@ -495,7 +486,7 @@ auto async_copy(
 , Sentinel                                            last
 , OutputIt                                            output
 )
-THRUST_DECLTYPE_RETURNS(
+THRUST_RETURNS(
   thrust::system::cuda::detail::async_copy_n(
     from_exec, to_exec, first, distance(first, last), output
   )
@@ -506,7 +497,6 @@ template <
   typename FromPolicy, typename ToPolicy
 , typename ForwardIt, typename Sentinel, typename OutputIt
 >
-THRUST_RUNTIME_FUNCTION
 auto async_copy(
   thrust::cpp::execution_policy<FromPolicy>& from_exec
 , thrust::cuda::execution_policy<ToPolicy>&  to_exec
@@ -514,7 +504,7 @@ auto async_copy(
 , Sentinel                                   last
 , OutputIt                                   output
 )
-THRUST_DECLTYPE_RETURNS(
+THRUST_RETURNS(
   thrust::system::cuda::detail::async_copy_n(
     from_exec, to_exec, first, distance(first, last), output
   )
@@ -525,7 +515,6 @@ template <
   typename FromPolicy, typename ToPolicy
 , typename ForwardIt, typename Sentinel, typename OutputIt
 >
-THRUST_RUNTIME_FUNCTION
 auto async_copy(
   thrust::cuda::execution_policy<FromPolicy>& from_exec
 , thrust::cuda::execution_policy<ToPolicy>&   to_exec
@@ -533,7 +522,7 @@ auto async_copy(
 , Sentinel                                    last
 , OutputIt                                    output
 )
-THRUST_DECLTYPE_RETURNS(
+THRUST_RETURNS(
   thrust::system::cuda::detail::async_copy_n(
     from_exec, to_exec, first, distance(first, last), output
   )
@@ -541,9 +530,8 @@ THRUST_DECLTYPE_RETURNS(
 
 } // cuda_cub
 
-THRUST_END_NS
+} // end namespace thrust
 
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 
 #endif
-

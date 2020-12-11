@@ -23,7 +23,7 @@
  * (C) Copyright David Abrahams 2002.
  * (C) Copyright Jeremy Siek    2002.
  * (C) Copyright Thomas Witt    2002.
- * 
+ *
  * Distributed under the Boost Software License, Version 1.0.
  * (See accompanying NOTICE file for the complete license)
  *
@@ -180,14 +180,14 @@ template<typename BidirectionalIterator>
     reverse_iterator(reverse_iterator<OtherBidirectionalIterator> const &r
 // XXX msvc screws this up
 // XXX remove these guards when we have static_assert
-#ifndef _MSC_VER
+#if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
                      , typename thrust::detail::enable_if<
                          thrust::detail::is_convertible<
                            OtherBidirectionalIterator,
                            BidirectionalIterator
                          >::value
                        >::type * = 0
-#endif // _MSC_VER
+#endif // MSVC
                      );
 
   /*! \cond
@@ -217,7 +217,7 @@ template<typename BidirectionalIterator>
 
 /*! \p make_reverse_iterator creates a \p reverse_iterator
  *  from a \c BidirectionalIterator pointing to a range of elements to reverse.
- *  
+ *
  *  \param x A \c BidirectionalIterator pointing to a range to reverse.
  *  \return A new \p reverse_iterator which reverses the range \p x.
  */
@@ -235,4 +235,3 @@ reverse_iterator<BidirectionalIterator> make_reverse_iterator(BidirectionalItera
 } // end thrust
 
 #include <thrust/iterator/detail/reverse_iterator.inl>
-

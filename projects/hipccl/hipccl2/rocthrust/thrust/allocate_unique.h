@@ -16,10 +16,10 @@
 #include <thrust/detail/allocator/allocator_traits.h>
 
 #include <utility>
-#include <memory>
+#include <thrust/detail/memory_wrapper.h>
 
-THRUST_BEGIN_NS
-
+namespace thrust
+{
 // wg21.link/p0316r0
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -245,7 +245,7 @@ private:
   allocator_type alloc_;
   std::size_t    count_;
 };
-  
+
 template <typename T, typename Allocator>
 using uninitialized_array_allocator_delete
   = array_allocator_delete<T, Allocator, true>;
@@ -437,7 +437,6 @@ uninitialized_allocate_unique_n(
 
 ///////////////////////////////////////////////////////////////////////////////
 
-THRUST_END_NS
+} //end namespace thrust
 
 #endif // THRUST_CPP_DIALECT >= 2011
-

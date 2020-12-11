@@ -21,10 +21,9 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/detail/cpp11_required.h>
-#include <thrust/detail/modern_gcc_required.h>
+#include <thrust/detail/cpp14_required.h>
 
-#if THRUST_CPP_DIALECT >= 2011 && !defined(THRUST_LEGACY_GCC)
+#if THRUST_CPP_DIALECT >= 2014
 
 #include <thrust/detail/static_assert.h>
 #include <thrust/detail/select_system.h>
@@ -33,7 +32,8 @@
 
 #include <thrust/event.h>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 
 namespace async
 {
@@ -53,12 +53,6 @@ async_copy(
 , ForwardIt first, Sentinel last, OutputIt output
 )
 {
-  THRUST_UNUSED_VAR(from_exec);
-  THRUST_UNUSED_VAR(to_exec);
-  THRUST_UNUSED_VAR(first);
-  THRUST_UNUSED_VAR(last);
-  THRUST_UNUSED_VAR(output);
-
   THRUST_STATIC_ASSERT_MSG(
     (thrust::detail::depend_on_instantiation<ForwardIt, false>::value)
   , "this algorithm is not implemented for the specified system"
@@ -87,7 +81,7 @@ struct copy_fn final
   , OutputIt&& output
   )
   // ADL dispatch.
-  THRUST_DECLTYPE_RETURNS(
+  THRUST_RETURNS(
     async_copy(
       thrust::detail::derived_cast(thrust::detail::strip_const(from_exec))
     , thrust::detail::derived_cast(thrust::detail::strip_const(to_exec))
@@ -106,11 +100,14 @@ struct copy_fn final
   , ForwardIt&& first, Sentinel&& last
   , OutputIt&& output
   )
-  // ADL dispatch.
-  THRUST_DECLTYPE_RETURNS(
-    async_copy(
+  THRUST_RETURNS(
+    copy_fn::call(
       thrust::detail::derived_cast(thrust::detail::strip_const(exec))
-    , thrust::detail::derived_cast(thrust::detail::strip_const(exec))
+      // Synthesize a suitable new execution policy, because we don't want to
+      // try and extract twice from the one we were passed.
+    , typename remove_cvref_t<
+        decltype(thrust::detail::derived_cast(thrust::detail::strip_const(exec)))
+      >::tag_type{}
     , THRUST_FWD(first), THRUST_FWD(last)
     , THRUST_FWD(output)
     )
@@ -119,7 +116,7 @@ struct copy_fn final
   template <typename ForwardIt, typename Sentinel, typename OutputIt>
   __host__
   static auto call(ForwardIt&& first, Sentinel&& last, OutputIt&& output)
-  THRUST_DECLTYPE_RETURNS(
+  THRUST_RETURNS(
     copy_fn::call(
       thrust::detail::select_system(
         typename thrust::iterator_system<remove_cvref_t<ForwardIt>>::type{}
@@ -135,7 +132,7 @@ struct copy_fn final
   template <typename... Args>
   THRUST_NODISCARD __host__
   auto operator()(Args&&... args) const
-  THRUST_DECLTYPE_RETURNS(
+  THRUST_RETURNS(
     call(THRUST_FWD(args)...)
   )
 };
@@ -146,6 +143,6 @@ THRUST_INLINE_CONSTANT copy_detail::copy_fn copy{};
 
 } // namespace async
 
-THRUST_END_NS
+} // end namespace thrust
 
 #endif

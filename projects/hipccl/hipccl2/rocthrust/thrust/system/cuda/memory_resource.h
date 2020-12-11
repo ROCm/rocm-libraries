@@ -22,6 +22,7 @@
 
 #include <thrust/mr/memory_resource.h>
 #include <thrust/system/cuda/detail/guarded_cuda_runtime_api.h>
+#include <thrust/system/cuda/detail/managed_memory_pointer.h>
 #include <thrust/system/cuda/pointer.h>
 #include <thrust/system/detail/bad_alloc.h>
 #include <thrust/system/cuda/error.h>
@@ -29,7 +30,8 @@
 
 #include <thrust/memory/detail/host_system_resource.h>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 
 namespace system
 {
@@ -86,7 +88,7 @@ namespace detail
         thrust::cuda::pointer<void> >
         device_memory_resource;
     typedef detail::cuda_memory_resource<detail::cudaMallocManaged, cudaFree,
-        thrust::cuda::pointer<void> >
+        detail::managed_memory_pointer<void> >
         managed_memory_resource;
     typedef detail::cuda_memory_resource<cudaMallocHost, cudaFreeHost,
         thrust::host_memory_resource::pointer>
@@ -105,5 +107,4 @@ typedef detail::pinned_memory_resource universal_host_pinned_memory_resource;
 } // end cuda
 } // end system
 
-THRUST_END_NS
-
+} // end namespace thrust

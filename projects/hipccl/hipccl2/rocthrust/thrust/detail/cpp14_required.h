@@ -1,5 +1,5 @@
 /*
- *  Copyright 2008-2013 NVIDIA Corporation
+ *  Copyright 2018 NVIDIA Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -14,24 +14,12 @@
  *  limitations under the License.
  */
 
-
 #pragma once
 
-//functions to support blocking
+#include <thrust/detail/config/cpp_dialect.h>
 
-namespace thrust
-{
-
-namespace detail
-{
-
-namespace util
-{
-
-
-} // end namespace util
-
-} // end namespace detail
-
-} // end namespace thrust
-
+#ifndef THRUST_CPP14_REQUIRED_NO_ERROR
+#  if THRUST_CPP_DIALECT < 2014
+#    error C++14 is required for this Thrust feature; please upgrade your compiler or pass the appropriate -std=c++14 flag to it.
+#  endif
+#endif

@@ -20,7 +20,7 @@
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/function_traits.h>
 
-#if __cplusplus >= 201103L || defined(__cpp_lib_result_of_sfinae)
+#if THRUST_CPP_DIALECT >= 2011 || defined(__cpp_lib_result_of_sfinae)
 // necessary for std::result_of
 #include <type_traits>
 #endif
@@ -31,11 +31,11 @@ namespace detail
 {
 
 // In the C++11 mode, by default, result_of_adaptable function inheritfrom std::result_of
-#if __cplusplus >= 201103L || defined(__cpp_lib_result_of_sfinae)
+#if THRUST_CPP_DIALECT >= 2011 || defined(__cpp_lib_result_of_sfinae)
 template <typename Signature, typename Enable = void>
 struct result_of_adaptable_function : std::result_of<Signature> {};
 #else  /* cxx11 */
-template<typename Signature, typename Enable = void> 
+template<typename Signature, typename Enable = void>
 struct result_of_adaptable_function;
 #endif  /* cxx11 */
 
@@ -62,4 +62,3 @@ template<typename Functor, typename Arg1, typename Arg2>
 
 } // end detail
 } // end thrust
-

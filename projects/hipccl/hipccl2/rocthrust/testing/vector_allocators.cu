@@ -1,10 +1,14 @@
 #include <unittest/unittest.h>
+
+#include <thrust/detail/config.h>
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
 
 template<typename BaseAlloc, bool PropagateOnSwap>
 class stateful_allocator : public BaseAlloc
 {
+  typedef thrust::detail::allocator_traits<BaseAlloc> base_traits;
+
 public:
     stateful_allocator(int i) : state(i)
     {
@@ -23,7 +27,7 @@ public:
         return *this;
     }
 
-#if __cplusplus >= 201103L
+#if THRUST_CPP_DIALECT >= 2011
     stateful_allocator(stateful_allocator && other)
         : BaseAlloc(std::move(other)), state(other.state)
     {
@@ -41,20 +45,35 @@ public:
     static int last_allocated;
     static int last_deallocated;
 
-    typedef
-        typename thrust::detail::allocator_traits<BaseAlloc>::pointer
-        pointer;
+    typedef typename base_traits::pointer pointer;
+    typedef typename base_traits::const_pointer const_pointer;
+    typedef typename base_traits::reference reference;
+    typedef typename base_traits::const_reference const_reference;
 
     pointer allocate(std::size_t size)
     {
+        BaseAlloc alloc;
         last_allocated = state;
-        return BaseAlloc::allocate(size);
+        return base_traits::allocate(alloc, size);
     }
 
     void deallocate(pointer ptr, std::size_t size)
     {
+        BaseAlloc alloc;
         last_deallocated = state;
-        return BaseAlloc::deallocate(ptr, size);
+        return base_traits::deallocate(alloc, ptr, size);
+    }
+
+    static void construct(pointer ptr)
+    {
+      BaseAlloc alloc;
+      return base_traits::construct(alloc, ptr);
+    }
+
+    static void destroy(pointer ptr)
+    {
+      BaseAlloc alloc;
+      return base_traits::destroy(alloc, ptr);
     }
 
     bool operator==(const stateful_allocator &rhs) const
@@ -129,7 +148,7 @@ void TestVectorAllocatorConstructors()
     ASSERT_EQUAL(Alloc::last_allocated, 2);
     Alloc::last_allocated = 0;
 
-#if __cplusplus >= 201103L
+#if THRUST_CPP_DIALECT >= 2011
     // FIXME: uncomment this after the vector_base(vector_base&&, const Alloc&)
     // is fixed and implemented
     // Vector v5(std::move(v3), alloc2);
@@ -188,7 +207,7 @@ void TestVectorAllocatorPropagateOnCopyAssignmentDevice()
 }
 DECLARE_UNITTEST(TestVectorAllocatorPropagateOnCopyAssignmentDevice);
 
-#if __cplusplus >= 201103L
+#if THRUST_CPP_DIALECT >= 2011
 template<typename Vector>
 void TestVectorAllocatorPropagateOnMoveAssignment()
 {

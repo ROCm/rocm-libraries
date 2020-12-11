@@ -18,6 +18,8 @@
 #include <unittest/unittest.h>
 
 #include <thrust/complex.h>
+#include <thrust/detail/config.h>
+
 #include <complex>
 #include <iostream>
 #include <sstream>
@@ -290,7 +292,7 @@ struct TestComplexTrigonometricFunctions
     ASSERT_ALMOST_EQUAL(sinh(a),sinh(c));
     ASSERT_ALMOST_EQUAL(tanh(a),tanh(c));
 
-#if __cplusplus >= 201103L
+#if THRUST_CPP_DIALECT >= 2011
 
     ASSERT_ALMOST_EQUAL(acos(a),acos(c));
     ASSERT_ALMOST_EQUAL(asin(a),asin(c));

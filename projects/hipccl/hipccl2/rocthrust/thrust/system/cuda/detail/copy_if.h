@@ -41,7 +41,8 @@
 #include <thrust/distance.h>
 #include <thrust/detail/alignment.h>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 // XXX declare generic copy_if interface
 // to avoid circulular dependency from thrust/copy.h
 template <typename DerivedPolicy, typename InputIterator, typename OutputIterator, typename Predicate>
@@ -254,7 +255,7 @@ namespace __copy_if {
                                      num_selections_prefix;
           if (selection_flags[ITEM])
           {
-            storage.raw_exchange[local_scatter_offset] = items[ITEM];
+            new (&storage.raw_exchange[local_scatter_offset]) item_type(items[ITEM]);
           }
         }
 
@@ -850,7 +851,7 @@ copy_if(execution_policy<Derived> &policy,
 }    // func copy_if
 
 }    // namespace cuda_cub
-THRUST_END_NS
+} // end namespace thrust
 
 #include <thrust/copy.h>
 #endif

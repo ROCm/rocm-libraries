@@ -31,6 +31,7 @@
 #include <thrust/detail/config.h>
 #include <thrust/system/hip/detail/guarded_hip_runtime_api.h>
 #include <thrust/system/hip/detail/execution_policy.h>
+#include <thrust/system/hip/detail/util.h>
 
 #include <thrust/detail/allocator_aware_execution_policy.h>
 
@@ -39,32 +40,10 @@
 #endif
 
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 namespace hip_rocprim
 {
-
-    __host__ __device__ inline hipStream_t default_stream()
-    {
-        return hipStreamDefault; // There's not hipStreamLegacy
-    }
-
-    template <class Derived>
-    hipStream_t __host__ __device__
-    get_stream(execution_policy<Derived>&)
-    {
-        return default_stream();
-    }
-
-    template <class Derived>
-    hipError_t THRUST_HIP_RUNTIME_FUNCTION synchronize_stream(execution_policy<Derived>&)
-    {
-      #if __THRUST_HAS_HIPRT__
-        hipDeviceSynchronize();
-        return hipGetLastError();
-      #else
-        return hipSuccess;
-      #endif
-    }
 
     template <class Derived>
     struct execute_on_stream_base : execution_policy<Derived>
@@ -93,20 +72,6 @@ namespace hip_rocprim
         {
             return exec.stream;
         }
-
-        friend hipError_t THRUST_HIP_RUNTIME_FUNCTION
-                          synchronize_stream(execute_on_stream_base& exec)
-        {
-#ifdef __HIP_DEVICE_COMPILE__
-#ifdef __THRUST_HAS_HIPRT__
-            THRUST_UNUSED_VAR(exec);
-            hipDeviceSynchronize();
-#endif
-#else
-            hipStreamSynchronize(exec.stream);
-#endif
-            return hipGetLastError();
-        }
     };
 
     struct execute_on_stream : execute_on_stream_base<execute_on_stream>
@@ -127,8 +92,8 @@ namespace hip_rocprim
     {
         typedef execution_policy<par_t> base_t;
 
-        __device__ __host__ par_t()
-            : base_t()
+        __device__ __host__
+        THRUST_CONSTEXPR par_t() : base_t()
         {
         }
 
@@ -142,11 +107,7 @@ namespace hip_rocprim
         }
     };
 
-#ifdef __HIP_DEVICE_COMPILE__
-    static const __device__ par_t par;
-#else
-    static const par_t par;
-#endif
+THRUST_INLINE_CONSTANT par_t par;
 } // namespace hip_rocprim
 
 namespace system
@@ -166,4 +127,4 @@ namespace hip
     using thrust::hip_rocprim::par;
 } // namespace hip
 
-THRUST_END_NS
+} // end namespace thrust

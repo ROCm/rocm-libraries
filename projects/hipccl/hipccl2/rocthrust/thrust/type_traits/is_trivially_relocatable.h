@@ -1,6 +1,5 @@
 ///////////////////////////////////////////////////////////////////////////////
 //  Copyright (c)      2018 NVIDIA Corporation
-//  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
 //
 //  Distributed under the Boost Software License, Version 1.0. (See accompanying
 //  file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -23,7 +22,8 @@
   #include <type_traits>
 #endif
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 
 namespace detail
 {
@@ -124,10 +124,10 @@ struct proclaim_trivially_relocatable : false_type {};
 /// Declares that the type \c T is \a TriviallyRelocatable by specializing
 /// `thrust::proclaim_trivially_relocatable`.
 #define THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(T)                              \
-  THRUST_BEGIN_NS                                                             \
+  namespace thrust {                                                          \
   template <>                                                                 \
   struct proclaim_trivially_relocatable<T> : ::thrust::true_type {};          \
-  THRUST_END_NS                                                               \
+  } /* end namespace thrust */                                                \
   /**/
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -186,72 +186,11 @@ struct is_trivially_relocatable_impl<T[N]> : is_trivially_relocatable_impl<T> {}
 
 } // namespace detail
 
-THRUST_END_NS
+} // end namespace thrust
 
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 
 #include <thrust/system/cuda/detail/guarded_cuda_runtime_api.h>
-
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(char1)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(char2)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(char3)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(char4)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(uchar1)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(uchar2)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(uchar3)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(uchar4)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(short1)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(short2)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(short3)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(short4)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(ushort1)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(ushort2)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(ushort3)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(ushort4)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(int1)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(int2)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(int3)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(int4)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(uint1)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(uint2)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(uint3)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(uint4)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(long1)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(long2)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(long3)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(long4)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(ulong1)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(ulong2)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(ulong3)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(ulong4)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(longlong1)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(longlong2)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(longlong3)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(longlong4)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(ulonglong1)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(ulonglong2)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(ulonglong3)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(ulonglong4)
-
-struct __half;
-struct __half2;
-
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(__half)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(__half2)
-
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(float1)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(float2)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(float3)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(float4)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(double1)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(double2)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(double3)
-THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(double4)
-#endif
-
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
-
-#include <thrust/system/hip/detail/guarded_hip_runtime_api.h>
 
 THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(char1)
 THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(char2)

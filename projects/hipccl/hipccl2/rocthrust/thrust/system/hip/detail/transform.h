@@ -35,7 +35,8 @@
 #include <thrust/system/hip/detail/parallel_for.h>
 #include <thrust/distance.h>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 namespace hip_rocprim
 {
 namespace __transform
@@ -368,5 +369,5 @@ transform(execution_policy<Derived>& policy,
 
 } // namespace hip_rocprim
 
-THRUST_END_NS
+} // end namespace thrust
 #endif

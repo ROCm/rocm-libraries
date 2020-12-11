@@ -30,7 +30,7 @@
 #include <type_traits>
 #include <utility>
 
-#if (defined(_MSC_VER) && _MSC_VER == 1900)
+#if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC && _MSC_VER == 1900)
 #define THRUST_OPTIONAL_MSVC2015
 #endif
 
@@ -59,6 +59,11 @@
   std::has_trivial_copy_constructor<T>::value
 #define THRUST_OPTIONAL_IS_TRIVIALLY_COPY_ASSIGNABLE(T) std::has_trivial_copy_assign<T>::value
 
+// GCC < 5 doesn't provide a way to emulate std::is_trivially_move_*,
+// so don't enable any optimizations that rely on them:
+#define THRUST_OPTIONAL_IS_TRIVIALLY_MOVE_CONSTRUCTIBLE(T) false
+#define THRUST_OPTIONAL_IS_TRIVIALLY_MOVE_ASSIGNABLE(T) false
+
 // This one will be different for GCC 5.7 if it's ever supported
 #define THRUST_OPTIONAL_IS_TRIVIALLY_DESTRUCTIBLE(T) std::is_trivially_destructible<T>::value
 
@@ -68,7 +73,8 @@
      !defined(__clang__))
 #ifndef THRUST_GCC_LESS_8_TRIVIALLY_COPY_CONSTRUCTIBLE_MUTEX
 #define THRUST_GCC_LESS_8_TRIVIALLY_COPY_CONSTRUCTIBLE_MUTEX
-THRUST_BEGIN_NS
+namespace thrust
+{
   namespace detail {
       template<class T>
       struct is_trivially_copy_constructible : std::is_trivially_copy_constructible<T>{};
@@ -76,30 +82,79 @@ THRUST_BEGIN_NS
       template<class T, class A>
       struct is_trivially_copy_constructible<std::vector<T,A>>
           : std::is_trivially_copy_constructible<T>{};
-#endif      
+#endif
   }
-THRUST_END_NS
+} // end namespace thrust
 #endif
 
 #define THRUST_OPTIONAL_IS_TRIVIALLY_COPY_CONSTRUCTIBLE(T)                                     \
     thrust::detail::is_trivially_copy_constructible<T>::value
 #define THRUST_OPTIONAL_IS_TRIVIALLY_COPY_ASSIGNABLE(T)                                        \
   std::is_trivially_copy_assignable<T>::value
+#define THRUST_OPTIONAL_IS_TRIVIALLY_MOVE_CONSTRUCTIBLE(T)                                     \
+  std::is_trivially_move_constructible<T>::value
+#define THRUST_OPTIONAL_IS_TRIVIALLY_MOVE_ASSIGNABLE(T)                                        \
+  std::is_trivially_move_assignable<T>::value
 #define THRUST_OPTIONAL_IS_TRIVIALLY_DESTRUCTIBLE(T) std::is_trivially_destructible<T>::value
 #else
-#define THRUST_OPTIONAL_IS_TRIVIALLY_COPY_CONSTRUCTIBLE(T)                                     \
-  std::is_trivially_copy_constructible<T>::value
-#define THRUST_OPTIONAL_IS_TRIVIALLY_COPY_ASSIGNABLE(T)                                        \
-  std::is_trivially_copy_assignable<T>::value
-#define THRUST_OPTIONAL_IS_TRIVIALLY_DESTRUCTIBLE(T) std::is_trivially_destructible<T>::value
+
+// To support clang + old libstdc++ without type traits, check for equivalent
+// clang built-ins and use them if present. See note above
+// is_trivially_copyable_impl in
+// thrust/type_traits/is_trivially_relocatable.h for more details.
+
+#ifndef __has_feature
+#define __has_feature(x) 0
 #endif
 
-#if __cplusplus > 201103L
+#if defined(__GLIBCXX__) && __has_feature(is_trivially_constructible)
+#define THRUST_OPTIONAL_IS_TRIVIALLY_COPY_CONSTRUCTIBLE(T) \
+  __is_trivially_constructible(T, T const&)
+#else
+#define THRUST_OPTIONAL_IS_TRIVIALLY_COPY_CONSTRUCTIBLE(T) \
+  std::is_trivially_copy_constructible<T>::value
+#endif
+
+#if defined(__GLIBCXX__) && __has_feature(is_trivially_assignable)
+#define THRUST_OPTIONAL_IS_TRIVIALLY_COPY_ASSIGNABLE(T) \
+  __is_trivially_assignable(T, T const&)
+#else
+#define THRUST_OPTIONAL_IS_TRIVIALLY_COPY_ASSIGNABLE(T) \
+  std::is_trivially_copy_assignable<T>::value
+#endif
+
+#if defined(__GLIBCXX__) && __has_feature(is_trivially_constructible)
+#define THRUST_OPTIONAL_IS_TRIVIALLY_MOVE_CONSTRUCTIBLE(T) \
+  __is_trivially_constructible(T, T&&)
+#else
+#define THRUST_OPTIONAL_IS_TRIVIALLY_MOVE_CONSTRUCTIBLE(T) \
+  std::is_trivially_move_constructible<T>::value
+#endif
+
+#if defined(__GLIBCXX__) && __has_feature(is_trivially_assignable)
+#define THRUST_OPTIONAL_IS_TRIVIALLY_MOVE_ASSIGNABLE(T) \
+  __is_trivially_assignable(T, T&&)
+#else
+#define THRUST_OPTIONAL_IS_TRIVIALLY_MOVE_ASSIGNABLE(T) \
+  std::is_trivially_move_assignable<T>::value
+#endif
+
+#if defined(__GLIBCXX__) && __has_feature(is_trivially_destructible)
+#define THRUST_OPTIONAL_IS_TRIVIALLY_DESTRUCTIBLE(T) \
+  __is_trivially_destructible(T)
+#else
+#define THRUST_OPTIONAL_IS_TRIVIALLY_DESTRUCTIBLE(T) \
+  std::is_trivially_destructible<T>::value
+#endif
+
+#endif
+
+#if THRUST_CPP_DIALECT > 2011
 #define THRUST_OPTIONAL_CPP14
 #endif
 
 // constexpr implies const in C++11, not C++14
-#if (__cplusplus == 201103L || defined(THRUST_OPTIONAL_MSVC2015) ||                \
+#if (THRUST_CPP_DIALECT == 2011 || defined(THRUST_OPTIONAL_MSVC2015) ||                \
      defined(THRUST_OPTIONAL_GCC49))
 /// \exclude
 #define THRUST_OPTIONAL_CPP11_CONSTEXPR
@@ -108,7 +163,8 @@ THRUST_END_NS
 #define THRUST_OPTIONAL_CPP11_CONSTEXPR constexpr
 #endif
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 #ifndef THRUST_MONOSTATE_INPLACE_MUTEX
 #define THRUST_MONOSTATE_INPLACE_MUTEX
 /// \brief Used to represent an optional with no data; essentially a bool
@@ -145,7 +201,7 @@ template <class B, class... Bs>
 struct conjunction<B, Bs...>
     : std::conditional<bool(B::value), conjunction<Bs...>, B>::type {};
 
-#if defined(_LIBCPP_VERSION) && __cplusplus == 201103L
+#if defined(_LIBCPP_VERSION) && THRUST_CPP_DIALECT == 2011
 #define THRUST_OPTIONAL_LIBCXX_MEM_FN_WORKAROUND
 #endif
 
@@ -159,17 +215,17 @@ struct is_pointer_to_non_const_member_func<Ret (T::*) (Args...)> : std::true_typ
 template <class T, class Ret, class... Args>
 struct is_pointer_to_non_const_member_func<Ret (T::*) (Args...)&> : std::true_type{};
 template <class T, class Ret, class... Args>
-struct is_pointer_to_non_const_member_func<Ret (T::*) (Args...)&&> : std::true_type{};        
+struct is_pointer_to_non_const_member_func<Ret (T::*) (Args...)&&> : std::true_type{};
 template <class T, class Ret, class... Args>
 struct is_pointer_to_non_const_member_func<Ret (T::*) (Args...) volatile> : std::true_type{};
 template <class T, class Ret, class... Args>
 struct is_pointer_to_non_const_member_func<Ret (T::*) (Args...) volatile&> : std::true_type{};
 template <class T, class Ret, class... Args>
-struct is_pointer_to_non_const_member_func<Ret (T::*) (Args...) volatile&&> : std::true_type{};        
+struct is_pointer_to_non_const_member_func<Ret (T::*) (Args...) volatile&&> : std::true_type{};
 
 template <class T> struct is_const_or_const_ref : std::false_type{};
 template <class T> struct is_const_or_const_ref<T const&> : std::true_type{};
-template <class T> struct is_const_or_const_ref<T const> : std::true_type{};    
+template <class T> struct is_const_or_const_ref<T const> : std::true_type{};
 #endif
 
 // std::invoke from C++17
@@ -177,8 +233,8 @@ template <class T> struct is_const_or_const_ref<T const> : std::true_type{};
 __thrust_exec_check_disable__
 template <typename Fn, typename... Args,
 #ifdef THRUST_OPTIONAL_LIBCXX_MEM_FN_WORKAROUND
-          typename = enable_if_t<!(is_pointer_to_non_const_member_func<Fn>::value 
-                                 && is_const_or_const_ref<Args...>::value)>, 
+          typename = enable_if_t<!(is_pointer_to_non_const_member_func<Fn>::value
+                                 && is_const_or_const_ref<Args...>::value)>,
 #endif
           typename = enable_if_t<std::is_member_pointer<decay_t<Fn>>::value>,
           int = 0>
@@ -288,7 +344,7 @@ using enable_assign_from_other = detail::enable_if_t<
     !std::is_assignable<T &, const optional<U> &>::value &&
     !std::is_assignable<T &, const optional<U> &&>::value>;
 
-#ifdef _MSC_VER
+#if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
 // TODO make a version which works with MSVC
 template <class T, class U = T> struct is_swappable : std::true_type {};
 
@@ -509,19 +565,10 @@ struct optional_copy_base<T, false> : optional_operations_base<T> {
   optional_copy_base &operator=(optional_copy_base &&rhs) = default;
 };
 
-// This class manages conditionally having a trivial move constructor
-// Unfortunately there's no way to achieve this in GCC < 5 AFAIK, since it
-// doesn't implement an analogue to std::is_trivially_move_constructible. We
-// have to make do with a non-trivial move constructor even if T is trivially
-// move constructible
-#ifndef THRUST_OPTIONAL_GCC49
-template <class T, bool = std::is_trivially_move_constructible<T>::value>
+template <class T, bool = THRUST_OPTIONAL_IS_TRIVIALLY_MOVE_CONSTRUCTIBLE(T)>
 struct optional_move_base : optional_copy_base<T> {
   using optional_copy_base<T>::optional_copy_base;
 };
-#else
-template <class T, bool = false> struct optional_move_base;
-#endif
 template <class T> struct optional_move_base<T, false> : optional_copy_base<T> {
   using optional_copy_base<T>::optional_copy_base;
 
@@ -576,21 +623,13 @@ struct optional_copy_assign_base<T, false> : optional_move_base<T> {
   operator=(optional_copy_assign_base &&rhs) = default;
 };
 
-// This class manages conditionally having a trivial move assignment operator
-// Unfortunately there's no way to achieve this in GCC < 5 AFAIK, since it
-// doesn't implement an analogue to std::is_trivially_move_assignable. We have
-// to make do with a non-trivial move assignment operator even if T is trivially
-// move assignable
-#ifndef THRUST_OPTIONAL_GCC49
-template <class T, bool = std::is_trivially_destructible<T>::value
-                       &&std::is_trivially_move_constructible<T>::value
-                           &&std::is_trivially_move_assignable<T>::value>
+template <class T,
+          bool = THRUST_OPTIONAL_IS_TRIVIALLY_DESTRUCTIBLE(T) &&
+                 THRUST_OPTIONAL_IS_TRIVIALLY_MOVE_CONSTRUCTIBLE(T) &&
+                 THRUST_OPTIONAL_IS_TRIVIALLY_MOVE_ASSIGNABLE(T)>
 struct optional_move_assign_base : optional_copy_assign_base<T> {
   using optional_copy_assign_base<T>::optional_copy_assign_base;
 };
-#else
-template <class T, bool = false> struct optional_move_assign_base;
-#endif
 
 template <class T>
 struct optional_move_assign_base<T, false> : optional_copy_assign_base<T> {
@@ -1569,7 +1608,7 @@ public:
   emplace(std::initializer_list<U> il, Args &&... args) {
     *this = nullopt;
     this->construct(il, std::forward<Args>(args)...);
-    return value();    
+    return value();
   }
 
   /// Swaps this optional with the other.
@@ -1813,58 +1852,58 @@ inline constexpr bool operator!=(nullopt_t, const optional<T> &rhs) noexcept {
   return rhs.has_value();
 }
 /// \group relop_nullopt
-__thrust_exec_check_disable__                                                    
-template <class T>                                                               
-__host__ __device__       
+__thrust_exec_check_disable__
+template <class T>
+__host__ __device__
 inline constexpr bool operator<(const optional<T> &, nullopt_t) noexcept {
   return false;
 }
 /// \group relop_nullopt
-__thrust_exec_check_disable__                                                    
-template <class T>                                                               
-__host__ __device__       
+__thrust_exec_check_disable__
+template <class T>
+__host__ __device__
 inline constexpr bool operator<(nullopt_t, const optional<T> &rhs) noexcept {
   return rhs.has_value();
 }
 /// \group relop_nullopt
-__thrust_exec_check_disable__                                                    
-template <class T>                                                               
-__host__ __device__       
+__thrust_exec_check_disable__
+template <class T>
+__host__ __device__
 inline constexpr bool operator<=(const optional<T> &lhs, nullopt_t) noexcept {
   return !lhs.has_value();
 }
 /// \group relop_nullopt
-__thrust_exec_check_disable__                                                    
-template <class T>                                                               
-__host__ __device__       
+__thrust_exec_check_disable__
+template <class T>
+__host__ __device__
 inline constexpr bool operator<=(nullopt_t, const optional<T> &) noexcept {
   return true;
 }
 /// \group relop_nullopt
-__thrust_exec_check_disable__                                                    
-template <class T>                                                               
-__host__ __device__       
+__thrust_exec_check_disable__
+template <class T>
+__host__ __device__
 inline constexpr bool operator>(const optional<T> &lhs, nullopt_t) noexcept {
   return lhs.has_value();
 }
 /// \group relop_nullopt
-__thrust_exec_check_disable__                                                    
-template <class T>                                                               
-__host__ __device__       
+__thrust_exec_check_disable__
+template <class T>
+__host__ __device__
 inline constexpr bool operator>(nullopt_t, const optional<T> &) noexcept {
   return false;
 }
 /// \group relop_nullopt
-__thrust_exec_check_disable__                                                    
-template <class T>                                                               
-__host__ __device__       
+__thrust_exec_check_disable__
+template <class T>
+__host__ __device__
 inline constexpr bool operator>=(const optional<T> &, nullopt_t) noexcept {
   return true;
 }
 /// \group relop_nullopt
-__thrust_exec_check_disable__                                                    
-template <class T>                                                               
-__host__ __device__       
+__thrust_exec_check_disable__
+template <class T>
+__host__ __device__
 inline constexpr bool operator>=(nullopt_t, const optional<T> &rhs) noexcept {
   return !rhs.has_value();
 }
@@ -1997,7 +2036,7 @@ inline constexpr optional<T> make_optional(std::initializer_list<U> il,
   return optional<T>(in_place, il, std::forward<Args>(args)...);
 }
 
-#if __cplusplus >= 201703L
+#if THRUST_CPP_DIALECT >= 2017
 template <class T> optional(T)->optional<T>;
 #endif
 
@@ -2827,7 +2866,7 @@ private:
   T *m_value;
 };
 
-THRUST_END_NS
+} // end namespace thrust
 
 namespace std {
 // TODO SFINAE
@@ -2844,4 +2883,3 @@ template <class T> struct hash<thrust::optional<T>> {
 } // namespace std
 
 #endif // THRUST_CPP_DIALECT >= 2011
-

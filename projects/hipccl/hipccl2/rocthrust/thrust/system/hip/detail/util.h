@@ -31,7 +31,6 @@
 #include <thrust/detail/config.h>
 #include <thrust/iterator/iterator_traits.h>
 // Not present in rocPRIM
-// #include <thrust/system/cuda/detail/cub/util_arch.cuh>
 #include <thrust/system/hip/detail/execution_policy.h>
 #include <thrust/system/hip/error.h>
 #include <thrust/system_error.h>
@@ -48,9 +47,50 @@
   #define THRUST_HIP_PRINTF(text, ...)
 #endif
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 namespace hip_rocprim
 {
+
+  inline __host__ __device__ hipStream_t default_stream()
+  {
+    #ifdef HIP_API_PER_THREAD_DEFAULT_STREAM
+      return hipStreamPerThread;
+    #else
+      return hipStreamDefault; // There's not hipStreamLegacy
+    #endif
+  }
+
+  template <class Derived>
+  hipStream_t __host__ __device__
+  get_stream(execution_policy<Derived>&)
+  {
+      return default_stream();
+  }
+
+  template <class Derived>
+  hipError_t synchronize_stream(execution_policy<Derived>& policy)
+  {
+    hipError_t result;
+  if (THRUST_IS_HOST_CODE) {
+    #if THRUST_INCLUDE_HOST_CODE
+      hipStreamSynchronize(stream(policy));
+      result = hipGetLastError();
+    #endif
+  } else {
+    #if THRUST_INCLUDE_DEVICE_CODE
+      #if __THRUST_HAS_HIPRT__
+        THRUST_UNUSED_VAR(policy);
+        hipDeviceSynchronize();
+        result = hipGetLastError();
+      #else
+        THRUST_UNUSED_VAR(policy);
+        result = hipSuccess;
+      #endif
+    #endif
+  }
+  return result;
+  }
 
 __thrust_exec_check_disable__ template <class Policy>
 __host__ __device__ hipError_t synchronize(Policy& policy)
@@ -130,53 +170,77 @@ trivial_copy_device_to_device(Policy& policy, Type* dst, Type const* src, size_t
 
 inline void __host__ __device__ terminate()
 {
-#ifdef __HIP_DEVICE_COMPILE__
-    abort();
-#else
-    std::terminate();
-#endif
+  if (THRUST_IS_DEVICE_CODE) {
+    #if THRUST_INCLUDE_DEVICE_CODE
+      abort();
+    #endif
+  } else {
+    #if THRUST_INCLUDE_HOST_CODE
+      std::terminate();
+    #endif
+  }
 }
 
 inline void __host__ __device__ throw_on_error(hipError_t status, char const* msg)
 {
-    if(hipSuccess != status)
-    {
-#if !defined(__HIP_DEVICE_COMPILE__)
-        throw thrust::system_error(status, thrust::hip_category(), msg);
-#else
 #if __THRUST_HAS_HIPRT__
-        printf("Error after %s: %s\n", msg, hipGetErrorString(status));
-#else
-        THRUST_HIP_PRINTF("Error %d: %s \n", (int)status, msg);
-    #if THRUST_HIP_PRINTF_ENABLED == 0
+  // Clear the global HIP error state which may have been set by the last
+  // call. Otherwise, errors may "leak" to unrelated kernel launches.
+  hipGetLastError();
+ #endif
+
+  if(hipSuccess != status)
+  {
+    if (THRUST_IS_HOST_CODE) {
+      #if THRUST_INCLUDE_HOST_CODE
+      throw thrust::system_error(status, thrust::hip_category(), msg);
+      #endif
+    } else {
+    #if THRUST_INCLUDE_DEVICE_CODE
+      #if __THRUST_HAS_HIPRT__
+        printf("Thrust HIP Backend Error %s: %s\n", hipGetErrorString(status),msg);
+      #else
+        THRUST_HIP_PRINTF("Error %d :%s \n", (int)status, msg);
+        #if THRUST_HIP_PRINTF_ENABLED == 0
         THRUST_UNUSED_VAR(status);
         THRUST_UNUSED_VAR(msg);
+        #endif
+      #endif
+      hip_rocprim::terminate();
     #endif
-#endif
-        hip_rocprim::terminate();
-#endif
     }
+  }
 }
 
 // TODO this overload should be removed and messages should be passed.
 inline void __host__ __device__ throw_on_error(hipError_t status)
 {
+#if __THRUST_HAS_HIPRT__
+  // Clear the global HIP error state which may have been set by the last
+  // call. Otherwise, errors may "leak" to unrelated kernel launches.
+  hipGetLastError();
+ #endif
+
     if(hipSuccess != status)
     {
-#if !defined(__HIP_DEVICE_COMPILE__)
+      if (THRUST_IS_HOST_CODE) {
+        #if THRUST_INCLUDE_HOST_CODE
         throw thrust::system_error(status, thrust::hip_category());
-#else
-#if __THRUST_HAS_HIPRT__
-        printf("Error %s\n", hipGetErrorString(status));
-#else
-        THRUST_HIP_PRINTF("Error %d \n", (int)status);
-    #if THRUST_HIP_PRINTF_ENABLED == 0
-        THRUST_UNUSED_VAR(status);
-    #endif
-#endif
+        #endif
+      } else {
+      #if THRUST_INCLUDE_DEVICE_CODE
+        #if __THRUST_HAS_HIPRT__
+          printf("Thrust HIP Backend Error %s\n", hipGetErrorString(status));
+        #else
+          THRUST_HIP_PRINTF("Error %d \n", (int)status);
+          #if THRUST_HIP_PRINTF_ENABLED == 0
+          THRUST_UNUSED_VAR(status);
+          #endif
+        #endif
         hip_rocprim::terminate();
-#endif
+      #endif
     }
+  }
 }
 
 template <class ValueType, class InputIt, class UnaryOp>
@@ -198,10 +262,18 @@ struct transform_input_iterator_t
     {
     }
 
+
 #if THRUST_CPP_DIALECT >= 2011
-    transform_input_iterator_t(const self_t &) = default;
+  transform_input_iterator_t(const self_t &) = default;
 #endif
 
+  // UnaryOp might not be copy assignable, such as when it is a lambda.  Define
+  // an explicit copy assignment operator that doesn't try to assign it.
+  THRUST_HIP_FUNCTION self_t& operator=(const self_t& o)
+  {
+    input = o.input;
+    return *this;
+  }
 
     /// Postfix increment
     THRUST_HIP_FUNCTION self_t operator++(int)
@@ -269,14 +341,6 @@ struct transform_input_iterator_t
         return op(input[n]);
     }
 
-#if 0
-    /// Structure dereference
-    THRUST_HIP_FUNCTION pointer operator->()
-    {
-        return &op(*input_itr);
-    }
-#endif
-
     /// Equal to
     THRUST_HIP_FUNCTION bool operator==(const self_t& rhs) const
     {
@@ -289,13 +353,6 @@ struct transform_input_iterator_t
         return (input != rhs.input);
     }
 
-#if 0
-    /// ostream operator
-    friend std::ostream& operator<<(std::ostream& os, const self& itr)
-    {
-        return os;
-    }
-#endif
 }; // struct transform_input_iterarot_t
 
 template <class ValueType, class InputIt1, class InputIt2, class BinaryOp>
@@ -320,6 +377,19 @@ struct transform_pair_of_input_iterators_t
         , op(op_)
     {
     }
+
+    #if THRUST_CPP_DIALECT >= 2011
+      transform_pair_of_input_iterators_t(const self_t &) = default;
+    #endif
+
+      // BinaryOp might not be copy assignable, such as when it is a lambda.
+      // Define an explicit copy assignment operator that doesn't try to assign it.
+      self_t& operator=(const self_t& o)
+      {
+        input1 = o.input1;
+        input2 = o.input2;
+        return *this;
+      }
 
     /// Postfix increment
     THRUST_HIP_FUNCTION self_t operator++(int)
@@ -403,118 +473,6 @@ struct transform_pair_of_input_iterators_t
 
 }; // struct trasnform_pair_of_input_iterators_t
 
-template <class ValueType, class InputIt1, class InputIt2, class InputIt3, class TransformOp>
-struct transform_triple_of_input_iterators_t
-{
-    typedef transform_triple_of_input_iterators_t               self_t;
-    typedef typename iterator_traits<InputIt1>::difference_type difference_type;
-    typedef ValueType                                           value_type;
-    typedef value_type*                                         pointer;
-    typedef value_type                                          reference;
-    typedef std::random_access_iterator_tag                     iterator_category;
-
-    InputIt1            input1;
-    InputIt2            input2;
-    InputIt3            input3;
-    mutable TransformOp op;
-
-    THRUST_HIP_FUNCTION transform_triple_of_input_iterators_t(InputIt1 input1_,
-                                                                              InputIt2 input2_,
-                                                                              InputIt3 input3_,
-                                                                              TransformOp op_)
-        : input1(input1_)
-        , input2(input2_)
-        , input3(input3_)
-        , op(op_)
-    {
-    }
-
-    /// Postfix increment
-    THRUST_HIP_FUNCTION self_t operator++(int)
-    {
-        self_t retval = *this;
-        ++input1;
-        ++input2;
-        ++input3;
-        return retval;
-    }
-
-    /// Prefix increment
-    THRUST_HIP_FUNCTION self_t operator++()
-    {
-        ++input1;
-        ++input2;
-        ++input3;
-        return *this;
-    }
-
-    /// Indirection
-    THRUST_HIP_FUNCTION reference operator*() const
-    {
-        return op(*input1, *input2, *input3);
-    }
-    /// Indirection
-    THRUST_HIP_FUNCTION reference operator*()
-    {
-        return op(*input1, *input2, *input3);
-    }
-
-    /// Addition
-    THRUST_HIP_FUNCTION self_t operator+(difference_type n) const
-    {
-        return self_t(input1 + n, input2 + n, input3 + n, op);
-    }
-
-    /// Addition assignment
-    THRUST_HIP_FUNCTION self_t& operator+=(difference_type n)
-    {
-        input1 += n;
-        input2 += n;
-        input3 += n;
-        return *this;
-    }
-
-    /// Subtraction
-    THRUST_HIP_FUNCTION self_t operator-(difference_type n) const
-    {
-        return self_t(input1 - n, input2 - n, input3 - n, op);
-    }
-
-    /// Subtraction assignment
-    THRUST_HIP_FUNCTION self_t& operator-=(difference_type n)
-    {
-        input1 -= n;
-        input2 -= n;
-        input3 -= n;
-        return *this;
-    }
-
-    /// Distance
-    THRUST_HIP_FUNCTION difference_type operator-(self_t other) const
-    {
-        return input1 - other.input1;
-    }
-
-    /// Array subscript
-    THRUST_HIP_FUNCTION reference operator[](difference_type n) const
-    {
-        return op(input1[n], input2[n], input3[n]);
-    }
-
-    /// Equal to
-    THRUST_HIP_FUNCTION bool operator==(const self_t& rhs) const
-    {
-        return (input1 == rhs.input1) && (input2 == rhs.input2) && (input3 == rhs.input3);
-    }
-
-    /// Not equal to
-    THRUST_HIP_FUNCTION bool operator!=(const self_t& rhs) const
-    {
-        return (input1 != rhs.input1) || (input2 != rhs.input2) || (input3 != rhs.input3);
-    }
-
-}; // struct trasnform_triple_of_input_iterators_t
-
 struct identity
 {
     template <class T>
@@ -529,211 +487,6 @@ struct identity
         return t;
     }
 };
-
-template <class ValueType, class OutputIt, class TransformOp = identity>
-struct transform_output_iterator_t
-{
-    struct proxy_reference
-    {
-    private:
-        OutputIt    output;
-        TransformOp op;
-
-    public:
-        __host__ __device__ proxy_reference(OutputIt const& output_, TransformOp op_)
-            : output(output_)
-            , op(op_)
-        {
-        }
-
-        proxy_reference __host__ __device__ operator=(ValueType const& x)
-        {
-            *output = op(x);
-            return *this;
-        }
-    };
-
-    typedef transform_output_iterator_t                         self_t;
-    typedef typename iterator_traits<OutputIt>::difference_type difference_type;
-    typedef void                                                value_type;
-    typedef proxy_reference                                     reference;
-    typedef std::output_iterator_tag                            iterator_category;
-
-    OutputIt    output;
-    TransformOp op;
-
-    THRUST_HIP_FUNCTION transform_output_iterator_t(OutputIt output)
-        : output(output)
-    {
-    }
-
-    THRUST_HIP_FUNCTION transform_output_iterator_t(OutputIt    output,
-                                                                    TransformOp op)
-        : output(output)
-        , op(op)
-    {
-    }
-
-    /// Postfix increment
-    THRUST_HIP_FUNCTION self_t operator++(int)
-    {
-        self_t retval = *this;
-        ++output;
-        return retval;
-    }
-
-    /// Prefix increment
-    THRUST_HIP_FUNCTION self_t operator++()
-    {
-        ++output;
-        return *this;
-    }
-
-    /// Indirection
-    THRUST_HIP_FUNCTION reference operator*() const
-    {
-        return proxy_reference(output, op);
-    }
-    /// Indirection
-    THRUST_HIP_FUNCTION reference operator*()
-    {
-        return proxy_reference(output, op);
-    }
-
-    /// Addition
-    THRUST_HIP_FUNCTION self_t operator+(difference_type n) const
-    {
-        return self_t(output + n, op);
-    }
-
-    /// Addition assignment
-    THRUST_HIP_FUNCTION self_t& operator+=(difference_type n)
-    {
-        output += n;
-        return *this;
-    }
-
-    /// Subtraction
-    THRUST_HIP_FUNCTION self_t operator-(difference_type n) const
-    {
-        return self_t(output - n, op);
-    }
-
-    /// Subtraction assignment
-    THRUST_HIP_FUNCTION self_t& operator-=(difference_type n)
-    {
-        output -= n;
-        return *this;
-    }
-
-    /// Distance
-    THRUST_HIP_FUNCTION difference_type operator-(self_t other) const
-    {
-        return output - other.output;
-    }
-
-    /// Array subscript
-    THRUST_HIP_FUNCTION reference operator[](difference_type n) const
-    {
-        return *(output + n);
-    }
-
-    /// Equal to
-    THRUST_HIP_FUNCTION bool operator==(const self_t& rhs) const
-    {
-        return (output == rhs.output);
-    }
-
-    /// Not equal to
-    THRUST_HIP_FUNCTION bool operator!=(const self_t& rhs) const
-    {
-        return (output != rhs.output);
-    }
-}; // struct transform_output_iterator_
-
-template <class T, T VALUE>
-struct static_integer_iterator
-{
-    typedef static_integer_iterator         self_t;
-    typedef int                             difference_type;
-    typedef T                               value_type;
-    typedef T                               reference;
-    typedef std::random_access_iterator_tag iterator_category;
-
-    THRUST_HIP_FUNCTION static_integer_iterator() {}
-
-    /// Postfix increment
-    THRUST_HIP_FUNCTION self_t operator++(int)
-    {
-        return *this;
-    }
-
-    /// Prefix increment
-    THRUST_HIP_FUNCTION self_t operator++()
-    {
-        return *this;
-    }
-
-    /// Indirection
-    THRUST_HIP_FUNCTION reference operator*() const
-    {
-        return VALUE;
-    }
-    /// Indirection
-    THRUST_HIP_FUNCTION reference operator*()
-    {
-        return VALUE;
-    }
-
-    /// Addition
-    THRUST_HIP_FUNCTION self_t operator+(difference_type) const
-    {
-        return self_t();
-    }
-
-    /// Addition assignment
-    THRUST_HIP_FUNCTION self_t& operator+=(difference_type)
-    {
-        return *this;
-    }
-
-    /// Subtraction
-    THRUST_HIP_FUNCTION self_t operator-(difference_type) const
-    {
-        return self_t();
-    }
-
-    /// Subtraction assignment
-    THRUST_HIP_FUNCTION self_t& operator-=(difference_type)
-    {
-        return *this;
-    }
-
-    /// Distance
-    THRUST_HIP_FUNCTION difference_type operator-(self_t) const
-    {
-        return 0;
-    }
-
-    /// Array subscript
-    THRUST_HIP_FUNCTION reference operator[](difference_type) const
-    {
-        return VALUE;
-    }
-
-    /// Equal to
-    THRUST_HIP_FUNCTION bool operator==(const self_t&) const
-    {
-        return true;
-    }
-
-    /// Not equal to
-    THRUST_HIP_FUNCTION bool operator!=(const self_t&) const
-    {
-        return false;
-    }
-
-}; // struct static_bool_iterator
 
 template <class T>
 struct counting_iterator_t
@@ -832,4 +585,4 @@ struct counting_iterator_t
 }; // struct count_iterator_t
 
 } // hip_rocprim
-THRUST_END_NS
+} // end namespace thrust

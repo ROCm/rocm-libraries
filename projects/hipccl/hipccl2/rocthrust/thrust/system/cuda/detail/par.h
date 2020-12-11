@@ -38,7 +38,8 @@
 #endif
 
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 namespace cuda_cub {
 
 template <class Derived>
@@ -68,23 +69,6 @@ private:
   {
     return exec.stream;
   }
-
-  friend __host__ __device__
-  cudaError_t
-  synchronize_stream(execute_on_stream_base &exec)
-  {
-    #if   !__CUDA_ARCH__
-      cudaStreamSynchronize(exec.stream);
-      return cudaGetLastError();
-    #elif __THRUST_HAS_CUDART__
-      THRUST_UNUSED_VAR(exec);
-      cudaDeviceSynchronize();
-      return cudaGetLastError();
-    #else
-      THRUST_UNUSED_VAR(exec);
-      return cudaSuccess;
-    #endif
-  }
 };
 
 struct execute_on_stream : execute_on_stream_base<execute_on_stream>
@@ -109,7 +93,7 @@ struct par_t : execution_policy<par_t>,
   typedef execution_policy<par_t> base_t;
 
   __host__ __device__
-  par_t() : base_t() {}
+  THRUST_CONSTEXPR par_t() : base_t() {}
 
   typedef execute_on_stream stream_attachment_type;
 
@@ -121,11 +105,7 @@ struct par_t : execution_policy<par_t>,
   }
 };
 
-#ifdef __CUDA_ARCH__
-static const __device__ par_t par;
-#else
-static const par_t par;
-#endif
+THRUST_INLINE_CONSTANT par_t par;
 }    // namespace cuda_
 
 namespace system {
@@ -141,5 +121,4 @@ namespace cuda {
 using thrust::cuda_cub::par;
 } // namespace cuda
 
-THRUST_END_NS
-
+} // end namespace thrust

@@ -16,7 +16,7 @@
 
 /*
  * (C) Copyright John Maddock 2000.
- * 
+ *
  * Distributed under the Boost Software License, Version 1.0.
  * (See accompanying NOTICE file for the complete license)
  *
@@ -29,7 +29,7 @@
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/preprocessor.h>
 
-THRUST_BEGIN_NS
+namespace thrust {
 
 namespace detail
 {
@@ -70,14 +70,14 @@ template <int x> struct static_assert_test {};
     >                                                                         \
       THRUST_PP_CAT2(thrust_static_assert_typedef_, __LINE__)                 \
       __attribute__((unused))                                                 \
-    /**/      
+    /**/
 #else
 #  define THRUST_STATIC_ASSERT(B)                                             \
     typedef ::thrust::detail::static_assert_test<                             \
       sizeof(::thrust::detail::STATIC_ASSERTION_FAILURE<(bool)(B)>)           \
     >                                                                         \
       THRUST_PP_CAT2(thrust_static_assert_typedef_, __LINE__)                 \
-    /**/      
+    /**/
 #endif
 
 #define THRUST_STATIC_ASSERT_MSG(B, msg) THRUST_STATIC_ASSERT(B)
@@ -86,6 +86,4 @@ template <int x> struct static_assert_test {};
 
 } // namespace detail
 
-THRUST_END_NS
-
-
+} //end namespace thrust

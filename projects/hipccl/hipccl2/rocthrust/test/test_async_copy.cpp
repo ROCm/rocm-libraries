@@ -19,7 +19,7 @@ TESTS_DEFINE(AsyncCopyTests, NumericalTestsParams);
     auto operator()(                                                          \
       ForwardIt&& first, Sentinel&& last, OutputIt&& output                   \
     ) const                                                                   \
-    THRUST_DECLTYPE_RETURNS(                                                  \
+    THRUST_RETURNS(                                                           \
       ::thrust::async::copy(                                                  \
         __VA_ARGS__                                                           \
         THRUST_PP_COMMA_IF(THRUST_PP_ARITY(__VA_ARGS__))                      \
@@ -134,7 +134,7 @@ TYPED_TEST(AsyncCopyTests, TestAsyncCopyTriviallyRelocatableDeviceToHost)
 
 TYPED_TEST(AsyncCopyTests, TestAsyncCopyTriviallyRelocatableDeviceToHostPolicies)
 {
-    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());    
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;
     AsyncCopyDeviceToHost<T, invoke_async_copy_device_to_host_fn>();
 };

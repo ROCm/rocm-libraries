@@ -96,7 +96,7 @@ public:
 
     std::tuple<remove_cvref_t<Dependencies>...>
     __host__
-    extract_dependencies() 
+    extract_dependencies()
     {
         return std::move(dependencies);
     }
@@ -184,13 +184,13 @@ public:
 
     std::tuple<remove_cvref_t<Dependencies>...>
     __host__
-    extract_dependencies() 
+    extract_dependencies()
     {
         return std::move(dependencies);
     }
 
-    typename std::remove_reference<Allocator>::type&
     __host__
+    typename std::add_lvalue_reference<Allocator>::type
     get_allocator()
     {
         return alloc;
@@ -264,4 +264,3 @@ extract_dependencies(System &&)
 } // end thrust
 
 #endif // THRUST_CPP_DIALECT >= 2011
-

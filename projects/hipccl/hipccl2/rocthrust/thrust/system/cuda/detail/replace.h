@@ -31,7 +31,8 @@
 #include <thrust/system/cuda/detail/transform.h>
 #include <thrust/detail/internal_functional.h>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 namespace cuda_cub {
 
   namespace __replace
@@ -64,14 +65,14 @@ namespace cuda_cub {
 
       template<class T>
       OutputType THRUST_DEVICE_FUNCTION
-      operator()(T const &x) const
+      operator()(T const &x)
       {
         return pred(x) ? new_value : x;
       }
 
       template<class T, class P>
       OutputType THRUST_DEVICE_FUNCTION
-      operator()(T const &x, P const& y) const
+      operator()(T const &x, P const& y)
       {
         return pred(y) ? new_value : x;
       }
@@ -89,12 +90,13 @@ replace(execution_policy<Derived> &policy,
         T const &                  old_value,
         T const &                  new_value)
 {
+  using thrust::placeholders::_1;
   cuda_cub::transform_if(policy,
                       first,
                       last,
                       first,
                       __replace::constant_f<T>(new_value),
-                      thrust::detail::equal_to_value<T>(old_value));
+                      _1 == old_value);
 }
 
 template <class Derived,
@@ -206,5 +208,5 @@ replace_copy(execution_policy<Derived> &policy,
 }
 
 }    // namespace cuda_cub
-THRUST_END_NS
+} // end namespace thrust
 #endif

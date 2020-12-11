@@ -21,7 +21,7 @@
 
 #pragma once
 
-#include <algorithm>
+#include <thrust/detail/algorithm_wrapper.h>
 
 #include <thrust/host_vector.h>
 
@@ -502,4 +502,3 @@ public:
 
 } // end mr
 } // end thrust
-

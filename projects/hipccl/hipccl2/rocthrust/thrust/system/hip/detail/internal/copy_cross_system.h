@@ -42,7 +42,8 @@
 #include <thrust/detail/temporary_array.h>
 #include <thrust/type_traits/is_trivially_relocatable.h>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 namespace hip_rocprim
 {
 namespace __copy
@@ -318,4 +319,4 @@ cross_system_copy_n(thrust::hip_rocprim::execution_policy<D>& device_s,
     }
 } // namespace __copy
 } // namespace hip_rocprim
-THRUST_END_NS
+} // end namespace thrust

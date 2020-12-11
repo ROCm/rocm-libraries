@@ -20,7 +20,8 @@
 #include <thrust/system/hip/detail/guarded_hip_runtime_api.h>
 #include <thrust/system/hip/error.h>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 namespace system
 {
 
@@ -82,4 +83,4 @@ const error_category& hip_category(void)
 }
 
 } // end namespace system
-THRUST_END_NS
+} // end namespace thrust

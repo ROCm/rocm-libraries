@@ -59,7 +59,7 @@ template<unsigned int i>
     };
 
     __host__ __device__
-    argument(void){}
+    THRUST_CONSTEXPR argument(){}
 
     template<typename Env>
     __host__ __device__
@@ -72,4 +72,3 @@ template<unsigned int i>
 } // end functional
 } // end detail
 } // end thrust
-

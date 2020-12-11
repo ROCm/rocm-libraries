@@ -32,7 +32,8 @@
 #include <thrust/device_allocator.h>
 #include <thrust/detail/type_deduction.h>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -43,7 +44,7 @@ auto device_make_unique(Args&&... args)
     uninitialized_allocate_unique<T>(device_allocator<T>{})
   )
 {
-  // FIXME: This is crude - we construct an unnecessary T on the host for 
+  // FIXME: This is crude - we construct an unnecessary T on the host for
   // `device_new`. We need a proper dispatched `construct` algorithm to
   // do this properly.
   auto p = uninitialized_allocate_unique<T>(device_allocator<T>{});
@@ -53,6 +54,6 @@ auto device_make_unique(Args&&... args)
 
 ///////////////////////////////////////////////////////////////////////////////
 
-THRUST_END_NS
+} //end namespace thrust
 
 #endif // THRUST_CPP_DIALECT >= 2011

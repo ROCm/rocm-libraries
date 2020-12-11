@@ -28,7 +28,8 @@
 #include <thrust/mr/allocator.h>
 #include <ostream>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 namespace hip_rocprim
 {
 
@@ -102,68 +103,13 @@ inline __host__ __device__ pointer<T> malloc(std::size_t n);
  */
 inline __host__ __device__ void free(pointer<void> ptr);
 
-// XXX upon c++11
-// template<typename T>
-// using allocator = thrust::mr::stateless_resource_allocator<T,memory_resource >;
-//
-
 /*! \p hip::allocator is the default allocator used by the \p hip system's containers such as
  *  <tt>hip::vector</tt> if no user-specified allocator is provided. \p hip::allocator allocates
  *  (deallocates) storage with \p hip::malloc (\p hip::free).
  */
-template <typename T>
-struct allocator
-    : thrust::mr::stateless_resource_allocator<
-        T,
-        system::hip::memory_resource
-    >
-{
-private:
-    typedef thrust::mr::stateless_resource_allocator<
-        T,
-        system::hip::memory_resource
-    > base;
 
-public:
-    /*! The \p rebind metafunction provides the type of an \p allocator
-     *  instantiated with another type.
-     *
-     *  \tparam U The other type to use for instantiation.
-     */
-    template <typename U>
-    struct rebind
-    {
-        /*! The typedef \p other gives the type of the rebound \p allocator.
-         */
-        typedef allocator<U> other;
-    };
-
-    /*! No-argument constructor has no effect.
-     */
-    __host__ __device__
-    inline allocator() {}
-
-    /*! Copy constructor via base
-     */
-    __host__ __device__
-    inline allocator(const allocator & other) : base(other) {}
-
-
-    /*! Constructor from other \p allocator via base
-     */
-    template <typename U>
-    __host__ __device__
-    inline allocator(const allocator<U> & other) : base(other) {}
-
-#if THRUST_CPP_DIALECT >= 2011
-      allocator & operator=(const allocator &) = default;
-#endif
-
-    /*! Destructor has no effect.
-     */
-    __host__ __device__
-    inline ~allocator() {}
-}; // struct allocator
+ template<typename T>
+ using allocator = thrust::mr::stateless_resource_allocator<T, system::hip::memory_resource>;
 
 } // namespace hip_rocprim
 
@@ -189,6 +135,6 @@ namespace hip
     using thrust::hip_rocprim::malloc;
 } // end hip
 
-THRUST_END_NS
+} // end namespace thrust
 
 #include <thrust/system/hip/detail/memory.inl>

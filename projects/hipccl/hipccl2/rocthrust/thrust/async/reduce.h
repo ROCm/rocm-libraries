@@ -21,10 +21,9 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/detail/cpp11_required.h>
-#include <thrust/detail/modern_gcc_required.h>
+#include <thrust/detail/cpp14_required.h>
 
-#if THRUST_CPP_DIALECT >= 2011 && !defined(THRUST_LEGACY_GCC)
+#if THRUST_CPP_DIALECT >= 2014
 
 #include <thrust/detail/static_assert.h>
 #include <thrust/detail/select_system.h>
@@ -35,7 +34,8 @@
 
 #include <thrust/future.h>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 
 namespace async
 {
@@ -47,7 +47,7 @@ template <
   typename DerivedPolicy
 , typename ForwardIt, typename Sentinel, typename T, typename BinaryOp
 >
-__host__ 
+__host__
 future<DerivedPolicy, T>
 async_reduce(
   thrust::execution_policy<DerivedPolicy>&, ForwardIt, Sentinel, T, BinaryOp
@@ -58,7 +58,7 @@ async_reduce(
   , "this algorithm is not implemented for the specified system"
   );
   return {};
-} 
+}
 
 } // namespace unimplemented
 
@@ -81,7 +81,7 @@ struct reduce_fn final
   , BinaryOp&& op
   )
   // ADL dispatch.
-  THRUST_DECLTYPE_RETURNS(
+  THRUST_RETURNS(
     async_reduce(
       thrust::detail::derived_cast(thrust::detail::strip_const(exec))
     , THRUST_FWD(first), THRUST_FWD(last)
@@ -95,13 +95,14 @@ struct reduce_fn final
   , typename ForwardIt, typename Sentinel, typename T
   >
   __host__
-  static auto call(
+  static auto call4(
     thrust::detail::execution_policy_base<DerivedPolicy> const& exec
   , ForwardIt&& first, Sentinel&& last
   , T&& init
+  , thrust::true_type
   )
   // ADL dispatch.
-  THRUST_DECLTYPE_RETURNS(
+  THRUST_RETURNS(
     async_reduce(
       thrust::detail::derived_cast(thrust::detail::strip_const(exec))
     , THRUST_FWD(first), THRUST_FWD(last)
@@ -116,12 +117,13 @@ struct reduce_fn final
   >
   __host__
   static auto
-  call(
+  call3(
     thrust::detail::execution_policy_base<DerivedPolicy> const& exec
   , ForwardIt&& first, Sentinel&& last
+  , thrust::true_type
   )
   // ADL dispatch.
-  THRUST_DECLTYPE_RETURNS(
+  THRUST_RETURNS(
     async_reduce(
       thrust::detail::derived_cast(thrust::detail::strip_const(exec))
     , THRUST_FWD(first), THRUST_FWD(last)
@@ -136,10 +138,12 @@ struct reduce_fn final
 
   template <typename ForwardIt, typename Sentinel, typename T, typename BinaryOp>
   __host__
-  static auto call(ForwardIt&& first, Sentinel&& last, T&& init, BinaryOp&& op)
-  THRUST_DECLTYPE_RETURNS_WITH_SFINAE_CONDITION(
-    (negation<is_execution_policy<remove_cvref_t<ForwardIt>>>::value)
-  , reduce_fn::call(
+  static auto call4(ForwardIt&& first, Sentinel&& last,
+                    T&& init,
+                    BinaryOp&& op,
+                    thrust::false_type)
+  THRUST_RETURNS(
+    reduce_fn::call(
       thrust::detail::select_system(
         typename iterator_system<remove_cvref_t<ForwardIt>>::type{}
       )
@@ -151,10 +155,11 @@ struct reduce_fn final
 
   template <typename ForwardIt, typename Sentinel, typename T>
   __host__
-  static auto call(ForwardIt&& first, Sentinel&& last, T&& init)
-  THRUST_DECLTYPE_RETURNS_WITH_SFINAE_CONDITION(
-    (negation<is_execution_policy<remove_cvref_t<ForwardIt>>>::value)
-  , reduce_fn::call(
+  static auto call3(ForwardIt&& first, Sentinel&& last,
+                    T&& init,
+                    thrust::false_type)
+  THRUST_RETURNS(
+    reduce_fn::call(
       thrust::detail::select_system(
         typename iterator_system<remove_cvref_t<ForwardIt>>::type{}
       )
@@ -164,10 +169,29 @@ struct reduce_fn final
     )
   )
 
+  // MSVC WAR: MSVC gets angsty and eats all available RAM when we try to detect
+  // if T1 is an execution_policy by using SFINAE. Switching to a static
+  // dispatch pattern to prevent this.
+  template <typename T1, typename T2, typename T3>
+  __host__
+  static auto call(T1&& t1, T2&& t2, T3&& t3)
+  THRUST_RETURNS(
+    reduce_fn::call3(THRUST_FWD(t1), THRUST_FWD(t2), THRUST_FWD(t3),
+                     thrust::is_execution_policy<thrust::remove_cvref_t<T1>>{})
+  )
+
+  template <typename T1, typename T2, typename T3, typename T4>
+  __host__
+  static auto call(T1&& t1, T2&& t2, T3&& t3, T4&& t4)
+  THRUST_RETURNS(
+    reduce_fn::call4(THRUST_FWD(t1), THRUST_FWD(t2), THRUST_FWD(t3), THRUST_FWD(t4),
+                     thrust::is_execution_policy<thrust::remove_cvref_t<T1>>{})
+  )
+
   template <typename ForwardIt, typename Sentinel>
   __host__
   static auto call(ForwardIt&& first, Sentinel&& last)
-  THRUST_DECLTYPE_RETURNS(
+  THRUST_RETURNS(
     reduce_fn::call(
       thrust::detail::select_system(
         typename iterator_system<remove_cvref_t<ForwardIt>>::type{}
@@ -183,9 +207,9 @@ struct reduce_fn final
   )
 
   template <typename... Args>
-  THRUST_NODISCARD __host__ 
+  THRUST_NODISCARD __host__
   auto operator()(Args&&... args) const
-  THRUST_DECLTYPE_RETURNS(
+  THRUST_RETURNS(
     call(THRUST_FWD(args)...)
   )
 };
@@ -216,7 +240,7 @@ async_reduce_into(
   , "this algorithm is not implemented for the specified system"
   );
   return {};
-} 
+}
 
 } // namespace unimplemented
 
@@ -241,7 +265,7 @@ struct reduce_into_fn final
   , BinaryOp&& op
   )
   // ADL dispatch.
-  THRUST_DECLTYPE_RETURNS(
+  THRUST_RETURNS(
     async_reduce_into(
       thrust::detail::derived_cast(thrust::detail::strip_const(exec))
     , THRUST_FWD(first), THRUST_FWD(last)
@@ -257,14 +281,15 @@ struct reduce_into_fn final
   , typename T
   >
   __host__
-  static auto call(
+  static auto call5(
     thrust::detail::execution_policy_base<DerivedPolicy> const& exec
   , ForwardIt&& first, Sentinel&& last
   , OutputIt&& output
   , T&& init
+  , thrust::true_type
   )
   // ADL dispatch.
-  THRUST_DECLTYPE_RETURNS(
+  THRUST_RETURNS(
     async_reduce_into(
       thrust::detail::derived_cast(thrust::detail::strip_const(exec))
     , THRUST_FWD(first), THRUST_FWD(last)
@@ -280,13 +305,14 @@ struct reduce_into_fn final
   >
   __host__
   static auto
-  call(
+  call4(
     thrust::detail::execution_policy_base<DerivedPolicy> const& exec
   , ForwardIt&& first, Sentinel&& last
   , OutputIt&& output
+  , thrust::true_type
   )
   // ADL dispatch.
-  THRUST_DECLTYPE_RETURNS(
+  THRUST_RETURNS(
     async_reduce_into(
       thrust::detail::derived_cast(thrust::detail::strip_const(exec))
     , THRUST_FWD(first), THRUST_FWD(last)
@@ -305,15 +331,15 @@ struct reduce_into_fn final
   , typename T, typename BinaryOp
   >
   __host__
-  static auto call(
+  static auto call5(
     ForwardIt&& first, Sentinel&& last
   , OutputIt&& output
   , T&& init
   , BinaryOp&& op
+  , thrust::false_type
   )
-  THRUST_DECLTYPE_RETURNS_WITH_SFINAE_CONDITION(
-    (negation<is_execution_policy<remove_cvref_t<ForwardIt>>>::value)
-  , reduce_into_fn::call(
+  THRUST_RETURNS(
+    reduce_into_fn::call(
       thrust::detail::select_system(
         typename iterator_system<remove_cvref_t<ForwardIt>>::type{}
       , typename iterator_system<remove_cvref_t<OutputIt>>::type{}
@@ -330,14 +356,14 @@ struct reduce_into_fn final
   , typename T
   >
   __host__
-  static auto call(
+  static auto call4(
     ForwardIt&& first, Sentinel&& last
   , OutputIt&& output
   , T&& init
+  , thrust::false_type
   )
-  THRUST_DECLTYPE_RETURNS_WITH_SFINAE_CONDITION(
-    (negation<is_execution_policy<remove_cvref_t<ForwardIt>>>::value)
-  , reduce_into_fn::call(
+  THRUST_RETURNS(
+    reduce_into_fn::call(
       thrust::detail::select_system(
         typename iterator_system<remove_cvref_t<ForwardIt>>::type{}
       , typename iterator_system<remove_cvref_t<OutputIt>>::type{}
@@ -357,7 +383,7 @@ struct reduce_into_fn final
     ForwardIt&& first, Sentinel&& last
   , OutputIt&& output
   )
-  THRUST_DECLTYPE_RETURNS(
+  THRUST_RETURNS(
     reduce_into_fn::call(
       thrust::detail::select_system(
         typename iterator_system<remove_cvref_t<ForwardIt>>::type{}
@@ -374,10 +400,31 @@ struct reduce_into_fn final
     )
   )
 
+  // MSVC WAR: MSVC gets angsty and eats all available RAM when we try to detect
+  // if T1 is an execution_policy by using SFINAE. Switching to a static
+  // dispatch pattern to prevent this.
+  template <typename T1, typename T2, typename T3, typename T4>
+  __host__
+  static auto call(T1&& t1, T2&& t2, T3&& t3, T4&& t4)
+  THRUST_RETURNS(
+    reduce_into_fn::call4(
+      THRUST_FWD(t1), THRUST_FWD(t2), THRUST_FWD(t3), THRUST_FWD(t4),
+      thrust::is_execution_policy<thrust::remove_cvref_t<T1>>{})
+  )
+
+  template <typename T1, typename T2, typename T3, typename T4, typename T5>
+  __host__
+  static auto call(T1&& t1, T2&& t2, T3&& t3, T4&& t4, T5&& t5)
+  THRUST_RETURNS(
+    reduce_into_fn::call5(
+      THRUST_FWD(t1), THRUST_FWD(t2), THRUST_FWD(t3), THRUST_FWD(t4),
+      THRUST_FWD(t5), thrust::is_execution_policy<thrust::remove_cvref_t<T1>>{})
+  )
+
   template <typename... Args>
-  THRUST_NODISCARD __host__ 
+  THRUST_NODISCARD __host__
   auto operator()(Args&&... args) const
-  THRUST_DECLTYPE_RETURNS(
+  THRUST_RETURNS(
     call(THRUST_FWD(args)...)
   )
 };
@@ -388,7 +435,6 @@ THRUST_INLINE_CONSTANT reduce_into_detail::reduce_into_fn reduce_into{};
 
 } // namespace async
 
-THRUST_END_NS
+} // end namespace thrust
 
 #endif
-

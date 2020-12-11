@@ -34,7 +34,8 @@
 #include <thrust/distance.h>
 #include <thrust/system/hip/detail/execution_policy.h>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 namespace hip_rocprim
 {
 
@@ -58,12 +59,13 @@ InputIt THRUST_HIP_FUNCTION
 find(execution_policy<Derived>& policy, InputIt first, InputIt last, T const& value);
 
 }; // namespace hip_rocprim
-THRUST_END_NS
+} // end namespace thrust
 
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/system/hip/detail/reduce.h>
 
-THRUST_BEGIN_NS
+namespace thrust
+{
 namespace hip_rocprim
 {
 namespace __find_if
@@ -179,9 +181,13 @@ find(execution_policy<Derived>& policy,
      InputIt                    last,
      T const&                   value)
 {
-    return hip_rocprim::find_if(policy, first, last, thrust::detail::equal_to_value<T>(value));
+    using thrust::placeholders::_1;
+    return hip_rocprim::find_if(policy,
+                                first,
+                                last,
+                                 _1 == value);
 }
 
 } // namespace hip_rocprim
-THRUST_END_NS
+} // end namespace thrust
 #endif
