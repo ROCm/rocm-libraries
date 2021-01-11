@@ -83,6 +83,8 @@ variables:
 build:cmake-latest:
   extends:
     - .deps:cmake-latest
+  tags:
+    - rocm
   script:
     - mkdir -p $BUILD_LATEST_DIR
     - cd $BUILD_LATEST_DIR
@@ -92,7 +94,8 @@ build:cmake-latest:
       -D CMAKE_BUILD_TYPE=Release
       -D BUILD_TEST=ON
       -D BUILD_EXAMPLE=ON
-      -D BUILD_BENCHMARK=ON
+      -D BUILD_BENCHMARK=OFF
+      -D AMDGPU_TEST_TARGETS="gfx803;gfx900;gfx906"
       -S $CI_PROJECT_DIR
       -B $BUILD_LATEST_DIR
     - cmake
@@ -111,6 +114,8 @@ build:cmake-latest:
 build:cmake-minimum:
   extends:
     - .deps:cmake-minimum
+  tags:
+    - rocm
   needs:
     - job: build:cmake-latest
       artifacts: false
@@ -123,8 +128,9 @@ build:cmake-minimum:
       -D CMAKE_BUILD_TYPE=Release
       -D BUILD_TEST=ON
       -D BUILD_EXAMPLE=ON
-      -D BUILD_BENCHMARK=ON
+      -D BUILD_BENCHMARK=OFF
       -D DISABLE_WERROR=OFF
+      -D AMDGPU_TEST_TARGETS="gfx803;gfx900;gfx906"      
       -B $BUILD_MINIMUM_DIR
       ../../.
     - cmake
@@ -144,7 +150,7 @@ build:package:
   extends:
     - .deps:cmake-minimum
   tags:
-    - rocm-stable
+    - rocm
   script:
     - mkdir -p $PACKAGE_DIR
     - cd $PACKAGE_DIR
@@ -182,7 +188,7 @@ test:deb:
   needs:
     - build:package
   tags:
-    - rocm-stable
+    - rocm
   extends:
     - .deps:cmake-minimum
   script:
