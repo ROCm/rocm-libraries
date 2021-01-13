@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -334,7 +334,7 @@ TYPED_TEST(RocprimDevicePartitionTests, Predicate)
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
-    
+
     using O = typename TestFixture::input_type;
     using T = typename std::conditional<std::is_same<O, rocprim::half>::value, int, O>::type;//typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
