@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2019 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -65,7 +65,7 @@ option(BUILD_BENCHMARK "Build benchmarks" OFF)
 include(cmake/Dependencies.cmake)
 
 # Setup VERSION
-set(VERSION_STRING "2.10.7")
+set(VERSION_STRING "2.10.8")
 rocm_setup_version(VERSION ${VERSION_STRING})
 
 # AMD targets
