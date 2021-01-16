@@ -2,7 +2,11 @@
 
 See README.md on how to build the hipCUB documentation using Doxygen.
 
-## [Unreleased hipCUB-2.10.7 for ROCm 4.0.0]
+## [Unreleased hipCUB-2.10.8 for ROCm 4.1.0]
+### Added
+- Support for DiscardOutputIterator
+
+## [hipCUB-2.10.7 for ROCm 4.0.0]
 ### Added
 - No new features
 
