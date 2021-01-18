@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -205,6 +205,27 @@ auto partition_block_load_flags(InputIterator /* block_predecessor */,
     }
 }
 
+// This wrapper processes only part of items and flags (valid_count - 1)th item (for tails)
+// and (valid_count)th item (for heads), all items after valid_count are unflagged.
+template<class InequalityOp>
+struct guarded_inequality_op
+{
+    InequalityOp inequality_op;
+    unsigned int valid_count;
+
+    ROCPRIM_DEVICE inline
+    guarded_inequality_op(InequalityOp inequality_op, unsigned int valid_count)
+        : inequality_op(inequality_op), valid_count(valid_count)
+    {}
+
+    template<class T, class U>
+    ROCPRIM_DEVICE inline
+    bool operator()(const T& a, const U& b, unsigned int b_index)
+    {
+        return (b_index < valid_count && inequality_op(a, b));
+    }
+};
+
 template<
     select_method SelectMethod,
     unsigned int BlockSize,
@@ -235,25 +256,59 @@ auto partition_block_load_flags(InputIterator block_predecessor,
     if(block_id > 0)
     {
         const ValueType predecessor = *block_predecessor;
-        BlockDiscontinuityType()
-            .flag_heads(
-                is_selected,
-                predecessor,
-                values,
-                inequality_op,
-                storage.discontinuity_values
-            );
+        if(is_last_block)
+        {
+            BlockDiscontinuityType()
+                .flag_heads(
+                    is_selected,
+                    predecessor,
+                    values,
+                    guarded_inequality_op<InequalityOp>(
+                        inequality_op,
+                        valid_in_last_block
+                    ),
+                    storage.discontinuity_values
+                );
+        }
+        else
+        {
+            BlockDiscontinuityType()
+                .flag_heads(
+                    is_selected,
+                    predecessor,
+                    values,
+                    inequality_op,
+                    storage.discontinuity_values
+                );
+        }
     }
     else
     {
-        BlockDiscontinuityType()
+        if(is_last_block)
+        {
+            BlockDiscontinuityType()
+            .flag_heads(
+                is_selected,
+                values,
+                guarded_inequality_op<InequalityOp>(
+                    inequality_op,
+                    valid_in_last_block
+                ),
+                storage.discontinuity_values
+            );
+        }
+        else
+        {
+            BlockDiscontinuityType()
             .flag_heads(
                 is_selected,
                 values,
                 inequality_op,
                 storage.discontinuity_values
             );
+        }
     }
+
 
     // Set is_selected for invalid items to false
     if(is_last_block)

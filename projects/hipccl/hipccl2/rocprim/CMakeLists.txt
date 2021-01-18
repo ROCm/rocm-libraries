@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -46,8 +46,21 @@ endif()
 
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker search and installed rpath")
 
-# AMD targets
-set(AMDGPU_TARGETS gfx900:xnack-;gfx906:xnack-;gfx908:xnack- CACHE STRING "List of specific device types to build for")
+# Detect compiler support for target ID
+if( CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" )
+  execute_process(COMMAND ${CMAKE_CXX_COMPILER} "--help"
+    OUTPUT_VARIABLE CXX_OUTPUT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_STRIP_TRAILING_WHITESPACE)
+  string(REGEX MATCH ".mcode\-object\-version" TARGET_ID_SUPPORT ${CXX_OUTPUT})
+endif()
+
+# Use target ID syntax if supported for AMDGPU_TARGETS
+if(TARGET_ID_SUPPORT)
+  set(AMDGPU_TARGETS gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack- CACHE STRING "List of specific machine types for library to target")
+else()
+  set(AMDGPU_TARGETS gfx803;gfx900;gfx906;gfx908 CACHE STRING "List of specific machine types for library to target")
+endif()
 set(AMDGPU_TEST_TARGETS "" CACHE STRING "List of specific device types to test for") # Leave empty for default system device
 
 # Verify that hcc compiler is used on ROCM platform
