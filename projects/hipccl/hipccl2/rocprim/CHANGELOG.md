@@ -6,6 +6,9 @@ Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwar
 ### Fixed
 - Texture cache iteration support has been re-enabled.
 - Benchmark builds have been re-enabled.
+- Unique operator no longer called on invalid elements.
+### Known issues
+- Device scan unit test currently failing due to LLVM bug.
 
 ## [rocPRIM-2.10.7 for ROCm 4.0.0]
 ### Added
