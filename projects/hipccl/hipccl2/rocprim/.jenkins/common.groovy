@@ -4,7 +4,7 @@
 def runCompileCommand(platform, project, jobName, boolean debug=false)
 {
     project.paths.construct_build_prefix()
-        
+
     String buildTypeArg = debug ? '-DCMAKE_BUILD_TYPE=Debug' : '-DCMAKE_BUILD_TYPE=Release'
     String buildTypeDir = debug ? 'debug' : 'release'
     String cmake = platform.jenkinsLabel.contains('centos') ? 'cmake3' : 'cmake'
@@ -16,7 +16,7 @@ def runCompileCommand(platform, project, jobName, boolean debug=false)
                 ${cmake} -DCMAKE_CXX_COMPILER=/opt/rocm/bin/hipcc ${buildTypeArg} -DBUILD_TEST=ON -DBUILD_BENCHMARK=ON ../..
                 make -j\$(nproc)
                 """
-    
+
     platform.runCommand(this, command)
 }
 
@@ -31,7 +31,7 @@ def runTestCommand (platform, project)
                 set -x
                 cd ${project.paths.project_build_prefix}
                 cd ${project.testDirectory}
-                ${sudo} LD_LIBRARY_PATH=/opt/rocm/lib ${testCommand}
+                ${sudo} LD_LIBRARY_PATH=/opt/rocm/lib ${testCommand} --exclude-regex rocprim.device_scan
             """
 
     platform.runCommand(this, command)
