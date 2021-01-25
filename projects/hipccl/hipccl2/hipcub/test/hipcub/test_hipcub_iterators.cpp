@@ -1,0 +1,278 @@
+// MIT License
+//
+// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+#include <iterator>
+#include <stdio.h>
+#include <typeinfo>
+
+#include "hipcub/iterator/constant_input_iterator.hpp"
+#include "hipcub/iterator/counting_input_iterator.hpp"
+#include "hipcub/iterator/transform_input_iterator.hpp"
+
+#include "common_test_header.hpp"
+
+
+//---------------------------------------------------------------------
+// Globals, constants and typedefs
+//---------------------------------------------------------------------
+
+#define INTEGER_SEED (0)
+
+//hipcub::CachingDeviceAllocator g_allocator(true);
+
+// Params for tests
+template<class InputType>
+struct IteratorParams
+{
+    using input_type = InputType;
+};
+
+template<class Params>
+class HipcubIteratorTests : public ::testing::Test
+{
+    public:
+    using input_type = typename Params::input_type;
+};
+
+typedef ::testing::Types<
+    //IteratorParams<char>,
+    //IteratorParams<short>,
+    IteratorParams<int>
+    //IteratorParams<long>,
+    //IteratorParams<float>
+> HipcubIteratorTestsParams;
+
+static std::vector<int32_t> base_values = {0, 99};
+
+// TODO need to implement the seeding like CUB
+template<typename T>
+__host__ __device__ __forceinline__ void 
+InitValue(uint32_t seed, T& value, uint32_t index = 0)
+{
+    (void) seed;
+    value = (index > 0);
+}
+
+template <typename T>
+struct TransformOp
+{
+    // Increment transform
+    __host__ __device__ __forceinline__ T operator()(T input) const
+    {
+        T addend;
+        InitValue(INTEGER_SEED, addend, 1);
+        return input + addend;
+    }
+};
+
+struct SelectOp
+{
+    template <typename T>
+    __host__ __device__ __forceinline__ bool operator()(T input)
+    {
+        (void) input;
+        return true;
+    }
+};
+
+//---------------------------------------------------------------------
+// Test kernels
+//---------------------------------------------------------------------
+
+/**
+* Test random access input iterator
+*/
+template<typename InputIteratorT, typename T>
+__global__ void Kernel(
+    InputIteratorT    d_in,
+    T                 *d_out,
+    InputIteratorT    *d_itrs)
+{
+    d_out[0] = *d_in;               // Value at offset 0
+    d_out[1] = d_in[100];           // Value at offset 100
+    d_out[2] = *(d_in + 1000);      // Value at offset 1000
+    d_out[3] = *(d_in + 10000);     // Value at offset 10000
+
+    d_in++;
+    d_out[4] = d_in[0];             // Value at offset 1
+
+    d_in += 20;
+    d_out[5] = d_in[0];             // Value at offset 21
+    d_itrs[0] = d_in;               // Iterator at offset 21
+
+    d_in -= 10;
+    d_out[6] = d_in[0];             // Value at offset 11;
+
+    d_in -= 11;
+    d_out[7] = d_in[0];             // Value at offset 0
+    d_itrs[1] = d_in;               // Iterator at offset 0
+}
+
+template<typename IteratorType, typename T>
+void iterator_test_function(IteratorType d_itr, std::vector<T> &h_reference)
+{
+    std::vector<T> output(h_reference.size());
+
+    IteratorType *d_itrs = NULL;
+    HIP_CHECK(hipMalloc(&d_itrs, sizeof(IteratorType) * 2));
+
+    IteratorType *h_itrs = (IteratorType*)malloc(sizeof(IteratorType) * 2);
+
+    T* device_output;
+    HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
+
+    // Run unguarded kernel
+    Kernel<<<1, 1>>>(d_itr, device_output, d_itrs);
+
+    hipPeekAtLastError();
+    hipDeviceSynchronize();
+
+    HIP_CHECK(
+            hipMemcpy(
+                output.data(), device_output,
+                output.size() * sizeof(T),
+                hipMemcpyDeviceToHost
+                )
+            );
+
+    HIP_CHECK(
+            hipMemcpy(
+                h_itrs, d_itrs,
+                sizeof(IteratorType) * 2,
+                hipMemcpyDeviceToHost
+                )
+            );
+
+    for(size_t i = 0; i < output.size(); i++)
+    {
+        ASSERT_EQ(output[i], h_reference[i]);
+    }
+
+    IteratorType h_itr = d_itr + 21;
+    ASSERT_TRUE(h_itr == h_itrs[0]);
+
+    ASSERT_TRUE(d_itr == h_itrs[1]);
+}
+
+TYPED_TEST_CASE(HipcubIteratorTests, HipcubIteratorTestsParams);
+
+TYPED_TEST(HipcubIteratorTests, TestConstant)
+{
+    using T = typename TestFixture::input_type;
+    using IteratorType = hipcub::ConstantInputIterator<T>;
+
+    constexpr uint32_t array_size = 8;
+
+    std::vector<T> h_reference(array_size);
+
+    for(uint32_t base_index = 0; base_index < base_values.size(); base_index++)
+    {
+        T base_value = (T)base_values[base_index];
+
+        IteratorType d_itr(base_value);
+
+        for(uint32_t i = 0; i < h_reference.size(); i++)
+        {
+            h_reference[i] = base_value;
+        }
+
+        iterator_test_function<IteratorType, T>(d_itr, h_reference);
+    }
+    
+}
+
+TYPED_TEST(HipcubIteratorTests, TestCounting)
+{
+    using T = typename TestFixture::input_type;
+    using IteratorType = hipcub::CountingInputIterator<T>;
+
+    constexpr uint32_t array_size = 8;
+
+    std::vector<T> h_reference(array_size);
+
+    for(uint32_t base_index = 0; base_index < base_values.size(); base_index++)
+    {
+        T base_value = (T)base_values[base_index];
+
+        IteratorType d_itr(base_value);
+
+        h_reference[0] = base_value + 0;          // Value at offset 0
+        h_reference[1] = base_value + 100;        // Value at offset 100
+        h_reference[2] = base_value + 1000;       // Value at offset 1000
+        h_reference[3] = base_value + 10000;      // Value at offset 10000
+        h_reference[4] = base_value + 1;          // Value at offset 1
+        h_reference[5] = base_value + 21;         // Value at offset 21
+        h_reference[6] = base_value + 11;         // Value at offset 11
+        h_reference[7] = base_value + 0;          // Value at offset 0;
+
+        iterator_test_function<IteratorType, T>(d_itr, h_reference);
+    }
+    
+}
+
+TYPED_TEST(HipcubIteratorTests, TestTransform)
+{
+    using T = typename TestFixture::input_type;
+    using CastT = typename TestFixture::input_type;
+    using IteratorType = hipcub::TransformInputIterator<T, TransformOp<T>, CastT*>;
+
+    constexpr int TEST_VALUES = 11000;
+
+    //T *h_data = new T[TEST_VALUES];
+    std::vector<T> h_data(TEST_VALUES);
+    for (int i = 0; i < TEST_VALUES; ++i)
+    {
+        InitValue(INTEGER_SEED, h_data[i], i);
+    }
+
+    // Allocate device arrays
+    T *d_data = NULL;
+    //g_allocator.DeviceAllocate((void**)&d_data, sizeof(T) * TEST_VALUES);
+    HIP_CHECK(hipMalloc(&d_data, h_data.size() * sizeof(typename decltype(h_data)::value_type)));
+    //cudaMemcpy(d_data, h_data, sizeof(T) * TEST_VALUES, cudaMemcpyHostToDevice);
+
+    HIP_CHECK(
+        hipMemcpy(
+            d_data, h_data.data(),
+            TEST_VALUES * sizeof(T),
+            hipMemcpyHostToDevice
+            )
+        );
+
+    TransformOp<T> op;
+
+    // Initialize reference data
+    constexpr uint32_t array_size = 8;
+    std::vector<T> h_reference(array_size);
+    h_reference[0] = op(h_data[0]);          // Value at offset 0
+    h_reference[1] = op(h_data[100]);        // Value at offset 100
+    h_reference[2] = op(h_data[1000]);       // Value at offset 1000
+    h_reference[3] = op(h_data[10000]);      // Value at offset 10000
+    h_reference[4] = op(h_data[1]);          // Value at offset 1
+    h_reference[5] = op(h_data[21]);         // Value at offset 21
+    h_reference[6] = op(h_data[11]);         // Value at offset 11
+    h_reference[7] = op(h_data[0]);          // Value at offset 0;
+
+    IteratorType d_itr((CastT*) d_data, op);
+
+    iterator_test_function<IteratorType, T>(d_itr, h_reference);
+}
