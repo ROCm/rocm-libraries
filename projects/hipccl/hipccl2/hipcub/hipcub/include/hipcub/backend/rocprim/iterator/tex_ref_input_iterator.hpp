@@ -27,8 +27,8 @@
  *
  ******************************************************************************/
 
-#ifndef HIPCUB_ROCPRIM_ITERATOR_TEX_OBJ_INPUT_ITERATOR_HPP_
-#define HIPCUB_ROCPRIM_ITERATOR_TEX_OBJ_INPUT_ITERATOR_HPP_
+#ifndef HIPCUB_ROCPRIM_ITERATOR_TEX_REF_INPUT_ITERATOR_HPP_
+#define HIPCUB_ROCPRIM_ITERATOR_TEX_REF_INPUT_ITERATOR_HPP_
 
 #include "../../../config.hpp"
 
@@ -38,9 +38,10 @@ BEGIN_HIPCUB_NAMESPACE
 
 template<
     typename T,
+    int UNIQUE_ID, // Unused parameter for compatibility with original definition in cub
     typename OffsetT = std::ptrdiff_t
 >
-class TexObjInputIterator : public ::rocprim::texture_cache_iterator<T, OffsetT>
+class TexRefInputIterator : public ::rocprim::texture_cache_iterator<T, OffsetT>
 {
     public:
     template<class Qualified>
@@ -58,15 +59,15 @@ class TexObjInputIterator : public ::rocprim::texture_cache_iterator<T, OffsetT>
     }
 
     ROCPRIM_HOST_DEVICE inline
-    ~TexObjInputIterator() = default;
+    ~TexRefInputIterator() = default;
 
     ROCPRIM_HOST_DEVICE inline
-    TexObjInputIterator() : ::rocprim::texture_cache_iterator<T, OffsetT>()
+    TexRefInputIterator() : ::rocprim::texture_cache_iterator<T, OffsetT>()
     {
     }
 
     ROCPRIM_HOST_DEVICE inline
-    TexObjInputIterator(const ::rocprim::texture_cache_iterator<T, OffsetT> other)
+    TexRefInputIterator(const ::rocprim::texture_cache_iterator<T, OffsetT> other)
         : ::rocprim::texture_cache_iterator<T, OffsetT>(other)
     {
     }
@@ -76,3 +77,4 @@ class TexObjInputIterator : public ::rocprim::texture_cache_iterator<T, OffsetT>
 END_HIPCUB_NAMESPACE
 
 #endif // HIPCUB_ROCPRIM_ITERATOR_TEX_OBJ_INPUT_ITERATOR_HPP_
+
