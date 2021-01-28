@@ -110,7 +110,7 @@ TEST(DevicePtrTests, TestDevicePointerManipulationHmm)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    if (!(supports_hmm() && use_hmm())) return;
+    if (!(use_hmm())) return;
 
     int* data;
     HIP_CHECK(hipMallocManaged((void**)&data, 5 * sizeof(int)));
