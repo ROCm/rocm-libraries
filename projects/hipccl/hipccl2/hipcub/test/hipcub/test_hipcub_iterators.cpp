@@ -77,7 +77,7 @@ static std::vector<int32_t> base_values = {0, 99};
 
 // TODO need to implement the seeding like CUB
 template<typename T>
-__host__ __device__ __forceinline__ void 
+__host__ __device__ __forceinline__ void
 InitValue(uint32_t seed, T& value, uint32_t index = 0)
 {
     (void) seed;
@@ -395,6 +395,51 @@ TYPED_TEST(HipcubIteratorTests, TestTexRef)
 
 TYPED_TEST(HipcubIteratorTests, TestTexTransform)
 {
+    using T = typename TestFixture::input_type;
+    using CastT = typename TestFixture::input_type;
+    using TextureIteratorType = hipcub::TexRefInputIterator<T, __LINE__>;
+
+    constexpr uint32_t TEST_VALUES          = 11000;
+
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+
+        //T *h_data = new T[TEST_VALUES];
+        std::vector<T> h_data(TEST_VALUES);
+        std::vector<T> output = test_utils::get_random_data<T>(TEST_VALUES, T(2), T(200), seed_value);
+
+        // Allocate device arrays
+        T *d_data   = NULL;
+        g_allocator.DeviceAllocate((void**)&d_data, sizeof(T) * TEST_VALUES);
+        hipMemcpy(d_data, h_data.data(), sizeof(T) * TEST_VALUES, hipMemcpyHostToDevice);
+
+        TransformOp<T> op;
+
+        // Initialize reference data
+        constexpr uint32_t array_size = 8;
+        std::vector<T> h_reference(array_size);
+        h_reference[0] = op(h_data[0]);          // Value at offset 0
+        h_reference[1] = op(h_data[100]);        // Value at offset 100
+        h_reference[2] = op(h_data[1000]);       // Value at offset 1000
+        h_reference[3] = op(h_data[10000]);      // Value at offset 10000
+        h_reference[4] = op(h_data[1]);          // Value at offset 1
+        h_reference[5] = op(h_data[21]);         // Value at offset 21
+        h_reference[6] = op(h_data[11]);         // Value at offset 11
+        h_reference[7] = op(h_data[0]);          // Value at offset 0;
+
+        // Create and bind ref-based test iterator
+        TextureIteratorType d_tex_itr;
+        d_tex_itr.BindTexture((CastT*) d_data, sizeof(T) * TEST_VALUES);
+
+        // Create transform iterator
+        hipcub::TransformInputIterator<T, TransformOp<T>, TextureIteratorType> xform_itr(d_tex_itr, op);
+
+        iterator_test_function<
+            hipcub::TransformInputIterator<T, TransformOp<T>, TextureIteratorType>,
+            T>
+            (xform_itr, h_reference);
+    }
 }
 
 TYPED_TEST(HipcubIteratorTests, TestCacheModified)
