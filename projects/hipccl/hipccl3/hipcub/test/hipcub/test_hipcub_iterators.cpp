@@ -66,10 +66,10 @@ class HipcubIteratorTests : public ::testing::Test
 };
 
 typedef ::testing::Types<
-    //IteratorParams<char>,
-    //IteratorParams<short>,
-    IteratorParams<int>
-    //IteratorParams<long>,
+    IteratorParams<int8_t>,
+    IteratorParams<int16_t>,
+    IteratorParams<int32_t>,
+    IteratorParams<int64_t>
     //IteratorParams<float>
 > HipcubIteratorTestsParams;
 
@@ -307,7 +307,7 @@ TYPED_TEST(HipcubIteratorTests, TestTexObj)
 
         //T *h_data = new T[TEST_VALUES];
         std::vector<T> h_data(TEST_VALUES);
-        std::vector<T> output = test_utils::get_random_data<T>(TEST_VALUES, 2, 200, seed_value);
+        std::vector<T> output = test_utils::get_random_data<T>(TEST_VALUES, T(2), T(200), seed_value);
 
         // Allocate device arrays
         T *d_data   = NULL;
@@ -358,7 +358,7 @@ TYPED_TEST(HipcubIteratorTests, TestTexRef)
 
         //T *h_data = new T[TEST_VALUES];
         std::vector<T> h_data(TEST_VALUES);
-        std::vector<T> output = test_utils::get_random_data<T>(TEST_VALUES, 2, 200, seed_value);
+        std::vector<T> output = test_utils::get_random_data<T>(TEST_VALUES, T(2), T(200), seed_value);
 
         // Allocate device arrays
         T *d_data   = NULL;
