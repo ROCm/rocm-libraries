@@ -24,6 +24,7 @@
 #include <stdio.h>
 #include <typeinfo>
 
+#include "hipcub/iterator/arg_index_input_iterator.hpp"
 #include "hipcub/iterator/constant_input_iterator.hpp"
 #include "hipcub/iterator/counting_input_iterator.hpp"
 #include "hipcub/iterator/transform_input_iterator.hpp"
@@ -31,13 +32,6 @@
 #include "hipcub/iterator/tex_ref_input_iterator.hpp"
 
 #include "hipcub/util_allocator.hpp"
-
-#if 0
-//#include <cub/iterator/cache_modified_input_iterator.cuh>
-//#include <cub/iterator/cache_modified_output_iterator.cuh>
-//#include <cub/iterator/tex_obj_input_iterator.cuh>
-//#include <cub/iterator/tex_ref_input_iterator.cuh>
-#endif
 
 #include "common_test_header.hpp"
 
@@ -150,7 +144,7 @@ void iterator_test_function(IteratorType d_itr, std::vector<T> &h_reference)
     IteratorType *h_itrs = (IteratorType*)malloc(sizeof(IteratorType) * 2);
 
     T* device_output;
-    HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
+    g_allocator.DeviceAllocate((void**)&device_output, output.size() * sizeof(typename decltype(output)::value_type));
 
     // Run unguarded kernel
     Kernel<<<1, 1>>>(d_itr, device_output, d_itrs);
@@ -181,8 +175,9 @@ void iterator_test_function(IteratorType d_itr, std::vector<T> &h_reference)
 
     IteratorType h_itr = d_itr + 21;
     ASSERT_TRUE(h_itr == h_itrs[0]);
-
     ASSERT_TRUE(d_itr == h_itrs[1]);
+
+    g_allocator.DeviceFree(device_output);
 }
 
 TYPED_TEST_CASE(HipcubIteratorTests, HipcubIteratorTestsParams);
@@ -247,7 +242,6 @@ TYPED_TEST(HipcubIteratorTests, TestTransform)
 
     constexpr int TEST_VALUES = 11000;
 
-    //T *h_data = new T[TEST_VALUES];
     std::vector<T> h_data(TEST_VALUES);
     for (int i = 0; i < TEST_VALUES; ++i)
     {
@@ -256,9 +250,7 @@ TYPED_TEST(HipcubIteratorTests, TestTransform)
 
     // Allocate device arrays
     T *d_data = NULL;
-    //g_allocator.DeviceAllocate((void**)&d_data, sizeof(T) * TEST_VALUES);
-    HIP_CHECK(hipMalloc(&d_data, h_data.size() * sizeof(typename decltype(h_data)::value_type)));
-    //hipMemcpy(d_data, h_data, sizeof(T) * TEST_VALUES, hipMemcpyHostToDevice);
+    g_allocator.DeviceAllocate((void**)&d_data, sizeof(T) * TEST_VALUES);
 
     HIP_CHECK(
         hipMemcpy(
@@ -285,6 +277,8 @@ TYPED_TEST(HipcubIteratorTests, TestTransform)
     IteratorType d_itr((CastT*) d_data, op);
 
     iterator_test_function<IteratorType, T>(d_itr, h_reference);
+
+    g_allocator.DeviceFree(d_data);
 }
 
 TYPED_TEST(HipcubIteratorTests, TestTexObj)
@@ -335,6 +329,9 @@ TYPED_TEST(HipcubIteratorTests, TestTexObj)
         d_obj_itr.BindTexture((CastT*) d_data, sizeof(T) * TEST_VALUES);
 
         iterator_test_function<IteratorType, T>(d_obj_itr, h_reference);
+
+        g_allocator.DeviceFree(d_data);
+        g_allocator.DeviceFree(d_dummy);
     }
 }
 
@@ -390,6 +387,9 @@ TYPED_TEST(HipcubIteratorTests, TestTexRef)
         d_ref_itr2.BindTexture((CastT*) d_dummy, sizeof(T) * DUMMY_TEST_VALUES);
 
         iterator_test_function<IteratorType, T>(d_ref_itr, h_reference);
+
+        g_allocator.DeviceFree(d_data);
+        g_allocator.DeviceFree(d_dummy);
     }
 }
 
@@ -439,9 +439,7 @@ TYPED_TEST(HipcubIteratorTests, TestTexTransform)
             hipcub::TransformInputIterator<T, TransformOp<T>, TextureIteratorType>,
             T>
             (xform_itr, h_reference);
-    }
-}
 
-TYPED_TEST(HipcubIteratorTests, TestCacheModified)
-{
+        g_allocator.DeviceFree(d_data);
+    }
 }
