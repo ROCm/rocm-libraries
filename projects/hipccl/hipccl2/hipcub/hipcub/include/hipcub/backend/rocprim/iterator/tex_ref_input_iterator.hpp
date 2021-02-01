@@ -58,15 +58,15 @@ class TexRefInputIterator : public ::rocprim::texture_cache_iterator<T, OffsetT>
         return ::rocprim::texture_cache_iterator<T, OffsetT>::unbind_texture();
     }
 
-    ROCPRIM_HOST_DEVICE inline
+    HIPCUB_HOST_DEVICE inline
     ~TexRefInputIterator() = default;
 
-    ROCPRIM_HOST_DEVICE inline
+    HIPCUB_HOST_DEVICE inline
     TexRefInputIterator() : ::rocprim::texture_cache_iterator<T, OffsetT>()
     {
     }
 
-    ROCPRIM_HOST_DEVICE inline
+    HIPCUB_HOST_DEVICE inline
     TexRefInputIterator(const ::rocprim::texture_cache_iterator<T, OffsetT> other)
         : ::rocprim::texture_cache_iterator<T, OffsetT>(other)
     {
