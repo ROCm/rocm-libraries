@@ -83,3 +83,4 @@ add_hipcub_test("hipcub.WarpReduce" test_hipcub_warp_reduce.cpp)
 add_hipcub_test("hipcub.WarpScan" test_hipcub_warp_scan.cpp)
 # TODO: Fix the build error at nvcc case
 #add_hipcub_test("hipcub.Iterator" test_hipcub_iterators.cpp)
+add_hipcub_test("hipcub.ThreadOperations" test_hipcub_thread.cpp)
