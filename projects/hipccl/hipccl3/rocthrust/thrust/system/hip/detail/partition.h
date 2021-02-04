@@ -176,7 +176,7 @@ namespace __partition
         bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
 
         if(num_items == 0)
-            return thrust::make_pair(first, last);
+            return thrust::make_pair(selected_result, rejected_result);
 
         // Determine temporary device storage requirements.
         hip_rocprim::throw_on_error(rocprim::partition(NULL,
