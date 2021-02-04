@@ -90,6 +90,15 @@ namespace __merge
         size_type input2_size
             = static_cast<size_type>(thrust::distance(keys2_first, keys2_last));
 
+        if( input1_size == 0 && input2_size == 0 )
+            return keys1_first;
+
+        if( input1_size == 0 )
+            return keys2_last;
+
+        if( input2_size == 0 )
+            return keys1_last;
+
         size_t      storage_size = 0;
         hipStream_t stream       = hip_rocprim::stream(policy);
         bool        debug_sync   = THRUST_HIP_DEBUG_SYNC_FLAG;
