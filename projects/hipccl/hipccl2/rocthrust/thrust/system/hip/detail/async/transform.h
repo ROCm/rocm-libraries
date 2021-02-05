@@ -113,6 +113,12 @@ auto async_transform_n(
     );
   }
 
+  if( n == 0)
+  {
+    e.ready();
+    return e;
+  }
+
   // Run transform.
 
   async_transform_fn<ForwardIt, OutputIt, UnaryOperation> wrapped(

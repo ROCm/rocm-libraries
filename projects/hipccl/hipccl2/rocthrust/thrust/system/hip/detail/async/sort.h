@@ -264,6 +264,12 @@ auto async_stable_sort_n(
       );
   }
 
+  if( n == 0)
+  {
+      e.ready();
+      return e;
+  }
+
   // Run merge sort.
 
   thrust::hip_rocprim::throw_on_error(
@@ -439,6 +445,12 @@ auto async_stable_sort_n(
         )
       )
     );
+  }
+
+  if( n == 0)
+  {
+      e.ready();
+      return e;
   }
 
   // Run radix sort.
