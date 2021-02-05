@@ -175,6 +175,9 @@ namespace __partition
         hipStream_t stream             = hip_rocprim::stream(policy);
         bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
 
+        if(num_items == 0)
+            return thrust::make_pair(selected_result, rejected_result);
+
         // Determine temporary device storage requirements.
         hip_rocprim::throw_on_error(rocprim::partition(NULL,
                                                        temp_storage_bytes,
