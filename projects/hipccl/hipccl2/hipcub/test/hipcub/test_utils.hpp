@@ -465,6 +465,15 @@ auto assert_near(const std::vector<T>& result, const std::vector<T>& expected, c
     }
 }
 
+template<class T>
+void custom_assert_eq(const std::vector<T>& result, const std::vector<T>& expected, size_t size)
+{
+    for(size_t i = 0; i < size; i++)
+    {
+        ASSERT_EQ(result[i], expected[i]) << "where index = " << i;
+    }
+}
+
 } // end test_util namespace
 
 // Need for hipcub::DeviceReduce::Min/Max etc.
