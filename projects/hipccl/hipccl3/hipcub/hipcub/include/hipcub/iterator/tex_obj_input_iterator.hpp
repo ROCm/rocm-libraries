@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2021, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2021, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -27,52 +27,15 @@
  *
  ******************************************************************************/
 
-#ifndef HIPCUB_ROCPRIM_ITERATOR_TEX_OBJ_INPUT_ITERATOR_HPP_
-#define HIPCUB_ROCPRIM_ITERATOR_TEX_OBJ_INPUT_ITERATOR_HPP_
+#ifndef HIPCUB_TEX_OBJ_INPUT_ITERATOR_HPP_
+#define HIPCUB_TEX_OBJ_INPUT_ITERATOR_HPP_
 
-#include "../../../config.hpp"
+#ifdef __HIP_PLATFORM_HCC__
+    #include "../backend/rocprim/iterator/tex_obj_input_iterator.hpp"
+#elif defined(__HIP_PLATFORM_NVCC__)
+    #include "../config.hpp"
+    #include <cub/iterator/tex_obj_input_iterator.cuh>
+#endif
 
-#include <rocprim/iterator/texture_cache_iterator.hpp>
+#endif // HIPCUB_ITERATOR_DISCARD_OUTPUT__HPP_
 
-BEGIN_HIPCUB_NAMESPACE
-
-template<
-    typename T,
-    typename OffsetT = std::ptrdiff_t
->
-class TexObjInputIterator : public ::rocprim::texture_cache_iterator<T, OffsetT>
-{
-    public:
-    template<class Qualified>
-    inline
-    hipError_t BindTexture(Qualified* ptr,
-                           size_t bytes = size_t(-1),
-                           size_t texture_offset = 0)
-    {
-        return ::rocprim::texture_cache_iterator<T, OffsetT>::bind_texture(ptr, bytes, texture_offset);
-    }
-
-    inline hipError_t UnbindTexture()
-    {
-        return ::rocprim::texture_cache_iterator<T, OffsetT>::unbind_texture();
-    }
-
-    HIPCUB_HOST_DEVICE inline
-    ~TexObjInputIterator() = default;
-
-    HIPCUB_HOST_DEVICE inline
-    TexObjInputIterator() : ::rocprim::texture_cache_iterator<T, OffsetT>()
-    {
-    }
-
-    HIPCUB_HOST_DEVICE inline
-    TexObjInputIterator(const ::rocprim::texture_cache_iterator<T, OffsetT> other)
-        : ::rocprim::texture_cache_iterator<T, OffsetT>(other)
-    {
-    }
-
-};
-
-END_HIPCUB_NAMESPACE
-
-#endif // HIPCUB_ROCPRIM_ITERATOR_TEX_OBJ_INPUT_ITERATOR_HPP_
