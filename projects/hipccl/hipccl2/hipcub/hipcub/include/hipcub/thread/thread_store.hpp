@@ -27,8 +27,8 @@
  *
  ******************************************************************************/
 
-#ifndef HIPCUB_THREAD_THREAD_LOAD_HPP_
-#define HIPCUB_THREAD_THREAD_LOAD_HPP_
+#ifndef HIPHIPCUB_THREAD_THREAD_STORE_HPP_
+#define HIPHIPCUB_THREAD_THREAD_STORE_HPP_
 
 #ifdef __HIP_PLATFORM_HCC__
 
@@ -36,46 +36,44 @@
 
 BEGIN_HIPCUB_NAMESPACE
 
-enum CacheLoadModifier
+enum CacheStoreModifier
 {
-    LOAD_DEFAULT,       ///< Default (no modifier)
-    LOAD_CA,            ///< Cache at all levels
-    LOAD_CG,            ///< Cache at global level
-    LOAD_CS,            ///< Cache streaming (likely to be accessed once)
-    LOAD_CV,            ///< Cache as volatile (including cached system lines)
-    LOAD_LDG,           ///< Cache as texture
-    LOAD_VOLATILE,      ///< Volatile (any memory space)
+    STORE_DEFAULT,              ///< Default (no modifier)
+    STORE_WB,                   ///< Cache write-back all coherent levels
+    STORE_CG,                   ///< Cache at global level
+    STORE_CS,                   ///< Cache streaming (likely to be accessed once)
+    STORE_WT,                   ///< Cache write-through (to system memory)
+    STORE_VOLATILE,             ///< Volatile shared (any memory space)
 };
 
 template <
-    CacheLoadModifier MODIFIER = LOAD_DEFAULT,
-    typename InputIteratorT>
-HIPCUB_DEVICE __forceinline__
-typename std::iterator_traits<InputIteratorT>::value_type
-ThreadLoad(InputIteratorT itr)
+    CacheStoreModifier MODIFIER = STORE_DEFAULT,
+    typename OutputIteratorT,
+    typename T
+>
+__device__ __forceinline__ void ThreadStore(
+    OutputIteratorT itr,
+    T               val)
 {
-    using T = typename std::iterator_traits<InputIteratorT>::value_type;
-    T retval = ThreadLoad<MODIFIER>(&(*itr));
-    return *itr;
+    ThreadStore<MODIFIER>(&(*itr), val);
 }
 
 template <
-    CacheLoadModifier MODIFIER = LOAD_DEFAULT,
-    typename T>
-HIPCUB_DEVICE __forceinline__
-T
-ThreadLoad(T* ptr)
+    CacheStoreModifier MODIFIER = STORE_DEFAULT,
+    typename T
+>
+__device__ __forceinline__ void ThreadStore(
+    T *ptr,
+    T val)
 {
-    T retval;
-    __builtin_memcpy(&retval, ptr, sizeof(T));
-    return retval;
+    __builtin_memcpy(ptr, &val, sizeof(T));
 }
 
 END_HIPCUB_NAMESPACE
 
 #elif defined(__HIP_PLATFORM_NVCC__)
     #include "../config.hpp"
-    #include <cub/thread/thread_load.cuh>
+    #include <cub/thread/thread_store.cuh>
 #endif
 
 #endif
