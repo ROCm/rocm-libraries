@@ -29,6 +29,7 @@
 
 
 #include "hipcub/thread/thread_load.hpp"
+#include "hipcub/thread/thread_store.hpp"
 
 #include "common_test_header.hpp"
 
@@ -45,7 +46,7 @@ public:
     using type = typename Params::type;
 };
 
-// TODO add custom types larger than 64 bits 
+// TODO add custom types larger than 64 bits
 typedef ::testing::Types<
     params<uint8_t>,
     params<uint16_t>,
@@ -57,10 +58,10 @@ typedef ::testing::Types<
 
 template<class Type>
 __global__
-void thread_load_kernel(Type* const device_input, Type* device_output)
+void thread_load_kernel(Type* volatile const device_input, Type* device_output)
 {
     size_t index = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
-    device_output[index] = hipcub::ThreadLoad<hipcub::LOAD_CG>(device_input + index); 
+    device_output[index] = hipcub::ThreadLoad<hipcub::LOAD_CG>(device_input + index);
 }
 
 TYPED_TEST_CASE(HipcubThreadOperationTests, ThreadOperationTestParams);
@@ -69,8 +70,8 @@ TYPED_TEST(HipcubThreadOperationTests, Load)
 {
     using T = typename TestFixture::type;
     constexpr uint32_t block_size = 256;
-    constexpr uint32_t grid_size = 1;
-    constexpr uint32_t size = 256;
+    constexpr uint32_t grid_size = 128;
+    constexpr uint32_t size = block_size * grid_size;
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -99,6 +100,69 @@ TYPED_TEST(HipcubThreadOperationTests, Load)
         );
 
         thread_load_kernel<T><<<grid_size, block_size>>>(device_input, device_output);
+
+        // Reading results back
+        HIP_CHECK(
+            hipMemcpy(
+                output.data(), device_output,
+                output.size() * sizeof(T),
+                hipMemcpyDeviceToHost
+            )
+        );
+
+        // Verifying results
+        for(size_t i = 0; i < output.size(); i++)
+        {
+            ASSERT_EQ(output[i], expected[i]);
+        }
+
+        HIP_CHECK(hipFree(device_input));
+        HIP_CHECK(hipFree(device_output));
+    }
+}
+
+template<class Type>
+__global__
+void thread_store_kernel(Type* const device_input, Type* device_output)
+{
+    size_t index = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+    hipcub::ThreadStore<hipcub::STORE_WB>(device_output + index, device_input[index]);
+}
+
+TYPED_TEST(HipcubThreadOperationTests, Store)
+{
+    using T = typename TestFixture::type;
+    constexpr uint32_t block_size = 256;
+    constexpr uint32_t grid_size = 128;
+    constexpr uint32_t size = block_size * grid_size;
+
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+        // Generate data
+        std::vector<T> input = test_utils::get_random_data<T>(size, 2, 200, seed_value);
+        std::vector<T> output(size);
+
+        // Calculate expected results on host
+        std::vector<T> expected = input;
+
+        // Preparing device
+        T* device_input;
+        HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(T)));
+        T* device_output;
+        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(T)));
+
+        HIP_CHECK(
+            hipMemcpy(
+                device_input, input.data(),
+                input.size() * sizeof(T),
+                hipMemcpyHostToDevice
+            )
+        );
+
+        thread_store_kernel<T><<<grid_size, block_size>>>(device_input, device_output);
 
         // Reading results back
         HIP_CHECK(
