@@ -30,6 +30,7 @@
 
 #include "hipcub/thread/thread_load.hpp"
 #include "hipcub/thread/thread_store.hpp"
+#include "hipcub/thread/thread_reduce.hpp"
 
 #include "common_test_header.hpp"
 
@@ -176,6 +177,97 @@ TYPED_TEST(HipcubThreadOperationTests, Store)
         // Verifying results
         for(size_t i = 0; i < output.size(); i++)
         {
+            ASSERT_EQ(output[i], expected[i]);
+        }
+
+        HIP_CHECK(hipFree(device_input));
+        HIP_CHECK(hipFree(device_output));
+    }
+}
+
+struct reduction_op
+{
+    template<typename T> HIPCUB_HOST_DEVICE
+T
+operator()(const T& input_1,const T& input_2) const
+{
+    return input_1 + input_2;
+}
+};
+
+template<class Type, int32_t Length>
+__global__
+void thread_reduce_kernel(Type* const device_input, Type* device_output)
+{
+    size_t input_index = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * Length;
+    size_t output_index = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * Length;
+    device_output[output_index] = hipcub::internal::ThreadReduce<Length>(&device_input[input_index], reduction_op());
+}
+
+TYPED_TEST(HipcubThreadOperationTests, Reduction)
+{
+    using T = typename TestFixture::type;
+    constexpr uint32_t length = 4;
+    constexpr uint32_t block_size = 128 / length;
+    constexpr uint32_t grid_size = 128;
+    constexpr uint32_t size = block_size * grid_size * length;
+    reduction_op operation;
+
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+        // Generate data
+        std::vector<T> input = test_utils::get_random_data<T>(size, 2, 200, seed_value);
+        std::vector<T> output(size);
+        std::vector<T> expected(size);
+
+        // Calculate expected results on host
+        for(uint32_t grid_index = 0; grid_index < grid_size; grid_index++)
+        {
+            for(uint32_t i = 0; i < block_size; i++)
+            {
+                uint32_t offset = (grid_index * block_size + i) * length;
+                T result = T(0);
+                for(uint32_t j = 0; j < length; j++)
+                {
+                    result = operation(result, input[offset + j]);
+                }
+                expected[offset] = result;
+            }
+        }
+        //std::vector<T> expected = input;
+
+        // Preparing device
+        T* device_input;
+        HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(T)));
+        T* device_output;
+        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(T)));
+
+        HIP_CHECK(
+            hipMemcpy(
+                device_input, input.data(),
+                input.size() * sizeof(T),
+                hipMemcpyHostToDevice
+            )
+        );
+
+        thread_reduce_kernel<T, length><<<grid_size, block_size>>>(device_input, device_output);
+
+        // Reading results back
+        HIP_CHECK(
+            hipMemcpy(
+                output.data(), device_output,
+                output.size() * sizeof(T),
+                hipMemcpyDeviceToHost
+            )
+        );
+
+        // Verifying results
+        for(size_t i = 0; i < output.size(); i+=length)
+        {
+            //std::cout << "i: " << i << " " << expected[i] << " - " << output[i] << std::endl;
             ASSERT_EQ(output[i], expected[i]);
         }
 
