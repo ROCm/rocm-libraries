@@ -579,29 +579,32 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScanUsingHeadFlags)
             if( size != 0 )
                 expected[0] = init;
 
-            std::transform(
-                rocprim::make_zip_iterator(
-                    rocprim::make_tuple(input.begin(), flags.begin()+1)
-                ),
-                rocprim::make_zip_iterator(
-                    rocprim::make_tuple(input.end() - 1, flags.end())
-                ),
-                rocprim::make_zip_iterator(
-                    rocprim::make_tuple(expected.begin() + 1, rocprim::make_discard_iterator())
-                ),
-                [init](const rocprim::tuple<input_type, flag_type>& t)
-                    -> rocprim::tuple<input_type, flag_type>
-                {
-                    if(rocprim::get<1>(t))
+            if( size != 0 )
+            {
+                std::transform(
+                    rocprim::make_zip_iterator(
+                        rocprim::make_tuple(input.begin(), flags.begin()+1)
+                    ),
+                    rocprim::make_zip_iterator(
+                        rocprim::make_tuple(input.end() - 1, flags.end())
+                    ),
+                    rocprim::make_zip_iterator(
+                        rocprim::make_tuple(expected.begin() + 1, rocprim::make_discard_iterator())
+                    ),
+                    [init](const rocprim::tuple<input_type, flag_type>& t)
+                        -> rocprim::tuple<input_type, flag_type>
                     {
-                        return rocprim::make_tuple(
-                            init,
-                            rocprim::get<1>(t)
-                        );
+                        if(rocprim::get<1>(t))
+                        {
+                            return rocprim::make_tuple(
+                                init,
+                                rocprim::get<1>(t)
+                            );
+                        }
+                        return t;
                     }
-                    return t;
-                }
-            );
+                );
+            }
             // Now we can run inclusive scan and get segmented exclusive results
             test_utils::host_inclusive_scan(
                 rocprim::make_zip_iterator(
