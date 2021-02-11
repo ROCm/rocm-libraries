@@ -159,6 +159,9 @@ hipError_t merge_sort_impl(void * temporary_storage,
         return hipSuccess;
     }
 
+    if( size == size_t(0) )
+        return hipSuccess;
+
     auto number_of_blocks = (size + block_size - 1)/block_size;
     if(debug_synchronous)
     {

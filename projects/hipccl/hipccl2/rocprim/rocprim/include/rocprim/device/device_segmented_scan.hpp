@@ -129,6 +129,9 @@ hipError_t segmented_scan_impl(void * temporary_storage,
         return hipSuccess;
     }
 
+    if( segments == 0u )
+        return hipSuccess;
+
     std::chrono::high_resolution_clock::time_point start;
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
     hipLaunchKernelGGL(

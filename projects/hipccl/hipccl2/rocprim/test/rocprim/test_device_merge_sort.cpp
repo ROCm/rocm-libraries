@@ -75,7 +75,7 @@ typedef ::testing::Types<
 std::vector<size_t> get_sizes(int seed_value)
 {
     std::vector<size_t> sizes = {
-        1, 10, 53, 211,
+        0, 1, 10, 53, 211,
         128, 256, 512,
         1024, 2048, 5000,
         34567, (1 << 17) - 1220, (1 << 20) - 123
@@ -207,7 +207,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
-    
+
     using key_type = typename TestFixture::key_type;
     using value_type = typename TestFixture::value_type;
     using compare_function = typename TestFixture::compare_function;

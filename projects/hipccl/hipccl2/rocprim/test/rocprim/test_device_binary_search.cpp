@@ -68,7 +68,7 @@ TYPED_TEST_CASE(RocprimDeviceBinarySearch, Params);
 
 std::vector<size_t> get_sizes(int seed_value)
 {
-    std::vector<size_t> sizes = { 1, 10, 53, 211, 1024, 2345, 4096, 34567, (1 << 16) - 1220, (1 << 22) - 76543 };
+    std::vector<size_t> sizes = { 0, 1, 10, 53, 211, 1024, 2345, 4096, 34567, (1 << 16) - 1220, (1 << 22) - 76543 };
     const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(5, 1, 100000, seed_value);
     sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
     return sizes;
@@ -315,7 +315,7 @@ TYPED_TEST(RocprimDeviceBinarySearch, BinarySearch)
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
-    
+
     using haystack_type = typename TestFixture::params::haystack_type;
     using needle_type = typename TestFixture::params::needle_type;
     using output_type = typename TestFixture::params::output_type;

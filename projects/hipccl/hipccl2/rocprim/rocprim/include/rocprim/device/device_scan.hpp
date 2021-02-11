@@ -225,6 +225,9 @@ auto scan_impl(void * temporary_storage,
         std::cout << "items_per_block " << items_per_block << '\n';
     }
 
+    if( number_of_blocks == 0u )
+        return hipSuccess;
+
     if(number_of_blocks > 1)
     {
         // Pointer to array with block_prefixes
@@ -360,6 +363,9 @@ auto scan_impl(void * temporary_storage,
         std::cout << "number of blocks " << number_of_blocks << '\n';
         std::cout << "items_per_block " << items_per_block << '\n';
     }
+
+    if( number_of_blocks == 0u )
+        return hipSuccess;
 
     if(number_of_blocks > 1)
     {
