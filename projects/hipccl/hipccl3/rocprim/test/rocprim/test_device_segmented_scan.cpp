@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -578,7 +578,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScanUsingHeadFlags)
             // This shifts input one to the right and initializes segments with init.
             if( size != 0 )
                 expected[0] = init;
-            
+
             std::transform(
                 rocprim::make_zip_iterator(
                     rocprim::make_tuple(input.begin(), flags.begin()+1)

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -71,6 +71,7 @@ typedef ::testing::Types<
 std::vector<std::tuple<size_t, size_t>> get_sizes()
 {
     std::vector<std::tuple<size_t, size_t>> sizes = {
+        std::make_tuple(0, 0),
         std::make_tuple(2, 1),
         std::make_tuple(10, 10),
         std::make_tuple(111, 111),
@@ -228,7 +229,7 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKeyValue)
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
-    
+
     using key_type = typename TestFixture::key_type;
     using value_type = typename TestFixture::value_type;
     using compare_op_type = typename TestFixture::compare_op_type;
