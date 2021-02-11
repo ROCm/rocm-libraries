@@ -85,7 +85,7 @@ std::vector<size_t> get_sizes(int seed_value)
 {
     std::vector<size_t> sizes = {
         1024, 2048, 4096, 1792,
-        1, 10, 53, 211, 500,
+        0, 1, 10, 53, 211, 500,
         2345, 11001, 34567,
         100000,
         (1 << 16) - 1220
@@ -100,7 +100,7 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
-    
+
     using input_type = typename TestFixture::params::input_type;
     using output_type = typename TestFixture::params::output_type;
     using reduce_op_type = typename TestFixture::params::reduce_op_type;

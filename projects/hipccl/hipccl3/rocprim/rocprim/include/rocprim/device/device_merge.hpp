@@ -157,6 +157,9 @@ hipError_t merge_impl(void * temporary_storage,
         return hipSuccess;
     }
 
+    if( partitions == 0u )
+        return hipSuccess;
+
     // Start point for time measurements
     std::chrono::high_resolution_clock::time_point start;
 

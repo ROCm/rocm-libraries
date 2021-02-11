@@ -164,6 +164,9 @@ hipError_t segmented_radix_sort_impl(void * temporary_storage,
         return hipSuccess;
     }
 
+    if( segments == 0u )
+        return hipSuccess;
+
     if(debug_synchronous)
     {
         std::cout << "iterations " << iterations << '\n';

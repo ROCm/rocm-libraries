@@ -392,6 +392,9 @@ hipError_t radix_sort_impl(void * temporary_storage,
         return hipSuccess;
     }
 
+    if( size == 0u )
+        return hipSuccess;
+
     if(debug_synchronous)
     {
         std::cout << "blocks " << blocks << '\n';

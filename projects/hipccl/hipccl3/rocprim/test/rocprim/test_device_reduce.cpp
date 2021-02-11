@@ -72,7 +72,7 @@ typedef ::testing::Types<
 std::vector<size_t> get_sizes(int seed_value)
 {
     std::vector<size_t> sizes = {
-        1, 10, 53, 211,
+        0, 1, 10, 53, 211,
         1024, 2048, 5096,
         34567, (1 << 17) - 1220
     };
@@ -393,7 +393,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
-    
+
     using T = typename TestFixture::input_type;
     using key_value = rocprim::key_value_pair<int, T>;
     const bool debug_synchronous = TestFixture::debug_synchronous;
