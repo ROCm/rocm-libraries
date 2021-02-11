@@ -394,7 +394,10 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScanUsingHeadFlags)
             // Generate data
             std::vector<input_type> input = test_utils::get_random_data<input_type>(size, 1, 10, seed_value);
             std::vector<flag_type> flags = test_utils::get_random_data<flag_type>(size, 0, 10, seed_value);
-            flags[0] = 1U;
+
+            if( size != 0 )
+                flags[0] = 1U;
+
             std::transform(
                 flags.begin(), flags.end(), flags.begin(),
                 [](flag_type a){ if(a == 1U) return 1U; return 0U; }
@@ -535,7 +538,10 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScanUsingHeadFlags)
             // Generate data
             std::vector<input_type> input = test_utils::get_random_data<input_type>(size, 1, 10, seed_value);
             std::vector<flag_type> flags = test_utils::get_random_data<flag_type>(size, 0, 10, seed_value);
-            flags[0] = 1U;
+
+            if( size != 0 )
+                flags[0] = 1U;
+
             std::transform(
                 flags.begin(), flags.end(), flags.begin(),
                 [](flag_type a){ if(a == 1U) return 1U; return 0U; }
@@ -570,7 +576,9 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScanUsingHeadFlags)
             std::vector<output_type> expected(input.size());
             // Modify input to perform exclusive operation on initial input.
             // This shifts input one to the right and initializes segments with init.
-            expected[0] = init;
+            if( size != 0 )
+                expected[0] = init;
+            
             std::transform(
                 rocprim::make_zip_iterator(
                     rocprim::make_tuple(input.begin(), flags.begin()+1)
