@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -83,7 +83,7 @@ std::vector<size_t> get_sizes(int seed_value)
 {
     std::vector<size_t> sizes = {
         1024, 2048, 4096, 1792,
-        1, 10, 53, 211, 500,
+        0, 1, 10, 53, 211, 500,
         2345, 11001, 34567,
         (1 << 16) - 1220
     };
@@ -97,7 +97,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScan)
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
-    
+
     using input_type = typename TestFixture::params::input_type;
     using output_type = typename TestFixture::params::output_type;
     using scan_op_type = typename TestFixture::params::scan_op_type;
@@ -394,7 +394,10 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScanUsingHeadFlags)
             // Generate data
             std::vector<input_type> input = test_utils::get_random_data<input_type>(size, 1, 10, seed_value);
             std::vector<flag_type> flags = test_utils::get_random_data<flag_type>(size, 0, 10, seed_value);
-            flags[0] = 1U;
+
+            if( size != 0 )
+                flags[0] = 1U;
+
             std::transform(
                 flags.begin(), flags.end(), flags.begin(),
                 [](flag_type a){ if(a == 1U) return 1U; return 0U; }
@@ -535,7 +538,10 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScanUsingHeadFlags)
             // Generate data
             std::vector<input_type> input = test_utils::get_random_data<input_type>(size, 1, 10, seed_value);
             std::vector<flag_type> flags = test_utils::get_random_data<flag_type>(size, 0, 10, seed_value);
-            flags[0] = 1U;
+
+            if( size != 0 )
+                flags[0] = 1U;
+
             std::transform(
                 flags.begin(), flags.end(), flags.begin(),
                 [](flag_type a){ if(a == 1U) return 1U; return 0U; }
@@ -570,30 +576,35 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScanUsingHeadFlags)
             std::vector<output_type> expected(input.size());
             // Modify input to perform exclusive operation on initial input.
             // This shifts input one to the right and initializes segments with init.
-            expected[0] = init;
-            std::transform(
-                rocprim::make_zip_iterator(
-                    rocprim::make_tuple(input.begin(), flags.begin()+1)
-                ),
-                rocprim::make_zip_iterator(
-                    rocprim::make_tuple(input.end() - 1, flags.end())
-                ),
-                rocprim::make_zip_iterator(
-                    rocprim::make_tuple(expected.begin() + 1, rocprim::make_discard_iterator())
-                ),
-                [init](const rocprim::tuple<input_type, flag_type>& t)
-                    -> rocprim::tuple<input_type, flag_type>
-                {
-                    if(rocprim::get<1>(t))
+            if( size != 0 )
+                expected[0] = init;
+
+            if( size != 0 )
+            {
+                std::transform(
+                    rocprim::make_zip_iterator(
+                        rocprim::make_tuple(input.begin(), flags.begin()+1)
+                    ),
+                    rocprim::make_zip_iterator(
+                        rocprim::make_tuple(input.end() - 1, flags.end())
+                    ),
+                    rocprim::make_zip_iterator(
+                        rocprim::make_tuple(expected.begin() + 1, rocprim::make_discard_iterator())
+                    ),
+                    [init](const rocprim::tuple<input_type, flag_type>& t)
+                        -> rocprim::tuple<input_type, flag_type>
                     {
-                        return rocprim::make_tuple(
-                            init,
-                            rocprim::get<1>(t)
-                        );
+                        if(rocprim::get<1>(t))
+                        {
+                            return rocprim::make_tuple(
+                                init,
+                                rocprim::get<1>(t)
+                            );
+                        }
+                        return t;
                     }
-                    return t;
-                }
-            );
+                );
+            }
             // Now we can run inclusive scan and get segmented exclusive results
             test_utils::host_inclusive_scan(
                 rocprim::make_zip_iterator(
