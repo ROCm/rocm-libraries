@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -393,7 +393,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
-    
+
     using T = typename TestFixture::input_type;
     using key_value = rocprim::key_value_pair<int, T>;
     const bool debug_synchronous = TestFixture::debug_synchronous;

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -99,7 +99,7 @@ typedef ::testing::Types<
 std::vector<size_t> get_sizes(int seed_value)
 {
     std::vector<size_t> sizes = {
-        1, 10, 53, 211,
+        0, 1, 10, 53, 211,
         1024, 2048, 5096,
         34567, (1 << 18),
         (1 << 20) - 12345

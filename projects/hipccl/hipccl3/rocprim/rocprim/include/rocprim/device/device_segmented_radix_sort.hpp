@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2019 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -163,6 +163,9 @@ hipError_t segmented_radix_sort_impl(void * temporary_storage,
         storage_size = storage_size == 0 ? 4 : storage_size;
         return hipSuccess;
     }
+
+    if( segments == 0u )
+        return hipSuccess;
 
     if(debug_synchronous)
     {

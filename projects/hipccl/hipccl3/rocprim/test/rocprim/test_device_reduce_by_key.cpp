@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -107,7 +107,7 @@ std::vector<size_t> get_sizes(int seed_value)
 {
     std::vector<size_t> sizes = {
         1024, 2048, 4096, 1792,
-        1, 10, 53, 211, 500,
+        0, 1, 10, 53, 211, 500,
         2345, 11001, 34567,
         100000,
         (1 << 16) - 1220, (1 << 23) - 76543
@@ -122,7 +122,7 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
-    
+
     using key_type = typename TestFixture::params::key_type;
     using value_type = typename TestFixture::params::value_type;
     using aggregate_type = typename TestFixture::params::aggregate_type;

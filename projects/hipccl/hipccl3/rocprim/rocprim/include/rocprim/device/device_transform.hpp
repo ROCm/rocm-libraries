@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2019 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -146,6 +146,9 @@ hipError_t transform(InputIterator input,
                      const hipStream_t stream = 0,
                      bool debug_synchronous = false)
 {
+    if( size == size_t(0) )
+        return hipSuccess;
+
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     using result_type = typename ::rocprim::detail::invoke_result<UnaryFunction, input_type>::type;
 

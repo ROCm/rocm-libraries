@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2019 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -156,6 +156,9 @@ hipError_t merge_impl(void * temporary_storage,
         storage_size = partition_bytes;
         return hipSuccess;
     }
+
+    if( partitions == 0u )
+        return hipSuccess;
 
     // Start point for time measurements
     std::chrono::high_resolution_clock::time_point start;

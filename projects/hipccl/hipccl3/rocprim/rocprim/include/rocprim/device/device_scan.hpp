@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -225,6 +225,9 @@ auto scan_impl(void * temporary_storage,
         std::cout << "items_per_block " << items_per_block << '\n';
     }
 
+    if( number_of_blocks == 0u )
+        return hipSuccess;
+
     if(number_of_blocks > 1)
     {
         // Pointer to array with block_prefixes
@@ -360,6 +363,9 @@ auto scan_impl(void * temporary_storage,
         std::cout << "number of blocks " << number_of_blocks << '\n';
         std::cout << "items_per_block " << items_per_block << '\n';
     }
+
+    if( number_of_blocks == 0u )
+        return hipSuccess;
 
     if(number_of_blocks > 1)
     {
