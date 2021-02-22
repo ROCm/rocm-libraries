@@ -16,7 +16,7 @@
 
 
 /*! \file device_make_unique.h
- *  \brief A factory function for creating `unique_ptr`s to device objects.
+ *  \brief A factory function for creating unique pointers to device objects.
  */
 
 #pragma once

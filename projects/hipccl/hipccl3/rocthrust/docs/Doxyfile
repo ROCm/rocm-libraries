@@ -32,7 +32,7 @@ DOXYFILE_ENCODING      = UTF-8
 # title of most generated pages and in a few other places.
 # The default value is: My Project.
 
-PROJECT_NAME           = "RCCL"
+PROJECT_NAME           = thrust
 
 # The PROJECT_NUMBER tag can be used to enter a project or revision number. This
 # could be handy for archiving the generated documentation or if some version
@@ -162,7 +162,7 @@ FULL_PATH_NAMES        = YES
 # will be relative from the directory where doxygen is started.
 # This tag requires that the tag FULL_PATH_NAMES is set to YES.
 
-STRIP_FROM_PATH        = 
+STRIP_FROM_PATH        = ..
 
 # The STRIP_FROM_INC_PATH tag can be used to strip a user-defined part of the
 # path mentioned in the documentation of a class, which tells the reader which
@@ -2029,7 +2029,7 @@ ENABLE_PREPROCESSING   = YES
 # The default value is: NO.
 # This tag requires that the tag ENABLE_PREPROCESSING is set to YES.
 
-MACRO_EXPANSION        = NO
+MACRO_EXPANSION        = YES
 
 # If the EXPAND_ONLY_PREDEF and MACRO_EXPANSION tags are both set to YES then
 # the macro expansion is limited to the macros specified with the PREDEFINED and
@@ -2044,7 +2044,7 @@ EXPAND_ONLY_PREDEF     = NO
 # The default value is: YES.
 # This tag requires that the tag ENABLE_PREPROCESSING is set to YES.
 
-SEARCH_INCLUDES        = YES
+SEARCH_INCLUDES        = NO
 
 # The INCLUDE_PATH tag can be used to specify one or more directories that
 # contain include files that are not input files but should be processed by the
@@ -2069,7 +2069,20 @@ INCLUDE_FILE_PATTERNS  =
 # recursively expanded use the := operator instead of the = operator.
 # This tag requires that the tag ENABLE_PREPROCESSING is set to YES.
 
-PREDEFINED             = 
+PREDEFINED             = THRUST_NOEXCEPT=noexcept \
+                         "THRUST_INLINE_CONSTANT=inline constexpr" \
+                         "THRUST_DEFAULT={}" \
+                         "THRUST_NODISCARD=[[nodiscard]]" \
+                         "THRUST_MR_DEFAULT_ALIGNMENT=alignof(max_align_t)" \
+                         "THRUST_FINAL=final" \
+                         "THRUST_OVERRIDE=" \
+                         "THRUST_BEGIN_NS=namespace thrust {" \
+                         "THRUST_END_NS=}" \
+                         "cuda_cub=system::cuda" \
+                         THRUST_PREVENT_MACRO_SUBSTITUTION= \
+                         __thrust_exec_check_disable__= \
+                         DOXYGEN_DOCUMENTATION_BUILD= \
+                         DOXYGEN_SHOULD_SKIP_THIS=
 
 # If the MACRO_EXPANSION and EXPAND_ONLY_PREDEF tags are set to YES then this
 # tag can be used to specify a list of macro names that should be expanded. The
@@ -2088,7 +2101,7 @@ EXPAND_AS_DEFINED      =
 # The default value is: YES.
 # This tag requires that the tag ENABLE_PREPROCESSING is set to YES.
 
-SKIP_FUNCTION_MACROS   = YES
+SKIP_FUNCTION_MACROS   = NO
 
 #---------------------------------------------------------------------------
 # Configuration options related to external references
