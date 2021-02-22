@@ -2,7 +2,7 @@
 # Copyright 2019-2020 Advanced Micro Devices, Inc.
 # ########################################################################
 
-cmake_minimum_required(VERSION 3.5.1 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.10.2 FATAL_ERROR)
 
 # Install prefix
 if(WIN32)
