@@ -227,6 +227,19 @@ TYPED_TEST(HipcubDevicePartitionTests, Flagged)
     }
 }
 
+// NOTE: The following lambdas cannot be inside the test because of nvcc
+// The enclosing parent function ("TestBody") for an extended __host__ __device__ lambda cannot have private or protected access within its class
+struct TestSelectOp
+{
+    template<class T>
+    __host__ __device__
+    bool operator()(const T& value) const
+    {
+        if(value == T(50)) return true;
+        return false;
+    }
+};
+
 TYPED_TEST(HipcubDevicePartitionTests, If)
 {
     using T = typename TestFixture::input_type;
@@ -236,11 +249,15 @@ TYPED_TEST(HipcubDevicePartitionTests, If)
 
     hipStream_t stream = 0; // default stream
 
+#ifdef __HIP_PLATFORM_NVCC__
+    TestSelectOp select_op;
+#else
     auto select_op = [] __host__ __device__ (const T& value) -> bool
     {
         if(value == T(50)) return true;
         return false;
     };
+#endif
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
