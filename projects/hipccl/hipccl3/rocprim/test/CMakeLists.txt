@@ -36,8 +36,6 @@ function(add_hip_test TEST_NAME TEST_SOURCES)
       ${COMMON_TEST_HEADER_DIRECTORY}
   )
 
-  message(STATUS "${CMAKE_CURRENT_SOURCE_DIR}=${${CMAKE_CURRENT_SOURCE_DIR}}")
-
   target_link_libraries(${TEST_TARGET} PRIVATE hip::device)
 
   target_link_libraries(${TEST_TARGET}
