@@ -22,47 +22,35 @@
 
 function(add_hipcub_benchmark BENCHMARK_SOURCE)
   get_filename_component(BENCHMARK_TARGET ${BENCHMARK_SOURCE} NAME_WE)
-  if((HIP_COMPILER STREQUAL "nvcc"))
-    if((CMAKE_VERSION VERSION_LESS "3.10"))
-      CUDA_INCLUDE_DIRECTORIES(
-          "${PROJECT_BINARY_DIR}/hipcub/include/hipcub"
-          "${PROJECT_BINARY_DIR}/hipcub/include"
-          "${PROJECT_SOURCE_DIR}/hipcub/include"
-          "${GOOGLEBENCHMARK_ROOT}/include"
-          ${GTEST_INCLUDE_DIRS}
-          ${CUB_INCLUDE_DIR}
-      )
-    endif()
-    set_source_files_properties(${BENCHMARK_SOURCE}
-      PROPERTIES
-          CUDA_SOURCE_PROPERTY_FORMAT OBJ
-    )
-    CUDA_ADD_EXECUTABLE(${BENCHMARK_TARGET}
-      ${BENCHMARK_SOURCE}
-      OPTIONS
-        --expt-extended-lambda
-    )
-    target_include_directories(${BENCHMARK_TARGET} SYSTEM BEFORE
-      PUBLIC
-        "${GOOGLEBENCHMARK_ROOT}/include"
-    )
-    target_link_libraries(${BENCHMARK_TARGET}
-      hipcub_cub
+  add_executable(${BENCHMARK_TARGET} ${BENCHMARK_SOURCE})
+  target_include_directories(${BENCHMARK_TARGET} SYSTEM BEFORE
+    PUBLIC
+      "${GOOGLEBENCHMARK_ROOT}/include"
+  )
+  target_link_libraries(${BENCHMARK_TARGET}
+    PRIVATE
       benchmark::benchmark
+      hipcub
+  )
+  if((HIP_COMPILER STREQUAL "nvcc"))
+    set_target_properties(${BENCHMARK_TARGET}
+      PROPERTIES CUDA_SEPARABLE_COMPILATION ON
+                 CUDA_STANDARD 14
+                 CUDA_STANDARD_REQUIRED ON
+                 CUDA_EXTENSIONS OFF
+                 CXX_STANDARD 14
+                 CXX_STANDARD_REQUIRED ON
+                 CXX_EXTENSIONS ON
     )
-  else()
-    add_executable(${BENCHMARK_TARGET} ${BENCHMARK_SOURCE})
+    set_source_files_properties(${BENCHMARK_SOURCE} PROPERTIES LANGUAGE CUDA)
+    target_compile_options(${BENCHMARK_TARGET}
+      PRIVATE
+        $<$<COMPILE_LANGUAGE:CUDA>:--expt-extended-lambda>
+    )
     target_link_libraries(${BENCHMARK_TARGET}
       PRIVATE
-        hipcub
-        benchmark::benchmark
+        hipcub_cub
     )
-    foreach(amdgpu_target ${AMDGPU_TARGETS})
-      target_link_libraries(${BENCHMARK_TARGET}
-        PRIVATE
-          --amdgpu-target=${amdgpu_target}
-        )
-    endforeach()
   endif()
   set_target_properties(${BENCHMARK_TARGET}
     PROPERTIES

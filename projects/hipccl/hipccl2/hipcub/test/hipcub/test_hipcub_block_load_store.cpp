@@ -533,7 +533,7 @@ __global__ void load_store_guarded_kernel(
 
     // Threadblock work bounds
     int block_offset = blockIdx.x * TileSize;
-    int guarded_elements = std::max(num_items - block_offset, 0);
+    int guarded_elements = max(num_items - block_offset, 0);
 
     // Tile of items
     OutputT data[ItemsPerThread];
