@@ -111,7 +111,7 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleUp)
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = typename TestFixture::type;
-    const size_t hardware_warp_size = ::rocprim::warp_size();
+    const size_t hardware_warp_size = ::rocprim::host_warp_size();
     const size_t size = hardware_warp_size;
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
@@ -214,7 +214,7 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleDown)
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = typename TestFixture::type;
-    const size_t hardware_warp_size = ::rocprim::warp_size();
+    const size_t hardware_warp_size = ::rocprim::host_warp_size();
     const size_t size = hardware_warp_size;
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
@@ -319,7 +319,7 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleIndex)
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = typename TestFixture::type;
-    const size_t hardware_warp_size = ::rocprim::warp_size();
+    const size_t hardware_warp_size = ::rocprim::host_warp_size();
     const size_t size = hardware_warp_size;
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
@@ -422,7 +422,7 @@ TEST(RocprimIntrinsicsTests, ShuffleUpCustomStruct)
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = custom_notaligned;
-    const size_t hardware_warp_size = ::rocprim::warp_size();
+    const size_t hardware_warp_size = ::rocprim::host_warp_size();
     const size_t size = hardware_warp_size;
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
@@ -522,7 +522,7 @@ TEST(RocprimIntrinsicsTests, ShuffleUpCustomAlignedStruct)
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = custom_16aligned;
-    const size_t hardware_warp_size = ::rocprim::warp_size();
+    const size_t hardware_warp_size = ::rocprim::host_warp_size();
     const size_t size = hardware_warp_size;
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
