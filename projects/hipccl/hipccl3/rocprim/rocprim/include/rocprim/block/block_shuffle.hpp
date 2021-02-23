@@ -224,4 +224,4 @@ END_ROCPRIM_NAMESPACE
 /// @}
 // end of group blockmodule
 
-#endif // ROCPRIM_BLOCK_BLOCK_REDUCE_HPP_
+#endif // ROCPRIM_BLOCK_BLOCK_SHUFFLE_HPP_
