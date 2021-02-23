@@ -53,6 +53,11 @@ async_transform(
 , ForwardIt first, Sentinel last, OutputIt output, UnaryOperation op
 )
 {
+  THRUST_UNUSED_VAR(exec);
+  THRUST_UNUSED_VAR(first);
+  THRUST_UNUSED_VAR(last);
+  THRUST_UNUSED_VAR(output);
+  THRUST_UNUSED_VAR(op);
   THRUST_STATIC_ASSERT_MSG(
     (thrust::detail::depend_on_instantiation<ForwardIt, false>::value)
   , "this algorithm is not implemented for the specified system"

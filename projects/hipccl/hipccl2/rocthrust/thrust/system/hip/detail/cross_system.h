@@ -134,6 +134,8 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
         bool, hipMemcpyDeviceToHost== Direction::value
       >
   {
+    THRUST_UNUSED_VAR(exec0);
+    THRUST_UNUSED_VAR(exec1);
     return {};
   }
 
@@ -148,6 +150,7 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
         bool, hipMemcpyDeviceToHost == Direction::value
       >
   {
+    THRUST_UNUSED_VAR(exec);
     return {};
   }
 
@@ -167,6 +170,8 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
         bool, hipMemcpyHostToDevice  == Direction::value
       >
   {
+    THRUST_UNUSED_VAR(exec0);
+    THRUST_UNUSED_VAR(exec1);
     return {};
   }
 
@@ -181,6 +186,7 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
         bool, hipMemcpyHostToDevice == Direction::value
       >
   {
+    THRUST_UNUSED_VAR(exec);
     return {};
   }
 
@@ -200,6 +206,8 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
         bool,    hipMemcpyDeviceToDevice == Direction::value
       >
   {
+    THRUST_UNUSED_VAR(exec0);
+    THRUST_UNUSED_VAR(exec1);
     return {};
   }
 
@@ -214,6 +222,7 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
         bool,   hipMemcpyDeviceToDevice  == Direction::value
       >
   {
+    THRUST_UNUSED_VAR(exec); 
     return {};
   }
 
