@@ -234,8 +234,8 @@ typedef ::testing::Types<
     params<char4, rocprim::detail::int4, 16, true>
 > Params;
 
-TYPED_TEST_CASE(RocprimBlockLoadStoreClassTests, ClassParams);
-TYPED_TEST_CASE(RocprimVectorizationTests, Params);
+TYPED_TEST_SUITE(RocprimBlockLoadStoreClassTests, ClassParams);
+TYPED_TEST_SUITE(RocprimVectorizationTests, Params);
 
 template<
     class Type,

@@ -53,7 +53,7 @@ typedef ::testing::Types<
     RocprimArgIndexIteratorParams<float>
 > RocprimArgIndexIteratorTestsParams;
 
-TYPED_TEST_CASE(RocprimArgIndexIteratorTests, RocprimArgIndexIteratorTestsParams);
+TYPED_TEST_SUITE(RocprimArgIndexIteratorTests, RocprimArgIndexIteratorTestsParams);
 
 TYPED_TEST(RocprimArgIndexIteratorTests, Equal)
 {

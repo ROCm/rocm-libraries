@@ -34,7 +34,7 @@ public:
     using params = Params;
 };
 
-TYPED_TEST_CASE(RocprimWarpReduceTests, WarpParams);
+TYPED_TEST_SUITE(RocprimWarpReduceTests, WarpParams);
 
 template<
     class T,

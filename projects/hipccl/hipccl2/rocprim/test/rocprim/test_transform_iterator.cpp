@@ -80,7 +80,7 @@ typedef ::testing::Types<
     RocprimTransformIteratorParams<float, plus_ten<double>, double>
 > RocprimTransformIteratorTestsParams;
 
-TYPED_TEST_CASE(RocprimTransformIteratorTests, RocprimTransformIteratorTestsParams);
+TYPED_TEST_SUITE(RocprimTransformIteratorTests, RocprimTransformIteratorTestsParams);
 
 TYPED_TEST(RocprimTransformIteratorTests, TransformReduce)
 {
