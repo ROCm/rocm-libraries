@@ -69,8 +69,8 @@ typedef ::testing::Types<
     block_param_type(unsigned int, rocprim::half)
 > BlockHistSortParams;
 
-TYPED_TEST_CASE(RocprimBlockHistogramAtomicInputArrayTests, BlockHistAtomicParams);
-TYPED_TEST_CASE(RocprimBlockHistogramSortInputArrayTests, BlockHistSortParams);
+TYPED_TEST_SUITE(RocprimBlockHistogramAtomicInputArrayTests, BlockHistAtomicParams);
+TYPED_TEST_SUITE(RocprimBlockHistogramSortInputArrayTests, BlockHistSortParams);
 
 template<
     unsigned int BlockSize,

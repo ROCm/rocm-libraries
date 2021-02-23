@@ -137,7 +137,7 @@ typedef ::testing::Types<
     params1<double, 55, -123, +123, double>
 > Params1;
 
-TYPED_TEST_CASE(RocprimDeviceHistogramEven, Params1);
+TYPED_TEST_SUITE(RocprimDeviceHistogramEven, Params1);
 
 TEST(RocprimDeviceHistogramEven, IncorrectInput)
 {
@@ -344,7 +344,7 @@ typedef ::testing::Types<
     params2<double, 3, 10000, 1000, 1000, double, unsigned int>
 > Params2;
 
-TYPED_TEST_CASE(RocprimDeviceHistogramRange, Params2);
+TYPED_TEST_SUITE(RocprimDeviceHistogramRange, Params2);
 
 TEST(RocprimDeviceHistogramRange, IncorrectInput)
 {
@@ -585,7 +585,7 @@ typedef ::testing::Types<
     params3<double, 4, 3, 55, -123, +123, double>
 > Params3;
 
-TYPED_TEST_CASE(RocprimDeviceHistogramMultiEven, Params3);
+TYPED_TEST_SUITE(RocprimDeviceHistogramMultiEven, Params3);
 
 TYPED_TEST(RocprimDeviceHistogramMultiEven, MultiEven)
 {
@@ -839,7 +839,7 @@ typedef ::testing::Types<
     params4<double, 3, 1, 3, 10000, 1000, 1000, double, unsigned int>
 > Params4;
 
-TYPED_TEST_CASE(RocprimDeviceHistogramMultiRange, Params4);
+TYPED_TEST_SUITE(RocprimDeviceHistogramMultiRange, Params4);
 
 TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
 {

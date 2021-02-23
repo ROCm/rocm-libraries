@@ -68,7 +68,7 @@ typedef ::testing::Types<
     params<256, 2, 2>
 > Params;
 
-TYPED_TEST_CASE(RocprimThreadTests, Params);
+TYPED_TEST_SUITE(RocprimThreadTests, Params);
 
 template<
     unsigned int BlockSizeX,

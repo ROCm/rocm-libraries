@@ -58,7 +58,7 @@ typedef ::testing::Types<
     warp_sort_param_type(rocprim::half)
 > WarpSortParams;
 
-TYPED_TEST_CASE(RocprimWarpSortShuffleBasedTests, WarpSortParams);
+TYPED_TEST_SUITE(RocprimWarpSortShuffleBasedTests, WarpSortParams);
 
 template<
     class T,

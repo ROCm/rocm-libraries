@@ -38,7 +38,7 @@ public:
     using params = Params;
 };
 
-TYPED_TEST_CASE(RocprimWarpScanTests, WarpParams);
+TYPED_TEST_SUITE(RocprimWarpScanTests, WarpParams);
 
 template<
     class T,

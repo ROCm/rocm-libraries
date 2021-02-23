@@ -43,7 +43,7 @@ public:
     static constexpr unsigned int block_size = Params::block_size;
 };
 
-TYPED_TEST_CASE(RocprimBlockScanSingleValueTests, BlockParams);
+TYPED_TEST_SUITE(RocprimBlockScanSingleValueTests, BlockParams);
 
 template<
     int Method,
@@ -689,7 +689,7 @@ public:
     static constexpr unsigned int block_size = Params::block_size;
 };
 
-TYPED_TEST_CASE(RocprimBlockScanInputArrayTests, BlockParams);
+TYPED_TEST_SUITE(RocprimBlockScanInputArrayTests, BlockParams);
 
 template<
     unsigned int BlockSize,

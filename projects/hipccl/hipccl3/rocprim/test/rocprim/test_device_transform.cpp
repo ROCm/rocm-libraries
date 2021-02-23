@@ -84,7 +84,7 @@ std::vector<size_t> get_sizes(int seed_value)
     return sizes;
 }
 
-TYPED_TEST_CASE(RocprimDeviceTransformTests, RocprimDeviceTransformTestsParams);
+TYPED_TEST_SUITE(RocprimDeviceTransformTests, RocprimDeviceTransformTestsParams);
 
 template<class T>
 struct transform

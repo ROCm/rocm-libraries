@@ -91,7 +91,7 @@ typedef ::testing::Types<
     params<unsigned char>
 > IntrinsicsTestParams;
 
-TYPED_TEST_CASE(RocprimIntrinsicsTests, IntrinsicsTestParams);
+TYPED_TEST_SUITE(RocprimIntrinsicsTests, IntrinsicsTestParams);
 
 template<class T>
 __global__

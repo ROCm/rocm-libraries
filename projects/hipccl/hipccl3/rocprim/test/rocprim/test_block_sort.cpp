@@ -38,7 +38,7 @@ public:
     static constexpr unsigned int block_size = Params::block_size;
 };
 
-TYPED_TEST_CASE(RocprimBlockSortTests, BlockParams);
+TYPED_TEST_SUITE(RocprimBlockSortTests, BlockParams);
 
 template<
     unsigned int BlockSize,

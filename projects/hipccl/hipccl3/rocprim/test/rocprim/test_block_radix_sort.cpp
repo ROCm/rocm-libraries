@@ -54,7 +54,7 @@ static constexpr unsigned int end_radix[n_sizes] = {
     0, 0, 0, 10, 11, 12, 0, 0, 0, 10, 11, 12
 };
 
-TYPED_TEST_CASE(RocprimBlockRadixSort, BlockParams);
+TYPED_TEST_SUITE(RocprimBlockRadixSort, BlockParams);
 
 template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
 struct key_comparator

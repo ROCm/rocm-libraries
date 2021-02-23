@@ -110,7 +110,7 @@ std::vector<size_t> get_sizes(int seed_value)
     return sizes;
 }
 
-TYPED_TEST_CASE(RocprimDeviceScanTests, RocprimDeviceScanTestsParams);
+TYPED_TEST_SUITE(RocprimDeviceScanTests, RocprimDeviceScanTestsParams);
 
 TYPED_TEST(RocprimDeviceScanTests, InclusiveScanEmptyInput)
 {

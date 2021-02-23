@@ -98,7 +98,7 @@ typedef ::testing::Types<
     block_param_type(rocprim::half, int)
 > BlockDiscParams;
 
-TYPED_TEST_CASE(RocprimBlockDiscontinuity, BlockDiscParams);
+TYPED_TEST_SUITE(RocprimBlockDiscontinuity, BlockDiscParams);
 
 template<
     class Type,
