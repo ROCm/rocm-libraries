@@ -80,9 +80,10 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScan)
     const size_t size = block_size * grid_size;
 
     // Given warp size not supported
-    if(logical_warp_size > rocprim::warp_size())
+    unsigned int current_device_warp_size = rocprim::host_warp_size();
+    if(logical_warp_size > current_device_warp_size)
     {
-        return;
+        GTEST_SKIP();
     }
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
@@ -196,9 +197,10 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScanReduce)
     const size_t size = block_size * grid_size;
 
     // Given warp size not supported
-    if(logical_warp_size > rocprim::warp_size())
+    unsigned int current_device_warp_size = rocprim::host_warp_size();
+    if(logical_warp_size > current_device_warp_size)
     {
-        return;
+        GTEST_SKIP();
     }
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
@@ -324,9 +326,10 @@ TYPED_TEST(RocprimWarpScanTests, ExclusiveScan)
     const size_t size = block_size * grid_size;
 
     // Given warp size not supported
-    if(logical_warp_size > rocprim::warp_size())
+    unsigned int current_device_warp_size = rocprim::host_warp_size();
+    if(logical_warp_size > current_device_warp_size)
     {
-        return;
+        GTEST_SKIP();
     }
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
@@ -443,9 +446,10 @@ TYPED_TEST(RocprimWarpScanTests, ExclusiveReduceScan)
     const size_t size = block_size * grid_size;
 
     // Given warp size not supported
-    if(logical_warp_size > rocprim::warp_size())
+    unsigned int current_device_warp_size = rocprim::host_warp_size();
+    if(logical_warp_size > current_device_warp_size)
     {
-        return;
+        GTEST_SKIP();
     }
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
@@ -585,9 +589,10 @@ TYPED_TEST(RocprimWarpScanTests, Scan)
     const size_t size = block_size * grid_size;
 
     // Given warp size not supported
-    if(logical_warp_size > rocprim::warp_size())
+    unsigned int current_device_warp_size = rocprim::host_warp_size();
+    if(logical_warp_size > current_device_warp_size)
     {
-        return;
+        GTEST_SKIP();
     }
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
@@ -734,9 +739,10 @@ TYPED_TEST(RocprimWarpScanTests, ScanReduce)
     const size_t size = block_size * grid_size;
 
     // Given warp size not supported
-    if(logical_warp_size > rocprim::warp_size())
+    unsigned int current_device_warp_size = rocprim::host_warp_size();
+    if(logical_warp_size > current_device_warp_size)
     {
-        return;
+        GTEST_SKIP();
     }
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
@@ -871,9 +877,10 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScanCustomType)
     const size_t size = block_size * grid_size;
 
     // Given warp size not supported
-    if(logical_warp_size > rocprim::warp_size())
+    unsigned int current_device_warp_size = rocprim::host_warp_size();
+    if(logical_warp_size > current_device_warp_size)
     {
-        return;
+        GTEST_SKIP();
     }
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
