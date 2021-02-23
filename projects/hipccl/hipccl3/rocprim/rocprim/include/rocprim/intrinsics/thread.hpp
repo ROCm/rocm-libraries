@@ -33,6 +33,21 @@ BEGIN_ROCPRIM_NAMESPACE
 
 // Sizes
 
+/// \brief Returns a number of threads in a hardware warp for the actual device
+///
+/// It is constant for a device.
+ROCPRIM_HOST inline
+unsigned int host_warp_size()
+{
+    unsigned int warp_size = -1;
+    int default_hip_device;
+    hipGetDevice(&default_hip_device);
+    hipDeviceProp_t device_prop;
+    hipGetDeviceProperties(&device_prop,default_hip_device);
+    warp_size = device_prop.warpSize;
+    return warp_size;
+};
+
 /// \brief Returns a number of threads in a hardware warp.
 ///
 /// It is constant for a device.

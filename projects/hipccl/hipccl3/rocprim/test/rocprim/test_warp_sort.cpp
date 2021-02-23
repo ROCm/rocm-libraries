@@ -90,9 +90,10 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, Sort)
     const size_t size = block_size * grid_size;
 
     // Given warp size not supported
-    if(logical_warp_size > rocprim::warp_size() || !rocprim::detail::is_power_of_two(logical_warp_size))
+    unsigned int current_device_warp_size = rocprim::host_warp_size();
+    if(logical_warp_size > current_device_warp_size || !rocprim::detail::is_power_of_two(logical_warp_size))
     {
-        return;
+        GTEST_SKIP();
     }
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
@@ -186,9 +187,10 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
     const size_t size = block_size * grid_size;
 
     // Given warp size not supported
-    if(logical_warp_size > rocprim::warp_size() || !rocprim::detail::is_power_of_two(logical_warp_size))
+    unsigned int current_device_warp_size = rocprim::host_warp_size();
+    if(logical_warp_size > current_device_warp_size || !rocprim::detail::is_power_of_two(logical_warp_size))
     {
-        return;
+        GTEST_SKIP();
     }
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
