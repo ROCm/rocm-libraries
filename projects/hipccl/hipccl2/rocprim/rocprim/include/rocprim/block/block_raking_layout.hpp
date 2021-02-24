@@ -43,7 +43,7 @@ template<
     class T,
     unsigned int BlockThreads
     >
-class block_shuffle
+struct block_raking_layout
 {
   /// The total number of elements that need to be cooperatively reduced
   static constexpr unsigned int SharedElements = BlockThreads;
@@ -70,7 +70,6 @@ class block_shuffle
       T buff[GridElements];
   };
 
-public:
 
   #ifndef DOXYGEN_SHOULD_SKIP_THIS // hides storage_type implementation for Doxygen
   using storage_type = detail::raw_storage<storage_type_>;
@@ -78,12 +77,7 @@ public:
   using storage_type = storage_type_; // only for Doxygen
   #endif
 
-// private:
-//   ROCPRIM_SHARED_MEMORY storage_type storage;
-
-public:
-
-  static ROCPRIM_DEVICE inline T* PlacementPtr(
+  static ROCPRIM_DEVICE inline T* placement_ptr(
           storage_type &temp_storage,
           unsigned int linear_tid)
       {
@@ -104,7 +98,7 @@ public:
       /**
        * \brief Returns the location for the calling thread to begin sequential raking
        */
-      static ROCPRIM_DEVICE inline T* RakingPtr(
+      static ROCPRIM_DEVICE inline T* raking_ptr(
           TempStorage &temp_storage,
           unsigned int linear_tid)
       {
