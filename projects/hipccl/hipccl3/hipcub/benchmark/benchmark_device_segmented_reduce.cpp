@@ -159,7 +159,7 @@ benchmark::RegisterBenchmark( \
     (std::string("segmented_reduce") + "<" #T ">" + \
         "(~" + std::to_string(SEGMENTS) + " segments)" \
     ).c_str(), \
-    run_benchmark<T>, \
+    &run_benchmark<T>, \
     SEGMENTS, stream, size \
 )
 
