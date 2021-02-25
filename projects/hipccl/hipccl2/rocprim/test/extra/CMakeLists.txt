@@ -32,6 +32,13 @@ list(APPEND CMAKE_MODULE_PATH
   ${HIP_PATH}/cmake /opt/rocm/hip/cmake # FindHIP.cmake
 )
 
+# Use target ID syntax if supported for AMDGPU_TARGETS
+if(TARGET_ID_SUPPORT)
+  set(AMDGPU_TARGETS gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack- CACHE STRING "List of specific machine types for library to target")
+else()
+  set(AMDGPU_TARGETS gfx803;gfx900;gfx906;gfx908 CACHE STRING "List of specific machine types for library to target")
+endif()
+
 # Verify that hcc compiler is used on ROCM platform
 include(VerifyCompiler)
 
@@ -43,13 +50,6 @@ set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror")
-
-# Use target ID syntax if supported for AMDGPU_TARGETS
-if(TARGET_ID_SUPPORT)
-  set(AMDGPU_TARGETS gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack- CACHE STRING "List of specific machine types for library to target")
-else()
-  set(AMDGPU_TARGETS gfx803;gfx900;gfx906;gfx908 CACHE STRING "List of specific machine types for library to target")
-endif()
 
 # Enable testing (ctest)
 enable_testing()
