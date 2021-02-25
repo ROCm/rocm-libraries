@@ -168,7 +168,7 @@ benchmark::RegisterBenchmark( \
     (std::string("reduce_by_key") + "<" #Key ", " #Value ">" + \
         "([1, " + std::to_string(max_length) + "])" \
     ).c_str(), \
-    run_benchmark<Key, Value>, \
+    &run_benchmark<Key, Value>, \
     max_length, stream, size \
 )
 

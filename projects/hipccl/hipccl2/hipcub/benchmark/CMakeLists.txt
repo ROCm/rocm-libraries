@@ -33,15 +33,7 @@ function(add_hipcub_benchmark BENCHMARK_SOURCE)
       hipcub
   )
   if((HIP_COMPILER STREQUAL "nvcc"))
-    set_target_properties(${BENCHMARK_TARGET}
-      PROPERTIES CUDA_SEPARABLE_COMPILATION ON
-                 CUDA_STANDARD 14
-                 CUDA_STANDARD_REQUIRED ON
-                 CUDA_EXTENSIONS OFF
-                 CXX_STANDARD 14
-                 CXX_STANDARD_REQUIRED ON
-                 CXX_EXTENSIONS ON
-    )
+    set_property(TARGET ${BENCHMARK_TARGET} PROPERTY CUDA_STANDARD 14)
     set_source_files_properties(${BENCHMARK_SOURCE} PROPERTIES LANGUAGE CUDA)
     target_compile_options(${BENCHMARK_TARGET}
       PRIVATE
@@ -76,5 +68,6 @@ add_hipcub_benchmark(benchmark_device_scan.cpp)
 add_hipcub_benchmark(benchmark_device_segmented_radix_sort.cpp)
 add_hipcub_benchmark(benchmark_device_segmented_reduce.cpp)
 add_hipcub_benchmark(benchmark_device_select.cpp)
-add_hipcub_benchmark(benchmark_warp_reduce.cpp)
-add_hipcub_benchmark(benchmark_warp_scan.cpp)
+# TODO: Find a workaround for compile issue
+#add_hipcub_benchmark(benchmark_warp_reduce.cpp)
+#add_hipcub_benchmark(benchmark_warp_scan.cpp)

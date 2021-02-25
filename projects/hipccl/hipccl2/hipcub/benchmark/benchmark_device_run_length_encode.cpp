@@ -248,7 +248,7 @@ benchmark::RegisterBenchmark( \
     (std::string("run_length_encode") + "<" #T ">" + \
         "([1, " + std::to_string(max_length) + "])" \
     ).c_str(), \
-    run_encode_benchmark<T>, \
+    &run_encode_benchmark<T>, \
     max_length, stream, size \
 )
 
@@ -280,7 +280,7 @@ benchmark::RegisterBenchmark( \
     (std::string("run_length_encode_non_trivial_runs") + "<" #T ">" + \
         "([1, " + std::to_string(max_length) + "])" \
     ).c_str(), \
-    run_non_trivial_runs_benchmark<T>, \
+    &run_non_trivial_runs_benchmark<T>, \
     max_length, stream, size \
 )
 
