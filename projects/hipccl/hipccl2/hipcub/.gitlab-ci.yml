@@ -127,12 +127,13 @@ build:rocm-benchmark:
   extends: .rocm:build
   stage: build
   only:
-    - cub_update_1-11-0
+    - fix_benchmarks
     - develop_stream
     - develop
     - master
   script:
-    - mkdir build
+    - if [ ! -d "build" ] ; then mkdir build;
+    - fi;
     - cd build
     # Build hipCUB benchmark
     - cmake
@@ -167,7 +168,7 @@ benchmark:rocm_vega20:
   stage: benchmark
   when: manual
   only:
-    - cub_update_1-11-0
+    - fix_benchmarks
     - develop_stream
     - develop
     - master
@@ -200,7 +201,7 @@ benchmark:rocm_s9300:
   stage: benchmark
   when: manual
   only:
-    - cub_update_1-11-0
+    - fix_benchmarks
     - develop_stream
     - develop
     - master
@@ -231,7 +232,7 @@ benchmark:rocm_mi25:
   stage: benchmark
   when: manual
   only:
-    - cub_update_1-11-0
+    - fix_benchmarks
     - develop_stream
     - develop
     - master
@@ -367,7 +368,7 @@ build:nvcc-benchmark:
   extends: .nvcc
   stage: build
   only:
-    - cub_update_1-11-0
+    - fix_benchmarks
     - develop_stream
     - develop
     - master
@@ -378,6 +379,8 @@ build:nvcc-benchmark:
       -G Ninja
       -D CMAKE_BUILD_TYPE=Release
       -D BUILD_BENCHMARK=ON
+      -D CMAKE_CXX_COMPILER=g++-8
+      -D CMAKE_C_COMPILER=g++-8
       -B build
       ../.
     - cmake
@@ -402,7 +405,7 @@ benchmark:nvcc_titanv:
   stage: benchmark
   when: manual
   only:
-    - cub_update_1-11-0
+    - fix_benchmarks
     - develop_stream
     - develop
     - master
@@ -429,7 +432,7 @@ benchmark:nvcc_980:
   stage: benchmark
   when: manual
   only:
-    - cub_update_1-11-0
+    - fix_benchmarks
     - develop_stream
     - develop
     - master

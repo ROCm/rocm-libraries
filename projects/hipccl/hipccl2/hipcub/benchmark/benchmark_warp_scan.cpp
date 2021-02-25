@@ -134,7 +134,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
 #define CREATE_BENCHMARK(T, BS, WS, INCLUSIVE) \
     benchmark::RegisterBenchmark( \
         (std::string("warp_scan<"#T", "#BS", "#WS">.") + method_name).c_str(), \
-        run_benchmark<T, BS, WS, INCLUSIVE>, \
+        &run_benchmark<T, BS, WS, INCLUSIVE>, \
         stream, size \
     )
 
