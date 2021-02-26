@@ -2,7 +2,18 @@
 
 See README.md on how to build the hipCUB documentation using Doxygen.
 
-## [Unreleased hipCUB-2.10.8 for ROCm 4.1.0]
+## [Unreleased hipCUB-2.10.9 for ROCm 4.2.0]
+### Added
+- Support for TexObjInputIterator and TexRefInputIterator
+- Support for DevicePartition
+### Changed
+- Minimum cmake version required is now 3.10.2
+- CUB backend has been updated to 1.11.0
+### Fixed
+- Benchmark build fixed
+- nvcc build fixed
+
+## [hipCUB-2.10.8 for ROCm 4.1.0]
 ### Added
 - Support for DiscardOutputIterator
 
