@@ -14,7 +14,7 @@ stages:
 
 variables:
   # Tested CMake versions
-  CMAKE_MINIMUM_VERSION: 3.5.2
+  CMAKE_MINIMUM_VERSION: 3.10.2
   CMAKE_LATEST_VERSION: 3.17.0
   # Cluster config
 
@@ -23,11 +23,11 @@ variables:
   # Helper variables
   DEPS_DIR: $CI_PROJECT_DIR/deps
   BUILD_DIR: $CI_PROJECT_DIR/build
-  CMAKE_MINIMUM_URL: "https://cmake.org/files/v3.5/cmake-3.5.1-Linux-x86_64.tar.gz"
-  CMAKE_MINIMUM_PATH: "$CI_PROJECT_DIR/deps/cmake-3.5.2"
+  CMAKE_MINIMUM_URL: "https://cmake.org/files/v3.10/cmake-3.10.2-Linux-x86_64.tar.gz"
+  CMAKE_MINIMUM_PATH: "$CI_PROJECT_DIR/deps/cmake-3.10.2"
   CMAKE_LATEST_URL: "https://cmake.org/files/v3.16/cmake-3.16.0-Linux-x86_64.tar.gz"
   CMAKE_LATEST_PATH: "$CI_PROJECT_DIR/deps/cmake-3.17.0"
-  BUILD_MINIMUM_DIR: $CI_PROJECT_DIR/build/cmake-3.5.2
+  BUILD_MINIMUM_DIR: $CI_PROJECT_DIR/build/cmake-3.10.2
   BUILD_LATEST_DIR: $CI_PROJECT_DIR/build/cmake-3.17.0
   PACKAGE_DIR: $CI_PROJECT_DIR/build/package
 
