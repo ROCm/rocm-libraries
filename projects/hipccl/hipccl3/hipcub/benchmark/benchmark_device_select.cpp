@@ -371,19 +371,19 @@ void run_unique_benchmark(benchmark::State& state,
 #define CREATE_SELECT_FLAGGED_BENCHMARK(T, F, p) \
 benchmark::RegisterBenchmark( \
     ("select_flagged<" #T "," #F ", "#T", unsigned int>(p = " #p")"), \
-    run_flagged_benchmark<T, F>, size, stream, p \
+    &run_flagged_benchmark<T, F>, size, stream, p \
 )
 
 #define CREATE_SELECT_IF_BENCHMARK(T, p) \
 benchmark::RegisterBenchmark( \
     ("select_if<" #T ", "#T", unsigned int>(p = " #p")"), \
-    run_selectop_benchmark<T>, size, stream, p \
+    &run_selectop_benchmark<T>, size, stream, p \
 )
 
 #define CREATE_UNIQUE_BENCHMARK(T, p) \
 benchmark::RegisterBenchmark( \
     ("unique<" #T ", "#T", unsigned int>(p = " #p")"), \
-    run_unique_benchmark<T>, size, stream, p \
+    &run_unique_benchmark<T>, size, stream, p \
 )
 
 #define BENCHMARK_FLAGGED_TYPE(type, value) \
