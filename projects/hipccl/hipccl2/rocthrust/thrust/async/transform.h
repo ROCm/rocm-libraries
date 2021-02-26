@@ -49,8 +49,8 @@ template <
 __host__
 event<DerivedPolicy>
 async_transform(
-  thrust::execution_policy<DerivedPolicy>& exec
-, ForwardIt first, Sentinel last, OutputIt output, UnaryOperation op
+  thrust::execution_policy<DerivedPolicy>&
+, ForwardIt , Sentinel , OutputIt , UnaryOperation 
 )
 {
   THRUST_STATIC_ASSERT_MSG(
