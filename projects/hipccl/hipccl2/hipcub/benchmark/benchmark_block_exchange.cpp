@@ -296,7 +296,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
 #define CREATE_BENCHMARK(T, BS, IPT) \
 benchmark::RegisterBenchmark( \
     (std::string("block_exchange<" #T ", " #BS ", " #IPT ">.") + name).c_str(), \
-    run_benchmark<Benchmark, T, BS, IPT>, \
+    &run_benchmark<Benchmark, T, BS, IPT>, \
     stream, size \
 )
 

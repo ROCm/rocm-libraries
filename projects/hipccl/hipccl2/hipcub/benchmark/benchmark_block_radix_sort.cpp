@@ -176,7 +176,7 @@ void run_benchmark(benchmark::State& state, benchmark_kinds benchmark_kind, hipS
 #define CREATE_BENCHMARK(T, BS, IPT) \
 benchmark::RegisterBenchmark( \
     (std::string("block_radix_sort<" #T ", " #BS ", " #IPT ">.") + name).c_str(), \
-    run_benchmark<T, BS, IPT>, \
+    &run_benchmark<T, BS, IPT>, \
     benchmark_kind, stream, size \
 )
 

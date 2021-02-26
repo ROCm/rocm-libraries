@@ -117,7 +117,7 @@ void run_benchmark(benchmark::State& state,
 #define CREATE_BENCHMARK(T, REDUCE_OP) \
 benchmark::RegisterBenchmark( \
     ("reduce<" #T ", " #REDUCE_OP ">"), \
-    run_benchmark<T, REDUCE_OP>, size, stream, REDUCE_OP() \
+    &run_benchmark<T, REDUCE_OP>, size, stream, REDUCE_OP() \
 )
 
 int main(int argc, char *argv[])

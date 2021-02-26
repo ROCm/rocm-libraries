@@ -28,7 +28,7 @@ stages:
 variables:
   SUDO_CMD: "" # Must be "sudo" on images which don't use root user
   DEPS_DIR: "$CI_PROJECT_DIR/__dependencies"
-  CMAKE_URL: "https://cmake.org/files/v3.5/cmake-3.5.1-Linux-x86_64.tar.gz"
+  CMAKE_MINIMUM_URL: "https://cmake.org/files/v3.10/cmake-3.10.2-Linux-x86_64.tar.gz"
   # General build flags
   CXXFLAGS: ""
   CMAKE_OPTIONS: ""
@@ -50,7 +50,7 @@ variables:
     - hipconfig
     # cmake
     - mkdir -p $DEPS_DIR/cmake
-    - wget --no-check-certificate --quiet -O - $CMAKE_URL | tar --strip-components=1 -xz -C $DEPS_DIR/cmake
+    - wget --no-check-certificate --quiet -O - $CMAKE_MINIMUM_URL | tar --strip-components=1 -xz -C $DEPS_DIR/cmake
     - export PATH=$DEPS_DIR/cmake/bin:$PATH
     # Combine global build options with local options
     - export CXXFLAGS=$CXXFLAGS" "$LOCAL_CXXFLAGS
@@ -65,7 +65,7 @@ variables:
     - hipconfig
     # cmake
     - mkdir -p $DEPS_DIR/cmake
-    - wget --no-check-certificate --quiet -O - $CMAKE_URL | tar --strip-components=1 -xz -C $DEPS_DIR/cmake
+    - wget --no-check-certificate --quiet -O - $CMAKE_MINIMUM_URL | tar --strip-components=1 -xz -C $DEPS_DIR/cmake
     - export PATH=$DEPS_DIR/cmake/bin:$PATH
     # Combine global build options with local options
     - export CXXFLAGS=$CXXFLAGS" "$LOCAL_CXXFLAGS
@@ -95,7 +95,8 @@ build:rocm:
   extends: .rocm:build
   stage: build
   script:
-    - mkdir build
+    - if [ ! -d "build" ] ; then mkdir build;
+    - fi;
     - cd build
     - cmake
       -G Ninja
@@ -126,12 +127,13 @@ build:rocm-benchmark:
   extends: .rocm:build
   stage: build
   only:
-    - internal_benchmark
+    - fix_benchmarks
     - develop_stream
     - develop
     - master
   script:
-    - mkdir build
+    - if [ ! -d "build" ] ; then mkdir build;
+    - fi;
     - cd build
     # Build hipCUB benchmark
     - cmake
@@ -166,7 +168,7 @@ benchmark:rocm_vega20:
   stage: benchmark
   when: manual
   only:
-    - internal_benchmark
+    - fix_benchmarks
     - develop_stream
     - develop
     - master
@@ -199,7 +201,7 @@ benchmark:rocm_s9300:
   stage: benchmark
   when: manual
   only:
-    - internal_benchmark
+    - fix_benchmarks
     - develop_stream
     - develop
     - master
@@ -230,7 +232,7 @@ benchmark:rocm_mi25:
   stage: benchmark
   when: manual
   only:
-    - internal_benchmark
+    - fix_benchmarks
     - develop_stream
     - develop
     - master
@@ -265,7 +267,7 @@ test:rocm_package:
     - cd ../..
     # hipCUB
     - cd build
-    - $SUDO_CMD dpkg -i hipcub-*.deb
+    - $SUDO_CMD dpkg -i hipcub*.deb
     - mkdir ../package_test && cd ../package_test
     - CXX=hipcc cmake ../test/extra/. -Drocprim_DIR="/opt/rocm/rocprim"
     - make VERBOSE=1
@@ -327,7 +329,7 @@ test:rocm_install:
     - hipconfig
     # cmake
     - mkdir -p $DEPS_DIR/cmake
-    - wget --no-check-certificate --quiet -O - $CMAKE_URL | tar --strip-components=1 -xz -C $DEPS_DIR/cmake
+    - wget --no-check-certificate --quiet -O - $CMAKE_MINIMUM_URL | tar --strip-components=1 -xz -C $DEPS_DIR/cmake
     - export PATH=$DEPS_DIR/cmake/bin:$PATH
     # Combine global build options with local options
     - export CXXFLAGS=$CXXFLAGS" "$LOCAL_CXXFLAGS
@@ -342,7 +344,6 @@ build:nvcc:
     - cmake
       -G Ninja
       -D CMAKE_BUILD_TYPE=Release
-      -D CMAKE_CXX_COMPILER=nvcc
       -D BUILD_TEST=ON
       -D BUILD_EXAMPLE=ON
       -B build
@@ -367,7 +368,7 @@ build:nvcc-benchmark:
   extends: .nvcc
   stage: build
   only:
-    - internal_benchmark
+    - fix_benchmarks
     - develop_stream
     - develop
     - master
@@ -377,8 +378,9 @@ build:nvcc-benchmark:
     - cmake
       -G Ninja
       -D CMAKE_BUILD_TYPE=Release
-      -D CMAKE_CXX_COMPILER=nvcc
       -D BUILD_BENCHMARK=ON
+      -D CMAKE_CXX_COMPILER=g++-8
+      -D CMAKE_C_COMPILER=g++-8
       -B build
       ../.
     - cmake
@@ -403,7 +405,7 @@ benchmark:nvcc_titanv:
   stage: benchmark
   when: manual
   only:
-    - internal_benchmark
+    - fix_benchmarks
     - develop_stream
     - develop
     - master
@@ -430,7 +432,7 @@ benchmark:nvcc_980:
   stage: benchmark
   when: manual
   only:
-    - internal_benchmark
+    - fix_benchmarks
     - develop_stream
     - develop
     - master
@@ -450,7 +452,7 @@ test:nvcc_package:
     - build:nvcc
   script:
     - cd build
-    - $SUDO_CMD dpkg -i hipcub_nvcc-*.deb
+    - $SUDO_CMD dpkg -i hipcub_nvcc*.deb
     - mkdir ../package_test && cd ../package_test
     - cmake ../test/extra/.
     - make VERBOSE=1
