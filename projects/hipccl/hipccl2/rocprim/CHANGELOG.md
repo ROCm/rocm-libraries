@@ -2,7 +2,13 @@
 
 Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwarePlatform/rocPRIM/](https://codedocs.xyz/ROCmSoftwarePlatform/rocPRIM/)
 
-## [Unreleased rocPRIM-2.10.8 for ROCm 4.1.0]
+## [Unreleased rocPRIM-2.10.9 for ROCm 4.1.0]
+### Fixed
+- Size zero inputs are now properly handled with newer ROCm builds that no longer allow zero-size kernel grid/block dimensions
+### Changed
+- Minimum cmake version required is now 3.10.2
+
+## [rocPRIM-2.10.8 for ROCm 4.1.0]
 ### Fixed
 - Texture cache iteration support has been re-enabled.
 - Benchmark builds have been re-enabled.
