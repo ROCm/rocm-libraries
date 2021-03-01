@@ -89,7 +89,7 @@ public:
       ::rocprim::syncthreads();
 
       const int offset_tid = static_cast<int>(flat_id) + distance;
-      if ((offset_tid >= 0) && (offset_tid < BLOCK_THREADS))
+      if ((offset_tid >= 0) && (offset_tid < BlockSize))
       {
           output = storage[static_cast<size_t>(offset_tid)].prev;
       }
@@ -104,16 +104,16 @@ public:
   ROCPRIM_DEVICE inline
   void rotate(
       T   input,                  ///< [in] The calling thread's input item
-      T&  output,                 ///< [out] The \p input item from thread <em>thread</em><sub>(<em>i</em>+<tt>distance></tt>)%<tt><BLOCK_THREADS></tt></sub> (may be aliased to \p input).  This value is not updated for <em>thread</em><sub>BLOCK_THREADS-1</sub>
-      unsigned int distance = 1)  ///< [in] Offset distance (0 < \p distance < <tt>BLOCK_THREADS</tt>)
+      T&  output,                 ///< [out] The \p input item from thread <em>thread</em><sub>(<em>i</em>+<tt>distance></tt>)%<tt><BlockSize></tt></sub> (may be aliased to \p input).  This value is not updated for <em>thread</em><sub>BlockSize-1</sub>
+      unsigned int distance = 1)  ///< [in] Offset distance (0 < \p distance < <tt>BlockSize</tt>)
   {
       const size_t flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
       storage[flat_id].prev = input;
       ::rocprim::syncthreads();
 
       unsigned int offset = threadIdx.x + distance;
-      if (offset >= BLOCK_THREADS)
-          offset -= BLOCK_THREADS;
+      if (offset >= BlockSize)
+          offset -= BlockSize;
 
       output = storage[offset].prev;
   }
@@ -150,7 +150,7 @@ public:
 
 
     /**
-     * \brief The thread block rotates its [<em>blocked arrangement</em>](index.html#sec5sec3) of \p input items, shifting it up by one item.  All threads receive the \p input provided by <em>thread</em><sub><tt>BLOCK_THREADS-1</tt></sub>.
+     * \brief The thread block rotates its [<em>blocked arrangement</em>](index.html#sec5sec3) of \p input items, shifting it up by one item.  All threads receive the \p input provided by <em>thread</em><sub><tt>BlockSize-1</tt></sub>.
      *
      * \par
      * - \blocked
@@ -161,7 +161,7 @@ public:
     __device__ __forceinline__ void up(
         T (&input)[ItemsPerThread],   ///< [in] The calling thread's input items
         T (&prev)[ItemsPerThread],    ///< [out] The corresponding predecessor items (may be aliased to \p input).  The item \p prev[0] is not updated for <em>thread</em><sub>0</sub>.
-        T &block_suffix)                ///< [out] The item \p input[ItemsPerThread-1] from <em>thread</em><sub><tt>BLOCK_THREADS-1</tt></sub>, provided to all threads
+        T &block_suffix)                ///< [out] The item \p input[ItemsPerThread-1] from <em>thread</em><sub><tt>BlockSize-1</tt></sub>, provided to all threads
     {
         up(input, prev);
         block_suffix = storage[BlockSize - 1].prev;
@@ -178,7 +178,7 @@ public:
     template <unsigned int ItemsPerThread>
     __device__ __forceinline__ void down(
         T (&input)[ItemsPerThread],   ///< [in] The calling thread's input items
-        T (&next)[ItemsPerThread])    ///< [out] The corresponding predecessor items (may be aliased to \p input).  The value \p next[0] is not updated for <em>thread</em><sub>BLOCK_THREADS-1</sub>.
+        T (&next)[ItemsPerThread])    ///< [out] The corresponding predecessor items (may be aliased to \p input).  The value \p next[0] is not updated for <em>thread</em><sub>BlockSize-1</sub>.
     {
       const size_t flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
       storage[flat_id].next = input[0];
@@ -208,7 +208,7 @@ public:
     template <unsigned int ItemsPerThread>
     __device__ __forceinline__ void Down(
         T (&input)[ItemsPerThread],   ///< [in] The calling thread's input items
-        T (&next)[ItemsPerThread],    ///< [out] The corresponding predecessor items (may be aliased to \p input).  The value \p next[0] is not updated for <em>thread</em><sub>BLOCK_THREADS-1</sub>.
+        T (&next)[ItemsPerThread],    ///< [out] The corresponding predecessor items (may be aliased to \p input).  The value \p next[0] is not updated for <em>thread</em><sub>BlockSize-1</sub>.
         T &block_suffix)                ///< [out] The item \p input[0] from <em>thread</em><sub><tt>0</tt></sub>, provided to all threads
     {
         Up(input, next);
