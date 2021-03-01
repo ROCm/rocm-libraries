@@ -37,10 +37,6 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-
-namespace detail
-{
-
 template<
     class T,
     unsigned int BlockSizeX,
@@ -143,7 +139,7 @@ public:
       }
       if (flat_id > 0)
       {
-          prev[0] = temp_storage[flat_id - 1].prev;
+          prev[0] = storage[flat_id - 1].prev;
       }
     }
 
@@ -190,9 +186,9 @@ public:
         next[i] = input[i + 1];
       }
 
-      if (linear_tid <(BlockSize -1))
+      if (flat_id <(BlockSize -1))
       {
-        next[0] = temp_storage[linear_tid + 1].next;
+        next[0] = storage[flat_id + 1].next;
       }
     }
 
@@ -212,7 +208,7 @@ public:
         T &block_suffix)                ///< [out] The item \p input[0] from <em>thread</em><sub><tt>0</tt></sub>, provided to all threads
     {
         Up(input, next);
-        block_suffix = temp_storage[0].next;
+        block_suffix = storage[0].next;
     }
 
 
