@@ -1,8 +1,0 @@
-OS_VER:
-  - ubuntu18.04
-
-CXX_TYPE:
-  - gcc
-
-CXX_VER:
-  - 7
