@@ -86,6 +86,7 @@ void sort_block(SortType sorter,
 }
 
 template<
+    unsigned int WarpSize,
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
     unsigned int RadixBits,
@@ -95,7 +96,7 @@ struct radix_digit_count_helper
 {
     static constexpr unsigned int radix_size = 1 << RadixBits;
 
-    static constexpr unsigned int warp_size = ::rocprim::warp_size();
+    static constexpr unsigned int warp_size = WarpSize;
     static constexpr unsigned int warps_no = BlockSize / warp_size;
     static_assert(BlockSize % warp_size == 0, "BlockSize must be divisible by warp size");
     static_assert(radix_size <= BlockSize, "Radix size must not exceed BlockSize");
@@ -396,7 +397,7 @@ void fill_digit_counts(KeysInputIterator keys_input,
     constexpr unsigned int radix_size = 1 << RadixBits;
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
 
-    using count_helper_type = radix_digit_count_helper<BlockSize, ItemsPerThread, RadixBits, Descending>;
+    using count_helper_type = radix_digit_count_helper<::rocprim::warp_size(), BlockSize, ItemsPerThread, RadixBits, Descending>;
 
     ROCPRIM_SHARED_MEMORY typename count_helper_type::storage_type storage;
 

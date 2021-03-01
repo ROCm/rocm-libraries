@@ -51,7 +51,7 @@ unsigned int host_warp_size()
 /// \brief Returns a number of threads in a hardware warp.
 ///
 /// It is constant for a device.
-ROCPRIM_HOST_DEVICE inline
+ROCPRIM_DEVICE inline
 constexpr unsigned int warp_size()
 {
     return warpSize;
