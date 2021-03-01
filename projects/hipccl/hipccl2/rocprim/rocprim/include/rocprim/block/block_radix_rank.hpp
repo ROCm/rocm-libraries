@@ -25,12 +25,16 @@
 
 #include "../config.hpp"
 #include "../detail/various.hpp"
-
+#include "block_scan.hpp"
 
 #include "../intrinsics.hpp"
 #include "../functional.hpp"
 #include "../types.hpp"
 
+
+// using_warp_scan,
+/// \brief An algorithm which limits calculations to a single hardware warp.
+// reduce_then_scan,
 
 /// \addtogroup blockmodule
 /// @{
@@ -38,11 +42,11 @@
 BEGIN_ROCPRIM_NAMESPACE
 
 /** Empty callback implementation */
-template <int BINS_PER_THREAD>
+template <int BinsPerThread>
 struct block_radix_rank_empty_callback
 {
     ROCPRIM_DEVICE inline
-    void operator()(int (&bins)[BINS_PER_THREAD]) {}
+    void operator()(int (&bins)[BinsPerThread]) {}
 };
 
 template <
@@ -50,7 +54,7 @@ template <
     int                     RadixBits,
     bool                    IsDescending,
     bool                    MemoizeOuterScan      = true,
-    BlockScanAlgorithm      InnerScanAlgorithm    = BLOCK_SCAN_WARP_SCANS,
+    block_scan_algorithm    InnerScanAlgorithm    = block_scan_algorithm::using_warp_scan,
     int                     BlockSizeY             = 1,
     int                     BlockSizeZ             = 1>
 class block_radix_rank
@@ -66,7 +70,7 @@ private:
 
     // Integer type for packing DigitCounters into columns of shared memory banks
 
-    typedef typename unsigned int PackedCounter;
+    typedef unsigned int PackedCounter;
     // typedef typename If<(SMEM_CONFIG == cudaSharedMemBankSizeEightByte),
     //     unsigned long long,
     //     unsigned int>::Type PackedCounter;
@@ -80,18 +84,18 @@ private:
 
     static constexpr unsigned int PackingRatio      = sizeof(PackedCounter) / sizeof(DigitCounter);
     static constexpr unsigned int LogPackingRatio  = Log2<PackingRatio>::VALUE;
-    static constexpr unsigned int LogCounterLanes = std::max(RadixBits - LogPackingRatio,0);
+    static constexpr unsigned int LogCounterLanes = maximum<unsigned int>()(RadixBits - LogPackingRatio,0);
     static constexpr unsigned int CounterLanes = 1 << LogCounterLanes;
     static constexpr unsigned int PaddedCounterLanes = 1 +CounterLanes;
     static constexpr unsigned int RakingSegment = PaddedCounterLanes;
 
 public:
-    static constexpr unsigned int BinsTrackedPerThread = std::max(1,(RadixDigits + BlockSize -1 )/BlockSize);
+    static constexpr unsigned int BinsTrackedPerThread = maximum<unsigned int>()(1,(RadixDigits + BlockSize -1 )/BlockSize);
 
 private:
 
 
-    /// BlockScan type
+    /// block_scan type
     typedef block_scan<
             PackedCounter,
             BlockSizeX,
@@ -112,7 +116,7 @@ private:
         } aliasable;
 
         // Storage for scanning local ranks
-        typename BlockScan::TempStorage block_scan_storage;
+        typename block_scan::storage_type block_scan_storage;
     };
 
 public:
@@ -124,14 +128,14 @@ public:
   #endif
 
 private:
-    ROCPRIM_SHARED_MEMORY storage_type storage;
+
 
     /******************************************************************************
      * Thread fields
      ******************************************************************************/
 
     /// Shared storage reference
-    _TempStorage &temp_storage;
+    ROCPRIM_SHARED_MEMORY storage_type_ &temp_storage;
 
     /// Linear thread-id
     unsigned int linear_tid;
@@ -148,9 +152,9 @@ private:
      * Internal storage allocator
      */
     ROCPRIM_DEVICE inline
-    _TempStorage& PrivateStorage()
+    storage_type_& PrivateStorage()
     {
-        __shared__ _TempStorage private_storage;
+        __shared__ storage_type_ private_storage;
         return private_storage;
     }
 
@@ -180,7 +184,8 @@ private:
             raking_ptr = smem_raking_ptr;
         }
 
-        return internal::ThreadReduce<RakingSegment>(raking_ptr, Sum());
+        // return internal::ThreadReduce<RakingSegment>(raking_ptr, Sum());
+        return 0; //TODO: Implment ThreadReduce
     }
 
 
@@ -197,7 +202,9 @@ private:
             smem_raking_ptr;
 
         // Exclusive raking downsweep scan
-        internal::ThreadScanExclusive<RakingSegment>(raking_ptr, raking_ptr, Sum(), raking_partial);
+        // TODO: Implement Thread
+        // internal::ThreadScanExclusive<RakingSegment>(raking_ptr, raking_ptr, Sum(), raking_partial);
+
 
         if (MemoizeOuterScan)
         {
@@ -220,9 +227,9 @@ private:
         const size_t linear_tid = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         // Reset shared memory digit counters
         #pragma unroll
-        for (int LANE = 0; LANE < PaddedCounterLanes; LANE++)
+        for (int Lane = 0; Lane < PaddedCounterLanes; Lane++)
         {
-            *((PackedCounter*) temp_storage.aliasable.digit_counters[LANE][linear_tid]) = 0;
+            *((PackedCounter*) temp_storage.aliasable.digit_counters[Lane][linear_tid]) = 0;
         }
     }
 
@@ -239,9 +246,9 @@ private:
 
             // Propagate totals in packed fields
             #pragma unroll
-            for (int PACKED = 1; PACKED < PackingRatio; PACKED++)
+            for (int Packed = 1; Packed < PackingRatio; Packed++)
             {
-                block_prefix += block_aggregate << (sizeof(DigitCounter) * 8 * PACKED);
+                block_prefix += block_aggregate << (sizeof(DigitCounter) * 8 * Packed);
             }
 
             return block_prefix;
@@ -261,17 +268,13 @@ private:
         // Compute exclusive sum
         PackedCounter exclusive_partial;
         PrefixCallBack prefix_call_back;
-        BlockScan(temp_storage.block_scan_storage).ExclusiveSum(raking_partial, exclusive_partial, prefix_call_back);
+        block_scan(temp_storage.block_scan_storage).ExclusiveSum(raking_partial, exclusive_partial, prefix_call_back);
 
         // Downsweep scan with exclusive partial
         ExclusiveDownsweep(exclusive_partial);
     }
 
 public:
-
-    /// \smemstorage{BlockScan}
-    struct TempStorage : Uninitialized<_TempStorage> {};
-
 
     /******************************************************************//**
      * \name Collective constructors
@@ -281,24 +284,24 @@ public:
     /**
      * \brief Collective constructor using a private static allocation of shared memory as temporary storage.
      */
-    ROCPRIM_DEVICE inline
-    BlockRadixRank()
-    :
-        temp_storage(PrivateStorage()),
-        linear_tid(RowMajorTid(BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z))
-    {}
-
-
-    /**
-     * \brief Collective constructor using the specified memory allocation as temporary storage.
-     */
-    ROCPRIM_DEVICE inline
-    BlockRadixRank(
-        TempStorage &temp_storage)             ///< [in] Reference to memory allocation having layout type TempStorage
-    :
-        temp_storage(temp_storage.Alias()),
-        linear_tid(RowMajorTid(BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z))
-    {}
+    // ROCPRIM_DEVICE inline
+    // BlockRadixRank()
+    // :
+    //     temp_storage(PrivateStorage()),
+    //     linear_tid(RowMajorTid(BlockSizeX, BlockSizeY, BlockSizeZ))
+    // {}
+    //
+    //
+    // /**
+    //  * \brief Collective constructor using the specified memory allocation as temporary storage.
+    //  */
+    // ROCPRIM_DEVICE inline
+    // BlockRadixRank(
+    //     storage_type &temp_storage)             ///< [in] Reference to memory allocation having layout type storage_type
+    // :
+    //     temp_storage(temp_storage.Alias()),
+    //     linear_tid(RowMajorTid(BlockSizeX, BlockSizeY, BlockSizeZ))
+    // {}
 
 
     //@}  end member group
@@ -322,36 +325,37 @@ public:
     {
         DigitCounter    thread_prefixes[KeysPerThread];   // For each key, the count of previous keys in this tile having the same digit
         DigitCounter*   digit_counters[KeysPerThread];    // For each key, the byte-offset of its corresponding digit counter in smem
+        const size_t linear_tid = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
 
         // Reset shared memory digit counters
         ResetCounters();
 
         #pragma unroll
-        for (int ITEM = 0; ITEM < KeysPerThread; ++ITEM)
+        for (int Item = 0; Item < KeysPerThread; ++Item)
         {
             // Get digit
-            unsigned int digit = digit_extractor.Digit(keys[ITEM]);
+            unsigned int digit = digit_extractor.digit(keys[Item]);
 
             // Get sub-counter
-            unsigned int sub_counter = digit >> LOG_COUNTER_LANES;
+            unsigned int sub_counter = digit >> LogCounterLanes;
 
             // Get counter lane
-            unsigned int counter_lane = digit & (COUNTER_LANES - 1);
+            unsigned int counter_lane = digit & (CounterLanes - 1);
 
-            if (IS_DESCENDING)
+            if (IsDescending)
             {
                 sub_counter = PackingRatio - 1 - sub_counter;
-                counter_lane = COUNTER_LANES - 1 - counter_lane;
+                counter_lane = CounterLanes - 1 - counter_lane;
             }
 
             // Pointer to smem digit counter
-            digit_counters[ITEM] = &temp_storage.aliasable.digit_counters[counter_lane][linear_tid][sub_counter];
+            digit_counters[Item] = &temp_storage.aliasable.digit_counters[counter_lane][linear_tid][sub_counter];
 
             // Load thread-exclusive prefix
-            thread_prefixes[ITEM] = *digit_counters[ITEM];
+            thread_prefixes[Item] = *digit_counters[Item];
 
             // Store inclusive prefix
-            *digit_counters[ITEM] = thread_prefixes[ITEM] + 1;
+            *digit_counters[Item] = thread_prefixes[Item] + 1;
         }
 
         ::rocprim::syncthreads();
@@ -363,16 +367,16 @@ public:
 
         // Extract the local ranks of each key
         #pragma unroll
-        for (int ITEM = 0; ITEM < KeysPerThread; ++ITEM)
+        for (int Item = 0; Item < KeysPerThread; ++Item)
         {
             // Add in thread block exclusive prefix
-            ranks[ITEM] = thread_prefixes[ITEM] + *digit_counters[ITEM];
+            ranks[Item] = thread_prefixes[Item] + *digit_counters[Item];
         }
     }
 
 
     /**
-     * \brief Rank keys.  For the lower \p RADIX_DIGITS threads, digit counts for each digit are provided for the corresponding thread.
+     * \brief Rank keys.  For the lower \p RadixDigits threads, digit counts for each digit are provided for the corresponding thread.
      */
     template <
         typename        UnsignedBits,
@@ -383,26 +387,28 @@ public:
         UnsignedBits    (&keys)[KeysPerThread],           ///< [in] Keys for this tile
         int             (&ranks)[KeysPerThread],          ///< [out] For each key, the local rank within the tile (out parameter)
         DigitExtractorT digit_extractor,                    ///< [in] The digit extractor
-        int             (&exclusive_digit_prefix)[BINS_TRACKED_PER_THREAD])            ///< [out] The exclusive prefix sum for the digits [(threadIdx.x * BINS_TRACKED_PER_THREAD) ... (threadIdx.x * BINS_TRACKED_PER_THREAD) + BINS_TRACKED_PER_THREAD - 1]
+        int             (&exclusive_digit_prefix)[BinsTrackedPerThread])            ///< [out] The exclusive prefix sum for the digits [(threadIdx.x * BinsTrackedPerThread) ... (threadIdx.x * BinsTrackedPerThread) + BinsTrackedPerThread - 1]
     {
+      const size_t linear_tid = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
+
         // Rank keys
         rank_keys(keys, ranks, digit_extractor);
 
         // Get the inclusive and exclusive digit totals corresponding to the calling thread.
         #pragma unroll
-        for (int track = 0; track < BINS_TRACKED_PER_THREAD; ++track)
+        for (int track = 0; track < BinsTrackedPerThread; ++track)
         {
-            int bin_idx = (linear_tid * BINS_TRACKED_PER_THREAD) + track;
+            int bin_idx = (linear_tid * BinsTrackedPerThread) + track;
 
-            if ((BlockSize == RADIX_DIGITS) || (bin_idx < RADIX_DIGITS))
+            if ((BlockSize == RadixDigits) || (bin_idx < RadixDigits))
             {
-                if (IS_DESCENDING)
-                    bin_idx = RADIX_DIGITS - bin_idx - 1;
+                if (IsDescending)
+                    bin_idx = RadixDigits - bin_idx - 1;
 
                 // Obtain ex/inclusive digit counts.  (Unfortunately these all reside in the
                 // first counter column, resulting in unavoidable bank conflicts.)
-                unsigned int counter_lane   = (bin_idx & (COUNTER_LANES - 1));
-                unsigned int sub_counter    = bin_idx >> (LOG_COUNTER_LANES);
+                unsigned int counter_lane   = (bin_idx & (CounterLanes - 1));
+                unsigned int sub_counter    = bin_idx >> (LogCounterLanes);
 
                 exclusive_digit_prefix[track] = temp_storage.aliasable.digit_counters[counter_lane][0][sub_counter];
             }
@@ -418,13 +424,12 @@ public:
  * Radix-rank using match.any
  */
 template <
-    int                     BLOCK_DIM_X,
-    int                     RADIX_BITS,
-    bool                    IS_DESCENDING,
-    BlockScanAlgorithm      INNER_SCAN_ALGORITHM    = BLOCK_SCAN_WARP_SCANS,
-    int                     BLOCK_DIM_Y             = 1,
-    int                     BLOCK_DIM_Z             = 1,
-    int                     PTX_ARCH                = CUB_PTX_ARCH>
+    int                     BlockSizeX,
+    int                     RadixBits,
+    bool                    IsDescending,
+    block_scan_algorithm    InnerScanAlgorithm    = block_scan_algorithm::using_warp_scan,
+    int                     BlockSizeY             = 1,
+    int                     BlockSizeZ             = 1>
 class BlockRadixRankMatch
 {
 private:
@@ -436,57 +441,41 @@ private:
     typedef int32_t    RankT;
     typedef int32_t    DigitCounterT;
 
-    enum
-    {
-        // The thread block size in threads
-        BlockSize               = BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z,
 
-        RADIX_DIGITS                = 1 << RADIX_BITS,
-
-        LOG_WARP_THREADS            = CUB_LOG_WARP_THREADS(PTX_ARCH),
-        WARP_THREADS                = 1 << LOG_WARP_THREADS,
-        WARPS                       = (BlockSize + WARP_THREADS - 1) / WARP_THREADS,
-
-        PADDED_WARPS            = ((WARPS & 0x1) == 0) ?
-                                    WARPS + 1 :
-                                    WARPS,
-
-        COUNTERS                = PADDED_WARPS * RADIX_DIGITS,
-        RakingSegment          = (COUNTERS + BlockSize - 1) / BlockSize,
-        PaddedRakingSegment   = ((RakingSegment & 0x1) == 0) ?
-                                    RakingSegment + 1 :
-                                    RakingSegment,
-    };
+    // The thread block size in threads
+    static constexpr unsigned int  BlockSize           = BlockSizeX * BlockSizeY * BlockSizeZ;
+    static constexpr unsigned int  RadixDigits         = 1 << RadixBits;
+    static constexpr unsigned int  WarpThreads         =  detail::get_min_warp_size(BlockSize, ::rocprim::warp_size());
+    static constexpr unsigned int  Warps               = (BlockSize + WarpThreads - 1) / WarpThreads;
+    static constexpr unsigned int  PaddedWarps         = ((Warps & 0x1) == 0) ?  Warps + 1 :     Warps;
+    static constexpr unsigned int  Counters            = PaddedWarps * RadixDigits;
+    static constexpr unsigned int  RakingSegment       = (Counters + BlockSize - 1) / BlockSize;
+    static constexpr unsigned int  PaddedRakingSegment = ((RakingSegment & 0x1) == 0) ?  RakingSegment + 1 :  RakingSegment;
 
 public:
 
-    enum
-    {
-        /// Number of bin-starting offsets tracked per thread
-        BINS_TRACKED_PER_THREAD = CUB_MAX(1, (RADIX_DIGITS + BlockSize - 1) / BlockSize),
-    };
+    static constexpr unsigned int BinsTrackedPerThread = maximum<unsigned int>()(1, (RadixDigits + BlockSize - 1) / BlockSize);
 
 private:
 
-    /// BlockScan type
-    typedef BlockScan<
+    /// block_scan type
+    typedef block_scan<
             DigitCounterT,
             BlockSize,
-            INNER_SCAN_ALGORITHM,
-            BLOCK_DIM_Y,
-            BLOCK_DIM_Z,
-            PTX_ARCH>
-        BlockScanT;
+            InnerScanAlgorithm,
+            BlockSizeY,
+            BlockSizeZ>
+        block_scan_t;
 
 
     /// Shared memory storage layout type for BlockRadixRank
-    struct __align__(16) _TempStorage
+    struct __align__(16) storage_type_
     {
-        typename BlockScanT::TempStorage            block_scan_storage;
+        typename block_scan_t::storage_type            block_scan_storage;
 
         union __align__(16) Aliasable
         {
-            volatile DigitCounterT                  warp_digit_counters[RADIX_DIGITS][PADDED_WARPS];
+            volatile DigitCounterT                  warp_digit_counters[RadixDigits][PaddedWarps];
             DigitCounterT                           raking_grid[BlockSize][PaddedRakingSegment];
 
         } aliasable;
@@ -498,17 +487,18 @@ private:
      ******************************************************************************/
 
     /// Shared storage reference
-    _TempStorage &temp_storage;
+    storage_type_ &temp_storage;
 
-    /// Linear thread-id
-    unsigned int linear_tid;
 
 
 
 public:
 
-    /// \smemstorage{BlockScan}
-    struct TempStorage : Uninitialized<_TempStorage> {};
+      #ifndef DOXYGEN_SHOULD_SKIP_THIS // hides storage_type implementation for Doxygen
+      using storage_type = detail::raw_storage<storage_type_>;
+      #else
+      using storage_type = storage_type_; // only for Doxygen
+      #endif
 
 
     /******************************************************************//**
@@ -522,10 +512,8 @@ public:
      */
     ROCPRIM_DEVICE inline
     BlockRadixRankMatch(
-        TempStorage &temp_storage)             ///< [in] Reference to memory allocation having layout type TempStorage
-    :
-        temp_storage(temp_storage.Alias()),
-        linear_tid(RowMajorTid(BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z))
+        storage_type &temp_storage)             ///< [in] Reference to memory allocation having layout type storage_type
+    :        temp_storage(temp_storage.Alias())
     {}
 
 
@@ -539,12 +527,12 @@ public:
      * callback with the array of key counts.
 
      * @tparam CountsCallback The callback type. It should implement an instance
-     * overload of operator()(int (&bins)[BINS_TRACKED_PER_THREAD]), where bins
+     * overload of operator()(int (&bins)[BinsTrackedPerThread]), where bins
      * is an array of key counts for each digit value distributed in block
      * distribution among the threads of the thread block. Key counts can be
      * used, to update other data structures in global or shared
      * memory. Depending on the implementation of the ranking algoirhtm
-     * (see BlockRadixRankMatchEarlyCounts), key counts may become available
+     * (see block_radix_rank_match_early_counts), key counts may become available
      * early, therefore, they are returned through a callback rather than a
      * separate output parameter of rank_keys().
      */
@@ -552,27 +540,29 @@ public:
     ROCPRIM_DEVICE inline
     void CallBack(CountsCallback callback)
     {
-        int bins[BINS_TRACKED_PER_THREAD];
+      const size_t linear_tid = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
+
+        int bins[BinsTrackedPerThread];
         // Get count for each digit
         #pragma unroll
-        for (int track = 0; track < BINS_TRACKED_PER_THREAD; ++track)
+        for (int track = 0; track < BinsTrackedPerThread; ++track)
         {
-            int bin_idx = (linear_tid * BINS_TRACKED_PER_THREAD) + track;
-            const int TILE_ITEMS = KeysPerThread * BlockSize;
+            int bin_idx = (linear_tid * BinsTrackedPerThread) + track;
+            const int TileItems = KeysPerThread * BlockSize;
 
-            if ((BlockSize == RADIX_DIGITS) || (bin_idx < RADIX_DIGITS))
+            if ((BlockSize == RadixDigits) || (bin_idx < RadixDigits))
             {
-                if (IS_DESCENDING)
+                if (IsDescending)
                 {
-                    bin_idx = RADIX_DIGITS - bin_idx - 1;
+                    bin_idx = RadixDigits - bin_idx - 1;
                     bins[track] = (bin_idx > 0 ?
-                        temp_storage.aliasable.warp_digit_counters[bin_idx - 1][0] : TILE_ITEMS) -
+                        temp_storage.aliasable.warp_digit_counters[bin_idx - 1][0] : TileItems) -
                         temp_storage.aliasable.warp_digit_counters[bin_idx][0];
                 }
                 else
                 {
-                    bins[track] = (bin_idx < RADIX_DIGITS - 1 ?
-                        temp_storage.aliasable.warp_digit_counters[bin_idx + 1][0] : TILE_ITEMS) -
+                    bins[track] = (bin_idx < RadixDigits - 1 ?
+                        temp_storage.aliasable.warp_digit_counters[bin_idx + 1][0] : TileItems) -
                         temp_storage.aliasable.warp_digit_counters[bin_idx][0];
                 }
             }
@@ -596,39 +586,40 @@ public:
         CountsCallback    callback)
     {
         // Initialize shared digit counters
+        const size_t linear_tid = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
 
         #pragma unroll
-        for (int ITEM = 0; ITEM < PaddedRakingSegment; ++ITEM)
-            temp_storage.aliasable.raking_grid[linear_tid][ITEM] = 0;
+        for (int Item = 0; Item < PaddedRakingSegment; ++Item)
+            temp_storage.aliasable.raking_grid[linear_tid][Item] = 0;
 
         ::rocprim::syncthreads();
 
         // Each warp will strip-mine its section of input, one strip at a time
 
         volatile DigitCounterT  *digit_counters[KeysPerThread];
-        uint32_t                warp_id         = linear_tid >> LOG_WARP_THREADS;
-        uint32_t                lane_mask_lt    = LaneMaskLt();
+        uint32_t                warp_id         = ::rocprim::warp_id(linear_tid);
+        uint32_t                lane_mask_lt    = lane_mask_less_than();
 
         #pragma unroll
-        for (int ITEM = 0; ITEM < KeysPerThread; ++ITEM)
+        for (int Item = 0; Item < KeysPerThread; ++Item)
         {
             // My digit
-            uint32_t digit = digit_extractor.Digit(keys[ITEM]);
+            uint32_t digit = digit_extractor.digit(keys[Item]);
 
-            if (IS_DESCENDING)
-                digit = RADIX_DIGITS - digit - 1;
+            if (IsDescending)
+                digit = RadixDigits - digit - 1;
 
             // Mask of peers who have same digit as me
-            uint32_t peer_mask = MatchAny<RADIX_BITS>(digit);
+            uint32_t peer_mask = MatchAny<RadixBits>(digit);
 
             // Pointer to smem digit counter for this key
-            digit_counters[ITEM] = &temp_storage.aliasable.warp_digit_counters[digit][warp_id];
+            digit_counters[Item] = &temp_storage.aliasable.warp_digit_counters[digit][warp_id];
 
             // Number of occurrences in previous strips
-            DigitCounterT warp_digit_prefix = *digit_counters[ITEM];
+            DigitCounterT warp_digit_prefix = *digit_counters[Item];
 
             // Warp-sync
-            WARP_SYNC(0xFFFFFFFF);
+            // WARP_SYNC(0xFFFFFFFF);
 
             // Number of peers having same digit as me
             int32_t digit_count = __popc(peer_mask);
@@ -639,14 +630,14 @@ public:
             if (peer_digit_prefix == 0)
             {
                 // First thread for each digit updates the shared warp counter
-                *digit_counters[ITEM] = DigitCounterT(warp_digit_prefix + digit_count);
+                *digit_counters[Item] = DigitCounterT(warp_digit_prefix + digit_count);
             }
 
             // Warp-sync
-            WARP_SYNC(0xFFFFFFFF);
+            // WARP_SYNC(0xFFFFFFFF);
 
             // Number of prior keys having same digit
-            ranks[ITEM] = warp_digit_prefix + DigitCounterT(peer_digit_prefix);
+            ranks[Item] = warp_digit_prefix + DigitCounterT(peer_digit_prefix);
         }
 
         ::rocprim::syncthreads();
@@ -656,25 +647,25 @@ public:
         DigitCounterT scan_counters[PaddedRakingSegment];
 
         #pragma unroll
-        for (int ITEM = 0; ITEM < PaddedRakingSegment; ++ITEM)
-            scan_counters[ITEM] = temp_storage.aliasable.raking_grid[linear_tid][ITEM];
+        for (int Items = 0; Items < PaddedRakingSegment; ++Items)
+            scan_counters[Items] = temp_storage.aliasable.raking_grid[linear_tid][Items];
 
-        BlockScanT(temp_storage.block_scan_storage).ExclusiveSum(scan_counters, scan_counters);
+        block_scan_t(temp_storage.block_scan_storage).ExclusiveSum(scan_counters, scan_counters);
 
         #pragma unroll
-        for (int ITEM = 0; ITEM < PaddedRakingSegment; ++ITEM)
-            temp_storage.aliasable.raking_grid[linear_tid][ITEM] = scan_counters[ITEM];
+        for (int Items = 0; Items < PaddedRakingSegment; ++Items)
+            temp_storage.aliasable.raking_grid[linear_tid][Items] = scan_counters[Items];
 
         ::rocprim::syncthreads();
-        if (!Equals<CountsCallback, BlockRadixRankEmptyCallback<BINS_TRACKED_PER_THREAD>>::VALUE)
+        if (!Equals<CountsCallback, block_radix_rank_empty_callback<BinsTrackedPerThread>>::VALUE)
         {
             CallBack<KeysPerThread>(callback);
         }
 
         // Seed ranks with counter values from previous warps
         #pragma unroll
-        for (int ITEM = 0; ITEM < KeysPerThread; ++ITEM)
-            ranks[ITEM] += *digit_counters[ITEM];
+        for (int Items = 0; Items < KeysPerThread; ++Items)
+            ranks[Items] += *digit_counters[Items];
     }
 
     template <
@@ -687,11 +678,11 @@ public:
         DigitExtractorT digit_extractor)
     {
         rank_keys(keys, ranks, digit_extractor,
-                 BlockRadixRankEmptyCallback<BINS_TRACKED_PER_THREAD>());
+                 block_radix_rank_empty_callback<BinsTrackedPerThread>());
     }
 
     /**
-     * \brief Rank keys.  For the lower \p RADIX_DIGITS threads, digit counts for each digit are provided for the corresponding thread.
+     * \brief Rank keys.  For the lower \p RadixDigits threads, digit counts for each digit are provided for the corresponding thread.
      */
     template <
         typename        UnsignedBits,
@@ -703,21 +694,23 @@ public:
         UnsignedBits    (&keys)[KeysPerThread],           ///< [in] Keys for this tile
         int             (&ranks)[KeysPerThread],          ///< [out] For each key, the local rank within the tile (out parameter)
         DigitExtractorT digit_extractor,                    ///< [in] The digit extractor
-        int             (&exclusive_digit_prefix)[BINS_TRACKED_PER_THREAD],            ///< [out] The exclusive prefix sum for the digits [(threadIdx.x * BINS_TRACKED_PER_THREAD) ... (threadIdx.x * BINS_TRACKED_PER_THREAD) + BINS_TRACKED_PER_THREAD - 1]
+        int             (&exclusive_digit_prefix)[BinsTrackedPerThread],            ///< [out] The exclusive prefix sum for the digits [(threadIdx.x * BinsTrackedPerThread) ... (threadIdx.x * BinsTrackedPerThread) + BinsTrackedPerThread - 1]
         CountsCallback callback)
     {
+        const size_t linear_tid = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
+
         rank_keys(keys, ranks, digit_extractor, callback);
 
         // Get exclusive count for each digit
         #pragma unroll
-        for (int track = 0; track < BINS_TRACKED_PER_THREAD; ++track)
+        for (int track = 0; track < BinsTrackedPerThread; ++track)
         {
-            int bin_idx = (linear_tid * BINS_TRACKED_PER_THREAD) + track;
+            int bin_idx = (linear_tid * BinsTrackedPerThread) + track;
 
-            if ((BlockSize == RADIX_DIGITS) || (bin_idx < RADIX_DIGITS))
+            if ((BlockSize == RadixDigits) || (bin_idx < RadixDigits))
             {
-                if (IS_DESCENDING)
-                    bin_idx = RADIX_DIGITS - bin_idx - 1;
+                if (IsDescending)
+                    bin_idx = RadixDigits - bin_idx - 1;
 
                 exclusive_digit_prefix[track] = temp_storage.aliasable.warp_digit_counters[bin_idx][0];
             }
@@ -733,10 +726,10 @@ public:
         UnsignedBits    (&keys)[KeysPerThread],           ///< [in] Keys for this tile
         int             (&ranks)[KeysPerThread],          ///< [out] For each key, the local rank within the tile (out parameter)
         DigitExtractorT digit_extractor,
-        int             (&exclusive_digit_prefix)[BINS_TRACKED_PER_THREAD])            ///< [out] The exclusive prefix sum for the digits [(threadIdx.x * BINS_TRACKED_PER_THREAD) ... (threadIdx.x * BINS_TRACKED_PER_THREAD) + BINS_TRACKED_PER_THREAD - 1]
+        int             (&exclusive_digit_prefix)[BinsTrackedPerThread])            ///< [out] The exclusive prefix sum for the digits [(threadIdx.x * BinsTrackedPerThread) ... (threadIdx.x * BinsTrackedPerThread) + BinsTrackedPerThread - 1]
     {
         rank_keys(keys, ranks, digit_extractor, exclusive_digit_prefix,
-                 BlockRadixRankEmptyCallback<BINS_TRACKED_PER_THREAD>());
+                 block_radix_rank_empty_callback<BinsTrackedPerThread>());
     }
 };
 
@@ -752,71 +745,73 @@ enum WarpMatchAlgorithm
  * decoupled look-back, where it reduces the time other thread blocks need to
  * wait for digit counts to become available.
  */
-template <int BLOCK_DIM_X, int RADIX_BITS, bool IS_DESCENDING,
-          BlockScanAlgorithm INNER_SCAN_ALGORITHM = BLOCK_SCAN_WARP_SCANS,
-          WarpMatchAlgorithm MATCH_ALGORITHM = WARP_MATCH_ANY, int NUM_PARTS = 1>
-struct BlockRadixRankMatchEarlyCounts
+template <int BlockSizeX,
+          int RadixBits,
+          bool IsDescending,
+          block_scan_algorithm InnerScanAlgorithm = block_scan_algorithm::using_warp_scan,
+          WarpMatchAlgorithm MatchAlgorithm = WARP_MATCH_ANY,
+          int NumParts = 1>
+struct block_radix_rank_match_early_counts
 {
     // constants
-    enum
-    {
-        BlockSize = BLOCK_DIM_X,
-        RADIX_DIGITS = 1 << RADIX_BITS,
-        BINS_PER_THREAD = (RADIX_DIGITS + BlockSize - 1) / BlockSize,
-        BINS_TRACKED_PER_THREAD = BINS_PER_THREAD,
-        FULL_BINS = BINS_PER_THREAD * BlockSize == RADIX_DIGITS,
-        WARP_THREADS = CUB_PTX_WARP_THREADS,
-        BLOCK_WARPS = BlockSize / WARP_THREADS,
-        WARP_MASK = ~0,
-        NUM_MATCH_MASKS = MATCH_ALGORITHM == WARP_MATCH_ATOMIC_OR ? BLOCK_WARPS : 0,
-        // Guard against declaring zero-sized array:
-        MATCH_MASKS_ALLOC_SIZE = NUM_MATCH_MASKS < 1 ? 1 : NUM_MATCH_MASKS,
-    };
+
+    static constexpr unsigned int BlockSize = BlockSizeX;
+    static constexpr unsigned int RadixDigits = 1 << RadixBits;
+    static constexpr unsigned int BinsPerThread = (RadixDigits + BlockSize - 1) / BlockSize;
+    static constexpr unsigned int BinsTrackedPerThread = BinsPerThread;
+    static constexpr unsigned int FullBins = BinsPerThread * BlockSize == RadixDigits;
+    static constexpr unsigned int WarpThreads = ::rocprim::warp_size();
+    static constexpr unsigned int BlockWarps = BlockSize / WarpThreads;
+    static constexpr unsigned int WarpMask = ~0;
+    static constexpr unsigned int NumMatchMasks = MatchAlgorithm == WARP_MATCH_ATOMIC_OR ? BlockWarps : 0;
+
+    // Guard against declaring zero-sized array;
+    static constexpr unsigned int MatchMasksAllocSize = NumMatchMasks < 1 ? 1 : NumMatchMasks;
 
     // types
-    typedef cub::BlockScan<int, BlockSize, INNER_SCAN_ALGORITHM> BlockScan;
+    typedef ::rocprim::block_scan<int, BlockSize, InnerScanAlgorithm> block_scan;
 
 
 
     // temporary storage
-    struct TempStorage
+    struct storage_type
     {
         union
         {
-            int warp_offsets[BLOCK_WARPS][RADIX_DIGITS];
-            int warp_histograms[BLOCK_WARPS][RADIX_DIGITS][NUM_PARTS];
+            int warp_offsets[BlockWarps][RadixDigits];
+            int warp_histograms[BlockWarps][RadixDigits][NumParts];
         };
 
-        int match_masks[MATCH_MASKS_ALLOC_SIZE][RADIX_DIGITS];
+        int match_masks[MatchMasksAllocSize][RadixDigits];
 
-        typename BlockScan::TempStorage prefix_tmp;
+        typename block_scan::storage_type prefix_tmp;
     };
 
-    TempStorage& temp_storage;
+    storage_type& temp_storage;
 
     // internal ranking implementation
     template <typename UnsignedBits, int KeysPerThread, typename DigitExtractorT,
               typename CountsCallback>
-    struct BlockRadixRankMatchInternal
+    struct block_radix_rank_match_internal
     {
-        TempStorage& s;
+        storage_type& s;
         DigitExtractorT digit_extractor;
         CountsCallback callback;
         int warp;
         int lane;
 
         ROCPRIM_DEVICE inline
-        int Digit(UnsignedBits key)
+        int digit(UnsignedBits key)
         {
-            int digit =  digit_extractor.Digit(key);
-            return IS_DESCENDING ? RADIX_DIGITS - 1 - digit : digit;
+            int digit =  digit_extractor.digit(key);
+            return IsDescending ? RadixDigits - 1 - digit : digit;
         }
 
         ROCPRIM_DEVICE inline
         int ThreadBin(int u)
         {
-            int bin = threadIdx.x * BINS_PER_THREAD + u;
-            return IS_DESCENDING ? RADIX_DIGITS - 1 - bin : bin;
+            int bin = threadIdx.x * BinsPerThread + u;
+            return IsDescending ? RadixDigits - 1 - bin : bin;
         }
 
         ROCPRIM_DEVICE inline
@@ -824,58 +819,59 @@ struct BlockRadixRankMatchEarlyCounts
         void compute_histograms_warp(UnsignedBits (&keys)[KeysPerThread])
         {
             //int* warp_offsets = &s.warp_offsets[warp][0];
-            int (&warp_histograms)[RADIX_DIGITS][NUM_PARTS] = s.warp_histograms[warp];
+            int (&warp_histograms)[RadixDigits][NumParts] = s.warp_histograms[warp];
             // compute warp-private histograms
             #pragma unroll
-            for (int bin = lane; bin < RADIX_DIGITS; bin += WARP_THREADS)
+            for (int bin = lane; bin < RadixDigits; bin += WarpThreads)
             {
                 #pragma unroll
-                for (int part = 0; part < NUM_PARTS; ++part)
+                for (int part = 0; part < NumParts; ++part)
                 {
                     warp_histograms[bin][part] = 0;
                 }
             }
-            if (MATCH_ALGORITHM == WARP_MATCH_ATOMIC_OR)
+            if (MatchAlgorithm == WARP_MATCH_ATOMIC_OR)
             {
                 int* match_masks = &s.match_masks[warp][0];
                 #pragma unroll
-                for (int bin = lane; bin < RADIX_DIGITS; bin += WARP_THREADS)
+                for (int bin = lane; bin < RadixDigits; bin += WarpThreads)
                 {
                     match_masks[bin] = 0;
                 }
             }
-            WARP_SYNC(WARP_MASK);
+            // WARP_SYNC(WarpMask);
 
             // compute private per-part histograms
-            int part = lane % NUM_PARTS;
+            int part = lane % NumParts;
             #pragma unroll
             for (int u = 0; u < KeysPerThread; ++u)
             {
-                atomicAdd(&warp_histograms[Digit(keys[u])][part], 1);
+                atomicAdd(&warp_histograms[digit(keys[u])][part], 1);
             }
 
             // sum different parts;
-            // no extra work is necessary if NUM_PARTS == 1
-            if (NUM_PARTS > 1)
+            // no extra work is necessary if NumParts == 1
+            if (NumParts > 1)
             {
-                WARP_SYNC(WARP_MASK);
-                // TODO: handle RADIX_DIGITS % WARP_THREADS != 0 if it becomes necessary
-                const int WARP_BINS_PER_THREAD = RADIX_DIGITS / WARP_THREADS;
-                int bins[WARP_BINS_PER_THREAD];
+                // WARP_SYNC(WarpMask);
+                // TODO: handle RadixDigits % WarpThreads != 0 if it becomes necessary
+                const int WARP_BinsPerThread = RadixDigits / WarpThreads;
+                int bins[WARP_BinsPerThread];
                 #pragma unroll
-                for (int u = 0; u < WARP_BINS_PER_THREAD; ++u)
+                for (int u = 0; u < WARP_BinsPerThread; ++u)
                 {
-                    int bin = lane + u * WARP_THREADS;
-                    bins[u] = internal::ThreadReduce(warp_histograms[bin], Sum());
+                    int bin = lane + u * WarpThreads;
+                    // bins[u] = internal::ThreadReduce(warp_histograms[bin], Sum());
+                    //TODO: Implement Thread Reduce
                 }
                 ::rocprim::syncthreads();
 
                 // store the resulting histogram in shared memory
                 int* warp_offsets = &s.warp_offsets[warp][0];
                 #pragma unroll
-                for (int u = 0; u < WARP_BINS_PER_THREAD; ++u)
+                for (int u = 0; u < WARP_BinsPerThread; ++u)
                 {
-                    int bin = lane + u * WARP_THREADS;
+                    int bin = lane + u * WarpThreads;
                     warp_offsets[bin] = bins[u];
                 }
             }
@@ -883,18 +879,18 @@ struct BlockRadixRankMatchEarlyCounts
 
         ROCPRIM_DEVICE inline
 
-        void compute_offsets_warp_upsweep(int (&bins)[BINS_PER_THREAD])
+        void compute_offsets_warp_upsweep(int (&bins)[BinsPerThread])
         {
             // sum up warp-private histograms
             #pragma unroll
-            for (int u = 0; u < BINS_PER_THREAD; ++u)
+            for (int u = 0; u < BinsPerThread; ++u)
             {
                 bins[u] = 0;
                 int bin = ThreadBin(u);
-                if (FULL_BINS || (bin >= 0 && bin < RADIX_DIGITS))
+                if (FullBins || (bin >= 0 && bin < RadixDigits))
                 {
                     #pragma unroll
-                    for (int j_warp = 0; j_warp < BLOCK_WARPS; ++j_warp)
+                    for (int j_warp = 0; j_warp < BlockWarps; ++j_warp)
                     {
                         int warp_offset = s.warp_offsets[j_warp][bin];
                         s.warp_offsets[j_warp][bin] = bins[u];
@@ -906,17 +902,17 @@ struct BlockRadixRankMatchEarlyCounts
 
         ROCPRIM_DEVICE inline
 
-        void compute_offsets_warp_downsweep(int (&offsets)[BINS_PER_THREAD])
+        void compute_offsets_warp_downsweep(int (&offsets)[BinsPerThread])
         {
             #pragma unroll
-            for (int u = 0; u < BINS_PER_THREAD; ++u)
+            for (int u = 0; u < BinsPerThread; ++u)
             {
                 int bin = ThreadBin(u);
-                if (FULL_BINS || (bin >= 0 && bin < RADIX_DIGITS))
+                if (FullBins || (bin >= 0 && bin < RadixDigits))
                 {
                     int digit_offset = offsets[u];
                     #pragma unroll
-                    for (int j_warp = 0; j_warp < BLOCK_WARPS; ++j_warp)
+                    for (int j_warp = 0; j_warp < BlockWarps; ++j_warp)
                     {
                         s.warp_offsets[j_warp][bin] += digit_offset;
                     }
@@ -937,22 +933,22 @@ struct BlockRadixRankMatchEarlyCounts
             #pragma unroll
             for (int u = 0; u < KeysPerThread; ++u)
             {
-                int bin = Digit(keys[u]);
+                int bin = digit(keys[u]);
                 int* p_match_mask = &match_masks[bin];
                 atomicOr(p_match_mask, lane_mask);
-                WARP_SYNC(WARP_MASK);
+                // WARP_SYNC(WarpMask);
                 int bin_mask = *p_match_mask;
-                int leader = (WARP_THREADS - 1) - __clz(bin_mask);
+                int leader = (WarpThreads - 1) - __clz(bin_mask);
                 int warp_offset = 0;
-                int popc = __popc(bin_mask & LaneMaskLe());
+                int popc = __popc(bin_mask & lane_mask_less_than_equal());
                 if (lane == leader)
                 {
                     // atomic is a bit faster
                     warp_offset = atomicAdd(&warp_offsets[bin], popc);
                 }
-                warp_offset = SHFL_IDX_SYNC(warp_offset, leader, bin_mask);
+                warp_offset = warp_shuffle(warp_offset, leader, bin_mask);
                 if (lane == leader) *p_match_mask = 0;
-                WARP_SYNC(WARP_MASK);
+                // WARP_SYNC(WarpMask);
                 ranks[u] = warp_offset + popc - 1;
             }
         }
@@ -968,17 +964,17 @@ struct BlockRadixRankMatchEarlyCounts
             #pragma unroll
             for (int u = 0; u < KeysPerThread; ++u)
             {
-                int bin = Digit(keys[u]);
-                int bin_mask = MatchAny<RADIX_BITS>(bin);
-                int leader = (WARP_THREADS - 1) - __clz(bin_mask);
+                int bin = digit(keys[u]);
+                int bin_mask = MatchAny<RadixBits>(bin);
+                int leader = (WarpThreads - 1) - __clz(bin_mask);
                 int warp_offset = 0;
-                int popc = __popc(bin_mask & LaneMaskLe());
+                int popc = __popc(bin_mask & lane_mask_less_than_equal());
                 if (lane == leader)
                 {
                     // atomic is a bit faster
                     warp_offset = atomicAdd(&warp_offsets[bin], popc);
                 }
-                warp_offset = SHFL_IDX_SYNC(warp_offset, leader, bin_mask);
+                warp_offset = warp_shuffle(warp_offset, leader, bin_mask);
                 ranks[u] = warp_offset + popc - 1;
             }
         }
@@ -987,36 +983,36 @@ struct BlockRadixRankMatchEarlyCounts
         void rank_keys(
             UnsignedBits (&keys)[KeysPerThread],
             int (&ranks)[KeysPerThread],
-            int (&exclusive_digit_prefix)[BINS_PER_THREAD])
+            int (&exclusive_digit_prefix)[BinsPerThread])
         {
             compute_histograms_warp(keys);
 
             ::rocprim::syncthreads();
-            int bins[BINS_PER_THREAD];
+            int bins[BinsPerThread];
             compute_offsets_warp_upsweep(bins);
             callback(bins);
 
-            BlockScan(s.prefix_tmp).ExclusiveSum(bins, exclusive_digit_prefix);
+            block_scan(s.prefix_tmp).ExclusiveSum(bins, exclusive_digit_prefix);
 
             compute_offsets_warp_downsweep(exclusive_digit_prefix);
             ::rocprim::syncthreads();
-            compute_ranks_item(keys, ranks, Int2Type<MATCH_ALGORITHM>());
+            compute_ranks_item(keys, ranks, Int2Type<MatchAlgorithm>());
         }
 
         ROCPRIM_DEVICE inline
-        BlockRadixRankMatchInternal
-        (TempStorage& temp_storage, DigitExtractorT digit_extractor, CountsCallback callback)
+        block_radix_rank_match_internal
+        (storage_type& temp_storage, DigitExtractorT digit_extractor, CountsCallback callback)
             : s(temp_storage), digit_extractor(digit_extractor),
-              callback(callback), warp(threadIdx.x / WARP_THREADS), lane(LaneId())
+              callback(callback), warp(threadIdx.x / WarpThreads), lane(lane_id())
             {}
     };
 
     ROCPRIM_DEVICE inline
-    BlockRadixRankMatchEarlyCounts
-    (TempStorage& temp_storage) : temp_storage(temp_storage) {}
+    block_radix_rank_match_early_counts
+    (storage_type& temp_storage) : temp_storage(temp_storage) {}
 
     /**
-     * \brief Rank keys.  For the lower \p RADIX_DIGITS threads, digit counts for each digit are provided for the corresponding thread.
+     * \brief Rank keys.  For the lower \p RadixDigits threads, digit counts for each digit are provided for the corresponding thread.
      */
     template <typename UnsignedBits, int KeysPerThread, typename DigitExtractorT,
         typename CountsCallback>
@@ -1025,10 +1021,10 @@ struct BlockRadixRankMatchEarlyCounts
         UnsignedBits    (&keys)[KeysPerThread],
         int             (&ranks)[KeysPerThread],
         DigitExtractorT digit_extractor,
-        int             (&exclusive_digit_prefix)[BINS_PER_THREAD],
+        int             (&exclusive_digit_prefix)[BinsPerThread],
         CountsCallback  callback)
     {
-        BlockRadixRankMatchInternal<UnsignedBits, KeysPerThread, DigitExtractorT, CountsCallback>
+        block_radix_rank_match_internal<UnsignedBits, KeysPerThread, DigitExtractorT, CountsCallback>
             internal(temp_storage, digit_extractor, callback);
         internal.rank_keys(keys, ranks, exclusive_digit_prefix);
     }
@@ -1039,10 +1035,10 @@ struct BlockRadixRankMatchEarlyCounts
         UnsignedBits    (&keys)[KeysPerThread],
         int             (&ranks)[KeysPerThread],
         DigitExtractorT digit_extractor,
-        int             (&exclusive_digit_prefix)[BINS_PER_THREAD])
+        int             (&exclusive_digit_prefix)[BinsPerThread])
     {
-        typedef BlockRadixRankEmptyCallback<BINS_PER_THREAD> CountsCallback;
-        BlockRadixRankMatchInternal<UnsignedBits, KeysPerThread, DigitExtractorT, CountsCallback>
+        typedef block_radix_rank_empty_callback<BinsPerThread> CountsCallback;
+        block_radix_rank_match_internal<UnsignedBits, KeysPerThread, DigitExtractorT, CountsCallback>
             internal(temp_storage, digit_extractor, CountsCallback());
         internal.rank_keys(keys, ranks, exclusive_digit_prefix);
     }
@@ -1054,7 +1050,7 @@ struct BlockRadixRankMatchEarlyCounts
         int             (&ranks)[KeysPerThread],
         DigitExtractorT digit_extractor)
     {
-        int exclusive_digit_prefix[BINS_PER_THREAD];
+        int exclusive_digit_prefix[BinsPerThread];
         rank_keys(keys, ranks, digit_extractor, exclusive_digit_prefix);
     }
 };
