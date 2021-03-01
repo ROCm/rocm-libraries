@@ -35,10 +35,6 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-
-namespace detail
-{
-
 template<
     class T,
     unsigned int BlockThreads
@@ -99,7 +95,7 @@ struct block_raking_layout
        * \brief Returns the location for the calling thread to begin sequential raking
        */
       static ROCPRIM_DEVICE inline T* raking_ptr(
-          TempStorage &temp_storage,
+          storage_type &temp_storage,
           unsigned int linear_tid)
       {
           return temp_storage.get().buff + (linear_tid * (SegmentLength + UseSegmentPadding));
