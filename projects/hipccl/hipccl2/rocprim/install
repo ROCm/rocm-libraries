@@ -129,8 +129,11 @@ fi
 compiler="hipcc"
 
 cmake_executable="cmake"
-if [ -e /etc/redhat-release ] ; then
-    cmake_executable="cmake3"
+if [ -e /etc/redhat-release ]; then
+    grep 6.10 /etc/centos-release > /dev/null 2>&1
+    if [ $? != 0 ]; then
+        cmake_executable="cmake3"
+    fi
 fi
 
 benchmark="OFF"
