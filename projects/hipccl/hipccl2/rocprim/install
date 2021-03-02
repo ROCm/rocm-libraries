@@ -129,9 +129,6 @@ fi
 compiler="hipcc"
 
 cmake_executable="cmake"
-if [ -e /etc/redhat-release ] ; then
-    cmake_executable="cmake3"
-fi
 
 benchmark="OFF"
 if [[ "${build_benchmark}" == true ]]; then
