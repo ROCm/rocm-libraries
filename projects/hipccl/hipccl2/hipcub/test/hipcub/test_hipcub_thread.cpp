@@ -31,6 +31,8 @@
 #include "hipcub/thread/thread_load.hpp"
 #include "hipcub/thread/thread_store.hpp"
 #include "hipcub/thread/thread_reduce.hpp"
+#include "hipcub/thread/thread_scan.hpp"
+#include "hipcub/thread/thread_search.hpp"
 
 #include "common_test_header.hpp"
 
@@ -47,7 +49,6 @@ public:
     using type = typename Params::type;
 };
 
-// TODO add custom types larger than 64 bits
 typedef ::testing::Types<
     params<uint8_t>,
     params<uint16_t>,
@@ -57,6 +58,8 @@ typedef ::testing::Types<
     params<test_utils::custom_test_type<double>>
 > ThreadOperationTestParams;
 
+TYPED_TEST_CASE(HipcubThreadOperationTests, ThreadOperationTestParams);
+
 template<class Type>
 __global__
 void thread_load_kernel(Type* volatile const device_input, Type* device_output)
@@ -64,8 +67,6 @@ void thread_load_kernel(Type* volatile const device_input, Type* device_output)
     size_t index = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
     device_output[index] = hipcub::ThreadLoad<hipcub::LOAD_CG>(device_input + index);
 }
-
-TYPED_TEST_CASE(HipcubThreadOperationTests, ThreadOperationTestParams);
 
 TYPED_TEST(HipcubThreadOperationTests, Load)
 {
@@ -185,14 +186,14 @@ TYPED_TEST(HipcubThreadOperationTests, Store)
     }
 }
 
-struct reduction_op
+struct sum_op
 {
     template<typename T> HIPCUB_HOST_DEVICE
-T
-operator()(const T& input_1,const T& input_2) const
-{
-    return input_1 + input_2;
-}
+    T
+    operator()(const T& input_1,const T& input_2) const
+    {
+        return input_1 + input_2;
+    }
 };
 
 template<class Type, int32_t Length>
@@ -201,7 +202,7 @@ void thread_reduce_kernel(Type* const device_input, Type* device_output)
 {
     size_t input_index = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * Length;
     size_t output_index = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * Length;
-    device_output[output_index] = hipcub::internal::ThreadReduce<Length>(&device_input[input_index], reduction_op());
+    device_output[output_index] = hipcub::internal::ThreadReduce<Length>(&device_input[input_index], sum_op());
 }
 
 TYPED_TEST(HipcubThreadOperationTests, Reduction)
@@ -211,7 +212,7 @@ TYPED_TEST(HipcubThreadOperationTests, Reduction)
     constexpr uint32_t block_size = 128 / length;
     constexpr uint32_t grid_size = 128;
     constexpr uint32_t size = block_size * grid_size * length;
-    reduction_op operation;
+    sum_op operation;
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -268,6 +269,90 @@ TYPED_TEST(HipcubThreadOperationTests, Reduction)
         for(size_t i = 0; i < output.size(); i+=length)
         {
             //std::cout << "i: " << i << " " << expected[i] << " - " << output[i] << std::endl;
+            ASSERT_EQ(output[i], expected[i]);
+        }
+
+        HIP_CHECK(hipFree(device_input));
+        HIP_CHECK(hipFree(device_output));
+    }
+}
+
+template<class Type, int32_t Length>
+__global__
+void thread_scan_kernel(Type* const device_input, Type* device_output)
+{
+    size_t input_index = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * Length;
+    size_t output_index = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * Length;
+
+    hipcub::internal::ThreadScanInclusive<Length>(&device_input[input_index], 
+                                                  &device_output[output_index],
+                                                  sum_op());
+}
+
+TYPED_TEST(HipcubThreadOperationTests, Scan)
+{
+    using T = typename TestFixture::type;
+    constexpr uint32_t length = 4;
+    constexpr uint32_t block_size = 128 / length;
+    constexpr uint32_t grid_size = 128;
+    constexpr uint32_t size = block_size * grid_size * length;
+    sum_op operation;
+
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+        // Generate data
+        std::vector<T> input = test_utils::get_random_data<T>(size, 2, 200, seed_value);
+        std::vector<T> output(size);
+        std::vector<T> expected(size);
+
+        // Calculate expected results on host
+        for(uint32_t grid_index = 0; grid_index < grid_size; grid_index++)
+        {
+            for(uint32_t i = 0; i < block_size; i++)
+            {
+                uint32_t offset = (grid_index * block_size + i) * length;
+                T result = input[offset];
+                expected[offset] = result;
+                for(uint32_t j = 1; j < length; j++)
+                {
+                    result = operation(result, input[offset + j]);
+                    expected[offset + j] = result;
+                }
+            }
+        }
+
+        // Preparing device
+        T* device_input;
+        HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(T)));
+        T* device_output;
+        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(T)));
+
+        HIP_CHECK(
+            hipMemcpy(
+                device_input, input.data(),
+                input.size() * sizeof(T),
+                hipMemcpyHostToDevice
+            )
+        );
+
+        thread_scan_kernel<T, length><<<grid_size, block_size>>>(device_input, device_output);
+
+        // Reading results back
+        HIP_CHECK(
+            hipMemcpy(
+                output.data(), device_output,
+                output.size() * sizeof(T),
+                hipMemcpyDeviceToHost
+            )
+        );
+
+        // Verifying results
+        for(size_t i = 0; i < output.size(); i++)
+        {
+            //std::cout << "i: " << i << " " << input[i] << " - " << expected[i] << " - " << output[i] << std::endl;
             ASSERT_EQ(output[i], expected[i]);
         }
 

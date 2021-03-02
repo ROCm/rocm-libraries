@@ -35,111 +35,110 @@
 
  BEGIN_HIPCUB_NAMESPACE
 
+/**
+ * Computes the begin offsets into A and B for the specific diagonal
+ */
+template <
+    typename AIteratorT,
+    typename BIteratorT,
+    typename OffsetT,
+    typename CoordinateT>
+__host__ __device__ __forceinline__ void MergePathSearch(
+    OffsetT         diagonal,
+    AIteratorT      a,
+    BIteratorT      b,
+    OffsetT         a_len,
+    OffsetT         b_len,
+    CoordinateT&    path_coordinate)
+{
+    /// The value type of the input iterator
+    typedef typename std::iterator_traits<AIteratorT>::value_type T;
 
- /**
-  * Computes the begin offsets into A and B for the specific diagonal
-  */
- template <
-     typename AIteratorT,
-     typename BIteratorT,
-     typename OffsetT,
-     typename CoordinateT>
- __host__ __device__ __forceinline__ void MergePathSearch(
-     OffsetT         diagonal,
-     AIteratorT      a,
-     BIteratorT      b,
-     OffsetT         a_len,
-     OffsetT         b_len,
-     CoordinateT&    path_coordinate)
- {
-     /// The value type of the input iterator
-     typedef typename std::iterator_traits<AIteratorT>::value_type T;
+    OffsetT split_min = CUB_MAX(diagonal - b_len, 0);
+    OffsetT split_max = CUB_MIN(diagonal, a_len);
 
-     OffsetT split_min = CUB_MAX(diagonal - b_len, 0);
-     OffsetT split_max = CUB_MIN(diagonal, a_len);
+    while (split_min < split_max)
+    {
+        OffsetT split_pivot = (split_min + split_max) >> 1;
+        if (a[split_pivot] <= b[diagonal - split_pivot - 1])
+        {
+            // Move candidate split range up A, down B
+            split_min = split_pivot + 1;
+        }
+        else
+        {
+            // Move candidate split range up B, down A
+            split_max = split_pivot;
+        }
+    }
 
-     while (split_min < split_max)
-     {
-         OffsetT split_pivot = (split_min + split_max) >> 1;
-         if (a[split_pivot] <= b[diagonal - split_pivot - 1])
-         {
-             // Move candidate split range up A, down B
-             split_min = split_pivot + 1;
-         }
-         else
-         {
-             // Move candidate split range up B, down A
-             split_max = split_pivot;
-         }
-     }
-
-     path_coordinate.x = CUB_MIN(split_min, a_len);
-     path_coordinate.y = diagonal - split_min;
- }
-
+    path_coordinate.x = CUB_MIN(split_min, a_len);
+    path_coordinate.y = diagonal - split_min;
+}
 
 
- /**
-  * \brief Returns the offset of the first value within \p input which does not compare less than \p val
-  */
- template <
-     typename InputIteratorT,
-     typename OffsetT,
-     typename T>
- __device__ __forceinline__ OffsetT LowerBound(
-     InputIteratorT      input,              ///< [in] Input sequence
-     OffsetT             num_items,          ///< [in] Input sequence length
-     T                   val)                ///< [in] Search key
- {
-     OffsetT retval = 0;
-     while (num_items > 0)
-     {
-         OffsetT half = num_items >> 1;
-         if (input[retval + half] < val)
-         {
-             retval = retval + (half + 1);
-             num_items = num_items - (half + 1);
-         }
-         else
-         {
-             num_items = half;
-         }
-     }
 
-     return retval;
- }
+/**
+ * \brief Returns the offset of the first value within \p input which does not compare less than \p val
+ */
+template <
+    typename InputIteratorT,
+    typename OffsetT,
+    typename T>
+__device__ __forceinline__ OffsetT LowerBound(
+    InputIteratorT      input,              ///< [in] Input sequence
+    OffsetT             num_items,          ///< [in] Input sequence length
+    T                   val)                ///< [in] Search key
+{
+    OffsetT retval = 0;
+    while (num_items > 0)
+    {
+        OffsetT half = num_items >> 1;
+        if (input[retval + half] < val)
+        {
+            retval = retval + (half + 1);
+            num_items = num_items - (half + 1);
+        }
+        else
+        {
+            num_items = half;
+        }
+    }
 
- 
- /**
-  * \brief Returns the offset of the first value within \p input which compares greater than \p val
-  */
- template <
-     typename InputIteratorT,
-     typename OffsetT,
-     typename T>
- __device__ __forceinline__ OffsetT UpperBound(
-     InputIteratorT      input,              ///< [in] Input sequence
-     OffsetT             num_items,          ///< [in] Input sequence length
-     T                   val)                ///< [in] Search key
- {
-     OffsetT retval = 0;
-     while (num_items > 0)
-     {
-         OffsetT half = num_items >> 1;
-         if (val < input[retval + half])
-         {
-             num_items = half;
-         }
-         else
-         {
-             retval = retval + (half + 1);
-             num_items = num_items - (half + 1);
-         }
-     }
+    return retval;
+}
 
-     return retval;
- }
 
- END_HIPCUB_NAMESPACE
+/**
+ * \brief Returns the offset of the first value within \p input which compares greater than \p val
+ */
+template <
+    typename InputIteratorT,
+    typename OffsetT,
+    typename T>
+__device__ __forceinline__ OffsetT UpperBound(
+    InputIteratorT      input,              ///< [in] Input sequence
+    OffsetT             num_items,          ///< [in] Input sequence length
+    T                   val)                ///< [in] Search key
+{
+    OffsetT retval = 0;
+    while (num_items > 0)
+    {
+        OffsetT half = num_items >> 1;
+        if (val < input[retval + half])
+        {
+            num_items = half;
+        }
+        else
+        {
+            retval = retval + (half + 1);
+            num_items = num_items - (half + 1);
+        }
+    }
 
- #endif // HIBCUB_ROCPRIM_THREAD_THREAD_SCAN_HPP_
+    return retval;
+}
+
+END_HIPCUB_NAMESPACE
+
+#endif // HIBCUB_ROCPRIM_THREAD_THREAD_SCAN_HPP_
