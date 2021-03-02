@@ -163,7 +163,7 @@ private:
      * Performs upsweep raking reduction, returning the aggregate
      */
     ROCPRIM_DEVICE inline
-    PackedCounter Upsweep()
+    PackedCounter up_sweep()
     {
         const size_t linear_tid = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         PackedCounter *smem_raking_ptr = temp_storage.aliasable.raking_grid[linear_tid];
@@ -191,7 +191,7 @@ private:
 
     /// Performs exclusive downsweep raking scan
     ROCPRIM_DEVICE inline
-    void ExclusiveDownsweep(
+    void exclusive_downsweep(
         PackedCounter raking_partial)
     {
         const size_t linear_tid = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
@@ -222,7 +222,7 @@ private:
      * Reset shared memory digit counters
      */
     ROCPRIM_DEVICE inline
-    void ResetCounters()
+    void reset_counters()
     {
         const size_t linear_tid = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         // Reset shared memory digit counters
@@ -260,18 +260,18 @@ private:
      * Scan shared memory digit counters.
      */
     ROCPRIM_DEVICE inline
-    void ScanCounters()
+    void scan_counters()
     {
-        // Upsweep scan
-        PackedCounter raking_partial = Upsweep();
+        // up_sweep scan
+        PackedCounter raking_partial = up_sweep();
 
         // Compute exclusive sum
         PackedCounter exclusive_partial;
         PrefixCallBack prefix_call_back;
-        block_scan(temp_storage.block_scan_storage).ExclusiveSum(raking_partial, exclusive_partial, prefix_call_back);
+        block_scan(temp_storage.block_scan_storage).exclusive_sum(raking_partial, exclusive_partial, prefix_call_back);
 
         // Downsweep scan with exclusive partial
-        ExclusiveDownsweep(exclusive_partial);
+        exclusive_downsweep(exclusive_partial);
     }
 
 public:
@@ -328,7 +328,7 @@ public:
         const size_t linear_tid = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
 
         // Reset shared memory digit counters
-        ResetCounters();
+        reset_counters();
 
         #pragma unroll
         for (int Item = 0; Item < KeysPerThread; ++Item)
@@ -361,7 +361,7 @@ public:
         ::rocprim::syncthreads();
 
         // Scan shared memory counters
-        ScanCounters();
+        scan_counters();
 
         ::rocprim::syncthreads();
 
@@ -430,7 +430,7 @@ template <
     block_scan_algorithm    InnerScanAlgorithm    = block_scan_algorithm::using_warp_scan,
     int                     BlockSizeY             = 1,
     int                     BlockSizeZ             = 1>
-class BlockRadixRankMatch
+class block_radix_rank_match
 {
 private:
 
@@ -511,7 +511,7 @@ public:
      * \brief Collective constructor using the specified memory allocation as temporary storage.
      */
     ROCPRIM_DEVICE inline
-    BlockRadixRankMatch(
+    block_radix_rank_match(
         storage_type &temp_storage)             ///< [in] Reference to memory allocation having layout type storage_type
     :        temp_storage(temp_storage.Alias())
     {}
@@ -650,7 +650,7 @@ public:
         for (int Items = 0; Items < PaddedRakingSegment; ++Items)
             scan_counters[Items] = temp_storage.aliasable.raking_grid[linear_tid][Items];
 
-        block_scan_t(temp_storage.block_scan_storage).ExclusiveSum(scan_counters, scan_counters);
+        block_scan_t(temp_storage.block_scan_storage).exclusive_sum(scan_counters, scan_counters);
 
         #pragma unroll
         for (int Items = 0; Items < PaddedRakingSegment; ++Items)
@@ -733,10 +733,10 @@ public:
     }
 };
 
-enum WarpMatchAlgorithm
+enum warp_match_algorithm : int
 {
-    WARP_MATCH_ANY,
-    WARP_MATCH_ATOMIC_OR
+    warp_match_any,
+    warp_match_atomic_or
 };
 
 /**
@@ -749,7 +749,7 @@ template <int BlockSizeX,
           int RadixBits,
           bool IsDescending,
           block_scan_algorithm InnerScanAlgorithm = block_scan_algorithm::using_warp_scan,
-          WarpMatchAlgorithm MatchAlgorithm = WARP_MATCH_ANY,
+          warp_match_algorithm MatchAlgorithm = warp_match_algorithm::warp_match_any,
           int NumParts = 1>
 struct block_radix_rank_match_early_counts
 {
@@ -763,7 +763,7 @@ struct block_radix_rank_match_early_counts
     static constexpr unsigned int WarpThreads = ::rocprim::warp_size();
     static constexpr unsigned int BlockWarps = BlockSize / WarpThreads;
     static constexpr unsigned int WarpMask = ~0;
-    static constexpr unsigned int NumMatchMasks = MatchAlgorithm == WARP_MATCH_ATOMIC_OR ? BlockWarps : 0;
+    static constexpr unsigned int NumMatchMasks = MatchAlgorithm == warp_match_algorithm::warp_match_atomic_or ? BlockWarps : 0;
 
     // Guard against declaring zero-sized array;
     static constexpr unsigned int MatchMasksAllocSize = NumMatchMasks < 1 ? 1 : NumMatchMasks;
@@ -808,7 +808,7 @@ struct block_radix_rank_match_early_counts
         }
 
         ROCPRIM_DEVICE inline
-        int ThreadBin(int u)
+        int thread_bin(int u)
         {
             int bin = threadIdx.x * BinsPerThread + u;
             return IsDescending ? RadixDigits - 1 - bin : bin;
@@ -830,7 +830,7 @@ struct block_radix_rank_match_early_counts
                     warp_histograms[bin][part] = 0;
                 }
             }
-            if (MatchAlgorithm == WARP_MATCH_ATOMIC_OR)
+            if (MatchAlgorithm == warp_match_algorithm::warp_match_atomic_or)
             {
                 int* match_masks = &s.match_masks[warp][0];
                 #pragma unroll
@@ -886,7 +886,7 @@ struct block_radix_rank_match_early_counts
             for (int u = 0; u < BinsPerThread; ++u)
             {
                 bins[u] = 0;
-                int bin = ThreadBin(u);
+                int bin = thread_bin(u);
                 if (FullBins || (bin >= 0 && bin < RadixDigits))
                 {
                     #pragma unroll
@@ -907,7 +907,7 @@ struct block_radix_rank_match_early_counts
             #pragma unroll
             for (int u = 0; u < BinsPerThread; ++u)
             {
-                int bin = ThreadBin(u);
+                int bin = thread_bin(u);
                 if (FullBins || (bin >= 0 && bin < RadixDigits))
                 {
                     int digit_offset = offsets[u];
@@ -924,7 +924,7 @@ struct block_radix_rank_match_early_counts
 
         void compute_ranks_item(
             UnsignedBits (&keys)[KeysPerThread], int (&ranks)[KeysPerThread],
-            Int2Type<WARP_MATCH_ATOMIC_OR>)
+            Int2Type<warp_match_algorithm::warp_match_atomic_or>)
         {
             // compute key ranks
             int lane_mask = 1 << lane;
@@ -957,7 +957,7 @@ struct block_radix_rank_match_early_counts
 
         void compute_ranks_item(
             UnsignedBits (&keys)[KeysPerThread], int (&ranks)[KeysPerThread],
-            Int2Type<WARP_MATCH_ANY>)
+            Int2Type<warp_match_algorithm::warp_match_any>)
         {
             // compute key ranks
             int* warp_offsets = &s.warp_offsets[warp][0];
@@ -992,7 +992,7 @@ struct block_radix_rank_match_early_counts
             compute_offsets_warp_upsweep(bins);
             callback(bins);
 
-            block_scan(s.prefix_tmp).ExclusiveSum(bins, exclusive_digit_prefix);
+            block_scan(s.prefix_tmp).exclusive_sum(bins, exclusive_digit_prefix);
 
             compute_offsets_warp_downsweep(exclusive_digit_prefix);
             ::rocprim::syncthreads();
