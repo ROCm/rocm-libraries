@@ -35,15 +35,13 @@
 
 #include "common_test_header.hpp"
 
-hipcub::CachingDeviceAllocator  g_allocator(true);
+hipcub::CachingDeviceAllocator  g_allocator;
 
 //---------------------------------------------------------------------
 // Globals, constants and typedefs
 //---------------------------------------------------------------------
 
 #define INTEGER_SEED (0)
-
-//hipcub::CachingDeviceAllocator g_allocator(true);
 
 // Params for tests
 template<class InputType>
