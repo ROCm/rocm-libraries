@@ -27,19 +27,23 @@
  *
  ******************************************************************************/
 
- #ifndef HIBCUB_ROCPRIM_THREAD_THREAD_SCAN_HPP_
- #define HIBCUB_ROCPRIM_THREAD_THREAD_SCAN_HPP_
+#ifndef HIBCUB_ROCPRIM_THREAD_THREAD_SCAN_HPP_
+#define HIBCUB_ROCPRIM_THREAD_THREAD_SCAN_HPP_
 
 
- #include "../../../config.hpp"
- #include "../../../thread/thread_operators.cuh"
+#include "../../../config.hpp"
+// #include "../../../thread/thread_operators.cuh"
 
- BEGIN_HIPCUB_NAMESPACE
+BEGIN_HIPCUB_NAMESPACE
 
- /// Internal namespace (to prevent ADL mishaps between static functions when mixing different CUB installations)
- namespace internal {
+/// Internal namespace (to prevent ADL mishaps between static functions when mixing different CUB installations)
+namespace internal {
 
-
+template <int A>
+struct Int2Type
+{
+    enum {VALUE = A};
+};
  /**
   * \addtogroup UtilModule
   * @{
@@ -104,7 +108,6 @@
      return ThreadScanExclusive(inclusive, exclusive, input + 1, output + 1, scan_op, Int2Type<LENGTH - 1>());
  }
 
-
  /**
   * \brief Perform a sequential exclusive prefix scan over the statically-sized \p input array, seeded with the specified \p prefix.  The aggregate is returned.
   *
@@ -126,14 +129,6 @@
      return ThreadScanExclusive<LENGTH>((T*) input, (T*) output, scan_op, prefix, apply_prefix);
  }
 
-
-
-
-
-
-
-
-
  template <
      int         LENGTH,
      typename    T,
@@ -154,7 +149,6 @@
 
      return inclusive;
  }
-
 
  /**
   * \brief Perform a sequential inclusive prefix scan over \p LENGTH elements of the \p input array.  The aggregate is returned.
