@@ -1,5 +1,5 @@
 /******************************************************************************
- * Copyright (c) 2011, Duane Merrill.  All rights reserved.
+ * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
  * Modifications Copyright (c) 2021, Advanced Micro Devices, Inc.  All rights reserved.
  *
@@ -27,19 +27,42 @@
  *
  ******************************************************************************/
 
-/**
- * \file
- * Thread utilities for sequential prefix scan over statically-sized array types
- */
+#ifndef HIPHIPCUB_THREAD_THREAD_STORE_HPP_
+#define HIPHIPCUB_THREAD_THREAD_STORE_HPP_
+BEGIN_HIPCUB_NAMESPACE
 
- #ifndef HIPCUB_THREAD_THREAD_SEARCH_HPP_
- #define HIPCUB_THREAD_THREAD_SEARCH_HPP_
+enum CacheStoreModifier
+{
+    STORE_DEFAULT,              ///< Default (no modifier)
+    STORE_WB,                   ///< Cache write-back all coherent levels
+    STORE_CG,                   ///< Cache at global level
+    STORE_CS,                   ///< Cache streaming (likely to be accessed once)
+    STORE_WT,                   ///< Cache write-through (to system memory)
+    STORE_VOLATILE,             ///< Volatile shared (any memory space)
+};
 
-#ifdef __HIP_PLATFORM_HCC__
-    #include "../backend/rocprim/thread/thread_search.hpp"
-#elif defined(__HIP_PLATFORM_NVCC__)
-    #include "../config.hpp"
-    #include <cub/thread/thread_search.cuh>
-#endif
+template <
+    CacheStoreModifier MODIFIER = STORE_DEFAULT,
+    typename OutputIteratorT,
+    typename T
+>
+__device__ __forceinline__ void ThreadStore(
+    OutputIteratorT itr,
+    T               val)
+{
+    ThreadStore<MODIFIER>(&(*itr), val);
+}
 
+template <
+    CacheStoreModifier MODIFIER = STORE_DEFAULT,
+    typename T
+>
+__device__ __forceinline__ void ThreadStore(
+    T *ptr,
+    T val)
+{
+    __builtin_memcpy(ptr, &val, sizeof(T));
+}
+
+END_HIPCUB_NAMESPACE
 #endif

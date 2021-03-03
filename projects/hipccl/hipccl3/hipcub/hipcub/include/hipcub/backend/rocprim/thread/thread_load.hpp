@@ -1,5 +1,5 @@
 /******************************************************************************
- * Copyright (c) 2011, Duane Merrill.  All rights reserved.
+ * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
  * Modifications Copyright (c) 2021, Advanced Micro Devices, Inc.  All rights reserved.
  *
@@ -27,19 +27,45 @@
  *
  ******************************************************************************/
 
-/**
- * \file
- * Thread utilities for sequential prefix scan over statically-sized array types
- */
+#ifndef HIPHIPCUB_THREAD_THREAD_LOAD_HPP_
+#define HIPHIPCUB_THREAD_THREAD_LOAD_HPP_
+BEGIN_HIPCUB_NAMESPACE
 
- #ifndef HIPCUB_THREAD_THREAD_SEARCH_HPP_
- #define HIPCUB_THREAD_THREAD_SEARCH_HPP_
+enum CacheLoadModifier
+{
+    LOAD_DEFAULT,       ///< Default (no modifier)
+    LOAD_CA,            ///< Cache at all levels
+    LOAD_CG,            ///< Cache at global level
+    LOAD_CS,            ///< Cache streaming (likely to be accessed once)
+    LOAD_CV,            ///< Cache as volatile (including cached system lines)
+    LOAD_LDG,           ///< Cache as texture
+    LOAD_VOLATILE,      ///< Volatile (any memory space)
+};
 
-#ifdef __HIP_PLATFORM_HCC__
-    #include "../backend/rocprim/thread/thread_search.hpp"
-#elif defined(__HIP_PLATFORM_NVCC__)
-    #include "../config.hpp"
-    #include <cub/thread/thread_search.cuh>
+template <
+    CacheLoadModifier MODIFIER = LOAD_DEFAULT,
+    typename InputIteratorT>
+HIPCUB_DEVICE __forceinline__
+typename std::iterator_traits<InputIteratorT>::value_type
+ThreadLoad(InputIteratorT itr)
+{
+    using T = typename std::iterator_traits<InputIteratorT>::value_type;
+    T retval = ThreadLoad<MODIFIER>(&(*itr));
+    return *itr;
+}
+
+template <
+    CacheLoadModifier MODIFIER = LOAD_DEFAULT,
+    typename T>
+HIPCUB_DEVICE __forceinline__
+T
+ThreadLoad(T* ptr)
+{
+    T retval;
+    __builtin_memcpy(&retval, ptr, sizeof(T));
+    return retval;
+}
+
+END_HIPCUB_NAMESPACE
 #endif
 
-#endif

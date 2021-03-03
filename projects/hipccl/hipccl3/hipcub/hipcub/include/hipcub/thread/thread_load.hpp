@@ -27,52 +27,12 @@
  *
  ******************************************************************************/
 
-#ifndef HIPCUB_THREAD_THREAD_LOAD_HPP_
-#define HIPCUB_THREAD_THREAD_LOAD_HPP_
+#ifndef HIPCUB_THREAD_LOAD_HPP_
+#define HIPCUB_THREAD_LOAD_HPP_
 
 #ifdef __HIP_PLATFORM_HCC__
-
-#include "../config.hpp"
-
-BEGIN_HIPCUB_NAMESPACE
-
-enum CacheLoadModifier
-{
-    LOAD_DEFAULT,       ///< Default (no modifier)
-    LOAD_CA,            ///< Cache at all levels
-    LOAD_CG,            ///< Cache at global level
-    LOAD_CS,            ///< Cache streaming (likely to be accessed once)
-    LOAD_CV,            ///< Cache as volatile (including cached system lines)
-    LOAD_LDG,           ///< Cache as texture
-    LOAD_VOLATILE,      ///< Volatile (any memory space)
-};
-
-template <
-    CacheLoadModifier MODIFIER = LOAD_DEFAULT,
-    typename InputIteratorT>
-HIPCUB_DEVICE __forceinline__
-typename std::iterator_traits<InputIteratorT>::value_type
-ThreadLoad(InputIteratorT itr)
-{
-    using T = typename std::iterator_traits<InputIteratorT>::value_type;
-    T retval = ThreadLoad<MODIFIER>(&(*itr));
-    return *itr;
-}
-
-template <
-    CacheLoadModifier MODIFIER = LOAD_DEFAULT,
-    typename T>
-HIPCUB_DEVICE __forceinline__
-T
-ThreadLoad(T* ptr)
-{
-    T retval;
-    __builtin_memcpy(&retval, ptr, sizeof(T));
-    return retval;
-}
-
-END_HIPCUB_NAMESPACE
-
+    #include "../config.hpp"
+    #include "../backend/rocprim/thread/thread_load.hpp"
 #elif defined(__HIP_PLATFORM_NVCC__)
     #include "../config.hpp"
     #include <cub/thread/thread_load.cuh>
