@@ -27,12 +27,12 @@
  *
  ******************************************************************************/
 
-#ifndef HIPCUB_THREAD_STORE_HPP_
-#define HIPCUB_THREAD_STORE_HPP_
+#ifndef HIPCUB_THREAD_THREAD_STORE_HPP_
+#define HIPCUB_THREAD_THREAD_STORE_HPP_
 
 #ifdef __HIP_PLATFORM_HCC__
     #include "../config.hpp"
-    #include "../backend/rocprim/thread/thread_store.hpp" 
+    #include "../backend/rocprim/thread/thread_store.hpp"
 #elif defined(__HIP_PLATFORM_NVCC__)
     #include "../config.hpp"
     #include <cub/thread/thread_store.cuh>

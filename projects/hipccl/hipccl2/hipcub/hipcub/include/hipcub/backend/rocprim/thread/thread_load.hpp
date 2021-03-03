@@ -27,8 +27,8 @@
  *
  ******************************************************************************/
 
-#ifndef HIPHIPCUB_THREAD_THREAD_LOAD_HPP_
-#define HIPHIPCUB_THREAD_THREAD_LOAD_HPP_
+#ifndef HIPCUB_ROCPRIM_THREAD_THREAD_LOAD_HPP_
+#define HIPCUB_ROCPRIM_THREAD_THREAD_LOAD_HPP_
 BEGIN_HIPCUB_NAMESPACE
 
 enum CacheLoadModifier

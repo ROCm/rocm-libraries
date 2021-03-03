@@ -284,7 +284,7 @@ void thread_scan_kernel(Type* const device_input, Type* device_output)
     size_t input_index = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * Length;
     size_t output_index = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * Length;
 
-    hipcub::internal::ThreadScanInclusive<Length>(&device_input[input_index], 
+    hipcub::internal::ThreadScanInclusive<Length>(&device_input[input_index],
                                                   &device_output[output_index],
                                                   sum_op());
 }
@@ -358,5 +358,149 @@ TYPED_TEST(HipcubThreadOperationTests, Scan)
 
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_output));
+    }
+}
+
+template<class Type>
+__global__
+void thread_search_kernel(
+    Type* const device_input,
+    Type* device_lower_bound_output,
+    Type* device_upper_bound_output,
+    Type val,
+    uint32_t num_items)
+{
+    size_t input_index = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x) * num_items;
+    size_t output_index = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+
+    device_lower_bound_output[output_index] =
+        hipcub::LowerBound(device_input + input_index, num_items, val);
+
+    device_upper_bound_output[output_index] =
+        hipcub::UpperBound(device_input + input_index, num_items, val);
+}
+
+TYPED_TEST(HipcubThreadOperationTests, Bounds)
+{
+    using T = typename TestFixture::type;
+    using OffsetT = uint32_t;
+    constexpr uint32_t block_size = 256;
+    constexpr uint32_t grid_size = 1;
+
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+        uint32_t num_items = test_utils::get_random_value(1, 12, seed_value);
+        T val = test_utils::get_random_value(2, 200, seed_value);
+
+        uint32_t size = block_size * grid_size * num_items;
+
+        // Generate data
+        std::vector<T> input = test_utils::get_random_data<T>(size, 2, 200, seed_value);
+
+        std::vector<T> output_lower_bound(size / num_items);
+        std::vector<T> output_upper_bound(size / num_items);
+
+        std::vector<T> expected_lower_bound(size / num_items);
+        std::vector<T> expected_upper_bound(size / num_items);
+
+        // Calculate expected results on host
+        for(uint32_t grid_index = 0; grid_index < grid_size; grid_index++)
+        {
+            for(uint32_t i = 0; i < block_size; i++)
+            {
+                uint32_t input_offset = (grid_index * block_size + i) * num_items;
+                uint32_t output_offset = grid_index * block_size + i;
+                uint32_t local_num_items = num_items;
+                OffsetT retval = 0;
+
+                // calculate expected lower bound
+                while (local_num_items > 0)
+                {
+                    OffsetT half = local_num_items >> 1;
+                    if (input[input_offset + retval + half] < val)
+                    {
+                        retval = retval + (half + 1);
+                        local_num_items = local_num_items - (half + 1);
+                    }
+                    else
+                    {
+                        local_num_items = half;
+                    }
+                }
+                expected_lower_bound[output_offset] = retval;
+
+                // calculate expected upper bound
+                local_num_items = num_items;
+                retval = 0;
+                while (local_num_items > 0)
+                {
+                    OffsetT half = local_num_items >> 1;
+                    if (val < input[input_offset + retval + half])
+                    {
+                        local_num_items = half;
+                    }
+                    else
+                    {
+                        retval = retval + (half + 1);
+                        local_num_items = local_num_items - (half + 1);
+                    }
+                }
+                expected_upper_bound[output_offset] = retval;
+            }
+        }
+
+        // Preparing device
+        T* device_input;
+        HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(T)));
+
+        T* device_lower_bound_output;
+        HIP_CHECK(hipMalloc(&device_lower_bound_output, output_lower_bound.size() * sizeof(T)));
+
+        T* device_upper_bound_output;
+        HIP_CHECK(hipMalloc(&device_upper_bound_output, output_upper_bound.size() * sizeof(T)));
+
+        HIP_CHECK(
+            hipMemcpy(
+                device_input, input.data(),
+                input.size() * sizeof(T),
+                hipMemcpyHostToDevice
+            )
+        );
+
+        thread_search_kernel<T>
+            <<<grid_size, block_size>>>
+                (device_input, device_lower_bound_output, device_upper_bound_output, val, num_items);
+
+        // Reading results back
+        HIP_CHECK(
+            hipMemcpy(
+                output_lower_bound.data(), device_lower_bound_output,
+                output_lower_bound.size() * sizeof(T),
+                hipMemcpyDeviceToHost
+            )
+        );
+
+        // Reading results back
+        HIP_CHECK(
+            hipMemcpy(
+                output_upper_bound.data(), device_upper_bound_output,
+                output_upper_bound.size() * sizeof(T),
+                hipMemcpyDeviceToHost
+            )
+        );
+
+        // Verifying results
+        for(size_t i = 0; i < output_lower_bound.size(); i++)
+        {
+            ASSERT_EQ(output_lower_bound[i], expected_lower_bound[i]);
+            ASSERT_EQ(output_upper_bound[i], expected_upper_bound[i]);
+        }
+
+        HIP_CHECK(hipFree(device_input));
+        HIP_CHECK(hipFree(device_lower_bound_output));
+        HIP_CHECK(hipFree(device_upper_bound_output));
     }
 }

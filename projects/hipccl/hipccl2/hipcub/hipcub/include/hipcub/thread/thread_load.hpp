@@ -27,8 +27,8 @@
  *
  ******************************************************************************/
 
-#ifndef HIPCUB_THREAD_LOAD_HPP_
-#define HIPCUB_THREAD_LOAD_HPP_
+#ifndef HIPCUB_THREAD_THREAD_LOAD_HPP_
+#define HIPCUB_THREAD_THREAD_LOAD_HPP_
 
 #ifdef __HIP_PLATFORM_HCC__
     #include "../config.hpp"
