@@ -27,6 +27,9 @@
 #include "../detail/various.hpp"
 #include "block_scan.hpp"
 
+#include "../thread/thread_reduce.hpp"
+#include "../thread/thread_scan.hpp"
+#include "../thread/thread_operators.hpp"
 #include "../intrinsics.hpp"
 #include "../functional.hpp"
 #include "../types.hpp"
@@ -46,7 +49,7 @@ template <int BinsPerThread>
 struct block_radix_rank_empty_callback
 {
     ROCPRIM_DEVICE inline
-    void operator()(int (&bins)[BinsPerThread]) {}
+    void operator()(int (&bins)[BinsPerThread]) { (void)bins; }
 };
 
 template <
@@ -184,8 +187,7 @@ private:
             raking_ptr = smem_raking_ptr;
         }
 
-        // return internal::ThreadReduce<RakingSegment>(raking_ptr, Sum());
-        return 0; //TODO: Implment ThreadReduce
+        return internal::thread_reduce<RakingSegment>(raking_ptr, sum());
     }
 
 
@@ -202,8 +204,7 @@ private:
             smem_raking_ptr;
 
         // Exclusive raking downsweep scan
-        // TODO: Implement Thread
-        // internal::ThreadScanExclusive<RakingSegment>(raking_ptr, raking_ptr, Sum(), raking_partial);
+        internal::thread_scan_exclusive<RakingSegment>(raking_ptr, raking_ptr, sum(), raking_partial);
 
 
         if (MemoizeOuterScan)
@@ -861,8 +862,7 @@ struct block_radix_rank_match_early_counts
                 for (int u = 0; u < WARP_BinsPerThread; ++u)
                 {
                     int bin = lane + u * WarpThreads;
-                    // bins[u] = internal::ThreadReduce(warp_histograms[bin], Sum());
-                    //TODO: Implement Thread Reduce
+                    bins[u] = internal::thread_reduce(warp_histograms[bin], sum());
                 }
                 ::rocprim::syncthreads();
 
