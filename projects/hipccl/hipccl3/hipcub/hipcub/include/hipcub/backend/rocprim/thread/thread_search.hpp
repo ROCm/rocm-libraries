@@ -27,11 +27,10 @@
  *
  ******************************************************************************/
 
- #ifndef HIBCUB_ROCPRIM_THREAD_THREAD_SCAN_HPP_
- #define HIBCUB_ROCPRIM_THREAD_THREAD_SCAN_HPP_
+ #ifndef HIBCUB_ROCPRIM_THREAD_THREAD_SEARCH_HPP_
+ #define HIBCUB_ROCPRIM_THREAD_THREAD_SEARCH_HPP_
 
  #include <iterator>
- #include "../../../config.hpp"
 
  BEGIN_HIPCUB_NAMESPACE
 
@@ -51,9 +50,6 @@ __host__ __device__ __forceinline__ void MergePathSearch(
     OffsetT         b_len,
     CoordinateT&    path_coordinate)
 {
-    /// The value type of the input iterator
-    typedef typename std::iterator_traits<AIteratorT>::value_type T;
-
     OffsetT split_min = CUB_MAX(diagonal - b_len, 0);
     OffsetT split_max = CUB_MIN(diagonal, a_len);
 
