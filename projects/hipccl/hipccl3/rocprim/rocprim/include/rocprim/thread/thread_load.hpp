@@ -46,7 +46,7 @@ enum cache_load_modifier : int
 };
 
 template <
-    cache_load_modifier MODIFIER = LOAD_DEFAULT,
+    cache_load_modifier MODIFIER = load_default,
     typename InputIteratorT>
 ROCPRIM_DEVICE inline
 typename std::iterator_traits<InputIteratorT>::value_type
@@ -58,7 +58,7 @@ thread_load(InputIteratorT itr)
 }
 
 template <
-    cache_load_modifier MODIFIER = LOAD_DEFAULT,
+    cache_load_modifier MODIFIER = load_default,
     typename T>
 ROCPRIM_DEVICE inline
 T thread_load(T* ptr)

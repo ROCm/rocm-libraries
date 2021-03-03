@@ -27,13 +27,13 @@
  *
  ******************************************************************************/
 
- #ifndef HIBCUB_ROCPRIM_THREAD_THREAD_SCAN_HPP_
- #define HIBCUB_ROCPRIM_THREAD_THREAD_SCAN_HPP_
+ #ifndef ROCPRIM_THREAD_THREAD_SCAN_HPP_
+ #define ROCPRIM_THREAD_THREAD_SCAN_HPP_
 
  #include <iterator>
- #include "../../../config.hpp"
+ #include "../config.hpp"
 
- BEGIN_HIPCUB_NAMESPACE
+ BEGIN_ROCPRIM_NAMESPACE
 
 /**
  * Computes the begin offsets into A and B for the specific diagonal
@@ -139,6 +139,6 @@ ROCPRIM_DEVICE inline OffsetT upper_bound(
     return retval;
 }
 
-END_HIPCUB_NAMESPACE
+END_ROCPRIM_NAMESPACE
 
-#endif // HIBCUB_ROCPRIM_THREAD_THREAD_SCAN_HPP_
+#endif // ROCPRIM_THREAD_THREAD_SCAN_HPP_
