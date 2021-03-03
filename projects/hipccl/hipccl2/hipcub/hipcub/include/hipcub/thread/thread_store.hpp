@@ -27,50 +27,12 @@
  *
  ******************************************************************************/
 
-#ifndef HIPHIPCUB_THREAD_THREAD_STORE_HPP_
-#define HIPHIPCUB_THREAD_THREAD_STORE_HPP_
+#ifndef HIPCUB_THREAD_STORE_HPP_
+#define HIPCUB_THREAD_STORE_HPP_
 
 #ifdef __HIP_PLATFORM_HCC__
-
-#include "../config.hpp"
-
-BEGIN_HIPCUB_NAMESPACE
-
-enum CacheStoreModifier
-{
-    STORE_DEFAULT,              ///< Default (no modifier)
-    STORE_WB,                   ///< Cache write-back all coherent levels
-    STORE_CG,                   ///< Cache at global level
-    STORE_CS,                   ///< Cache streaming (likely to be accessed once)
-    STORE_WT,                   ///< Cache write-through (to system memory)
-    STORE_VOLATILE,             ///< Volatile shared (any memory space)
-};
-
-template <
-    CacheStoreModifier MODIFIER = STORE_DEFAULT,
-    typename OutputIteratorT,
-    typename T
->
-__device__ __forceinline__ void ThreadStore(
-    OutputIteratorT itr,
-    T               val)
-{
-    ThreadStore<MODIFIER>(&(*itr), val);
-}
-
-template <
-    CacheStoreModifier MODIFIER = STORE_DEFAULT,
-    typename T
->
-__device__ __forceinline__ void ThreadStore(
-    T *ptr,
-    T val)
-{
-    __builtin_memcpy(ptr, &val, sizeof(T));
-}
-
-END_HIPCUB_NAMESPACE
-
+    #include "../config.hpp"
+    #include "../backend/rocprim/thread/thread_store.hpp" 
 #elif defined(__HIP_PLATFORM_NVCC__)
     #include "../config.hpp"
     #include <cub/thread/thread_store.cuh>
