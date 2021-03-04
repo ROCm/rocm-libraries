@@ -64,9 +64,15 @@ public:
   #endif
 
 private:
-  ROCPRIM_SHARED_MEMORY storage_type_ storage;
+  storage_type_* storage;
 
 public:
+  ROCPRIM_DEVICE inline
+  block_shuffle()
+  {
+      ROCPRIM_SHARED_MEMORY storage_type_ shared_storage;
+      storage = &shared_storage;
+  }
   /**
    * \brief Each <em>thread<sub>i</sub></em> obtains the \p input provided by <em>thread</em><sub><em>i</em>+<tt>distance</tt></sub>. The offset \p distance may be negative.
    *
@@ -80,14 +86,16 @@ public:
     int distance =1
   )
   {
+
+
       const size_t flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
-      storage.prev[flat_id] = input;
+      storage->prev[flat_id] = input;
       ::rocprim::syncthreads();
 
       const int offset_tid = static_cast<int>(flat_id) + distance;
       if ((offset_tid >= 0) && (offset_tid < (int)BlockSize))
       {
-          output = storage.prev[static_cast<size_t>(offset_tid)];
+          output = storage->prev[static_cast<size_t>(offset_tid)];
       }
   }
 
@@ -104,14 +112,14 @@ public:
       unsigned int distance = 1)  ///< [in] Offset distance (0 < \p distance < <tt>BlockSize</tt>)
   {
       const size_t flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
-      storage.prev[flat_id] = input;
+      storage->prev[flat_id] = input;
       ::rocprim::syncthreads();
 
       unsigned int offset = threadIdx.x + distance;
       if (offset >= BlockSize)
           offset -= BlockSize;
 
-      output = storage.prev[offset];
+      output = storage->prev[offset];
   }
 
 
@@ -130,7 +138,7 @@ public:
         T (&prev)[ItemsPerThread])    ///< [out] The corresponding predecessor items (may be aliased to \p input).  The item \p prev[0] is not updated for <em>thread</em><sub>0</sub>.
     {
       const size_t flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
-      storage.prev[flat_id] = input[ItemsPerThread -1];
+      storage->prev[flat_id] = input[ItemsPerThread -1];
       ::rocprim::syncthreads();
       #pragma unroll
       for (unsigned int i = ItemsPerThread - 1; i > 0; --i)
@@ -139,7 +147,7 @@ public:
       }
       if (flat_id > 0)
       {
-          prev[0] = storage.prev[flat_id - 1];
+          prev[0] = storage->prev[flat_id - 1];
       }
     }
 
@@ -154,13 +162,13 @@ public:
      * - \smemreuse
      */
     template <int ItemsPerThread>
-    __device__ __forceinline__ void up(
+    ROCPRIM_DEVICE inline void up(
         T (&input)[ItemsPerThread],   ///< [in] The calling thread's input items
         T (&prev)[ItemsPerThread],    ///< [out] The corresponding predecessor items (may be aliased to \p input).  The item \p prev[0] is not updated for <em>thread</em><sub>0</sub>.
         T &block_suffix)                ///< [out] The item \p input[ItemsPerThread-1] from <em>thread</em><sub><tt>BlockSize-1</tt></sub>, provided to all threads
     {
         up(input, prev);
-        block_suffix = storage.prev[BlockSize - 1];
+        block_suffix = storage->prev[BlockSize - 1];
     }
 
     /**
@@ -172,23 +180,23 @@ public:
      * - \smemreuse
      */
     template <unsigned int ItemsPerThread>
-    __device__ __forceinline__ void down(
+    ROCPRIM_DEVICE inline void down(
         T (&input)[ItemsPerThread],   ///< [in] The calling thread's input items
         T (&next)[ItemsPerThread])    ///< [out] The corresponding predecessor items (may be aliased to \p input).  The value \p next[0] is not updated for <em>thread</em><sub>BlockSize-1</sub>.
     {
       const size_t flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
-      storage.next[flat_id] = input[0];
+      storage->next[flat_id] = input[0];
       ::rocprim::syncthreads();
 
       #pragma unroll
-      for (int i = 0; i < (ItemsPerThread - 1); ++i)
+      for (unsigned int i = 0; i < (ItemsPerThread - 1); ++i)
       {
         next[i] = input[i + 1];
       }
 
       if (flat_id <(BlockSize -1))
       {
-        next[0] = storage.next[flat_id + 1];
+        next[ItemsPerThread -1] = storage->next[flat_id + 1];
       }
     }
 
@@ -202,13 +210,13 @@ public:
      * - \smemreuse
      */
     template <unsigned int ItemsPerThread>
-    __device__ __forceinline__ void Down(
+    ROCPRIM_DEVICE inline void Down(
         T (&input)[ItemsPerThread],   ///< [in] The calling thread's input items
         T (&next)[ItemsPerThread],    ///< [out] The corresponding predecessor items (may be aliased to \p input).  The value \p next[0] is not updated for <em>thread</em><sub>BlockSize-1</sub>.
         T &block_suffix)                ///< [out] The item \p input[0] from <em>thread</em><sub><tt>0</tt></sub>, provided to all threads
     {
         Up(input, next);
-        block_suffix = storage.next[0];
+        block_suffix = storage->next[0];
     }
 
 
