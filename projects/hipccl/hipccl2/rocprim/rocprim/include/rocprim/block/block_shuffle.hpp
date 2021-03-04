@@ -64,7 +64,7 @@ public:
   #endif
 
 private:
-  ROCPRIM_SHARED_MEMORY storage_type storage;
+  ROCPRIM_SHARED_MEMORY storage_type_ storage;
 
 public:
   /**
@@ -81,13 +81,13 @@ public:
   )
   {
       const size_t flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
-      storage[flat_id].prev = input;
+      storage.prev[flat_id] = input;
       ::rocprim::syncthreads();
 
       const int offset_tid = static_cast<int>(flat_id) + distance;
-      if ((offset_tid >= 0) && (offset_tid < BlockSize))
+      if ((offset_tid >= 0) && (offset_tid < (int)BlockSize))
       {
-          output = storage[static_cast<size_t>(offset_tid)].prev;
+          output = storage.prev[static_cast<size_t>(offset_tid)];
       }
   }
 
@@ -104,14 +104,14 @@ public:
       unsigned int distance = 1)  ///< [in] Offset distance (0 < \p distance < <tt>BlockSize</tt>)
   {
       const size_t flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
-      storage[flat_id].prev = input;
+      storage.prev[flat_id] = input;
       ::rocprim::syncthreads();
 
       unsigned int offset = threadIdx.x + distance;
       if (offset >= BlockSize)
           offset -= BlockSize;
 
-      output = storage[offset].prev;
+      output = storage.prev[offset];
   }
 
 
@@ -130,7 +130,7 @@ public:
         T (&prev)[ItemsPerThread])    ///< [out] The corresponding predecessor items (may be aliased to \p input).  The item \p prev[0] is not updated for <em>thread</em><sub>0</sub>.
     {
       const size_t flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
-      storage[flat_id].prev = input[ItemsPerThread -1];
+      storage.prev[flat_id] = input[ItemsPerThread -1];
       ::rocprim::syncthreads();
       #pragma unroll
       for (unsigned int i = ItemsPerThread - 1; i > 0; --i)
@@ -139,7 +139,7 @@ public:
       }
       if (flat_id > 0)
       {
-          prev[0] = storage[flat_id - 1].prev;
+          prev[0] = storage.prev[flat_id - 1];
       }
     }
 
@@ -160,7 +160,7 @@ public:
         T &block_suffix)                ///< [out] The item \p input[ItemsPerThread-1] from <em>thread</em><sub><tt>BlockSize-1</tt></sub>, provided to all threads
     {
         up(input, prev);
-        block_suffix = storage[BlockSize - 1].prev;
+        block_suffix = storage.prev[BlockSize - 1];
     }
 
     /**
@@ -177,7 +177,7 @@ public:
         T (&next)[ItemsPerThread])    ///< [out] The corresponding predecessor items (may be aliased to \p input).  The value \p next[0] is not updated for <em>thread</em><sub>BlockSize-1</sub>.
     {
       const size_t flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
-      storage[flat_id].next = input[0];
+      storage.next[flat_id] = input[0];
       ::rocprim::syncthreads();
 
       #pragma unroll
@@ -188,7 +188,7 @@ public:
 
       if (flat_id <(BlockSize -1))
       {
-        next[0] = storage[flat_id + 1].next;
+        next[0] = storage.next[flat_id + 1];
       }
     }
 
@@ -208,7 +208,7 @@ public:
         T &block_suffix)                ///< [out] The item \p input[0] from <em>thread</em><sub><tt>0</tt></sub>, provided to all threads
     {
         Up(input, next);
-        block_suffix = storage[0].next;
+        block_suffix = storage.next[0];
     }
 
 

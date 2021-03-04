@@ -59,17 +59,17 @@ struct with_b_index_arg<
 
 // Wrapping function that allows to call FlagOp of any of these signatures:
 // with b_index (a, b, b_index) or without it (a, b).
-template<class T, class FlagOp>
+template<class T, class FlagType, class FlagOp>
 ROCPRIM_DEVICE inline
-typename std::enable_if<with_b_index_arg<T, FlagOp>::value, T>::type
+typename std::enable_if<with_b_index_arg<T, FlagOp>::value, FlagType>::type
 apply(FlagOp flag_op, const T& a, const T& b, unsigned int index)
 {
     return flag_op(b, a, index);
 }
 
-template<class T, class FlagOp>
+template<class T, class FlagType, class FlagOp>
 ROCPRIM_DEVICE inline
-typename std::enable_if<!with_b_index_arg<T, FlagOp>::value, T>::type
+typename std::enable_if<!with_b_index_arg<T, FlagOp>::value, FlagType>::type
 apply(FlagOp flag_op, const T& a, const T& b, unsigned int)
 {
     return flag_op(b, a);
@@ -935,7 +935,7 @@ private:
                 {
                     predecessor_item = storage_.last_items[flat_id - 1];
                 }
-                head_flags[0] = detail::apply(flag_op, predecessor_item, items[0], flat_id * ItemsPerThread);
+                head_flags[0] = detail::apply<T, Flag, FlagOp>(flag_op, predecessor_item, items[0], flat_id * ItemsPerThread);
             }
             else
             {
@@ -943,7 +943,7 @@ private:
                 head_flags[0] = true;
                 if(flat_id != 0)
                 {
-                    head_flags[0] = detail::apply(
+                    head_flags[0] = detail::apply<T, Flag, FlagOp>(
                         flag_op, storage_.last_items[flat_id - 1], items[0], flat_id * ItemsPerThread
                     );
                 }
@@ -951,14 +951,14 @@ private:
 
             for(unsigned int i = 1; i < ItemsPerThread; i++)
             {
-                head_flags[i] = detail::apply(flag_op, items[i - 1], items[i], flat_id * ItemsPerThread + i);
+                head_flags[i] = detail::apply<T, Flag, FlagOp>(flag_op, items[i - 1], items[i], flat_id * ItemsPerThread + i);
             }
         }
         if(WithTails)
         {
             for(unsigned int i = 0; i < ItemsPerThread - 1; i++)
             {
-                tail_flags[i] = detail::apply(flag_op, items[i], items[i + 1], flat_id * ItemsPerThread + i + 1);
+                tail_flags[i] = detail::apply<T, Flag, FlagOp>(flag_op, items[i], items[i + 1], flat_id * ItemsPerThread + i + 1);
             }
 
             if(WithTileSuccessor)
@@ -968,7 +968,7 @@ private:
                 {
                     successor_item = storage_.first_items[flat_id + 1];
                 }
-                tail_flags[ItemsPerThread - 1] = detail::apply(
+                tail_flags[ItemsPerThread - 1] = detail::apply<T, Flag, FlagOp>(
                     flag_op, items[ItemsPerThread - 1], successor_item,
                     flat_id * ItemsPerThread + ItemsPerThread
                 );
@@ -979,7 +979,7 @@ private:
                 tail_flags[ItemsPerThread - 1] = true;
                 if(flat_id != BlockSize - 1)
                 {
-                    tail_flags[ItemsPerThread - 1] = detail::apply(
+                    tail_flags[ItemsPerThread - 1] = detail::apply<T, Flag, FlagOp>(
                         flag_op, items[ItemsPerThread - 1], storage_.first_items[flat_id + 1],
                         flat_id * ItemsPerThread + ItemsPerThread
                     );
