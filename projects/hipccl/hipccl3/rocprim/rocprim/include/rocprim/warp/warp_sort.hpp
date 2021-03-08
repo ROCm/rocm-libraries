@@ -100,9 +100,6 @@ class warp_sort : detail::warp_sort_shuffle<Key, WarpSize, Value>
 {
     typedef typename detail::warp_sort_shuffle<Key, WarpSize, Value> base_type;
 
-    // Check if WarpSize is correct
-    static_assert(WarpSize <= warp_size(), "WarpSize can't be greater than hardware warp size.");
-
 public:
     /// \brief Struct used to allocate a temporary memory that is required for thread
     /// communication during operations provided by related parallel primitive.
@@ -129,6 +126,11 @@ public:
     void sort(Key& thread_key,
               BinaryFunction compare_function = BinaryFunction())
     {
+        if (WarpSize > warp_size())
+        {
+            ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size . Aborting warp sort.");
+            return;
+        }
         base_type::sort(thread_key, compare_function);
     }
 
@@ -166,6 +168,11 @@ public:
               storage_type& storage,
               BinaryFunction compare_function = BinaryFunction())
     {
+        if (WarpSize > warp_size())
+        {
+            ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size. Aborting warp sort.");
+            return;
+        }
         base_type::sort(
             thread_key, storage, compare_function
         );
@@ -188,6 +195,11 @@ public:
               Value& thread_value,
               BinaryFunction compare_function = BinaryFunction())
     {
+        if (WarpSize > warp_size())
+        {
+            ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size. Aborting warp sort.");
+            return;
+        }
         base_type::sort(
             thread_key, thread_value, compare_function
         );
@@ -229,6 +241,11 @@ public:
               storage_type& storage,
               BinaryFunction compare_function = BinaryFunction())
     {
+        if (WarpSize > warp_size())
+        {
+            ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size. Aborting warp sort.");
+            return;
+        }
         base_type::sort(
             thread_key, thread_value, storage, compare_function
         );

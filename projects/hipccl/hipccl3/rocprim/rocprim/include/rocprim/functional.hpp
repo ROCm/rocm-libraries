@@ -31,6 +31,15 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \addtogroup utilsmodule_functional
 /// @{
 
+#define ROCPRIM_PRINT_ERROR_ONCE(message) \
+{                                          \
+    unsigned int idx = hipThreadIdx_x + (hipBlockIdx_x * hipBlockDim_x); \
+    idx += hipThreadIdx_y + (hipBlockIdx_y * hipBlockDim_y);             \
+    idx += hipThreadIdx_z + (hipBlockIdx_z * hipBlockDim_z);             \
+    if (idx == 0)                                                        \
+        printf("%s\n", #message);                                        \
+}
+
 template<class T>
 ROCPRIM_HOST_DEVICE inline
 constexpr T max(const T& a, const T& b)
