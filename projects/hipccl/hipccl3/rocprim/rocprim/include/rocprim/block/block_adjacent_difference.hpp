@@ -940,7 +940,7 @@ private:
             else
             {
                 // The first item in the block is always flagged
-                head_flags[0] = true;
+                head_flags[0] = 1;
                 if(flat_id != 0)
                 {
                     head_flags[0] = detail::apply<T, Flag, FlagOp>(
@@ -976,7 +976,7 @@ private:
             else
             {
                 // The last item in the block is always flagged
-                tail_flags[ItemsPerThread - 1] = true;
+                tail_flags[ItemsPerThread - 1] = 1;
                 if(flat_id != BlockSize - 1)
                 {
                     tail_flags[ItemsPerThread - 1] = detail::apply<T, Flag, FlagOp>(
