@@ -126,7 +126,7 @@ public:
     void sort(Key& thread_key,
               BinaryFunction compare_function = BinaryFunction())
     {
-        if (WarpSize > warp_size())
+        if( WarpSize > ::rocprim::warp_size() )
         {
             ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size . Aborting warp sort.");
             return;
@@ -168,7 +168,7 @@ public:
               storage_type& storage,
               BinaryFunction compare_function = BinaryFunction())
     {
-        if (WarpSize > warp_size())
+        if( WarpSize > ::rocprim::warp_size() )
         {
             ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size. Aborting warp sort.");
             return;
@@ -195,7 +195,7 @@ public:
               Value& thread_value,
               BinaryFunction compare_function = BinaryFunction())
     {
-        if (WarpSize > warp_size())
+        if( WarpSize > ::rocprim::warp_size() )
         {
             ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size. Aborting warp sort.");
             return;
@@ -241,7 +241,7 @@ public:
               storage_type& storage,
               BinaryFunction compare_function = BinaryFunction())
     {
-        if (WarpSize > warp_size())
+        if( WarpSize > ::rocprim::warp_size() )
         {
             ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size. Aborting warp sort.");
             return;

@@ -118,9 +118,6 @@ class warp_reduce
 {
     using base_type = typename detail::select_warp_reduce_impl<T, WarpSize, UseAllReduce>::type;
 
-    // Check if WarpSize is correct
-    static_assert(WarpSize <= warp_size(), "WarpSize can't be greater than hardware warp size.");
-
 public:
     /// \brief Struct used to allocate a temporary memory that is required for thread
     /// communication during operations provided by related parallel primitive.
@@ -183,6 +180,12 @@ public:
                 storage_type& storage,
                 BinaryFunction reduce_op = BinaryFunction())
     {
+        if( WarpSize > ::rocprim::warp_size() )
+        {
+            ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size . Aborting warp sort.");
+            return;
+        }
+
         base_type::reduce(input, output, storage, reduce_op);
     }
 
@@ -240,6 +243,12 @@ public:
                 storage_type& storage,
                 BinaryFunction reduce_op = BinaryFunction())
     {
+        if( WarpSize > ::rocprim::warp_size() )
+        {
+            ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size . Aborting warp sort.");
+            return;
+        }
+
         base_type::reduce(input, output, valid_items, storage, reduce_op);
     }
 
@@ -269,6 +278,12 @@ public:
                                storage_type& storage,
                                BinaryFunction reduce_op = BinaryFunction())
     {
+        if( WarpSize > ::rocprim::warp_size() )
+        {
+            ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size . Aborting warp sort.");
+            return;
+        }
+
         base_type::head_segmented_reduce(input, output, flag, storage, reduce_op);
     }
 
@@ -298,6 +313,12 @@ public:
                                storage_type& storage,
                                BinaryFunction reduce_op = BinaryFunction())
     {
+        if( WarpSize > ::rocprim::warp_size() )
+        {
+            ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size . Aborting warp sort.");
+            return;
+        }
+        
         base_type::tail_segmented_reduce(input, output, flag, storage, reduce_op);
     }
 };
