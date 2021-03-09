@@ -115,9 +115,6 @@ class warp_scan
 {
     using base_type = typename detail::select_warp_scan_impl<T, WarpSize>::type;
 
-    // Check if WarpSize is correct
-    static_assert(WarpSize <= warp_size(), "WarpSize can't be greater than hardware warp size.");
-
 public:
     /// \brief Struct used to allocate a temporary memory that is required for thread
     /// communication during operations provided by related parallel primitive.
@@ -184,6 +181,12 @@ public:
                         storage_type& storage,
                         BinaryFunction scan_op = BinaryFunction())
     {
+        if( WarpSize > ::rocprim::warp_size() )
+        {
+            ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size . Aborting warp sort.");
+            return;
+        }
+
         base_type::inclusive_scan(input, output, storage, scan_op);
     }
 
@@ -244,6 +247,12 @@ public:
                         storage_type& storage,
                         BinaryFunction scan_op = BinaryFunction())
     {
+        if( WarpSize > ::rocprim::warp_size() )
+        {
+            ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size . Aborting warp sort.");
+            return;
+        }
+
         base_type::inclusive_scan(input, output, reduction, storage, scan_op);
     }
 
@@ -307,6 +316,12 @@ public:
                         storage_type& storage,
                         BinaryFunction scan_op = BinaryFunction())
     {
+        if( WarpSize > ::rocprim::warp_size() )
+        {
+            ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size . Aborting warp sort.");
+            return;
+        }
+
         base_type::exclusive_scan(input, output, init, storage, scan_op);
     }
 
@@ -372,6 +387,12 @@ public:
                         storage_type& storage,
                         BinaryFunction scan_op = BinaryFunction())
     {
+        if( WarpSize > ::rocprim::warp_size() )
+        {
+            ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size . Aborting warp sort.");
+            return;
+        }
+
         base_type::exclusive_scan(input, output, init, reduction, storage, scan_op);
     }
 
@@ -442,6 +463,12 @@ public:
               storage_type& storage,
               BinaryFunction scan_op = BinaryFunction())
     {
+        if( WarpSize > ::rocprim::warp_size() )
+        {
+            ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size . Aborting warp sort.");
+            return;
+        }
+
         base_type::scan(input, inclusive_output, exclusive_output, init, storage, scan_op);
     }
 
@@ -513,6 +540,12 @@ public:
               storage_type& storage,
               BinaryFunction scan_op = BinaryFunction())
     {
+        if( WarpSize > ::rocprim::warp_size() )
+        {
+            ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size . Aborting warp sort.");
+            return;
+        }
+
         base_type::scan(
             input, inclusive_output, exclusive_output, init, reduction,
             storage, scan_op
@@ -533,6 +566,12 @@ public:
                 const unsigned int src_lane,
                 storage_type& storage)
     {
+        if( WarpSize > ::rocprim::warp_size() )
+        {
+            ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size . Aborting warp sort.");
+            return;
+        }
+
         return base_type::broadcast(input, src_lane, storage);
     }
 
@@ -541,6 +580,12 @@ protected:
     ROCPRIM_DEVICE inline
     void to_exclusive(T inclusive_input, T& exclusive_output, storage_type& storage)
     {
+        if( WarpSize > ::rocprim::warp_size() )
+        {
+            ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size . Aborting warp sort.");
+            return;
+        }
+        
         return base_type::to_exclusive(inclusive_input, exclusive_output, storage);
     }
 #endif

@@ -75,7 +75,7 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScan)
     constexpr size_t block_size =
         rocprim::detail::is_power_of_two(logical_warp_size)
         ? rocprim::max<size_t>(rocprim::warp_size(), logical_warp_size * 4)
-        : (rocprim::warp_size()/logical_warp_size) * logical_warp_size;
+        : rocprim::max<size_t>((rocprim::warp_size()/logical_warp_size) * logical_warp_size, 1);
     unsigned int grid_size = 4;
     const size_t size = block_size * grid_size;
 
@@ -192,7 +192,7 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScanReduce)
     constexpr size_t block_size =
         rocprim::detail::is_power_of_two(logical_warp_size)
             ? rocprim::max<size_t>(rocprim::warp_size(), logical_warp_size * 4)
-            : (rocprim::warp_size()/logical_warp_size) * logical_warp_size;
+            : rocprim::max<size_t>((rocprim::warp_size()/logical_warp_size) * logical_warp_size, 1);
     unsigned int grid_size = 4;
     const size_t size = block_size * grid_size;
 
@@ -321,7 +321,7 @@ TYPED_TEST(RocprimWarpScanTests, ExclusiveScan)
     constexpr size_t block_size =
         rocprim::detail::is_power_of_two(logical_warp_size)
         ? rocprim::max<size_t>(rocprim::warp_size(), logical_warp_size * 4)
-        : (rocprim::warp_size()/logical_warp_size) * logical_warp_size;
+        : rocprim::max<size_t>((rocprim::warp_size()/logical_warp_size) * logical_warp_size, 1);
     unsigned int grid_size = 4;
     const size_t size = block_size * grid_size;
 
@@ -441,7 +441,7 @@ TYPED_TEST(RocprimWarpScanTests, ExclusiveReduceScan)
     constexpr size_t block_size =
         rocprim::detail::is_power_of_two(logical_warp_size)
         ? rocprim::max<size_t>(rocprim::warp_size(), logical_warp_size * 4)
-        : (rocprim::warp_size()/logical_warp_size) * logical_warp_size;
+        : rocprim::max<size_t>((rocprim::warp_size()/logical_warp_size) * logical_warp_size,  1);
     unsigned int grid_size = 4;
     const size_t size = block_size * grid_size;
 
@@ -584,7 +584,7 @@ TYPED_TEST(RocprimWarpScanTests, Scan)
     constexpr size_t block_size =
         rocprim::detail::is_power_of_two(logical_warp_size)
         ? rocprim::max<size_t>(rocprim::warp_size(), logical_warp_size * 4)
-        : (rocprim::warp_size()/logical_warp_size) * logical_warp_size;
+        : rocprim::max<size_t>((rocprim::warp_size()/logical_warp_size) * logical_warp_size, 1);
     unsigned int grid_size = 4;
     const size_t size = block_size * grid_size;
 
@@ -734,7 +734,7 @@ TYPED_TEST(RocprimWarpScanTests, ScanReduce)
     constexpr size_t block_size =
         rocprim::detail::is_power_of_two(logical_warp_size)
         ? rocprim::max<size_t>(rocprim::warp_size(), logical_warp_size * 4)
-        : (rocprim::warp_size()/logical_warp_size) * logical_warp_size;
+        : rocprim::max<size_t>((rocprim::warp_size()/logical_warp_size) * logical_warp_size, 1);
     unsigned int grid_size = 4;
     const size_t size = block_size * grid_size;
 
@@ -872,7 +872,7 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScanCustomType)
     constexpr size_t block_size =
         rocprim::detail::is_power_of_two(logical_warp_size)
         ? rocprim::max<size_t>(rocprim::warp_size(), logical_warp_size * 4)
-        : (rocprim::warp_size()/logical_warp_size) * logical_warp_size;
+        : rocprim::max<size_t>((rocprim::warp_size()/logical_warp_size) * logical_warp_size, 1);
     unsigned int grid_size = 4;
     const size_t size = block_size * grid_size;
 

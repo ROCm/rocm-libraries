@@ -42,7 +42,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize, 0)
 void warp_reduce_sum_kernel(T* device_input, T* device_output)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
@@ -74,7 +74,7 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSum)
     constexpr size_t block_size =
         rocprim::detail::is_power_of_two(logical_warp_size)
             ? rocprim::max<size_t>(rocprim::warp_size(), logical_warp_size * 4)
-            : (rocprim::warp_size()/logical_warp_size) * logical_warp_size;
+            : rocprim::max<size_t>((rocprim::warp_size()/logical_warp_size) * logical_warp_size, 1);
     const size_t size = block_size * 4;
 
     // Given warp size not supported
@@ -153,7 +153,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize, 0)
 void warp_allreduce_sum_kernel(T* device_input, T* device_output)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
@@ -182,7 +182,7 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSum)
     constexpr size_t block_size =
         rocprim::detail::is_power_of_two(logical_warp_size)
             ? rocprim::max<size_t>(rocprim::warp_size(), logical_warp_size * 4)
-            : (rocprim::warp_size()/logical_warp_size) * logical_warp_size;
+            : rocprim::max<size_t>((rocprim::warp_size()/logical_warp_size) * logical_warp_size, 1);
     const size_t size = block_size * 4;
 
     // Given warp size not supported
@@ -265,7 +265,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize, 0)
 void warp_reduce_sum_kernel(T* device_input, T* device_output, size_t valid)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
@@ -297,7 +297,7 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumValid)
     constexpr size_t block_size =
         rocprim::detail::is_power_of_two(logical_warp_size)
             ? rocprim::max<size_t>(rocprim::warp_size(), logical_warp_size * 4)
-            : (rocprim::warp_size()/logical_warp_size) * logical_warp_size;
+            : rocprim::max<size_t>((rocprim::warp_size()/logical_warp_size) * logical_warp_size, 1);
     const size_t size = block_size * 4;
     const size_t valid = logical_warp_size - 1;
 
@@ -377,7 +377,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize, 0)
 void warp_allreduce_sum_kernel(T* device_input, T* device_output, size_t valid)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
@@ -406,7 +406,7 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSumValid)
     constexpr size_t block_size =
         rocprim::detail::is_power_of_two(logical_warp_size)
             ? rocprim::max<size_t>(rocprim::warp_size(), logical_warp_size * 4)
-            : (rocprim::warp_size()/logical_warp_size) * logical_warp_size;
+            : rocprim::max<size_t>((rocprim::warp_size()/logical_warp_size) * logical_warp_size, 1);
     const size_t size = block_size * 4;
     const size_t valid = logical_warp_size - 1;
 
@@ -498,7 +498,7 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumCustomStruct)
     constexpr size_t block_size =
         rocprim::detail::is_power_of_two(logical_warp_size)
             ? rocprim::max<size_t>(rocprim::warp_size(), logical_warp_size * 4)
-            : (rocprim::warp_size()/logical_warp_size) * logical_warp_size;
+            : rocprim::max<size_t>((rocprim::warp_size()/logical_warp_size) * logical_warp_size, 1);
     const size_t size = block_size * 4;
 
     // Given warp size not supported
@@ -586,7 +586,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize, 0)
 void head_segmented_warp_reduce_kernel(T* input, Flag* flags, T* output)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
@@ -617,7 +617,7 @@ TYPED_TEST(RocprimWarpReduceTests, HeadSegmentedReduceSum)
     constexpr size_t block_size =
         rocprim::detail::is_power_of_two(logical_warp_size)
             ? rocprim::max<size_t>(rocprim::warp_size(), logical_warp_size * 4)
-            : (rocprim::warp_size()/logical_warp_size) * logical_warp_size;
+            : rocprim::max<size_t>((rocprim::warp_size()/logical_warp_size) * logical_warp_size, 1);
     const size_t size = block_size * 4;
 
     // Given warp size not supported
@@ -730,7 +730,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize, 0)
 void tail_segmented_warp_reduce_kernel(T* input, Flag* flags, T* output)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
@@ -761,7 +761,7 @@ TYPED_TEST(RocprimWarpReduceTests, TailSegmentedReduceSum)
     constexpr size_t block_size =
         rocprim::detail::is_power_of_two(logical_warp_size)
             ? rocprim::max<size_t>(rocprim::warp_size(), logical_warp_size * 4)
-            : (rocprim::warp_size()/logical_warp_size) * logical_warp_size;
+            : rocprim::max<size_t>((rocprim::warp_size()/logical_warp_size) * logical_warp_size, 1);
     const size_t size = block_size * 4;
 
     // Given warp size not supported
