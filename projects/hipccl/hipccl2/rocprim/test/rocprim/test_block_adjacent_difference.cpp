@@ -32,7 +32,7 @@
 #include "test_utils_types.hpp"
 
 template<class Params>
-class RocprimBlockDiscontinuity : public ::testing::Test {
+class RocprimBlockAdjacentDifference : public ::testing::Test {
 public:
     using params = Params;
 };
@@ -62,17 +62,17 @@ template<class T, class FlagType, class FlagOp>
 typename std::enable_if<rocprim::detail::with_b_index_arg<T, FlagType>::value, FlagType>::type
 apply(FlagOp flag_op, const T& a, const T& b, unsigned int b_index)
 {
-    return flag_op(a, b, b_index);
+    return flag_op(b, a, b_index);
 }
 
 template<class T, class FlagType, class FlagOp>
 typename std::enable_if<!rocprim::detail::with_b_index_arg<T, FlagType>::value, FlagType>::type
 apply(FlagOp flag_op, const T& a, const T& b, unsigned int)
 {
-    return flag_op(a, b);
+    return flag_op(b, a);
 }
 
-TEST(RocprimBlockDiscontinuity, Traits)
+TEST(RocprimBlockAdjacentDifference, Traits)
 {
     ASSERT_FALSE((rocprim::detail::with_b_index_arg<int, rocprim::less<int>>::value));
     ASSERT_FALSE((rocprim::detail::with_b_index_arg<int, custom_flag_op2>::value));
@@ -98,7 +98,7 @@ typedef ::testing::Types<
     block_param_type(rocprim::half, int)
 > BlockDiscParams;
 
-TYPED_TEST_CASE(RocprimBlockDiscontinuity, BlockDiscParams);
+TYPED_TEST_CASE(RocprimBlockAdjacentDifference, BlockDiscParams);
 
 template<
     class Type,
@@ -613,7 +613,7 @@ struct static_for<N, N, Type, FlagType, FlagOpType, Method, BlockSize>
     }
 };
 
-TYPED_TEST(RocprimBlockDiscontinuity, FlagHeads)
+TYPED_TEST(RocprimBlockAdjacentDifference, FlagHeads)
 {
     using type = typename TestFixture::params::input_type;
     using flag_type = typename TestFixture::params::output_type;
@@ -629,7 +629,7 @@ TYPED_TEST(RocprimBlockDiscontinuity, FlagHeads)
     static_for<6, n_items, type, flag_type, flag_op_type_4, 0, block_size>::run();
 }
 
-TYPED_TEST(RocprimBlockDiscontinuity, FlagTails)
+TYPED_TEST(RocprimBlockAdjacentDifference, FlagTails)
 {
     using type = typename TestFixture::params::input_type;
     using flag_type = typename TestFixture::params::output_type;
@@ -638,14 +638,13 @@ TYPED_TEST(RocprimBlockDiscontinuity, FlagTails)
     using flag_op_type_3 = typename std::conditional<std::is_same<type, rocprim::half>::value, test_utils::half_greater, rocprim::greater<type>>::type;
     using flag_op_type_4 = typename std::conditional<std::is_same<type, rocprim::half>::value, test_utils::half_not_equal_to, rocprim::not_equal_to<type>>::type;
     constexpr size_t block_size = TestFixture::params::block_size;
-
     static_for<0, 2, type, flag_type, flag_op_type_1, 1, block_size>::run();
     static_for<2, 4, type, flag_type, flag_op_type_2, 1, block_size>::run();
     static_for<4, 6, type, flag_type, flag_op_type_3, 1, block_size>::run();
     static_for<6, n_items, type, flag_type, flag_op_type_4, 1, block_size>::run();
 }
 
-TYPED_TEST(RocprimBlockDiscontinuity, FlagHeadsAndTails)
+TYPED_TEST(RocprimBlockAdjacentDifference, FlagHeadsAndTails)
 {
     using type = typename TestFixture::params::input_type;
     using flag_type = typename TestFixture::params::output_type;
