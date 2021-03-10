@@ -1,5 +1,4 @@
-# MIT License
-#
+# MIT License #
 # Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -78,6 +77,7 @@ add_hipcub_test("hipcub.DeviceSegmentedRadixSort" test_hipcub_device_segmented_r
 add_hipcub_test("hipcub.DeviceSegmentedReduce" test_hipcub_device_segmented_reduce.cpp)
 add_hipcub_test("hipcub.DeviceSelect" test_hipcub_device_select.cpp)
 add_hipcub_test("hipcub.DevicePartition" test_hipcub_device_partition.cpp)
+add_hipcub_test("hipcub.Grid" test_hipcub_grid.cpp)
 add_hipcub_test("hipcub.UtilPtx" test_hipcub_util_ptx.cpp)
 add_hipcub_test("hipcub.WarpReduce" test_hipcub_warp_reduce.cpp)
 add_hipcub_test("hipcub.WarpScan" test_hipcub_warp_scan.cpp)

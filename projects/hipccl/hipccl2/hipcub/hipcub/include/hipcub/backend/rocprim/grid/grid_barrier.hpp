@@ -33,7 +33,7 @@
 
 #include "../../../config.hpp"
 
-#include "../../../thread/thread_load.cuh"
+#include "../../../thread/thread_load.hpp"
 
 BEGIN_HIPCUB_NAMESPACE
 
@@ -44,7 +44,7 @@ BEGIN_HIPCUB_NAMESPACE
 
 
 /**
- * \brief GridBarrier implements a software global barrier among thread blocks within a CUDA grid
+ * \brief GridBarrier implements a software global barrier among thread blocks within a hip grid
  */
 class GridBarrier
 {
@@ -73,7 +73,7 @@ public:
         // Threadfence and syncthreads to make sure global writes are visible before
         // thread-0 reports in with its sync counter
         __threadfence();
-        CTA_SYNC();
+        __syncthreads();
 
         if (blockIdx.x == 0)
         {
@@ -83,10 +83,10 @@ public:
                 d_vol_sync[blockIdx.x] = 1;
             }
 
-            CTA_SYNC();
+            __syncthreads();
 
             // Wait for everyone else to report in
-            for (int peer_block = threadIdx.x; peer_block < gridDim.x; peer_block += blockDim.x)
+            for (uint32_t peer_block = threadIdx.x; peer_block < gridDim.x; peer_block += blockDim.x)
             {
                 while (ThreadLoad<LOAD_CG>(d_sync + peer_block) == 0)
                 {
@@ -94,10 +94,10 @@ public:
                 }
             }
 
-            CTA_SYNC();
+            __syncthreads();
 
             // Let everyone know it's safe to proceed
-            for (int peer_block = threadIdx.x; peer_block < gridDim.x; peer_block += blockDim.x)
+            for (uint32_t peer_block = threadIdx.x; peer_block < gridDim.x; peer_block += blockDim.x)
             {
                 d_vol_sync[peer_block] = 0;
             }
@@ -116,7 +116,7 @@ public:
                 }
             }
 
-            CTA_SYNC();
+            __syncthreads();
         }
     }
 };
@@ -146,12 +146,12 @@ public:
     /**
      * DeviceFrees and resets the progress counters
      */
-    cudaError_t HostReset()
+    hipError_t HostReset()
     {
-        cudaError_t retval = cudaSuccess;
+        hipError_t retval = hipSuccess;
         if (d_sync)
         {
-            CubDebug(retval = cudaFree(d_sync));
+            retval = hipFree(d_sync);
             d_sync = NULL;
         }
         sync_bytes = 0;
@@ -172,23 +172,23 @@ public:
      * Sets up the progress counters for the next kernel launch (lazily
      * allocating and initializing them if necessary)
      */
-    cudaError_t Setup(int sweep_grid_size)
+    hipError_t Setup(int sweep_grid_size)
     {
-        cudaError_t retval = cudaSuccess;
+        hipError_t retval = hipSuccess;
         do {
             size_t new_sync_bytes = sweep_grid_size * sizeof(SyncFlag);
             if (new_sync_bytes > sync_bytes)
             {
                 if (d_sync)
                 {
-                    if (CubDebug(retval = cudaFree(d_sync))) break;
+                    if ((retval = hipFree(d_sync))) break;
                 }
 
                 sync_bytes = new_sync_bytes;
 
                 // Allocate and initialize to zero
-                if (CubDebug(retval = cudaMalloc((void**) &d_sync, sync_bytes))) break;
-                if (CubDebug(retval = cudaMemset(d_sync, 0, new_sync_bytes))) break;
+                if ((retval = hipMalloc((void**) &d_sync, sync_bytes))) break;
+                if ((retval = hipMemset(d_sync, 0, new_sync_bytes))) break;
             }
         } while (0);
 
@@ -199,3 +199,4 @@ public:
 END_HIPCUB_NAMESPACE
 
 #endif // HIPCUB_ROCPRIM_GRID_GRID_BARRIER_HPP_
+
