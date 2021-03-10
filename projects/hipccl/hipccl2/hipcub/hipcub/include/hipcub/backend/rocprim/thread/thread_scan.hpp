@@ -32,18 +32,13 @@
 
 
 #include "../../../config.hpp"
-// #include "../../../thread/thread_operators.cuh"
+#include "../util_type.hpp"
 
 BEGIN_HIPCUB_NAMESPACE
 
 /// Internal namespace (to prevent ADL mishaps between static functions when mixing different CUB installations)
 namespace internal {
 
-template <int A>
-struct Int2Type
-{
-    enum {VALUE = A};
-};
  /**
   * \addtogroup UtilModule
   * @{

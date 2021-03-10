@@ -1,6 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
+ * Modifications Copyright (c) 2021, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -34,7 +35,6 @@
 #include "../../../config.hpp"
 
 BEGIN_HIPCUB_NAMESPACE
-
 
 /**
  * \addtogroup GridModule
@@ -112,97 +112,96 @@ public:
 
 
     /// This operation sets the fill-size and resets the drain counter, preparing the GridQueue for draining in the next kernel instance.  To be called by the host or by a kernel prior to that which will be draining.
-    __host__ __device__ __forceinline__ cudaError_t FillAndResetDrain(
+    HIPCUB_DEVICE hipError_t FillAndResetDrain(
         OffsetT fill_size,
-        cudaStream_t stream = 0)
+        hipStream_t stream = 0)
     {
-        cudaError_t result = cudaErrorUnknown;
-        if (CUB_IS_DEVICE_CODE) {
-            #if CUB_INCLUDE_DEVICE_CODE
-                (void)stream;
-                d_counters[FILL] = fill_size;
-                d_counters[DRAIN] = 0;
-                result = cudaSuccess;
-            #endif
-        } else {
-            #if CUB_INCLUDE_HOST_CODE
-                OffsetT counters[2];
-                counters[FILL] = fill_size;
-                counters[DRAIN] = 0;
-                result = CubDebug(cudaMemcpyAsync(d_counters, counters, sizeof(OffsetT) * 2, cudaMemcpyHostToDevice, stream));
-            #endif
-        }
+        hipError_t result = hipErrorUnknown;
+        (void)stream;
+        d_counters[FILL] = fill_size;
+        d_counters[DRAIN] = 0;
+        result = hipSuccess;
         return result;
     }
 
+    HIPCUB_HOST hipError_t FillAndResetDrain(
+        OffsetT fill_size,
+        hipStream_t stream = 0)
+    {
+        hipError_t result = hipErrorUnknown;
+        OffsetT counters[2];
+        counters[FILL] = fill_size;
+        counters[DRAIN] = 0;
+        result = CubDebug(hipMemcpyAsync(d_counters, counters, sizeof(OffsetT) * 2, hipMemcpyHostToDevice, stream));
+        return result;
+    }
 
     /// This operation resets the drain so that it may advance to meet the existing fill-size.  To be called by the host or by a kernel prior to that which will be draining.
-    __host__ __device__ __forceinline__ cudaError_t ResetDrain(cudaStream_t stream = 0)
+    HIPCUB_DEVICE hipError_t ResetDrain(hipStream_t stream = 0)
     {
-        cudaError_t result = cudaErrorUnknown;
-        if (CUB_IS_DEVICE_CODE) {
-            #if CUB_INCLUDE_DEVICE_CODE
-                (void)stream;
-                d_counters[DRAIN] = 0;
-                result = cudaSuccess;
-            #endif
-        } else {
-            #if CUB_INCLUDE_HOST_CODE
-                result = CubDebug(cudaMemsetAsync(d_counters + DRAIN, 0, sizeof(OffsetT), stream));
-            #endif
-        }
+        hipError_t result = hipErrorUnknown;
+        (void)stream;
+        d_counters[DRAIN] = 0;
+        result = hipSuccess;
+        return result;
+    }
+
+    HIPCUB_HOST hipError_t ResetDrain(hipStream_t stream = 0)
+    {
+        hipError_t result = hipErrorUnknown;
+        result = CubDebug(hipMemsetAsync(d_counters + DRAIN, 0, sizeof(OffsetT), stream));
         return result;
     }
 
 
     /// This operation resets the fill counter.  To be called by the host or by a kernel prior to that which will be filling.
-    __host__ __device__ __forceinline__ cudaError_t ResetFill(cudaStream_t stream = 0)
+    HIPCUB_DEVICE hipError_t ResetFill(hipStream_t stream = 0)
     {
-        cudaError_t result = cudaErrorUnknown;
-        if (CUB_IS_DEVICE_CODE) {
-            #if CUB_INCLUDE_DEVICE_CODE
-                (void)stream;
-                d_counters[FILL] = 0;
-                result = cudaSuccess;
-            #endif
-        } else {
-            #if CUB_INCLUDE_HOST_CODE
-                result = CubDebug(cudaMemsetAsync(d_counters + FILL, 0, sizeof(OffsetT), stream));
-            #endif
-        }
+        hipError_t result = hipErrorUnknown;
+        (void)stream;
+        d_counters[FILL] = 0;
+        result = hipSuccess;
+        return result;
+    }
+
+    HIPCUB_HOST hipError_t ResetFill(hipStream_t stream = 0)
+    {
+        hipError_t result = hipErrorUnknown;
+        result = CubDebug(hipMemsetAsync(d_counters + FILL, 0, sizeof(OffsetT), stream));
         return result;
     }
 
 
     /// Returns the fill-size established by the parent or by the previous kernel.
-    __host__ __device__ __forceinline__ cudaError_t FillSize(
+    HIPCUB_DEVICE hipError_t FillSize(
         OffsetT &fill_size,
-        cudaStream_t stream = 0)
+        hipStream_t stream = 0)
     {
-        cudaError_t result = cudaErrorUnknown;
-        if (CUB_IS_DEVICE_CODE) {
-            #if CUB_INCLUDE_DEVICE_CODE
-                (void)stream;
-                fill_size = d_counters[FILL];
-                result = cudaSuccess;
-            #endif
-        } else {
-            #if CUB_INCLUDE_HOST_CODE
-                result = CubDebug(cudaMemcpyAsync(&fill_size, d_counters + FILL, sizeof(OffsetT), cudaMemcpyDeviceToHost, stream));
-            #endif
-        }
+        hipError_t result = hipErrorUnknown;
+        (void)stream;
+        fill_size = d_counters[FILL];
+        result = hipSuccess;
+        return result;
+    }
+
+    HIPCUB_HOST hipError_t FillSize(
+        OffsetT &fill_size,
+        hipStream_t stream = 0)
+    {
+        hipError_t result = hipErrorUnknown;
+        result = CubDebug(hipMemcpyAsync(&fill_size, d_counters + FILL, sizeof(OffsetT), hipMemcpyDeviceToHost, stream));
         return result;
     }
 
 
-    /// Drain \p num_items from the queue.  Returns offset from which to read items.  To be called from CUDA kernel.
+    /// Drain \p num_items from the queue.  Returns offset from which to read items.  To be called from hip kernel.
     __device__ __forceinline__ OffsetT Drain(OffsetT num_items)
     {
         return atomicAdd(d_counters + DRAIN, num_items);
     }
 
 
-    /// Fill \p num_items into the queue.  Returns offset from which to write items.    To be called from CUDA kernel.
+    /// Fill \p num_items into the queue.  Returns offset from which to write items.    To be called from hip kernel.
     __device__ __forceinline__ OffsetT Fill(OffsetT num_items)
     {
         return atomicAdd(d_counters + FILL, num_items);

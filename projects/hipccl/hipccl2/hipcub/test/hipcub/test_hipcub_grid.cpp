@@ -30,6 +30,8 @@
 #include "common_test_header.hpp"
 
 #include "hipcub/grid/grid_barrier.hpp"
+#include "hipcub/grid/grid_even_share.hpp"
+#include "hipcub/grid/grid_queue.hpp"
 
 __global__ void Kernel(
     hipcub::GridBarrier global_barrier,
