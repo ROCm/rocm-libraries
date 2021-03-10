@@ -158,13 +158,13 @@ cd hipCUB; cd build
 ## Documentation
 
 ```shell
-# go to hipCUB doc directory
-cd hipCUB; cd doc
+# go to hipCUB docs directory
+cd hipCUB; cd docs
 
-# run doxygen
-doxygen Doxyfile
+# run doxygen and sphinx
+./run_docs.sh
 
-# open html/index.html
+# open docBin/html/index.html
 
 ```
 
