@@ -110,7 +110,7 @@ public:
 
 
     /**
-     * \brief Dispatch initializer. To be called prior prior to kernel launch.
+     * \brief Dispatch initializer. To be called prior to kernel launch.
      */
     __host__ __device__ __forceinline__ void DispatchInit(
         OffsetT num_items_,          ///< Total number of input items
