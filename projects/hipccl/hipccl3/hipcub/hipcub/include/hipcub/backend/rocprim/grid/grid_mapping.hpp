@@ -32,7 +32,7 @@
 #include <type_traits>
 
 #include "../../../config.hpp"
-#include "../../../thread/thread_load.cuh"
+#include "../../../thread/thread_load.hpp"
 
 BEGIN_HIPCUB_NAMESPACE
 

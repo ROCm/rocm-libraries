@@ -1,6 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
+ * Modifications Copyright (c) 2021, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -33,6 +34,7 @@
 
 #include "../../../config.hpp"
 #include "../../../grid/grid_mapping.hpp"
+#include "../util_type.hpp"
 
 BEGIN_HIPCUB_NAMESPACE
 
@@ -118,8 +120,8 @@ public:
         this->block_offset          = num_items_;    // Initialize past-the-end
         this->block_end             = num_items_;    // Initialize past-the-end
         this->num_items             = num_items_;
-        this->total_tiles           = static_cast<int>(cub::DivideAndRoundUp(num_items_, tile_items));
-        this->grid_size             = CUB_MIN(total_tiles, max_grid_size);
+        this->total_tiles           = static_cast<int>(hipcub::DivideAndRoundUp(num_items_, tile_items));
+        this->grid_size             = min(total_tiles, max_grid_size);
         int avg_tiles_per_block     = total_tiles / grid_size;
         // leftover grains go to big blocks:
         this->big_shares            = total_tiles - (avg_tiles_per_block * grid_size);
@@ -150,7 +152,7 @@ public:
         {
             // This thread block gets a normal share of grains (avg_tiles_per_block)
             block_offset = normal_base_offset + (block_id * normal_share_items);
-            block_end = CUB_MIN(num_items, block_offset + normal_share_items);
+            block_end = min(num_items, block_offset + normal_share_items);
         }
         // Else default past-the-end
     }
