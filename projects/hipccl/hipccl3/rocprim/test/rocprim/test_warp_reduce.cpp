@@ -72,31 +72,33 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSum)
     using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
 
-    constexpr size_t block_size_32 =
+    // The different warp sizes
+    constexpr size_t ws32 = 32;
+    constexpr size_t ws64 = 64;
+
+    // Block size of warp size 32
+    constexpr size_t block_size_ws32 =
         rocprim::detail::is_power_of_two(logical_warp_size)
-            ? rocprim::max<size_t>(32, logical_warp_size * 4)
-            : rocprim::max<size_t>((32/logical_warp_size) * logical_warp_size, 1);
+            ? rocprim::max<size_t>(ws32, logical_warp_size * 4)
+            : rocprim::max<size_t>((ws32/logical_warp_size) * logical_warp_size, 1);
 
-    constexpr size_t block_size_64 =
+    // Block size of warp size 64
+    constexpr size_t block_size_ws64 =
         rocprim::detail::is_power_of_two(logical_warp_size)
-            ? rocprim::max<size_t>(64, logical_warp_size * 4)
-            : rocprim::max<size_t>((64/logical_warp_size) * logical_warp_size, 1);
+            ? rocprim::max<size_t>(ws64, logical_warp_size * 4)
+            : rocprim::max<size_t>((ws64/logical_warp_size) * logical_warp_size, 1);
 
-    size_t size;
-    if (rocprim::host_warp_size() == 32)
-        size = block_size_32 * 4;
-    else if (rocprim::host_warp_size() == 64)
-        size = block_size_64 * 4;
-    else
-    {
-        printf("Unsupported warp size: %d.  Aborting test\n", rocprim::host_warp_size());
-        GTEST_SKIP();
-    }
+    const unsigned int current_device_warp_size = rocprim::host_warp_size();
 
-    // Given warp size not supported
-    unsigned int current_device_warp_size = rocprim::host_warp_size();
-    if(logical_warp_size > current_device_warp_size)
+    const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
+    constexpr unsigned int grid_size = 4;
+    const size_t size = block_size * grid_size;
+
+    // Check if warp size is supported
+    if( (logical_warp_size > current_device_warp_size) ||
+        (block_size != ws32 && block_size != ws64) )
     {
+        printf("Unsupported warp size: %d.  Skipping test\n", rocprim::host_warp_size());
         GTEST_SKIP();
     }
 
@@ -136,21 +138,20 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSum)
             )
         );
 
-        if (rocprim::host_warp_size() == 32)
+        // Launching kernel
+        if (current_device_warp_size == ws32)
         {
-            // Launching kernel
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(warp_reduce_sum_kernel<T, block_size_32, logical_warp_size>),
-                dim3(size/block_size_32), dim3(block_size_32), 0, 0,
+                HIP_KERNEL_NAME(warp_reduce_sum_kernel<T, block_size_ws32, logical_warp_size>),
+                dim3(size/block_size_ws32), dim3(block_size_ws32), 0, 0,
                 device_input, device_output
             );
         }
-        else if (rocprim::host_warp_size() == 64)
+        else if (current_device_warp_size == ws64)
         {
-            // Launching kernel
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(warp_reduce_sum_kernel<T, block_size_64, logical_warp_size>),
-                dim3(size/block_size_64), dim3(block_size_64), 0, 0,
+                HIP_KERNEL_NAME(warp_reduce_sum_kernel<T, block_size_ws64, logical_warp_size>),
+                dim3(size/block_size_ws64), dim3(block_size_ws64), 0, 0,
                 device_input, device_output
             );
         }
@@ -207,31 +208,34 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSum)
     using T = typename TestFixture::params::type;
     using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
-    constexpr size_t block_size_32 =
+
+    // The different warp sizes
+    constexpr size_t ws32 = 32;
+    constexpr size_t ws64 = 64;
+
+    // Block size of warp size 32
+    constexpr size_t block_size_ws32 =
         rocprim::detail::is_power_of_two(logical_warp_size)
-            ? rocprim::max<size_t>(32, logical_warp_size * 4)
-            : rocprim::max<size_t>((32/logical_warp_size) * logical_warp_size, 1);
+            ? rocprim::max<size_t>(ws32, logical_warp_size * 4)
+            : rocprim::max<size_t>((ws32/logical_warp_size) * logical_warp_size, 1);
 
-    constexpr size_t block_size_64 =
+    // Block size of warp size 64
+    constexpr size_t block_size_ws64 =
         rocprim::detail::is_power_of_two(logical_warp_size)
-            ? rocprim::max<size_t>(64, logical_warp_size * 4)
-            : rocprim::max<size_t>((64/logical_warp_size) * logical_warp_size, 1);
+            ? rocprim::max<size_t>(ws64, logical_warp_size * 4)
+            : rocprim::max<size_t>((ws64/logical_warp_size) * logical_warp_size, 1);
 
-    size_t size;
-    if (rocprim::host_warp_size() == 32)
-        size = block_size_32 * 4;
-    else if (rocprim::host_warp_size() == 64)
-        size = block_size_64 * 4;
-    else
-    {
-        printf("Unsupported warp size: %d.  Aborting test\n", rocprim::host_warp_size());
-        GTEST_SKIP();
-    }
+    const unsigned int current_device_warp_size = rocprim::host_warp_size();
 
-    // Given warp size not supported
-    unsigned int current_device_warp_size = rocprim::host_warp_size();
-    if(logical_warp_size > current_device_warp_size)
+    const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
+    constexpr unsigned int grid_size = 4;
+    const size_t size = block_size * grid_size;
+
+    // Check if warp size is supported
+    if( (logical_warp_size > current_device_warp_size) ||
+        (block_size != ws32 && block_size != ws64) )
     {
+        printf("Unsupported warp size: %d.  Skipping test\n", rocprim::host_warp_size());
         GTEST_SKIP();
     }
 
@@ -275,21 +279,20 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSum)
             )
         );
 
-        if (rocprim::host_warp_size() == 32)
+        // Launching kernel
+        if (current_device_warp_size == ws32)
         {
-            // Launching kernel
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(warp_allreduce_sum_kernel<T, block_size_32, logical_warp_size>),
-                dim3(size/block_size_32), dim3(block_size_32), 0, 0,
+                HIP_KERNEL_NAME(warp_allreduce_sum_kernel<T, block_size_ws32, logical_warp_size>),
+                dim3(size/block_size_ws32), dim3(block_size_ws32), 0, 0,
                 device_input, device_output
             );
         }
-        else if (rocprim::host_warp_size() == 64)
+        else if (current_device_warp_size == ws64)
         {
-            // Launching kernel
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(warp_allreduce_sum_kernel<T, block_size_64, logical_warp_size>),
-                dim3(size/block_size_64), dim3(block_size_64), 0, 0,
+                HIP_KERNEL_NAME(warp_allreduce_sum_kernel<T, block_size_ws64, logical_warp_size>),
+                dim3(size/block_size_ws64), dim3(block_size_ws64), 0, 0,
                 device_input, device_output
             );
         }
@@ -349,32 +352,35 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumValid)
     using T = typename TestFixture::params::type;
     using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
-    constexpr size_t block_size_32 =
-        rocprim::detail::is_power_of_two(logical_warp_size)
-            ? rocprim::max<size_t>(32, logical_warp_size * 4)
-            : rocprim::max<size_t>((32/logical_warp_size) * logical_warp_size, 1);
 
-    constexpr size_t block_size_64 =
-        rocprim::detail::is_power_of_two(logical_warp_size)
-            ? rocprim::max<size_t>(64, logical_warp_size * 4)
-            : rocprim::max<size_t>((64/logical_warp_size) * logical_warp_size, 1);
+    // The different warp sizes
+    constexpr size_t ws32 = 32;
+    constexpr size_t ws64 = 64;
 
-    size_t size;
-    if (rocprim::host_warp_size() == 32)
-        size = block_size_32 * 4;
-    else if (rocprim::host_warp_size() == 64)
-        size = block_size_64 * 4;
-    else
-    {
-        printf("Unsupported warp size: %d.  Aborting test\n", rocprim::host_warp_size());
-        GTEST_SKIP();
-    }
+    // Block size of warp size 32
+    constexpr size_t block_size_ws32 =
+        rocprim::detail::is_power_of_two(logical_warp_size)
+            ? rocprim::max<size_t>(ws32, logical_warp_size * 4)
+            : rocprim::max<size_t>((ws32/logical_warp_size) * logical_warp_size, 1);
+
+    // Block size of warp size 64
+    constexpr size_t block_size_ws64 =
+        rocprim::detail::is_power_of_two(logical_warp_size)
+            ? rocprim::max<size_t>(ws64, logical_warp_size * 4)
+            : rocprim::max<size_t>((ws64/logical_warp_size) * logical_warp_size, 1);
+
+    const unsigned int current_device_warp_size = rocprim::host_warp_size();
+
+    const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
+    constexpr unsigned int grid_size = 4;
+    const size_t size = block_size * grid_size;
     const size_t valid = logical_warp_size - 1;
-
-    // Given warp size not supported
-    unsigned int current_device_warp_size = rocprim::host_warp_size();
-    if(logical_warp_size > current_device_warp_size)
+    
+    // Check if warp size is supported
+    if( (logical_warp_size > current_device_warp_size) ||
+        (block_size != ws32 && block_size != ws64) )
     {
+        printf("Unsupported warp size: %d.  Skipping test\n", rocprim::host_warp_size());
         GTEST_SKIP();
     }
 
@@ -414,21 +420,20 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumValid)
             )
         );
 
-        if (rocprim::host_warp_size() == 32)
+        // Launching kernel
+        if (current_device_warp_size == ws32)
         {
-            // Launching kernel
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(warp_reduce_sum_kernel<T, block_size_32, logical_warp_size>),
-                dim3(size/block_size_32), dim3(block_size_32), 0, 0,
+                HIP_KERNEL_NAME(warp_reduce_sum_kernel<T, block_size_ws32, logical_warp_size>),
+                dim3(size/block_size_ws32), dim3(block_size_ws32), 0, 0,
                 device_input, device_output, valid
             );
         }
-        else if (rocprim::host_warp_size() == 64)
+        else if (current_device_warp_size == ws64)
         {
-            // Launching kernel
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(warp_reduce_sum_kernel<T, block_size_64, logical_warp_size>),
-                dim3(size/block_size_64), dim3(block_size_64), 0, 0,
+                HIP_KERNEL_NAME(warp_reduce_sum_kernel<T, block_size_ws64, logical_warp_size>),
+                dim3(size/block_size_ws64), dim3(block_size_ws64), 0, 0,
                 device_input, device_output, valid
             );
         }
@@ -485,32 +490,35 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSumValid)
     using T = typename TestFixture::params::type;
     using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
-    constexpr size_t block_size_32 =
-        rocprim::detail::is_power_of_two(logical_warp_size)
-            ? rocprim::max<size_t>(32, logical_warp_size * 4)
-            : rocprim::max<size_t>((32/logical_warp_size) * logical_warp_size, 1);
 
-    constexpr size_t block_size_64 =
-        rocprim::detail::is_power_of_two(logical_warp_size)
-            ? rocprim::max<size_t>(64, logical_warp_size * 4)
-            : rocprim::max<size_t>((64/logical_warp_size) * logical_warp_size, 1);
+    // The different warp sizes
+    constexpr size_t ws32 = 32;
+    constexpr size_t ws64 = 64;
 
-    size_t size;
-    if (rocprim::host_warp_size() == 32)
-        size = block_size_32 * 4;
-    else if (rocprim::host_warp_size() == 64)
-        size = block_size_64 * 4;
-    else
-    {
-        printf("Unsupported warp size: %d.  Aborting test\n", rocprim::host_warp_size());
-        GTEST_SKIP();
-    }
+    // Block size of warp size 32
+    constexpr size_t block_size_ws32 =
+        rocprim::detail::is_power_of_two(logical_warp_size)
+            ? rocprim::max<size_t>(ws32, logical_warp_size * 4)
+            : rocprim::max<size_t>((ws32/logical_warp_size) * logical_warp_size, 1);
+
+    // Block size of warp size 64
+    constexpr size_t block_size_ws64 =
+        rocprim::detail::is_power_of_two(logical_warp_size)
+            ? rocprim::max<size_t>(ws64, logical_warp_size * 4)
+            : rocprim::max<size_t>((ws64/logical_warp_size) * logical_warp_size, 1);
+
+    const unsigned int current_device_warp_size = rocprim::host_warp_size();
+
+    const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
+    constexpr unsigned int grid_size = 4;
+    const size_t size = block_size * grid_size;
     const size_t valid = logical_warp_size - 1;
 
-    // Given warp size not supported
-    unsigned int current_device_warp_size = rocprim::host_warp_size();
-    if(logical_warp_size > current_device_warp_size)
+    // Check if warp size is supported
+    if( (logical_warp_size > current_device_warp_size) ||
+        (block_size != ws32 && block_size != ws64) )
     {
+        printf("Unsupported warp size: %d.  Skipping test\n", rocprim::host_warp_size());
         GTEST_SKIP();
     }
 
@@ -554,21 +562,20 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSumValid)
             )
         );
 
-        if (rocprim::host_warp_size() == 32)
+        // Launching kernel
+        if (current_device_warp_size == ws32)
         {
-            // Launching kernel
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(warp_allreduce_sum_kernel<T, block_size_32, logical_warp_size>),
-                dim3(size/block_size_32), dim3(block_size_32), 0, 0,
+                HIP_KERNEL_NAME(warp_allreduce_sum_kernel<T, block_size_ws32, logical_warp_size>),
+                dim3(size/block_size_ws32), dim3(block_size_ws32), 0, 0,
                 device_input, device_output, valid
             );
         }
-        else if (rocprim::host_warp_size() == 64)
+        else if (current_device_warp_size == ws64)
         {
-            // Launching kernel
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(warp_allreduce_sum_kernel<T, block_size_64, logical_warp_size>),
-                dim3(size/block_size_64), dim3(block_size_64), 0, 0,
+                HIP_KERNEL_NAME(warp_allreduce_sum_kernel<T, block_size_ws64, logical_warp_size>),
+                dim3(size/block_size_ws64), dim3(block_size_ws64), 0, 0,
                 device_input, device_output, valid
             );
         }
@@ -604,31 +611,34 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumCustomStruct)
 
     // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
-    constexpr size_t block_size_32 =
+
+    // The different warp sizes
+    constexpr size_t ws32 = 32;
+    constexpr size_t ws64 = 64;
+
+    // Block size of warp size 32
+    constexpr size_t block_size_ws32 =
         rocprim::detail::is_power_of_two(logical_warp_size)
-            ? rocprim::max<size_t>(32, logical_warp_size * 4)
-            : rocprim::max<size_t>((32/logical_warp_size) * logical_warp_size, 1);
+            ? rocprim::max<size_t>(ws32, logical_warp_size * 4)
+            : rocprim::max<size_t>((ws32/logical_warp_size) * logical_warp_size, 1);
 
-    constexpr size_t block_size_64 =
+    // Block size of warp size 64
+    constexpr size_t block_size_ws64 =
         rocprim::detail::is_power_of_two(logical_warp_size)
-            ? rocprim::max<size_t>(64, logical_warp_size * 4)
-            : rocprim::max<size_t>((64/logical_warp_size) * logical_warp_size, 1);
+            ? rocprim::max<size_t>(ws64, logical_warp_size * 4)
+            : rocprim::max<size_t>((ws64/logical_warp_size) * logical_warp_size, 1);
 
-    size_t size;
-    if (rocprim::host_warp_size() == 32)
-        size = block_size_32 * 4;
-    else if (rocprim::host_warp_size() == 64)
-        size = block_size_64 * 4;
-    else
-    {
-        printf("Unsupported warp size: %d.  Aborting test\n", rocprim::host_warp_size());
-        GTEST_SKIP();
-    }
+    const unsigned int current_device_warp_size = rocprim::host_warp_size();
 
-    // Given warp size not supported
-    unsigned int current_device_warp_size = rocprim::host_warp_size();
-    if(logical_warp_size > current_device_warp_size)
+    const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
+    constexpr unsigned int grid_size = 4;
+    const size_t size = block_size * grid_size;
+
+    // Check if warp size is supported
+    if( (logical_warp_size > current_device_warp_size) ||
+        (block_size != ws32 && block_size != ws64) )
     {
+        printf("Unsupported warp size: %d.  Skipping test\n", rocprim::host_warp_size());
         GTEST_SKIP();
     }
 
@@ -676,21 +686,20 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumCustomStruct)
             )
         );
 
-        if (rocprim::host_warp_size() == 32)
+        // Launching kernel
+        if (current_device_warp_size == ws32)
         {
-            // Launching kernel
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(warp_reduce_sum_kernel<T, block_size_32, logical_warp_size>),
-                dim3(size/block_size_32), dim3(block_size_32), 0, 0,
+                HIP_KERNEL_NAME(warp_reduce_sum_kernel<T, block_size_ws32, logical_warp_size>),
+                dim3(size/block_size_ws32), dim3(block_size_ws32), 0, 0,
                 device_input, device_output
             );
         }
-        else if (rocprim::host_warp_size() == 64)
+        else if (current_device_warp_size == ws64)
         {
-            // Launching kernel
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(warp_reduce_sum_kernel<T, block_size_64, logical_warp_size>),
-                dim3(size/block_size_64), dim3(block_size_64), 0, 0,
+                HIP_KERNEL_NAME(warp_reduce_sum_kernel<T, block_size_ws64, logical_warp_size>),
+                dim3(size/block_size_ws64), dim3(block_size_ws64), 0, 0,
                 device_input, device_output
             );
         }
@@ -750,31 +759,34 @@ TYPED_TEST(RocprimWarpReduceTests, HeadSegmentedReduceSum)
     using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
     using flag_type = unsigned char;
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
-    constexpr size_t block_size_32 =
+
+    // The different warp sizes
+    constexpr size_t ws32 = 32;
+    constexpr size_t ws64 = 64;
+
+    // Block size of warp size 32
+    constexpr size_t block_size_ws32 =
         rocprim::detail::is_power_of_two(logical_warp_size)
-            ? rocprim::max<size_t>(32, logical_warp_size * 4)
-            : rocprim::max<size_t>((32/logical_warp_size) * logical_warp_size, 1);
+            ? rocprim::max<size_t>(ws32, logical_warp_size * 4)
+            : rocprim::max<size_t>((ws32/logical_warp_size) * logical_warp_size, 1);
 
-    constexpr size_t block_size_64 =
+    // Block size of warp size 64
+    constexpr size_t block_size_ws64 =
         rocprim::detail::is_power_of_two(logical_warp_size)
-            ? rocprim::max<size_t>(64, logical_warp_size * 4)
-            : rocprim::max<size_t>((64/logical_warp_size) * logical_warp_size, 1);
+            ? rocprim::max<size_t>(ws64, logical_warp_size * 4)
+            : rocprim::max<size_t>((ws64/logical_warp_size) * logical_warp_size, 1);
 
-    size_t size;
-    if (rocprim::host_warp_size() == 32)
-        size = block_size_32 * 4;
-    else if (rocprim::host_warp_size() == 64)
-        size = block_size_64 * 4;
-    else
-    {
-        printf("Unsupported warp size: %d.  Aborting test\n", rocprim::host_warp_size());
-        GTEST_SKIP();
-    }
+    const unsigned int current_device_warp_size = rocprim::host_warp_size();
 
-    // Given warp size not supported
-    unsigned int current_device_warp_size = rocprim::host_warp_size();
-    if(logical_warp_size > current_device_warp_size)
+    const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
+    constexpr unsigned int grid_size = 4;
+    const size_t size = block_size * grid_size;
+
+    // Check if warp size is supported
+    if( (logical_warp_size > current_device_warp_size) ||
+        (block_size != ws32 && block_size != ws64) )
     {
+        printf("Unsupported warp size: %d.  Skipping test\n", rocprim::host_warp_size());
         GTEST_SKIP();
     }
 
@@ -834,21 +846,20 @@ TYPED_TEST(RocprimWarpReduceTests, HeadSegmentedReduceSum)
         }
         expected[segment_head_index] = reduction;
 
-        if (rocprim::host_warp_size() == 32)
+        // Launching kernel
+        if (current_device_warp_size == ws32)
         {
-            // Launching kernel
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(head_segmented_warp_reduce_kernel<T, flag_type, block_size_32, logical_warp_size>),
-                dim3(size/block_size_32), dim3(block_size_32), 0, 0,
+                HIP_KERNEL_NAME(head_segmented_warp_reduce_kernel<T, flag_type, block_size_ws32, logical_warp_size>),
+                dim3(size/block_size_ws32), dim3(block_size_ws32), 0, 0,
                 device_input, device_flags, device_output
             );
         }
-        else if (rocprim::host_warp_size() == 64)
+        else if (current_device_warp_size == ws64)
         {
-            // Launching kernel
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(head_segmented_warp_reduce_kernel<T, flag_type, block_size_64, logical_warp_size>),
-                dim3(size/block_size_64), dim3(block_size_64), 0, 0,
+                HIP_KERNEL_NAME(head_segmented_warp_reduce_kernel<T, flag_type, block_size_ws64, logical_warp_size>),
+                dim3(size/block_size_ws64), dim3(block_size_ws64), 0, 0,
                 device_input, device_flags, device_output
             );
         }
@@ -920,31 +931,34 @@ TYPED_TEST(RocprimWarpReduceTests, TailSegmentedReduceSum)
     using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
     using flag_type = unsigned char;
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
-    constexpr size_t block_size_32 =
+
+    // The different warp sizes
+    constexpr size_t ws32 = 32;
+    constexpr size_t ws64 = 64;
+
+    // Block size of warp size 32
+    constexpr size_t block_size_ws32 =
         rocprim::detail::is_power_of_two(logical_warp_size)
-            ? rocprim::max<size_t>(32, logical_warp_size * 4)
-            : rocprim::max<size_t>((32/logical_warp_size) * logical_warp_size, 1);
+            ? rocprim::max<size_t>(ws32, logical_warp_size * 4)
+            : rocprim::max<size_t>((ws32/logical_warp_size) * logical_warp_size, 1);
 
-    constexpr size_t block_size_64 =
+    // Block size of warp size 64
+    constexpr size_t block_size_ws64 =
         rocprim::detail::is_power_of_two(logical_warp_size)
-            ? rocprim::max<size_t>(64, logical_warp_size * 4)
-            : rocprim::max<size_t>((64/logical_warp_size) * logical_warp_size, 1);
+            ? rocprim::max<size_t>(ws64, logical_warp_size * 4)
+            : rocprim::max<size_t>((ws64/logical_warp_size) * logical_warp_size, 1);
 
-    size_t size;
-    if (rocprim::host_warp_size() == 32)
-        size = block_size_32 * 4;
-    else if (rocprim::host_warp_size() == 64)
-        size = block_size_64 * 4;
-    else
-    {
-        printf("Unsupported warp size: %d.  Aborting test\n", rocprim::host_warp_size());
-        GTEST_SKIP();
-    }
+    const unsigned int current_device_warp_size = rocprim::host_warp_size();
 
-    // Given warp size not supported
-    unsigned int current_device_warp_size = rocprim::host_warp_size();
-    if(logical_warp_size > current_device_warp_size)
+    const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
+    constexpr unsigned int grid_size = 4;
+    const size_t size = block_size * grid_size;
+
+    // Check if warp size is supported
+    if( (logical_warp_size > current_device_warp_size) ||
+        (block_size != ws32 && block_size != ws64) )
     {
+        printf("Unsupported warp size: %d.  Skipping test\n", rocprim::host_warp_size());
         GTEST_SKIP();
     }
 
@@ -1015,21 +1029,20 @@ TYPED_TEST(RocprimWarpReduceTests, TailSegmentedReduceSum)
             }
         }
 
-        if (rocprim::host_warp_size() == 32)
+        // Launching kernel
+        if (current_device_warp_size == ws32)
         {
-            // Launching kernel
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(tail_segmented_warp_reduce_kernel<T, flag_type, block_size_32, logical_warp_size>),
-                dim3(size/block_size_32), dim3(block_size_32), 0, 0,
+                HIP_KERNEL_NAME(tail_segmented_warp_reduce_kernel<T, flag_type, block_size_ws32, logical_warp_size>),
+                dim3(size/block_size_ws32), dim3(block_size_ws32), 0, 0,
                 device_input, device_flags, device_output
             );
         }
-        else if (rocprim::host_warp_size() == 64)
+        else if (current_device_warp_size == ws64)
         {
-            // Launching kernel
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(tail_segmented_warp_reduce_kernel<T, flag_type, block_size_64, logical_warp_size>),
-                dim3(size/block_size_64), dim3(block_size_64), 0, 0,
+                HIP_KERNEL_NAME(tail_segmented_warp_reduce_kernel<T, flag_type, block_size_ws64, logical_warp_size>),
+                dim3(size/block_size_ws64), dim3(block_size_ws64), 0, 0,
                 device_input, device_flags, device_output
             );
         }
