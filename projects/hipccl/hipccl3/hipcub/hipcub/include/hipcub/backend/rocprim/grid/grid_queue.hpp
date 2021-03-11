@@ -105,7 +105,7 @@ public:
 
     /// Constructs a GridQueue descriptor around the device storage allocation
     __host__ __device__ __forceinline__ GridQueue(
-        void *d_storage)                    ///< Device allocation to back the GridQueue.  Must be at least as big as <tt>AllocationSize()</tt>.
+        void *d_storage) ///< Device allocation to back the GridQueue.  Must be at least as big as <tt>AllocationSize()</tt>.
     :
         d_counters((OffsetT*) d_storage)
     {}
@@ -195,14 +195,14 @@ public:
 
 
     /// Drain \p num_items from the queue.  Returns offset from which to read items.  To be called from hip kernel.
-    __device__ __forceinline__ OffsetT Drain(OffsetT num_items)
+    HIPCUB_DEVICE OffsetT Drain(OffsetT num_items)
     {
         return atomicAdd(d_counters + DRAIN, num_items);
     }
 
 
     /// Fill \p num_items into the queue.  Returns offset from which to write items.    To be called from hip kernel.
-    __device__ __forceinline__ OffsetT Fill(OffsetT num_items)
+    HIPCUB_DEVICE OffsetT Fill(OffsetT num_items)
     {
         return atomicAdd(d_counters + FILL, num_items);
     }
