@@ -34,7 +34,8 @@ namespace detail
 // Returns logical warp id of the last thread in thread's segment
 template<bool HeadSegmented, unsigned int WarpSize, class Flag>
 ROCPRIM_DEVICE inline
-unsigned int last_in_warp_segment(Flag flag)
+auto last_in_warp_segment(Flag flag)
+    -> typename std::enable_if<(WarpSize<=__AMDGCN_WAVEFRONT_SIZE), unsigned int>::type
 {
     // Get flags (now every thread know where the flags are)
     lane_mask_type warp_flags = ::rocprim::ballot(flag);
@@ -57,6 +58,16 @@ unsigned int last_in_warp_segment(Flag flag)
     #else
     return ::__ffsll(warp_flags) - 1;
     #endif
+}
+
+// Returns logical warp id of the last thread in thread's segment
+template<bool HeadSegmented, unsigned int WarpSize, class Flag>
+ROCPRIM_DEVICE inline
+auto last_in_warp_segment(Flag)
+    -> typename std::enable_if<(WarpSize>__AMDGCN_WAVEFRONT_SIZE), unsigned int>::type
+{
+    ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size . Aborting warp sort.");
+    return 0;
 }
 
 } // end namespace detail
