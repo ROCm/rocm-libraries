@@ -90,15 +90,9 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, Sort)
     constexpr size_t ws32 = 32;
     constexpr size_t ws64 = 64;
 
-    // Block size of warp size 32
-    constexpr size_t block_size_ws32 = rocprim::max<size_t>(ws32, logical_warp_size * 4);
-
-    // Block size of warp size 64
-    constexpr size_t block_size_ws64 = rocprim::max<size_t>(ws64, logical_warp_size * 4);
-
     const unsigned int current_device_warp_size = rocprim::host_warp_size();
+    const size_t block_size = std::max<size_t>(ws32, logical_warp_size * 4);
 
-    const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     constexpr unsigned int grid_size = 4;
     const size_t size = block_size * grid_size;
 
@@ -107,7 +101,7 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, Sort)
         !rocprim::detail::is_power_of_two(logical_warp_size) ||
         (block_size != ws32 && block_size != ws64) )
     {
-        printf("Unsupported warp size: %d.  Skipping test\n", rocprim::host_warp_size());
+        printf("Unsupported warp size: %d.  Skipping test\n", current_device_warp_size);
         GTEST_SKIP();
     }
 
@@ -202,15 +196,9 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
     constexpr size_t ws32 = 32;
     constexpr size_t ws64 = 64;
 
-    // Block size of warp size 32
-    constexpr size_t block_size_ws32 = rocprim::max<size_t>(ws32, logical_warp_size * 4);
-
-    // Block size of warp size 64
-    constexpr size_t block_size_ws64 = rocprim::max<size_t>(ws64, logical_warp_size * 4);
-
     const unsigned int current_device_warp_size = rocprim::host_warp_size();
+    const size_t block_size = std::max<size_t>(ws32, logical_warp_size * 4);
 
-    const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     constexpr unsigned int grid_size = 4;
     const size_t size = block_size * grid_size;
 
@@ -219,7 +207,7 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
         !rocprim::detail::is_power_of_two(logical_warp_size) ||
         (block_size != ws32 && block_size != ws64) )
     {
-        printf("Unsupported warp size: %d.  Skipping test\n", rocprim::host_warp_size());
+        printf("Unsupported warp size: %d.  Skipping test\n", current_device_warp_size);
         GTEST_SKIP();
     }
 
