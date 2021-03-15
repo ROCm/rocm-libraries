@@ -34,22 +34,14 @@ public:
     using params = Params;
 };
 
-#if (defined(__gfx1030__))
-    #define warp_sort_param_type(type) \
-        warp_params<type, 2U>, \
-        warp_params<type, 4U>, \
-        warp_params<type, 8U>, \
-        warp_params<type, 16U>, \
-        warp_params<type, 32U>
-#else
-    #define warp_sort_param_type(type) \
-       warp_params<type, 2U>, \
-       warp_params<type, 4U>, \
-       warp_params<type, 8U>, \
-       warp_params<type, 16U>, \
-       warp_params<type, 32U>, \
-       warp_params<type, 64U>
-#endif
+#define warp_sort_param_type(type) \
+   warp_params<type, 2U>, \
+   warp_params<type, 4U>, \
+   warp_params<type, 8U>, \
+   warp_params<type, 16U>, \
+   warp_params<type, 32U>, \
+   warp_params<type, 64U>
+
 typedef ::testing::Types<
     warp_sort_param_type(int),
     warp_sort_param_type(test_utils::custom_test_type<int>),
@@ -101,7 +93,8 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, Sort)
         !rocprim::detail::is_power_of_two(logical_warp_size) ||
         (block_size != ws32 && block_size != ws64) )
     {
-        printf("Unsupported warp size: %d.  Skipping test\n", current_device_warp_size);
+        printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: %d.    Skipping test\n",
+            logical_warp_size, block_size, current_device_warp_size);
         GTEST_SKIP();
     }
 
@@ -207,7 +200,8 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
         !rocprim::detail::is_power_of_two(logical_warp_size) ||
         (block_size != ws32 && block_size != ws64) )
     {
-        printf("Unsupported warp size: %d.  Skipping test\n", current_device_warp_size);
+        printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: %d.    Skipping test\n",
+            logical_warp_size, block_size, current_device_warp_size);
         GTEST_SKIP();
     }
 
