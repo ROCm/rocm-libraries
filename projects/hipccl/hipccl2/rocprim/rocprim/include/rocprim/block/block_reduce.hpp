@@ -31,6 +31,8 @@
 
 #include "detail/block_reduce_warp_reduce.hpp"
 #include "detail/block_reduce_raking_reduce.hpp"
+#include "detail/block_reduce_raking_commutative_only.hpp"
+
 
 /// \addtogroup blockmodule
 /// @{
@@ -44,6 +46,8 @@ enum class block_reduce_algorithm
     using_warp_reduce,
     /// \brief An algorithm which limits calculations to a single hardware warp.
     raking_reduce,
+    /// \bried raking reduce that supports only commutative operators
+    raking_reduce_commutative_only,
     /// \brief Default block_reduce algorithm.
     default_algorithm = using_warp_reduce,
 };
@@ -69,6 +73,14 @@ struct select_block_reduce_impl<block_reduce_algorithm::raking_reduce>
     template<class T, unsigned int BlockSizeX, unsigned int BlockSizeY, unsigned int BlockSizeZ>
     using type = block_reduce_raking_reduce<T, BlockSizeX, BlockSizeY, BlockSizeZ>;
 };
+
+template<>
+struct select_block_reduce_impl<block_reduce_algorithm::raking_reduce_commutative_only>
+{
+    template<class T, unsigned int BlockSizeX, unsigned int BlockSizeY, unsigned int BlockSizeZ>
+    using type = block_reduce_raking_communtative_only<T, BlockSizeX, BlockSizeY, BlockSizeZ>;
+};
+
 
 } // end namespace detail
 

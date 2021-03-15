@@ -61,7 +61,7 @@ TYPED_TEST(RocprimBlockShuffleTests, BlockOffset)
 
     using type = typename TestFixture::type;
     const size_t block_size = TestFixture::block_size;
-    const size_t size = block_size * 1134;
+    const size_t size = block_size * 11;
     const size_t grid_size = size / block_size;
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -145,7 +145,7 @@ TYPED_TEST(RocprimBlockShuffleTests, BlockRotate)
 
     using type = typename TestFixture::type;
     const size_t block_size = TestFixture::block_size;
-    const size_t size = block_size * 1134;
+    const size_t size = block_size * 11;
     const size_t grid_size = size / block_size;
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -229,7 +229,7 @@ TYPED_TEST(RocprimBlockShuffleTests, BlockUp)
 
     using type = typename TestFixture::type;
     const size_t block_size = TestFixture::block_size;
-    const size_t size = block_size * 1134;
+    const size_t size = block_size * 11;
     const size_t grid_size = size / block_size;
     constexpr unsigned int ItemsPerThread = 128;
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
@@ -323,7 +323,7 @@ TYPED_TEST(RocprimBlockShuffleTests, BlockDown)
 
     using type = typename TestFixture::type;
     const size_t block_size = TestFixture::block_size;
-    const size_t size = block_size * 1134;
+    const size_t size = block_size * 11;
     const size_t grid_size = size / block_size;
     constexpr unsigned int ItemsPerThread = 128;
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)

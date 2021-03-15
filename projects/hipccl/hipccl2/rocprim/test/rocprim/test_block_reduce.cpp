@@ -171,6 +171,10 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, Reduce)
             output, output_reductions, expected_reductions,
             device_output, device_output_reductions, grid_size, false
         );
+        static_run_algo<T, block_size, rocprim::block_reduce_algorithm::raking_reduce_commutative_only, binary_op_type>::run(
+            output, output_reductions, expected_reductions,
+            device_output, device_output_reductions, grid_size, false
+        );
 
         HIP_CHECK(hipFree(device_output));
         HIP_CHECK(hipFree(device_output_reductions));
@@ -236,6 +240,11 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceMultiplies)
             device_output, device_output_reductions, grid_size, true
         );
         static_run_algo<T, block_size, rocprim::block_reduce_algorithm::raking_reduce, binary_op_type>::run(
+            output, output_reductions, expected_reductions,
+            device_output, device_output_reductions, grid_size, true
+        );
+
+        static_run_algo<T, block_size, rocprim::block_reduce_algorithm::raking_reduce_commutative_only, binary_op_type>::run(
             output, output_reductions, expected_reductions,
             device_output, device_output_reductions, grid_size, true
         );
@@ -365,6 +374,10 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceValid)
             device_output, device_output_reductions, valid_items, grid_size
         );
         static_run_valid<T, block_size, rocprim::block_reduce_algorithm::raking_reduce, binary_op_type>::run(
+            output, output_reductions, expected_reductions,
+            device_output, device_output_reductions, valid_items, grid_size
+        );
+        static_run_valid<T, block_size, rocprim::block_reduce_algorithm::raking_reduce_commutative_only, binary_op_type>::run(
             output, output_reductions, expected_reductions,
             device_output, device_output_reductions, valid_items, grid_size
         );
@@ -552,4 +565,6 @@ TYPED_TEST(RocprimBlockReduceInputArrayTests, Reduce)
 
     static_for_input_array<0, 2, T, block_size, rocprim::block_reduce_algorithm::using_warp_reduce>::run();
     static_for_input_array<0, 2, T, block_size, rocprim::block_reduce_algorithm::raking_reduce>::run();
+    // static_for_input_array<0, 2, T, block_size, rocprim::block_reduce_algorithm::raking_reduce_commutative_only>::run();
+
 }

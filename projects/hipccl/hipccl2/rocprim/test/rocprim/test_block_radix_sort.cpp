@@ -26,11 +26,6 @@
 #include <rocprim/block/block_load.hpp>
 #include <rocprim/block/block_store.hpp>
 #include <rocprim/block/block_radix_sort.hpp>
-#include <rocprim/block/block_radix_rank.hpp>
-#include <rocprim/block/block_shuffle.hpp>
-#include <rocprim/block/block_adjacent_difference.hpp>
-#include <rocprim/block/block_raking_layout.hpp>
-
 
 
 // required test headers
