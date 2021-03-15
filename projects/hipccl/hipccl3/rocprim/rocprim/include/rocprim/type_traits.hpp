@@ -99,6 +99,94 @@ struct is_compound
         !is_fundamental<T>::value
     > {};
 
+template<typename T, int size = 0>
+struct get_unsigned_bits_type
+{
+  typedef typename get_unsigned_bits_type<T,sizeof(T)>::unsigned_type unsigned_type;
+};
+
+template<typename T>
+struct get_unsigned_bits_type<T,1>
+{
+  typedef uint8_t unsigned_type;
+};
+
+
+template<typename T>
+struct get_unsigned_bits_type<T,2>
+{
+  typedef uint16_t unsigned_type;
+};
+
+
+template<typename T>
+struct get_unsigned_bits_type<T,4>
+{
+  typedef uint32_t unsigned_type;
+};
+
+
+template<typename T>
+struct get_unsigned_bits_type<T,8>
+{
+  typedef uint64_t unsigned_type;
+};
+
+template<typename T, typename UnsignedBits>
+ROCPRIM_DEVICE inline
+auto TwiddleIn(UnsignedBits key)
+    -> typename std::enable_if<is_floating_point<T>::value, UnsignedBits>::type
+{
+  static const UnsignedBits   HIGH_BIT    = UnsignedBits(1) << ((sizeof(UnsignedBits) * 8) - 1);
+  UnsignedBits mask = (key & HIGH_BIT) ? UnsignedBits(-1) : HIGH_BIT;
+  return key ^ mask;
+}
+
+template<typename T, typename UnsignedBits>
+static ROCPRIM_DEVICE inline
+auto TwiddleIn(UnsignedBits key)
+    -> typename std::enable_if<is_unsigned<T>::value, UnsignedBits>::type
+{
+    return key ;
+};
+
+template<typename T, typename UnsignedBits>
+static ROCPRIM_DEVICE inline
+auto TwiddleIn(UnsignedBits key)
+    -> typename std::enable_if<is_integral<T>::value && is_signed<T>::value, UnsignedBits>::type
+{
+    static const UnsignedBits   HIGH_BIT    = UnsignedBits(1) << ((sizeof(UnsignedBits) * 8) - 1);
+    return key ^ HIGH_BIT;
+};
+
+template<typename T, typename UnsignedBits>
+ROCPRIM_DEVICE inline
+auto TwiddleOut(UnsignedBits key)
+    -> typename std::enable_if<is_floating_point<T>::value, UnsignedBits>::type
+{
+    static const UnsignedBits   HIGH_BIT    = UnsignedBits(1) << ((sizeof(UnsignedBits) * 8) - 1);
+    UnsignedBits mask = (key & HIGH_BIT) ? HIGH_BIT : UnsignedBits(-1);
+    return key ^ mask;
+}
+
+template<typename T, typename UnsignedBits>
+static ROCPRIM_DEVICE inline
+auto TwiddleOut(UnsignedBits key)
+    -> typename std::enable_if<is_unsigned<T>::value, UnsignedBits>::type
+{
+    return key;
+};
+
+template<typename T, typename UnsignedBits>
+static ROCPRIM_DEVICE inline
+auto TwiddleOut(UnsignedBits key)
+    -> typename std::enable_if<is_integral<T>::value && is_signed<T>::value, UnsignedBits>::type
+{
+    static const UnsignedBits   HIGH_BIT    = UnsignedBits(1) << ((sizeof(UnsignedBits) * 8) - 1);
+    return key ^ HIGH_BIT;
+};
+
+
 END_ROCPRIM_NAMESPACE
 
 /// @}
