@@ -178,6 +178,33 @@ public:
       return this->reduce(partial,output,BlockSize,reduction_op);
     }
 
+    /// Computes a thread block-wide reduction using the specified reduction operator. The first num_valid threads each contribute one reduction partial.  The return value is only valid for thread<sub>0</sub>.
+    template <
+        typename            ReductionOp>
+    ROCPRIM_DEVICE inline
+    T reduce(
+        T                   partial,            ///< [in] Calling thread's input partial reductions
+        T&                  output,
+        unsigned int        num_valid,
+        storage_type         ,
+        ReductionOp         reduction_op)       ///< [in] Binary reduction operator
+    {
+      return this->reduce(partial,output,num_valid,reduction_op);
+    }
+
+    /// Computes a thread block-wide reduction using the specified reduction operator. The first num_valid threads each contribute one reduction partial.  The return value is only valid for thread<sub>0</sub>.
+    template <
+        typename            ReductionOp>
+    ROCPRIM_DEVICE inline
+    T reduce(
+        T                   partial,            ///< [in] Calling thread's input partial reductions
+        T&                  output,
+        storage_type         ,
+        ReductionOp         reduction_op)       ///< [in] Binary reduction operator
+    {
+      return this->reduce(partial,output,BlockSize,reduction_op);
+    }
+
 };
 } // end namespace detail
 
