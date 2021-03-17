@@ -79,7 +79,7 @@ struct scan_config_803
         ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
 
     using type = scan_config<
-        limit_block_size<256U, sizeof(Value)>::value,
+        limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
         ::rocprim::max(1u, 16u / item_scale),
         ROCPRIM_DETAIL_USE_LOOKBACK_SCAN,
         ::rocprim::block_load_method::block_load_transpose,
@@ -95,7 +95,23 @@ struct scan_config_900
         ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
 
     using type = scan_config<
-        limit_block_size<256U, sizeof(Value)>::value,
+        limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
+        ::rocprim::max(1u, 16u / item_scale),
+        ROCPRIM_DETAIL_USE_LOOKBACK_SCAN,
+        ::rocprim::block_load_method::block_load_transpose,
+        ::rocprim::block_store_method::block_store_transpose,
+        ::rocprim::block_scan_algorithm::using_warp_scan
+    >;
+};
+
+template<class Value>
+struct scan_config_1031
+{
+    static constexpr unsigned int item_scale =
+        ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
+
+    using type = scan_config<
+        limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_32>::value,
         ::rocprim::max(1u, 16u / item_scale),
         ROCPRIM_DETAIL_USE_LOOKBACK_SCAN,
         ::rocprim::block_load_method::block_load_transpose,
@@ -110,6 +126,7 @@ struct default_scan_config
         TargetArch,
         select_arch_case<803, scan_config_803<Value>>,
         select_arch_case<900, scan_config_900<Value>>,
+        select_arch_case<1031, scan_config_1031<Value>>,
         scan_config_900<Value>
     > { };
 
