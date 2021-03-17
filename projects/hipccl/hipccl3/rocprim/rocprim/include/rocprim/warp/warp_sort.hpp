@@ -131,7 +131,7 @@ public:
     }
 
     /// \brief Warp sort for any data type.
-    ///
+    /// Invalid Warp Size
     template<class BinaryFunction = ::rocprim::less<Key>, unsigned int FunctionWarpSize = WarpSize>
     ROCPRIM_DEVICE inline
     auto sort(Key& ,

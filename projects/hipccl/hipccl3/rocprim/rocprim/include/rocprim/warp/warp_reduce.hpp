@@ -173,20 +173,30 @@ public:
     /// }
     /// \endcode
     /// \endparblock
-    template<class BinaryFunction = ::rocprim::plus<T>>
+    template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
     ROCPRIM_DEVICE inline
-    void reduce(T input,
+    auto reduce(T input,
                 T& output,
                 storage_type& storage,
                 BinaryFunction reduce_op = BinaryFunction())
+        -> typename std::enable_if<(FunctionWarpSize<=__AMDGCN_WAVEFRONT_SIZE), void>::type
     {
-        if( WarpSize > ::rocprim::warp_size() )
-        {
-            ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size . Aborting warp sort.");
-            return;
-        }
-
         base_type::reduce(input, output, storage, reduce_op);
+    }
+
+    /// \brief Performs reduction across threads in a logical warp.
+    /// Invalid Warp Size
+    template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
+    ROCPRIM_DEVICE inline
+    auto reduce(T ,
+                T& ,
+                storage_type& ,
+                BinaryFunction reduce_op = BinaryFunction())
+        -> typename std::enable_if<(FunctionWarpSize>__AMDGCN_WAVEFRONT_SIZE), void>::type
+    {
+        (void) reduce_op;
+        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size. Aborting warp sort.");
+        return;
     }
 
     /// \brief Performs reduction across threads in a logical warp.
@@ -235,21 +245,32 @@ public:
     /// }
     /// \endcode
     /// \endparblock
-    template<class BinaryFunction = ::rocprim::plus<T>>
+    template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
     ROCPRIM_DEVICE inline
-    void reduce(T input,
+    auto reduce(T input,
                 T& output,
                 int valid_items,
                 storage_type& storage,
                 BinaryFunction reduce_op = BinaryFunction())
+        -> typename std::enable_if<(FunctionWarpSize<=__AMDGCN_WAVEFRONT_SIZE), void>::type
     {
-        if( WarpSize > ::rocprim::warp_size() )
-        {
-            ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size . Aborting warp sort.");
-            return;
-        }
-
         base_type::reduce(input, output, valid_items, storage, reduce_op);
+    }
+
+    /// \brief Performs reduction across threads in a logical warp.
+    /// Invalid Warp Size
+    template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
+    ROCPRIM_DEVICE inline
+    auto reduce(T ,
+                T& ,
+                int ,
+                storage_type& ,
+                BinaryFunction reduce_op = BinaryFunction())
+        -> typename std::enable_if<(FunctionWarpSize>__AMDGCN_WAVEFRONT_SIZE), void>::type
+    {
+        (void) reduce_op;
+        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size. Aborting warp sort.");
+        return;
     }
 
     /// \brief Performs head-segmented reduction across threads in a logical warp.
@@ -270,21 +291,32 @@ public:
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
     /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
-    template<class Flag, class BinaryFunction = ::rocprim::plus<T>>
+    template<class Flag, class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
     ROCPRIM_DEVICE inline
-    void head_segmented_reduce(T input,
+    auto head_segmented_reduce(T input,
                                T& output,
                                Flag flag,
                                storage_type& storage,
                                BinaryFunction reduce_op = BinaryFunction())
+        -> typename std::enable_if<(FunctionWarpSize<=__AMDGCN_WAVEFRONT_SIZE), void>::type
     {
-        if( WarpSize > ::rocprim::warp_size() )
-        {
-            ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size . Aborting warp sort.");
-            return;
-        }
-
         base_type::head_segmented_reduce(input, output, flag, storage, reduce_op);
+    }
+
+    /// \brief Performs head-segmented reduction across threads in a logical warp.
+    /// Invalid Warp Size
+    template<class Flag, class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
+    ROCPRIM_DEVICE inline
+    auto head_segmented_reduce(T ,
+                               T& ,
+                               Flag ,
+                               storage_type& ,
+                               BinaryFunction reduce_op = BinaryFunction())
+        -> typename std::enable_if<(FunctionWarpSize>__AMDGCN_WAVEFRONT_SIZE), void>::type
+    {
+        (void) reduce_op;
+        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size. Aborting warp sort.");
+        return;
     }
 
     /// \brief Performs tail-segmented reduction across threads in a logical warp.
@@ -305,21 +337,32 @@ public:
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
     /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
-    template<class Flag, class BinaryFunction = ::rocprim::plus<T>>
+    template<class Flag, class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
     ROCPRIM_DEVICE inline
-    void tail_segmented_reduce(T input,
+    auto tail_segmented_reduce(T input,
                                T& output,
                                Flag flag,
                                storage_type& storage,
                                BinaryFunction reduce_op = BinaryFunction())
+        -> typename std::enable_if<(FunctionWarpSize<=__AMDGCN_WAVEFRONT_SIZE), void>::type
     {
-        if( WarpSize > ::rocprim::warp_size() )
-        {
-            ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size . Aborting warp sort.");
-            return;
-        }
-        
         base_type::tail_segmented_reduce(input, output, flag, storage, reduce_op);
+    }
+
+    /// \brief Performs tail-segmented reduction across threads in a logical warp.
+    /// Invalid Warp Size
+    template<class Flag, class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
+    ROCPRIM_DEVICE inline
+    auto tail_segmented_reduce(T ,
+                               T& ,
+                               Flag ,
+                               storage_type& ,
+                               BinaryFunction reduce_op = BinaryFunction())
+        -> typename std::enable_if<(FunctionWarpSize>__AMDGCN_WAVEFRONT_SIZE), void>::type
+    {
+        (void) reduce_op;
+        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size. Aborting warp sort.");
+        return;
     }
 };
 
