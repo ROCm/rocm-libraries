@@ -296,7 +296,7 @@ public:
                                  U (&output)[ItemsPerThread],
                                  storage_type& storage)
     {
-        constexpr unsigned int items_per_warp = get_selected_warp_size() * ItemsPerThread;
+        const unsigned int items_per_warp = get_selected_warp_size() * ItemsPerThread;
         const unsigned int lane_id = ::rocprim::lane_id();
         const unsigned int warp_id = ::rocprim::warp_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         const unsigned int current_warp_size = get_current_warp_size();
@@ -365,7 +365,7 @@ public:
                                  U (&output)[ItemsPerThread],
                                  storage_type& storage)
     {
-        constexpr unsigned int items_per_warp = get_selected_warp_size() * ItemsPerThread;
+        const unsigned int items_per_warp = get_selected_warp_size() * ItemsPerThread;
         const unsigned int lane_id = ::rocprim::lane_id();
         const unsigned int warp_id = ::rocprim::warp_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         const unsigned int current_warp_size = get_current_warp_size();
@@ -702,14 +702,14 @@ public:
 private:
 
     ROCPRIM_DEVICE inline
-    constexpr unsigned int get_selected_warp_size() const
+    unsigned int get_selected_warp_size() const
     {
         return detail::get_min_warp_size(BlockSize, ::rocprim::warp_size());
     }
 
     // Number of warps in block
     ROCPRIM_DEVICE inline
-    constexpr unsigned int get_warps_count() const
+    unsigned int get_warps_count() const
     {
         return (BlockSize + get_selected_warp_size() - 1) / get_selected_warp_size();
     }
