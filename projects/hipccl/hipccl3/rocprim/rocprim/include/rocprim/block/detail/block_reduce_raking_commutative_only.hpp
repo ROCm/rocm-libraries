@@ -55,7 +55,7 @@ class block_reduce_raking_communtative_only
     static constexpr unsigned int RakingThreads =::rocprim::warp_size();
     static constexpr bool UseFallBack = ((BlockSize % WarpSize != 0) || (BlockSize <= WarpSize));
 
-    static constexpr unsigned int SharingThreads =::rocprim::max<unsigned int>(1u,BlockSize - RakingThreads);
+    static constexpr unsigned int SharingThreads =::rocprim::max<int>(1,BlockSize - RakingThreads);
     static constexpr unsigned int SegmentLength = SharingThreads / WarpSize;
 
     // BlockSize is multiple of hardware warp
