@@ -65,23 +65,6 @@ unsigned int lane_id()
     return ::__lane_id();
 }
 
-ROCPRIM_DEVICE inline
-unsigned int lane_mask_less_than()
-{
-    unsigned int lane_mask = 1<<lane_id();
-    lane_mask--;
-    return lane_mask;
-}
-
-ROCPRIM_DEVICE inline
-unsigned int lane_mask_less_than_equal()
-{
-    unsigned int lane_mask = 1<<(lane_id()+1);
-    lane_mask--;
-    return lane_mask;
-}
-
-
 /// \brief Returns flat (linear, 1D) thread identifier in a multidimensional block (tile).
 ROCPRIM_DEVICE inline
 unsigned int flat_block_thread_id()
