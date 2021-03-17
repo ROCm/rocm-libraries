@@ -81,11 +81,6 @@ template<
 class block_exchange
 {
     static constexpr unsigned int BlockSize = BlockSizeX * BlockSizeY * BlockSizeZ;
-    // Select warp size
-    static constexpr unsigned int warp_size =
-        detail::get_min_warp_size(BlockSize, ::rocprim::warp_size());
-    // Number of warps in block
-    static constexpr unsigned int warps_no = (BlockSize + warp_size - 1) / warp_size;
 
     // Minimize LDS bank conflicts for power-of-two strides, i.e. when items accessed
     // using `thread_id * ItemsPerThread` pattern where ItemsPerThread is power of two
@@ -301,7 +296,7 @@ public:
                                  U (&output)[ItemsPerThread],
                                  storage_type& storage)
     {
-        constexpr unsigned int items_per_warp = warp_size * ItemsPerThread;
+        constexpr unsigned int items_per_warp = get_selected_warp_size() * ItemsPerThread;
         const unsigned int lane_id = ::rocprim::lane_id();
         const unsigned int warp_id = ::rocprim::warp_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         const unsigned int current_warp_size = get_current_warp_size();
@@ -370,7 +365,7 @@ public:
                                  U (&output)[ItemsPerThread],
                                  storage_type& storage)
     {
-        constexpr unsigned int items_per_warp = warp_size * ItemsPerThread;
+        constexpr unsigned int items_per_warp = get_selected_warp_size() * ItemsPerThread;
         const unsigned int lane_id = ::rocprim::lane_id();
         const unsigned int warp_id = ::rocprim::warp_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         const unsigned int current_warp_size = get_current_warp_size();
@@ -707,12 +702,25 @@ public:
 private:
 
     ROCPRIM_DEVICE inline
+    constexpr unsigned int get_selected_warp_size() const
+    {
+        return detail::get_min_warp_size(BlockSize, ::rocprim::warp_size());
+    }
+
+    // Number of warps in block
+    ROCPRIM_DEVICE inline
+    constexpr unsigned int get_warps_count() const
+    {
+        return (BlockSize + get_selected_warp_size() - 1) / get_selected_warp_size();
+    }
+
+    ROCPRIM_DEVICE inline
     unsigned int get_current_warp_size() const
     {
         const unsigned int warp_id = ::rocprim::warp_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
-        return (warp_id == warps_no - 1)
-            ? (BlockSize % warp_size > 0 ? BlockSize % warp_size : warp_size)
-            : warp_size;
+        return (warp_id == get_warps_count() - 1)
+            ? (BlockSize % get_selected_warp_size() > 0 ? BlockSize % get_selected_warp_size() : get_selected_warp_size())
+            : get_selected_warp_size();
     }
 
     // Change index to minimize LDS bank conflicts if necessary
