@@ -50,7 +50,7 @@ namespace detail
 enum BlockReduceAlgorithm
 {
     BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY
-        = detail::to_BlockReduceAlgorithm_enum(::rocprim::block_reduce_algorithm::raking_reduce),
+        = detail::to_BlockReduceAlgorithm_enum(::rocprim::block_reduce_algorithm::raking_reduce_commutative_only),
     BLOCK_REDUCE_RAKING
         = detail::to_BlockReduceAlgorithm_enum(::rocprim::block_reduce_algorithm::raking_reduce),
     BLOCK_REDUCE_WARP_REDUCTIONS

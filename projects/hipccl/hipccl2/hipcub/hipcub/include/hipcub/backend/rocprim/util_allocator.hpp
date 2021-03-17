@@ -418,8 +418,8 @@ struct CachingDeviceAllocator
                 if (debug) _HipcubLog("\tDevice %d failed to allocate %lld bytes for stream %lld, retrying after freeing cached allocations",
                       device, (long long) search_key.bytes, (long long) search_key.associated_stream);
 
+                error = hipGetLastError();     // Reset error
                 error = hipSuccess;    // Reset the error we will return
-                hipGetLastError();     // Reset error
 
                 // Lock
                 mutex.lock();
