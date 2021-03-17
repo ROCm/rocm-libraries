@@ -83,7 +83,7 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, Sort)
     constexpr size_t ws64 = 64;
 
     const unsigned int current_device_warp_size = rocprim::host_warp_size();
-    const size_t block_size = std::max<size_t>(ws32, logical_warp_size * 4);
+    const size_t block_size = std::max<size_t>(current_device_warp_size, logical_warp_size * 4);
 
     constexpr unsigned int grid_size = 4;
     const size_t size = block_size * grid_size;
@@ -91,7 +91,7 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, Sort)
     // Check if warp size is supported
     if( logical_warp_size > current_device_warp_size ||
         !rocprim::detail::is_power_of_two(logical_warp_size) ||
-        (block_size != ws32 && block_size != ws64) )
+        (current_device_warp_size != ws32 && current_device_warp_size != ws64) ) // Only WarpSize 32 and 64 is supported
     {
         printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: %d.    Skipping test\n",
             logical_warp_size, block_size, current_device_warp_size);
@@ -190,7 +190,7 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
     constexpr size_t ws64 = 64;
 
     const unsigned int current_device_warp_size = rocprim::host_warp_size();
-    const size_t block_size = std::max<size_t>(ws32, logical_warp_size * 4);
+    const size_t block_size = std::max<size_t>(current_device_warp_size, logical_warp_size * 4);
 
     constexpr unsigned int grid_size = 4;
     const size_t size = block_size * grid_size;
@@ -198,7 +198,7 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
     // Check if warp size is supported
     if( logical_warp_size > current_device_warp_size ||
         !rocprim::detail::is_power_of_two(logical_warp_size) ||
-        (block_size != ws32 && block_size != ws64) )
+        (current_device_warp_size != ws32 && current_device_warp_size != ws64) ) // Only WarpSize 32 and 64 is supported
     {
         printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: %d.    Skipping test\n",
             logical_warp_size, block_size, current_device_warp_size);

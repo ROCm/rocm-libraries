@@ -96,7 +96,7 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSum)
 
     // Check if warp size is supported
     if( (logical_warp_size > current_device_warp_size) ||
-        (block_size != ws32 && block_size != ws64) )
+        (current_device_warp_size != ws32 && current_device_warp_size != ws64) ) // Only WarpSize 32 and 64 is supported
     {
         printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: %d.    Skipping test\n",
             logical_warp_size, block_size, current_device_warp_size);
@@ -234,7 +234,7 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSum)
 
     // Check if warp size is supported
     if( (logical_warp_size > current_device_warp_size) ||
-        (block_size != ws32 && block_size != ws64) )
+        (current_device_warp_size != ws32 && current_device_warp_size != ws64) ) // Only WarpSize 32 and 64 is supported
     {
         printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: %d.    Skipping test\n",
             logical_warp_size, block_size, current_device_warp_size);
@@ -380,7 +380,7 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumValid)
 
     // Check if warp size is supported
     if( (logical_warp_size > current_device_warp_size) ||
-        (block_size != ws32 && block_size != ws64) )
+        (current_device_warp_size != ws32 && current_device_warp_size != ws64) ) // Only WarpSize 32 and 64 is supported
     {
         printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: %d.    Skipping test\n",
             logical_warp_size, block_size, current_device_warp_size);
@@ -519,7 +519,7 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSumValid)
 
     // Check if warp size is supported
     if( (logical_warp_size > current_device_warp_size) ||
-        (block_size != ws32 && block_size != ws64) )
+        (current_device_warp_size != ws32 && current_device_warp_size != ws64) ) // Only WarpSize 32 and 64 is supported
     {
         printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: %d.    Skipping test\n",
             logical_warp_size, block_size, current_device_warp_size);
@@ -640,7 +640,7 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumCustomStruct)
 
     // Check if warp size is supported
     if( (logical_warp_size > current_device_warp_size) ||
-        (block_size != ws32 && block_size != ws64) )
+        (current_device_warp_size != ws32 && current_device_warp_size != ws64) ) // Only WarpSize 32 and 64 is supported
     {
         printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: %d.    Skipping test\n",
             logical_warp_size, block_size, current_device_warp_size);
@@ -789,7 +789,7 @@ TYPED_TEST(RocprimWarpReduceTests, HeadSegmentedReduceSum)
 
     // Check if warp size is supported
     if( (logical_warp_size > current_device_warp_size) ||
-        (block_size != ws32 && block_size != ws64) )
+        (current_device_warp_size != ws32 && current_device_warp_size != ws64) ) // Only WarpSize 32 and 64 is supported
     {
         printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: %d.    Skipping test\n",
             logical_warp_size, block_size, current_device_warp_size);
@@ -962,7 +962,7 @@ TYPED_TEST(RocprimWarpReduceTests, TailSegmentedReduceSum)
 
     // Check if warp size is supported
     if( (logical_warp_size > current_device_warp_size) ||
-        (block_size != ws32 && block_size != ws64) )
+        (current_device_warp_size != ws32 && current_device_warp_size != ws64) ) // Only WarpSize 32 and 64 is supported
     {
         printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: %d.    Skipping test\n",
             logical_warp_size, block_size, current_device_warp_size);
