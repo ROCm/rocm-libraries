@@ -84,11 +84,11 @@ private:
     static constexpr unsigned int padding = ::rocprim::warp_size();
 
     // Helper struct
-    struct prefix_type
+    struct alignas(sizeof(prefix_underlying_type)) prefix_type
     {
         flag_type_ flag;
         T value;
-    } __attribute__((aligned(sizeof(prefix_underlying_type))));
+    };
 
     static_assert(sizeof(prefix_underlying_type) == sizeof(prefix_type), "");
 
