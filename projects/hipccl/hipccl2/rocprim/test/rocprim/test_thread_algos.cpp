@@ -353,7 +353,6 @@ TYPED_TEST(RocprimThreadOperationTests, Scan)
         // Verifying results
         for(size_t i = 0; i < output.size(); i++)
         {
-            //std::cout << "i: " << i << " " << input[i] << " - " << expected[i] << " - " << output[i] << std::endl;
             ASSERT_EQ(output[i], expected[i]);
         }
 
