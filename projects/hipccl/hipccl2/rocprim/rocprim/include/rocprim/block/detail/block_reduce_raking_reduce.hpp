@@ -65,6 +65,11 @@ class block_reduce_raking_reduce
 public:
     using storage_type = detail::raw_storage<storage_type_>;
 
+    /// \brief Computes a thread block-wide reduction using addition (+) as the reduction operator. The first num_valid threads each contribute one reduction partial.  The return value is only valid for thread<sub>0</sub>.
+    /// \param input   [in] Calling thread's input to be reduced
+    /// \param output   [out] Variable containing reduction output
+    /// \param storage  [in] Temporary Storage used for the Reduction
+    /// \param reduce_op [in] Binary reduction operator
     template<class BinaryFunction>
     ROCPRIM_DEVICE inline
     void reduce(T input,
@@ -78,6 +83,10 @@ public:
         );
     }
 
+    /// \brief Computes a thread block-wide reduction using addition (+) as the reduction operator. The first num_valid threads each contribute one reduction partial.  The return value is only valid for thread<sub>0</sub>.
+    /// \param input   [in] Calling thread's input to be reduced
+    /// \param output   [out] Variable containing reduction output
+    /// \param reduce_op [in] Binary reduction operator
     template<class BinaryFunction>
     ROCPRIM_DEVICE inline
     void reduce(T input,
@@ -88,6 +97,11 @@ public:
         this->reduce(input, output, storage, reduce_op);
     }
 
+    /// \brief Computes a thread block-wide reduction using addition (+) as the reduction operator. The first num_valid threads each contribute one reduction partial.  The return value is only valid for thread<sub>0</sub>.
+    /// \param input   [in] Calling thread's input array to be reduced
+    /// \param output   [out] Variable containing reduction output
+    /// \param storage  [in] Temporary Storage used for the Reduction
+    /// \param reduce_op [in] Binary reduction operator
     template<unsigned int ItemsPerThread, class BinaryFunction>
     ROCPRIM_DEVICE inline
     void reduce(T (&input)[ItemsPerThread],
@@ -113,6 +127,10 @@ public:
         );
     }
 
+    /// \brief Computes a thread block-wide reduction using addition (+) as the reduction operator. The first num_valid threads each contribute one reduction partial.  The return value is only valid for thread<sub>0</sub>.
+    /// \param input   [in] Calling thread's input array to be reduced
+    /// \param output   [out] Variable containing reduction output
+    /// \param reduce_op [in] Binary reduction operator
     template<unsigned int ItemsPerThread, class BinaryFunction>
     ROCPRIM_DEVICE inline
     void reduce(T (&input)[ItemsPerThread],
@@ -123,6 +141,12 @@ public:
         this->reduce(input, output, storage, reduce_op);
     }
 
+    /// \brief Computes a thread block-wide reduction using addition (+) as the reduction operator. The first num_valid threads each contribute one reduction partial.  The return value is only valid for thread<sub>0</sub>.
+    /// \param input   [in] Calling thread's input partial reductions
+    /// \param output   [out] Variable containing reduction output
+    /// \param valid_items [in] Number of valid elements (may be less than BlockSize)
+    /// \param storage [in] Temporary Storage used for reduction
+    /// \param reduce_op [in] Binary reduction operator
     template<class BinaryFunction>
     ROCPRIM_DEVICE inline
     void reduce(T input,
@@ -137,6 +161,12 @@ public:
         );
     }
 
+
+    /// \brief Computes a thread block-wide reduction using addition (+) as the reduction operator. The first num_valid threads each contribute one reduction partial.  The return value is only valid for thread<sub>0</sub>.
+    /// \param input   [in] Calling thread's input partial reductions
+    /// \param output   [out] Variable containing reduction output
+    /// \param valid_items [in] Number of valid elements (may be less than BlockSize)
+    /// \param reduce_op [in] Binary reduction operator
     template<class BinaryFunction>
     ROCPRIM_DEVICE inline
     void reduce(T input,
