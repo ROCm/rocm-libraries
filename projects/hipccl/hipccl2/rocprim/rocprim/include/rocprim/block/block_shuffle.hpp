@@ -46,6 +46,20 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
+
+/// \brief The block_shuffle class is a block level parallel primitive which provides methods
+/// for shuffling data partitioned across a block
+///
+/// \tparam T - the input/output type.
+/// \tparam Algorithm - selected scan algorithm, block_scan_algorithm::default_algorithm by default.
+/// \tparam BlockSizeY - the number of threads in a block's y dimension, defaults to 1.
+/// \tparam BlockSizeZ - the number of threads in a block's z dimension, defaults to 1.
+///
+/// \par Overview
+/// It is commonplace for blocks of threads to rearrange data items between
+//  threads.  The BlockShuffle abstraction allows threads to efficiently shift items
+//  either (a) up to their successor or (b) down to their predecessor.
+/// \endparblock
 template<
     class T,
     unsigned int BlockSizeX,
@@ -86,13 +100,15 @@ public:
         storage = &shared_storage;
     }
 
-    /// \brief Each <em>thread<sub>i</sub></em> obtains the \p input provided
-    /// by <em>thread</em><sub><em>i</em>+<tt>distance</tt></sub>.
-    /// The offset \p distance may be negative.
+    /// \brief Shuffles data across threads in a block, offseted by the distance value.
     ///
-    /// \par
-    /// - \smemreuse
+    /// \par A thread with  threadId i receives data from a thread with threadIdx (i-distance), whre distance may be a negative value.
+    /// allocated by the method itself.
+    /// \par Any shuffle operation with invalid input or output threadIds are not carried out, i.e. threadId < 0 || threadId >= BlockSize.
     ///
+    /// \param [in] input - input data to be shuffled to another thread.
+    /// \param [out] output - reference to a output value, that receives data from another thread
+    /// \param [in] distance - The input threadId + distance = output threadId.
     ROCPRIM_DEVICE inline
     void offset(
       T input,
@@ -110,12 +126,15 @@ public:
         }
     }
 
-    /// \brief Each <em>thread<sub>i</sub></em> obtains the \p input provided by
-    /// <em>thread</em><sub><em>i</em>+<tt>distance</tt></sub>.
+    /// \brief Shuffles data across threads in a block, offseted by the distance value.
     ///
-    /// \par
-    /// - \smemreuse
+    /// \par A thread with  threadId i receives data from a thread with threadIdx (i-distance)%BlockSize, whre distance may be a negative value.
+    /// allocated by the method itself.
+    /// \par Data is rotated around the block, using (input_threadId + distance) modulous BlockSize to ensure valid threadIds.
     ///
+    /// \param [in] input - input data to be shuffled to another thread.
+    /// \param [out] output - reference to a output value, that receives data from another thread
+    /// \param [in] distance - The input threadId + distance = output threadId.
     ROCPRIM_DEVICE inline
     void rotate(
         T   input,                  ///< [in] The calling thread's input item
@@ -134,18 +153,15 @@ public:
     }
 
 
-    /// \brief The thread block rotates its [<em>blocked arrangement</em>](index.html#sec5sec3) of \p input items, shifting it up by one item
+    /// \brief The thread block rotates a blocked arrange of \input items, shifting it up by one item
     ///
-    /// \par
-    /// - \blocked
-    /// - \granularity
-    /// - \smemreuse
-    ///
+    /// \param [in]  input -  The calling thread's input items
+    /// \param [out] prev  -  The corresponding predecessor items (may be aliased to \p input).  The item \p prev[0] is not updated for <em>thread</em><sub>0</sub>.
     template <unsigned int ItemsPerThread>
     ROCPRIM_DEVICE inline
     void up(
-        T (&input)[ItemsPerThread],   ///< [in] The calling thread's input items
-        T (&prev)[ItemsPerThread])    ///< [out] The corresponding predecessor items (may be aliased to \p input).  The item \p prev[0] is not updated for <em>thread</em><sub>0</sub>.
+        T (&input)[ItemsPerThread],
+        T (&prev)[ItemsPerThread])
     {
         const size_t flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         storage->prev[flat_id] = input[ItemsPerThread -1];
@@ -163,35 +179,29 @@ public:
 
 
 
-    /**
-     * \brief The thread block rotates its [<em>blocked arrangement</em>](index.html#sec5sec3) of \p input items, shifting it up by one item.  All threads receive the \p input provided by <em>thread</em><sub><tt>BlockSize-1</tt></sub>.
-     *
-     * \par
-     * - \blocked
-     * - \granularity
-     * - \smemreuse
-     */
+    /// \brief The thread block rotates a blocked arrange of \input items, shifting it up by one item
+    ///
+    /// \param [in]  input - The calling thread's input items
+    /// \param [out] prev  - The corresponding predecessor items (may be aliased to \p input).  The item \p prev[0] is not updated for <em>thread</em><sub>0</sub>.
+    /// \param [out] block_suffix - The item \p input[ItemsPerThread-1] from <em>thread</em><sub><tt>BlockSize-1</tt></sub>, provided to all threads
     template <int ItemsPerThread>
     ROCPRIM_DEVICE inline void up(
-        T (&input)[ItemsPerThread],   ///< [in] The calling thread's input items
-        T (&prev)[ItemsPerThread],    ///< [out] The corresponding predecessor items (may be aliased to \p input).  The item \p prev[0] is not updated for <em>thread</em><sub>0</sub>.
-        T &block_suffix)                ///< [out] The item \p input[ItemsPerThread-1] from <em>thread</em><sub><tt>BlockSize-1</tt></sub>, provided to all threads
+        T (&input)[ItemsPerThread],
+        T (&prev)[ItemsPerThread],
+        T &block_suffix)
     {
         up(input, prev);
         block_suffix = storage->prev[BlockSize - 1];
     }
 
-    /// \brief The thread block rotates its [<em>blocked arrangement</em>](index.html#sec5sec3) of \p input items, shifting it down by one item
+    /// \brief The thread block rotates a blocked arrange of \input items, shifting it down by one item
     ///
-    /// \par
-    /// - \blocked
-    /// - \granularity
-    /// - \smemreuse
-    ///
+    /// \param [in]  input -  The calling thread's input items
+    /// \param [out] next  -  The corresponding successor items (may be aliased to \p input).  The item \p prev[0] is not updated for <em>thread</em><sub>BlockSize - 1</sub>.
     template <unsigned int ItemsPerThread>
     ROCPRIM_DEVICE inline void down(
-        T (&input)[ItemsPerThread],   ///< [in] The calling thread's input items
-        T (&next)[ItemsPerThread])    ///< [out] The corresponding predecessor items (may be aliased to \p input).  The value \p next[0] is not updated for <em>thread</em><sub>BlockSize-1</sub>.
+        T (&input)[ItemsPerThread],
+        T (&next)[ItemsPerThread])
     {
         const size_t flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         storage->next[flat_id] = input[0];
@@ -210,23 +220,19 @@ public:
     }
 
 
-    /// \brief The thread block rotates its [<em>blocked arrangement</em>](index.html#sec5sec3)
-    /// of input items, shifting it down by one item.
-    /// All threads receive \p input[0] provided by <em>thread</em><sub><tt>0</tt></sub>.
+    /// \brief The thread block rotates a blocked arrange of \input items, shifting it down by one item
     ///
-    /// \par
-    /// - \blocked
-    /// - \granularity
-    /// - \smemreuse
-    ///
+    /// \param [in]  input -  The calling thread's input items
+    /// \param [out] next  -  The corresponding successor items (may be aliased to \p input).  The item \p prev[0] is not updated for <em>thread</em><sub>BlockSize - 1</sub>.
+    /// \param [out] block_prefix -  The item \p input[0] from <em>thread</em><sub><tt>0</tt></sub>, provided to all threads
     template <unsigned int ItemsPerThread>
     ROCPRIM_DEVICE inline void Down(
-        T (&input)[ItemsPerThread],   ///< [in] The calling thread's input items
-        T (&next)[ItemsPerThread],    ///< [out] The corresponding predecessor items (may be aliased to \p input).  The value \p next[0] is not updated for <em>thread</em><sub>BlockSize-1</sub>.
-        T &block_suffix)                ///< [out] The item \p input[0] from <em>thread</em><sub><tt>0</tt></sub>, provided to all threads
+        T (&input)[ItemsPerThread],
+        T (&next)[ItemsPerThread],
+        T &block_prefix)
     {
-        Up(input, next);
-        block_suffix = storage->next[0];
+        Down(input, next);
+        block_prefix = storage->next[0];
     }
 };
 
