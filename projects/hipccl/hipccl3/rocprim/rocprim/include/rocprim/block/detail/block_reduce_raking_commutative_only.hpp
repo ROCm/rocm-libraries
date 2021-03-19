@@ -83,11 +83,15 @@ public:
       temp_storage = &shared_storage;
     }
     using storage_type = detail::raw_storage<storage_type_>;
-    /// Computes a thread block-wide reduction using addition (+) as the reduction operator. The first num_valid threads each contribute one reduction partial.  The return value is only valid for thread<sub>0</sub>.
+
+    /// \brief Computes a thread block-wide reduction using addition (+) as the reduction operator. The first num_valid threads each contribute one reduction partial.  The return value is only valid for thread<sub>0</sub>.
+    /// \param partial   [in] Calling thread's input partial reductions
+    /// \param num_valid [in] Number of valid elements (may be less than BlockSize)
+    /// \return Sum of the specified elements
     ROCPRIM_DEVICE inline
     T sum(
-        T                   partial,            ///< [in] Calling thread's input partial reductions
-        int                 num_valid)          ///< [in] Number of valid elements (may be less than BlockSize)
+        T                   partial,
+        int                 num_valid)
     {
       const size_t linear_tid = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
       bool FullTile = (num_valid >= BlockSize);
@@ -119,15 +123,20 @@ public:
     }
 
 
-    /// Computes a thread block-wide reduction using the specified reduction operator. The first num_valid threads each contribute one reduction partial.  The return value is only valid for thread<sub>0</sub>.
+    /// \brief Computes a thread block-wide reduction using addition (+) as the reduction operator. The first num_valid threads each contribute one reduction partial.  The return value is only valid for thread<sub>0</sub>.
+    /// \param partial   [in] Calling thread's input partial reductions
+    /// \param output   [out] Variable containing reduction output
+    /// \param num_valid [in] Number of valid elements (may be less than BlockSize)
+    /// \param reduction_op [in] Binary reduction operator
+    /// \return Reduction of the specified elements
     template <
         typename            ReductionOp>
     ROCPRIM_DEVICE inline
     T reduce(
-        T                   partial,            ///< [in] Calling thread's input partial reductions
+        T                   partial,
         T&                  output,
-        int                 num_valid,          ///< [in] Number of valid elements (may be less than BlockSize)
-        ReductionOp         reduction_op)       ///< [in] Binary reduction operator
+        int                 num_valid,
+        ReductionOp         reduction_op)
     {
         const size_t linear_tid = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         bool FullTile = (num_valid >= (int)BlockSize);
@@ -166,41 +175,56 @@ public:
         return output;
     }
 
-    /// Computes a thread block-wide reduction using the specified reduction operator. The first num_valid threads each contribute one reduction partial.  The return value is only valid for thread<sub>0</sub>.
+    /// \brief Computes a thread block-wide reduction using addition (+) as the reduction operator. The first num_valid threads each contribute one reduction partial.  The return value is only valid for thread<sub>0</sub>.
+    /// \param partial   [in] Calling thread's input partial reductions
+    /// \param output   [out] Variable containing reduction output
+    /// \param reduction_op [in] Binary reduction operator
+    /// \return Reduction of the specified elements
     template <
         typename            ReductionOp>
     ROCPRIM_DEVICE inline
     T reduce(
-        T                   partial,            ///< [in] Calling thread's input partial reductions
+        T                   partial,            
         T&                  output,
-        ReductionOp         reduction_op)       ///< [in] Binary reduction operator
+        ReductionOp         reduction_op)       
     {
       return this->reduce(partial,output,BlockSize,reduction_op);
     }
 
-    /// Computes a thread block-wide reduction using the specified reduction operator. The first num_valid threads each contribute one reduction partial.  The return value is only valid for thread<sub>0</sub>.
+    /// \brief Computes a thread block-wide reduction using addition (+) as the reduction operator. The first num_valid threads each contribute one reduction partial.  The return value is only valid for thread<sub>0</sub>.
+    /// \param partial   [in] Calling thread's input partial reductions
+    /// \param output   [out] Variable containing reduction output
+    /// \param num_valid [in] Number of valid elements (may be less than BlockSize)
+    /// \param storage_type [in] Temporary Storage which is ignored
+    /// \param reduction_op [in] Binary reduction operator
+    /// \return Reduction of the specified elements
     template <
         typename            ReductionOp>
     ROCPRIM_DEVICE inline
     T reduce(
-        T                   partial,            ///< [in] Calling thread's input partial reductions
+        T                   partial,            
         T&                  output,
         unsigned int        num_valid,
         storage_type         ,
-        ReductionOp         reduction_op)       ///< [in] Binary reduction operator
+        ReductionOp         reduction_op)       
     {
       return this->reduce(partial,output,num_valid,reduction_op);
     }
 
-    /// Computes a thread block-wide reduction using the specified reduction operator. The first num_valid threads each contribute one reduction partial.  The return value is only valid for thread<sub>0</sub>.
+    /// \brief Computes a thread block-wide reduction using addition (+) as the reduction operator. The first num_valid threads each contribute one reduction partial.  The return value is only valid for thread<sub>0</sub>.
+    /// \param partial   [in] Calling thread's input partial reductions
+    /// \param output   [out] Variable containing reduction output
+    /// \param storage_type [in] Temporary Storage which is ignored
+    /// \param reduction_op [in] Binary reduction operator
+    /// \return Reduction of the specified elements
     template <
         typename            ReductionOp>
     ROCPRIM_DEVICE inline
     T reduce(
-        T                   partial,            ///< [in] Calling thread's input partial reductions
+        T                   partial,            
         T&                  output,
         storage_type         ,
-        ReductionOp         reduction_op)       ///< [in] Binary reduction operator
+        ReductionOp         reduction_op)       
     {
       return this->reduce(partial,output,BlockSize,reduction_op);
     }
