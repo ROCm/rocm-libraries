@@ -74,8 +74,8 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScan)
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
 
     // The different warp sizes
-    constexpr size_t ws32 = 32;
-    constexpr size_t ws64 = 64;
+    constexpr size_t ws32 = size_t(ROCPRIM_WARP_SIZE_32);
+    constexpr size_t ws64 = size_t(ROCPRIM_WARP_SIZE_64);
 
     // Block size of warp size 32
     constexpr size_t block_size_ws32 =
@@ -220,8 +220,8 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScanReduce)
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
 
     // The different warp sizes
-    constexpr size_t ws32 = 32;
-    constexpr size_t ws64 = 64;
+    constexpr size_t ws32 = size_t(ROCPRIM_WARP_SIZE_32);
+    constexpr size_t ws64 = size_t(ROCPRIM_WARP_SIZE_64);
 
     // Block size of warp size 32
     constexpr size_t block_size_ws32 =
@@ -378,8 +378,8 @@ TYPED_TEST(RocprimWarpScanTests, ExclusiveScan)
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
 
     // The different warp sizes
-    constexpr size_t ws32 = 32;
-    constexpr size_t ws64 = 64;
+    constexpr size_t ws32 = size_t(ROCPRIM_WARP_SIZE_32);
+    constexpr size_t ws64 = size_t(ROCPRIM_WARP_SIZE_64);
 
     // Block size of warp size 32
     constexpr size_t block_size_ws32 =
@@ -527,8 +527,8 @@ TYPED_TEST(RocprimWarpScanTests, ExclusiveReduceScan)
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
 
     // The different warp sizes
-    constexpr size_t ws32 = 32;
-    constexpr size_t ws64 = 64;
+    constexpr size_t ws32 = size_t(ROCPRIM_WARP_SIZE_32);
+    constexpr size_t ws64 = size_t(ROCPRIM_WARP_SIZE_64);
 
     // Block size of warp size 32
     constexpr size_t block_size_ws32 =
@@ -698,8 +698,8 @@ TYPED_TEST(RocprimWarpScanTests, Scan)
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
 
     // The different warp sizes
-    constexpr size_t ws32 = 32;
-    constexpr size_t ws64 = 64;
+    constexpr size_t ws32 = size_t(ROCPRIM_WARP_SIZE_32);
+    constexpr size_t ws64 = size_t(ROCPRIM_WARP_SIZE_64);
 
     // Block size of warp size 32
     constexpr size_t block_size_ws32 =
@@ -877,8 +877,8 @@ TYPED_TEST(RocprimWarpScanTests, ScanReduce)
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
 
     // The different warp sizes
-    constexpr size_t ws32 = 32;
-    constexpr size_t ws64 = 64;
+    constexpr size_t ws32 = size_t(ROCPRIM_WARP_SIZE_32);
+    constexpr size_t ws64 = size_t(ROCPRIM_WARP_SIZE_64);
 
     // Block size of warp size 32
     constexpr size_t block_size_ws32 =
@@ -1045,8 +1045,8 @@ TYPED_TEST(RocprimWarpScanTests, InclusiveScanCustomType)
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
 
     // The different warp sizes
-    constexpr size_t ws32 = 32;
-    constexpr size_t ws64 = 64;
+    constexpr size_t ws32 = size_t(ROCPRIM_WARP_SIZE_32);
+    constexpr size_t ws64 = size_t(ROCPRIM_WARP_SIZE_64);
 
     // Block size of warp size 32
     constexpr size_t block_size_ws32 =

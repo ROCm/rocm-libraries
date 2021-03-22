@@ -76,5 +76,6 @@
 /// Supported warp sizes
 #define ROCPRIM_WARP_SIZE_32 32u
 #define ROCPRIM_WARP_SIZE_64 64u
+#define ROCPRIM_MAX_WARP_SIZE ROCPRIM_WARP_SIZE_64
 
 #endif // ROCPRIM_CONFIG_HPP_
