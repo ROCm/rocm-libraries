@@ -76,6 +76,7 @@ class block_reduce_raking_communtative_only
     storage_type_ *temp_storage;
 
 public:
+
     ROCPRIM_DEVICE inline
     block_reduce_raking_communtative_only()
     {
@@ -112,7 +113,11 @@ public:
         {
             // Raking reduction in grid
             T *raking_segment = BlockRakingLayout::raking_ptr(temp_storage->default_storage.raking_grid, linear_tid);
-            partial = internal::thread_reduce<SegmentLength>(raking_segment, ::rocprim::plus<T>(), partial);
+            partial = ::rocprim::thread_reduce<SegmentLength>(
+                raking_segment,
+                ::rocprim::plus<T>(),
+                partial
+            );
 
             // Warpscan
             partial = WarpReduce(temp_storage->default_storage.warp_storage).Sum(partial);
@@ -162,7 +167,11 @@ public:
             {
                 // Raking reduction in grid
                 T *raking_segment = BlockRakingLayout::raking_ptr(temp_storage->default_storage.raking_grid, linear_tid);
-                partial = internal::thread_reduce<SegmentLength>(raking_segment, reduction_op, partial);
+                partial = ::rocprim::thread_reduce<SegmentLength>(
+                    raking_segment,
+                    reduction_op,
+                    partial
+                );
 
                 // Warpscan
                 T output_value;
@@ -184,9 +193,9 @@ public:
         typename            ReductionOp>
     ROCPRIM_DEVICE inline
     T reduce(
-        T                   partial,            
+        T                   partial,
         T&                  output,
-        ReductionOp         reduction_op)       
+        ReductionOp         reduction_op)
     {
       return this->reduce(partial,output,BlockSize,reduction_op);
     }
@@ -202,11 +211,11 @@ public:
         typename            ReductionOp>
     ROCPRIM_DEVICE inline
     T reduce(
-        T                   partial,            
+        T                   partial,
         T&                  output,
         unsigned int        num_valid,
         storage_type         ,
-        ReductionOp         reduction_op)       
+        ReductionOp         reduction_op)
     {
       return this->reduce(partial,output,num_valid,reduction_op);
     }
@@ -221,10 +230,10 @@ public:
         typename            ReductionOp>
     ROCPRIM_DEVICE inline
     T reduce(
-        T                   partial,            
+        T                   partial,
         T&                  output,
         storage_type         ,
-        ReductionOp         reduction_op)       
+        ReductionOp         reduction_op)
     {
       return this->reduce(partial,output,BlockSize,reduction_op);
     }

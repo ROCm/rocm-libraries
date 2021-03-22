@@ -35,9 +35,15 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// Internal namespace (to prevent ADL mishaps between static functions when mixing different CUB installations)
-namespace internal {
-
+/// \brief Carry out a reduction on an array of elements in one thread
+/// \tparam LENGTH - Length of the array to be reduced
+/// \tparam T - the input/output type
+/// \tparam ReductionOp - Binary Operation that used to carry out the reduction
+/// \tparam NoPrefix - Boolean, determining whether to have a initialization value for the reduction accumulator
+/// \param input [in] - Pointer to the first element of the array to be reduced
+/// \param reduction_op [in] - Instance of the reduction operator functor
+/// \param prefix [in] - Value to be used as prefix, if NoPrefix is false
+/// \return - Value obtained from reduction of input array
 template <
     int         LENGTH,
     typename    T,
@@ -61,6 +67,14 @@ ROCPRIM_DEVICE inline T thread_reduce(
     return retval;
 }
 
+/// \brief Carry out a reduction on an array of elements in one thread
+/// \tparam LENGTH - Length of the array to be reduced
+/// \tparam T - the input/output type
+/// \tparam ReductionOp - Binary Operation that used to carry out the reduction
+/// \param input [in] - Pointer to the first element of the array to be reduced
+/// \param reduction_op [in] - Instance of the reduction operator functor
+/// \param prefix [in] - Value to be used as prefix
+/// \return - Value obtained from reduction of input array
 template <
     int         LENGTH,
     typename    T,
@@ -73,6 +87,13 @@ ROCPRIM_DEVICE inline T thread_reduce(
     return thread_reduce<LENGTH, false>((T*)input, reduction_op, prefix);
 }
 
+/// \brief Carry out a reduction on an array of elements in one thread
+/// \tparam LENGTH - Length of the array to be reduced
+/// \tparam T - the input/output type
+/// \tparam ReductionOp - Binary Operation that used to carry out the reduction
+/// \param input [in] - Pointer to the first element of the array to be reduced
+/// \param reduction_op [in] - Instance of the reduction operator functor
+/// \return - Value obtained from reduction of input array
 template <
     int         LENGTH,
     typename    T,
@@ -82,8 +103,6 @@ ROCPRIM_DEVICE inline T thread_reduce(
     ReductionOp reduction_op)
 {
     return thread_reduce<LENGTH, true>((T*)input, reduction_op);
-}
-
 }
 
 END_ROCPRIM_NAMESPACE
