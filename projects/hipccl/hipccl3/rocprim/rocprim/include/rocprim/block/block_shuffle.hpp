@@ -46,19 +46,46 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-
 /// \brief The block_shuffle class is a block level parallel primitive which provides methods
 /// for shuffling data partitioned across a block
 ///
 /// \tparam T - the input/output type.
-/// \tparam Algorithm - selected scan algorithm, block_scan_algorithm::default_algorithm by default.
+/// \tparam BlockSizeX - the number of threads in a block's x dimension, it has no defaults value.
 /// \tparam BlockSizeY - the number of threads in a block's y dimension, defaults to 1.
 /// \tparam BlockSizeZ - the number of threads in a block's z dimension, defaults to 1.
 ///
 /// \par Overview
 /// It is commonplace for blocks of threads to rearrange data items between
-//  threads.  The BlockShuffle abstraction allows threads to efficiently shift items
-//  either (a) up to their successor or (b) down to their predecessor.
+/// threads.  The BlockShuffle abstraction allows threads to efficiently shift items
+/// either (a) up to their successor or (b) down to their predecessor.
+/// * Computation can more efficient when:
+///   * \p ItemsPerThread is greater than one,
+///   * \p T is an arithmetic type,
+///   * the number of threads in the block is a multiple of the hardware warp size (see rocprim::warp_size()).
+///
+/// \par Examples
+/// \parblock
+/// In the examples shuffle operation is performed on block of 192 threads, each provides
+/// one \p int value, result is returned using the same variable as for input.
+///
+/// \code{.cpp}
+/// __global__ void example_kernel(...)
+/// {
+///     // specialize block__shuffle_int for int and logical warp of 192 threads
+///     using block__shuffle_int = rocprim::block_shuffle<int, 192>;
+///     // allocate storage in shared memory
+///     __shared__ block_shuffle::storage_type storage;
+///
+///     int value = ...;
+///     // execute block shuffle
+///     block__shuffle_int().inclusive_up(
+///         value, // input
+///         value, // output
+///         storage
+///     );
+///     ...
+/// }
+/// \endcode
 /// \endparblock
 template<
     class T,
@@ -69,6 +96,7 @@ class block_shuffle
 {
     static constexpr unsigned int BlockSize = BlockSizeX * BlockSizeY * BlockSizeZ;
 
+    // Struct used for creating a raw_storage object for this primitive's temporary storage.
     struct storage_type_
     {
         T prev[BlockSize];
@@ -109,14 +137,34 @@ public:
     /// \param [in] input - input data to be shuffled to another thread.
     /// \param [out] output - reference to a output value, that receives data from another thread
     /// \param [in] distance - The input threadId + distance = output threadId.
+    ///
+    /// \par Example.
+    /// \code{.cpp}
+    /// __global__ void example_kernel(...)
+    /// {
+    ///     // specialize block__shuffle_int for int and logical warp of 192 threads
+    ///     using block__shuffle_int = rocprim::block_shuffle<int, 192>;
+    ///     // allocate storage in shared memory
+    ///     __shared__ block_shuffle::storage_type storage;
+    ///
+    ///     int value = ...;
+    ///     // execute block shuffle
+    ///     block__shuffle_int().offset(
+    ///         value, // input
+    ///         value  // output
+    ///     );
+    ///     ...
+    /// }
+    /// \endcode
     ROCPRIM_DEVICE inline
     void offset(
       T input,
       T& output,
-      int distance =1)
+      int distance = 1)
     {
         const size_t flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         storage->prev[flat_id] = input;
+
         ::rocprim::syncthreads();
 
         const int offset_tid = static_cast<int>(flat_id) + distance;
@@ -135,14 +183,34 @@ public:
     /// \param [in] input - input data to be shuffled to another thread.
     /// \param [out] output - reference to a output value, that receives data from another thread
     /// \param [in] distance - The input threadId + distance = output threadId.
+    ///
+    /// \par Example.
+    /// \code{.cpp}
+    /// __global__ void example_kernel(...)
+    /// {
+    ///     // specialize block__shuffle_int for int and logical warp of 192 threads
+    ///     using block__shuffle_int = rocprim::block_shuffle<int, 192>;
+    ///     // allocate storage in shared memory
+    ///     __shared__ block_shuffle::storage_type storage;
+    ///
+    ///     int value = ...;
+    ///     // execute block shuffle
+    ///     block__shuffle_int().rotate(
+    ///         value, // input
+    ///         value  // output
+    ///     );
+    ///     ...
+    /// }
+    /// \endcode
     ROCPRIM_DEVICE inline
     void rotate(
-        T   input,                  ///< [in] The calling thread's input item
-        T&  output,                 ///< [out] The \p input item from thread <em>thread</em><sub>(<em>i</em>+<tt>distance></tt>)%<tt><BlockSize></tt></sub> (may be aliased to \p input).  This value is not updated for <em>thread</em><sub>BlockSize-1</sub>
-        unsigned int distance = 1)  ///< [in] Offset distance (0 < \p distance < <tt>BlockSize</tt>)
+        T   input,
+        T&  output,
+        unsigned int distance = 1)
     {
         const size_t flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         storage->prev[flat_id] = input;
+
         ::rocprim::syncthreads();
 
         unsigned int offset = threadIdx.x + distance;
@@ -153,10 +221,31 @@ public:
     }
 
 
-    /// \brief The thread block rotates a blocked arrange of \input items, shifting it up by one item
+    /// \brief The thread block rotates a blocked arrange of \input items,
+    /// shifting it up by one item
     ///
     /// \param [in]  input -  The calling thread's input items
-    /// \param [out] prev  -  The corresponding predecessor items (may be aliased to \p input).  The item \p prev[0] is not updated for <em>thread</em><sub>0</sub>.
+    /// \param [out] prev  -  The corresponding predecessor items (may be aliased to \p input).
+    /// The item \p prev[0] is not updated for <em>thread</em><sub>0</sub>.
+    ///
+    /// \par Example.
+    /// \code{.cpp}
+    /// __global__ void example_kernel(...)
+    /// {
+    ///     // specialize block__shuffle_int for int and logical warp of 192 threads
+    ///     using block__shuffle_int = rocprim::block_shuffle<int, 192>;
+    ///     // allocate storage in shared memory
+    ///     __shared__ block_shuffle::storage_type storage;
+    ///
+    ///     int value = ...;
+    ///     // execute block shuffle
+    ///     block__shuffle_int().up(
+    ///         value, // input
+    ///         value  // output
+    ///     );
+    ///     ...
+    /// }
+    /// \endcode
     template <unsigned int ItemsPerThread>
     ROCPRIM_DEVICE inline
     void up(
@@ -165,12 +254,15 @@ public:
     {
         const size_t flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         storage->prev[flat_id] = input[ItemsPerThread -1];
+
         ::rocprim::syncthreads();
+
         #pragma unroll
         for (unsigned int i = ItemsPerThread - 1; i > 0; --i)
         {
             prev[i] = input[i - 1];
         }
+
         if (flat_id > 0)
         {
             prev[0] = storage->prev[flat_id - 1];
@@ -179,11 +271,14 @@ public:
 
 
 
-    /// \brief The thread block rotates a blocked arrange of \input items, shifting it up by one item
+    /// \brief The thread block rotates a blocked arrange of \input items,
+    /// shifting it up by one item
     ///
     /// \param [in]  input - The calling thread's input items
-    /// \param [out] prev  - The corresponding predecessor items (may be aliased to \p input).  The item \p prev[0] is not updated for <em>thread</em><sub>0</sub>.
-    /// \param [out] block_suffix - The item \p input[ItemsPerThread-1] from <em>thread</em><sub><tt>BlockSize-1</tt></sub>, provided to all threads
+    /// \param [out] prev  - The corresponding predecessor items (may be aliased to \p input).
+    /// The item \p prev[0] is not updated for <em>thread</em><sub>0</sub>.
+    /// \param [out] block_suffix - The item \p input[ItemsPerThread-1] from
+    /// <em>thread</em><sub><tt>BlockSize-1</tt></sub>, provided to all threads
     template <int ItemsPerThread>
     ROCPRIM_DEVICE inline void up(
         T (&input)[ItemsPerThread],
@@ -191,13 +286,36 @@ public:
         T &block_suffix)
     {
         up(input, prev);
+
+        // Update block prefix
         block_suffix = storage->prev[BlockSize - 1];
     }
 
-    /// \brief The thread block rotates a blocked arrange of \input items, shifting it down by one item
+    /// \brief The thread block rotates a blocked arrange of \input items,
+    /// shifting it down by one item
     ///
     /// \param [in]  input -  The calling thread's input items
-    /// \param [out] next  -  The corresponding successor items (may be aliased to \p input).  The item \p prev[0] is not updated for <em>thread</em><sub>BlockSize - 1</sub>.
+    /// \param [out] next  -  The corresponding successor items (may be aliased to \p input).
+    /// The item \p prev[0] is not updated for <em>thread</em><sub>BlockSize - 1</sub>.
+    ///
+    /// \par Example.
+    /// \code{.cpp}
+    /// __global__ void example_kernel(...)
+    /// {
+    ///     // specialize block__shuffle_int for int and logical warp of 192 threads
+    ///     using block__shuffle_int = rocprim::block_shuffle<int, 192>;
+    ///     // allocate storage in shared memory
+    ///     __shared__ block_shuffle::storage_type storage;
+    ///
+    ///     int value = ...;
+    ///     // execute block shuffle
+    ///     block__shuffle_int().down(
+    ///         value, // input
+    ///         value  // output
+    ///     );
+    ///     ...
+    /// }
+    /// \endcode
     template <unsigned int ItemsPerThread>
     ROCPRIM_DEVICE inline void down(
         T (&input)[ItemsPerThread],
@@ -205,6 +323,7 @@ public:
     {
         const size_t flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         storage->next[flat_id] = input[0];
+
         ::rocprim::syncthreads();
 
         #pragma unroll
@@ -219,11 +338,12 @@ public:
         }
     }
 
-
-    /// \brief The thread block rotates a blocked arrange of \input items, shifting it down by one item
+    /// \brief The thread block rotates a blocked arrange of \input items,
+    /// shifting it down by one item
     ///
     /// \param [in]  input -  The calling thread's input items
-    /// \param [out] next  -  The corresponding successor items (may be aliased to \p input).  The item \p prev[0] is not updated for <em>thread</em><sub>BlockSize - 1</sub>.
+    /// \param [out] next  -  The corresponding successor items (may be aliased to \p input).
+    /// The item \p prev[0] is not updated for <em>thread</em><sub>BlockSize - 1</sub>.
     /// \param [out] block_prefix -  The item \p input[0] from <em>thread</em><sub><tt>0</tt></sub>, provided to all threads
     template <unsigned int ItemsPerThread>
     ROCPRIM_DEVICE inline void Down(
@@ -232,6 +352,8 @@ public:
         T &block_prefix)
     {
         Down(input, next);
+
+        // Update block prefix
         block_prefix = storage->next[0];
     }
 };

@@ -45,6 +45,12 @@ enum cache_store_modifier
     store_volatile,             ///< Volatile shared (any memory space)
 };
 
+/// \brief Store data using the default load instruction. No support for cache modified stores yet
+/// \tparam MODIFIER        - Value in enum for determine which type of cache store modifier to be used
+/// \tparam OutputIteratorT - Type of Output Iterator
+/// \tparam T               - Type of Data to be stored
+/// \param itr [in]         - Iterator to location where data is to be stored
+/// \param val [in]         - Data to be stored
 template <
     cache_store_modifier MODIFIER = store_default,
     typename OutputIteratorT,
@@ -57,6 +63,11 @@ ROCPRIM_DEVICE inline void thread_store(
     thread_store<MODIFIER>(&(*itr), val);
 }
 
+/// \brief Store data using the default load instruction. No support for cache modified stores yet
+/// \tparam MODIFIER        - Value in enum for determine which type of cache store modifier to be used
+/// \tparam T               - Type of Data to be stored
+/// \param ptr [in] - Pointer to location where data is to be stored
+/// \param val [in] - Data to be stored
 template <
     cache_store_modifier MODIFIER = store_default,
     typename T

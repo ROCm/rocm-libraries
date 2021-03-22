@@ -45,6 +45,12 @@ enum cache_load_modifier : int
     load_volatile,      ///< Volatile (any memory space)
 };
 
+/// \brief Store data using the default load instruction. No support for cache modified stores yet
+/// \tparam MODIFIER        - Value in enum for determine which type of cache store modifier to be used
+/// \tparam InputIteratorT - Type of Output Iterator
+/// \param itr [in]         - Iterator to location where data is to be stored
+/// \param val [in]         - Data to be stored
+/// \return Data that is loaded from memory
 template <
     cache_load_modifier MODIFIER = load_default,
     typename InputIteratorT>
@@ -57,6 +63,11 @@ thread_load(InputIteratorT itr)
     return *itr;
 }
 
+/// \brief Load data using the default load instruction. No support for cache modified loads yet
+/// \tparam MODIFIER        - Value in enum for determine which type of cache store modifier to be used
+/// \tparam T               - Type of Data to be loaded
+/// \param ptr [in] - Pointer to data to be loaded
+/// \return Data that is loaded from memory
 template <
     cache_load_modifier MODIFIER = load_default,
     typename T>

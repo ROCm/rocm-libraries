@@ -36,9 +36,6 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// Internal namespace (to prevent ADL mishaps between static functions when mixing different CUB installations)
-namespace internal {
-
 template <int A>
 struct Int2Type
 {
@@ -54,6 +51,16 @@ struct Int2Type
   * @{
   */
 
+  /// \brief Perform a sequential exclusive prefix scan over \p LENGTH elements of the \p input array.  The aggregate is returned.
+  /// \tparam LENGTH           - Length of \p input and \p output arrays
+  /// \tparam T                - <b>[inferred]</b> The data type to be scanned.
+  /// \tparam ScanOp           - <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
+  /// \param inclusive [in]    - Initial value for inclusive aggregate
+  /// \param exclusive [in]    - Initial value for exclusive aggregate
+  /// \param input [in]        - Input array
+  /// \param output [out]      - Output array (may be aliased to \p input)
+  /// \param scan_op [in]      - Binary scan operator
+  /// \return                  - Aggregate of the scan
  template <
      int         LENGTH,
      typename    T,
@@ -80,13 +87,16 @@ struct Int2Type
 
 
 
- /**
-  * \brief Perform a sequential exclusive prefix scan over \p LENGTH elements of the \p input array, seeded with the specified \p prefix.  The aggregate is returned.
-  *
-  * \tparam LENGTH     LengthT of \p input and \p output arrays
-  * \tparam T          <b>[inferred]</b> The data type to be scanned.
-  * \tparam ScanOp     <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
-  */
+ /// \brief Perform a sequential exclusive prefix scan over \p LENGTH elements of the \p input array.  The aggregate is returned.
+ /// \tparam LENGTH           - Length of \p input and \p output arrays
+ /// \tparam T                - <b>[inferred]</b> The data type to be scanned.
+ /// \tparam ScanOp           - <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
+ /// \param input [in]        - Input array
+ /// \param output [out]      - Output array (may be aliased to \p input)
+ /// \param scan_op [in]      - Binary scan operator
+ /// \param prefix  [in]      - Prefix to seed scan with
+ /// \param apply_prefix [in] - Whether or not the calling thread should apply its prefix.  (Handy for preventing thread-0 from applying a prefix.)
+ /// \return                  - Aggregate of the scan
  template <
      int         LENGTH,
      typename    T,
@@ -110,13 +120,16 @@ struct Int2Type
      return thread_scan_exclusive(inclusive, exclusive, input + 1, output + 1, scan_op, Int2Type<LENGTH - 1>());
  }
 
- /**
-  * \brief Perform a sequential exclusive prefix scan over the statically-sized \p input array, seeded with the specified \p prefix.  The aggregate is returned.
-  *
-  * \tparam LENGTH     <b>[inferred]</b> LengthT of \p input and \p output arrays
-  * \tparam T          <b>[inferred]</b> The data type to be scanned.
-  * \tparam ScanOp     <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
-  */
+ /// \brief Perform a sequential exclusive prefix scan over \p LENGTH elements of the \p input array.  The aggregate is returned.
+ /// \tparam LENGTH           - Length of \p input and \p output arrays
+ /// \tparam T                - <b>[inferred]</b> The data type to be scanned.
+ /// \tparam ScanOp           - <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
+ /// \param input [in]        - Input array
+ /// \param output [out]      - Output array (may be aliased to \p input)
+ /// \param scan_op [in]      - Binary scan operator
+ /// \param prefix  [in]      - Prefix to seed scan with
+ /// \param apply_prefix [in] - Whether or not the calling thread should apply its prefix.  (Handy for preventing thread-0 from applying a prefix.)
+ /// \return                  - Aggregate of the scan
  template <
      int         LENGTH,
      typename    T,
@@ -132,6 +145,15 @@ struct Int2Type
      return thread_scan_exclusive<LENGTH>((T*) input, (T*) output, scan_op, prefix, apply_prefix);
  }
 
+ /// \brief Perform a sequential exclusive prefix scan over \p LENGTH elements of the \p input array.  The aggregate is returned.
+ /// \tparam LENGTH           - Length of \p input and \p output arrays
+ /// \tparam T                - <b>[inferred]</b> The data type to be scanned.
+ /// \tparam ScanOp           - <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
+ /// \param inclusive [in]    - Initial value for inclusive aggregate
+ /// \param input [in]        - Input array
+ /// \param output [out]      - Output array (may be aliased to \p input)
+ /// \param scan_op [in]      - Binary scan operator
+ /// \return                  - Aggregate of the scan
  template <
      int         LENGTH,
      typename    T,
@@ -154,22 +176,24 @@ struct Int2Type
      return inclusive;
  }
 
- /**
-  * \brief Perform a sequential inclusive prefix scan over \p LENGTH elements of the \p input array.  The aggregate is returned.
-  *
-  * \tparam LENGTH     LengthT of \p input and \p output arrays
-  * \tparam T          <b>[inferred]</b> The data type to be scanned.
-  * \tparam ScanOp     <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
-  */
+
+/// \brief Perform a sequential inclusive prefix scan over \p LENGTH elements of the \p input array.  The aggregate is returned.
+/// \tparam LENGTH     - LengthT of \p input and \p output arrays
+/// \tparam T          - <b>[inferred]</b> The data type to be scanned.
+/// \tparam ScanOp     - <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
+/// \param input [in] - Input array
+/// \param output [out] - Output array (may be aliased to \p input)
+/// \param scan_op [in] - Binary scan operator
+/// \return - Aggregate of the scan
  template <
      int         LENGTH,
      typename    T,
      typename    ScanOp>
  ROCPRIM_DEVICE inline
  T thread_scan_inclusive(
-     T           *input,                 ///< [in] Input array
-     T           *output,                ///< [out] Output array (may be aliased to \p input)
-     ScanOp      scan_op)                ///< [in] Binary scan operator
+     T           *input,
+     T           *output,
+     ScanOp      scan_op)
  {
      T inclusive = input[0];
      output[0] = inclusive;
@@ -179,13 +203,14 @@ struct Int2Type
  }
 
 
- /**
-  * \brief Perform a sequential inclusive prefix scan over the statically-sized \p input array.  The aggregate is returned.
-  *
-  * \tparam LENGTH     <b>[inferred]</b> LengthT of \p input and \p output arrays
-  * \tparam T          <b>[inferred]</b> The data type to be scanned.
-  * \tparam ScanOp     <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
-  */
+ /// \brief Perform a sequential inclusive prefix scan over \p LENGTH elements of the \p input array.  The aggregate is returned.
+ /// \tparam LENGTH     - LengthT of \p input and \p output arrays
+ /// \tparam T          - <b>[inferred]</b> The data type to be scanned.
+ /// \tparam ScanOp     - <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
+ /// \param input [in] - Input array
+ /// \param output [out] - Output array (may be aliased to \p input)
+ /// \param scan_op [in] - Binary scan operator
+ /// \return - Aggregate of the scan
  template <
      int         LENGTH,
      typename    T,
@@ -200,13 +225,16 @@ struct Int2Type
  }
 
 
- /**
-  * \brief Perform a sequential inclusive prefix scan over \p LENGTH elements of the \p input array, seeded with the specified \p prefix.  The aggregate is returned.
-  *
-  * \tparam LENGTH     LengthT of \p input and \p output arrays
-  * \tparam T          <b>[inferred]</b> The data type to be scanned.
-  * \tparam ScanOp     <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
-  */
+ /// \brief Perform a sequential inclusive prefix scan over \p LENGTH elements of the \p input array.  The aggregate is returned.
+ /// \tparam LENGTH           - LengthT of \p input and \p output arrays
+ /// \tparam T                - <b>[inferred]</b> The data type to be scanned.
+ /// \tparam ScanOp           - <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
+ /// \param input [in]        - Input array
+ /// \param output [out]      - Output array (may be aliased to \p input)
+ /// \param scan_op [in]      - Binary scan operator
+ /// \param prefix  [in]      - Prefix to seed scan with
+ /// \param apply_prefix [in] - Whether or not the calling thread should apply its prefix.  (Handy for preventing thread-0 from applying a prefix.)
+ /// \return                  - Aggregate of the scan
  template <
      int         LENGTH,
      typename    T,
@@ -231,24 +259,27 @@ struct Int2Type
  }
 
 
- /**
-  * \brief Perform a sequential inclusive prefix scan over the statically-sized \p input array, seeded with the specified \p prefix.  The aggregate is returned.
-  *
-  * \tparam LENGTH     <b>[inferred]</b> LengthT of \p input and \p output arrays
-  * \tparam T          <b>[inferred]</b> The data type to be scanned.
-  * \tparam ScanOp     <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
-  */
+ /// \brief Perform a sequential inclusive prefix scan over \p LENGTH elements of the \p input array.  The aggregate is returned.
+ /// \tparam LENGTH           - LengthT of \p input and \p output arrays
+ /// \tparam T                - <b>[inferred]</b> The data type to be scanned.
+ /// \tparam ScanOp           - <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
+ /// \param input [in]        - Input array
+ /// \param output [out]      - Output array (may be aliased to \p input)
+ /// \param scan_op [in]      - Binary scan operator
+ /// \param prefix  [in]      - Prefix to seed scan with
+ /// \param apply_prefix [in] - Whether or not the calling thread should apply its prefix.  (Handy for preventing thread-0 from applying a prefix.)
+ /// \return                  - Aggregate of the scan
  template <
      int         LENGTH,
      typename    T,
      typename    ScanOp>
  ROCPRIM_DEVICE inline
  T thread_scan_inclusive(
-     T           (&input)[LENGTH],       ///< [in] Input array
-     T           (&output)[LENGTH],      ///< [out] Output array (may be aliased to \p input)
-     ScanOp      scan_op,                ///< [in] Binary scan operator
-     T           prefix,                 ///< [in] Prefix to seed scan with
-     bool        apply_prefix = true)    ///< [in] Whether or not the calling thread should apply its prefix.  (Handy for preventing thread-0 from applying a prefix.)
+     T           (&input)[LENGTH],
+     T           (&output)[LENGTH],
+     ScanOp      scan_op,
+     T           prefix,
+     bool        apply_prefix = true)
  {
      return thread_scan_inclusive<LENGTH>((T*) input, (T*) output, scan_op, prefix, apply_prefix);
  }
@@ -257,9 +288,6 @@ struct Int2Type
  //@}  end member group
 
  /** @} */       // end group UtilModule
-
-
- }               // internal namespace
 
  END_ROCPRIM_NAMESPACE
 

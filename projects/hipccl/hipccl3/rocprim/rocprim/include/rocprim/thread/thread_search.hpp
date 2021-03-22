@@ -54,8 +54,8 @@ ROCPRIM_HOST_DEVICE inline void merge_path_search(
     /// The value type of the input iterator
     typedef typename std::iterator_traits<AIteratorT>::value_type T;
 
-    OffsetT split_min = CUB_MAX(diagonal - b_len, 0);
-    OffsetT split_max = CUB_MIN(diagonal, a_len);
+    OffsetT split_min = ::rocprim::max(diagonal - b_len, 0);
+    OffsetT split_max = ::rocprim::min(diagonal, a_len);
 
     while (split_min < split_max)
     {
@@ -72,23 +72,29 @@ ROCPRIM_HOST_DEVICE inline void merge_path_search(
         }
     }
 
-    path_coordinate.x = CUB_MIN(split_min, a_len);
+    path_coordinate.x = ::rocprim::min(split_min, a_len);
     path_coordinate.y = diagonal - split_min;
 }
 
 
 
-/**
- * \brief Returns the offset of the first value within \p input which does not compare less than \p val
- */
+
+/// \brief Returns the offset of the first value within \p input which does not compare less than \p val
+/// \tparam InputIteratorT   - <b>[inferred]</b> Type of iterator for the input data to be searched
+/// \tparam OffsetT          - <b>[inferred]</b> The data type of num_items
+/// \tparam T                - <b>[inferred]</b> The data type of the input sequence elements
+/// \param input     [in]    - Input sequence
+/// \param num_items [out]   - Input sequence length
+/// \param val       [in]    - Search Key
+/// \return                  - Offset at which val was found
 template <
     typename InputIteratorT,
     typename OffsetT,
     typename T>
 ROCPRIM_DEVICE inline OffsetT lower_bound(
-    InputIteratorT      input,              ///< [in] Input sequence
-    OffsetT             num_items,          ///< [in] Input sequence length
-    T                   val)                ///< [in] Search key
+    InputIteratorT      input,
+    OffsetT             num_items,
+    T                   val)
 {
     OffsetT retval = 0;
     while (num_items > 0)
@@ -109,9 +115,14 @@ ROCPRIM_DEVICE inline OffsetT lower_bound(
 }
 
 
-/**
- * \brief Returns the offset of the first value within \p input which compares greater than \p val
- */
+/// \brief Returns the offset of the first value within \p input which compares greater than \p val
+/// \tparam InputIteratorT   - <b>[inferred]</b> Type of iterator for the input data to be searched
+/// \tparam OffsetT          - <b>[inferred]</b> The data type of num_items
+/// \tparam T                - <b>[inferred]</b> The data type of the input sequence elements
+/// \param input     [in]    - Input sequence
+/// \param num_items [out]   - Input sequence length
+/// \param val       [in]    - Search Key
+/// \return                  - Offset at which val was found
 template <
     typename InputIteratorT,
     typename OffsetT,
