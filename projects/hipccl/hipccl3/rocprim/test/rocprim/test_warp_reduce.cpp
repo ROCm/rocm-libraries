@@ -73,8 +73,8 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSum)
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
 
     // The different warp sizes
-    constexpr size_t ws32 = 32;
-    constexpr size_t ws64 = 64;
+    constexpr size_t ws32 = size_t(ROCPRIM_WARP_SIZE_32);
+    constexpr size_t ws64 = size_t(ROCPRIM_WARP_SIZE_64);
 
     // Block size of warp size 32
     constexpr size_t block_size_ws32 =
@@ -211,8 +211,8 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSum)
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
 
     // The different warp sizes
-    constexpr size_t ws32 = 32;
-    constexpr size_t ws64 = 64;
+    constexpr size_t ws32 = size_t(ROCPRIM_WARP_SIZE_32);
+    constexpr size_t ws64 = size_t(ROCPRIM_WARP_SIZE_64);
 
     // Block size of warp size 32
     constexpr size_t block_size_ws32 =
@@ -356,8 +356,8 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumValid)
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
 
     // The different warp sizes
-    constexpr size_t ws32 = 32;
-    constexpr size_t ws64 = 64;
+    constexpr size_t ws32 = size_t(ROCPRIM_WARP_SIZE_32);
+    constexpr size_t ws64 = size_t(ROCPRIM_WARP_SIZE_64);
 
     // Block size of warp size 32
     constexpr size_t block_size_ws32 =
@@ -495,8 +495,8 @@ TYPED_TEST(RocprimWarpReduceTests, AllReduceSumValid)
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
 
     // The different warp sizes
-    constexpr size_t ws32 = 32;
-    constexpr size_t ws64 = 64;
+    constexpr size_t ws32 = size_t(ROCPRIM_WARP_SIZE_32);
+    constexpr size_t ws64 = size_t(ROCPRIM_WARP_SIZE_64);
 
     // Block size of warp size 32
     constexpr size_t block_size_ws32 =
@@ -617,8 +617,8 @@ TYPED_TEST(RocprimWarpReduceTests, ReduceSumCustomStruct)
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
 
     // The different warp sizes
-    constexpr size_t ws32 = 32;
-    constexpr size_t ws64 = 64;
+    constexpr size_t ws32 = size_t(ROCPRIM_WARP_SIZE_32);
+    constexpr size_t ws64 = size_t(ROCPRIM_WARP_SIZE_64);
 
     // Block size of warp size 32
     constexpr size_t block_size_ws32 =
@@ -766,8 +766,8 @@ TYPED_TEST(RocprimWarpReduceTests, HeadSegmentedReduceSum)
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
 
     // The different warp sizes
-    constexpr size_t ws32 = 32;
-    constexpr size_t ws64 = 64;
+    constexpr size_t ws32 = size_t(ROCPRIM_WARP_SIZE_32);
+    constexpr size_t ws64 = size_t(ROCPRIM_WARP_SIZE_64);
 
     // Block size of warp size 32
     constexpr size_t block_size_ws32 =
@@ -939,8 +939,8 @@ TYPED_TEST(RocprimWarpReduceTests, TailSegmentedReduceSum)
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
 
     // The different warp sizes
-    constexpr size_t ws32 = 32;
-    constexpr size_t ws64 = 64;
+    constexpr size_t ws32 = size_t(ROCPRIM_WARP_SIZE_32);
+    constexpr size_t ws64 = size_t(ROCPRIM_WARP_SIZE_64);
 
     // Block size of warp size 32
     constexpr size_t block_size_ws32 =

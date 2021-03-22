@@ -100,6 +100,9 @@ class warp_sort : detail::warp_sort_shuffle<Key, WarpSize, Value>
 {
     typedef typename detail::warp_sort_shuffle<Key, WarpSize, Value> base_type;
 
+    // Check if WarpSize is valid for the targets
+    static_assert(WarpSize <= ROCPRIM_MAX_WARP_SIZE, "WarpSize can't be greater than hardware warp size.");
+    
 public:
     /// \brief Struct used to allocate a temporary memory that is required for thread
     /// communication during operations provided by related parallel primitive.
