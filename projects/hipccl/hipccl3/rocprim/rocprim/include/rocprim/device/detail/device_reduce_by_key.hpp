@@ -165,7 +165,7 @@ void fill_unique_counts(KeysInputIterator keys_input,
                         unsigned int full_batches)
 {
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
-    constexpr unsigned int warp_size = ::rocprim::warp_size();
+    constexpr unsigned int warp_size = ::rocprim::device_warp_size();
     constexpr unsigned int warps_no = BlockSize / warp_size;
 
     using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;

@@ -47,7 +47,7 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \par Overview
 /// * \p WarpSize must be power of two.
 /// * \p WarpSize must be equal to or less than the size of hardware warp (see
-/// rocprim::warp_size()). If it is less, sort is performed separately within groups
+/// rocprim::device_warp_size()). If it is less, sort is performed separately within groups
 /// determined by WarpSize.
 /// For example, if \p WarpSize is 4, hardware warp is 64, sort will be performed in logical
 /// warps grouped like this: `{ {0, 1, 2, 3}, {4, 5, 6, 7 }, ..., {60, 61, 62, 63} }`
@@ -93,7 +93,7 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \endparblock
 template<
     class Key,
-    unsigned int WarpSize = warp_size(),
+    unsigned int WarpSize = device_warp_size(),
     class Value = empty_type
 >
 class warp_sort : detail::warp_sort_shuffle<Key, WarpSize, Value>
