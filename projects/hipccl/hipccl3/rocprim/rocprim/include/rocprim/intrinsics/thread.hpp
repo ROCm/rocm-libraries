@@ -34,7 +34,7 @@ BEGIN_ROCPRIM_NAMESPACE
 // Sizes
 
 /// \brief Returns a number of threads in a hardware warp for the actual device.
-/// At device side this constant is not available at compile time.
+/// At host side this constant is available at runtime time only.
 ///
 /// It is constant for a device.
 ROCPRIM_HOST inline
