@@ -382,10 +382,10 @@ auto test_block_exchange()
     std::vector<output_type> expected(size);
     std::vector<output_type> output(size, output_type(0));
 
-    constexpr size_t warp_size =
-        ::rocprim::detail::get_min_warp_size(block_size, size_t(::rocprim::warp_size()));
-    constexpr size_t warps_no = (block_size + warp_size - 1) / warp_size;
-    constexpr size_t items_per_warp = warp_size * items_per_thread;
+    const size_t warp_size =
+        ::rocprim::detail::get_min_warp_size(block_size, size_t(::rocprim::host_warp_size()));
+    const size_t warps_no = (block_size + warp_size - 1) / warp_size;
+    const size_t items_per_warp = warp_size * items_per_thread;
 
     // Calculate input and expected results on host
     std::vector<type> values(size);
@@ -479,10 +479,10 @@ auto test_block_exchange()
     std::vector<output_type> expected(size);
     std::vector<output_type> output(size, output_type(0));
 
-    constexpr size_t warp_size =
-        ::rocprim::detail::get_min_warp_size(block_size, size_t(::rocprim::warp_size()));
-    constexpr size_t warps_no = (block_size + warp_size - 1) / warp_size;
-    constexpr size_t items_per_warp = warp_size * items_per_thread;
+    const size_t warp_size =
+        ::rocprim::detail::get_min_warp_size(block_size, size_t(::rocprim::host_warp_size()));
+    const size_t warps_no = (block_size + warp_size - 1) / warp_size;
+    const size_t items_per_warp = warp_size * items_per_thread;
 
     // Calculate input and expected results on host
     std::vector<type> values(size);
