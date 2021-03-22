@@ -33,7 +33,8 @@ BEGIN_ROCPRIM_NAMESPACE
 
 // Sizes
 
-/// \brief Returns a number of threads in a hardware warp for the actual device
+/// \brief Returns a number of threads in a hardware warp for the actual device.
+/// At device side this constant is not available at compile time.
 ///
 /// It is constant for a device.
 ROCPRIM_HOST inline
@@ -48,11 +49,12 @@ unsigned int host_warp_size()
     return warp_size;
 };
 
-/// \brief Returns a number of threads in a hardware warp.
+/// \brief Returns a number of threads in a hardware warp for the actual target.
+/// At device side this constant is available at compile time.
 ///
 /// It is constant for a device.
 ROCPRIM_DEVICE inline
-constexpr unsigned int warp_size()
+constexpr unsigned int device_warp_size()
 {
     return warpSize;
 }
@@ -126,13 +128,13 @@ unsigned int flat_tile_thread_id()
 ROCPRIM_DEVICE inline
 unsigned int warp_id()
 {
-    return flat_block_thread_id()/warp_size();
+    return flat_block_thread_id()/device_warp_size();
 }
 
 ROCPRIM_DEVICE inline
 unsigned int warp_id(unsigned int flat_id)
 {
-    return flat_id/warp_size();
+    return flat_id/device_warp_size();
 }
 
 /// \brief Returns warp id in a block (tile). Use template parameters to optimize 1D or 2D kernels.
@@ -140,7 +142,7 @@ template<unsigned int BlockSizeX, unsigned int BlockSizeY, unsigned int BlockSiz
 ROCPRIM_DEVICE inline
 unsigned int warp_id()
 {
-    return flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>()/warp_size();
+    return flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>()/device_warp_size();
 }
 
 /// \brief Returns flat (linear, 1D) block identifier in a multidimensional grid.
@@ -269,7 +271,7 @@ namespace detail
 
     template<>
     ROCPRIM_DEVICE inline
-    unsigned int logical_lane_id<warp_size()>()
+    unsigned int logical_lane_id<device_warp_size()>()
     {
         return lane_id();
     }
@@ -284,7 +286,7 @@ namespace detail
 
     template<>
     ROCPRIM_DEVICE inline
-    unsigned int logical_warp_id<warp_size()>()
+    unsigned int logical_warp_id<device_warp_size()>()
     {
         return warp_id();
     }

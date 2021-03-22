@@ -506,12 +506,12 @@ void segmented_sort(KeysInputIterator keys_input,
     >;
     using long_radix_helper_type = segmented_radix_sort_helper<
         key_type, value_type,
-        ::rocprim::warp_size(), block_size, items_per_thread,
+        ::rocprim::device_warp_size(), block_size, items_per_thread,
         long_radix_bits, Descending
     >;
     using short_radix_helper_type = segmented_radix_sort_helper<
         key_type, value_type,
-        ::rocprim::warp_size(), block_size, items_per_thread,
+        ::rocprim::device_warp_size(), block_size, items_per_thread,
         short_radix_bits, Descending
     >;
 

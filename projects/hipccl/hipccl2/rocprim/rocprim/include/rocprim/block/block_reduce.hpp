@@ -99,7 +99,7 @@ struct select_block_reduce_impl<block_reduce_algorithm::raking_reduce_commutativ
 ///   * \p ItemsPerThread is greater than one,
 ///   * \p T is an arithmetic type,
 ///   * reduce operation is simple addition operator, and
-///   * the number of threads in the block is a multiple of the hardware warp size (see rocprim::warp_size()).
+///   * the number of threads in the block is a multiple of the hardware warp size (see rocprim::device_warp_size()).
 /// * block_reduce has two alternative implementations: \p block_reduce_algorithm::using_warp_reduce
 ///   and block_reduce_algorithm::raking_reduce.
 ///
