@@ -326,8 +326,10 @@ auto scan_impl(void * temporary_storage,
     -> typename std::enable_if<Config::use_lookback, hipError_t>::type
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    using result_type = typename ::rocprim::detail::match_result_type<
-        input_type, BinaryFunction
+    using result_type = typename std::remove_reference<
+        typename ::rocprim::detail::match_result_type<
+            input_type, BinaryFunction
+        >::type
     >::type;
 
     using config = Config;
@@ -566,7 +568,7 @@ hipError_t inclusive_scan(void * temporary_storage,
     return detail::scan_impl<false, config>(
         temporary_storage, storage_size,
         // result_type() is a dummy initial value (not used)
-        input, output, result_type(), size,
+        input, output, result_type{}, size,
         scan_op, stream, debug_synchronous
     );
 }
