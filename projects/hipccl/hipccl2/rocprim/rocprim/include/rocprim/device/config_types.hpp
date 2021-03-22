@@ -57,7 +57,7 @@ template<
     unsigned int MaxBlockSize,
     unsigned int SharedMemoryPerThread,
     // Most kernels require block sizes not smaller than warp
-    unsigned int MinBlockSize
+    unsigned int MinBlockSize, 
     // Can fit in shared memory?
     // Although GPUs have 64KiB, 32KiB is used here as a "soft" limit,
     // because some additional memory may be required in kernels
