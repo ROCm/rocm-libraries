@@ -182,7 +182,7 @@ public:
                 T& output,
                 storage_type& storage,
                 BinaryFunction reduce_op = BinaryFunction())
-        -> typename std::enable_if<(FunctionWarpSize<=__AMDGCN_WAVEFRONT_SIZE), void>::type
+        -> typename std::enable_if<(FunctionWarpSize <= __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         base_type::reduce(input, output, storage, reduce_op);
     }
@@ -195,7 +195,7 @@ public:
                 T& ,
                 storage_type& ,
                 BinaryFunction reduce_op = BinaryFunction())
-        -> typename std::enable_if<(FunctionWarpSize>__AMDGCN_WAVEFRONT_SIZE), void>::type
+        -> typename std::enable_if<(FunctionWarpSize > __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         (void) reduce_op;
         ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size. Aborting warp sort.");
@@ -255,7 +255,7 @@ public:
                 int valid_items,
                 storage_type& storage,
                 BinaryFunction reduce_op = BinaryFunction())
-        -> typename std::enable_if<(FunctionWarpSize<=__AMDGCN_WAVEFRONT_SIZE), void>::type
+        -> typename std::enable_if<(FunctionWarpSize <= __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         base_type::reduce(input, output, valid_items, storage, reduce_op);
     }
@@ -269,7 +269,7 @@ public:
                 int ,
                 storage_type& ,
                 BinaryFunction reduce_op = BinaryFunction())
-        -> typename std::enable_if<(FunctionWarpSize>__AMDGCN_WAVEFRONT_SIZE), void>::type
+        -> typename std::enable_if<(FunctionWarpSize > __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         (void) reduce_op;
         ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size. Aborting warp sort.");
@@ -301,7 +301,7 @@ public:
                                Flag flag,
                                storage_type& storage,
                                BinaryFunction reduce_op = BinaryFunction())
-        -> typename std::enable_if<(FunctionWarpSize<=__AMDGCN_WAVEFRONT_SIZE), void>::type
+        -> typename std::enable_if<(FunctionWarpSize <= __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         base_type::head_segmented_reduce(input, output, flag, storage, reduce_op);
     }
@@ -315,7 +315,7 @@ public:
                                Flag ,
                                storage_type& ,
                                BinaryFunction reduce_op = BinaryFunction())
-        -> typename std::enable_if<(FunctionWarpSize>__AMDGCN_WAVEFRONT_SIZE), void>::type
+        -> typename std::enable_if<(FunctionWarpSize > __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         (void) reduce_op;
         ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size. Aborting warp sort.");
@@ -347,7 +347,7 @@ public:
                                Flag flag,
                                storage_type& storage,
                                BinaryFunction reduce_op = BinaryFunction())
-        -> typename std::enable_if<(FunctionWarpSize<=__AMDGCN_WAVEFRONT_SIZE), void>::type
+        -> typename std::enable_if<(FunctionWarpSize <= __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         base_type::tail_segmented_reduce(input, output, flag, storage, reduce_op);
     }
@@ -361,7 +361,7 @@ public:
                                Flag ,
                                storage_type& ,
                                BinaryFunction reduce_op = BinaryFunction())
-        -> typename std::enable_if<(FunctionWarpSize>__AMDGCN_WAVEFRONT_SIZE), void>::type
+        -> typename std::enable_if<(FunctionWarpSize > __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         (void) reduce_op;
         ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size. Aborting warp sort.");
