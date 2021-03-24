@@ -35,7 +35,7 @@ namespace detail
 template<bool HeadSegmented, unsigned int WarpSize, class Flag>
 ROCPRIM_DEVICE inline
 auto last_in_warp_segment(Flag flag)
-    -> typename std::enable_if<(WarpSize<=__AMDGCN_WAVEFRONT_SIZE), unsigned int>::type
+    -> typename std::enable_if<(WarpSize <= __AMDGCN_WAVEFRONT_SIZE), unsigned int>::type
 {
     // Get flags (now every thread know where the flags are)
     lane_mask_type warp_flags = ::rocprim::ballot(flag);
@@ -64,7 +64,7 @@ auto last_in_warp_segment(Flag flag)
 template<bool HeadSegmented, unsigned int WarpSize, class Flag>
 ROCPRIM_DEVICE inline
 auto last_in_warp_segment(Flag)
-    -> typename std::enable_if<(WarpSize>__AMDGCN_WAVEFRONT_SIZE), unsigned int>::type
+    -> typename std::enable_if<(WarpSize > __AMDGCN_WAVEFRONT_SIZE), unsigned int>::type
 {
     ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size . Aborting warp sort.");
     return 0;

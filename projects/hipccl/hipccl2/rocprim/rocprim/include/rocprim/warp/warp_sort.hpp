@@ -102,7 +102,7 @@ class warp_sort : detail::warp_sort_shuffle<Key, WarpSize, Value>
 
     // Check if WarpSize is valid for the targets
     static_assert(WarpSize <= ROCPRIM_MAX_WARP_SIZE, "WarpSize can't be greater than hardware warp size.");
-    
+
 public:
     /// \brief Struct used to allocate a temporary memory that is required for thread
     /// communication during operations provided by related parallel primitive.
@@ -128,7 +128,7 @@ public:
     ROCPRIM_DEVICE inline
     auto sort(Key& thread_key,
               BinaryFunction compare_function = BinaryFunction())
-        -> typename std::enable_if<(FunctionWarpSize<=__AMDGCN_WAVEFRONT_SIZE), void>::type
+        -> typename std::enable_if<(FunctionWarpSize <= __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         base_type::sort(thread_key, compare_function);
     }
@@ -139,7 +139,7 @@ public:
     ROCPRIM_DEVICE inline
     auto sort(Key& ,
               BinaryFunction compare_function = BinaryFunction())
-        -> typename std::enable_if<(FunctionWarpSize>__AMDGCN_WAVEFRONT_SIZE), void>::type
+        -> typename std::enable_if<(FunctionWarpSize > __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         (void) compare_function; // disables unused parameter warning
         ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size. Aborting warp sort.");
@@ -179,7 +179,7 @@ public:
     auto sort(Key& thread_key,
               storage_type& storage,
               BinaryFunction compare_function = BinaryFunction())
-        -> typename std::enable_if<(FunctionWarpSize<=__AMDGCN_WAVEFRONT_SIZE), void>::type
+        -> typename std::enable_if<(FunctionWarpSize <= __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         base_type::sort(
             thread_key, storage, compare_function
@@ -193,7 +193,7 @@ public:
     auto sort(Key& ,
               storage_type& ,
               BinaryFunction compare_function = BinaryFunction())
-        -> typename std::enable_if<(FunctionWarpSize>__AMDGCN_WAVEFRONT_SIZE), void>::type
+        -> typename std::enable_if<(FunctionWarpSize > __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         (void) compare_function; // disables unused parameter warning
         ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size. Aborting warp sort.");
@@ -216,7 +216,7 @@ public:
     auto sort(Key& thread_key,
               Value& thread_value,
               BinaryFunction compare_function = BinaryFunction())
-        -> typename std::enable_if<(FunctionWarpSize<=__AMDGCN_WAVEFRONT_SIZE), void>::type
+        -> typename std::enable_if<(FunctionWarpSize <= __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         base_type::sort(
             thread_key, thread_value, compare_function
@@ -230,7 +230,7 @@ public:
     auto sort(Key& ,
               Value& ,
               BinaryFunction compare_function = BinaryFunction())
-        -> typename std::enable_if<(FunctionWarpSize>__AMDGCN_WAVEFRONT_SIZE), void>::type
+        -> typename std::enable_if<(FunctionWarpSize > __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         (void) compare_function; // disables unused parameter warning
         ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size. Aborting warp sort.");
@@ -272,7 +272,7 @@ public:
               Value& thread_value,
               storage_type& storage,
               BinaryFunction compare_function = BinaryFunction())
-        -> typename std::enable_if<(FunctionWarpSize<=__AMDGCN_WAVEFRONT_SIZE), void>::type
+        -> typename std::enable_if<(FunctionWarpSize <= __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         base_type::sort(
             thread_key, thread_value, storage, compare_function
@@ -287,7 +287,7 @@ public:
               Value& ,
               storage_type& ,
               BinaryFunction compare_function = BinaryFunction())
-        -> typename std::enable_if<(FunctionWarpSize>__AMDGCN_WAVEFRONT_SIZE), void>::type
+        -> typename std::enable_if<(FunctionWarpSize > __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         (void) compare_function; // disables unused parameter warning
         ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size. Aborting warp sort.");

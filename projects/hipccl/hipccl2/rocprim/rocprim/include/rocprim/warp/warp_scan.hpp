@@ -183,7 +183,7 @@ public:
                         T& output,
                         storage_type& storage,
                         BinaryFunction scan_op = BinaryFunction())
-        -> typename std::enable_if<(FunctionWarpSize<=__AMDGCN_WAVEFRONT_SIZE), void>::type
+        -> typename std::enable_if<(FunctionWarpSize <= __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         base_type::inclusive_scan(input, output, storage, scan_op);
     }
@@ -196,7 +196,7 @@ public:
                         T& ,
                         storage_type& ,
                         BinaryFunction scan_op = BinaryFunction())
-        -> typename std::enable_if<(FunctionWarpSize>__AMDGCN_WAVEFRONT_SIZE), void>::type
+        -> typename std::enable_if<(FunctionWarpSize > __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         (void) scan_op;
         ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size . Aborting warp sort.");
@@ -259,7 +259,7 @@ public:
                         T& reduction,
                         storage_type& storage,
                         BinaryFunction scan_op = BinaryFunction())
-        -> typename std::enable_if<(FunctionWarpSize<=__AMDGCN_WAVEFRONT_SIZE), void>::type
+        -> typename std::enable_if<(FunctionWarpSize <= __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         base_type::inclusive_scan(input, output, reduction, storage, scan_op);
     }
@@ -273,7 +273,7 @@ public:
                         T& ,
                         storage_type& ,
                         BinaryFunction scan_op = BinaryFunction())
-        -> typename std::enable_if<(FunctionWarpSize>__AMDGCN_WAVEFRONT_SIZE), void>::type
+        -> typename std::enable_if<(FunctionWarpSize > __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         (void) scan_op;
         ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size . Aborting warp sort.");
@@ -339,7 +339,7 @@ public:
                         T init,
                         storage_type& storage,
                         BinaryFunction scan_op = BinaryFunction())
-        -> typename std::enable_if<(FunctionWarpSize<=__AMDGCN_WAVEFRONT_SIZE), void>::type
+        -> typename std::enable_if<(FunctionWarpSize <= __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         base_type::exclusive_scan(input, output, init, storage, scan_op);
     }
@@ -353,7 +353,7 @@ public:
                         T ,
                         storage_type& ,
                         BinaryFunction scan_op = BinaryFunction())
-        -> typename std::enable_if<(FunctionWarpSize>__AMDGCN_WAVEFRONT_SIZE), void>::type
+        -> typename std::enable_if<(FunctionWarpSize > __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         (void) scan_op;
         ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size . Aborting warp sort.");
@@ -421,7 +421,7 @@ public:
                         T& reduction,
                         storage_type& storage,
                         BinaryFunction scan_op = BinaryFunction())
-        -> typename std::enable_if<(FunctionWarpSize<=__AMDGCN_WAVEFRONT_SIZE), void>::type
+        -> typename std::enable_if<(FunctionWarpSize <= __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         base_type::exclusive_scan(input, output, init, reduction, storage, scan_op);
     }
@@ -436,7 +436,7 @@ public:
                         T& ,
                         storage_type& ,
                         BinaryFunction scan_op = BinaryFunction())
-        -> typename std::enable_if<(FunctionWarpSize>__AMDGCN_WAVEFRONT_SIZE), void>::type
+        -> typename std::enable_if<(FunctionWarpSize > __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         (void) scan_op;
         ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size . Aborting warp sort.");
@@ -509,7 +509,7 @@ public:
               T init,
               storage_type& storage,
               BinaryFunction scan_op = BinaryFunction())
-        -> typename std::enable_if<(FunctionWarpSize<=__AMDGCN_WAVEFRONT_SIZE), void>::type
+        -> typename std::enable_if<(FunctionWarpSize <= __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         base_type::scan(input, inclusive_output, exclusive_output, init, storage, scan_op);
     }
@@ -524,7 +524,7 @@ public:
               T ,
               storage_type& ,
               BinaryFunction scan_op = BinaryFunction())
-        -> typename std::enable_if<(FunctionWarpSize>__AMDGCN_WAVEFRONT_SIZE), void>::type
+        -> typename std::enable_if<(FunctionWarpSize > __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         (void) scan_op;
         ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size . Aborting warp sort.");
@@ -598,7 +598,7 @@ public:
               T& reduction,
               storage_type& storage,
               BinaryFunction scan_op = BinaryFunction())
-        -> typename std::enable_if<(FunctionWarpSize<=__AMDGCN_WAVEFRONT_SIZE), void>::type
+        -> typename std::enable_if<(FunctionWarpSize <= __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         base_type::scan(
             input, inclusive_output, exclusive_output, init, reduction,
@@ -617,7 +617,7 @@ public:
               T& ,
               storage_type& ,
               BinaryFunction scan_op = BinaryFunction())
-        -> typename std::enable_if<(FunctionWarpSize>__AMDGCN_WAVEFRONT_SIZE), void>::type
+        -> typename std::enable_if<(FunctionWarpSize > __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         (void) scan_op;
         ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size . Aborting warp sort.");
@@ -638,7 +638,7 @@ public:
     auto broadcast(T input,
                    const unsigned int src_lane,
                    storage_type& storage)
-        -> typename std::enable_if<(FunctionWarpSize<=__AMDGCN_WAVEFRONT_SIZE), T>::type
+        -> typename std::enable_if<(FunctionWarpSize <= __AMDGCN_WAVEFRONT_SIZE), T>::type
     {
         return base_type::broadcast(input, src_lane, storage);
     }
@@ -650,7 +650,7 @@ public:
     auto broadcast(T ,
                    const unsigned int ,
                    storage_type& )
-        -> typename std::enable_if<(FunctionWarpSize>__AMDGCN_WAVEFRONT_SIZE), T>::type
+        -> typename std::enable_if<(FunctionWarpSize > __AMDGCN_WAVEFRONT_SIZE), T>::type
     {
         ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size. Aborting warp sort.");
         return T();
@@ -662,7 +662,7 @@ protected:
     template<unsigned int FunctionWarpSize = WarpSize>
     ROCPRIM_DEVICE inline
     auto to_exclusive(T inclusive_input, T& exclusive_output, storage_type& storage)
-        -> typename std::enable_if<(FunctionWarpSize<=__AMDGCN_WAVEFRONT_SIZE), void>::type
+        -> typename std::enable_if<(FunctionWarpSize <= __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         return base_type::to_exclusive(inclusive_input, exclusive_output, storage);
     }
@@ -670,7 +670,7 @@ protected:
     template<unsigned int FunctionWarpSize = WarpSize>
     ROCPRIM_DEVICE inline
     auto to_exclusive(T , T& , storage_type&)
-        -> typename std::enable_if<(FunctionWarpSize>__AMDGCN_WAVEFRONT_SIZE), void>::type
+        -> typename std::enable_if<(FunctionWarpSize > __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size. Aborting warp sort.");
         return;
