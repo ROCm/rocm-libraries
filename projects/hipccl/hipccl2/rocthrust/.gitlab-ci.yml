@@ -189,8 +189,8 @@ deploy:deb:
       -G "DEB;ZIP"
       -B $PACKAGE_DIR
     # Install rocPRIM and rocThrust
-    - $SUDO_CMD dpkg -i $PACKAGE_DIR/rocprim-*.deb
-    - $SUDO_CMD dpkg -i $PACKAGE_DIR/rocthrust-*.deb
+    - $SUDO_CMD dpkg -i $PACKAGE_DIR/rocprim*.deb
+    - $SUDO_CMD dpkg -i $PACKAGE_DIR/rocthrust*.deb
     # Test install
     - mkdir -p package_test
     - cd package_test
