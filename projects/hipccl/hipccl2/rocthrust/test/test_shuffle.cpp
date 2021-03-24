@@ -335,7 +335,6 @@ TYPED_TEST(ShuffleVectorTests, TestShuffleSimple)
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     using Vector = typename TestFixture::input_type;
-    using T      = typename Vector::value_type;
 
     Vector data(5);
     data[0] = 0;
@@ -357,7 +356,6 @@ TYPED_TEST(ShuffleVectorTests, TestShuffleCopySimple)
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     using Vector = typename TestFixture::input_type;
-    using T      = typename Vector::value_type;
 
     Vector data(5);
     data[0] = 0;
@@ -437,7 +435,6 @@ TYPED_TEST(ShuffleVariablesTests, TestFunctionIsBijection)
 TYPED_TEST(ShuffleVariablesTests, TestBijectionLength)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-    using T = typename TestFixture::input_type;
 
     thrust::default_random_engine g(0xD5);
 
