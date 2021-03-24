@@ -368,11 +368,6 @@ struct TestTransformScanToDiscardIterator
 };
 VariableUnitTest<TestTransformScanToDiscardIterator, IntegralTypes> TestTransformScanToDiscardIteratorInstance;
 
-// TODO: FIX build error
-// Regression test for https://github.com/NVIDIA/thrust/issues/1332
-// The issue was the internal transform_input_iterator_t created by the
-// transform_inclusive_scan implementation was instantiated using a reference
-// type for the value_type.
 template <typename T>
 void TestValueCategoryDeduction()
 {
