@@ -34,8 +34,11 @@
 
  BEGIN_HIPCUB_NAMESPACE
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS    // Do not document
+
 /**
- * Computes the begin offsets into A and B for the specific diagonal
+ * \brief Computes the begin offsets into A and B for the specific diagonal
+ *
  */
 template <
     typename AIteratorT,
@@ -134,6 +137,8 @@ __device__ __forceinline__ OffsetT UpperBound(
 
     return retval;
 }
+
+#endif
 
 END_HIPCUB_NAMESPACE
 

@@ -72,7 +72,7 @@ namespace internal {
      return inclusive;
  }
 
-
+ #ifndef DOXYGEN_SHOULD_SKIP_THIS    // Do not document
 
  /**
   * \brief Perform a sequential exclusive prefix scan over \p LENGTH elements of the \p input array, seeded with the specified \p prefix.  The aggregate is returned.
@@ -124,6 +124,8 @@ namespace internal {
      return ThreadScanExclusive<LENGTH>((T*) input, (T*) output, scan_op, prefix, apply_prefix);
  }
 
+ #endif
+
  template <
      int         LENGTH,
      typename    T,
@@ -144,6 +146,8 @@ namespace internal {
 
      return inclusive;
  }
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS    // Do not document
 
  /**
   * \brief Perform a sequential inclusive prefix scan over \p LENGTH elements of the \p input array.  The aggregate is returned.
@@ -168,7 +172,6 @@ namespace internal {
      return ThreadScanInclusive(inclusive, input + 1, output + 1, scan_op, Int2Type<LENGTH - 1>());
  }
 
-
  /**
   * \brief Perform a sequential inclusive prefix scan over the statically-sized \p input array.  The aggregate is returned.
   *
@@ -187,7 +190,6 @@ namespace internal {
  {
      return ThreadScanInclusive<LENGTH>((T*) input, (T*) output, scan_op);
  }
-
 
  /**
   * \brief Perform a sequential inclusive prefix scan over \p LENGTH elements of the \p input array, seeded with the specified \p prefix.  The aggregate is returned.
@@ -218,7 +220,6 @@ namespace internal {
      return ThreadScanInclusive(inclusive, input + 1, output + 1, scan_op, Int2Type<LENGTH - 1>());
  }
 
-
  /**
   * \brief Perform a sequential inclusive prefix scan over the statically-sized \p input array, seeded with the specified \p prefix.  The aggregate is returned.
   *
@@ -240,6 +241,7 @@ namespace internal {
      return ThreadScanInclusive<LENGTH>((T*) input, (T*) output, scan_op, prefix, apply_prefix);
  }
 
+ #endif
 
  //@}  end member group
 
