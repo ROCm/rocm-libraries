@@ -45,7 +45,7 @@ template<
     class BinaryFunction
 >
 __global__
-__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void partition_kernel(IndexIterator index,
                       KeysInputIterator1 keys_input1,
                       KeysInputIterator2 keys_input2,
@@ -73,7 +73,7 @@ template<
     class BinaryFunction
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void merge_kernel(IndexIterator index,
                   KeysInputIterator1 keys_input1,
                   KeysInputIterator2 keys_input2,

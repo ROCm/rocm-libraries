@@ -104,7 +104,7 @@ template<
     class key_type
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void sort_key_kernel(
     key_type* device_keys_output,
     bool to_striped,
@@ -148,7 +148,7 @@ template<
     class value_type
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void sort_key_value_kernel(
     key_type* device_keys_output,
     value_type* device_values_output,

@@ -57,7 +57,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
-__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void test_hip_warp_sort(T* d_output)
 {
     unsigned int i = hipThreadIdx_x + (hipBlockIdx_x * hipBlockDim_x);
@@ -160,7 +160,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
-__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void test_hip_sort_key_value_kernel(KeyType* d_output_key, ValueType* d_output_value)
 {
     unsigned int i = hipThreadIdx_x + (hipBlockIdx_x * hipBlockDim_x);

@@ -46,7 +46,7 @@ template<
     class Counter
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void init_histogram_kernel(fixed_array<Counter *, ActiveChannels> histogram,
                            fixed_array<unsigned int, ActiveChannels> bins)
 {
@@ -63,7 +63,7 @@ template<
     class SampleToBinOp
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void histogram_shared_kernel(SampleIterator samples,
                              unsigned int columns,
                              unsigned int rows,
@@ -93,7 +93,7 @@ template<
     class SampleToBinOp
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void histogram_global_kernel(SampleIterator samples,
                              unsigned int columns,
                              unsigned int row_stride,
