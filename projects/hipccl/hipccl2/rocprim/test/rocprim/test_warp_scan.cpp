@@ -46,7 +46,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void warp_inclusive_scan_kernel(T* device_input, T* device_output)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
@@ -184,7 +184,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void warp_inclusive_scan_reduce_kernel(
     T* device_input,
     T* device_output,
@@ -350,7 +350,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void warp_exclusive_scan_kernel(T* device_input, T* device_output, T init)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
@@ -490,7 +490,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void warp_exclusive_scan_reduce_kernel(
     T* device_input,
     T* device_output,
@@ -664,7 +664,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void warp_scan_kernel(
     T* device_input,
     T* device_inclusive_output,
@@ -838,7 +838,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void warp_scan_reduce_kernel(
     T* device_input,
     T* device_inclusive_output,

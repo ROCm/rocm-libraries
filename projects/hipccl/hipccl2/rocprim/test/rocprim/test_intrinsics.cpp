@@ -95,7 +95,7 @@ TYPED_TEST_SUITE(RocprimIntrinsicsTests, IntrinsicsTestParams);
 
 template<class T>
 __global__
-__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void shuffle_up_kernel(T* data, unsigned int delta, unsigned int width)
 {
     const unsigned int index = (hipBlockIdx_x * hipBlockDim_x) + hipThreadIdx_x;
@@ -198,7 +198,7 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleUp)
 
 template<class T>
 __global__
-__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void shuffle_down_kernel(T* data, unsigned int delta, unsigned int width)
 {
     const unsigned int index = (hipBlockIdx_x * hipBlockDim_x) + hipThreadIdx_x;
@@ -301,7 +301,7 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleDown)
 
 template<class T>
 __global__
-__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void shuffle_index_kernel(T* data, int* src_lanes, unsigned int width)
 {
     const unsigned int index = (hipBlockIdx_x * hipBlockDim_x) + hipThreadIdx_x;

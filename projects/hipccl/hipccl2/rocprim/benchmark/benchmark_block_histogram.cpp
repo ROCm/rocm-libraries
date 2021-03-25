@@ -64,7 +64,7 @@ template<
     unsigned int Trials
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void kernel(const T* input, T* output)
 {
     Runner::template run<T, BlockSize, ItemsPerThread, BinSize, Trials>(input, output);

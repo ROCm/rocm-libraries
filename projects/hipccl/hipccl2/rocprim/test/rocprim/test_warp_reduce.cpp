@@ -42,7 +42,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
-__launch_bounds__(BlockSize, 0)
+__launch_bounds__(BlockSize)
 void warp_reduce_sum_kernel(T* device_input, T* device_output)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
@@ -183,7 +183,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
-__launch_bounds__(BlockSize, 0)
+__launch_bounds__(BlockSize)
 void warp_allreduce_sum_kernel(T* device_input, T* device_output)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
@@ -325,7 +325,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
-__launch_bounds__(BlockSize, 0)
+__launch_bounds__(BlockSize)
 void warp_reduce_sum_kernel(T* device_input, T* device_output, size_t valid)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
@@ -467,7 +467,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
-__launch_bounds__(BlockSize, 0)
+__launch_bounds__(BlockSize)
 void warp_allreduce_sum_kernel(T* device_input, T* device_output, size_t valid)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
@@ -736,7 +736,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
-__launch_bounds__(BlockSize, 0)
+__launch_bounds__(BlockSize)
 void head_segmented_warp_reduce_kernel(T* input, Flag* flags, T* output)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
@@ -909,7 +909,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
-__launch_bounds__(BlockSize, 0)
+__launch_bounds__(BlockSize)
 void tail_segmented_warp_reduce_kernel(T* input, Flag* flags, T* output)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
