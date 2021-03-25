@@ -63,9 +63,9 @@ public:
      */
     GridBarrier() : d_sync(NULL) {}
 
-
-    /**
-     * Synchronize
+     /**
+     * @typedef SyncFlag
+     * @brief Synchronize
      */
     __device__ __forceinline__ void Sync() const
     {
@@ -200,4 +200,3 @@ public:
 END_HIPCUB_NAMESPACE
 
 #endif // HIPCUB_ROCPRIM_GRID_GRID_BARRIER_HPP_
-
