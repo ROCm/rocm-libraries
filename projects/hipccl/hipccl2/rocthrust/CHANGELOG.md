@@ -2,7 +2,7 @@
 
 Full documentation for rocThrust is available at [https://rocthrust.readthedocs.io/en/latest/](https://rocthrust.readthedocs.io/en/latest/)
 
-## [Unreleased rocThrust-2.10.9 for ROCm 4.2.0]
+## [rocThrust-2.10.9 for ROCm 4.2.0]
 ### Added
 - Updated to match upstream Thrust 1.10
 ### Changed
