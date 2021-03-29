@@ -153,7 +153,7 @@ struct stream_deleter final
 struct stream_conditional_deleter final
 {
 private:
-  bool const cond_;
+  bool cond_;
 
 public:
   __host__
@@ -206,8 +206,12 @@ public:
 
   __thrust_exec_check_disable__
   unique_stream(unique_stream const&) = delete;
+  
+  // GCC 10 complains if this is defaulted. See NVIDIA/thrust#1269.
   __thrust_exec_check_disable__
-  unique_stream(unique_stream&&) = default;
+  __host__ unique_stream(unique_stream &&o) noexcept
+    : handle_(std::move(o.handle_))
+  {}
   __thrust_exec_check_disable__
   unique_stream& operator=(unique_stream const&) = delete;
   __thrust_exec_check_disable__

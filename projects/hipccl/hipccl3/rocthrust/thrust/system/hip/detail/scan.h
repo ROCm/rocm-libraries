@@ -215,25 +215,10 @@ inclusive_scan_n(execution_policy<Derived>& policy,
       }
   };
   #if __THRUST_HAS_HIPRT__
-  return workaround::par(policy, input_it, num_items, result, scan_op);
+    return workaround::par(policy, input_it, num_items, result, scan_op);
   #else
-  return workaround::seq(policy, input_it, num_items, result, scan_op);
+    return workaround::seq(policy, input_it, num_items, result, scan_op);
   #endif
-
-
-
-//     OutputIt ret = result;
-//     THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-//         (rocprim::inclusive_scan<rocprim::default_config, InputIt, OutputIt, ScanOp>)
-//     );
-// #if __THRUST_HAS_HIPRT__
-//     ret = __scan::inclusive_scan(policy, input_it, result, num_items, scan_op);
-// #else // __THRUST_HAS_HIPRT__
-//     ret = thrust::inclusive_scan(
-//         cvt_to_seq(derived_cast(policy)), input_it, input_it + num_items, result, scan_op
-//     );
-// #endif // __THRUST_HAS_HIPRT__
-//     return ret;
 }
 
 template <class Derived, class InputIt, class OutputIt, class ScanOp>
@@ -306,52 +291,50 @@ OutputIt THRUST_HIP_FUNCTION exclusive_scan_n(execution_policy<Derived>& policy,
         return thrust::exclusive_scan(cvt_to_seq(derived_cast(policy)), first, first + num_items, result, init, scan_op);
       }
   };
-  
+
   #if __THRUST_HAS_HIPRT__
     return workaround::par(policy, first, num_items, result, init, scan_op);
   #else
     return workaround::seq(policy, first, num_items, result, init, scan_op);
   #endif
+}
 
+template <class Derived, class InputIt, class OutputIt, class T, class ScanOp>
+OutputIt THRUST_HIP_FUNCTION
+exclusive_scan(execution_policy<Derived>& policy,
+               InputIt                    first,
+               InputIt                    last,
+               OutputIt                   result,
+               T                          init,
+               ScanOp                     scan_op)
+{
+    int num_items = static_cast<int>(thrust::distance(first, last));
+    return hip_rocprim::exclusive_scan_n(policy, first, num_items, result, init, scan_op);
+}
 
-    }
+template <class Derived, class InputIt, class OutputIt, class T>
+OutputIt THRUST_HIP_FUNCTION
+exclusive_scan(execution_policy<Derived>& policy,
+               InputIt                    first,
+               OutputIt                   last,
+               OutputIt                   result,
+               T                          init)
+{
+    return exclusive_scan(policy, first, last, result, init, plus<T>());
+}
 
-    template <class Derived, class InputIt, class OutputIt, class T, class ScanOp>
-    OutputIt THRUST_HIP_FUNCTION
-    exclusive_scan(execution_policy<Derived>& policy,
-                   InputIt                    first,
-                   InputIt                    last,
-                   OutputIt                   result,
-                   T                          init,
-                   ScanOp                     scan_op)
-    {
-        int num_items = static_cast<int>(thrust::distance(first, last));
-        return hip_rocprim::exclusive_scan_n(policy, first, num_items, result, init, scan_op);
-    }
-
-    template <class Derived, class InputIt, class OutputIt, class T>
-    OutputIt THRUST_HIP_FUNCTION
-    exclusive_scan(execution_policy<Derived>& policy,
-                   InputIt                    first,
-                   OutputIt                   last,
-                   OutputIt                   result,
-                   T                          init)
-    {
-        return exclusive_scan(policy, first, last, result, init, plus<T>());
-    }
-
-    template <class Derived, class InputIt, class OutputIt>
-    OutputIt THRUST_HIP_FUNCTION
-    exclusive_scan(execution_policy<Derived>& policy,
-                   InputIt                    first,
-                   OutputIt                   last,
-                   OutputIt                   result)
-    {
-        typedef typename thrust::detail::eval_if<thrust::detail::is_output_iterator<OutputIt>::value,
-                                                 thrust::iterator_value<InputIt>,
-                                                 thrust::iterator_value<OutputIt>>::type result_type;
-        return exclusive_scan(policy, first, last, result, result_type(0));
-    }
+template <class Derived, class InputIt, class OutputIt>
+OutputIt THRUST_HIP_FUNCTION
+exclusive_scan(execution_policy<Derived>& policy,
+               InputIt                    first,
+               OutputIt                   last,
+               OutputIt                   result)
+{
+    typedef typename thrust::detail::eval_if<thrust::detail::is_output_iterator<OutputIt>::value,
+                                             thrust::iterator_value<InputIt>,
+                                             thrust::iterator_value<OutputIt>>::type result_type;
+    return exclusive_scan(policy, first, last, result, result_type(0));
+}
 
 } // namespace  hip_rocprim
 

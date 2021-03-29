@@ -92,11 +92,10 @@ get_temporary_buffer(my_new_temporary_allocation_system, std::ptrdiff_t)
 }
 
 template<typename Pointer>
-void return_temporary_buffer(my_new_temporary_allocation_system, Pointer p)
+void return_temporary_buffer(my_new_temporary_allocation_system, Pointer)
 {
   // This should never be called (the three-argument with size overload below
   // should be preferred) and shouldn't be ambiguous.
-  THRUST_UNUSED_VAR(p);
   ASSERT_EQUAL(true, false);
 }
 
