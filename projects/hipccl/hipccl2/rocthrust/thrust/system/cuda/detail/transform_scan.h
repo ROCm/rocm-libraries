@@ -50,7 +50,7 @@ transform_inclusive_scan(execution_policy<Derived> &policy,
                          TransformOp                transform_op,
                          ScanOp                     scan_op)
 {
-  // Use the input iterator's value type per https://wg21.link/P0571
+  // Use the transformed input iterator's value type per https://wg21.link/P0571
   using input_type = typename thrust::iterator_value<InputIt>::type;
 #if THRUST_CPP_DIALECT < 2017
   using result_type = typename std::result_of<TransformOp(input_type)>::type;
@@ -58,19 +58,11 @@ transform_inclusive_scan(execution_policy<Derived> &policy,
   using result_type = std::invoke_result_t<TransformOp, input_type>;
 #endif
 
-  typedef typename thrust::detail::eval_if<
-    thrust::detail::has_result_type<TransformOp>::value,
-    thrust::detail::result_type<TransformOp>,
-    thrust::detail::eval_if<
-      thrust::detail::is_output_iterator<OutputIt>::value,
-      iterator_value<InputIt>,
-      iterator_value<OutputIt>
-    >
-  >::type result_type;
+  using value_type = typename std::remove_reference<result_type>::type;
 
   typedef typename iterator_traits<InputIt>::difference_type size_type;
   size_type num_items = static_cast<size_type>(thrust::distance(first, last));
-  typedef transform_input_iterator_t<result_type,
+  typedef transform_input_iterator_t<value_type,
                                      InputIt,
                                      TransformOp>
       transformed_iterator_t;
@@ -98,7 +90,7 @@ transform_exclusive_scan(execution_policy<Derived> &policy,
                          ScanOp                     scan_op)
 {
   // Use the initial value type per https://wg21.link/P0571
-  using result_type = InitialValueType;
+  using result_type = typename std::remove_reference<InitialValueType>::type;
 
 
   typedef typename iterator_traits<InputIt>::difference_type size_type;

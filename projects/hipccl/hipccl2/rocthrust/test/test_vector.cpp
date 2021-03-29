@@ -793,6 +793,18 @@ TYPED_TEST(VectorTests, TestVectorReserving)
     ASSERT_EQ(v.capacity(), old_capacity);
 }
 
+TEST(VectorTests, TestVectorUninitialisedCopy)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    thrust::device_vector<int> v;
+    std::vector<int> std_vector;
+
+    v = std_vector;
+
+    ASSERT_EQ(v.size(), static_cast<size_t>(0));
+}
+
 TYPED_TEST(VectorTests, TestVectorShrinkToFit)
 {
     using Vector = typename TestFixture::input_type;
