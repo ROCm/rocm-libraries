@@ -2,12 +2,13 @@
 
 Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwarePlatform/rocPRIM/](https://codedocs.xyz/ROCmSoftwarePlatform/rocPRIM/)
 
-## [Unreleased rocPRIM-2.10.9 for ROCm 4.2.0]
+## [Unreleased rocPRIM-2.10.9 for ROCm 4.1.0]
 ### Fixed
 - Size zero inputs are now properly handled with newer ROCm builds that no longer allow zero-size kernel grid/block dimensions
-- Device scan unit test failure fixed
 ### Changed
 - Minimum cmake version required is now 3.10.2
+### Known issues
+- Device scan unit test currently failing due to LLVM bug.
 
 ## [rocPRIM-2.10.8 for ROCm 4.1.0]
 ### Fixed
