@@ -53,7 +53,7 @@ unsigned int masked_bit_count(unsigned long long x, unsigned int add = 0)
     #else
     c = ::__mbcnt_lo(static_cast<int>(x), add);
     c = ::__mbcnt_hi(static_cast<int>(x >> 32), c);
-    #endif  
+    #endif
     return c;
 }
 
@@ -77,6 +77,36 @@ int warp_all(int predicate)
 /// @}
 // end of group intrinsicsmodule
 
+/**
+ * Compute a 32b mask of threads having the same least-significant
+ * LABEL_BITS of \p label as the calling thread.
+ */
+template <int LABEL_BITS>
+ROCPRIM_DEVICE inline
+unsigned int MatchAny(unsigned int label)
+{
+    unsigned int retval;
+
+    // Extract masks of common threads for each bit
+    #pragma unroll
+    for (int BIT = 0; BIT < LABEL_BITS; ++BIT)
+    {
+        unsigned long long  mask;
+        unsigned long long current_bit = 1 << BIT;
+        mask = label & current_bit;
+        bool bit_match = (mask==current_bit);
+        mask = ballot(bit_match);
+        if(!bit_match)
+        {
+          mask = ! mask;
+        }
+        // Remove peers who differ
+        retval = (BIT == 0) ? mask : retval & mask;
+    }
+
+    return retval;
+
+}
 END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_INTRINSICS_WARP_HPP_
