@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2020, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2021, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -27,26 +27,15 @@
  *
  ******************************************************************************/
 
-#ifndef HIPCUB_ROCPRIM_ITERATOR_ARG_INDEX_INPUT_ITERATOR_HPP_
-#define HIPCUB_ROCPRIM_ITERATOR_ARG_INDEX_INPUT_ITERATOR_HPP_
+#ifndef HIPCUB_THREAD_THREAD_STORE_HPP_
+#define HIPCUB_THREAD_THREAD_STORE_HPP_
 
-#include "../../../config.hpp"
-
-#include <rocprim/iterator/arg_index_iterator.hpp>
-
-BEGIN_HIPCUB_NAMESPACE
-
-#ifndef DOXYGEN_SHOULD_SKIP_THIS    // Do not document
-
-template<
-    typename InputIterator,
-    typename Difference = std::ptrdiff_t,
-    typename Value = typename std::iterator_traits<InputIterator>::value_type
->
-using ArgIndexInputIterator = ::rocprim::arg_index_iterator<InputIterator, Difference, Value>;
-
+#ifdef __HIP_PLATFORM_HCC__
+    #include "../config.hpp"
+    #include "../backend/rocprim/thread/thread_store.hpp"
+#elif defined(__HIP_PLATFORM_NVCC__)
+    #include "../config.hpp"
+    #include <cub/thread/thread_store.cuh>
 #endif
 
-END_HIPCUB_NAMESPACE
-
-#endif // HIPCUB_ROCPRIM_ITERATOR_ARG_INDEX_INPUT_ITERATOR_HPP_
+#endif
