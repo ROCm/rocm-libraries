@@ -49,6 +49,8 @@ HIPCUB_DEVICE __forceinline__ void AsmThreadStore(void * ptr, T val)
     __builtin_memcpy(ptr, &val, sizeof(T));
 }
 
+#if HIPCUB_THREAD_STORE_USE_CACHE_MODIFIERS == 1
+
 // NOTE: the reason there is an interim_type is because of a bug for 8bit types.
 // TODO fix flat_store_ubyte and flat_store_sbyte issues
 
@@ -88,6 +90,8 @@ HIPCUB_ASM_THREAD_STORE_GROUP(STORE_VOLATILE, "glc", "vmcnt");
 
 // TODO find correct modifiers to match these
 HIPCUB_ASM_THREAD_STORE_GROUP(STORE_CS, "", "");
+
+#endif
 
 template<CacheStoreModifier MODIFIER = STORE_DEFAULT, typename OutputIteratorT, typename T>
 __device__ __forceinline__ void ThreadStore(OutputIteratorT itr, T val)

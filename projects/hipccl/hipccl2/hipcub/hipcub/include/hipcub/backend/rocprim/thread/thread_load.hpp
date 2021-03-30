@@ -52,6 +52,8 @@ HIPCUB_DEVICE __forceinline__ T AsmThreadLoad(void * ptr)
     return retval;
 }
 
+#if HIPCUB_THREAD_LOAD_USE_CACHE_MODIFIERS == 1
+
 // NOTE: the reason there is an interim_type is because of a bug for 8bit types.
 // TODO fix flat_load_ubyte and flat_load_sbyte issues
 
@@ -93,6 +95,8 @@ HIPCUB_ASM_THREAD_LOAD_GROUP(LOAD_VOLATILE, "glc", "vmcnt");
 // TODO find correct modifiers to match these
 HIPCUB_ASM_THREAD_LOAD_GROUP(LOAD_LDG, "", "");
 HIPCUB_ASM_THREAD_LOAD_GROUP(LOAD_CS, "", "");
+
+#endif
 
 template<CacheLoadModifier MODIFIER = LOAD_DEFAULT, typename InputIteratorT>
 HIPCUB_DEVICE __forceinline__ typename std::iterator_traits<InputIteratorT>::value_type ThreadLoad(InputIteratorT itr)
