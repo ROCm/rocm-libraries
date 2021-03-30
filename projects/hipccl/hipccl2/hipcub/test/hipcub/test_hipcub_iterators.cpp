@@ -25,6 +25,7 @@
 #include <typeinfo>
 
 #include "hipcub/iterator/arg_index_input_iterator.hpp"
+#include "hipcub/iterator/cache_modified_input_iterator.hpp"
 #include "hipcub/iterator/constant_input_iterator.hpp"
 #include "hipcub/iterator/counting_input_iterator.hpp"
 #include "hipcub/iterator/transform_input_iterator.hpp"
@@ -179,6 +180,41 @@ void iterator_test_function(IteratorType d_itr, std::vector<T> &h_reference)
 }
 
 TYPED_TEST_CASE(HipcubIteratorTests, HipcubIteratorTestsParams);
+
+TYPED_TEST(HipcubIteratorTests, TestCache)
+{
+    using T = typename TestFixture::input_type;
+    using IteratorType = hipcub::CacheModifiedInputIterator<hipcub::LOAD_CG, T>;
+
+    constexpr uint32_t array_size = 8;
+    constexpr int TEST_VALUES = 11000;
+
+    std::vector<T> h_data(TEST_VALUES);
+    for (int i = 0; i < TEST_VALUES; ++i)
+    {
+        InitValue(INTEGER_SEED, h_data[i], i);
+    }
+
+    std::vector<T> h_reference(array_size);
+    h_reference[0] = h_data[0];          // Value at offset 0
+    h_reference[1] = h_data[100];        // Value at offset 100
+    h_reference[2] = h_data[1000];       // Value at offset 1000
+    h_reference[3] = h_data[10000];      // Value at offset 10000
+    h_reference[4] = h_data[1];          // Value at offset 1
+    h_reference[5] = h_data[21];         // Value at offset 21
+    h_reference[6] = h_data[11];         // Value at offset 11
+    h_reference[7] = h_data[0];          // Value at offset 0;
+
+    T *d_data = NULL;
+    g_allocator.DeviceAllocate((void**)&d_data, sizeof(T) * TEST_VALUES);
+
+    HIP_CHECK(hipMemcpy(d_data, h_data.data(), TEST_VALUES * sizeof(T), hipMemcpyHostToDevice));
+
+    IteratorType d_itr((T*) d_data);
+    iterator_test_function<IteratorType, T>(d_itr, h_reference);
+
+    g_allocator.DeviceFree(d_data);
+}
 
 TYPED_TEST(HipcubIteratorTests, TestConstant)
 {
