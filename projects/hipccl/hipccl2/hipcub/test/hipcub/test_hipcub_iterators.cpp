@@ -26,6 +26,7 @@
 
 #include "hipcub/iterator/arg_index_input_iterator.hpp"
 #include "hipcub/iterator/cache_modified_input_iterator.hpp"
+#include "hipcub/iterator/cache_modified_output_iterator.hpp"
 #include "hipcub/iterator/constant_input_iterator.hpp"
 #include "hipcub/iterator/counting_input_iterator.hpp"
 #include "hipcub/iterator/transform_input_iterator.hpp"
@@ -106,11 +107,15 @@ struct SelectOp
 /**
 * Test random access input iterator
 */
-template<typename InputIteratorT, typename T>
+template<
+    typename InputIteratorT,
+    typename T,
+    typename OutputIteratorT = InputIteratorT
+>
 __global__ void Kernel(
     InputIteratorT    d_in,
     T                 *d_out,
-    InputIteratorT    *d_itrs)
+    OutputIteratorT    *d_itrs)
 {
     d_out[0] = *d_in;               // Value at offset 0
     d_out[1] = d_in[100];           // Value at offset 100
@@ -181,7 +186,7 @@ void iterator_test_function(IteratorType d_itr, std::vector<T> &h_reference)
 
 TYPED_TEST_CASE(HipcubIteratorTests, HipcubIteratorTestsParams);
 
-TYPED_TEST(HipcubIteratorTests, TestCache)
+TYPED_TEST(HipcubIteratorTests, TestCacheModifiedInput)
 {
     using T = typename TestFixture::input_type;
     using IteratorType = hipcub::CacheModifiedInputIterator<hipcub::LOAD_CG, T>;
