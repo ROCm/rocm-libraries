@@ -33,13 +33,13 @@ BEGIN_HIPCUB_NAMESPACE
 
 enum CacheLoadModifier : int32_t
 {
-    LOAD_DEFAULT = 0,  ///< Default (no modifier)
-    LOAD_CA,           ///< Cache at all levels
-    LOAD_CG,           ///< Cache at global level
-    LOAD_CS,           ///< Cache streaming (likely to be accessed once)
-    LOAD_CV,           ///< Cache as volatile (including cached system lines)
-    LOAD_LDG,          ///< Cache as texture
-    LOAD_VOLATILE,     ///< Volatile (any memory space)
+    LOAD_DEFAULT,   ///< Default (no modifier)
+    LOAD_CA,        ///< Cache at all levels
+    LOAD_CG,        ///< Cache at global level
+    LOAD_CS,        ///< Cache streaming (likely to be accessed once)
+    LOAD_CV,        ///< Cache as volatile (including cached system lines)
+    LOAD_LDG,       ///< Cache as texture
+    LOAD_VOLATILE,  ///< Volatile (any memory space)
 };
 
 // TODO add to detail namespace
@@ -48,8 +48,7 @@ template<CacheLoadModifier MODIFIER = LOAD_DEFAULT, typename T>
 HIPCUB_DEVICE __forceinline__ T AsmThreadLoad(void * ptr)
 {
     T retval;
-    // TODO uncomment it. Was commented to make sure specializations work
-    //__builtin_memcpy(&retval, ptr, sizeof(T));
+    __builtin_memcpy(&retval, ptr, sizeof(T));
     return retval;
 }
 
@@ -58,41 +57,42 @@ HIPCUB_DEVICE __forceinline__ T AsmThreadLoad(void * ptr)
 
 // Important for syncing. Check section 9.2.2 or 7.3 in the following document
 // http://developer.amd.com/wordpress/media/2013/12/AMD_GCN3_Instruction_Set_Architecture_rev1.1.pdf
-#define HIPCUB_ASM_THREAD(cache_modifier_name,                                                                \
-                          llvm_cache_modifier,                                                                \
-                          type,                                                                               \
-                          interim_type,                                                                       \
-                          asm_operator,                                                                       \
-                          output_modifier,                                                                    \
-                          wait_cmd)                                                                           \
+#define HIPCUB_ASM_THREAD_LOAD(cache_modifier,                                                                \
+                               llvm_cache_modifier,                                                           \
+                               type,                                                                          \
+                               interim_type,                                                                  \
+                               asm_operator,                                                                  \
+                               output_modifier,                                                               \
+                               wait_cmd)                                                                      \
     template<>                                                                                                \
-    HIPCUB_DEVICE __forceinline__ type AsmThreadLoad<cache_modifier_name, type>(void * ptr)                   \
+    HIPCUB_DEVICE __forceinline__ type AsmThreadLoad<cache_modifier, type>(void * ptr)                        \
     {                                                                                                         \
         interim_type retval;                                                                                  \
         asm volatile(#asm_operator " %0, %1 " llvm_cache_modifier : "=" #output_modifier(retval) : "v"(ptr)); \
-        asm volatile("s_waitcnt " wait_cmd "(%0)" : : "I"(0x00));                                            \
-        return retval;                                                                                        \
+        asm volatile("s_waitcnt " wait_cmd "(%0)" : : "I"(0x00));                                             \
+        return (type) retval;                                                                                 \
     }
 
 // TODO fix flat_load_ubyte and flat_load_sbyte issues
-#define HIPCUB_ASM_THREAD_GROUP(cache_modifier_name, llvm_cache_modifier, wait_cmd)                                  \
-    HIPCUB_ASM_THREAD(cache_modifier_name, llvm_cache_modifier, int8_t,   int16_t,  flat_load_sshort,  v, wait_cmd); \
-    HIPCUB_ASM_THREAD(cache_modifier_name, llvm_cache_modifier, int16_t,  int16_t,  flat_load_sshort,  v, wait_cmd); \
-    HIPCUB_ASM_THREAD(cache_modifier_name, llvm_cache_modifier, uint8_t,  uint16_t, flat_load_ushort,  v, wait_cmd); \
-    HIPCUB_ASM_THREAD(cache_modifier_name, llvm_cache_modifier, uint16_t, uint16_t, flat_load_ushort,  v, wait_cmd); \
-    HIPCUB_ASM_THREAD(cache_modifier_name, llvm_cache_modifier, uint32_t, uint32_t, flat_load_dword,   v, wait_cmd); \
-    HIPCUB_ASM_THREAD(cache_modifier_name, llvm_cache_modifier, float,    uint32_t, flat_load_dword,   v, wait_cmd); \
-    HIPCUB_ASM_THREAD(cache_modifier_name, llvm_cache_modifier, uint64_t, uint64_t, flat_load_dwordx2, v, wait_cmd); \
-    HIPCUB_ASM_THREAD(cache_modifier_name, llvm_cache_modifier, double,   uint64_t, flat_load_dwordx2, v, wait_cmd);
+// TODO Add specialization for custom larger data types
+#define HIPCUB_ASM_THREAD_LOAD_GROUP(cache_modifier, llvm_cache_modifier, wait_cmd)                                  \
+    HIPCUB_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, int8_t, int16_t, flat_load_sshort, v, wait_cmd);     \
+    HIPCUB_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, int16_t, int16_t, flat_load_sshort, v, wait_cmd);    \
+    HIPCUB_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, uint8_t, uint16_t, flat_load_ushort, v, wait_cmd);   \
+    HIPCUB_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, uint16_t, uint16_t, flat_load_ushort, v, wait_cmd);  \
+    HIPCUB_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, uint32_t, uint32_t, flat_load_dword, v, wait_cmd);   \
+    HIPCUB_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, float, uint32_t, flat_load_dword, v, wait_cmd);      \
+    HIPCUB_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, uint64_t, uint64_t, flat_load_dwordx2, v, wait_cmd); \
+    HIPCUB_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, double, uint64_t, flat_load_dwordx2, v, wait_cmd);
 
-HIPCUB_ASM_THREAD_GROUP(LOAD_CA, "glc", "");
-HIPCUB_ASM_THREAD_GROUP(LOAD_CG, "glc slc", "");
-HIPCUB_ASM_THREAD_GROUP(LOAD_CV, "glc", "vmcnt");
-HIPCUB_ASM_THREAD_GROUP(LOAD_VOLATILE, "glc", "vmcnt");
+HIPCUB_ASM_THREAD_LOAD_GROUP(LOAD_CA, "glc", "");
+HIPCUB_ASM_THREAD_LOAD_GROUP(LOAD_CG, "glc slc", "");
+HIPCUB_ASM_THREAD_LOAD_GROUP(LOAD_CV, "glc", "vmcnt");
+HIPCUB_ASM_THREAD_LOAD_GROUP(LOAD_VOLATILE, "glc", "vmcnt");
 
 // TODO find correct modifiers to match these
-HIPCUB_ASM_THREAD_GROUP(LOAD_LDG, "", "");
-HIPCUB_ASM_THREAD_GROUP(LOAD_CS, "", "");
+HIPCUB_ASM_THREAD_LOAD_GROUP(LOAD_LDG, "", "");
+HIPCUB_ASM_THREAD_LOAD_GROUP(LOAD_CS, "", "");
 
 template<CacheLoadModifier MODIFIER = LOAD_DEFAULT, typename InputIteratorT>
 HIPCUB_DEVICE __forceinline__ typename std::iterator_traits<InputIteratorT>::value_type ThreadLoad(InputIteratorT itr)
