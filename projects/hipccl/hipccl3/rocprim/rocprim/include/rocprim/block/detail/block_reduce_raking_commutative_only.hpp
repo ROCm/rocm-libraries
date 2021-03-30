@@ -51,8 +51,8 @@ class block_reduce_raking_communtative_only
     typedef block_reduce_raking_reduce<T,BlockSizeX,BlockSizeY,BlockSizeZ> fall_back;
     // Number of items to reduce per thread
 
-    static constexpr unsigned int WarpSize =::rocprim::warp_size();
-    static constexpr unsigned int RakingThreads =::rocprim::warp_size();
+    static constexpr unsigned int WarpSize =::rocprim::device_warp_size();
+    static constexpr unsigned int RakingThreads =::rocprim::device_warp_size();
     static constexpr bool UseFallBack = ((BlockSize % WarpSize != 0) || (BlockSize <= WarpSize));
 
     static constexpr unsigned int SharingThreads =::rocprim::max<int>(1,BlockSize - RakingThreads);
