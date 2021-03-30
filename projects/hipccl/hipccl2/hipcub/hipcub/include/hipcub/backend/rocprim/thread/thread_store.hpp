@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2020, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2021, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -27,26 +27,42 @@
  *
  ******************************************************************************/
 
-#ifndef HIPCUB_ROCPRIM_ITERATOR_ARG_INDEX_INPUT_ITERATOR_HPP_
-#define HIPCUB_ROCPRIM_ITERATOR_ARG_INDEX_INPUT_ITERATOR_HPP_
-
-#include "../../../config.hpp"
-
-#include <rocprim/iterator/arg_index_iterator.hpp>
-
+#ifndef HIPCUB_ROCPRIM_THREAD_THREAD_STORE_HPP_
+#define HIPCUB_ROCPRIM_THREAD_THREAD_STORE_HPP_
 BEGIN_HIPCUB_NAMESPACE
 
-#ifndef DOXYGEN_SHOULD_SKIP_THIS    // Do not document
+enum CacheStoreModifier
+{
+    STORE_DEFAULT,              ///< Default (no modifier)
+    STORE_WB,                   ///< Cache write-back all coherent levels
+    STORE_CG,                   ///< Cache at global level
+    STORE_CS,                   ///< Cache streaming (likely to be accessed once)
+    STORE_WT,                   ///< Cache write-through (to system memory)
+    STORE_VOLATILE,             ///< Volatile shared (any memory space)
+};
 
-template<
-    typename InputIterator,
-    typename Difference = std::ptrdiff_t,
-    typename Value = typename std::iterator_traits<InputIterator>::value_type
+template <
+    CacheStoreModifier MODIFIER = STORE_DEFAULT,
+    typename OutputIteratorT,
+    typename T
 >
-using ArgIndexInputIterator = ::rocprim::arg_index_iterator<InputIterator, Difference, Value>;
+__device__ __forceinline__ void ThreadStore(
+    OutputIteratorT itr,
+    T               val)
+{
+    ThreadStore<MODIFIER>(&(*itr), val);
+}
 
-#endif
+template <
+    CacheStoreModifier MODIFIER = STORE_DEFAULT,
+    typename T
+>
+__device__ __forceinline__ void ThreadStore(
+    T *ptr,
+    T val)
+{
+    __builtin_memcpy(ptr, &val, sizeof(T));
+}
 
 END_HIPCUB_NAMESPACE
-
-#endif // HIPCUB_ROCPRIM_ITERATOR_ARG_INDEX_INPUT_ITERATOR_HPP_
+#endif
