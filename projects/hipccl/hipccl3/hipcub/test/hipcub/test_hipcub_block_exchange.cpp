@@ -363,52 +363,32 @@ TYPED_TEST(HipcubBlockExchangeTests, BlockedToWarpStriped)
     // Calculate input and expected results on host
     std::vector<type> values(size);
     std::iota(values.begin(), values.end(), 0);
-    if (current_device_warp_size == HIPCUB_WARP_SIZE_32)
+
+    const size_t warps_no = current_device_warp_size == HIPCUB_WARP_SIZE_32 ? warps_no_32 : warps_no_64;
+    const size_t warp_size = current_device_warp_size == HIPCUB_WARP_SIZE_32 ? warp_size_32 : warp_size_64;
+    const size_t items_per_warp = current_device_warp_size == HIPCUB_WARP_SIZE_32 ? items_per_warp_32 : items_per_warp_64;
+
+    for(size_t bi = 0; bi < size / items_per_block; bi++)
     {
-        for(size_t bi = 0; bi < size / items_per_block; bi++)
+        for(size_t wi = 0; wi < warps_no; wi++)
         {
-            for(size_t wi = 0; wi < warps_no_32; wi++)
+            const size_t current_warp_size = wi == warps_no - 1
+                ? (block_size % warp_size != 0 ? block_size % warp_size : warp_size)
+                : warp_size;
+            for(size_t li = 0; li < current_warp_size; li++)
             {
-                const size_t current_warp_size = wi == warps_no_32 - 1
-                    ? (block_size % warp_size_32 != 0 ? block_size % warp_size_32 : warp_size_32)
-                    : warp_size_32;
-                for(size_t li = 0; li < current_warp_size; li++)
+                for(size_t ii = 0; ii < items_per_thread; ii++)
                 {
-                    for(size_t ii = 0; ii < items_per_thread; ii++)
-                    {
-                        const size_t offset = bi * items_per_block + wi * items_per_warp_32;
-                        const size_t i0 = offset + li * items_per_thread + ii;
-                        const size_t i1 = offset + ii * current_warp_size + li;
-                        input[i1] = values[i1];
-                        expected[i0] = values[i1];
-                    }
+                    const size_t offset = bi * items_per_block + wi * items_per_warp;
+                    const size_t i0 = offset + li * items_per_thread + ii;
+                    const size_t i1 = offset + ii * current_warp_size + li;
+                    input[i1] = values[i1];
+                    expected[i0] = values[i1];
                 }
             }
         }
     }
-    else if (current_device_warp_size == HIPCUB_WARP_SIZE_64)
-    {
-        for(size_t bi = 0; bi < size / items_per_block; bi++)
-        {
-            for(size_t wi = 0; wi < warps_no_64; wi++)
-            {
-                const size_t current_warp_size = wi == warps_no_64 - 1
-                    ? (block_size % warp_size_64 != 0 ? block_size % warp_size_64 : warp_size_64)
-                    : warp_size_64;
-                for(size_t li = 0; li < current_warp_size; li++)
-                {
-                    for(size_t ii = 0; ii < items_per_thread; ii++)
-                    {
-                        const size_t offset = bi * items_per_block + wi * items_per_warp_64;
-                        const size_t i0 = offset + li * items_per_thread + ii;
-                        const size_t i1 = offset + ii * current_warp_size + li;
-                        input[i1] = values[i1];
-                        expected[i0] = values[i1];
-                    }
-                }
-            }
-        }
-    }
+
     // Preparing device
     type* device_input;
     HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
@@ -516,48 +496,27 @@ TYPED_TEST(HipcubBlockExchangeTests, WarpStripedToBlocked)
     // Calculate input and expected results on host
     std::vector<type> values(size);
     std::iota(values.begin(), values.end(), 0);
-    if (current_device_warp_size == HIPCUB_WARP_SIZE_32)
+
+    const size_t warps_no = current_device_warp_size == HIPCUB_WARP_SIZE_32 ? warps_no_32 : warps_no_64;
+    const size_t warp_size = current_device_warp_size == HIPCUB_WARP_SIZE_32 ? warp_size_32 : warp_size_64;
+    const size_t items_per_warp = current_device_warp_size == HIPCUB_WARP_SIZE_32 ? items_per_warp_32 : items_per_warp_64;
+
+    for(size_t bi = 0; bi < size / items_per_block; bi++)
     {
-        for(size_t bi = 0; bi < size / items_per_block; bi++)
+        for(size_t wi = 0; wi < warps_no; wi++)
         {
-            for(size_t wi = 0; wi < warps_no_32; wi++)
+            const size_t current_warp_size = wi == warps_no - 1
+                ? (block_size % warp_size != 0 ? block_size % warp_size : warp_size)
+                : warp_size;
+            for(size_t li = 0; li < current_warp_size; li++)
             {
-                const size_t current_warp_size = wi == warps_no_32 - 1
-                    ? (block_size % warp_size_32 != 0 ? block_size % warp_size_32 : warp_size_32)
-                    : warp_size_32;
-                for(size_t li = 0; li < current_warp_size; li++)
+                for(size_t ii = 0; ii < items_per_thread; ii++)
                 {
-                    for(size_t ii = 0; ii < items_per_thread; ii++)
-                    {
-                        const size_t offset = bi * items_per_block + wi * items_per_warp_32;
-                        const size_t i0 = offset + li * items_per_thread + ii;
-                        const size_t i1 = offset + ii * current_warp_size + li;
-                        input[i0] = values[i1];
-                        expected[i1] = values[i1];
-                    }
-                }
-            }
-        }
-    }
-    else if (current_device_warp_size == HIPCUB_WARP_SIZE_64)
-    {
-        for(size_t bi = 0; bi < size / items_per_block; bi++)
-        {
-            for(size_t wi = 0; wi < warps_no_64; wi++)
-            {
-                const size_t current_warp_size = wi == warps_no_64 - 1
-                    ? (block_size % warp_size_64 != 0 ? block_size % warp_size_64 : warp_size_64)
-                    : warp_size_64;
-                for(size_t li = 0; li < current_warp_size; li++)
-                {
-                    for(size_t ii = 0; ii < items_per_thread; ii++)
-                    {
-                        const size_t offset = bi * items_per_block + wi * items_per_warp_64;
-                        const size_t i0 = offset + li * items_per_thread + ii;
-                        const size_t i1 = offset + ii * current_warp_size + li;
-                        input[i0] = values[i1];
-                        expected[i1] = values[i1];
-                    }
+                    const size_t offset = bi * items_per_block + wi * items_per_warp;
+                    const size_t i0 = offset + li * items_per_thread + ii;
+                    const size_t i1 = offset + ii * current_warp_size + li;
+                    input[i0] = values[i1];
+                    expected[i1] = values[i1];
                 }
             }
         }

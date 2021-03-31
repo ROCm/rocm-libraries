@@ -90,7 +90,7 @@ typedef ::testing::Types<
     params<unsigned char>
 > UtilPtxTestParams;
 
-TYPED_TEST_CASE(HipcubUtilPtxTests, UtilPtxTestParams);
+TYPED_TEST_SUITE(HipcubUtilPtxTests, UtilPtxTestParams);
 
 template<unsigned int LOGICAL_WARP_THREADS, class T>
 __global__
@@ -114,10 +114,8 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleUp)
 {
     using T = typename TestFixture::type;
     constexpr unsigned int logical_warp_size = TestFixture::logical_warp_size;
-    constexpr unsigned int hardware_warp_size_32 = HIPCUB_WARP_SIZE_32;
-    constexpr unsigned int hardware_warp_size_64 = HIPCUB_WARP_SIZE_64;
     const unsigned int current_device_warp_size = rocprim::host_warp_size();
-    const size_t hardware_warp_size = (current_device_warp_size == HIPCUB_WARP_SIZE_32) ? hardware_warp_size_32 : hardware_warp_size_64;;
+    const size_t hardware_warp_size = (current_device_warp_size == HIPCUB_WARP_SIZE_32) ? HIPCUB_WARP_SIZE_32 : HIPCUB_WARP_SIZE_64;
     const size_t size = hardware_warp_size;
 
     if (logical_warp_size > current_device_warp_size)
@@ -224,10 +222,8 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleDown)
 {
     using T = typename TestFixture::type;
     constexpr unsigned int logical_warp_size = TestFixture::logical_warp_size;
-    constexpr unsigned int hardware_warp_size_32 = HIPCUB_WARP_SIZE_32;
-    constexpr unsigned int hardware_warp_size_64 = HIPCUB_WARP_SIZE_64;
     const unsigned int current_device_warp_size = rocprim::host_warp_size();
-    const size_t hardware_warp_size = (current_device_warp_size == HIPCUB_WARP_SIZE_32) ? hardware_warp_size_32 : hardware_warp_size_64;;
+    const size_t hardware_warp_size = (current_device_warp_size == HIPCUB_WARP_SIZE_32) ? HIPCUB_WARP_SIZE_32 : HIPCUB_WARP_SIZE_64;
     const size_t size = hardware_warp_size;
 
     if (logical_warp_size > current_device_warp_size)
@@ -332,10 +328,8 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleIndex)
 {
     using T = typename TestFixture::type;
     constexpr unsigned int logical_warp_size = TestFixture::logical_warp_size;
-    constexpr unsigned int hardware_warp_size_32 = HIPCUB_WARP_SIZE_32;
-    constexpr unsigned int hardware_warp_size_64 = HIPCUB_WARP_SIZE_64;
     const unsigned int current_device_warp_size = rocprim::host_warp_size();
-    const size_t hardware_warp_size = (current_device_warp_size == HIPCUB_WARP_SIZE_32) ? hardware_warp_size_32 : hardware_warp_size_64;;
+    const size_t hardware_warp_size = (current_device_warp_size == HIPCUB_WARP_SIZE_32) ? HIPCUB_WARP_SIZE_32 : HIPCUB_WARP_SIZE_64;
     const size_t size = hardware_warp_size;
 
     if (logical_warp_size > current_device_warp_size)
@@ -435,10 +429,8 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleIndex)
 TEST(HipcubUtilPtxTests, ShuffleUpCustomStruct)
 {
     using T = custom_notaligned;
-    constexpr unsigned int hardware_warp_size_32 = HIPCUB_WARP_SIZE_32;
-    constexpr unsigned int hardware_warp_size_64 = HIPCUB_WARP_SIZE_64;
-    constexpr unsigned int logical_warp_size_32 = hardware_warp_size_32;
-    constexpr unsigned int logical_warp_size_64 = hardware_warp_size_64;
+    constexpr unsigned int logical_warp_size_32 = HIPCUB_WARP_SIZE_32;
+    constexpr unsigned int logical_warp_size_64 = HIPCUB_WARP_SIZE_64;
 
     const unsigned int current_device_warp_size = rocprim::host_warp_size();
     const unsigned int logical_warp_size = (current_device_warp_size == HIPCUB_WARP_SIZE_32) ? logical_warp_size_32 : logical_warp_size_64;
@@ -509,7 +501,7 @@ TEST(HipcubUtilPtxTests, ShuffleUpCustomStruct)
                 // Launching kernel
                 hipLaunchKernelGGL(
                     HIP_KERNEL_NAME(shuffle_up_kernel<logical_warp_size_32, T>),
-                    dim3(1), dim3(hardware_warp_size_32), 0, 0,
+                    dim3(1), dim3(HIPCUB_WARP_SIZE_32), 0, 0,
                     device_data, src_offset
                 );
             }
@@ -518,7 +510,7 @@ TEST(HipcubUtilPtxTests, ShuffleUpCustomStruct)
                 // Launching kernel
                 hipLaunchKernelGGL(
                     HIP_KERNEL_NAME(shuffle_up_kernel<logical_warp_size_64, T>),
-                    dim3(1), dim3(hardware_warp_size_32), 0, 0,
+                    dim3(1), dim3(HIPCUB_WARP_SIZE_64), 0, 0,
                     device_data, src_offset
                 );
             }
@@ -546,13 +538,11 @@ TEST(HipcubUtilPtxTests, ShuffleUpCustomStruct)
 TEST(HipcubUtilPtxTests, ShuffleUpCustomAlignedStruct)
 {
     using T = custom_16aligned;
-    constexpr unsigned int hardware_warp_size_32 = HIPCUB_WARP_SIZE_32;
-    constexpr unsigned int hardware_warp_size_64 = HIPCUB_WARP_SIZE_64;
-    constexpr unsigned int logical_warp_size_32 = hardware_warp_size_32;
-    constexpr unsigned int logical_warp_size_64 = hardware_warp_size_64;
+    constexpr unsigned int logical_warp_size_32 = HIPCUB_WARP_SIZE_32;
+    constexpr unsigned int logical_warp_size_64 = HIPCUB_WARP_SIZE_64;
 
     const unsigned int current_device_warp_size = rocprim::host_warp_size();
-    const unsigned int hardware_warp_size = (current_device_warp_size == HIPCUB_WARP_SIZE_32) ? hardware_warp_size_32 : hardware_warp_size_64;
+    const unsigned int hardware_warp_size = (current_device_warp_size == HIPCUB_WARP_SIZE_32) ? HIPCUB_WARP_SIZE_32 : HIPCUB_WARP_SIZE_64;
     const unsigned int logical_warp_size = (current_device_warp_size == HIPCUB_WARP_SIZE_32) ? logical_warp_size_32 : logical_warp_size_64;
     const size_t size = (current_device_warp_size == HIPCUB_WARP_SIZE_32) ? logical_warp_size_32 : logical_warp_size_64;
 
@@ -664,11 +654,9 @@ void warp_id_kernel(unsigned int* output)
 
 TEST(HipcubUtilPtxTests, WarpId)
 {
-    constexpr unsigned int hardware_warp_size_32 = HIPCUB_WARP_SIZE_32;
-    constexpr unsigned int hardware_warp_size_64 = HIPCUB_WARP_SIZE_64;
     const unsigned int current_device_warp_size = rocprim::host_warp_size();
-    const unsigned int hardware_warp_size = (current_device_warp_size == HIPCUB_WARP_SIZE_32) ? hardware_warp_size_32 : hardware_warp_size_64;
-    const size_t block_size = (current_device_warp_size == HIPCUB_WARP_SIZE_32) ? 4 * hardware_warp_size_32 : 4 * hardware_warp_size_64;
+    const unsigned int hardware_warp_size = (current_device_warp_size == HIPCUB_WARP_SIZE_32) ? HIPCUB_WARP_SIZE_32 : HIPCUB_WARP_SIZE_64;
+    const size_t block_size = (current_device_warp_size == HIPCUB_WARP_SIZE_32) ? 4 * HIPCUB_WARP_SIZE_32 : 4 * HIPCUB_WARP_SIZE_64;
     const size_t size = 16 * block_size;
 
     std::vector<unsigned int> output(size);
