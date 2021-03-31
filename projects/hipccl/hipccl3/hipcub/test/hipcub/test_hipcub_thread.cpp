@@ -58,7 +58,6 @@ public:
 };
 
 typedef ::testing::Types<
-#if 1
     params<int8_t, hipcub::LOAD_CA, hipcub::STORE_WB>,
     params<int16_t, hipcub::LOAD_CA, hipcub::STORE_WB>,
     params<uint8_t, hipcub::LOAD_CA, hipcub::STORE_WB>,
@@ -81,7 +80,6 @@ typedef ::testing::Types<
     params<uint64_t, hipcub::LOAD_CV, hipcub::STORE_WT>,
     params<test_utils::custom_test_type<uint64_t>, hipcub::LOAD_CV, hipcub::STORE_WB>,
     params<test_utils::custom_test_type<double>, hipcub::LOAD_CV, hipcub::STORE_WB>
-#endif
 > ThreadOperationTestParams;
 
 TYPED_TEST_CASE(HipcubThreadOperationTests, ThreadOperationTestParams);

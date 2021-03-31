@@ -42,20 +42,15 @@ enum CacheLoadModifier : int32_t
     LOAD_VOLATILE,  ///< Volatile (any memory space)
 };
 
-// TODO add to detail namespace
-// TODO cleanup
 template<CacheLoadModifier MODIFIER = LOAD_DEFAULT, typename T>
 HIPCUB_DEVICE __forceinline__ T AsmThreadLoad(void * ptr)
 {
-    T retval;
+    T retval = 0;
     __builtin_memcpy(&retval, ptr, sizeof(T));
     return retval;
 }
 
 #if HIPCUB_THREAD_LOAD_USE_CACHE_MODIFIERS == 1
-
-// NOTE: the reason there is an interim_type is because of a bug for 8bit types.
-// TODO fix flat_load_ubyte and flat_load_sbyte issues
 
 // Important for syncing. Check section 9.2.2 or 7.3 in the following document
 // http://developer.amd.com/wordpress/media/2013/12/AMD_GCN3_Instruction_Set_Architecture_rev1.1.pdf
@@ -72,15 +67,14 @@ HIPCUB_DEVICE __forceinline__ T AsmThreadLoad(void * ptr)
         interim_type retval;                                                                                  \
         asm volatile(#asm_operator " %0, %1 " llvm_cache_modifier : "=" #output_modifier(retval) : "v"(ptr)); \
         asm volatile("s_waitcnt " wait_cmd "(%0)" : : "I"(0x00));                                             \
-        return (type) retval;                                                                                 \
+        return retval;                                                                                        \
     }
 
-// TODO fix flat_load_ubyte and flat_load_sbyte issues
 // TODO Add specialization for custom larger data types
 #define HIPCUB_ASM_THREAD_LOAD_GROUP(cache_modifier, llvm_cache_modifier, wait_cmd)                                  \
-    HIPCUB_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, int8_t, int16_t, flat_load_sshort, v, wait_cmd);     \
+    HIPCUB_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, int8_t, int16_t, flat_load_sbyte, v, wait_cmd);      \
     HIPCUB_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, int16_t, int16_t, flat_load_sshort, v, wait_cmd);    \
-    HIPCUB_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, uint8_t, uint16_t, flat_load_ushort, v, wait_cmd);   \
+    HIPCUB_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, uint8_t, uint16_t, flat_load_ubyte, v, wait_cmd);    \
     HIPCUB_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, uint16_t, uint16_t, flat_load_ushort, v, wait_cmd);  \
     HIPCUB_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, uint32_t, uint32_t, flat_load_dword, v, wait_cmd);   \
     HIPCUB_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, float, uint32_t, flat_load_dword, v, wait_cmd);      \
