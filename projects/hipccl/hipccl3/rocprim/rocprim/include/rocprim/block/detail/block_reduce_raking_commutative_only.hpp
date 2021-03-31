@@ -48,19 +48,22 @@ class block_reduce_raking_communtative_only
 {
     static constexpr unsigned int BlockSize = BlockSizeX * BlockSizeY * BlockSizeZ;
 
+    // Select warp size
+    static constexpr unsigned int warp_size_ =
+        detail::warp_size_in_class(::rocprim::device_warp_size());
+    static constexpr unsigned int raking_threads_ = warp_size_;
+    static constexpr bool use_fall_back_ = ((BlockSize % warp_size_ != 0) || (BlockSize <= warp_size_));
+
     typedef block_reduce_raking_reduce<T,BlockSizeX,BlockSizeY,BlockSizeZ> fall_back;
     // Number of items to reduce per thread
 
-    static constexpr unsigned int WarpSize =::rocprim::device_warp_size();
-    static constexpr unsigned int RakingThreads =::rocprim::device_warp_size();
-    static constexpr bool UseFallBack = ((BlockSize % WarpSize != 0) || (BlockSize <= WarpSize));
-
-    static constexpr unsigned int SharingThreads =::rocprim::max<int>(1,BlockSize - RakingThreads);
-    static constexpr unsigned int SegmentLength = SharingThreads / WarpSize;
+    static constexpr unsigned int sharing_threads_ = ::rocprim::max<int>(1, BlockSize - raking_threads_);
+    static constexpr unsigned int segment_length_ = sharing_threads_ / warp_size_;
 
     // BlockSize is multiple of hardware warp
-    typedef warp_reduce<T,RakingThreads> WarpReduce;
-    typedef block_raking_layout<T,SharingThreads> BlockRakingLayout;
+    typedef warp_reduce<T, raking_threads_> WarpReduce;
+    typedef block_raking_layout<T, sharing_threads_> BlockRakingLayout;
+
     union storage_type_
     {
       struct DefaultStorage
@@ -73,80 +76,69 @@ class block_reduce_raking_communtative_only
 
     };
 
-    storage_type_ *temp_storage;
-
 public:
 
-    ROCPRIM_DEVICE inline
-    block_reduce_raking_communtative_only()
-    {
-      ROCPRIM_SHARED_MEMORY storage_type_ shared_storage;
-      temp_storage = &shared_storage;
-    }
     using storage_type = detail::raw_storage<storage_type_>;
 
-    /// \brief Computes a thread block-wide reduction using addition (+) as the reduction operator. The first num_valid threads each contribute one reduction partial.  The return value is only valid for thread<sub>0</sub>.
-    /// \param partial   [in] Calling thread's input partial reductions
-    /// \param num_valid [in] Number of valid elements (may be less than BlockSize)
-    /// \return Sum of the specified elements
+    template<typename ReductionOp>
     ROCPRIM_DEVICE inline
-    T sum(
-        T                   partial,
-        int                 num_valid)
+    T reduce(
+        T             partial,
+        T&            output,
+        int           num_valid,
+        ReductionOp   reduction_op)
     {
-      const size_t linear_tid = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
-      bool FullTile = (num_valid >= BlockSize);
-      if (UseFallBack || !FullTile)
-      {
-          return fall_back().template Sum<FullTile>(partial, num_valid);
-      }
-      else
-      {
-        // Place partial into shared memory grid
-        if (linear_tid >= RakingThreads)
-            *BlockRakingLayout::placement_ptr(temp_storage->default_storage.raking_grid, linear_tid - RakingThreads) = partial;
-
-        ::rocprim::syncthreads();
-
-        // Reduce parallelism to one warp
-        if (linear_tid < RakingThreads)
-        {
-            // Raking reduction in grid
-            T *raking_segment = BlockRakingLayout::raking_ptr(temp_storage->default_storage.raking_grid, linear_tid);
-            partial = ::rocprim::thread_reduce<SegmentLength>(
-                raking_segment,
-                ::rocprim::plus<T>(),
-                partial
-            );
-
-            // Warpscan
-            partial = WarpReduce(temp_storage->default_storage.warp_storage).Sum(partial);
-        }
-      }
-
-      return partial;
+        ROCPRIM_SHARED_MEMORY storage_type storage;
+        return reduce(partial, output, num_valid, storage, reduction_op);
     }
 
-
-    /// \brief Computes a thread block-wide reduction using addition (+) as the reduction operator. The first num_valid threads each contribute one reduction partial.  The return value is only valid for thread<sub>0</sub>.
-    /// \param partial   [in] Calling thread's input partial reductions
-    /// \param output   [out] Variable containing reduction output
-    /// \param num_valid [in] Number of valid elements (may be less than BlockSize)
-    /// \param reduction_op [in] Binary reduction operator
-    /// \return Reduction of the specified elements
-    template <
-        typename            ReductionOp>
+    template<typename ReductionOp>
     ROCPRIM_DEVICE inline
     T reduce(
         T                   partial,
         T&                  output,
-        int                 num_valid,
         ReductionOp         reduction_op)
+    {
+        return this->reduce(partial, output, BlockSize, reduction_op);
+    }
+
+    template<typename ReductionOp>
+    ROCPRIM_DEVICE inline
+    T reduce(
+        T             partial,
+        T&            output,
+        unsigned int  num_valid,
+        storage_type& storage,
+        ReductionOp   reduction_op)
+    {
+        return this->reduce(partial, output, num_valid, storage, reduction_op);
+    }
+
+    template<typename ReductionOp>
+    ROCPRIM_DEVICE inline
+    T reduce(
+        T             partial,
+        T&            output,
+        storage_type& storage,
+        ReductionOp   reduction_op)
+    {
+        return this->reduce(partial, output, BlockSize, storage, reduction_op);
+    }
+
+
+    template<typename ReductionOp>
+    ROCPRIM_DEVICE inline
+    T reduce(
+        T             partial,
+        T&            output,
+        int           num_valid,
+        storage_type& storage,
+        ReductionOp   reduction_op)
     {
         const size_t linear_tid = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         bool FullTile = (num_valid >= (int)BlockSize);
 
-        if (UseFallBack || !FullTile)
+        if (use_fall_back_ || !FullTile)
         {
             T output_value;
             fall_back().reduce(partial, output_value, num_valid, reduction_op);
@@ -155,19 +147,20 @@ public:
         }
         else
         {
+            storage_type_& storage_ = storage.get();
 
             // Place partial into shared memory grid
-            if (linear_tid >= RakingThreads)
-                *BlockRakingLayout::placement_ptr(temp_storage->default_storage.raking_grid, linear_tid - RakingThreads) = partial;
+            if (linear_tid >= raking_threads_)
+                *BlockRakingLayout::placement_ptr(storage_.default_storage.raking_grid, linear_tid - raking_threads_) = partial;
 
             ::rocprim::syncthreads();
 
             // Reduce parallelism to one warp
-            if (linear_tid < RakingThreads)
+            if (linear_tid < raking_threads_)
             {
                 // Raking reduction in grid
-                T *raking_segment = BlockRakingLayout::raking_ptr(temp_storage->default_storage.raking_grid, linear_tid);
-                partial = ::rocprim::thread_reduce<SegmentLength>(
+                T *raking_segment = BlockRakingLayout::raking_ptr(storage_.default_storage.raking_grid, linear_tid);
+                partial = ::rocprim::thread_reduce<segment_length_>(
                     raking_segment,
                     reduction_op,
                     partial
@@ -175,70 +168,15 @@ public:
 
                 // Warpscan
                 T output_value;
-                WarpReduce().reduce(partial, output_value, temp_storage->default_storage.warp_storage, reduction_op);
+                WarpReduce().reduce(partial, output_value, storage_.default_storage.warp_storage, reduction_op);
                 partial = output_value;
             }
         }
-
         output =  partial;
         return output;
     }
-
-    /// \brief Computes a thread block-wide reduction using addition (+) as the reduction operator. The first num_valid threads each contribute one reduction partial.  The return value is only valid for thread<sub>0</sub>.
-    /// \param partial   [in] Calling thread's input partial reductions
-    /// \param output   [out] Variable containing reduction output
-    /// \param reduction_op [in] Binary reduction operator
-    /// \return Reduction of the specified elements
-    template <
-        typename            ReductionOp>
-    ROCPRIM_DEVICE inline
-    T reduce(
-        T                   partial,
-        T&                  output,
-        ReductionOp         reduction_op)
-    {
-      return this->reduce(partial,output,BlockSize,reduction_op);
-    }
-
-    /// \brief Computes a thread block-wide reduction using addition (+) as the reduction operator. The first num_valid threads each contribute one reduction partial.  The return value is only valid for thread<sub>0</sub>.
-    /// \param partial   [in] Calling thread's input partial reductions
-    /// \param output   [out] Variable containing reduction output
-    /// \param num_valid [in] Number of valid elements (may be less than BlockSize)
-    /// \param storage_type [in] Temporary Storage which is ignored
-    /// \param reduction_op [in] Binary reduction operator
-    /// \return Reduction of the specified elements
-    template <
-        typename            ReductionOp>
-    ROCPRIM_DEVICE inline
-    T reduce(
-        T                   partial,
-        T&                  output,
-        unsigned int        num_valid,
-        storage_type         ,
-        ReductionOp         reduction_op)
-    {
-      return this->reduce(partial,output,num_valid,reduction_op);
-    }
-
-    /// \brief Computes a thread block-wide reduction using addition (+) as the reduction operator. The first num_valid threads each contribute one reduction partial.  The return value is only valid for thread<sub>0</sub>.
-    /// \param partial   [in] Calling thread's input partial reductions
-    /// \param output   [out] Variable containing reduction output
-    /// \param storage_type [in] Temporary Storage which is ignored
-    /// \param reduction_op [in] Binary reduction operator
-    /// \return Reduction of the specified elements
-    template <
-        typename            ReductionOp>
-    ROCPRIM_DEVICE inline
-    T reduce(
-        T                   partial,
-        T&                  output,
-        storage_type         ,
-        ReductionOp         reduction_op)
-    {
-      return this->reduce(partial,output,BlockSize,reduction_op);
-    }
-
 };
+
 } // end namespace detail
 
 END_ROCPRIM_NAMESPACE

@@ -55,7 +55,8 @@ struct block_raking_layout
   static constexpr unsigned int SharedElements = BlockThreads;
 
   /// Maximum number of warp-synchronous raking threads
-  static constexpr unsigned int MaxRakingThreads = min(BlockThreads,::rocprim::device_warp_size());
+  static constexpr unsigned int MaxRakingThreads =
+      detail::get_min_warp_size(BlockThreads, ::rocprim::device_warp_size());
 
   /// Number of raking elements per warp-synchronous raking thread (rounded up)
   static constexpr unsigned int SegmentLength = (SharedElements + MaxRakingThreads - 1)/MaxRakingThreads;
