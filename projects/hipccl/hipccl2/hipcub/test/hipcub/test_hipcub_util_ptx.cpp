@@ -614,7 +614,7 @@ TEST(HipcubUtilPtxTests, ShuffleUpCustomAlignedStruct)
                     device_data, src_offset
                 );
             }
-            if (logical_warp_size == logical_warp_size_64)
+            else if (logical_warp_size == logical_warp_size_64)
             {
                 // Launching kernel
                 hipLaunchKernelGGL(
