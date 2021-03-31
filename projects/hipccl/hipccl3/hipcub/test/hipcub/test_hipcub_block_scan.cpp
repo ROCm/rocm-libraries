@@ -88,7 +88,7 @@ typedef ::testing::Types<
     params<unsigned char, 377U, 1, hipcub::BLOCK_SCAN_RAKING>
 > SingleValueTestParams;
 
-TYPED_TEST_CASE(HipcubBlockScanSingleValueTests, SingleValueTestParams);
+TYPED_TEST_SUITE(HipcubBlockScanSingleValueTests, SingleValueTestParams);
 
 template<
     unsigned int BlockSize,
@@ -951,7 +951,7 @@ typedef ::testing::Types<
     params<float, 255,  15, hipcub::BLOCK_SCAN_RAKING>
 > InputArrayTestParams;
 
-TYPED_TEST_CASE(HipcubBlockScanInputArrayTests, InputArrayTestParams);
+TYPED_TEST_SUITE(HipcubBlockScanInputArrayTests, InputArrayTestParams);
 
 template<
     unsigned int BlockSize,
