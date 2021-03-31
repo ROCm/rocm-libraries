@@ -75,7 +75,7 @@ if(HIP_COMPILER STREQUAL "hcc" OR HIP_COMPILER STREQUAL "clang")
     download_project(
       PROJ                rocprim
       GIT_REPOSITORY      https://github.com/ROCmSoftwarePlatform/rocPRIM.git
-      GIT_TAG             gfx1030
+      GIT_TAG             develop
       INSTALL_DIR         ${CMAKE_CURRENT_BINARY_DIR}/deps/rocprim
       CMAKE_ARGS          -DBUILD_TEST=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm
       LOG_DOWNLOAD        TRUE
@@ -101,7 +101,7 @@ if(BUILD_TEST)
   download_project(
     PROJ                googletest
     GIT_REPOSITORY      https://github.com/google/googletest.git
-    GIT_TAG             release-1.8.1
+    GIT_TAG             release-1.10.0
     INSTALL_DIR         ${GTEST_ROOT}
     CMAKE_ARGS          -DBUILD_GTEST=ON -DINSTALL_GTEST=ON -Dgtest_force_shared_crt=ON -DBUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> ${COMPILER_OVERRIDE}
     LOG_DOWNLOAD        TRUE

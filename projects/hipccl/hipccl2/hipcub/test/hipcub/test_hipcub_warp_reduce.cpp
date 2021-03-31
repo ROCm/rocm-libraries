@@ -49,79 +49,30 @@ typedef ::testing::Types<
     params<int, 8U>,
     params<int, 16U>,
     params<int, 32U>,
-    #if (defined(HIPCUB_ROCPRIM_API) && \
-        (defined(__HIP_ARCH_GFX801__) || \
-         defined(__HIP_ARCH_GFX802__) || \
-         defined(__HIP_ARCH_GFX803__) || \
-         defined(__HIP_ARCH_GFX810__) || \
-         defined(__HIP_ARCH_GFX900__) || \
-         defined(__HIP_ARCH_GFX902__) || \
-         defined(__HIP_ARCH_GFX904__) || \
-         defined(__HIP_ARCH_GFX906__) || \
-         defined(__HIP_ARCH_GFX908__) || \
-         defined(__HIP_ARCH_GFX909__)))
-        params<int, 64U>,
-    #endif
+    params<int, 64U>,
     // Float
     params<float, 2U>,
     params<float, 4U>,
     params<float, 8U>,
     params<float, 16U>,
     params<float, 32U>,
-    #if (defined(HIPCUB_ROCPRIM_API) && \
-        (defined(__HIP_ARCH_GFX801__) || \
-         defined(__HIP_ARCH_GFX802__) || \
-         defined(__HIP_ARCH_GFX803__) || \
-         defined(__HIP_ARCH_GFX810__) || \
-         defined(__HIP_ARCH_GFX900__) || \
-         defined(__HIP_ARCH_GFX902__) || \
-         defined(__HIP_ARCH_GFX904__) || \
-         defined(__HIP_ARCH_GFX906__) || \
-         defined(__HIP_ARCH_GFX908__) || \
-         defined(__HIP_ARCH_GFX909__)))
-        params<float, 64U>,
-    #endif
-
+    params<float, 64U>,
     // shared memory reduce
     // Integer
     params<int, 3U>,
     params<int, 7U>,
     params<int, 15U>,
-    #if (defined(HIPCUB_ROCPRIM_API) && \
-        (defined(__HIP_ARCH_GFX801__) || \
-         defined(__HIP_ARCH_GFX802__) || \
-         defined(__HIP_ARCH_GFX803__) || \
-         defined(__HIP_ARCH_GFX810__) || \
-         defined(__HIP_ARCH_GFX900__) || \
-         defined(__HIP_ARCH_GFX902__) || \
-         defined(__HIP_ARCH_GFX904__) || \
-         defined(__HIP_ARCH_GFX906__) || \
-         defined(__HIP_ARCH_GFX908__) || \
-         defined(__HIP_ARCH_GFX909__)))
-        params<int, 37U>,
-        params<int, 61U>,
-    #endif
+    params<int, 37U>,
+    params<int, 61U>,
     // Float
     params<float, 3U>,
     params<float, 7U>,
-    params<float, 15U>
-    #if (defined(HIPCUB_ROCPRIM_API) && \
-        (defined(__HIP_ARCH_GFX801__) || \
-         defined(__HIP_ARCH_GFX802__) || \
-         defined(__HIP_ARCH_GFX803__) || \
-         defined(__HIP_ARCH_GFX810__) || \
-         defined(__HIP_ARCH_GFX900__) || \
-         defined(__HIP_ARCH_GFX902__) || \
-         defined(__HIP_ARCH_GFX904__) || \
-         defined(__HIP_ARCH_GFX906__) || \
-         defined(__HIP_ARCH_GFX908__) || \
-         defined(__HIP_ARCH_GFX909__)))
-        ,params<float, 37U>,
-        params<float, 61U>
-    #endif
+    params<float, 15U>,
+    params<float, 37U>,
+    params<float, 61U>
 > HipcubWarpReduceTestParams;
 
-TYPED_TEST_CASE(HipcubWarpReduceTests, HipcubWarpReduceTestParams);
+TYPED_TEST_SUITE(HipcubWarpReduceTests, HipcubWarpReduceTestParams);
 
 template<
     class T,
@@ -129,7 +80,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
-__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void warp_reduce_kernel(T* device_input, T* device_output)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
@@ -155,17 +106,36 @@ TYPED_TEST(HipcubWarpReduceTests, Reduce)
     // logical warp side for warp primitive, execution warp size
     // is always test_utils::warp_size()
     constexpr size_t logical_warp_size = TestFixture::warp_size;
-    constexpr size_t block_size =
+
+    // The different warp sizes
+    constexpr size_t ws32 = size_t(HIPCUB_WARP_SIZE_32);
+    constexpr size_t ws64 = size_t(HIPCUB_WARP_SIZE_64);
+
+    // Block size of warp size 32
+    constexpr size_t block_size_ws32 =
         test_utils::is_power_of_two(logical_warp_size)
-        ? test_utils::max<size_t>(test_utils::warp_size(), logical_warp_size * 4)
-        : (test_utils::warp_size()/logical_warp_size) * logical_warp_size;
+            ? test_utils::max<size_t>(ws32, logical_warp_size * 4)
+            : test_utils::max<size_t>((ws32/logical_warp_size) * logical_warp_size, 1);
+
+    // Block size of warp size 64
+    constexpr size_t block_size_ws64 =
+        test_utils::is_power_of_two(logical_warp_size)
+            ? test_utils::max<size_t>(ws64, logical_warp_size * 4)
+            : test_utils::max<size_t>((ws64/logical_warp_size) * logical_warp_size, 1);
+
+    const unsigned int current_device_warp_size = rocprim::host_warp_size();
+
+    const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     unsigned int grid_size = 4;
     const size_t size = block_size * grid_size;
 
-    // Given warp size not supported
-    if(logical_warp_size > test_utils::warp_size())
+    // Check if warp size is supported
+    if( (logical_warp_size > current_device_warp_size) ||
+        (current_device_warp_size != ws32 && current_device_warp_size != ws64) ) // Only WarpSize 32 and 64 is supported
     {
-        return;
+        printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: %d.    Skipping test\n",
+            logical_warp_size, block_size, current_device_warp_size);
+        GTEST_SKIP();
     }
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
@@ -205,11 +175,22 @@ TYPED_TEST(HipcubWarpReduceTests, Reduce)
         );
 
         // Launching kernel
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(warp_reduce_kernel<T, block_size, logical_warp_size>),
-            dim3(grid_size), dim3(block_size), 0, 0,
-            device_input, device_output
-        );
+        if (current_device_warp_size == ws32)
+        {
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(warp_reduce_kernel<T, block_size_ws32, logical_warp_size>),
+                dim3(grid_size), dim3(block_size_ws32), 0, 0,
+                device_input, device_output
+            );
+        }
+        else if (current_device_warp_size == ws64)
+        {
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(warp_reduce_kernel<T, block_size_ws64, logical_warp_size>),
+                dim3(grid_size), dim3(block_size_ws64), 0, 0,
+                device_input, device_output
+            );
+        }
 
         HIP_CHECK(hipPeekAtLastError());
         HIP_CHECK(hipDeviceSynchronize());
@@ -241,7 +222,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
-__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void warp_reduce_valid_kernel(T* device_input, T* device_output, const int valid)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
@@ -267,18 +248,36 @@ TYPED_TEST(HipcubWarpReduceTests, ReduceValid)
     // logical warp side for warp primitive, execution warp size
     // is always test_utils::warp_size()
     constexpr size_t logical_warp_size = TestFixture::warp_size;
-    constexpr size_t block_size =
+    // The different warp sizes
+    constexpr size_t ws32 = size_t(HIPCUB_WARP_SIZE_32);
+    constexpr size_t ws64 = size_t(HIPCUB_WARP_SIZE_64);
+
+    // Block size of warp size 32
+    constexpr size_t block_size_ws32 =
         test_utils::is_power_of_two(logical_warp_size)
-        ? test_utils::max<size_t>(test_utils::warp_size(), logical_warp_size * 4)
-        : (test_utils::warp_size()/logical_warp_size) * logical_warp_size;
+            ? test_utils::max<size_t>(ws32, logical_warp_size * 4)
+            : test_utils::max<size_t>((ws32/logical_warp_size) * logical_warp_size, 1);
+
+    // Block size of warp size 64
+    constexpr size_t block_size_ws64 =
+        test_utils::is_power_of_two(logical_warp_size)
+            ? test_utils::max<size_t>(ws64, logical_warp_size * 4)
+            : test_utils::max<size_t>((ws64/logical_warp_size) * logical_warp_size, 1);
+
+    const unsigned int current_device_warp_size = rocprim::host_warp_size();
+
+    const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     unsigned int grid_size = 4;
     const size_t size = block_size * grid_size;
     const int valid = logical_warp_size - 1;
 
-    // Given warp size not supported
-    if(logical_warp_size > test_utils::warp_size())
+    // Check if warp size is supported
+    if( (logical_warp_size > current_device_warp_size) ||
+        (current_device_warp_size != ws32 && current_device_warp_size != ws64) ) // Only WarpSize 32 and 64 is supported
     {
-        return;
+        printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: %d.    Skipping test\n",
+            logical_warp_size, block_size, current_device_warp_size);
+        GTEST_SKIP();
     }
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
@@ -318,11 +317,22 @@ TYPED_TEST(HipcubWarpReduceTests, ReduceValid)
         );
 
         // Launching kernel
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(warp_reduce_valid_kernel<T, block_size, logical_warp_size>),
-            dim3(grid_size), dim3(block_size), 0, 0,
-            device_input, device_output, valid
-        );
+        if (current_device_warp_size == ws32)
+        {
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(warp_reduce_valid_kernel<T, block_size_ws32, logical_warp_size>),
+                dim3(grid_size), dim3(block_size_ws32), 0, 0,
+                device_input, device_output, valid
+            );
+        }
+        else if (current_device_warp_size == ws64)
+        {
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(warp_reduce_valid_kernel<T, block_size_ws64, logical_warp_size>),
+                dim3(grid_size), dim3(block_size_ws64), 0, 0,
+                device_input, device_output, valid
+            );
+        }
 
         HIP_CHECK(hipPeekAtLastError());
         HIP_CHECK(hipDeviceSynchronize());
@@ -355,7 +365,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
-__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void head_segmented_warp_reduce_kernel(T* input, Flag* flags, T* output)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
@@ -379,18 +389,38 @@ TYPED_TEST(HipcubWarpReduceTests, HeadSegmentedReduceSum)
     // logical warp side for warp primitive, execution warp size
     // is always test_utils::warp_size()
     constexpr size_t logical_warp_size = TestFixture::warp_size;
-    constexpr size_t block_size =
+
+    // The different warp sizes
+    constexpr size_t ws32 = size_t(HIPCUB_WARP_SIZE_32);
+    constexpr size_t ws64 = size_t(HIPCUB_WARP_SIZE_64);
+
+    // Block size of warp size 32
+    constexpr size_t block_size_ws32 =
         test_utils::is_power_of_two(logical_warp_size)
-        ? test_utils::max<size_t>(test_utils::warp_size(), logical_warp_size * 4)
-        : (test_utils::warp_size()/logical_warp_size) * logical_warp_size;
+            ? test_utils::max<size_t>(ws32, logical_warp_size * 4)
+            : test_utils::max<size_t>((ws32/logical_warp_size) * logical_warp_size, 1);
+
+    // Block size of warp size 64
+    constexpr size_t block_size_ws64 =
+        test_utils::is_power_of_two(logical_warp_size)
+            ? test_utils::max<size_t>(ws64, logical_warp_size * 4)
+            : test_utils::max<size_t>((ws64/logical_warp_size) * logical_warp_size, 1);
+
+    const unsigned int current_device_warp_size = rocprim::host_warp_size();
+
+    const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     unsigned int grid_size = 4;
     const size_t size = block_size * grid_size;
 
-    // Given warp size not supported
-    if(logical_warp_size > test_utils::warp_size())
+    // Check if warp size is supported
+    if( (logical_warp_size > current_device_warp_size) ||
+        (current_device_warp_size != ws32 && current_device_warp_size != ws64) ) // Only WarpSize 32 and 64 is supported
     {
-        return;
+        printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: %d.    Skipping test\n",
+            logical_warp_size, block_size, current_device_warp_size);
+        GTEST_SKIP();
     }
+
 
     #ifdef HIPCUB_CUB_API
     // Bug in CUB
@@ -466,13 +496,27 @@ TYPED_TEST(HipcubWarpReduceTests, HeadSegmentedReduceSum)
         expected[segment_head_index] = reduction;
 
         // Launching kernel
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(head_segmented_warp_reduce_kernel<
-                T, flag_type, block_size, logical_warp_size
-            >),
-            dim3(size/block_size), dim3(block_size), 0, 0,
-            device_input, device_flags, device_output
-        );
+        if (current_device_warp_size == ws32)
+        {
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(head_segmented_warp_reduce_kernel<
+                    T, flag_type, block_size_ws32, logical_warp_size
+                >),
+                dim3(size/block_size_ws32), dim3(block_size_ws32), 0, 0,
+                device_input, device_flags, device_output
+            );
+        }
+        else if (current_device_warp_size == ws64)
+        {
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(head_segmented_warp_reduce_kernel<
+                    T, flag_type, block_size_ws64, logical_warp_size
+                >),
+                dim3(size/block_size_ws64), dim3(block_size_ws64), 0, 0,
+                device_input, device_flags, device_output
+            );
+        }
+
         HIP_CHECK(hipPeekAtLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
@@ -509,7 +553,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
-__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void tail_segmented_warp_reduce_kernel(T* input, Flag* flags, T* output)
 {
     constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
@@ -534,17 +578,36 @@ TYPED_TEST(HipcubWarpReduceTests, TailSegmentedReduceSum)
     // logical warp side for warp primitive, execution warp size
     // is always test_utils::warp_size()
     constexpr size_t logical_warp_size = TestFixture::warp_size;
-    constexpr size_t block_size =
+
+    // The different warp sizes
+    constexpr size_t ws32 = size_t(HIPCUB_WARP_SIZE_32);
+    constexpr size_t ws64 = size_t(HIPCUB_WARP_SIZE_64);
+
+    // Block size of warp size 32
+    constexpr size_t block_size_ws32 =
         test_utils::is_power_of_two(logical_warp_size)
-        ? test_utils::max<size_t>(test_utils::warp_size(), logical_warp_size * 4)
-        : (test_utils::warp_size()/logical_warp_size) * logical_warp_size;
+            ? test_utils::max<size_t>(ws32, logical_warp_size * 4)
+            : test_utils::max<size_t>((ws32/logical_warp_size) * logical_warp_size, 1);
+
+    // Block size of warp size 64
+    constexpr size_t block_size_ws64 =
+        test_utils::is_power_of_two(logical_warp_size)
+            ? test_utils::max<size_t>(ws64, logical_warp_size * 4)
+            : test_utils::max<size_t>((ws64/logical_warp_size) * logical_warp_size, 1);
+
+    const unsigned int current_device_warp_size = rocprim::host_warp_size();
+
+    const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     unsigned int grid_size = 4;
     const size_t size = block_size * grid_size;
 
-    // Given warp size not supported
-    if(logical_warp_size > test_utils::warp_size())
+    // Check if warp size is supported
+    if( (logical_warp_size > current_device_warp_size) ||
+        (current_device_warp_size != ws32 && current_device_warp_size != ws64) ) // Only WarpSize 32 and 64 is supported
     {
-        return;
+        printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: %d.    Skipping test\n",
+            logical_warp_size, block_size, current_device_warp_size);
+        GTEST_SKIP();
     }
 
     #ifdef HIPCUB_CUB_API
@@ -632,13 +695,27 @@ TYPED_TEST(HipcubWarpReduceTests, TailSegmentedReduceSum)
         }
 
         // Launching kernel
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(tail_segmented_warp_reduce_kernel<
-                T, flag_type, block_size, logical_warp_size
-            >),
-            dim3(size/block_size), dim3(block_size), 0, 0,
-            device_input, device_flags, device_output
-        );
+        if (current_device_warp_size == ws32)
+        {
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(tail_segmented_warp_reduce_kernel<
+                    T, flag_type, block_size_ws32, logical_warp_size
+                >),
+                dim3(size/block_size_ws32), dim3(block_size_ws32), 0, 0,
+                device_input, device_flags, device_output
+            );
+        }
+        else if (current_device_warp_size == ws64)
+        {
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(tail_segmented_warp_reduce_kernel<
+                    T, flag_type, block_size_ws64, logical_warp_size
+                >),
+                dim3(size/block_size_ws64), dim3(block_size_ws64), 0, 0,
+                device_input, device_flags, device_output
+            );
+        }
+
         HIP_CHECK(hipPeekAtLastError());
         HIP_CHECK(hipDeviceSynchronize());
 

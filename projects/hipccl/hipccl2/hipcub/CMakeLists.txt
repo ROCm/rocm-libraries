@@ -47,7 +47,7 @@ endif()
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker search and installed rpath")
 
 # AMD targets
-set(AMDGPU_TARGETS gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx1030 CACHE STRING "List of specific machine types for library to target")
+set(AMDGPU_TARGETS gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx1030;gfx1031 CACHE STRING "List of specific machine types for library to target")
 
 # Verify that hcc compiler is used on ROCM platform
 include(cmake/VerifyCompiler.cmake)

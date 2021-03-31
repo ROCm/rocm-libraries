@@ -66,7 +66,7 @@ typedef ::testing::Types<
     params<unsigned long long, unsigned long long, 100000, 100000>
 > Params;
 
-TYPED_TEST_CASE(HipcubDeviceRunLengthEncode, Params);
+TYPED_TEST_SUITE(HipcubDeviceRunLengthEncode, Params);
 
 std::vector<size_t> get_sizes()
 {

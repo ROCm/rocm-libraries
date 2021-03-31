@@ -72,7 +72,7 @@ typedef ::testing::Types<
     params<float, char, true, 0, 32, true>
 > Params;
 
-TYPED_TEST_CASE(HipcubDeviceRadixSort, Params);
+TYPED_TEST_SUITE(HipcubDeviceRadixSort, Params);
 
 template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
 struct key_comparator
