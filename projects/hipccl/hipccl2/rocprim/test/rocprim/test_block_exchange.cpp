@@ -36,7 +36,7 @@ public:
     using params = Params;
 };
 
-TYPED_TEST_CASE(RocprimBlockExchangeTests, BlockParams);
+TYPED_TEST_SUITE(RocprimBlockExchangeTests, BlockParams);
 
 template<
     class Type,
@@ -45,7 +45,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
-__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void blocked_to_striped_kernel(Type* device_input, OutputType* device_output)
 {
     constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
@@ -69,7 +69,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
-__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void striped_to_blocked_kernel(Type* device_input, OutputType* device_output)
 {
     constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
@@ -93,7 +93,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
-__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void blocked_to_warp_striped_kernel(Type* device_input, OutputType* device_output)
 {
     constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
@@ -117,7 +117,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
-__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void warp_striped_to_blocked_kernel(Type* device_input, OutputType* device_output)
 {
     constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
@@ -141,7 +141,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
-__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void scatter_to_blocked_kernel(Type* device_input, OutputType* device_output, unsigned int* device_ranks)
 {
     constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
@@ -167,7 +167,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
-__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void scatter_to_striped_kernel(Type* device_input, OutputType* device_output, unsigned int* device_ranks)
 {
     constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
@@ -382,10 +382,9 @@ auto test_block_exchange()
     std::vector<output_type> expected(size);
     std::vector<output_type> output(size, output_type(0));
 
-    constexpr size_t warp_size =
-        ::rocprim::detail::get_min_warp_size(block_size, size_t(::rocprim::warp_size()));
-    constexpr size_t warps_no = (block_size + warp_size - 1) / warp_size;
-    constexpr size_t items_per_warp = warp_size * items_per_thread;
+    const size_t warp_size = std::min(block_size, size_t(::rocprim::host_warp_size()));
+    const size_t warps_no = (block_size + warp_size - 1) / warp_size;
+    const size_t items_per_warp = warp_size * items_per_thread;
 
     // Calculate input and expected results on host
     std::vector<type> values(size);
@@ -479,10 +478,9 @@ auto test_block_exchange()
     std::vector<output_type> expected(size);
     std::vector<output_type> output(size, output_type(0));
 
-    constexpr size_t warp_size =
-        ::rocprim::detail::get_min_warp_size(block_size, size_t(::rocprim::warp_size()));
-    constexpr size_t warps_no = (block_size + warp_size - 1) / warp_size;
-    constexpr size_t items_per_warp = warp_size * items_per_thread;
+    const size_t warp_size = std::min(block_size, size_t(::rocprim::host_warp_size()));
+    const size_t warps_no = (block_size + warp_size - 1) / warp_size;
+    const size_t items_per_warp = warp_size * items_per_thread;
 
     // Calculate input and expected results on host
     std::vector<type> values(size);

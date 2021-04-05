@@ -34,11 +34,11 @@ namespace detail
 // Returns logical warp id of the last thread in thread's segment
 template<bool HeadSegmented, unsigned int WarpSize, class Flag>
 ROCPRIM_DEVICE inline
-unsigned int last_in_warp_segment(Flag flag)
+auto last_in_warp_segment(Flag flag)
+    -> typename std::enable_if<(WarpSize <= __AMDGCN_WAVEFRONT_SIZE), unsigned int>::type
 {
     // Get flags (now every thread know where the flags are)
-    auto warp_flags = ::rocprim::ballot(flag);
-    using ballot_type = decltype(warp_flags);
+    lane_mask_type warp_flags = ::rocprim::ballot(flag);
 
     // In case of head flags change them to tail flags
     if(HeadSegmented)
@@ -47,13 +47,27 @@ unsigned int last_in_warp_segment(Flag flag)
     }
     const auto lane_id = ::rocprim::lane_id();
     // Zero bits from thread with lower lane id
-    warp_flags &= ballot_type(-1) ^ ((ballot_type(1) << lane_id) - 1U);
+    warp_flags &= lane_mask_type(-1) ^ ((lane_mask_type(1) << lane_id) - 1U);
     // Ignore bits from thread from other (previous) logical warps
     warp_flags >>= (lane_id / WarpSize) * WarpSize;
     // Make sure last item in logical warp is marked as a tail
-    warp_flags |= ballot_type(1) << (WarpSize - 1U);
+    warp_flags |= lane_mask_type(1) << (WarpSize - 1U);
     // Calculate logical lane id of the last valid value in the segment
-    return ::__lastbit_u32_u64(warp_flags);
+    #if __AMDGCN_WAVEFRONT_SIZE == 32
+    return ::__ffs(warp_flags) - 1;
+    #else
+    return ::__ffsll(warp_flags) - 1;
+    #endif
+}
+
+// Returns logical warp id of the last thread in thread's segment
+template<bool HeadSegmented, unsigned int WarpSize, class Flag>
+ROCPRIM_DEVICE inline
+auto last_in_warp_segment(Flag)
+    -> typename std::enable_if<(WarpSize > __AMDGCN_WAVEFRONT_SIZE), unsigned int>::type
+{
+    ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size . Aborting warp sort.");
+    return 0;
 }
 
 } // end namespace detail

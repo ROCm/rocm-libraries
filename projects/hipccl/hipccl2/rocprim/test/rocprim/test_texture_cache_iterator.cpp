@@ -54,7 +54,7 @@ typedef ::testing::Types<
     RocprimTextureCacheIteratorParams<test_utils::custom_test_type<float>>
 > RocprimTextureCacheIteratorTestsParams;
 
-TYPED_TEST_CASE(RocprimTextureCacheIteratorTests, RocprimTextureCacheIteratorTestsParams);
+TYPED_TEST_SUITE(RocprimTextureCacheIteratorTests, RocprimTextureCacheIteratorTestsParams);
 
 template<class T>
 struct transform

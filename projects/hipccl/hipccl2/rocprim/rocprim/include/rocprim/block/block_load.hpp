@@ -649,7 +649,7 @@ private:
     using block_exchange_type = block_exchange<T, BlockSizeX, ItemsPerThread, BlockSizeY, BlockSizeZ>;
 
 public:
-    static_assert(BlockSize % warp_size() == 0,
+    static_assert(BlockSize % ::rocprim::device_warp_size() == 0,
                  "BlockSize must be a multiple of hardware warpsize");
 
     using storage_type = typename block_exchange_type::storage_type;

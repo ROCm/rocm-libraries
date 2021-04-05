@@ -68,6 +68,15 @@ size_t align_size(size_t size, size_t alignment = 256)
     return ceiling_div(size, alignment) * alignment;
 }
 
+// TOOD: Put the block algorithms with warp size variables at device side with macro.
+// Temporary workaround
+template<class T>
+ROCPRIM_HOST_DEVICE inline
+constexpr T warp_size_in_class(const T warp_size)
+{
+    return warp_size;
+}
+
 // Select the minimal warp size for block of size block_size, it's
 // useful for blocks smaller than maximal warp size.
 template<class T>

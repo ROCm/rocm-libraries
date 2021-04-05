@@ -41,7 +41,7 @@ public:
     static constexpr unsigned int block_size = Params::block_size;
 };
 
-TYPED_TEST_CASE(RocprimBlockReduceSingleValueTests, BlockParams);
+TYPED_TEST_SUITE(RocprimBlockReduceSingleValueTests, BlockParams);
 
 template<
     unsigned int BlockSize,
@@ -50,7 +50,7 @@ template<
     class BinaryOp
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void reduce_kernel(T* device_output, T* device_output_reductions)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
@@ -262,7 +262,7 @@ template<
     class BinaryOp
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void reduce_valid_kernel(T* device_output, T* device_output_reductions, const unsigned int valid_items)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
@@ -397,7 +397,7 @@ public:
     static constexpr unsigned int block_size = Params::block_size;
 };
 
-TYPED_TEST_CASE(RocprimBlockReduceInputArrayTests, BlockParams);
+TYPED_TEST_SUITE(RocprimBlockReduceInputArrayTests, BlockParams);
 
 template<
     unsigned int BlockSize,
@@ -407,7 +407,7 @@ template<
     class BinaryOp
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void reduce_array_kernel(T* device_output, T* device_output_reductions)
 {
     const unsigned int index = ((hipBlockIdx_x * BlockSize) + hipThreadIdx_x) * ItemsPerThread;

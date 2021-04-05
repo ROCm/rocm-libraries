@@ -88,7 +88,7 @@ std::vector<std::tuple<size_t, size_t>> get_sizes()
     return sizes;
 }
 
-TYPED_TEST_CASE(RocprimDeviceMergeTests, RocprimDeviceMergeTestsParams);
+TYPED_TEST_SUITE(RocprimDeviceMergeTests, RocprimDeviceMergeTestsParams);
 
 TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
 {

@@ -77,7 +77,7 @@ typedef ::testing::Types<
     params<unsigned char, long long, rocprim::plus<int>, 10, 3000, 4000>
 > Params;
 
-TYPED_TEST_CASE(RocprimDeviceSegmentedScan, Params);
+TYPED_TEST_SUITE(RocprimDeviceSegmentedScan, Params);
 
 std::vector<size_t> get_sizes(int seed_value)
 {

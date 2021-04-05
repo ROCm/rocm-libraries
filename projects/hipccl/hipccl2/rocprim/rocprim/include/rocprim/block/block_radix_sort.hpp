@@ -56,7 +56,7 @@ class block_bit_plus_scan
     static constexpr unsigned int BlockSize = BlockSizeX * BlockSizeY * BlockSizeZ;
     // Select warp size
     static constexpr unsigned int warp_size =
-        detail::get_min_warp_size(BlockSize, ::rocprim::warp_size());
+        detail::get_min_warp_size(BlockSize, ::rocprim::device_warp_size());
     // Number of warps in block
     static constexpr unsigned int warps_no = (BlockSize + warp_size - 1) / warp_size;
 

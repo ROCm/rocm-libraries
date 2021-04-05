@@ -192,7 +192,7 @@ test:deb:
   extends:
     - .deps:cmake-minimum
   script:
-    - $SUDO_CMD dpkg -i $PACKAGE_DIR/rocprim-*.deb
+    - $SUDO_CMD dpkg -i $PACKAGE_DIR/rocprim*.deb
     - mkdir -p package_test && cd package_test
     - cmake
       -G Ninja

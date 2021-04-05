@@ -48,7 +48,7 @@ template<
     class KeyCompareFunction
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void fill_unique_counts_kernel(KeysInputIterator keys_input,
                                unsigned int size,
                                unsigned int * unique_counts,
@@ -70,7 +70,7 @@ template<
     class UniqueCountOutputIterator
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void scan_unique_counts_kernel(unsigned int * unique_counts,
                                UniqueCountOutputIterator unique_count_output,
                                unsigned int batches)
@@ -90,7 +90,7 @@ template<
     class BinaryFunction
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void reduce_by_key_kernel(KeysInputIterator keys_input,
                           ValuesInputIterator values_input,
                           unsigned int size,
@@ -121,7 +121,7 @@ template<
     class BinaryFunction
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void scan_and_scatter_carry_outs_kernel(const carry_out<Result> * carry_outs,
                                         const Result * leading_aggregates,
                                         AggregatesOutputIterator aggregates_output,
