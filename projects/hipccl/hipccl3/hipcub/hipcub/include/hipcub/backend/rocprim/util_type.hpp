@@ -130,6 +130,12 @@ struct DoubleBuffer
     }
 };
 
+template <int A>
+struct Int2Type
+{
+    enum {VALUE = A};
+};
+
 template<
     class Key,
     class Value
@@ -156,6 +162,22 @@ void update_double_buffer(DoubleBuffer<T>& target, ::rocprim::double_buffer<T>& 
     }
 }
 
+template <typename T>
+using is_integral_or_enum =
+  std::integral_constant<bool, std::is_integral<T>::value || std::is_enum<T>::value>;
+
+}
+
+template <typename NumeratorT, typename DenominatorT>
+__host__ __device__ __forceinline__ constexpr NumeratorT
+DivideAndRoundUp(NumeratorT n, DenominatorT d)
+{
+  static_assert(hipcub::detail::is_integral_or_enum<NumeratorT>::value &&
+                hipcub::detail::is_integral_or_enum<DenominatorT>::value,
+                "DivideAndRoundUp is only intended for integral types.");
+
+  // Static cast to undo integral promotion.
+  return static_cast<NumeratorT>(n / d + (n % d != 0 ? 1 : 0));
 }
 
 END_HIPCUB_NAMESPACE
