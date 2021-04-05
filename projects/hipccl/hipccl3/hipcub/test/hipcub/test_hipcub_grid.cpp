@@ -66,7 +66,7 @@ TEST(HipcubGridTests, GridBarrier)
     HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(
         &max_sm_occupancy,
         KernelGridBarrier,
-        HIPCUB_WARP_THREADS,
+        rocprim::host_warp_size(),
         0));
 
     int32_t occupancy = std::min((max_block_threads / block_size), max_sm_occupancy);
