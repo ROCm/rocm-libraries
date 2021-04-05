@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-cmake_minimum_required(VERSION 3.5.1 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.10.2 FATAL_ERROR)
 
 # This project includes tests that should be run after
 # hipCUB is installed from package or using `make install`
@@ -32,6 +32,22 @@ list(APPEND CMAKE_MODULE_PATH
   ${HIP_PATH}/cmake /opt/rocm/hip/cmake # FindHIP.cmake
 )
 
+# Detect compiler support for target ID
+if( CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" )
+  execute_process(COMMAND ${CMAKE_CXX_COMPILER} "--help"
+    OUTPUT_VARIABLE CXX_OUTPUT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_STRIP_TRAILING_WHITESPACE)
+  string(REGEX MATCH ".mcode\-object\-version" TARGET_ID_SUPPORT ${CXX_OUTPUT})
+endif()
+
+# Use target ID syntax if supported for AMDGPU_TARGETS
+if(TARGET_ID_SUPPORT)
+  set(AMDGPU_TARGETS gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack- CACHE STRING "List of specific machine types for library to target")
+else()
+  set(AMDGPU_TARGETS gfx803;gfx900;gfx906;gfx908 CACHE STRING "List of specific machine types for library to target")
+endif()
+
 # Verify that hcc compiler is used on ROCM platform
 include(VerifyCompiler)
 
@@ -40,28 +56,28 @@ include(DownloadProject)
 if(HIP_COMPILER STREQUAL "nvcc")
   if(NOT DEFINED CUB_INCLUDE_DIR)
     file(
-      DOWNLOAD https://github.com/NVlabs/cub/archive/1.8.0.zip
-      ${CMAKE_CURRENT_BINARY_DIR}/cub-1.8.0.zip
+      DOWNLOAD https://github.com/NVlabs/cub/archive/1.11.0.zip
+      ${CMAKE_CURRENT_BINARY_DIR}/cub-1.11.0.zip
       STATUS cub_download_status LOG cub_download_log
     )
     list(GET cub_download_status 0 cub_download_error_code)
     if(cub_download_error_code)
       message(FATAL_ERROR "Error: downloading "
-        "https://github.com/NVlabs/cub/archive/1.8.0.zip failed "
+        "https://github.com/NVlabs/cub/archive/1.11.0.zip failed "
         "error_code: ${cub_download_error_code} "
         "log: ${cub_download_log} "
       )
     endif()
 
     execute_process(
-      COMMAND ${CMAKE_COMMAND} -E tar xzf ${CMAKE_CURRENT_BINARY_DIR}/cub-1.8.0.zip
+      COMMAND ${CMAKE_COMMAND} -E tar xzf ${CMAKE_CURRENT_BINARY_DIR}/cub-1.11.0.zip
       WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
       RESULT_VARIABLE cub_unpack_error_code
     )
     if(cub_unpack_error_code)
-      message(FATAL_ERROR "Error: unpacking ${CMAKE_CURRENT_BINARY_DIR}/cub-1.8.0.zip failed")
+      message(FATAL_ERROR "Error: unpacking ${CMAKE_CURRENT_BINARY_DIR}/cub-1.11.0.zip failed")
     endif()
-    set(CUB_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/cub-1.8.0/ CACHE PATH "")
+    set(CUB_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/cub-1.11.0/ CACHE PATH "")
   endif()
 endif()
 
@@ -91,56 +107,41 @@ endif()
 find_package(hipcub REQUIRED CONFIG HINTS ${hipcub_DIR} PATHS "/opt/rocm/hipcub")
 
 # Build CXX flags
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror")
 
-# AMD targets
-set(AMDGPU_TARGETS gfx803;gfx900;gfx906 CACHE STRING "List of specific machine types for library to target")
-
 # Enable testing (ctest)
 enable_testing()
-
-# Use CUDA_INCLUDE_DIRECTORIES to include required dirs
-# for nvcc if cmake version is less than 3.10
-if((HIP_COMPILER STREQUAL "nvcc") AND (CMAKE_VERSION VERSION_LESS "3.10"))
-    CUDA_INCLUDE_DIRECTORIES(
-        ${hipcub_INCLUDE_DIR}
-        ${GTEST_INCLUDE_DIRS}
-        ${CUB_INCLUDE_DIR}
-    )
-endif()
 
 function(add_hipcub_test TEST_NAME TEST_SOURCES)
   list(GET TEST_SOURCES 0 TEST_MAIN_SOURCE)
   get_filename_component(TEST_TARGET ${TEST_MAIN_SOURCE} NAME_WE)
-  if(HIP_COMPILER STREQUAL "hcc" OR HIP_COMPILER STREQUAL "clang")
-    add_executable(${TEST_TARGET} ${TEST_SOURCES})
+  add_executable(${TEST_TARGET} ${TEST_SOURCES})
+
+  if(HIP_COMPILER STREQUAL "nvcc")
+    set_property(TARGET ${TEST_TARGET} PROPERTY CUDA_STANDARD 14)
+    set_source_files_properties(${TEST_SOURCES} PROPERTIES LANGUAGE CUDA)
+    target_link_libraries(${TEST_TARGET}
+      PRIVATE
+        hip::hipcub
+    )
+    target_include_directories(${TEST_TARGET}
+      SYSTEM
+        PRIVATE
+          ${CUB_INCLUDE_DIR}
+    )
+  elseif(HIP_COMPILER STREQUAL "hcc" OR HIP_COMPILER STREQUAL "clang")
     target_link_libraries(${TEST_TARGET}
       PRIVATE
         ${hipcub_LIBRARIES} # hip::hipcub
     )
-    foreach(amdgpu_target ${AMDGPU_TARGETS})
-      target_link_libraries(${TEST_TARGET}
-        PRIVATE
-          --amdgpu-target=${amdgpu_target}
-      )
-    endforeach()
-  else() # CUDA/nvcc
-    set_source_files_properties(${TEST_SOURCES}
-      PROPERTIES
-        CUDA_SOURCE_PROPERTY_FORMAT OBJ
-      )
-      CUDA_ADD_EXECUTABLE(${TEST_TARGET}
-        ${TEST_SOURCES}
-        OPTIONS
-          --expt-extended-lambda
-    )
-    target_link_libraries(${TEST_TARGET} hip::hipcub)
-    target_include_directories(${TEST_TARGET} SYSTEM PRIVATE ${CUB_INCLUDE_DIR})
   endif()
-  add_test(${TEST_NAME} ${TEST_TARGET})
+  add_test(
+    NAME ${TEST_NAME}
+    COMMAND ${TEST_TARGET}
+  )
 endfunction()
 
 # hipCUB package test

@@ -169,7 +169,7 @@ void run_benchmark(benchmark::State& state,
 benchmark::RegisterBenchmark( \
     (std::string(EXCL ? "exclusive_scan" : "inclusive_scan") + \
     ("<" #T ", " #SCAN_OP ">")).c_str(), \
-    run_benchmark<EXCL, T, SCAN_OP>, size, stream, SCAN_OP() \
+    &run_benchmark<EXCL, T, SCAN_OP>, size, stream, SCAN_OP() \
 ),
 
 

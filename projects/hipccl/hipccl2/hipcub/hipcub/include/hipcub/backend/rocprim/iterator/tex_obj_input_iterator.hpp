@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2020, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2021, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -40,7 +40,38 @@ template<
     typename T,
     typename OffsetT = std::ptrdiff_t
 >
-using TexObjInputIterator = ::rocprim::texture_cache_iterator<T, OffsetT>;
+class TexObjInputIterator : public ::rocprim::texture_cache_iterator<T, OffsetT>
+{
+    public:
+    template<class Qualified>
+    inline
+    hipError_t BindTexture(Qualified* ptr,
+                           size_t bytes = size_t(-1),
+                           size_t texture_offset = 0)
+    {
+        return ::rocprim::texture_cache_iterator<T, OffsetT>::bind_texture(ptr, bytes, texture_offset);
+    }
+
+    inline hipError_t UnbindTexture()
+    {
+        return ::rocprim::texture_cache_iterator<T, OffsetT>::unbind_texture();
+    }
+
+    HIPCUB_HOST_DEVICE inline
+    ~TexObjInputIterator() = default;
+
+    HIPCUB_HOST_DEVICE inline
+    TexObjInputIterator() : ::rocprim::texture_cache_iterator<T, OffsetT>()
+    {
+    }
+
+    HIPCUB_HOST_DEVICE inline
+    TexObjInputIterator(const ::rocprim::texture_cache_iterator<T, OffsetT> other)
+        : ::rocprim::texture_cache_iterator<T, OffsetT>(other)
+    {
+    }
+
+};
 
 END_HIPCUB_NAMESPACE
 
