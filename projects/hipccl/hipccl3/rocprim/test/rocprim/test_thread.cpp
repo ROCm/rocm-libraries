@@ -68,7 +68,7 @@ typedef ::testing::Types<
     params<256, 2, 2>
 > Params;
 
-TYPED_TEST_CASE(RocprimThreadTests, Params);
+TYPED_TEST_SUITE(RocprimThreadTests, Params);
 
 template<
     unsigned int BlockSizeX,
@@ -76,7 +76,7 @@ template<
     unsigned int BlockSizeZ
 >
 __global__
-__launch_bounds__(1024, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(1024)
 void flat_id_kernel(unsigned int* device_output)
 {
     unsigned int thread_id = rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
@@ -147,7 +147,7 @@ template<
     unsigned int BlockSizeZ
 >
 __global__
-__launch_bounds__(1024, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(1024)
 void block_id_kernel(unsigned int* device_output)
 {
     unsigned int block_id = rocprim::flat_block_id<BlockSizeX, BlockSizeY, BlockSizeZ>();

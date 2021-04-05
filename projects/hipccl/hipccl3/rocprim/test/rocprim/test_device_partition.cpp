@@ -80,7 +80,7 @@ std::vector<size_t> get_sizes(int seed_value)
     return sizes;
 }
 
-TYPED_TEST_CASE(RocprimDevicePartitionTests, RocprimDevicePartitionTestsParams);
+TYPED_TEST_SUITE(RocprimDevicePartitionTests, RocprimDevicePartitionTestsParams);
 
 TYPED_TEST(RocprimDevicePartitionTests, Flagged)
 {

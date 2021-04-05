@@ -45,6 +45,7 @@ namespace detail
 template<
     class Key,
     class Value,
+    unsigned int WarpSize,
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
     unsigned int RadixBits,
@@ -57,7 +58,7 @@ class segmented_radix_sort_helper
     using key_type = Key;
     using value_type = Value;
 
-    using count_helper_type = radix_digit_count_helper<BlockSize, ItemsPerThread, RadixBits, Descending>;
+    using count_helper_type = radix_digit_count_helper<WarpSize, BlockSize, ItemsPerThread, RadixBits, Descending>;
     using scan_type = typename ::rocprim::block_scan<unsigned int, radix_size>;
     using sort_and_scatter_helper = radix_sort_and_scatter_helper<
         BlockSize, ItemsPerThread, RadixBits, Descending,
@@ -505,12 +506,12 @@ void segmented_sort(KeysInputIterator keys_input,
     >;
     using long_radix_helper_type = segmented_radix_sort_helper<
         key_type, value_type,
-        block_size, items_per_thread,
+        ::rocprim::device_warp_size(), block_size, items_per_thread,
         long_radix_bits, Descending
     >;
     using short_radix_helper_type = segmented_radix_sort_helper<
         key_type, value_type,
-        block_size, items_per_thread,
+        ::rocprim::device_warp_size(), block_size, items_per_thread,
         short_radix_bits, Descending
     >;
 

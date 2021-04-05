@@ -52,7 +52,7 @@ template<
     class ResultType
 >
 __global__
-__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void single_scan_kernel(InputIterator input,
                         const size_t size,
                         ResultType initial_value,
@@ -75,7 +75,7 @@ template<
     class ResultType
 >
 __global__
-__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void block_reduce_kernel(InputIterator input,
                          BinaryFunction scan_op,
                          ResultType * block_prefixes)
@@ -94,7 +94,7 @@ template<
     class ResultType
 >
 __global__
-__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void final_scan_kernel(InputIterator input,
                        const size_t size,
                        OutputIterator output,
@@ -119,7 +119,7 @@ template<
     class LookBackScanState
 >
 __global__
-__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void lookback_scan_kernel(InputIterator input,
                           OutputIterator output,
                           const size_t size,
@@ -137,7 +137,7 @@ void lookback_scan_kernel(InputIterator input,
 
 template<class LookBackScanState>
 __global__
-__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void init_lookback_scan_state_kernel(LookBackScanState lookback_scan_state,
                                      const unsigned int number_of_blocks,
                                      ordered_block_id<unsigned int> ordered_bid)

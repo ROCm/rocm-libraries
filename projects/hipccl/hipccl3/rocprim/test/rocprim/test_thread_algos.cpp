@@ -59,7 +59,7 @@ typedef ::testing::Types<
     params<test_utils::custom_test_type<double>>
 > ThreadOperationTestParams;
 
-TYPED_TEST_CASE(RocprimThreadOperationTests, ThreadOperationTestParams);
+TYPED_TEST_SUITE(RocprimThreadOperationTests, ThreadOperationTestParams);
 
 template<class Type>
 __global__
