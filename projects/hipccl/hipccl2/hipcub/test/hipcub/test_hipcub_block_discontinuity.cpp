@@ -144,7 +144,7 @@ typedef ::testing::Types<
     params<short, bool, 234U, 9, custom_flag_op1<short> >
 > Params;
 
-TYPED_TEST_CASE(HipcubBlockDiscontinuity, Params);
+TYPED_TEST_SUITE(HipcubBlockDiscontinuity, Params);
 
 template<
     class Type,
@@ -154,7 +154,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
-__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void flag_heads_kernel(Type* device_input, long long* device_heads)
 {
     const unsigned int lid = hipThreadIdx_x;
@@ -291,7 +291,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
-__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void flag_tails_kernel(Type* device_input, long long* device_tails)
 {
     const unsigned int lid = hipThreadIdx_x;
@@ -427,7 +427,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
-__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void flag_heads_and_tails_kernel(Type* device_input, long long* device_heads, long long* device_tails)
 {
     const unsigned int lid = hipThreadIdx_x;

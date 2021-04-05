@@ -140,7 +140,7 @@ typedef ::testing::Types<
     params1<double, 55, -123, +123, double>
 > Params1;
 
-TYPED_TEST_CASE(HipcubDeviceHistogramEven, Params1);
+TYPED_TEST_SUITE(HipcubDeviceHistogramEven, Params1);
 
 TYPED_TEST(HipcubDeviceHistogramEven, Even)
 {
@@ -325,7 +325,7 @@ typedef ::testing::Types<
     params2<double, 3, 10000, 1000, 1000, double, unsigned int>
 > Params2;
 
-TYPED_TEST_CASE(HipcubDeviceHistogramRange, Params2);
+TYPED_TEST_SUITE(HipcubDeviceHistogramRange, Params2);
 
 TYPED_TEST(HipcubDeviceHistogramRange, Range)
 {
@@ -539,7 +539,7 @@ typedef ::testing::Types<
     params3<double, 4, 3, 55, -123, +123, double>
 > Params3;
 
-TYPED_TEST_CASE(HipcubDeviceHistogramMultiEven, Params3);
+TYPED_TEST_SUITE(HipcubDeviceHistogramMultiEven, Params3);
 
 TYPED_TEST(HipcubDeviceHistogramMultiEven, MultiEven)
 {
@@ -808,7 +808,7 @@ typedef ::testing::Types<
     params4<double, 3, 1, 3, 10000, 1000, 1000, double, unsigned int>
 > Params4;
 
-TYPED_TEST_CASE(HipcubDeviceHistogramMultiRange, Params4);
+TYPED_TEST_SUITE(HipcubDeviceHistogramMultiRange, Params4);
 
 TYPED_TEST(HipcubDeviceHistogramMultiRange, MultiRange)
 {

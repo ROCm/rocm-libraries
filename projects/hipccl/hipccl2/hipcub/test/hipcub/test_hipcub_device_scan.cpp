@@ -73,7 +73,7 @@ std::vector<size_t> get_sizes()
     return sizes;
 }
 
-TYPED_TEST_CASE(HipcubDeviceScanTests, HipcubDeviceScanTestsParams);
+TYPED_TEST_SUITE(HipcubDeviceScanTests, HipcubDeviceScanTestsParams);
 
 TYPED_TEST(HipcubDeviceScanTests, InclusiveScan)
 {

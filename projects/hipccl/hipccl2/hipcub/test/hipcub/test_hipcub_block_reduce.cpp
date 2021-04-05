@@ -94,7 +94,7 @@ typedef ::testing::Types<
     params<unsigned char, 377U, 1, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING>
 > SingleValueTestParams;
 
-TYPED_TEST_CASE(HipcubBlockReduceSingleValueTests, SingleValueTestParams);
+TYPED_TEST_SUITE(HipcubBlockReduceSingleValueTests, SingleValueTestParams);
 
 template<
     unsigned int BlockSize,
@@ -102,7 +102,7 @@ template<
     class T
 >
 __global__
-__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void reduce_kernel(T* device_output, T* device_output_reductions)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
@@ -194,7 +194,7 @@ TYPED_TEST(HipcubBlockReduceSingleValueTests, Reduce)
     }
 }
 
-TYPED_TEST_CASE(HipcubBlockReduceSingleValueTests, SingleValueTestParams);
+TYPED_TEST_SUITE(HipcubBlockReduceSingleValueTests, SingleValueTestParams);
 
 template<
     unsigned int BlockSize,
@@ -202,7 +202,7 @@ template<
     class T
 >
 __global__
-__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void reduce_valid_kernel(T* device_output, T* device_output_reductions, const unsigned int valid_items)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
@@ -343,7 +343,7 @@ typedef ::testing::Types<
     params<float, 255,  15, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING>
 > InputArrayTestParams;
 
-TYPED_TEST_CASE(HipcubBlockReduceInputArrayTests, InputArrayTestParams);
+TYPED_TEST_SUITE(HipcubBlockReduceInputArrayTests, InputArrayTestParams);
 
 template<
     unsigned int BlockSize,
@@ -352,7 +352,7 @@ template<
     class T
 >
 __global__
-__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void reduce_array_kernel(T* device_output, T* device_output_reductions)
 {
     const unsigned int index = ((hipBlockIdx_x * BlockSize) + hipThreadIdx_x) * ItemsPerThread;

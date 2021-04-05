@@ -73,7 +73,7 @@ typedef ::testing::Types<
     params1<float, float, hipcub::Sum, 123, 100, 200>
 > Params1;
 
-TYPED_TEST_CASE(HipcubDeviceSegmentedReduceOp, Params1);
+TYPED_TEST_SUITE(HipcubDeviceSegmentedReduceOp, Params1);
 
 TYPED_TEST(HipcubDeviceSegmentedReduceOp, Reduce)
 {
@@ -252,7 +252,7 @@ typedef ::testing::Types<
     params2<float, float, 100, 200>
 > Params2;
 
-TYPED_TEST_CASE(HipcubDeviceSegmentedReduce, Params2);
+TYPED_TEST_SUITE(HipcubDeviceSegmentedReduce, Params2);
 
 TYPED_TEST(HipcubDeviceSegmentedReduce, Sum)
 {
