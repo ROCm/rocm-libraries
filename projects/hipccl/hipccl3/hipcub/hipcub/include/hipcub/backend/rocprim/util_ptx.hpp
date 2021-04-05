@@ -37,8 +37,13 @@
 
 #include <rocprim/intrinsics/warp_shuffle.hpp>
 
-#define HIPCUB_WARP_THREADS ::rocprim::warp_size()
+#define HIPCUB_WARP_THREADS ::rocprim::device_warp_size()
 #define HIPCUB_ARCH 1 // ignored with rocPRIM backend
+
+/// Supported warp sizes
+#define HIPCUB_WARP_SIZE_32 32u
+#define HIPCUB_WARP_SIZE_64 64u
+#define HIPCUB_MAX_WARP_SIZE HIPCUB_WARP_SIZE_64
 
 BEGIN_HIPCUB_NAMESPACE
 

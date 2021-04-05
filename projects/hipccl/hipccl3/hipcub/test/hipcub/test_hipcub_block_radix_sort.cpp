@@ -91,7 +91,7 @@ typedef ::testing::Types<
     params<unsigned short, double, 60U, 1, true, false, 8, 11>
 > Params;
 
-TYPED_TEST_CASE(HipcubBlockRadixSort, Params);
+TYPED_TEST_SUITE(HipcubBlockRadixSort, Params);
 
 template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
 struct key_comparator
@@ -147,7 +147,7 @@ template<
     class key_type
 >
 __global__
-__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void sort_key_kernel(
     key_type* device_keys_output,
     bool to_striped,
@@ -284,7 +284,7 @@ template<
     class value_type
 >
 __global__
-__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void sort_key_value_kernel(
     key_type* device_keys_output,
     value_type* device_values_output,

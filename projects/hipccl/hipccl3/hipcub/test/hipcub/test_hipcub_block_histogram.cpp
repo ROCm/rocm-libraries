@@ -90,7 +90,7 @@ typedef ::testing::Types<
     params<unsigned short, 1024, 1, 1024, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>
 > InputArrayTestParams;
 
-TYPED_TEST_CASE(HipcubBlockHistogramInputArrayTests, InputArrayTestParams);
+TYPED_TEST_SUITE(HipcubBlockHistogramInputArrayTests, InputArrayTestParams);
 
 template<
     unsigned int BlockSize,
@@ -100,7 +100,7 @@ template<
     class T
 >
 __global__
-__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void histogram_kernel(T* device_output, T* device_output_bin)
 {
     const unsigned int index = ((hipBlockIdx_x * BlockSize) + hipThreadIdx_x) * ItemsPerThread;

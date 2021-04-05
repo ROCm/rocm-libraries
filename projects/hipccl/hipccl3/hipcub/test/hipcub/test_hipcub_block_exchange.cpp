@@ -92,7 +92,7 @@ typedef ::testing::Types<
     params<short, int, 234U, 9>
 > Params;
 
-TYPED_TEST_CASE(HipcubBlockExchangeTests, Params);
+TYPED_TEST_SUITE(HipcubBlockExchangeTests, Params);
 
 template<
     class Type,
@@ -101,7 +101,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
-__launch_bounds__(512, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(512)
 void blocked_to_striped_kernel(Type* device_input, OutputType* device_output)
 {
     constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
@@ -204,7 +204,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
-__launch_bounds__(512, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(512)
 void striped_to_blocked_kernel(Type* device_input, OutputType* device_output)
 {
     constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
@@ -307,7 +307,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
-__launch_bounds__(512, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(512)
 void blocked_to_warp_striped_kernel(Type* device_input, OutputType* device_output)
 {
     constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
@@ -331,6 +331,7 @@ TYPED_TEST(HipcubBlockExchangeTests, BlockedToWarpStriped)
     constexpr size_t block_size = TestFixture::params::block_size;
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
     constexpr size_t items_per_block = block_size * items_per_thread;
+    const unsigned int current_device_warp_size = rocprim::host_warp_size();
     // Given block size not supported
     bool is_block_size_unsupported = block_size > test_utils::get_max_block_size();
 #ifdef HIPCUB_CUB_API
@@ -338,11 +339,12 @@ TYPED_TEST(HipcubBlockExchangeTests, BlockedToWarpStriped)
     // for incomplete blocks (not divisible by warp size)
     // Workaround for nvcc warning: "dynamic initialization in unreachable code"
     // (not a simple if with compile-time expression)
-    is_block_size_unsupported |= block_size % HIPCUB_WARP_THREADS != 0;
+    is_block_size_unsupported |= block_size % current_device_warp_size != 0;
 #endif
     if(is_block_size_unsupported)
     {
-        return;
+        printf("Unsupported test block size: %zu.     Skipping test\n", block_size);
+        GTEST_SKIP();
     }
 
     const size_t size = items_per_block * 113;
@@ -351,13 +353,21 @@ TYPED_TEST(HipcubBlockExchangeTests, BlockedToWarpStriped)
     std::vector<output_type> expected(size);
     std::vector<output_type> output(size, output_type(0));
 
-    constexpr size_t warp_size = test_utils::get_min_warp_size(block_size, size_t(HIPCUB_WARP_THREADS));
-    constexpr size_t warps_no = (block_size + warp_size - 1) / warp_size;
-    constexpr size_t items_per_warp = warp_size * items_per_thread;
+    constexpr size_t warp_size_32 = test_utils::get_min_warp_size(block_size, size_t(HIPCUB_WARP_SIZE_32));
+    constexpr size_t warp_size_64 = test_utils::get_min_warp_size(block_size, size_t(HIPCUB_WARP_SIZE_64));
+    constexpr size_t warps_no_32 = (block_size + warp_size_32 - 1) / warp_size_32;
+    constexpr size_t warps_no_64 = (block_size + warp_size_64 - 1) / warp_size_64;
+    constexpr size_t items_per_warp_32 = warp_size_32 * items_per_thread;
+    constexpr size_t items_per_warp_64 = warp_size_64 * items_per_thread;
 
     // Calculate input and expected results on host
     std::vector<type> values(size);
     std::iota(values.begin(), values.end(), 0);
+
+    const size_t warps_no = current_device_warp_size == HIPCUB_WARP_SIZE_32 ? warps_no_32 : warps_no_64;
+    const size_t warp_size = current_device_warp_size == HIPCUB_WARP_SIZE_32 ? warp_size_32 : warp_size_64;
+    const size_t items_per_warp = current_device_warp_size == HIPCUB_WARP_SIZE_32 ? items_per_warp_32 : items_per_warp_64;
+
     for(size_t bi = 0; bi < size / items_per_block; bi++)
     {
         for(size_t wi = 0; wi < warps_no; wi++)
@@ -430,7 +440,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
-__launch_bounds__(512, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(512)
 void warp_striped_to_blocked_kernel(Type* device_input, OutputType* device_output)
 {
     constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
@@ -454,6 +464,7 @@ TYPED_TEST(HipcubBlockExchangeTests, WarpStripedToBlocked)
     constexpr size_t block_size = TestFixture::params::block_size;
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
     constexpr size_t items_per_block = block_size * items_per_thread;
+    const unsigned int current_device_warp_size = rocprim::host_warp_size();
     // Given block size not supported
     bool is_block_size_unsupported = block_size > test_utils::get_max_block_size();
 #ifdef HIPCUB_CUB_API
@@ -461,11 +472,12 @@ TYPED_TEST(HipcubBlockExchangeTests, WarpStripedToBlocked)
     // for incomplete blocks (not divisible by warp size)
     // Workaround for nvcc warning: "dynamic initialization in unreachable code"
     // (not a simple if with compile-time expression)
-    is_block_size_unsupported |= block_size % HIPCUB_WARP_THREADS != 0;
+    is_block_size_unsupported |= block_size % current_device_warp_size != 0;
 #endif
     if(is_block_size_unsupported)
     {
-        return;
+        printf("Unsupported test block size: %zu.     Skipping test\n", block_size);
+        GTEST_SKIP();
     }
 
     const size_t size = items_per_block * 113;
@@ -474,13 +486,21 @@ TYPED_TEST(HipcubBlockExchangeTests, WarpStripedToBlocked)
     std::vector<output_type> expected(size);
     std::vector<output_type> output(size, output_type(0));
 
-    constexpr size_t warp_size = test_utils::get_min_warp_size(block_size, size_t(HIPCUB_WARP_THREADS));
-    constexpr size_t warps_no = (block_size + warp_size - 1) / warp_size;
-    constexpr size_t items_per_warp = warp_size * items_per_thread;
+    constexpr size_t warp_size_32 = test_utils::get_min_warp_size(block_size, size_t(HIPCUB_WARP_SIZE_32));
+    constexpr size_t warp_size_64 = test_utils::get_min_warp_size(block_size, size_t(HIPCUB_WARP_SIZE_64));
+    constexpr size_t warps_no_32 = (block_size + warp_size_32 - 1) / warp_size_32;
+    constexpr size_t warps_no_64 = (block_size + warp_size_64 - 1) / warp_size_64;
+    constexpr size_t items_per_warp_32 = warp_size_32 * items_per_thread;
+    constexpr size_t items_per_warp_64 = warp_size_64 * items_per_thread;
 
     // Calculate input and expected results on host
     std::vector<type> values(size);
     std::iota(values.begin(), values.end(), 0);
+
+    const size_t warps_no = current_device_warp_size == HIPCUB_WARP_SIZE_32 ? warps_no_32 : warps_no_64;
+    const size_t warp_size = current_device_warp_size == HIPCUB_WARP_SIZE_32 ? warp_size_32 : warp_size_64;
+    const size_t items_per_warp = current_device_warp_size == HIPCUB_WARP_SIZE_32 ? items_per_warp_32 : items_per_warp_64;
+
     for(size_t bi = 0; bi < size / items_per_block; bi++)
     {
         for(size_t wi = 0; wi < warps_no; wi++)
@@ -551,7 +571,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
-__launch_bounds__(512, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(512)
 void scatter_to_blocked_kernel(Type* device_input, OutputType* device_output, unsigned int* device_ranks)
 {
     constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
@@ -674,7 +694,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
-__launch_bounds__(512, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(512)
 void scatter_to_striped_kernel(Type* device_input, OutputType* device_output, unsigned int* device_ranks)
 {
     constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);

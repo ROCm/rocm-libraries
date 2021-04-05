@@ -167,7 +167,7 @@ typedef ::testing::Types<
 
 > ClassParams;
 
-TYPED_TEST_CASE(HipcubBlockLoadStoreClassTests, ClassParams);
+TYPED_TEST_SUITE(HipcubBlockLoadStoreClassTests, ClassParams);
 
 template<
     class Type,
@@ -177,7 +177,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
-__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void load_store_kernel(Type* device_input, Type* device_output)
 {
     Type items[ItemsPerThread];
@@ -278,7 +278,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
-__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void load_store_valid_kernel(Type* device_input, Type* device_output, size_t valid)
 {
     Type items[ItemsPerThread];
@@ -392,7 +392,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
-__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void load_store_valid_default_kernel(Type* device_input, Type* device_output, size_t valid, int _default)
 {
     Type items[ItemsPerThread];
