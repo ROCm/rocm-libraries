@@ -48,12 +48,18 @@
     #define HIPCUB_RUNTIME_FUNCTION CUB_RUNTIME_FUNCTION
 
     #include <cub/util_arch.cuh>
-    #define HIPCUB_WARP_THREADS CUB_PTX_WARP_THREADS
+    #define HIPCUB_DEVICE_WARP_THREADS CUB_PTX_WARP_THREADS
+    #define HIPCUB_HOST_WARP_THREADS CUB_PTX_WARP_THREADS
     #define HIPCUB_ARCH CUB_PTX_ARCH
     BEGIN_HIPCUB_NAMESPACE
     using namespace cub;
     END_HIPCUB_NAMESPACE
 #endif
+
+/// Supported warp sizes
+#define HIPCUB_WARP_SIZE_32 32u
+#define HIPCUB_WARP_SIZE_64 64u
+#define HIPCUB_MAX_WARP_SIZE HIPCUB_WARP_SIZE_64
 
 #define HIPCUB_HOST __host__
 #define HIPCUB_DEVICE __device__

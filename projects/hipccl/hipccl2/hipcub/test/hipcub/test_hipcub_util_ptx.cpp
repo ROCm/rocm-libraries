@@ -64,7 +64,7 @@ bool operator==(const custom_16aligned& lhs, const custom_16aligned& rhs)
 }
 
 // Params for tests
-template<class T, unsigned int LogicalWarpSize = HIPCUB_WARP_THREADS>
+template<class T, unsigned int LogicalWarpSize>
 struct params
 {
     using type = T;
@@ -85,9 +85,14 @@ typedef ::testing::Types<
     params<int, 8>,
     params<int, 4>,
     params<int, 2>,
-    params<float>,
-    params<double>,
-    params<unsigned char>
+    params<float, HIPCUB_WARP_SIZE_32>,
+    params<double, HIPCUB_WARP_SIZE_32>,
+    params<unsigned char, HIPCUB_WARP_SIZE_32>
+#ifdef __HIP_PLATFORM_HCC__
+    ,params<float, HIPCUB_WARP_SIZE_64>,
+    params<double, HIPCUB_WARP_SIZE_64>,
+    params<unsigned char, HIPCUB_WARP_SIZE_64>
+#endif
 > UtilPtxTestParams;
 
 TYPED_TEST_SUITE(HipcubUtilPtxTests, UtilPtxTestParams);
@@ -114,7 +119,7 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleUp)
 {
     using T = typename TestFixture::type;
     constexpr unsigned int logical_warp_size = TestFixture::logical_warp_size;
-    const unsigned int current_device_warp_size = rocprim::host_warp_size();
+    const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
     const size_t hardware_warp_size = (current_device_warp_size == HIPCUB_WARP_SIZE_32) ? HIPCUB_WARP_SIZE_32 : HIPCUB_WARP_SIZE_64;
     const size_t size = hardware_warp_size;
 
@@ -222,7 +227,7 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleDown)
 {
     using T = typename TestFixture::type;
     constexpr unsigned int logical_warp_size = TestFixture::logical_warp_size;
-    const unsigned int current_device_warp_size = rocprim::host_warp_size();
+    const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
     const size_t hardware_warp_size = (current_device_warp_size == HIPCUB_WARP_SIZE_32) ? HIPCUB_WARP_SIZE_32 : HIPCUB_WARP_SIZE_64;
     const size_t size = hardware_warp_size;
 
@@ -328,7 +333,7 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleIndex)
 {
     using T = typename TestFixture::type;
     constexpr unsigned int logical_warp_size = TestFixture::logical_warp_size;
-    const unsigned int current_device_warp_size = rocprim::host_warp_size();
+    const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
     const size_t hardware_warp_size = (current_device_warp_size == HIPCUB_WARP_SIZE_32) ? HIPCUB_WARP_SIZE_32 : HIPCUB_WARP_SIZE_64;
     const size_t size = hardware_warp_size;
 
@@ -432,7 +437,7 @@ TEST(HipcubUtilPtxTests, ShuffleUpCustomStruct)
     constexpr unsigned int logical_warp_size_32 = HIPCUB_WARP_SIZE_32;
     constexpr unsigned int logical_warp_size_64 = HIPCUB_WARP_SIZE_64;
 
-    const unsigned int current_device_warp_size = rocprim::host_warp_size();
+    const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
     const unsigned int logical_warp_size = (current_device_warp_size == HIPCUB_WARP_SIZE_32) ? logical_warp_size_32 : logical_warp_size_64;
     const size_t size = (current_device_warp_size == HIPCUB_WARP_SIZE_32) ? logical_warp_size_32 : logical_warp_size_64;
 
@@ -541,7 +546,7 @@ TEST(HipcubUtilPtxTests, ShuffleUpCustomAlignedStruct)
     constexpr unsigned int logical_warp_size_32 = HIPCUB_WARP_SIZE_32;
     constexpr unsigned int logical_warp_size_64 = HIPCUB_WARP_SIZE_64;
 
-    const unsigned int current_device_warp_size = rocprim::host_warp_size();
+    const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
     const unsigned int hardware_warp_size = (current_device_warp_size == HIPCUB_WARP_SIZE_32) ? HIPCUB_WARP_SIZE_32 : HIPCUB_WARP_SIZE_64;
     const unsigned int logical_warp_size = (current_device_warp_size == HIPCUB_WARP_SIZE_32) ? logical_warp_size_32 : logical_warp_size_64;
     const size_t size = (current_device_warp_size == HIPCUB_WARP_SIZE_32) ? logical_warp_size_32 : logical_warp_size_64;
@@ -654,7 +659,7 @@ void warp_id_kernel(unsigned int* output)
 
 TEST(HipcubUtilPtxTests, WarpId)
 {
-    const unsigned int current_device_warp_size = rocprim::host_warp_size();
+    const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
     const unsigned int hardware_warp_size = (current_device_warp_size == HIPCUB_WARP_SIZE_32) ? HIPCUB_WARP_SIZE_32 : HIPCUB_WARP_SIZE_64;
     const size_t block_size = (current_device_warp_size == HIPCUB_WARP_SIZE_32) ? 4 * HIPCUB_WARP_SIZE_32 : 4 * HIPCUB_WARP_SIZE_64;
     const size_t size = 16 * block_size;
