@@ -331,7 +331,7 @@ TYPED_TEST(HipcubBlockExchangeTests, BlockedToWarpStriped)
     constexpr size_t block_size = TestFixture::params::block_size;
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
     constexpr size_t items_per_block = block_size * items_per_thread;
-    const unsigned int current_device_warp_size = rocprim::host_warp_size();
+    const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
     // Given block size not supported
     bool is_block_size_unsupported = block_size > test_utils::get_max_block_size();
 #ifdef HIPCUB_CUB_API
@@ -464,7 +464,7 @@ TYPED_TEST(HipcubBlockExchangeTests, WarpStripedToBlocked)
     constexpr size_t block_size = TestFixture::params::block_size;
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
     constexpr size_t items_per_block = block_size * items_per_thread;
-    const unsigned int current_device_warp_size = rocprim::host_warp_size();
+    const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
     // Given block size not supported
     bool is_block_size_unsupported = block_size > test_utils::get_max_block_size();
 #ifdef HIPCUB_CUB_API

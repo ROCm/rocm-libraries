@@ -178,12 +178,6 @@ OutputIt host_exclusive_scan_by_key(InputIt first, InputIt last, KeyIt k_first,
     return ++d_first;
 }
 
-HIPCUB_HOST_DEVICE inline
-constexpr unsigned int warp_size()
-{
-    return HIPCUB_WARP_THREADS;
-}
-
 template<class T>
 HIPCUB_HOST_DEVICE inline
 constexpr T max(const T& a, const T& b)
@@ -214,43 +208,12 @@ constexpr T next_power_of_two(const T x, const T acc = 1)
     return acc >= x ? acc : next_power_of_two(x, 2 * acc);
 }
 
-// Return thread id in a "logical warp", which can be smaller than a hardware warp size.
-template<unsigned int LogicalWarpSize>
-HIPCUB_DEVICE inline
-auto logical_lane_id()
-    -> typename std::enable_if<is_power_of_two(LogicalWarpSize), unsigned int>::type
-{
-    return hipcub::LaneId() & (LogicalWarpSize-1); // same as land_id()%WarpSize
-}
-
-template<unsigned int LogicalWarpSize>
-HIPCUB_DEVICE inline
-auto logical_lane_id()
-    -> typename std::enable_if<!is_power_of_two(LogicalWarpSize), unsigned int>::type
-{
-    return hipcub::LaneId()%LogicalWarpSize;
-}
-
-template<>
-HIPCUB_DEVICE inline
-unsigned int logical_lane_id<HIPCUB_WARP_THREADS>()
-{
-    return hipcub::LaneId();
-}
-
 // Return id of "logical warp" in a block
-template<unsigned int LogicalWarpSize>
+template<unsigned int LogicalWarpSize = HIPCUB_DEVICE_WARP_THREADS>
 HIPCUB_DEVICE inline
 unsigned int logical_warp_id()
 {
     return hipcub::RowMajorTid(1, 1, 1)/LogicalWarpSize;
-}
-
-template<>
-HIPCUB_DEVICE inline
-unsigned int logical_warp_id<HIPCUB_WARP_THREADS>()
-{
-    return hipcub::WarpId();
 }
 
 inline
