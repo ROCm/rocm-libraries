@@ -85,9 +85,14 @@ typedef ::testing::Types<
     params<int, 8>,
     params<int, 4>,
     params<int, 2>,
-    params<float>,
-    params<double>,
-    params<unsigned char>
+    params<float, HIPCUB_WARP_SIZE_32>,
+    params<double, HIPCUB_WARP_SIZE_32>,
+    params<unsigned char, HIPCUB_WARP_SIZE_32>
+#ifdef __HIP_PLATFORM_HCC__
+    ,params<float, HIPCUB_WARP_SIZE_64>,
+    params<double, HIPCUB_WARP_SIZE_64>,
+    params<unsigned char, HIPCUB_WARP_SIZE_64>
+#endif
 > UtilPtxTestParams;
 
 TYPED_TEST_SUITE(HipcubUtilPtxTests, UtilPtxTestParams);

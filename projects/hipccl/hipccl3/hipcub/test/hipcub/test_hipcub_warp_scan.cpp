@@ -89,7 +89,8 @@ __global__
 __launch_bounds__(BlockSize)
 void warp_inclusive_scan_kernel(T* device_input, T* device_output)
 {
-    constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
+    // Minimum size is 1
+    constexpr unsigned int warps_no = test_utils::max(BlockSize / LogicalWarpSize, 1u);
     const unsigned int warp_id = test_utils::logical_warp_id<LogicalWarpSize>();
     unsigned int index = hipThreadIdx_x + (hipBlockIdx_x * hipBlockDim_x);
 
@@ -238,7 +239,8 @@ void warp_inclusive_scan_reduce_kernel(
     T* device_output,
     T* device_output_reductions)
 {
-    constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
+    // Minimum size is 1
+    constexpr unsigned int warps_no = test_utils::max(BlockSize / LogicalWarpSize, 1u);
     const unsigned int warp_id = test_utils::logical_warp_id<LogicalWarpSize>();
     unsigned int index = hipThreadIdx_x + ( hipBlockIdx_x * BlockSize );
 
@@ -426,7 +428,8 @@ __global__
 __launch_bounds__(BlockSize)
 void warp_exclusive_scan_kernel(T* device_input, T* device_output, T init)
 {
-    constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
+    // Minimum size is 1
+    constexpr unsigned int warps_no = test_utils::max(BlockSize / LogicalWarpSize, 1u);
     const unsigned int warp_id = test_utils::logical_warp_id<LogicalWarpSize>();
     unsigned int index = hipThreadIdx_x + (hipBlockIdx_x * hipBlockDim_x);
 
@@ -578,7 +581,8 @@ void warp_exclusive_scan_reduce_kernel(
     T* device_output_reductions,
     T init)
 {
-    constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
+    // Minimum size is 1
+    constexpr unsigned int warps_no = test_utils::max(BlockSize / LogicalWarpSize, 1u);
     const unsigned int warp_id = test_utils::logical_warp_id<LogicalWarpSize>();
     unsigned int index = hipThreadIdx_x + (hipBlockIdx_x * hipBlockDim_x);
 
@@ -771,7 +775,8 @@ void warp_scan_kernel(
     T* device_exclusive_output,
     T init)
 {
-    constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
+    // Minimum size is 1
+    constexpr unsigned int warps_no = test_utils::max(BlockSize / LogicalWarpSize, 1u);
     const unsigned int warp_id = test_utils::logical_warp_id<LogicalWarpSize>();
     unsigned int index = hipThreadIdx_x + (hipBlockIdx_x * hipBlockDim_x);
 
