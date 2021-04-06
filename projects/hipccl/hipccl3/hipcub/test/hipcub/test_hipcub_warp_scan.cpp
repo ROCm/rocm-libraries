@@ -107,7 +107,6 @@ TYPED_TEST(HipcubWarpScanTests, InclusiveScan)
 {
     using T = typename TestFixture::type;
     // logical warp side for warp primitive, execution warp size
-    // is always test_utils::warp_size()
     constexpr size_t logical_warp_size = TestFixture::warp_size;
 
     // The different warp sizes
@@ -126,7 +125,7 @@ TYPED_TEST(HipcubWarpScanTests, InclusiveScan)
             ? test_utils::max<size_t>(ws64, logical_warp_size * 4)
             : test_utils::max<size_t>((ws64/logical_warp_size) * logical_warp_size, 1);
 
-    const unsigned int current_device_warp_size = rocprim::host_warp_size();
+    const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
 
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     unsigned int grid_size = 4;
@@ -268,7 +267,7 @@ void warp_inclusive_scan_reduce_kernel(
 TYPED_TEST(HipcubWarpScanTests, InclusiveScanReduce)
 {
     using T = typename TestFixture::type;
-    // logical warp side for warp primitive, execution warp size is always test_utils::warp_size()
+    // logical warp side for warp primitive
     constexpr size_t logical_warp_size = TestFixture::warp_size;
 
     // The different warp sizes
@@ -287,7 +286,7 @@ TYPED_TEST(HipcubWarpScanTests, InclusiveScanReduce)
             ? test_utils::max<size_t>(ws64, logical_warp_size * 4)
             : test_utils::max<size_t>((ws64/logical_warp_size) * logical_warp_size, 1);
 
-    const unsigned int current_device_warp_size = rocprim::host_warp_size();
+    const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
 
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     unsigned int grid_size = 4;
@@ -444,7 +443,7 @@ void warp_exclusive_scan_kernel(T* device_input, T* device_output, T init)
 TYPED_TEST(HipcubWarpScanTests, ExclusiveScan)
 {
     using T = typename TestFixture::type;
-    // logical warp side for warp primitive, execution warp size is always test_utils::warp_size()
+    // logical warp side for warp primitive
     constexpr size_t logical_warp_size = TestFixture::warp_size;
 
     // The different warp sizes
@@ -463,7 +462,7 @@ TYPED_TEST(HipcubWarpScanTests, ExclusiveScan)
             ? test_utils::max<size_t>(ws64, logical_warp_size * 4)
             : test_utils::max<size_t>((ws64/logical_warp_size) * logical_warp_size, 1);
 
-    const unsigned int current_device_warp_size = rocprim::host_warp_size();
+    const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
 
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     unsigned int grid_size = 4;
@@ -601,7 +600,7 @@ void warp_exclusive_scan_reduce_kernel(
 TYPED_TEST(HipcubWarpScanTests, ExclusiveReduceScan)
 {
     using T = typename TestFixture::type;
-    // logical warp side for warp primitive, execution warp size is always test_utils::warp_size()
+    // logical warp side for warp primitive
     constexpr size_t logical_warp_size = TestFixture::warp_size;
 
     // The different warp sizes
@@ -620,7 +619,7 @@ TYPED_TEST(HipcubWarpScanTests, ExclusiveReduceScan)
             ? test_utils::max<size_t>(ws64, logical_warp_size * 4)
             : test_utils::max<size_t>((ws64/logical_warp_size) * logical_warp_size, 1);
 
-    const unsigned int current_device_warp_size = rocprim::host_warp_size();
+    const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
 
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     unsigned int grid_size = 4;
@@ -791,7 +790,7 @@ void warp_scan_kernel(
 TYPED_TEST(HipcubWarpScanTests, Scan)
 {
     using T = typename TestFixture::type;
-    // logical warp side for warp primitive, execution warp size is always test_utils::warp_size()
+    // logical warp side for warp primitive
     constexpr size_t logical_warp_size = TestFixture::warp_size;
 
     // The different warp sizes
@@ -810,7 +809,7 @@ TYPED_TEST(HipcubWarpScanTests, Scan)
             ? test_utils::max<size_t>(ws64, logical_warp_size * 4)
             : test_utils::max<size_t>((ws64/logical_warp_size) * logical_warp_size, 1);
 
-    const unsigned int current_device_warp_size = rocprim::host_warp_size();
+    const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
 
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     unsigned int grid_size = 4;
@@ -949,7 +948,7 @@ TYPED_TEST(HipcubWarpScanTests, InclusiveScanCustomType)
 {
     using base_type = typename TestFixture::type;
     using T = test_utils::custom_test_type<base_type>;
-    // logical warp side for warp primitive, execution warp size is always test_utils::warp_size()
+    // logical warp side for warp primitive
     constexpr size_t logical_warp_size = TestFixture::warp_size;
 
     // The different warp sizes
@@ -968,7 +967,7 @@ TYPED_TEST(HipcubWarpScanTests, InclusiveScanCustomType)
             ? test_utils::max<size_t>(ws64, logical_warp_size * 4)
             : test_utils::max<size_t>((ws64/logical_warp_size) * logical_warp_size, 1);
 
-    const unsigned int current_device_warp_size = rocprim::host_warp_size();
+    const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
 
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     unsigned int grid_size = 4;
