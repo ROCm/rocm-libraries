@@ -83,7 +83,8 @@ __global__
 __launch_bounds__(BlockSize)
 void warp_reduce_kernel(T* device_input, T* device_output)
 {
-    constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
+    // Minimum size is 1
+    constexpr unsigned int warps_no = test_utils::max(BlockSize / LogicalWarpSize, 1u);
     const unsigned int warp_id = test_utils::logical_warp_id<LogicalWarpSize>();
     unsigned int index = hipThreadIdx_x + (hipBlockIdx_x * hipBlockDim_x);
 
@@ -224,7 +225,8 @@ __global__
 __launch_bounds__(BlockSize)
 void warp_reduce_valid_kernel(T* device_input, T* device_output, const int valid)
 {
-    constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
+    // Minimum size is 1
+    constexpr unsigned int warps_no = test_utils::max(BlockSize / LogicalWarpSize, 1u);
     const unsigned int warp_id = test_utils::logical_warp_id<LogicalWarpSize>();
     unsigned int index = hipThreadIdx_x + (hipBlockIdx_x * hipBlockDim_x);
 
@@ -366,7 +368,8 @@ __global__
 __launch_bounds__(BlockSize)
 void head_segmented_warp_reduce_kernel(T* input, Flag* flags, T* output)
 {
-    constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
+    // Minimum size is 1
+    constexpr unsigned int warps_no = test_utils::max(BlockSize / LogicalWarpSize, 1u);
     const unsigned int warp_id = test_utils::logical_warp_id<LogicalWarpSize>();
     unsigned int index = hipThreadIdx_x + (hipBlockIdx_x * hipBlockDim_x);
 
@@ -553,7 +556,8 @@ __global__
 __launch_bounds__(BlockSize)
 void tail_segmented_warp_reduce_kernel(T* input, Flag* flags, T* output)
 {
-    constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
+    // Minimum size is 1
+    constexpr unsigned int warps_no = test_utils::max(BlockSize / LogicalWarpSize, 1u);
     const unsigned int warp_id = test_utils::logical_warp_id<LogicalWarpSize>();
     unsigned int index = hipThreadIdx_x + (hipBlockIdx_x * hipBlockDim_x);
 

@@ -58,7 +58,7 @@ typedef ::testing::Types<
     params<test_utils::custom_test_type<double>>
 > ThreadOperationTestParams;
 
-TYPED_TEST_CASE(HipcubThreadOperationTests, ThreadOperationTestParams);
+TYPED_TEST_SUITE(HipcubThreadOperationTests, ThreadOperationTestParams);
 
 template<class Type>
 __global__
