@@ -178,7 +178,7 @@ void iterator_test_function(IteratorType d_itr, std::vector<T> &h_reference)
     g_allocator.DeviceFree(device_output);
 }
 
-TYPED_TEST_CASE(HipcubIteratorTests, HipcubIteratorTestsParams);
+TYPED_TEST_SUITE(HipcubIteratorTests, HipcubIteratorTestsParams);
 
 TYPED_TEST(HipcubIteratorTests, TestConstant)
 {

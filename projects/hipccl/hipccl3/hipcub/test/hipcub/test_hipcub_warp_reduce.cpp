@@ -83,7 +83,8 @@ __global__
 __launch_bounds__(BlockSize)
 void warp_reduce_kernel(T* device_input, T* device_output)
 {
-    constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
+    // Minimum size is 1
+    constexpr unsigned int warps_no = test_utils::max(BlockSize / LogicalWarpSize, 1u);
     const unsigned int warp_id = test_utils::logical_warp_id<LogicalWarpSize>();
     unsigned int index = hipThreadIdx_x + (hipBlockIdx_x * hipBlockDim_x);
 
@@ -104,7 +105,6 @@ TYPED_TEST(HipcubWarpReduceTests, Reduce)
 {
     using T = typename TestFixture::type;
     // logical warp side for warp primitive, execution warp size
-    // is always test_utils::warp_size()
     constexpr size_t logical_warp_size = TestFixture::warp_size;
 
     // The different warp sizes
@@ -123,7 +123,7 @@ TYPED_TEST(HipcubWarpReduceTests, Reduce)
             ? test_utils::max<size_t>(ws64, logical_warp_size * 4)
             : test_utils::max<size_t>((ws64/logical_warp_size) * logical_warp_size, 1);
 
-    const unsigned int current_device_warp_size = rocprim::host_warp_size();
+    const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
 
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     unsigned int grid_size = 4;
@@ -225,7 +225,8 @@ __global__
 __launch_bounds__(BlockSize)
 void warp_reduce_valid_kernel(T* device_input, T* device_output, const int valid)
 {
-    constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
+    // Minimum size is 1
+    constexpr unsigned int warps_no = test_utils::max(BlockSize / LogicalWarpSize, 1u);
     const unsigned int warp_id = test_utils::logical_warp_id<LogicalWarpSize>();
     unsigned int index = hipThreadIdx_x + (hipBlockIdx_x * hipBlockDim_x);
 
@@ -246,7 +247,6 @@ TYPED_TEST(HipcubWarpReduceTests, ReduceValid)
 {
     using T = typename TestFixture::type;
     // logical warp side for warp primitive, execution warp size
-    // is always test_utils::warp_size()
     constexpr size_t logical_warp_size = TestFixture::warp_size;
     // The different warp sizes
     constexpr size_t ws32 = size_t(HIPCUB_WARP_SIZE_32);
@@ -264,7 +264,7 @@ TYPED_TEST(HipcubWarpReduceTests, ReduceValid)
             ? test_utils::max<size_t>(ws64, logical_warp_size * 4)
             : test_utils::max<size_t>((ws64/logical_warp_size) * logical_warp_size, 1);
 
-    const unsigned int current_device_warp_size = rocprim::host_warp_size();
+    const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
 
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     unsigned int grid_size = 4;
@@ -368,7 +368,8 @@ __global__
 __launch_bounds__(BlockSize)
 void head_segmented_warp_reduce_kernel(T* input, Flag* flags, T* output)
 {
-    constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
+    // Minimum size is 1
+    constexpr unsigned int warps_no = test_utils::max(BlockSize / LogicalWarpSize, 1u);
     const unsigned int warp_id = test_utils::logical_warp_id<LogicalWarpSize>();
     unsigned int index = hipThreadIdx_x + (hipBlockIdx_x * hipBlockDim_x);
 
@@ -387,7 +388,6 @@ TYPED_TEST(HipcubWarpReduceTests, HeadSegmentedReduceSum)
     using T = typename TestFixture::type;
     using flag_type = unsigned char;
     // logical warp side for warp primitive, execution warp size
-    // is always test_utils::warp_size()
     constexpr size_t logical_warp_size = TestFixture::warp_size;
 
     // The different warp sizes
@@ -406,7 +406,7 @@ TYPED_TEST(HipcubWarpReduceTests, HeadSegmentedReduceSum)
             ? test_utils::max<size_t>(ws64, logical_warp_size * 4)
             : test_utils::max<size_t>((ws64/logical_warp_size) * logical_warp_size, 1);
 
-    const unsigned int current_device_warp_size = rocprim::host_warp_size();
+    const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
 
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     unsigned int grid_size = 4;
@@ -556,7 +556,8 @@ __global__
 __launch_bounds__(BlockSize)
 void tail_segmented_warp_reduce_kernel(T* input, Flag* flags, T* output)
 {
-    constexpr unsigned int warps_no = BlockSize / LogicalWarpSize;
+    // Minimum size is 1
+    constexpr unsigned int warps_no = test_utils::max(BlockSize / LogicalWarpSize, 1u);
     const unsigned int warp_id = test_utils::logical_warp_id<LogicalWarpSize>();
     unsigned int index = hipThreadIdx_x + (hipBlockIdx_x * hipBlockDim_x);
 
@@ -576,7 +577,6 @@ TYPED_TEST(HipcubWarpReduceTests, TailSegmentedReduceSum)
     using T = typename TestFixture::type;
     using flag_type = unsigned char;
     // logical warp side for warp primitive, execution warp size
-    // is always test_utils::warp_size()
     constexpr size_t logical_warp_size = TestFixture::warp_size;
 
     // The different warp sizes
@@ -595,7 +595,7 @@ TYPED_TEST(HipcubWarpReduceTests, TailSegmentedReduceSum)
             ? test_utils::max<size_t>(ws64, logical_warp_size * 4)
             : test_utils::max<size_t>((ws64/logical_warp_size) * logical_warp_size, 1);
 
-    const unsigned int current_device_warp_size = rocprim::host_warp_size();
+    const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
 
     const size_t block_size = current_device_warp_size == ws32 ? block_size_ws32 : block_size_ws64;
     unsigned int grid_size = 4;
