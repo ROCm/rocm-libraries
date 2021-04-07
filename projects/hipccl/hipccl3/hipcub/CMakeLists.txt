@@ -76,6 +76,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
 option(BUILD_TEST "Build tests (requires googletest)" OFF)
 option(DOWNLOAD_ROCPRIM "Download rocPRIM and do not search for rocPRIM package" OFF)
 option(BUILD_BENCHMARK "Build benchmarks" OFF)
+option(BUILD_EXAMPLE "Build Examples" OFF)
 
 # Get dependencies
 include(cmake/Dependencies.cmake)
@@ -97,6 +98,9 @@ if(BUILD_TEST)
   add_subdirectory(test)
 endif()
 
+if(BUILD_EXAMPLE)
+  add_subdirectory(examples)
+endif()
 # Benchmarks
 if(BUILD_BENCHMARK AND NOT ONLY_INSTALL)
   add_subdirectory(benchmark)

@@ -54,7 +54,7 @@ public:
 template<class T>
 struct custom_flag_op1
 {
-    ROCPRIM_HOST_DEVICE
+    HIPCUB_HOST_DEVICE
     bool operator()(const T& a, const T& b, unsigned int b_index)
     {
         return (a == b) || (b_index % 10 == 0);
