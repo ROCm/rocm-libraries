@@ -79,7 +79,7 @@ template<
     class T
 >
 __global__
-__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void shuffle_offset_kernel(T* device_input, T* device_output, int distance)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
@@ -89,9 +89,6 @@ void shuffle_offset_kernel(T* device_input, T* device_output, int distance)
 
 TYPED_TEST(HipcubBlockShuffleTests, BlockOffset)
 {
-
-
-
     using type = typename TestFixture::type;
     const size_t block_size = TestFixture::block_size;
     const size_t size = block_size * 1134;
@@ -99,7 +96,7 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockOffset)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        int distance = (rand()%min(10,block_size/2))-min(10,block_size/2);
+        int distance = rand() % std::min(10, block_size/2) - std::min(10, block_size/2);
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value <<" & distance = "<<distance);
         // Generate data
         std::vector<type> input_data = test_utils::get_random_data<type>(size, -100, 100, seed_value);
@@ -151,18 +148,15 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockOffset)
 
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_output));
-
     }
-
 }
-
 
 template<
     unsigned int BlockSize,
     class T
 >
 __global__
-__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void shuffle_rotate_kernel(T* device_input, T* device_output, int distance)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
@@ -172,9 +166,6 @@ void shuffle_rotate_kernel(T* device_input, T* device_output, int distance)
 
 TYPED_TEST(HipcubBlockShuffleTests, BlockRotate)
 {
-
-
-
     using type = typename TestFixture::type;
     const size_t block_size = TestFixture::block_size;
     const size_t size = block_size * 1134;
@@ -182,7 +173,7 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockRotate)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        int distance = (rand()%min(5,block_size/2));
+        int distance = rand() % std::min(5, block_size/2);
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value <<" & distance = "<<distance);
         // Generate data
         std::vector<type> input_data = test_utils::get_random_data<type>(size, -100, 100, seed_value);
@@ -238,14 +229,13 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockRotate)
 
 }
 
-
 template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
     class T
 >
 __global__
-__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void shuffle_up_kernel(T (*device_input), T (*device_output))
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
@@ -255,9 +245,6 @@ void shuffle_up_kernel(T (*device_input), T (*device_output))
 
 TYPED_TEST(HipcubBlockShuffleTests, BlockUp)
 {
-
-
-
     using type = typename TestFixture::type;
     const size_t block_size = TestFixture::block_size;
     const size_t size = block_size * 1134;
@@ -338,7 +325,7 @@ template<
     class T
 >
 __global__
-__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void shuffle_down_kernel(T (*device_input), T (*device_output))
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
@@ -348,9 +335,6 @@ void shuffle_down_kernel(T (*device_input), T (*device_output))
 
 TYPED_TEST(HipcubBlockShuffleTests, BlockDown)
 {
-
-
-
     using type = typename TestFixture::type;
     const size_t block_size = TestFixture::block_size;
     const size_t size = block_size * 1134;
