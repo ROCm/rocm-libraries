@@ -72,7 +72,7 @@ typedef ::testing::Types<
     params<long, 377U>
 > SingleValueTestParams;
 
-TYPED_TEST_CASE(HipcubBlockShuffleTests, SingleValueTestParams);
+TYPED_TEST_SUITE(HipcubBlockShuffleTests, SingleValueTestParams);
 
 template<
     unsigned int BlockSize,
