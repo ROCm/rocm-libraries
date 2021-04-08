@@ -84,7 +84,11 @@ void shuffle_offset_kernel(T* device_input, T* device_output, int distance)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
     hipcub::BlockShuffle<T,BlockSize> b_shuffle;
-    b_shuffle.offset(device_input[index],device_output[index],distance);
+    b_shuffle.Offset(
+        device_input[index],
+        device_output[index],
+        distance
+    );
 }
 
 TYPED_TEST(HipcubBlockShuffleTests, BlockOffset)
@@ -96,7 +100,7 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockOffset)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        int distance = rand() % std::min(10, block_size/2) - std::min(10, block_size/2);
+        int distance = rand() % std::min(size_t(10), block_size/2) - std::min(size_t(10), block_size/2);
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value <<" & distance = "<<distance);
         // Generate data
         std::vector<type> input_data = test_utils::get_random_data<type>(size, -100, 100, seed_value);
@@ -161,7 +165,11 @@ void shuffle_rotate_kernel(T* device_input, T* device_output, int distance)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
     hipcub::BlockShuffle<T,BlockSize> b_shuffle;
-    b_shuffle.rotate(device_input[index],device_output[index],distance);
+    b_shuffle.Rotate(
+        device_input[index],
+        device_output[index],
+        distance
+    );
 }
 
 TYPED_TEST(HipcubBlockShuffleTests, BlockRotate)
@@ -173,7 +181,7 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockRotate)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        int distance = rand() % std::min(5, block_size/2);
+        int distance = rand() % std::min(size_t(5), block_size/2);
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value <<" & distance = "<<distance);
         // Generate data
         std::vector<type> input_data = test_utils::get_random_data<type>(size, -100, 100, seed_value);
@@ -240,7 +248,7 @@ void shuffle_up_kernel(T (*device_input), T (*device_output))
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
     hipcub::BlockShuffle<T,BlockSize> b_shuffle;
-    b_shuffle.template up<ItemsPerThread>(reinterpret_cast<T(&)[ItemsPerThread]>(device_input[index*ItemsPerThread]),reinterpret_cast<T(&)[ItemsPerThread]>(device_output[index*ItemsPerThread]));
+    b_shuffle.template Up<ItemsPerThread>(reinterpret_cast<T(&)[ItemsPerThread]>(device_input[index*ItemsPerThread]),reinterpret_cast<T(&)[ItemsPerThread]>(device_output[index*ItemsPerThread]));
 }
 
 TYPED_TEST(HipcubBlockShuffleTests, BlockUp)
@@ -330,7 +338,7 @@ void shuffle_down_kernel(T (*device_input), T (*device_output))
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
     hipcub::BlockShuffle<T,BlockSize> b_shuffle;
-    b_shuffle.template down<ItemsPerThread>(reinterpret_cast<T(&)[ItemsPerThread]>(device_input[index*ItemsPerThread]),reinterpret_cast<T(&)[ItemsPerThread]>(device_output[index*ItemsPerThread]));
+    b_shuffle.template Down<ItemsPerThread>(reinterpret_cast<T(&)[ItemsPerThread]>(device_input[index*ItemsPerThread]),reinterpret_cast<T(&)[ItemsPerThread]>(device_output[index*ItemsPerThread]));
 }
 
 TYPED_TEST(HipcubBlockShuffleTests, BlockDown)
