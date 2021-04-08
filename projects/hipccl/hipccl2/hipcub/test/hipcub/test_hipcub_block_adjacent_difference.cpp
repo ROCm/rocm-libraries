@@ -55,7 +55,7 @@ template<class T>
 struct custom_flag_op1
 {
     HIPCUB_HOST_DEVICE
-    bool operator()(const T& a, const T& b, unsigned int b_index)
+    bool operator()(const T& a, const T& b, int b_index)
     {
         return (a == b) || (b_index % 10 == 0);
     }
@@ -157,7 +157,7 @@ typedef ::testing::Types<
     params<short, bool, 234U, 9, custom_flag_op1<short> >
 > Params;
 
-TYPED_TEST_CASE(HipcubBlockAdjacentDifference, Params);
+TYPED_TEST_SUITE(HipcubBlockAdjacentDifference, Params);
 
 template<
     class Type,
@@ -167,7 +167,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void flag_heads_kernel(Type* device_input, long long* device_heads)
 {
     const unsigned int lid = hipThreadIdx_x;
@@ -201,7 +201,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void flag_tails_kernel(Type* device_input, long long* device_tails)
 {
     const unsigned int lid = hipThreadIdx_x;
@@ -235,7 +235,7 @@ template<
     unsigned int ItemsPerThread
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void flag_heads_and_tails_kernel(Type* device_input, long long* device_heads, long long* device_tails)
 {
     const unsigned int lid = hipThreadIdx_x;

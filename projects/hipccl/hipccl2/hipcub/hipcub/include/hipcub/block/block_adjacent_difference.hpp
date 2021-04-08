@@ -30,6 +30,31 @@
 #ifndef HIPCUB_BLOCK_BLOCK_AJACENT_DIFFERENCE_HPP_
 #define HIPCUB_BLOCK_BLOCK_AJACENT_DIFFERENCE_HPP_
 
+BEGIN_HIPCUB_NAMESPACE
+
+namespace detail
+{
+  // Trait checks if FlagOp can be called with 3 arguments (a, b, b_index)
+  template<class T, class FlagOp, class = void>
+  struct WithBIndexArg
+      : std::false_type
+  { };
+
+  template<class T, class FlagOp>
+  struct WithBIndexArg<
+          T, FlagOp,
+          typename std::conditional<
+             true,
+             void,
+             decltype(std::declval<FlagOp>()(std::declval<T>(), std::declval<T>(), 0))
+          >::type
+      > : std::true_type
+  { };
+
+}
+
+END_HIPCUB_NAMESPACE
+
 #ifdef __HIP_PLATFORM_HCC__
     #include "../backend/rocprim/block/block_adjacent_difference.hpp"
 #elif defined(__HIP_PLATFORM_NVCC__)

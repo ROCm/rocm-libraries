@@ -129,7 +129,7 @@ void SpmvGold(
     }
 }
 
-TYPED_TEST_CASE(HipcubDeviceSpmvTests, HipcubDeviceSpmvTestsParams);
+TYPED_TEST_SUITE(HipcubDeviceSpmvTests, HipcubDeviceSpmvTestsParams);
 
 TYPED_TEST(HipcubDeviceSpmvTests, Spmv)
 {
