@@ -98,9 +98,11 @@ if(BUILD_TEST)
   add_subdirectory(test)
 endif()
 
+# Examples
 if(BUILD_EXAMPLE)
   add_subdirectory(examples)
 endif()
+
 # Benchmarks
 if(BUILD_BENCHMARK AND NOT ONLY_INSTALL)
   add_subdirectory(benchmark)

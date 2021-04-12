@@ -2,9 +2,12 @@
 #define EXAMPLES_EXAMPLE_UTILS_HPP
 #include "mersenne.h"
 #include <vector>
+#include <sstream>
 #include <iostream>
-#include "hipcub/backend/rocprim/util_type.hpp"
-#include "hipcub/iterator/discard_output_iterator.hpp"
+
+#include <hipcub/util_type.hpp>
+#include <hipcub/util_allocator.hpp>
+#include <hipcub/iterator/discard_output_iterator.hpp>
 
 #define AssertEquals(a, b) if ((a) != (b)) { std::cerr << "\n(" << __FILE__ << ": " << __LINE__ << ")\n"; exit(1);}
 
@@ -107,7 +110,7 @@ struct CommandLineArgs
     {
         using namespace std;
         if (index < args.size()) {
-            istringstream str_stream(args[index]);
+            std::istringstream str_stream(args[index]);
             str_stream >> val;
         }
     }
@@ -124,7 +127,7 @@ struct CommandLineArgs
         {
             if (keys[i] == string(arg_name))
             {
-                istringstream str_stream(values[i]);
+                std::istringstream str_stream(values[i]);
                 str_stream >> val;
             }
         }
@@ -150,7 +153,7 @@ struct CommandLineArgs
                 if (keys[i] == string(arg_name))
                 {
                     string val_string(values[i]);
-                    istringstream str_stream(val_string);
+                    std::istringstream str_stream(val_string);
                     string::size_type old_pos = 0;
                     string::size_type new_pos = 0;
 

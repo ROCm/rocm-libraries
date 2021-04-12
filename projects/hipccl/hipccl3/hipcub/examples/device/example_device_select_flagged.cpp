@@ -43,7 +43,6 @@
 #include <stdio.h>
 #include <iostream>
 
-#include <hipcub/util_allocator.hpp>
 #include <hipcub/device/device_select.hpp>
 
 #include "../example_utils.hpp"
@@ -55,8 +54,8 @@ using namespace hipcub;
 // Globals, constants and typedefs
 //---------------------------------------------------------------------
 
-bool                    g_verbose = false;  // Whether to display input/output to console
-CachingDeviceAllocator  g_allocator(true);  // Caching allocator for device memory
+bool                            g_verbose = false;  // Whether to display input/output to console
+hipcub::CachingDeviceAllocator  g_allocator;  // Caching allocator for device memory
 
 
 //---------------------------------------------------------------------
@@ -179,7 +178,7 @@ int main(int argc, char** argv)
     Initialize(h_in, h_flags, num_items, max_segment);
     int num_selected = Solve(h_in, h_flags, h_reference, num_items);
 
-    printf("cub::DeviceSelect::Flagged %d items, %d selected (avg distance %d), %d-byte elements\n",
+    printf("hipcub::DeviceSelect::Flagged %d items, %d selected (avg distance %d), %d-byte elements\n",
         num_items, num_selected, (num_selected > 0) ? num_items / num_selected : 0, (int) sizeof(int));
     fflush(stdout);
 
@@ -203,11 +202,11 @@ int main(int argc, char** argv)
     // Allocate temporary storage
     void            *d_temp_storage = NULL;
     size_t          temp_storage_bytes = 0;
-    HipcubDebug(DeviceSelect::Flagged(d_temp_storage, temp_storage_bytes, d_in, d_flags, d_out, d_num_selected_out, num_items));
+    HipcubDebug(hipcub::DeviceSelect::Flagged(d_temp_storage, temp_storage_bytes, d_in, d_flags, d_out, d_num_selected_out, num_items));
     HipcubDebug(g_allocator.DeviceAllocate(&d_temp_storage, temp_storage_bytes));
 
     // Run
-    HipcubDebug(DeviceSelect::Flagged(d_temp_storage, temp_storage_bytes, d_in, d_flags, d_out, d_num_selected_out, num_items));
+    HipcubDebug(hipcub::DeviceSelect::Flagged(d_temp_storage, temp_storage_bytes, d_in, d_flags, d_out, d_num_selected_out, num_items));
 
     // Check for correctness (and display results, if specified)
     int compare = CompareDeviceResults(h_reference, d_out, num_selected, true, g_verbose);

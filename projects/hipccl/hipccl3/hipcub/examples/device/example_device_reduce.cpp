@@ -41,7 +41,6 @@
 
 #include <stdio.h>
 
-#include <hipcub/util_allocator.hpp>
 #include <hipcub/device/device_reduce.hpp>
 
 #include "../example_utils.hpp"
@@ -52,8 +51,8 @@ using namespace hipcub;
 // Globals, constants and typedefs
 //---------------------------------------------------------------------
 
-bool                    g_verbose = false;  // Whether to display input/output to console
-CachingDeviceAllocator  g_allocator(true);  // Caching allocator for device memory
+bool                            g_verbose = false;  // Whether to display input/output to console
+hipcub::CachingDeviceAllocator  g_allocator;  // Caching allocator for device memory
 
 
 //---------------------------------------------------------------------
@@ -127,7 +126,7 @@ int main(int argc, char** argv)
     // Initialize device
     HipcubDebug(args.DeviceInit());
 
-    printf("cub::DeviceReduce::Sum() %d items (%d-byte elements)\n",
+    printf("hipcub::DeviceReduce::Sum() %d items (%d-byte elements)\n",
         num_items, (int) sizeof(int));
     fflush(stdout);
 
@@ -153,11 +152,11 @@ int main(int argc, char** argv)
     // Request and allocate temporary storage
     void            *d_temp_storage = NULL;
     size_t          temp_storage_bytes = 0;
-    HipcubDebug(DeviceReduce::Sum(d_temp_storage, temp_storage_bytes, d_in, d_out, num_items));
+    HipcubDebug(hipcub::DeviceReduce::Sum(d_temp_storage, temp_storage_bytes, d_in, d_out, num_items));
     HipcubDebug(g_allocator.DeviceAllocate(&d_temp_storage, temp_storage_bytes));
 
     // Run
-    HipcubDebug(DeviceReduce::Sum(d_temp_storage, temp_storage_bytes, d_in, d_out, num_items));
+    HipcubDebug(hipcub::DeviceReduce::Sum(d_temp_storage, temp_storage_bytes, d_in, d_out, num_items));
 
     // Check for correctness (and display results, if specified)
     int compare = CompareDeviceResults(&h_reference, d_out, 1, g_verbose, g_verbose);

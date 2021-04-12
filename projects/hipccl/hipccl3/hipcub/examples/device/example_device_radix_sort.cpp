@@ -42,7 +42,6 @@
 #include <stdio.h>
 #include <algorithm>
 
-#include <hipcub/util_allocator.hpp>
 #include <hipcub/device/device_radix_sort.hpp>
 
 #include "../example_utils.hpp"
@@ -54,8 +53,8 @@ using namespace hipcub;
 // Globals, constants and typedefs
 //---------------------------------------------------------------------
 
-bool                    g_verbose = false;  // Whether to display input/output to console
-CachingDeviceAllocator  g_allocator(true);  // Caching allocator for device memory
+bool                            g_verbose = false;  // Whether to display input/output to console
+hipcub::CachingDeviceAllocator  g_allocator;  // Caching allocator for device memory
 
 
 //---------------------------------------------------------------------
@@ -162,7 +161,7 @@ int main(int argc, char** argv)
     // Initialize device
     HipcubDebug(args.DeviceInit());
 
-    printf("cub::DeviceRadixSort::SortPairs() %d items (%d-byte keys %d-byte values)\n",
+    printf("hipcub::DeviceRadixSort::SortPairs() %d items (%d-byte keys %d-byte values)\n",
         num_items, int(sizeof(float)), int(sizeof(int)));
     fflush(stdout);
 
@@ -187,7 +186,7 @@ int main(int argc, char** argv)
     size_t  temp_storage_bytes  = 0;
     void    *d_temp_storage     = NULL;
 
-    HipcubDebug(DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes, d_keys, d_values, num_items));
+    HipcubDebug(hipcub::DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes, d_keys, d_values, num_items));
     HipcubDebug(g_allocator.DeviceAllocate(&d_temp_storage, temp_storage_bytes));
 
     // Initialize device arrays
@@ -195,7 +194,7 @@ int main(int argc, char** argv)
     HipcubDebug(hipMemcpy(d_values.d_buffers[d_values.selector], h_values, sizeof(int) * num_items, hipMemcpyHostToDevice));
 
     // Run
-    HipcubDebug(DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes, d_keys, d_values, num_items));
+    HipcubDebug(hipcub::DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes, d_keys, d_values, num_items));
 
     // Check for correctness (and display results, if specified)
     int compare = CompareDeviceResults(h_reference_keys, d_keys.Current(), num_items, true, g_verbose);

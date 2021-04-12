@@ -43,7 +43,6 @@
 #include <algorithm>
 #include <iostream>
 
-#include <hipcub/util_allocator.hpp>
 #include <hipcub/device/device_radix_sort.hpp>
 #include <hipcub/device/device_run_length_encode.hpp>
 
@@ -56,8 +55,8 @@ using namespace hipcub;
 // Globals, constants and typedefs
 //---------------------------------------------------------------------
 
-bool                    g_verbose = false;  // Whether to display input/output to console
-CachingDeviceAllocator  g_allocator(true);  // Caching allocator for device memory
+bool                            g_verbose = false;  // Whether to display input/output to console
+hipcub::CachingDeviceAllocator  g_allocator;  // Caching allocator for device memory
 
 
 //---------------------------------------------------------------------
@@ -274,11 +273,11 @@ int main(int argc, char** argv)
         // Allocate temporary storage for sorting
         size_t  temp_storage_bytes  = 0;
         void    *d_temp_storage     = NULL;
-        HipcubDebug(DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes, d_keys, d_values, num_items));
+        HipcubDebug(hipcub::DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes, d_keys, d_values, num_items));
         HipcubDebug(g_allocator.DeviceAllocate(&d_temp_storage, temp_storage_bytes));
 
         // Do the sort
-        HipcubDebug(DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes, d_keys, d_values, num_items));
+        HipcubDebug(hipcub::DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes, d_keys, d_values, num_items));
 
         // Free unused buffers and sorting temporary storage
         if (d_keys.d_buffers[d_keys.selector ^ 1]) HipcubDebug(g_allocator.DeviceFree(d_keys.d_buffers[d_keys.selector ^ 1]));
@@ -298,7 +297,7 @@ int main(int argc, char** argv)
 
         // Allocate temporary storage for isolating non-trivial runs
         d_temp_storage = NULL;
-        HipcubDebug(DeviceRunLengthEncode::NonTrivialRuns(
+        HipcubDebug(hipcub::DeviceRunLengthEncode::NonTrivialRuns(
             d_temp_storage,
             temp_storage_bytes,
             d_keys.d_buffers[d_keys.selector],
@@ -309,7 +308,7 @@ int main(int argc, char** argv)
         HipcubDebug(g_allocator.DeviceAllocate(&d_temp_storage, temp_storage_bytes));
 
         // Do the isolation
-        HipcubDebug(DeviceRunLengthEncode::NonTrivialRuns(
+        HipcubDebug(hipcub::DeviceRunLengthEncode::NonTrivialRuns(
             d_temp_storage,
             temp_storage_bytes,
             d_keys.d_buffers[d_keys.selector],
