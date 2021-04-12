@@ -36,10 +36,16 @@
 
 #include "common_test_header.hpp"
 
-template<class T>
+template<
+    class T,
+    hipcub::CacheLoadModifier LoadModifier,
+    hipcub::CacheStoreModifier StoreModifier
+>
 struct params
 {
     using type = T;
+    static constexpr hipcub::CacheLoadModifier load_modifier = LoadModifier;
+    static constexpr hipcub::CacheStoreModifier store_modifier = StoreModifier;
 };
 
 template<class Params>
@@ -47,30 +53,50 @@ class HipcubThreadOperationTests : public ::testing::Test
 {
 public:
     using type = typename Params::type;
+    static constexpr hipcub::CacheLoadModifier load_modifier = Params::load_modifier;
+    static constexpr hipcub::CacheStoreModifier store_modifier = Params::store_modifier;
 };
 
 typedef ::testing::Types<
-    params<uint8_t>,
-    params<uint16_t>,
-    params<uint32_t>,
-    params<uint64_t>,
-    params<test_utils::custom_test_type<uint64_t>>,
-    params<test_utils::custom_test_type<double>>
+    params<int8_t, hipcub::LOAD_CA, hipcub::STORE_WB>,
+    params<int16_t, hipcub::LOAD_CA, hipcub::STORE_WB>,
+    params<uint8_t, hipcub::LOAD_CA, hipcub::STORE_WB>,
+    params<uint16_t, hipcub::LOAD_CA, hipcub::STORE_WB>,
+    params<uint32_t, hipcub::LOAD_CA, hipcub::STORE_WB>,
+    params<uint64_t, hipcub::LOAD_CA, hipcub::STORE_WB>,
+
+    params<int8_t, hipcub::LOAD_CG, hipcub::STORE_CG>,
+    params<int16_t, hipcub::LOAD_CG, hipcub::STORE_CG>,
+    params<uint8_t, hipcub::LOAD_CG, hipcub::STORE_CG>,
+    params<uint16_t, hipcub::LOAD_CG, hipcub::STORE_CG>,
+    params<uint32_t, hipcub::LOAD_CG, hipcub::STORE_CG>,
+    params<uint64_t, hipcub::LOAD_CG, hipcub::STORE_CG>,
+
+    params<int8_t, hipcub::LOAD_CV, hipcub::STORE_WT>,
+    params<int16_t, hipcub::LOAD_CV, hipcub::STORE_WT>,
+    params<uint8_t, hipcub::LOAD_CV, hipcub::STORE_WT>,
+    params<uint16_t, hipcub::LOAD_CV, hipcub::STORE_WT>,
+    params<uint32_t, hipcub::LOAD_CV, hipcub::STORE_WT>,
+    params<uint64_t, hipcub::LOAD_CV, hipcub::STORE_WT>,
+    params<test_utils::custom_test_type<uint64_t>, hipcub::LOAD_CV, hipcub::STORE_WB>,
+    params<test_utils::custom_test_type<double>, hipcub::LOAD_CV, hipcub::STORE_WB>
 > ThreadOperationTestParams;
 
 TYPED_TEST_SUITE(HipcubThreadOperationTests, ThreadOperationTestParams);
 
-template<class Type>
+template<class Type, hipcub::CacheLoadModifier Modifier>
 __global__
 void thread_load_kernel(Type* volatile const device_input, Type* device_output)
 {
     size_t index = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
-    device_output[index] = hipcub::ThreadLoad<hipcub::LOAD_CG>(device_input + index);
+    device_output[index] = hipcub::ThreadLoad<Modifier>(device_input + index);
 }
 
 TYPED_TEST(HipcubThreadOperationTests, Load)
 {
     using T = typename TestFixture::type;
+    constexpr hipcub::CacheLoadModifier Modifier = TestFixture::load_modifier;
+
     constexpr uint32_t block_size = 256;
     constexpr uint32_t grid_size = 128;
     constexpr uint32_t size = block_size * grid_size;
@@ -81,7 +107,7 @@ TYPED_TEST(HipcubThreadOperationTests, Load)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, 2, 200, seed_value);
+        std::vector<T> input = test_utils::get_random_data<T>(size, 2, 100, seed_value);
         std::vector<T> output(size);
 
         // Calculate expected results on host
@@ -101,7 +127,7 @@ TYPED_TEST(HipcubThreadOperationTests, Load)
             )
         );
 
-        thread_load_kernel<T><<<grid_size, block_size>>>(device_input, device_output);
+        thread_load_kernel<T, Modifier><<<grid_size, block_size>>>(device_input, device_output);
 
         // Reading results back
         HIP_CHECK(
@@ -123,17 +149,18 @@ TYPED_TEST(HipcubThreadOperationTests, Load)
     }
 }
 
-template<class Type>
+template<class Type, hipcub::CacheStoreModifier Modifier>
 __global__
 void thread_store_kernel(Type* const device_input, Type* device_output)
 {
     size_t index = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
-    hipcub::ThreadStore<hipcub::STORE_WB>(device_output + index, device_input[index]);
+    hipcub::ThreadStore<Modifier>(device_output + index, device_input[index]);
 }
 
 TYPED_TEST(HipcubThreadOperationTests, Store)
 {
     using T = typename TestFixture::type;
+    constexpr hipcub::CacheStoreModifier Modifier = TestFixture::store_modifier;
     constexpr uint32_t block_size = 256;
     constexpr uint32_t grid_size = 128;
     constexpr uint32_t size = block_size * grid_size;
@@ -144,7 +171,7 @@ TYPED_TEST(HipcubThreadOperationTests, Store)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, 2, 200, seed_value);
+        std::vector<T> input = test_utils::get_random_data<T>(size, 2, 100, seed_value);
         std::vector<T> output(size);
 
         // Calculate expected results on host
@@ -164,7 +191,7 @@ TYPED_TEST(HipcubThreadOperationTests, Store)
             )
         );
 
-        thread_store_kernel<T><<<grid_size, block_size>>>(device_input, device_output);
+        thread_store_kernel<T, Modifier><<<grid_size, block_size>>>(device_input, device_output);
 
         // Reading results back
         HIP_CHECK(
@@ -220,7 +247,7 @@ TYPED_TEST(HipcubThreadOperationTests, Reduction)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, 2, 200, seed_value);
+        std::vector<T> input = test_utils::get_random_data<T>(size, 2, 100, seed_value);
         std::vector<T> output(size);
         std::vector<T> expected(size);
 
@@ -304,7 +331,7 @@ TYPED_TEST(HipcubThreadOperationTests, Scan)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, 2, 200, seed_value);
+        std::vector<T> input = test_utils::get_random_data<T>(size, 2, 100, seed_value);
         std::vector<T> output(size);
         std::vector<T> expected(size);
 
@@ -393,12 +420,12 @@ TYPED_TEST(HipcubThreadOperationTests, Bounds)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         uint32_t num_items = test_utils::get_random_value(1, 12, seed_value);
-        T val = test_utils::get_random_value(2, 200, seed_value);
+        T val = test_utils::get_random_value(2, 100, seed_value);
 
         uint32_t size = block_size * grid_size * num_items;
 
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, 2, 200, seed_value);
+        std::vector<T> input = test_utils::get_random_data<T>(size, 2, 100, seed_value);
 
         std::vector<T> output_lower_bound(size / num_items);
         std::vector<T> output_upper_bound(size / num_items);

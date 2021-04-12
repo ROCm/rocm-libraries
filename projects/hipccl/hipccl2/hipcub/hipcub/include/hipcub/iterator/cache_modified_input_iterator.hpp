@@ -27,20 +27,15 @@
  *
  ******************************************************************************/
 
-#ifndef HIPCUB_THREAD_THREAD_STORE_HPP_
-#define HIPCUB_THREAD_THREAD_STORE_HPP_
+#ifndef HIPCUB_ITERATOR_CACHE_MODIFIED_INPUT_HPP_
+#define HIPCUB_ITERATOR_CACHE_MODIFIED_INPUT_HPP_
 
 #ifdef __HIP_PLATFORM_HCC__
-
-    #ifndef HIPCUB_THREAD_STORE_USE_CACHE_MODIFIERS
-        #define HIPCUB_THREAD_STORE_USE_CACHE_MODIFIERS 1
-    #endif
-
     #include "../config.hpp"
-    #include "../backend/rocprim/thread/thread_store.hpp"
+    #include "../backend/rocprim/iterator/cache_modified_input_iterator.hpp"
 #elif defined(__HIP_PLATFORM_NVCC__)
     #include "../config.hpp"
-    #include <cub/thread/thread_store.cuh>
+    #include <cub/iterator/cache_modified_input_iterator.cuh>
 #endif
 
 #endif
