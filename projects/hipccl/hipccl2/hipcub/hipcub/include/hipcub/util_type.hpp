@@ -1,7 +1,7 @@
 /******************************************************************************
- * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
+ * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2020, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2020, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -27,74 +27,14 @@
  *
  ******************************************************************************/
 
-#ifndef HIPCUB_CONFIG_HPP_
-#define HIPCUB_CONFIG_HPP_
-
-#include <hip/hip_runtime.h>
-
-#define HIPCUB_NAMESPACE hipcub
-
-#define BEGIN_HIPCUB_NAMESPACE \
-    namespace hipcub {
-
-#define END_HIPCUB_NAMESPACE \
-    } /* hipcub */
+#ifndef HIPCUB_UTIL_TYPES_HPP_
+#define HIPCUB_UTIL_TYPES_HPP_
 
 #ifdef __HIP_PLATFORM_HCC__
-    #define HIPCUB_ROCPRIM_API 1
-    #define HIPCUB_RUNTIME_FUNCTION __host__
+    #include "backend/rocprim/util_type.hpp"
 #elif defined(__HIP_PLATFORM_NVCC__)
-    #define HIPCUB_CUB_API 1
-    #define HIPCUB_RUNTIME_FUNCTION CUB_RUNTIME_FUNCTION
-
-    #include <cub/util_arch.cuh>
-    #define HIPCUB_DEVICE_WARP_THREADS CUB_PTX_WARP_THREADS
-    #define HIPCUB_HOST_WARP_THREADS CUB_PTX_WARP_THREADS
-    #define HIPCUB_ARCH CUB_PTX_ARCH
-    BEGIN_HIPCUB_NAMESPACE
-    using namespace cub;
-    END_HIPCUB_NAMESPACE
+    #include <cub/util_type.cuh>
 #endif
 
-/// Supported warp sizes
-#define HIPCUB_WARP_SIZE_32 32u
-#define HIPCUB_WARP_SIZE_64 64u
-#define HIPCUB_MAX_WARP_SIZE HIPCUB_WARP_SIZE_64
 
-#define HIPCUB_HOST __host__
-#define HIPCUB_DEVICE __device__
-#define HIPCUB_HOST_DEVICE __host__ __device__
-#define HIPCUB_SHARED_MEMORY __shared__
-
-BEGIN_HIPCUB_NAMESPACE
-
-/// hipCUB error reporting macro (prints error messages to stderr)
-#if (defined(DEBUG) || defined(_DEBUG)) && !defined(HIPCUB_STDERR)
-    #define HIPCUB_STDERR
 #endif
-
-inline
-hipError_t Debug(
-    hipError_t      error,
-    const char*     filename,
-    int             line)
-{
-    (void)filename;
-    (void)line;
-#ifdef HIPCUB_STDERR
-    if (error)
-    {
-        fprintf(stderr, "HIP error %d [%s, %d]: %s\n", error, filename, line, hipGetErrorString(error));
-        fflush(stderr);
-    }
-#endif
-    return error;
-}
-
-#ifndef HipcubDebug
-    #define HipcubDebug(e) hipcub::Debug((hipError_t) (e), __FILE__, __LINE__)
-#endif
-
-END_HIPCUB_NAMESPACE
-
-#endif // HIPCUB_CONFIG_HPP_
