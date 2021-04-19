@@ -104,11 +104,10 @@ struct block_raking_layout
     /// Alias wrapper allowing storage to be unioned
     struct TempStorage : Uninitialized<_TempStorage> {};
 
-
     /**
      * \brief Returns the location for the calling thread to place data into the grid
      */
-    static __device__ __forceinline__ T* PlacementPtr(
+    static HIPCUB_DEVICE inline T* PlacementPtr(
         TempStorage &temp_storage,
         unsigned int linear_tid)
     {
@@ -125,11 +124,10 @@ struct block_raking_layout
         return temp_storage.Alias().buff + offset;
     }
 
-
     /**
      * \brief Returns the location for the calling thread to begin sequential raking
      */
-    static __device__ __forceinline__ T* RakingPtr(
+    static HIPCUB_DEVICE inline T* RakingPtr(
         TempStorage &temp_storage,
         unsigned int linear_tid)
     {
