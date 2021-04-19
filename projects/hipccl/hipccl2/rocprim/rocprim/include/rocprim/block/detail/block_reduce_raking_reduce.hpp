@@ -40,7 +40,8 @@ template<
     class T,
     unsigned int BlockSizeX,
     unsigned int BlockSizeY,
-    unsigned int BlockSizeZ
+    unsigned int BlockSizeZ,
+    bool CommutativeOnly = false
 >
 class block_reduce_raking_reduce
 {
@@ -53,6 +54,10 @@ class block_reduce_raking_reduce
     // logical warp size must be a power of two.
     static constexpr unsigned int warp_size_ =
         detail::get_min_warp_size(BlockSize, ::rocprim::device_warp_size());
+
+    static constexpr bool commutative_only_        = CommutativeOnly && ((BlockSize % warp_size_ == 0) && (BlockSize > warp_size_));
+    static constexpr unsigned int sharing_threads_ = ::rocprim::max<int>(1, BlockSize - warp_size_);
+    static constexpr unsigned int segment_length_  = sharing_threads_ / warp_size_;
 
     // BlockSize is multiple of hardware warp
     static constexpr bool block_size_smaller_than_warp_size_ = (BlockSize < warp_size_);
@@ -180,13 +185,15 @@ public:
     }
 
 private:
-    template<class BinaryFunction>
+
+    template<class BinaryFunction, bool FunctionCommutativeOnly = commutative_only_>
     ROCPRIM_DEVICE inline
-    void reduce_impl(const unsigned int flat_tid,
+    auto reduce_impl(const unsigned int flat_tid,
                      T input,
                      T& output,
                      storage_type& storage,
                      BinaryFunction reduce_op)
+        -> typename std::enable_if<(!FunctionCommutativeOnly), void>::type
     {
         storage_type_& storage_ = storage.get();
         storage_.threads[flat_tid] = input;
@@ -199,6 +206,39 @@ private:
             {
                 thread_reduction = reduce_op(
                     thread_reduction, storage_.threads[i]
+                );
+            }
+            warp_reduce<block_size_smaller_than_warp_size_, warp_reduce_prefix_type>(
+                thread_reduction, output, BlockSize, reduce_op
+            );
+        }
+    }
+
+    template<class BinaryFunction, bool FunctionCommutativeOnly = commutative_only_>
+    ROCPRIM_DEVICE inline
+    auto reduce_impl(const unsigned int flat_tid,
+                     T input,
+                     T& output,
+                     storage_type& storage,
+                     BinaryFunction reduce_op)
+        -> typename std::enable_if<(FunctionCommutativeOnly), void>::type
+    {
+        storage_type_& storage_ = storage.get();
+
+        if (flat_tid >= warp_size_)
+            storage_.threads[flat_tid - warp_size_] = input;
+
+        ::rocprim::syncthreads();
+
+        if (flat_tid < warp_size_)
+        {
+            T thread_reduction = input;
+            T* storage_pointer = &storage_.threads[flat_tid * segment_length_];
+            #pragma unroll
+            for( unsigned int i = 0; i < segment_length_; i++ )
+            {
+                thread_reduction = reduce_op(
+                    thread_reduction, storage_pointer[i]
                 );
             }
             warp_reduce<block_size_smaller_than_warp_size_, warp_reduce_prefix_type>(
