@@ -32,8 +32,15 @@ endif()
 
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker search and installed rpath")
 
-# Get dependencies
-include(cmake/Dependencies.cmake)
+# rocm-cmake contains common cmake code for rocm projects to help
+# setup and install
+find_package( ROCM CONFIG )
+include( ROCMSetupVersion )
+include( ROCMCreatePackage )
+include( ROCMInstallTargets )
+include( ROCMPackageConfigHelpers )
+include( ROCMInstallSymlinks )
+include( ROCMCheckTargetIds OPTIONAL )
 
 # Detect compiler support for target ID
 # This section is deprecated. Please use rocm_check_target_ids for future use.
@@ -97,6 +104,9 @@ if(DISABLE_WERROR)
 else()
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror")
 endif()
+
+# Get dependencies
+include(cmake/Dependencies.cmake)
 
 # Setup VERSION
 rocm_setup_version(VERSION "2.10.9")
