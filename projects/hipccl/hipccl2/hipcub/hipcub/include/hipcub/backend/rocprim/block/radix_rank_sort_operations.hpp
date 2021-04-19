@@ -35,6 +35,8 @@
  #ifndef HIPCUB_ROCPRIM_BLOCK_RADIX_RANK_SORT_OPERATIONS_HPP_
  #define HIPCUB_ROCPRIM_BLOCK_RADIX_RANK_SORT_OPERATIONS_HPP_
 
+#include "../../../config.hpp"
+
  #include <rocprim/config.hpp>
  #include <rocprim/type_traits.hpp>
  #include <rocprim/detail/various.hpp>

@@ -37,6 +37,8 @@
 
 #include <type_traits>
 
+#include "../../../config.hpp"
+
 #include <rocprim/config.hpp>
 #include <rocprim/detail/various.hpp>
 
