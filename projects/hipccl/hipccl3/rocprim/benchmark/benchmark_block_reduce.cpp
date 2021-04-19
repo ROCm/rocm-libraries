@@ -257,6 +257,12 @@ int main(int argc, char *argv[])
     add_benchmarks<reduce_rr_t>(
         benchmarks, "reduce", "raking_reduce", stream, size
     );
+    // reduce commutative only
+    using reduce_rrco_t = reduce<rocprim::block_reduce_algorithm::raking_reduce_commutative_only>;
+    add_benchmarks<reduce_rrco_t>(
+        benchmarks, "reduce", "raking_reduce_commutative_only", stream, size
+    );
+
 
     // Use manual timing
     for(auto& b : benchmarks)
