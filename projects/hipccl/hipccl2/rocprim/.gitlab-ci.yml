@@ -128,7 +128,7 @@ build:cmake-minimum:
       -D CMAKE_BUILD_TYPE=Release
       -D BUILD_TEST=ON
       -D BUILD_EXAMPLE=ON
-      -D BUILD_BENCHMARK=OFF
+      -D BUILD_BENCHMARK=ON
       -D DISABLE_WERROR=OFF
       -D AMDGPU_TEST_TARGETS="gfx803;gfx900;gfx906"
       -B $BUILD_MINIMUM_DIR
