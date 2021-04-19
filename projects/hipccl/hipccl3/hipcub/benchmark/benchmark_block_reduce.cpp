@@ -204,10 +204,15 @@ int main(int argc, char *argv[])
     add_benchmarks<reduce_uwr_t>(
         benchmarks, "reduce", "BLOCK_REDUCE_WARP_REDUCTIONS", stream, size
     );
-    // reduce then scan
+    // raking reduce
     using reduce_rr_t = reduce<hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING>;
     add_benchmarks<reduce_rr_t>(
         benchmarks, "reduce", "BLOCK_REDUCE_RAKING", stream, size
+    );
+    // raking reduce commutative only
+    using reduce_rrco_t = reduce<hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY>;
+    add_benchmarks<reduce_rrco_t>(
+        benchmarks, "reduce", "BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY", stream, size
     );
 
     // Use manual timing
