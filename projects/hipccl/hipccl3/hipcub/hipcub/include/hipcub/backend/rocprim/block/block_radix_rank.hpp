@@ -602,7 +602,7 @@ public:
                 digit = RADIX_DIGITS - digit - 1;
 
             // Mask of peers who have same digit as me
-            uint32_t peer_mask = MatchAny<RADIX_BITS>(digit);
+            uint32_t peer_mask = rocprim::MatchAny<RADIX_BITS>(digit);
 
             // Pointer to smem digit counter for this key
             digit_counters[ITEM] = &temp_storage.aliasable.warp_digit_counters[digit][warp_id];
