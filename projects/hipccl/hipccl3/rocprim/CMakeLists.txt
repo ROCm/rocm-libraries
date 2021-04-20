@@ -46,14 +46,8 @@ endif()
 
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker search and installed rpath")
 
-# Set a default build type if none was specified
-if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-  message(STATUS "Setting build type to 'Release' as none was specified.")
-  set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
-  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "" "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
-endif()
-
-set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker search and installed rpath")
+# Get dependencies
+include(cmake/Dependencies.cmake)
 
 # Set the AMDGPU_TARGETS with backward compatiblity
 # Use target ID syntax if supported for AMDGPU_TARGETS
@@ -102,9 +96,6 @@ if(DISABLE_WERROR)
 else()
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror")
 endif()
-
-# Get dependencies
-include(cmake/Dependencies.cmake)
 
 # Setup VERSION
 set(VERSION_STRING "2.10.9")
