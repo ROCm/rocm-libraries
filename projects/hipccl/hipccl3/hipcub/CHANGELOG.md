@@ -2,7 +2,7 @@
 
 See README.md on how to build the hipCUB documentation using Doxygen.
 
-## [Unreleased hipCUB-2.10.9 for ROCm 4.2.0]
+## [hipCUB-2.10.9 for ROCm 4.2.0]
 ### Added
 - Support for TexObjInputIterator and TexRefInputIterator
 - Support for DevicePartition
