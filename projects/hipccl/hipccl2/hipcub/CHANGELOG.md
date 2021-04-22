@@ -2,6 +2,10 @@
 
 See README.md on how to build the hipCUB documentation using Doxygen.
 
+## [Unreleased hipCUB-2.10.10 for ROCm 4.3.0]
+### Added
+- DiscardOutputIterator to backend header
+
 ## [hipCUB-2.10.9 for ROCm 4.2.0]
 ### Added
 - Support for TexObjInputIterator and TexRefInputIterator
