@@ -37,13 +37,68 @@ BEGIN_ROCPRIM_NAMESPACE
 
 enum cache_store_modifier
 {
-    store_default,              ///< Default (no modifier)
-    store_wb,                   ///< Cache write-back all coherent levels
-    store_cg,                   ///< Cache at global level
-    store_cs,                   ///< Cache streaming (likely to be accessed once)
-    store_wt,                   ///< Cache write-through (to system memory)
-    store_volatile,             ///< Volatile shared (any memory space)
+    store_default,   ///< Default (no modifier)
+    store_wb,        ///< Cache write-back all coherent levels
+    store_cg,        ///< Cache at global level
+    store_cs,        ///< Cache streaming (likely to be accessed once)
+    store_wt,        ///< Cache write-through (to system memory)
+    store_volatile,  ///< Volatile shared (any memory space)
 };
+
+namespace detail
+{
+
+template<cache_store_modifier MODIFIER = store_default, typename T>
+ROCPRIM_DEVICE __forceinline__ void AsmThreadStore(void * ptr, T val)
+{
+    __builtin_memcpy(ptr, &val, sizeof(T));
+}
+
+#if ROCPRIM_THREAD_STORE_USE_CACHE_MODIFIERS == 1
+
+// NOTE: the reason there is an interim_type is because of a bug for 8bit types.
+// TODO fix flat_store_ubyte and flat_store_sbyte issues
+
+// Important for syncing. Check section 9.2.2 or 7.3 in the following document
+// http://developer.amd.com/wordpress/media/2013/12/AMD_GCN3_Instruction_Set_Architecture_rev1.1.pdf
+#define ROCPRIM_ASM_THREAD_STORE(cache_modifier,                                                              \
+                                llvm_cache_modifier,                                                         \
+                                type,                                                                        \
+                                interim_type,                                                                \
+                                asm_operator,                                                                \
+                                output_modifier,                                                             \
+                                wait_cmd)                                                                    \
+    template<>                                                                                               \
+    ROCPRIM_DEVICE __forceinline__ void AsmThreadStore<cache_modifier, type>(void * ptr, type val)            \
+    {                                                                                                        \
+        interim_type temp_val = val;                                                          \
+        asm volatile(#asm_operator " %0, %1 " llvm_cache_modifier : : "v"(ptr), #output_modifier(temp_val)); \
+        asm volatile("s_waitcnt " wait_cmd "(%0)" : : "I"(0x00));                                            \
+    }
+
+// TODO fix flat_store_ubyte and flat_store_sbyte issues
+// TODO Add specialization for custom larger data types
+#define ROCPRIM_ASM_THREAD_STORE_GROUP(cache_modifier, llvm_cache_modifier, wait_cmd)                                   \
+    ROCPRIM_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, int8_t, int16_t, flat_store_byte, v, wait_cmd);       \
+    ROCPRIM_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, int16_t, int16_t, flat_store_short, v, wait_cmd);     \
+    ROCPRIM_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, uint8_t, uint16_t, flat_store_byte, v, wait_cmd);     \
+    ROCPRIM_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, uint16_t, uint16_t, flat_store_short, v, wait_cmd);   \
+    ROCPRIM_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, uint32_t, uint32_t, flat_store_dword, v, wait_cmd);   \
+    ROCPRIM_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, float, uint32_t, flat_store_dword, v, wait_cmd);      \
+    ROCPRIM_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, uint64_t, uint64_t, flat_store_dwordx2, v, wait_cmd); \
+    ROCPRIM_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, double, uint64_t, flat_store_dwordx2, v, wait_cmd);
+
+ROCPRIM_ASM_THREAD_STORE_GROUP(store_wb, "glc", "");
+ROCPRIM_ASM_THREAD_STORE_GROUP(store_cg, "glc slc", "");
+ROCPRIM_ASM_THREAD_STORE_GROUP(store_wt, "glc", "vmcnt");
+ROCPRIM_ASM_THREAD_STORE_GROUP(store_volatile, "glc", "vmcnt");
+
+// TODO find correct modifiers to match these
+ROCPRIM_ASM_THREAD_STORE_GROUP(store_cs, "", "");
+
+#endif
+
+}
 
 /// \brief Store data using the default load instruction. No support for cache modified stores yet
 /// \tparam MODIFIER        - Value in enum for determine which type of cache store modifier to be used
@@ -76,7 +131,7 @@ ROCPRIM_DEVICE inline void thread_store(
     T *ptr,
     T val)
 {
-    __builtin_memcpy(ptr, &val, sizeof(T));
+    detail::AsmThreadStore<MODIFIER, T>(ptr, val);
 }
 
 END_ROCPRIM_NAMESPACE

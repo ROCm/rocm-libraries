@@ -565,6 +565,6 @@ TYPED_TEST(RocprimBlockReduceInputArrayTests, Reduce)
 
     static_for_input_array<0, 2, T, block_size, rocprim::block_reduce_algorithm::using_warp_reduce>::run();
     static_for_input_array<0, 2, T, block_size, rocprim::block_reduce_algorithm::raking_reduce>::run();
-    // static_for_input_array<0, 2, T, block_size, rocprim::block_reduce_algorithm::raking_reduce_commutative_only>::run();
+    static_for_input_array<0, 2, T, block_size, rocprim::block_reduce_algorithm::raking_reduce_commutative_only>::run();
 
 }

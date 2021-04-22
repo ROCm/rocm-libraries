@@ -103,8 +103,6 @@ class block_shuffle
         T next[BlockSize];
     };
 
-    storage_type_* storage;
-
 public:
 
     /// \brief Struct used to allocate a temporary memory that is required for thread
@@ -120,13 +118,6 @@ public:
     #else
         using storage_type = storage_type_; // only for Doxygen
     #endif
-
-    ROCPRIM_DEVICE inline
-    block_shuffle()
-    {
-        ROCPRIM_SHARED_MEMORY storage_type_ shared_storage;
-        storage = &shared_storage;
-    }
 
     /// \brief Shuffles data across threads in a block, offseted by the distance value.
     ///
@@ -144,8 +135,6 @@ public:
     /// {
     ///     // specialize block__shuffle_int for int and logical warp of 192 threads
     ///     using block__shuffle_int = rocprim::block_shuffle<int, 192>;
-    ///     // allocate storage in shared memory
-    ///     __shared__ block_shuffle::storage_type storage;
     ///
     ///     int value = ...;
     ///     // execute block shuffle
@@ -157,20 +146,42 @@ public:
     /// }
     /// \endcode
     ROCPRIM_DEVICE inline
-    void offset(
-      T input,
-      T& output,
-      int distance = 1)
+    void offset(T input,
+                T& output,
+                int distance = 1)
     {
-        const size_t flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
-        storage->prev[flat_id] = input;
+        offset(
+            ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>(),
+            input, output, distance
+        );
+    }
+
+    ROCPRIM_DEVICE inline
+    void offset(const size_t& flat_id,
+                T input,
+                T& output,
+                int distance)
+    {
+        ROCPRIM_SHARED_MEMORY storage_type storage;
+        offset(flat_id, input, output, distance, storage);
+    }
+
+    ROCPRIM_DEVICE inline
+    void offset(const size_t& flat_id,
+                T input,
+                T& output,
+                int distance,
+                storage_type& storage)
+    {
+        storage_type_& storage_ = storage.get();
+        storage_.prev[flat_id] = input;
 
         ::rocprim::syncthreads();
 
         const int offset_tid = static_cast<int>(flat_id) + distance;
         if ((offset_tid >= 0) && (offset_tid < (int)BlockSize))
         {
-            output = storage->prev[static_cast<size_t>(offset_tid)];
+            output = storage_.prev[static_cast<size_t>(offset_tid)];
         }
     }
 
@@ -190,8 +201,6 @@ public:
     /// {
     ///     // specialize block__shuffle_int for int and logical warp of 192 threads
     ///     using block__shuffle_int = rocprim::block_shuffle<int, 192>;
-    ///     // allocate storage in shared memory
-    ///     __shared__ block_shuffle::storage_type storage;
     ///
     ///     int value = ...;
     ///     // execute block shuffle
@@ -203,13 +212,35 @@ public:
     /// }
     /// \endcode
     ROCPRIM_DEVICE inline
-    void rotate(
-        T   input,
-        T&  output,
-        unsigned int distance = 1)
+    void rotate(T input,
+                T& output,
+                unsigned int distance = 1)
     {
-        const size_t flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
-        storage->prev[flat_id] = input;
+        rotate(
+            ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>(),
+            input, output, distance
+        );
+    }
+
+    ROCPRIM_DEVICE inline
+    void rotate(const size_t& flat_id,
+                T input,
+                T& output,
+                unsigned int distance)
+    {
+        ROCPRIM_SHARED_MEMORY storage_type storage;
+        rotate(flat_id, input, output, distance, storage);
+    }
+
+    ROCPRIM_DEVICE inline
+    void rotate(const size_t& flat_id,
+                T input,
+                T& output,
+                unsigned int distance,
+                storage_type& storage)
+    {
+        storage_type_& storage_ = storage.get();
+        storage_.prev[flat_id] = input;
 
         ::rocprim::syncthreads();
 
@@ -217,7 +248,7 @@ public:
         if (offset >= BlockSize)
             offset -= BlockSize;
 
-        output = storage->prev[offset];
+        output = storage_.prev[offset];
     }
 
 
@@ -234,8 +265,6 @@ public:
     /// {
     ///     // specialize block__shuffle_int for int and logical warp of 192 threads
     ///     using block__shuffle_int = rocprim::block_shuffle<int, 192>;
-    ///     // allocate storage in shared memory
-    ///     __shared__ block_shuffle::storage_type storage;
     ///
     ///     int value = ...;
     ///     // execute block shuffle
@@ -248,12 +277,35 @@ public:
     /// \endcode
     template <unsigned int ItemsPerThread>
     ROCPRIM_DEVICE inline
-    void up(
-        T (&input)[ItemsPerThread],
-        T (&prev)[ItemsPerThread])
+    void up(T (&input)[ItemsPerThread],
+            T (&prev)[ItemsPerThread])
     {
-        const size_t flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
-        storage->prev[flat_id] = input[ItemsPerThread -1];
+        this->up(
+            ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>(),
+            input, prev
+        );
+    }
+
+    template <unsigned int ItemsPerThread>
+    ROCPRIM_DEVICE inline
+    void up(const size_t& flat_id,
+            T (&input)[ItemsPerThread],
+            T (&prev)[ItemsPerThread])
+    {
+        ROCPRIM_SHARED_MEMORY storage_type storage;
+        this->up(flat_id, input, prev, storage);
+    }
+
+
+    template <unsigned int ItemsPerThread>
+    ROCPRIM_DEVICE inline
+    void up(const size_t& flat_id,
+            T (&input)[ItemsPerThread],
+            T (&prev)[ItemsPerThread],
+            storage_type& storage)
+    {
+        storage_type_& storage_ = storage.get();
+        storage_.prev[flat_id] = input[ItemsPerThread -1];
 
         ::rocprim::syncthreads();
 
@@ -265,7 +317,7 @@ public:
 
         if (flat_id > 0)
         {
-            prev[0] = storage->prev[flat_id - 1];
+            prev[0] = storage_.prev[flat_id - 1];
         }
     }
 
@@ -279,13 +331,38 @@ public:
     /// The item \p prev[0] is not updated for <em>thread</em><sub>0</sub>.
     /// \param [out] block_suffix - The item \p input[ItemsPerThread-1] from
     /// <em>thread</em><sub><tt>BlockSize-1</tt></sub>, provided to all threads
-    template <int ItemsPerThread>
-    ROCPRIM_DEVICE inline void up(
-        T (&input)[ItemsPerThread],
-        T (&prev)[ItemsPerThread],
-        T &block_suffix)
+    template <unsigned int ItemsPerThread>
+    ROCPRIM_DEVICE inline
+    void up(T (&input)[ItemsPerThread],
+            T (&prev)[ItemsPerThread],
+            T &block_suffix)
     {
-        up(input, prev);
+        this->up(
+            ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>(),
+            input, prev, block_suffix
+        );
+    }
+
+    template <unsigned int ItemsPerThread>
+    ROCPRIM_DEVICE inline
+    void up(const size_t& flat_id,
+            T (&input)[ItemsPerThread],
+            T (&prev)[ItemsPerThread],
+            T &block_suffix)
+    {
+        ROCPRIM_SHARED_MEMORY storage_type storage;
+        this->up(flat_id, input, prev, block_suffix, storage);
+    }
+
+    template <int ItemsPerThread>
+    ROCPRIM_DEVICE inline
+    void up(const size_t& flat_id,
+            T (&input)[ItemsPerThread],
+            T (&prev)[ItemsPerThread],
+            T &block_suffix,
+            storage_type& storage)
+    {
+        up(flat_id, input, prev, storage);
 
         // Update block prefix
         block_suffix = storage->prev[BlockSize - 1];
@@ -304,8 +381,6 @@ public:
     /// {
     ///     // specialize block__shuffle_int for int and logical warp of 192 threads
     ///     using block__shuffle_int = rocprim::block_shuffle<int, 192>;
-    ///     // allocate storage in shared memory
-    ///     __shared__ block_shuffle::storage_type storage;
     ///
     ///     int value = ...;
     ///     // execute block shuffle
@@ -317,12 +392,35 @@ public:
     /// }
     /// \endcode
     template <unsigned int ItemsPerThread>
-    ROCPRIM_DEVICE inline void down(
-        T (&input)[ItemsPerThread],
-        T (&next)[ItemsPerThread])
+    ROCPRIM_DEVICE inline
+    void down(T (&input)[ItemsPerThread],
+              T (&next)[ItemsPerThread])
     {
-        const size_t flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
-        storage->next[flat_id] = input[0];
+        this->down(
+            ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>(),
+            input, next
+        );
+    }
+
+    template <unsigned int ItemsPerThread>
+    ROCPRIM_DEVICE inline
+    void down(const size_t& flat_id,
+              T (&input)[ItemsPerThread],
+              T (&next)[ItemsPerThread])
+    {
+        ROCPRIM_SHARED_MEMORY storage_type storage;
+        this->down(flat_id, input, next, storage);
+    }
+
+    template <unsigned int ItemsPerThread>
+    ROCPRIM_DEVICE inline
+    void down(const size_t& flat_id,
+              T (&input)[ItemsPerThread],
+              T (&next)[ItemsPerThread],
+              storage_type& storage)
+    {
+        storage_type_& storage_ = storage.get();
+        storage_.next[flat_id] = input[0];
 
         ::rocprim::syncthreads();
 
@@ -334,7 +432,7 @@ public:
 
         if (flat_id <(BlockSize -1))
         {
-          next[ItemsPerThread -1] = storage->next[flat_id + 1];
+          next[ItemsPerThread -1] = storage_.next[flat_id + 1];
         }
     }
 
@@ -346,14 +444,39 @@ public:
     /// The item \p prev[0] is not updated for <em>thread</em><sub>BlockSize - 1</sub>.
     /// \param [out] block_prefix -  The item \p input[0] from <em>thread</em><sub><tt>0</tt></sub>, provided to all threads
     template <unsigned int ItemsPerThread>
-    ROCPRIM_DEVICE inline void Down(
-        T (&input)[ItemsPerThread],
-        T (&next)[ItemsPerThread],
-        T &block_prefix)
+    ROCPRIM_DEVICE inline
+    void down(T (&input)[ItemsPerThread],
+              T (&next)[ItemsPerThread],
+              T &block_prefix)
     {
-        Down(input, next);
+        this->down(
+            ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>(),
+            input, next, block_prefix
+        );
+    }
 
-        // Update block prefix
+    template <unsigned int ItemsPerThread>
+    ROCPRIM_DEVICE inline
+    void down(const size_t& flat_id,
+              T (&input)[ItemsPerThread],
+              T (&next)[ItemsPerThread],
+              T &block_prefix)
+    {
+        ROCPRIM_SHARED_MEMORY storage_type storage;
+        this->down(flat_id, input, next, block_prefix, storage);
+    }
+
+    template <unsigned int ItemsPerThread>
+    ROCPRIM_DEVICE inline
+    void down(const size_t& flat_id,
+              T (&input)[ItemsPerThread],
+              T (&next)[ItemsPerThread],
+              T &block_prefix,
+              storage_type& storage)
+    {
+        this->down(flat_id, input, next, storage);
+
+        // Update block prefixstorage_->
         block_prefix = storage->next[0];
     }
 };
