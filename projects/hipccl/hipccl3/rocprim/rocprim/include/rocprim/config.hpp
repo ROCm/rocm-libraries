@@ -66,6 +66,15 @@
     #define ROCPRIM_DETAIL_USE_LOOKBACK_SCAN true
 #endif
 
+#ifndef ROCPRIM_THREAD_LOAD_USE_CACHE_MODIFIERS
+    #define ROCPRIM_THREAD_LOAD_USE_CACHE_MODIFIERS 1
+#endif
+
+#ifndef ROCPRIM_THREAD_STORE_USE_CACHE_MODIFIERS
+    #define ROCPRIM_THREAD_STORE_USE_CACHE_MODIFIERS 1
+#endif
+
+
 // Defines targeted AMD architecture. Supported values:
 // * 803 (gfx803)
 // * 900 (gfx900)
