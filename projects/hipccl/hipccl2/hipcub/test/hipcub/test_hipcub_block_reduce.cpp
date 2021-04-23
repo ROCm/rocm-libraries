@@ -91,7 +91,25 @@ typedef ::testing::Types<
     params<short, 162U, 1, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING>,
     params<unsigned int, 255U, 1, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING>,
     params<int, 377U, 1, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING>,
-    params<unsigned char, 377U, 1, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING>
+    params<unsigned char, 377U, 1, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING>,
+
+    // TODO: Fix the tests
+
+    // -----------------------------------------------------------------------
+    // hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY
+    // -----------------------------------------------------------------------
+    params<int, 64U, 1, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY>,
+    params<int, 128U, 1, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY>,
+    params<int, 192U, 1, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY>,
+    params<int, 256U, 1, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY>,
+    params<int, 512U, 1, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY>,
+    params<int, 1024U, 1, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY>,
+    params<unsigned long, 65U, 1, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY>,
+    params<long, 37U, 1, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY>,
+    params<short, 162U, 1, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY>,
+    params<unsigned int, 255U, 1, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY>,
+    params<int, 377U, 1, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY>,
+    params<unsigned char, 377U, 1, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY>
 > SingleValueTestParams;
 
 TYPED_TEST_SUITE(HipcubBlockReduceSingleValueTests, SingleValueTestParams);

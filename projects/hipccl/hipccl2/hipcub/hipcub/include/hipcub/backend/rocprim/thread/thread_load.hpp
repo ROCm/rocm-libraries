@@ -93,7 +93,8 @@ HIPCUB_ASM_THREAD_LOAD_GROUP(LOAD_CS, "", "");
 #endif
 
 template<CacheLoadModifier MODIFIER = LOAD_DEFAULT, typename InputIteratorT>
-HIPCUB_DEVICE __forceinline__ typename std::iterator_traits<InputIteratorT>::value_type ThreadLoad(InputIteratorT itr)
+HIPCUB_DEVICE __forceinline__
+typename std::iterator_traits<InputIteratorT>::value_type ThreadLoad(InputIteratorT itr)
 {
     using T  = typename std::iterator_traits<InputIteratorT>::value_type;
     T retval = ThreadLoad<MODIFIER>(&(*itr));
@@ -101,7 +102,8 @@ HIPCUB_DEVICE __forceinline__ typename std::iterator_traits<InputIteratorT>::val
 }
 
 template<CacheLoadModifier MODIFIER = LOAD_DEFAULT, typename T>
-HIPCUB_DEVICE __forceinline__ T ThreadLoad(T * ptr)
+HIPCUB_DEVICE __forceinline__ T
+ThreadLoad(T * ptr)
 {
     return AsmThreadLoad<MODIFIER, T>(ptr);
 }

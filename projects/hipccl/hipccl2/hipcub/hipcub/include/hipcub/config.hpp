@@ -65,9 +65,36 @@
 #define HIPCUB_DEVICE __device__
 #define HIPCUB_HOST_DEVICE __host__ __device__
 #define HIPCUB_SHARED_MEMORY __shared__
-// TODO: This paremeters should be tuned for NAVI.
-#ifndef HIPCUB_DEFAULT_MIN_WARPS_PER_EU
-    #define HIPCUB_DEFAULT_MIN_WARPS_PER_EU 1
+
+BEGIN_HIPCUB_NAMESPACE
+
+/// hipCUB error reporting macro (prints error messages to stderr)
+#if (defined(DEBUG) || defined(_DEBUG)) && !defined(HIPCUB_STDERR)
+    #define HIPCUB_STDERR
 #endif
+
+inline
+hipError_t Debug(
+    hipError_t      error,
+    const char*     filename,
+    int             line)
+{
+    (void)filename;
+    (void)line;
+#ifdef HIPCUB_STDERR
+    if (error)
+    {
+        fprintf(stderr, "HIP error %d [%s, %d]: %s\n", error, filename, line, hipGetErrorString(error));
+        fflush(stderr);
+    }
+#endif
+    return error;
+}
+
+#ifndef HipcubDebug
+    #define HipcubDebug(e) hipcub::Debug((hipError_t) (e), __FILE__, __LINE__)
+#endif
+
+END_HIPCUB_NAMESPACE
 
 #endif // HIPCUB_CONFIG_HPP_

@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2020, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2021, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -30,6 +30,7 @@
 #ifndef HIPCUB_ROCPRIM_UTIL_TYPE_HPP_
 #define HIPCUB_ROCPRIM_UTIL_TYPE_HPP_
 
+#include <limits>
 #include <type_traits>
 
 #include "../../config.hpp"
@@ -179,6 +180,434 @@ DivideAndRoundUp(NumeratorT n, DenominatorT d)
   // Static cast to undo integral promotion.
   return static_cast<NumeratorT>(n / d + (n % d != 0 ? 1 : 0));
 }
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS    // Do not document
+
+/******************************************************************************
+ * Size and alignment
+ ******************************************************************************/
+
+/// Structure alignment
+template <typename T>
+struct AlignBytes
+{
+    struct Pad
+    {
+        T       val;
+        char    byte;
+    };
+
+    enum
+    {
+        /// The "true CUDA" alignment of T in bytes
+        ALIGN_BYTES = sizeof(Pad) - sizeof(T)
+    };
+
+    /// The "truly aligned" type
+    typedef T Type;
+};
+
+// Specializations where host C++ compilers (e.g., 32-bit Windows) may disagree
+// with device C++ compilers (EDG) on types passed as template parameters through
+// kernel functions
+
+#define __HIPCUB_ALIGN_BYTES(t, b)         \
+    template <> struct AlignBytes<t>    \
+    { enum { ALIGN_BYTES = b }; typedef __align__(b) t Type; };
+
+__HIPCUB_ALIGN_BYTES(short4, 8)
+__HIPCUB_ALIGN_BYTES(ushort4, 8)
+__HIPCUB_ALIGN_BYTES(int2, 8)
+__HIPCUB_ALIGN_BYTES(uint2, 8)
+__HIPCUB_ALIGN_BYTES(long long, 8)
+__HIPCUB_ALIGN_BYTES(unsigned long long, 8)
+__HIPCUB_ALIGN_BYTES(float2, 8)
+__HIPCUB_ALIGN_BYTES(double, 8)
+#ifdef _WIN32
+    __HIPCUB_ALIGN_BYTES(long2, 8)
+    __HIPCUB_ALIGN_BYTES(ulong2, 8)
+#else
+    __HIPCUB_ALIGN_BYTES(long2, 16)
+    __HIPCUB_ALIGN_BYTES(ulong2, 16)
+#endif
+__HIPCUB_ALIGN_BYTES(int4, 16)
+__HIPCUB_ALIGN_BYTES(uint4, 16)
+__HIPCUB_ALIGN_BYTES(float4, 16)
+__HIPCUB_ALIGN_BYTES(long4, 16)
+__HIPCUB_ALIGN_BYTES(ulong4, 16)
+__HIPCUB_ALIGN_BYTES(longlong2, 16)
+__HIPCUB_ALIGN_BYTES(ulonglong2, 16)
+__HIPCUB_ALIGN_BYTES(double2, 16)
+__HIPCUB_ALIGN_BYTES(longlong4, 16)
+__HIPCUB_ALIGN_BYTES(ulonglong4, 16)
+__HIPCUB_ALIGN_BYTES(double4, 16)
+
+template <typename T> struct AlignBytes<volatile T> : AlignBytes<T> {};
+template <typename T> struct AlignBytes<const T> : AlignBytes<T> {};
+template <typename T> struct AlignBytes<const volatile T> : AlignBytes<T> {};
+
+
+/// Unit-words of data movement
+template <typename T>
+struct UnitWord
+{
+    enum {
+        ALIGN_BYTES = AlignBytes<T>::ALIGN_BYTES
+    };
+
+    template <typename Unit>
+    struct IsMultiple
+    {
+        enum {
+            UNIT_ALIGN_BYTES    = AlignBytes<Unit>::ALIGN_BYTES,
+            IS_MULTIPLE         = (sizeof(T) % sizeof(Unit) == 0) && (int(ALIGN_BYTES) % int(UNIT_ALIGN_BYTES) == 0)
+        };
+    };
+
+    /// Biggest shuffle word that T is a whole multiple of and is not larger than the alignment of T
+    typedef typename If<IsMultiple<int>::IS_MULTIPLE,
+        unsigned int,
+        typename If<IsMultiple<short>::IS_MULTIPLE,
+            unsigned short,
+            unsigned char>::Type>::Type         ShuffleWord;
+
+    /// Biggest volatile word that T is a whole multiple of and is not larger than the alignment of T
+    typedef typename If<IsMultiple<long long>::IS_MULTIPLE,
+        unsigned long long,
+        ShuffleWord>::Type                      VolatileWord;
+
+    /// Biggest memory-access word that T is a whole multiple of and is not larger than the alignment of T
+    typedef typename If<IsMultiple<longlong2>::IS_MULTIPLE,
+        ulonglong2,
+        VolatileWord>::Type                     DeviceWord;
+
+    /// Biggest texture reference word that T is a whole multiple of and is not larger than the alignment of T
+    typedef typename If<IsMultiple<int4>::IS_MULTIPLE,
+        uint4,
+        typename If<IsMultiple<int2>::IS_MULTIPLE,
+            uint2,
+            ShuffleWord>::Type>::Type           TextureWord;
+};
+
+
+// float2 specialization workaround (for SM10-SM13)
+template <>
+struct UnitWord <float2>
+{
+    typedef int         ShuffleWord;
+    typedef unsigned long long   VolatileWord;
+    typedef unsigned long long   DeviceWord;
+    typedef float2      TextureWord;
+};
+
+// float4 specialization workaround (for SM10-SM13)
+template <>
+struct UnitWord <float4>
+{
+    typedef int         ShuffleWord;
+    typedef unsigned long long  VolatileWord;
+    typedef ulonglong2          DeviceWord;
+    typedef float4              TextureWord;
+};
+
+
+// char2 specialization workaround (for SM10-SM13)
+template <>
+struct UnitWord <char2>
+{
+    typedef unsigned short      ShuffleWord;
+    typedef unsigned short      VolatileWord;
+    typedef unsigned short      DeviceWord;
+    typedef unsigned short      TextureWord;
+};
+
+
+template <typename T> struct UnitWord<volatile T> : UnitWord<T> {};
+template <typename T> struct UnitWord<const T> : UnitWord<T> {};
+template <typename T> struct UnitWord<const volatile T> : UnitWord<T> {};
+
+
+#endif // DOXYGEN_SHOULD_SKIP_THIS
+
+
+
+
+/******************************************************************************
+ * Wrapper types
+ ******************************************************************************/
+
+/**
+ * \brief A storage-backing wrapper that allows types with non-trivial constructors to be aliased in unions
+ */
+template <typename T>
+struct Uninitialized
+{
+    /// Biggest memory-access word that T is a whole multiple of and is not larger than the alignment of T
+    typedef typename UnitWord<T>::DeviceWord DeviceWord;
+
+    enum
+    {
+        WORDS = sizeof(T) / sizeof(DeviceWord)
+    };
+
+    /// Backing storage
+    DeviceWord storage[WORDS];
+
+    /// Alias
+    __host__ __device__ __forceinline__ T& Alias()
+    {
+        return reinterpret_cast<T&>(*this);
+    }
+};
+
+
+/******************************************************************************
+ * Simple type traits utilities.
+ *
+ * For example:
+ *     Traits<int>::CATEGORY             // SIGNED_INTEGER
+ *     Traits<NullType>::NULL_TYPE       // true
+ *     Traits<uint4>::CATEGORY           // NOT_A_NUMBER
+ *     Traits<uint4>::PRIMITIVE;         // false
+ *
+ ******************************************************************************/
+
+ #ifndef DOXYGEN_SHOULD_SKIP_THIS    // Do not document
+
+/**
+ * \brief Basic type traits categories
+ */
+enum Category
+{
+    NOT_A_NUMBER,
+    SIGNED_INTEGER,
+    UNSIGNED_INTEGER,
+    FLOATING_POINT
+};
+
+
+/**
+ * \brief Basic type traits
+ */
+template <Category _CATEGORY, bool _PRIMITIVE, bool _NULL_TYPE, typename _UnsignedBits, typename T>
+struct BaseTraits
+{
+    /// Category
+    static const Category CATEGORY      = _CATEGORY;
+    enum
+    {
+        PRIMITIVE       = _PRIMITIVE,
+        NULL_TYPE       = _NULL_TYPE,
+    };
+};
+
+
+/**
+ * Basic type traits (unsigned primitive specialization)
+ */
+template <typename _UnsignedBits, typename T>
+struct BaseTraits<UNSIGNED_INTEGER, true, false, _UnsignedBits, T>
+{
+    typedef _UnsignedBits       UnsignedBits;
+
+    static const Category       CATEGORY    = UNSIGNED_INTEGER;
+    static const UnsignedBits   LOWEST_KEY  = UnsignedBits(0);
+    static const UnsignedBits   MAX_KEY     = UnsignedBits(-1);
+
+    enum
+    {
+        PRIMITIVE       = true,
+        NULL_TYPE       = false,
+    };
+
+
+    static __device__ __forceinline__ UnsignedBits TwiddleIn(UnsignedBits key)
+    {
+        return key;
+    }
+
+    static __device__ __forceinline__ UnsignedBits TwiddleOut(UnsignedBits key)
+    {
+        return key;
+    }
+
+    static __host__ __device__ __forceinline__ T Max()
+    {
+        UnsignedBits retval = MAX_KEY;
+        return reinterpret_cast<T&>(retval);
+    }
+
+    static __host__ __device__ __forceinline__ T Lowest()
+    {
+        UnsignedBits retval = LOWEST_KEY;
+        return reinterpret_cast<T&>(retval);
+    }
+};
+
+
+/**
+ * Basic type traits (signed primitive specialization)
+ */
+template <typename _UnsignedBits, typename T>
+struct BaseTraits<SIGNED_INTEGER, true, false, _UnsignedBits, T>
+{
+    typedef _UnsignedBits       UnsignedBits;
+
+    static const Category       CATEGORY    = SIGNED_INTEGER;
+    static const UnsignedBits   HIGH_BIT    = UnsignedBits(1) << ((sizeof(UnsignedBits) * 8) - 1);
+    static const UnsignedBits   LOWEST_KEY  = HIGH_BIT;
+    static const UnsignedBits   MAX_KEY     = UnsignedBits(-1) ^ HIGH_BIT;
+
+    enum
+    {
+        PRIMITIVE       = true,
+        NULL_TYPE       = false,
+    };
+
+    static __device__ __forceinline__ UnsignedBits TwiddleIn(UnsignedBits key)
+    {
+        return key ^ HIGH_BIT;
+    };
+
+    static __device__ __forceinline__ UnsignedBits TwiddleOut(UnsignedBits key)
+    {
+        return key ^ HIGH_BIT;
+    };
+
+    static __host__ __device__ __forceinline__ T Max()
+    {
+        UnsignedBits retval = MAX_KEY;
+        return reinterpret_cast<T&>(retval);
+    }
+
+    static __host__ __device__ __forceinline__ T Lowest()
+    {
+        UnsignedBits retval = LOWEST_KEY;
+        return reinterpret_cast<T&>(retval);
+    }
+};
+
+template <typename _T>
+struct FpLimits;
+
+template <>
+struct FpLimits<float>
+{
+    static __host__ __device__ __forceinline__ float Max() {
+        return std::numeric_limits<float>::max();
+    }
+
+    static __host__ __device__ __forceinline__ float Lowest() {
+        return std::numeric_limits<float>::max() * float(-1);
+    }
+};
+
+template <>
+struct FpLimits<double>
+{
+    static __host__ __device__ __forceinline__ double Max() {
+        return std::numeric_limits<double>::max();
+    }
+
+    static __host__ __device__ __forceinline__ double Lowest() {
+        return std::numeric_limits<double>::max()  * double(-1);
+    }
+};
+
+
+#if (__CUDACC_VER_MAJOR__ >= 9 || CUDA_VERSION >= 9000) && !__NVCOMPILER_CUDA__
+template <>
+struct FpLimits<__half>
+{
+    static __host__ __device__ __forceinline__ __half Max() {
+        unsigned short max_word = 0x7BFF;
+        return reinterpret_cast<__half&>(max_word);
+    }
+
+    static __host__ __device__ __forceinline__ __half Lowest() {
+        unsigned short lowest_word = 0xFBFF;
+        return reinterpret_cast<__half&>(lowest_word);
+    }
+};
+#endif
+
+
+/**
+ * Basic type traits (fp primitive specialization)
+ */
+template <typename _UnsignedBits, typename T>
+struct BaseTraits<FLOATING_POINT, true, false, _UnsignedBits, T>
+{
+    typedef _UnsignedBits       UnsignedBits;
+
+    static const Category       CATEGORY    = FLOATING_POINT;
+    static const UnsignedBits   HIGH_BIT    = UnsignedBits(1) << ((sizeof(UnsignedBits) * 8) - 1);
+    static const UnsignedBits   LOWEST_KEY  = UnsignedBits(-1);
+    static const UnsignedBits   MAX_KEY     = UnsignedBits(-1) ^ HIGH_BIT;
+
+    enum
+    {
+        PRIMITIVE       = true,
+        NULL_TYPE       = false,
+    };
+
+    static __device__ __forceinline__ UnsignedBits TwiddleIn(UnsignedBits key)
+    {
+        UnsignedBits mask = (key & HIGH_BIT) ? UnsignedBits(-1) : HIGH_BIT;
+        return key ^ mask;
+    };
+
+    static __device__ __forceinline__ UnsignedBits TwiddleOut(UnsignedBits key)
+    {
+        UnsignedBits mask = (key & HIGH_BIT) ? HIGH_BIT : UnsignedBits(-1);
+        return key ^ mask;
+    };
+
+    static __host__ __device__ __forceinline__ T Max() {
+        return FpLimits<T>::Max();
+    }
+
+    static __host__ __device__ __forceinline__ T Lowest() {
+        return FpLimits<T>::Lowest();
+    }
+};
+
+
+/**
+ * \brief Numeric type traits
+ */
+template <typename T> struct NumericTraits :            BaseTraits<NOT_A_NUMBER, false, false, T, T> {};
+
+template <> struct NumericTraits<NullType> :            BaseTraits<NOT_A_NUMBER, false, true, NullType, NullType> {};
+
+template <> struct NumericTraits<char> :                BaseTraits<(std::numeric_limits<char>::is_signed) ? SIGNED_INTEGER : UNSIGNED_INTEGER, true, false, unsigned char, char> {};
+template <> struct NumericTraits<signed char> :         BaseTraits<SIGNED_INTEGER, true, false, unsigned char, signed char> {};
+template <> struct NumericTraits<short> :               BaseTraits<SIGNED_INTEGER, true, false, unsigned short, short> {};
+template <> struct NumericTraits<int> :                 BaseTraits<SIGNED_INTEGER, true, false, unsigned int, int> {};
+template <> struct NumericTraits<long> :                BaseTraits<SIGNED_INTEGER, true, false, unsigned long, long> {};
+template <> struct NumericTraits<long long> :           BaseTraits<SIGNED_INTEGER, true, false, unsigned long long, long long> {};
+
+template <> struct NumericTraits<unsigned char> :       BaseTraits<UNSIGNED_INTEGER, true, false, unsigned char, unsigned char> {};
+template <> struct NumericTraits<unsigned short> :      BaseTraits<UNSIGNED_INTEGER, true, false, unsigned short, unsigned short> {};
+template <> struct NumericTraits<unsigned int> :        BaseTraits<UNSIGNED_INTEGER, true, false, unsigned int, unsigned int> {};
+template <> struct NumericTraits<unsigned long> :       BaseTraits<UNSIGNED_INTEGER, true, false, unsigned long, unsigned long> {};
+template <> struct NumericTraits<unsigned long long> :  BaseTraits<UNSIGNED_INTEGER, true, false, unsigned long long, unsigned long long> {};
+
+template <> struct NumericTraits<float> :               BaseTraits<FLOATING_POINT, true, false, unsigned int, float> {};
+template <> struct NumericTraits<double> :              BaseTraits<FLOATING_POINT, true, false, unsigned long long, double> {};
+#if (__CUDACC_VER_MAJOR__ >= 9 || CUDA_VERSION >= 9000) && !__NVCOMPILER_CUDA__
+    template <> struct NumericTraits<__half> :          BaseTraits<FLOATING_POINT, true, false, unsigned short, __half> {};
+#endif
+
+template <> struct NumericTraits<bool> :                BaseTraits<UNSIGNED_INTEGER, true, false, typename UnitWord<bool>::VolatileWord, bool> {};
+
+/**
+ * \brief Type traits
+ */
+template <typename T>
+struct Traits : NumericTraits<typename RemoveQualifiers<T>::Type> {};
+
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 END_HIPCUB_NAMESPACE
 

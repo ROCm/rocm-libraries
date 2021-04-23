@@ -55,27 +55,35 @@ typedef ::testing::Types<
     params<int, 8U>,
     params<int, 16U>,
     params<int, 32U>,
+#ifdef __HIP_PLATFORM_HCC__
     params<int, 64U>,
+#endif
     // Float
     params<float, 2U>,
     params<float, 4U>,
     params<float, 8U>,
     params<float, 16U>,
     params<float, 32U>,
+#ifdef __HIP_PLATFORM_HCC__
     params<float, 64U>,
+#endif
     // shared memory scan
     // Integer
     params<int, 3U>,
     params<int, 7U>,
     params<int, 15U>,
+#ifdef __HIP_PLATFORM_HCC__
     params<int, 37U>,
     params<int, 61U>,
+#endif
     // Float
     params<float, 3U>,
     params<float, 7U>,
-    params<float, 15U>,
-    params<float, 37U>,
+    params<float, 15U>
+#ifdef __HIP_PLATFORM_HCC__
+    ,params<float, 37U>,
     params<float, 61U>
+#endif
 > HipcubWarpScanTestParams;
 
 TYPED_TEST_SUITE(HipcubWarpScanTests, HipcubWarpScanTestParams);
