@@ -74,8 +74,8 @@ if(HIP_COMPILER STREQUAL "hcc" OR HIP_COMPILER STREQUAL "clang")
     message(STATUS "Downloading and building rocprim.")
     download_project(
       PROJ                rocprim
-      GIT_REPOSITORY      https://github.com/ROCmSoftwarePlatform/rocPRIM.git
-      GIT_TAG             develop
+      GIT_REPOSITORY      git@projects.streamhpc.com:amd/rocPRIM.git
+      GIT_TAG             hipcub_update_1.11.0
       INSTALL_DIR         ${CMAKE_CURRENT_BINARY_DIR}/deps/rocprim
       CMAKE_ARGS          -DBUILD_TEST=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm
       LOG_DOWNLOAD        TRUE
@@ -85,7 +85,7 @@ if(HIP_COMPILER STREQUAL "hcc" OR HIP_COMPILER STREQUAL "clang")
       BUILD_PROJECT       TRUE
       UPDATE_DISCONNECTED TRUE # Never update automatically from the remote repository
     )
-    find_package(rocprim REQUIRED CONFIG PATHS ${CMAKE_CURRENT_BINARY_DIR}/deps/rocprim)
+    find_package(rocprim REQUIRED CONFIG PATHS ${CMAKE_CURRENT_BINARY_DIR}/deps/rocprim NO_DEFAULT_PATH)
   endif()
 endif()
 

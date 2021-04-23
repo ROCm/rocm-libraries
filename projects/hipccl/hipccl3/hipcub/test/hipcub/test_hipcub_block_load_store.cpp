@@ -497,7 +497,7 @@ template <
     hipcub::BlockStoreAlgorithm StoreMethod,
     unsigned int BlockSize,
     unsigned int ItemsPerThread>
-__launch_bounds__ (BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__ (BlockSize)
 __global__ void load_store_guarded_kernel(
     InputIteratorT    d_in,
     OutputIteratorT   d_out_unguarded,

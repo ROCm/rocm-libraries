@@ -1,0 +1,10 @@
+
+add_hipcub_example("hipcub.example.DevicePartitionFlagged"            example_device_partition_flagged.cpp)
+add_hipcub_example("hipcub.example.DevicePartitionIf"                 example_device_partition_if.cpp)
+add_hipcub_example("hipcub.example.DeviceRadixSort"                   example_device_radix_sort.cpp)
+add_hipcub_example("hipcub.example.DeviceReduce"                      example_device_reduce.cpp)
+add_hipcub_example("hipcub.example.DeviceScan"                        example_device_scan.cpp)
+add_hipcub_example("hipcub.example.DeviceSelectFlagged"               example_device_select_flagged.cpp)
+add_hipcub_example("hipcub.example.DeviceSelectIf"                    example_device_select_if.cpp)
+add_hipcub_example("hipcub.example.DeviceSelectUnique"                example_device_select_unique.cpp)
+add_hipcub_example("hipcub.example.DeviceSortFindNonTrivalRuns.cpp"   example_device_sort_find_non_trivial_runs.cpp)

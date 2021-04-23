@@ -30,12 +30,12 @@
 #ifndef HIPCUB_ROCPRIM_DEVICE_DEVICE_SCAN_HPP_
 #define HIPCUB_ROCPRIM_DEVICE_DEVICE_SCAN_HPP_
 
+#include <iostream>
 #include "../../../config.hpp"
 
 #include "../thread/thread_operators.hpp"
 
 #include <rocprim/device/device_scan.hpp>
-
 BEGIN_HIPCUB_NAMESPACE
 
 class DeviceScan

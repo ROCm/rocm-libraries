@@ -39,7 +39,7 @@ template<
     unsigned int Trials
 >
 __global__
-__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void kernel(const T* input, T* output)
 {
     Runner::template run<T, BlockSize, ItemsPerThread, Trials>(input, output);
@@ -204,10 +204,15 @@ int main(int argc, char *argv[])
     add_benchmarks<reduce_uwr_t>(
         benchmarks, "reduce", "BLOCK_REDUCE_WARP_REDUCTIONS", stream, size
     );
-    // reduce then scan
+    // raking reduce
     using reduce_rr_t = reduce<hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING>;
     add_benchmarks<reduce_rr_t>(
         benchmarks, "reduce", "BLOCK_REDUCE_RAKING", stream, size
+    );
+    // raking reduce commutative only
+    using reduce_rrco_t = reduce<hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY>;
+    add_benchmarks<reduce_rrco_t>(
+        benchmarks, "reduce", "BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY", stream, size
     );
 
     // Use manual timing
