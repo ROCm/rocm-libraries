@@ -42,7 +42,6 @@
 #include "iterator/counting_input_iterator.hpp"
 #include "iterator/tex_obj_input_iterator.hpp"
 #include "iterator/transform_input_iterator.hpp"
-#include "iterator/discard_output_iterator.hpp"
 
 // Warp
 #include "warp/warp_reduce.hpp"
