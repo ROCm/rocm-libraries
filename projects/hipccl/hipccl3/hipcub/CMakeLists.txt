@@ -59,7 +59,7 @@ include( ROCMCheckTargetIds OPTIONAL )
 #Set the AMDGPU_TARGETS with backward compatiblity
 if(COMMAND rocm_check_target_ids)
    rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-       TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx1030"
+       TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+"
    )
 else()
   # Use target ID syntax if supported for AMDGPU_TARGETS
@@ -72,7 +72,7 @@ else()
   string(REGEX MATCH ".mcode\-object\-version" TARGET_ID_SUPPORT ${CXX_OUTPUT})
   endif()
   if(TARGET_ID_SUPPORT)
-      set(DEFAULT_AMDGPU_TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx1030")
+      set(DEFAULT_AMDGPU_TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-")
   else()
       set(DEFAULT_AMDGPU_TARGETS "gfx803;gfx900;gfx906;gfx908")
   endif()
