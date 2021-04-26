@@ -91,7 +91,7 @@ struct histogram_config_900
 
 // TODO: We need to update these parameters
 template<class Sample, unsigned int Channels, unsigned int ActiveChannels>
-struct histogram_config_910
+struct histogram_config_90a
 {
     static constexpr unsigned int item_scale = ::rocprim::detail::ceiling_div(sizeof(Sample), sizeof(int));
 
@@ -100,7 +100,7 @@ struct histogram_config_910
 
 // TODO: We need to update these parameters
 template<class Sample, unsigned int Channels, unsigned int ActiveChannels>
-struct histogram_config_1031
+struct histogram_config_1030
 {
     static constexpr unsigned int item_scale = ::rocprim::detail::ceiling_div(sizeof(Sample), sizeof(int));
 
@@ -113,8 +113,8 @@ struct default_histogram_config
         TargetArch,
         select_arch_case<803, histogram_config_803<Sample, Channels, ActiveChannels> >,
         select_arch_case<900, histogram_config_900<Sample, Channels, ActiveChannels> >,
-        select_arch_case<910, histogram_config_910<Sample, Channels, ActiveChannels> >,
-        select_arch_case<1031, histogram_config_1031<Sample, Channels, ActiveChannels> >,
+        select_arch_case<ROCPRIM_ARCH_90a, histogram_config_90a<Sample, Channels, ActiveChannels> >,
+        select_arch_case<1030, histogram_config_1030<Sample, Channels, ActiveChannels> >,
         histogram_config_900<Sample, Channels, ActiveChannels>
     > { };
 

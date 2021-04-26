@@ -60,7 +60,7 @@ struct transform_config_900
 };
 
 template<class Value>
-struct transform_config_910
+struct transform_config_90a
 {
     static constexpr unsigned int item_scale =
         ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
@@ -69,7 +69,7 @@ struct transform_config_910
 };
 
 template<class Value>
-struct transform_config_1031
+struct transform_config_1030
 {
     static constexpr unsigned int item_scale =
         ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
@@ -83,8 +83,8 @@ struct default_transform_config
         TargetArch,
         select_arch_case<803, transform_config_803<Value>>,
         select_arch_case<900, transform_config_900<Value>>,
-        select_arch_case<910, transform_config_910<Value>>,
-        select_arch_case<1031, transform_config_1031<Value>>,
+        select_arch_case<ROCPRIM_ARCH_90a, transform_config_90a<Value>>,
+        select_arch_case<1030, transform_config_1030<Value>>,
         transform_config_900<Value>
     > { };
 

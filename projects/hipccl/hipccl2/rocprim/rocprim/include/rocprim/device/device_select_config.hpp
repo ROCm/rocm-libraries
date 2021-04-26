@@ -98,7 +98,7 @@ struct select_config_900
 };
 
 template<class Value>
-struct select_config_910
+struct select_config_90a
 {
     static constexpr unsigned int item_scale =
         ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
@@ -113,7 +113,7 @@ struct select_config_910
 };
 
 template<class Value>
-struct select_config_1031
+struct select_config_1030
 {
     static constexpr unsigned int item_scale =
         ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
@@ -134,8 +134,8 @@ struct default_select_config
         TargetArch,
         select_arch_case<803, select_config_803<Value>>,
         select_arch_case<900, select_config_900<Value>>,
-        select_arch_case<910, select_config_900<Value>>,
-        select_arch_case<1031, select_config_1031<Value>>,
+        select_arch_case<ROCPRIM_ARCH_90a, select_config_90a<Value>>,
+        select_arch_case<1030, select_config_1030<Value>>,
         select_config_803<Value>
     > { };
 
