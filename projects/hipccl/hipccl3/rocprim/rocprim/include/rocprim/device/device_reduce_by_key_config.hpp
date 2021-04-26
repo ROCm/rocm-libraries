@@ -86,9 +86,27 @@ struct reduce_by_key_config_900
     >;
 };
 
-// TODO: Need to update
+// TODO: We need to update these parameters
 template<class Key, class Value>
-struct reduce_by_key_config_1031
+struct reduce_by_key_config_90a
+{
+    static constexpr unsigned int item_scale =
+        ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Key) + sizeof(Value), 2 * sizeof(int));
+
+    using scan = kernel_config<256, 2>;
+
+    using type = select_type<
+        select_type_case<
+            (sizeof(Key) <= 8 && sizeof(Value) <= 8),
+            reduce_by_key_config<scan, kernel_config<256, 10> >
+        >,
+        reduce_by_key_config<scan, kernel_config<limit_block_size<256U, sizeof(Key) + sizeof(Value), ROCPRIM_WARP_SIZE_64>::value, ::rocprim::max(1u, 15u / item_scale)> >
+    >;
+};
+
+// TODO: We need to update these parameters
+template<class Key, class Value>
+struct reduce_by_key_config_1030
 {
     static constexpr unsigned int item_scale =
         ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Key) + sizeof(Value), 2 * sizeof(int));
@@ -110,7 +128,8 @@ struct default_reduce_by_key_config
         TargetArch,
         select_arch_case<803, reduce_by_key_config_803<Key, Value> >,
         select_arch_case<900, reduce_by_key_config_900<Key, Value> >,
-        select_arch_case<1031, reduce_by_key_config_1031<Key, Value> >,
+        select_arch_case<ROCPRIM_ARCH_90a, reduce_by_key_config_90a<Key, Value> >,
+        select_arch_case<1030, reduce_by_key_config_1030<Key, Value> >,
         reduce_by_key_config_900<Key, Value>
     > { };
 
