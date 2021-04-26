@@ -1,5 +1,5 @@
 /******************************************************************************
- * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
+ * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
  * Modifications Copyright (c) 2017-2020, Advanced Micro Devices, Inc.  All rights reserved.
  *
@@ -30,9 +30,18 @@
 #ifndef HIPCUB_ROCPRIM_ITERATOR_ARG_INDEX_INPUT_ITERATOR_HPP_
 #define HIPCUB_ROCPRIM_ITERATOR_ARG_INDEX_INPUT_ITERATOR_HPP_
 
+#include <iterator>
+#include <iostream>
+
 #include "../../../config.hpp"
 
 #include <rocprim/iterator/arg_index_iterator.hpp>
+
+#if (THRUST_VERSION >= 100700)
+    // This iterator is compatible with Thrust API 1.7 and newer
+    #include <thrust/iterator/iterator_facade.h>
+    #include <thrust/iterator/iterator_traits.h>
+#endif // THRUST_VERSION
 
 BEGIN_HIPCUB_NAMESPACE
 
