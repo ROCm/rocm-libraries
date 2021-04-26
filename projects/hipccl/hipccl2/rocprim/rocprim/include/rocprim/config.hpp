@@ -53,7 +53,8 @@
       defined(__gfx904__) || \
       defined(__gfx906__) || \
       defined(__gfx908__) || \
-      defined(__gfx909__) ) && \
+      defined(__gfx909__) || \
+      defined(__gfx90a__) ) && \
       !defined(ROCPRIM_DISABLE_DPP)
     #define ROCPRIM_DETAIL_USE_DPP true
 #else
