@@ -35,8 +35,6 @@
 
 #include "../../../config.hpp"
 
-#if (CUDART_VERSION >= 5050) || defined(DOXYGEN_ACTIVE)  // This iterator is compatible with CUDA 5.5 and newer
-
 #if (THRUST_VERSION >= 100700)    // This iterator is compatible with Thrust API 1.7 and newer
     #include <thrust/iterator/iterator_facade.h>
     #include <thrust/iterator/iterator_traits.h>
@@ -87,4 +85,3 @@ class TexRefInputIterator : public ::rocprim::texture_cache_iterator<T, OffsetT>
 END_HIPCUB_NAMESPACE
 
 #endif // HIPCUB_ROCPRIM_ITERATOR_TEX_OBJ_INPUT_ITERATOR_HPP_
-
