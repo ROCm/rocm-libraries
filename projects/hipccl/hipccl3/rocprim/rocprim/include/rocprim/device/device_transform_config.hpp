@@ -59,12 +59,32 @@ struct transform_config_900
     using type = transform_config<256, ::rocprim::max(1u, 16u / item_scale)>;
 };
 
+template<class Value>
+struct transform_config_910
+{
+    static constexpr unsigned int item_scale =
+        ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
+
+    using type = transform_config<256, ::rocprim::max(1u, 16u / item_scale)>;
+};
+
+template<class Value>
+struct transform_config_1031
+{
+    static constexpr unsigned int item_scale =
+        ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
+
+    using type = transform_config<256, ::rocprim::max(1u, 16u / item_scale)>;
+};
+
 template<unsigned int TargetArch, class Value>
 struct default_transform_config
     : select_arch<
         TargetArch,
         select_arch_case<803, transform_config_803<Value>>,
         select_arch_case<900, transform_config_900<Value>>,
+        select_arch_case<910, transform_config_910<Value>>,
+        select_arch_case<1031, transform_config_1031<Value>>,
         transform_config_900<Value>
     > { };
 

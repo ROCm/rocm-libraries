@@ -84,6 +84,21 @@ struct reduce_config_900
     >;
 };
 
+// TODO: We need to update these parameters
+template<class Value>
+struct reduce_config_910
+{
+    static constexpr unsigned int item_scale =
+        ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
+
+    using type = reduce_config<
+        limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
+        ::rocprim::max(1u, 16u / item_scale),
+        ::rocprim::block_reduce_algorithm::using_warp_reduce
+    >;
+};
+
+// TODO: We need to update these parameters
 template<class Value>
 struct reduce_config_1031
 {
@@ -103,6 +118,7 @@ struct default_reduce_config
         TargetArch,
         select_arch_case<803, reduce_config_803<Value>>,
         select_arch_case<900, reduce_config_900<Value>>,
+        select_arch_case<910, reduce_config_910<Value>>,
         select_arch_case<1031, reduce_config_1031<Value>>,
         reduce_config_900<Value>
     > { };
