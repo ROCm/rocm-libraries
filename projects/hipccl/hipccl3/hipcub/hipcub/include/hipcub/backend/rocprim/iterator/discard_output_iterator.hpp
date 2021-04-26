@@ -30,12 +30,17 @@
 #ifndef HIPCUB_ROCPRIM_ITERATOR_DISCARD_OUTPUT_ITERATOR_HPP_
 #define HIPCUB_ROCPRIM_ITERATOR_DISCARD_OUTPUT_ITERATOR_HPP_
 
+#include <iterator>
+#include <iostream>
+
 #include "../../../config.hpp"
 
-// TODO: Check, if we can update rocPRIM, to use the rocPRIM discard iterator.
-//#include <rocprim/iterator/discard_iterator.hpp>
-
 BEGIN_HIPCUB_NAMESPACE
+#if (THRUST_VERSION >= 100700)
+    // This iterator is compatible with Thrust API 1.7 and newer
+    #include <thrust/iterator/iterator_facade.h>
+    #include <thrust/iterator/iterator_traits.h>
+#endif // THRUST_VERSION
 
 /**
  * \addtogroup UtilIterator
