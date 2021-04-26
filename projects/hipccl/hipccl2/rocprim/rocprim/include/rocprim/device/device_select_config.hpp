@@ -98,6 +98,21 @@ struct select_config_900
 };
 
 template<class Value>
+struct select_config_910
+{
+    static constexpr unsigned int item_scale =
+        ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
+
+    using type = select_config<
+        limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
+        ::rocprim::max(1u, 15u / item_scale),
+        ::rocprim::block_load_method::block_load_transpose,
+        ::rocprim::block_load_method::block_load_transpose,
+        ::rocprim::block_scan_algorithm::using_warp_scan
+    >;
+};
+
+template<class Value>
 struct select_config_1031
 {
     static constexpr unsigned int item_scale =
@@ -119,6 +134,7 @@ struct default_select_config
         TargetArch,
         select_arch_case<803, select_config_803<Value>>,
         select_arch_case<900, select_config_900<Value>>,
+        select_arch_case<910, select_config_900<Value>>,
         select_arch_case<1031, select_config_1031<Value>>,
         select_config_803<Value>
     > { };
