@@ -106,7 +106,7 @@ struct scan_config_900
 
 // TODO: We need to update these parameters
 template<class Value>
-struct scan_config_910
+struct scan_config_90a
 {
     static constexpr unsigned int item_scale =
         ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
@@ -123,7 +123,7 @@ struct scan_config_910
 
 // TODO: We need to update these parameters
 template<class Value>
-struct scan_config_1031
+struct scan_config_1030
 {
     static constexpr unsigned int item_scale =
         ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
@@ -144,8 +144,8 @@ struct default_scan_config
         TargetArch,
         select_arch_case<803, scan_config_803<Value>>,
         select_arch_case<900, scan_config_900<Value>>,
-        select_arch_case<910, scan_config_910<Value>>,
-        select_arch_case<1031, scan_config_1031<Value>>,
+        select_arch_case<ROCPRIM_ARCH_90a, scan_config_90a<Value>>,
+        select_arch_case<1030, scan_config_1030<Value>>,
         scan_config_900<Value>
     > { };
 

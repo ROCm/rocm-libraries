@@ -136,7 +136,7 @@ struct segmented_radix_sort_config_900<Key, empty_type>
     > { };
 
 template<class Key, class Value>
-struct segmented_radix_sort_config_910
+struct segmented_radix_sort_config_90a
 {
     static constexpr unsigned int item_scale =
         ::rocprim::detail::ceiling_div<unsigned int>(::rocprim::max(sizeof(Key), sizeof(Value)), sizeof(int));
@@ -163,7 +163,7 @@ struct segmented_radix_sort_config_910
 };
 
 template<class Key>
-struct segmented_radix_sort_config_910<Key, empty_type>
+struct segmented_radix_sort_config_90a<Key, empty_type>
     : select_type<
         select_type_case<sizeof(Key) == 1, segmented_radix_sort_config<4, 3, kernel_config<256, 10> > >,
         select_type_case<sizeof(Key) == 2, segmented_radix_sort_config<6, 5, kernel_config<256, 10> > >,
@@ -172,7 +172,7 @@ struct segmented_radix_sort_config_910<Key, empty_type>
     > { };
 
 template<class Key, class Value>
-struct segmented_radix_sort_config_1031
+struct segmented_radix_sort_config_1030
 {
     static constexpr unsigned int item_scale =
         ::rocprim::detail::ceiling_div<unsigned int>(::rocprim::max(sizeof(Key), sizeof(Value)), sizeof(int));
@@ -199,7 +199,7 @@ struct segmented_radix_sort_config_1031
 };
 
 template<class Key>
-struct segmented_radix_sort_config_1031<Key, empty_type>
+struct segmented_radix_sort_config_1030<Key, empty_type>
     : select_type<
         select_type_case<sizeof(Key) == 1, segmented_radix_sort_config<4, 3, kernel_config<256, 10> > >,
         select_type_case<sizeof(Key) == 2, segmented_radix_sort_config<6, 5, kernel_config<256, 10> > >,
@@ -213,8 +213,8 @@ struct default_segmented_radix_sort_config
         TargetArch,
         select_arch_case<803, detail::segmented_radix_sort_config_803<Key, Value> >,
         select_arch_case<900, detail::segmented_radix_sort_config_900<Key, Value> >,
-        select_arch_case<910, detail::segmented_radix_sort_config_900<Key, Value> >,
-        select_arch_case<1031, detail::segmented_radix_sort_config_900<Key, Value> >,
+        select_arch_case<ROCPRIM_ARCH_90a, detail::segmented_radix_sort_config_90a<Key, Value> >,
+        select_arch_case<1030, detail::segmented_radix_sort_config_900<Key, Value> >,
         detail::segmented_radix_sort_config_900<Key, Value>
     > { };
 

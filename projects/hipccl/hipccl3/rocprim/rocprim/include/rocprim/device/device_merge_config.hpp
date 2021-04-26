@@ -90,7 +90,7 @@ struct merge_config_900<Key, empty_type>
 
 // TODO: We need to update these parameters
 template<class Key, class Value>
-struct merge_config_910
+struct merge_config_90a
 {
     static constexpr unsigned int item_scale =
         ::rocprim::detail::ceiling_div<unsigned int>(::rocprim::max(sizeof(Key), sizeof(Value)), sizeof(int));
@@ -100,7 +100,7 @@ struct merge_config_910
 };
 
 template<class Key>
-struct merge_config_910<Key, empty_type>
+struct merge_config_90a<Key, empty_type>
 {
     static constexpr unsigned int item_scale =
         ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Key), sizeof(int));
@@ -115,7 +115,7 @@ struct merge_config_910<Key, empty_type>
 
 // TODO: We need to update these parameters
 template<class Key, class Value>
-struct merge_config_1031
+struct merge_config_1030
 {
     static constexpr unsigned int item_scale =
         ::rocprim::detail::ceiling_div<unsigned int>(::rocprim::max(sizeof(Key), sizeof(Value)), sizeof(int));
@@ -125,7 +125,7 @@ struct merge_config_1031
 };
 
 template<class Key>
-struct merge_config_1031<Key, empty_type>
+struct merge_config_1030<Key, empty_type>
 {
     static constexpr unsigned int item_scale =
         ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Key), sizeof(int));
@@ -144,8 +144,8 @@ struct default_merge_config
         TargetArch,
         select_arch_case<803, merge_config_803<Key, Value>>,
         select_arch_case<900, merge_config_900<Key, Value>>,
-        select_arch_case<910, merge_config_910<Key, Value>>,
-        select_arch_case<1031, merge_config_1031<Key, Value>>,
+        select_arch_case<ROCPRIM_ARCH_90a, merge_config_90a<Key, Value>>,
+        select_arch_case<1030, merge_config_1030<Key, Value>>,
         merge_config_900<Key, Value>
     > { };
 

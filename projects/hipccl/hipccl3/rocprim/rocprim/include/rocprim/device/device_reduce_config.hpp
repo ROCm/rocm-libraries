@@ -86,7 +86,7 @@ struct reduce_config_900
 
 // TODO: We need to update these parameters
 template<class Value>
-struct reduce_config_910
+struct reduce_config_90a
 {
     static constexpr unsigned int item_scale =
         ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
@@ -100,7 +100,7 @@ struct reduce_config_910
 
 // TODO: We need to update these parameters
 template<class Value>
-struct reduce_config_1031
+struct reduce_config_1030
 {
     static constexpr unsigned int item_scale =
         ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
@@ -118,8 +118,8 @@ struct default_reduce_config
         TargetArch,
         select_arch_case<803, reduce_config_803<Value>>,
         select_arch_case<900, reduce_config_900<Value>>,
-        select_arch_case<910, reduce_config_910<Value>>,
-        select_arch_case<1031, reduce_config_1031<Value>>,
+        select_arch_case<ROCPRIM_ARCH_90a, reduce_config_90a<Value>>,
+        select_arch_case<1030, reduce_config_1030<Value>>,
         reduce_config_900<Value>
     > { };
 
