@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2020, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2020, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -27,94 +27,100 @@
  *
  ******************************************************************************/
 
-#ifndef HIPCUB_ROCPRIM_ITERATOR_DISCARD_OUTPUT_ITERATOR_HPP_
-#define HIPCUB_ROCPRIM_ITERATOR_DISCARD_OUTPUT_ITERATOR_HPP_
+#ifndef HIPCUB_ROCPRIM_ITERATOR_CACHE_MODIFIED_OUTPUT_ITERATOR_HPP_
+#define HIPCUB_ROCPRIM_ITERATOR_CACHE_MODIFIED_OUTPUT_ITERATOR_HPP_
 
 #include <iterator>
 #include <iostream>
 
-#include "../../../config.hpp"
+#include "../thread/thread_load.hpp"
+#include "../thread/thread_store.hpp"
+#include "../util_type.hpp"
 
-BEGIN_HIPCUB_NAMESPACE
 #if (THRUST_VERSION >= 100700)
     // This iterator is compatible with Thrust API 1.7 and newer
     #include <thrust/iterator/iterator_facade.h>
     #include <thrust/iterator/iterator_traits.h>
 #endif // THRUST_VERSION
 
-/**
- * \addtogroup UtilIterator
- * @{
- */
 
+BEGIN_HIPCUB_NAMESPACE
 
-/**
- * \brief A discard iterator
- */
-template <typename OffsetT = ptrdiff_t>
-class DiscardOutputIterator
+template <
+    CacheStoreModifier  MODIFIER,
+    typename            ValueType,
+    typename            OffsetT = ptrdiff_t>
+class CacheModifiedOutputIterator
 {
+private:
+
+    // Proxy object
+    struct Reference
+    {
+        ValueType* ptr;
+
+        /// Constructor
+        __host__ __device__ __forceinline__ Reference(ValueType* ptr) : ptr(ptr) {}
+
+        /// Assignment
+        __device__ __forceinline__ ValueType operator =(ValueType val)
+        {
+            ThreadStore<MODIFIER>(ptr, val);
+            return val;
+        }
+    };
+
 public:
 
     // Required iterator traits
-    typedef DiscardOutputIterator   self_type;              ///< My own type
-    typedef OffsetT                 difference_type;        ///< Type to express the result of subtracting one iterator from another
-    typedef void                    value_type;             ///< The type of the element the iterator can point to
-    typedef void                    pointer;                ///< The type of a pointer to an element the iterator can point to
-    typedef void                    reference;              ///< The type of a reference to an element the iterator can point to
-
-#if (THRUST_VERSION >= 100700)
-    // Use Thrust's iterator categories so we can use these iterators in Thrust 1.7 (or newer) methods
-    typedef typename thrust::detail::iterator_facade_category<
-        thrust::any_system_tag,
-        thrust::random_access_traversal_tag,
-        value_type,
-        reference
-      >::type iterator_category;                                        ///< The iterator category
-#else
+    typedef CacheModifiedOutputIterator         self_type;              ///< My own type
+    typedef OffsetT                             difference_type;        ///< Type to express the result of subtracting one iterator from another
+    typedef void                                value_type;             ///< The type of the element the iterator can point to
+    typedef void                                pointer;                ///< The type of a pointer to an element the iterator can point to
+    typedef Reference                           reference;              ///< The type of a reference to an element the iterator can point to
     typedef std::random_access_iterator_tag     iterator_category;      ///< The iterator category
-#endif  // THRUST_VERSION
 
 private:
 
-    OffsetT offset;
+    ValueType* ptr;
 
 public:
 
     /// Constructor
-    __host__ __device__ __forceinline__ DiscardOutputIterator(
-        OffsetT offset = 0)     ///< Base offset
+    template <typename QualifiedValueType>
+    __host__ __device__ __forceinline__ CacheModifiedOutputIterator(
+        QualifiedValueType* ptr)     ///< Native pointer to wrap
     :
-        offset(offset)
+        ptr(const_cast<typename RemoveQualifiers<QualifiedValueType>::Type *>(ptr))
     {}
 
     /// Postfix increment
     __host__ __device__ __forceinline__ self_type operator++(int)
     {
         self_type retval = *this;
-        offset++;
+        ptr++;
         return retval;
     }
+
 
     /// Prefix increment
     __host__ __device__ __forceinline__ self_type operator++()
     {
-        offset++;
+        ptr++;
         return *this;
     }
 
     /// Indirection
-    __host__ __device__ __forceinline__ self_type& operator*()
+    __host__ __device__ __forceinline__ reference operator*() const
     {
-        // return self reference, which can be assigned to anything
-        return *this;
+        return Reference(ptr);
     }
 
     /// Addition
     template <typename Distance>
     __host__ __device__ __forceinline__ self_type operator+(Distance n) const
     {
-        self_type retval(offset + n);
+        self_type retval(ptr + n);
         return retval;
     }
 
@@ -122,7 +128,7 @@ public:
     template <typename Distance>
     __host__ __device__ __forceinline__ self_type& operator+=(Distance n)
     {
-        offset += n;
+        ptr += n;
         return *this;
     }
 
@@ -130,7 +136,7 @@ public:
     template <typename Distance>
     __host__ __device__ __forceinline__ self_type operator-(Distance n) const
     {
-        self_type retval(offset - n);
+        self_type retval(ptr - n);
         return retval;
     }
 
@@ -138,59 +144,43 @@ public:
     template <typename Distance>
     __host__ __device__ __forceinline__ self_type& operator-=(Distance n)
     {
-        offset -= n;
+        ptr -= n;
         return *this;
     }
 
     /// Distance
     __host__ __device__ __forceinline__ difference_type operator-(self_type other) const
     {
-        return offset - other.offset;
+        return ptr - other.ptr;
     }
 
     /// Array subscript
     template <typename Distance>
-    __host__ __device__ __forceinline__ self_type& operator[](Distance)
+    __host__ __device__ __forceinline__ reference operator[](Distance n) const
     {
-        // return self reference, which can be assigned to anything
-        return *this;
+        return Reference(ptr + n);
     }
-
-    /// Structure dereference
-    __host__ __device__ __forceinline__ pointer operator->()
-    {
-        return;
-    }
-
-    /// Assignment to anything else (no-op)
-    template<typename T>
-    __host__ __device__ __forceinline__ void operator=(T const&)
-    {}
-
-    /// Cast to void* operator
-    __host__ __device__ __forceinline__ operator void*() const { return NULL; }
 
     /// Equal to
     __host__ __device__ __forceinline__ bool operator==(const self_type& rhs)
     {
-        return (offset == rhs.offset);
+        return (ptr == rhs.ptr);
     }
 
     /// Not equal to
     __host__ __device__ __forceinline__ bool operator!=(const self_type& rhs)
     {
-        return (offset != rhs.offset);
+        return (ptr != rhs.ptr);
     }
 
     /// ostream operator
     friend std::ostream& operator<<(std::ostream& os, const self_type& itr)
     {
-        os << "[" << itr.offset << "]";
+        (void)itr;
         return os;
     }
-
 };
 
 END_HIPCUB_NAMESPACE
 
-#endif // HIPCUB_ROCPRIM_ITERATOR_DISCARD_OUTPUT_ITERATOR_HPP_
+#endif
