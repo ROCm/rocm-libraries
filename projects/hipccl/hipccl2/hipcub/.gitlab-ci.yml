@@ -321,7 +321,7 @@ test:rocm_install:
     - $SUDO_CMD apt-get install -y hip-base
     # Install hip-nvcc ignoring dependencies because it depends on cuda metapackage
     # (with heavy libraries, tools etc. that also require GUI and other packages)
-    - apt-get download hip-nvcc
+    - apt-get download hip-nvcc rocm-cmake
     - $SUDO_CMD dpkg -i --ignore-depends=cuda hip*.deb
     - $SUDO_CMD ls -d /opt/*
     - $SUDO_CMD ln -s $ROCM_LATEST_PATH /opt/rocm
