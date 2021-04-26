@@ -30,12 +30,17 @@
 #ifndef HIPCUB_ROCPRIM_ITERATOR_DISCARD_OUTPUT_ITERATOR_HPP_
 #define HIPCUB_ROCPRIM_ITERATOR_DISCARD_OUTPUT_ITERATOR_HPP_
 
+#include <iterator>
+#include <iostream>
+
 #include "../../../config.hpp"
 
-// TODO: Check, if we can update rocPRIM, to use the rocPRIM discard iterator.
-//#include <rocprim/iterator/discard_iterator.hpp>
-
 BEGIN_HIPCUB_NAMESPACE
+#if (THRUST_VERSION >= 100700)
+    // This iterator is compatible with Thrust API 1.7 and newer
+    #include <thrust/iterator/iterator_facade.h>
+    #include <thrust/iterator/iterator_traits.h>
+#endif // THRUST_VERSION
 
 /**
  * \addtogroup UtilIterator
@@ -73,6 +78,11 @@ public:
 private:
 
     OffsetT offset;
+
+#if defined(_WIN32) || !defined(_WIN64)
+    // Workaround for win32 parameter-passing bug (ulonglong2 argmin DeviceReduce)
+    OffsetT pad[CUB_MAX(1, (16 / sizeof(OffsetT) - 1))];
+#endif
 
 public:
 
@@ -182,6 +192,12 @@ public:
     __host__ __device__ __forceinline__ pointer operator->()
     {
         return;
+    }
+
+    /// Assignment to self (no-op)
+    __host__ __device__ __forceinline__ void operator=(self_type const& other)
+    {
+        offset = other.offset;
     }
 
     /// Assignment to anything else (no-op)

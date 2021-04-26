@@ -1,5 +1,5 @@
 /******************************************************************************
- * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
+ * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
  * Modifications Copyright (c) 2017-2021, Advanced Micro Devices, Inc.  All rights reserved.
  *
@@ -30,7 +30,17 @@
 #ifndef HIPCUB_ROCPRIM_ITERATOR_TEX_REF_INPUT_ITERATOR_HPP_
 #define HIPCUB_ROCPRIM_ITERATOR_TEX_REF_INPUT_ITERATOR_HPP_
 
+#include <iterator>
+#include <iostream>
+
 #include "../../../config.hpp"
+
+#if (CUDART_VERSION >= 5050) || defined(DOXYGEN_ACTIVE)  // This iterator is compatible with CUDA 5.5 and newer
+
+#if (THRUST_VERSION >= 100700)    // This iterator is compatible with Thrust API 1.7 and newer
+    #include <thrust/iterator/iterator_facade.h>
+    #include <thrust/iterator/iterator_traits.h>
+#endif // THRUST_VERSION
 
 #include <rocprim/iterator/texture_cache_iterator.hpp>
 
