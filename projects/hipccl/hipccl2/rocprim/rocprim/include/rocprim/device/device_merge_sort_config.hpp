@@ -66,14 +66,28 @@ struct merge_sort_config_900<Key, empty_type>
     using type = merge_sort_config<limit_block_size<256U, sizeof(Key), ROCPRIM_WARP_SIZE_64>::value>;
 };
 
+// TODO: We need to update these parameters
 template<class Key, class Value>
-struct merge_sort_config_1031
+struct merge_sort_config_90a
+{
+    using type = merge_sort_config<limit_block_size<256U, sizeof(Key) + sizeof(Value), ROCPRIM_WARP_SIZE_64>::value>;
+};
+
+template<class Key>
+struct merge_sort_config_90a<Key, empty_type>
+{
+    using type = merge_sort_config<limit_block_size<256U, sizeof(Key), ROCPRIM_WARP_SIZE_64>::value>;
+};
+
+// TODO: We need to update these parameters
+template<class Key, class Value>
+struct merge_sort_config_1030
 {
     using type = merge_sort_config<limit_block_size<256U, sizeof(Key) + sizeof(Value), ROCPRIM_WARP_SIZE_32>::value>;
 };
 
 template<class Key>
-struct merge_sort_config_1031<Key, empty_type>
+struct merge_sort_config_1030<Key, empty_type>
 {
     using type = merge_sort_config<limit_block_size<256U, sizeof(Key), ROCPRIM_WARP_SIZE_32>::value>;
 };
@@ -84,7 +98,8 @@ struct default_merge_sort_config
         TargetArch,
         select_arch_case<803, merge_sort_config_803<Key, Value>>,
         select_arch_case<900, merge_sort_config_900<Key, Value>>,
-        select_arch_case<1031, merge_sort_config_1031<Key, Value>>,
+        select_arch_case<ROCPRIM_ARCH_90a, merge_sort_config_90a<Key, Value>>,
+        select_arch_case<1030, merge_sort_config_1030<Key, Value>>,
         merge_sort_config_900<Key, Value>
     > { };
 
