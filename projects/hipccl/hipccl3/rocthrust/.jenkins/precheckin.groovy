@@ -15,6 +15,7 @@ def runCI =
 
     def prj = new rocProject('rocThrust', 'precheckin')
 
+    prj.defaults.ccache = true
     prj.timeout.compile = 420
 
     // Define test architectures, optional rocm version argument is available
