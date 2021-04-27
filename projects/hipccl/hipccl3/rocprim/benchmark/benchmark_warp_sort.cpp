@@ -210,6 +210,11 @@ int main(int argc, char *argv[])
 
     using custom_double2 = custom_type<double, double>;
     using custom_int_double = custom_type<int, double>;
+
+    using custom_int2            = custom_type<int, int>;
+    using custom_char_double     = custom_type<char, double>;
+    using custom_longlong_double = custom_type<long long, double>;
+
     std::vector<benchmark::internal::Benchmark*> benchmarks =
     {
         BENCHMARK_TYPE(int),
@@ -223,6 +228,9 @@ int main(int argc, char *argv[])
         BENCHMARK_KEY_TYPE(unsigned int, int),
         BENCHMARK_KEY_TYPE(int, custom_double2),
         BENCHMARK_KEY_TYPE(int, custom_int_double),
+        BENCHMARK_KEY_TYPE(custom_int2, custom_double2),
+        BENCHMARK_KEY_TYPE(custom_int2, custom_char_double),
+        BENCHMARK_KEY_TYPE(custom_int2, custom_longlong_double),
         BENCHMARK_KEY_TYPE(int8_t, int8_t),
         BENCHMARK_KEY_TYPE(uint8_t, uint8_t),
         BENCHMARK_KEY_TYPE(rocprim::half, rocprim::half)

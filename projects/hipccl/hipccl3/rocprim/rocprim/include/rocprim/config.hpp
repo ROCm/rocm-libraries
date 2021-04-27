@@ -79,9 +79,9 @@
 // Defines targeted AMD architecture. Supported values:
 // * 803 (gfx803)
 // * 900 (gfx900)
-// * 906 (gfx906)C
-// * 908 (gfx908)C
-// * 910 (gfx90a)C
+// * 906 (gfx906)
+// * 908 (gfx908)
+// * 910 (gfx90a)
 #ifndef ROCPRIM_TARGET_ARCH
     #define ROCPRIM_TARGET_ARCH 0
 #endif
