@@ -10,6 +10,7 @@ def runCI =
     
     def prj = new rocProject('rocThrust', 'Static Library PreCheckin')
 
+    prj.defaults.ccache = true
     prj.timeout.compile = 420
 
     def nodes = new dockerNodes(nodeDetails, jobName, prj)
