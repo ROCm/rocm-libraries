@@ -30,9 +30,19 @@
 #ifndef HIPCUB_ROCPRIM_ITERATOR_TRANSFORM_INPUT_ITERATOR_HPP_
 #define HIPCUB_ROCPRIM_ITERATOR_TRANSFORM_INPUT_ITERATOR_HPP_
 
+#include <iterator>
+#include <iostream>
+
 #include "../../../config.hpp"
 
 #include <rocprim/iterator/transform_iterator.hpp>
+
+#if (THRUST_VERSION >= 100700)
+    // This iterator is compatible with Thrust API 1.7 and newer
+    #include <thrust/iterator/iterator_facade.h>
+    #include <thrust/iterator/iterator_traits.h>
+#endif // THRUST_VERSION
+
 
 BEGIN_HIPCUB_NAMESPACE
 
