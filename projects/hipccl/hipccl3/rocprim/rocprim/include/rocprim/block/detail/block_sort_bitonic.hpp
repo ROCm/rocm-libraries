@@ -187,13 +187,13 @@ private:
     {
         storage_type_<Key, Value>& storage_ = storage.get();
         Key next_key = storage_.key[next_id];
-        Value next_value = storage_.value[next_id];
-        bool compare = (next_id < flat_tid) ? compare_function(key, next_key) : compare_function(next_key, key);
+        bool b = next_id < flat_tid;
+        bool compare = compare_function(b ? key : next_key, b ? next_key : key);
         bool swap = compare ^ dir;
         if(swap)
         {
             key = next_key;
-            value = next_value;
+            value = storage_.value[next_id];
         }
     }
 
