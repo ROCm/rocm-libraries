@@ -90,6 +90,24 @@ void warp_sort_by_key_kernel(K* input_key, V* input_value)
     input_value[i] = value;
 }
 
+template<class Value>
+Value get_max_value()
+{
+    return Value(10000);
+}
+
+template<>
+char get_max_value()
+{
+    return std::numeric_limits<char>::max();
+}
+
+template<>
+custom_type<char, double> get_max_value()
+{
+    return custom_type<char, double>(std::numeric_limits<char>::max());
+}
+
 template<
     class Key,
     unsigned int BlockSize,
@@ -103,9 +121,9 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
     // Make sure size is a multiple of BlockSize
     size = BlockSize * ((size + BlockSize - 1)/BlockSize);
     // Allocate and fill memory
-    std::vector<Key> input_key = get_random_data(size, Key(0), Key(10000));
+    std::vector<Key> input_key = get_random_data(size, Key(0), get_max_value<Key>());
     std::vector<Value> input_value(size_t(1));
-    if(SortByKey) input_value = get_random_data(size, Value(0), Value(10000));
+    if(SortByKey) input_value = get_random_data(size, Value(0), get_max_value<Value>());
     Key * d_input_key = nullptr;
     Value * d_input_value = nullptr;
     HIP_CHECK(hipMalloc(&d_input_key, size * sizeof(Key)));
