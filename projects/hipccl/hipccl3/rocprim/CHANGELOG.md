@@ -9,6 +9,7 @@ Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwar
 ## [rocPRIM-2.10.9 for ROCm 4.2.0]
 ### Fixed
 - Size zero inputs are now properly handled with newer ROCm builds that no longer allow zero-size kernel grid/block dimensions
+- Bugfix & minor performance improvement for merge_sort when input and output storage are the same.
 ### Changed
 - Minimum cmake version required is now 3.10.2
 ### Known issues
