@@ -36,47 +36,55 @@ namespace detail
 
 template<class T, class ShuffleOp>
 ROCPRIM_DEVICE inline
-T warp_shuffle_op(T input, ShuffleOp&& op)
+typename std::enable_if<std::is_trivially_copyable<T>::value && (sizeof(T) % sizeof(int) == 0), T>::type
+warp_shuffle_op(const T& input, ShuffleOp&& op)
 {
     constexpr int words_no = (sizeof(T) + sizeof(int) - 1) / sizeof(int);
 
-    int words[words_no];
-    __builtin_memcpy(words, &input, sizeof(T));
+    struct V { int words[words_no]; };
+    V a = __builtin_bit_cast(V, input);
 
     #pragma unroll
     for(int i = 0; i < words_no; i++)
     {
-        words[i] = op(words[i]);
+        a.words[i] = op(a.words[i]);
     }
 
+    return __builtin_bit_cast(T, a);
+}
+
+template<class T, class ShuffleOp>
+ROCPRIM_DEVICE inline
+typename std::enable_if<!(std::is_trivially_copyable<T>::value && (sizeof(T) % sizeof(int) == 0)), T>::type
+warp_shuffle_op(const T& input, ShuffleOp&& op)
+{
+    constexpr int words_no = (sizeof(T) + sizeof(int) - 1) / sizeof(int);
+
     T output;
-    __builtin_memcpy(&output, words, sizeof(T));
+    #pragma unroll
+    for(int i = 0; i < words_no; i++)
+    {
+        const size_t s = std::min(sizeof(int), sizeof(T) - i * sizeof(int));
+        int word;
+        __builtin_memcpy(&word, reinterpret_cast<const char*>(&input) + i * sizeof(int), s);
+        word = op(word);
+        __builtin_memcpy(reinterpret_cast<char*>(&output) + i * sizeof(int), &word, s);
+    }
 
     return output;
 }
 
 template<class T, int dpp_ctrl, int row_mask = 0xf, int bank_mask = 0xf, bool bound_ctrl = false>
 ROCPRIM_DEVICE inline
-T warp_move_dpp(T input)
+T warp_move_dpp(const T& input)
 {
-    constexpr int words_no = (sizeof(T) + sizeof(int) - 1) / sizeof(int);
-
-    int words[words_no];
-    __builtin_memcpy(words, &input, sizeof(T));
-
-    #pragma unroll
-    for(int i = 0; i < words_no; i++)
-    {
-        words[i] = ::__builtin_amdgcn_update_dpp(
-            0, words[i],
-            dpp_ctrl, row_mask, bank_mask, bound_ctrl
-        );
-    }
-
-    T output;
-    __builtin_memcpy(&output, words, sizeof(T));
-
-    return output;
+    return detail::warp_shuffle_op(
+        input,
+        [=](int v) -> int
+        {
+            return ::__builtin_amdgcn_update_dpp(0, v, dpp_ctrl, row_mask, bank_mask, bound_ctrl);
+        }
+    );
 }
 
 } // end namespace detail
@@ -97,7 +105,7 @@ T warp_move_dpp(T input)
 /// \param width - logical warp width
 template<class T>
 ROCPRIM_DEVICE inline
-T warp_shuffle(T input, const int src_lane, const int width = warp_size())
+T warp_shuffle(const T& input, const int src_lane, const int width = warp_size())
 {
     return detail::warp_shuffle_op(
         input,
@@ -122,7 +130,7 @@ T warp_shuffle(T input, const int src_lane, const int width = warp_size())
 /// \param width - logical warp width
 template<class T>
 ROCPRIM_DEVICE inline
-T warp_shuffle_up(T input, const unsigned int delta, const int width = warp_size())
+T warp_shuffle_up(const T& input, const unsigned int delta, const int width = warp_size())
 {
     return detail::warp_shuffle_op(
         input,
@@ -147,7 +155,7 @@ T warp_shuffle_up(T input, const unsigned int delta, const int width = warp_size
 /// \param width - logical warp width
 template<class T>
 ROCPRIM_DEVICE inline
-T warp_shuffle_down(T input, const unsigned int delta, const int width = warp_size())
+T warp_shuffle_down(const T& input, const unsigned int delta, const int width = warp_size())
 {
     return detail::warp_shuffle_op(
         input,
@@ -171,7 +179,7 @@ T warp_shuffle_down(T input, const unsigned int delta, const int width = warp_si
 /// \param width - logical warp width
 template<class T>
 ROCPRIM_DEVICE inline
-T warp_shuffle_xor(T input, const int lane_mask, const int width = warp_size())
+T warp_shuffle_xor(const T& input, const int lane_mask, const int width = warp_size())
 {
     return detail::warp_shuffle_op(
         input,
