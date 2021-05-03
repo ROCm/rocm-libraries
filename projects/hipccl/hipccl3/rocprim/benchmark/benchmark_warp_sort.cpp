@@ -90,6 +90,24 @@ void warp_sort_by_key_kernel(K* input_key, V* input_value)
     input_value[i] = value;
 }
 
+template<class Value>
+Value get_max_value()
+{
+    return Value(10000);
+}
+
+template<>
+char get_max_value()
+{
+    return std::numeric_limits<char>::max();
+}
+
+template<>
+custom_type<char, double> get_max_value()
+{
+    return custom_type<char, double>(std::numeric_limits<char>::max());
+}
+
 template<
     class Key,
     unsigned int BlockSize,
@@ -103,9 +121,9 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
     // Make sure size is a multiple of BlockSize
     size = BlockSize * ((size + BlockSize - 1)/BlockSize);
     // Allocate and fill memory
-    std::vector<Key> input_key = get_random_data(size, Key(0), Key(10000));
+    std::vector<Key> input_key = get_random_data(size, Key(0), get_max_value<Key>());
     std::vector<Value> input_value(size_t(1));
-    if(SortByKey) input_value = get_random_data(size, Value(0), Value(10000));
+    if(SortByKey) input_value = get_random_data(size, Value(0), get_max_value<Value>());
     Key * d_input_key = nullptr;
     Value * d_input_value = nullptr;
     HIP_CHECK(hipMalloc(&d_input_key, size * sizeof(Key)));
@@ -210,6 +228,11 @@ int main(int argc, char *argv[])
 
     using custom_double2 = custom_type<double, double>;
     using custom_int_double = custom_type<int, double>;
+
+    using custom_int2            = custom_type<int, int>;
+    using custom_char_double     = custom_type<char, double>;
+    using custom_longlong_double = custom_type<long long, double>;
+
     std::vector<benchmark::internal::Benchmark*> benchmarks =
     {
         BENCHMARK_TYPE(int),
@@ -223,6 +246,9 @@ int main(int argc, char *argv[])
         BENCHMARK_KEY_TYPE(unsigned int, int),
         BENCHMARK_KEY_TYPE(int, custom_double2),
         BENCHMARK_KEY_TYPE(int, custom_int_double),
+        BENCHMARK_KEY_TYPE(custom_int2, custom_double2),
+        BENCHMARK_KEY_TYPE(custom_int2, custom_char_double),
+        BENCHMARK_KEY_TYPE(custom_int2, custom_longlong_double),
         BENCHMARK_KEY_TYPE(int8_t, int8_t),
         BENCHMARK_KEY_TYPE(uint8_t, uint8_t),
         BENCHMARK_KEY_TYPE(rocprim::half, rocprim::half)
