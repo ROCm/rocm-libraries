@@ -47,7 +47,7 @@ void inplace_merge(sequential::execution_policy<DerivedPolicy> &exec,
   typedef typename thrust::iterator_value<RandomAccessIterator>::type value_type;
 
   #ifdef __HIP_DEVICE_COMPILE__
-    THRUST_HIP_PRINTF("ERROR:In Place Merge is not currently supported on the device. \n");
+    THRUST_HIP_PRINTF("Abort: Inplace Merge is currently disabled for memory objects allocated on the device. HIP malloc does not support device side memory allocation.\n");
     abort();
   #endif
 
@@ -77,7 +77,7 @@ void inplace_merge_by_key(sequential::execution_policy<DerivedPolicy> &exec,
   RandomAccessIterator2 last2   = first2 + (last1   - first1);
 
   #ifdef __HIP_DEVICE_COMPILE__
-    THRUST_HIP_PRINTF("ERROR:Inplace Merge by Key is not currently supported on the device. \n");
+    THRUST_HIP_PRINTF("Abort: Inplace Merge is currently disabled for memory objects allocated on the device. HIP malloc does not support device side memory allocation.\n");
     abort();
   #endif
 
@@ -230,7 +230,7 @@ void iterative_stable_merge_sort(sequential::execution_policy<DerivedPolicy> &ex
   else
   {
     #ifdef __HIP_DEVICE_COMPILE__
-      THRUST_HIP_PRINTF("ERROR:Iterative Stable Merge Sort is not currently supported on the device. \n");
+      THRUST_HIP_PRINTF("Abort: Iterative Stable Merge Sort is currently disabled for memory objects allocated on the device. HIP malloc does not support device side memory allocation.\n");
       abort();
     #endif
     thrust::detail::temporary_array<value_type, DerivedPolicy> temp(exec, n);
@@ -292,7 +292,7 @@ void iterative_stable_merge_sort_by_key(sequential::execution_policy<DerivedPoli
   else
   {
     #ifdef __HIP_DEVICE_COMPILE__
-      THRUST_HIP_PRINTF("ERROR:Iterative Iterative Stable Merge Sort by Key is not currently supported on the device. \n");
+      THRUST_HIP_PRINTF("Abort: Iterative Stable Merge Sort by Key is currently disabled for memory objects allocated on the device. HIP malloc does not support device side memory allocation.\n");
       abort();
     #endif
     thrust::detail::temporary_array<value_type1, DerivedPolicy> keys_temp(exec, n);

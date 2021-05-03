@@ -178,7 +178,7 @@ __host__ __device__
   typedef typename TempRange::iterator                     TempIterator;
 
   #ifdef  __HIP_DEVICE_COMPILE__
-    THRUST_HIP_PRINTF("ERROR:Stable Partition is not currently supported on the device. \n");
+    THRUST_HIP_PRINTF("Abort: Stable Partition is currently disabled for memory objects allocated on the device. HIP malloc does not support device side memory allocation.\n");
     abort();
   #endif
 
