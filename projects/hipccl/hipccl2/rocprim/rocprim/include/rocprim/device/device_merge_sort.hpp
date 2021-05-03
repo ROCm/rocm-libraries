@@ -183,12 +183,12 @@ hipError_t merge_sort_impl(void * temporary_storage,
     hipLaunchKernelGGL(
         HIP_KERNEL_NAME(block_sort_kernel<block_size>),
         dim3(grid_size), dim3(block_size), 0, stream,
-        keys_input, keys_output, values_input, values_output,
+        keys_input, keys_buffer, values_input, values_buffer,
         size, compare_function
     );
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("block_sort_kernel", size, start);
 
-    bool temporary_store = false;
+    bool temporary_store = true;
     for(unsigned int block = block_size; block < size; block *= 2)
     {
         temporary_store = !temporary_store;
