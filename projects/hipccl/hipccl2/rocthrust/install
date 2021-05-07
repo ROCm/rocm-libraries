@@ -137,7 +137,7 @@ fi
 if [[ "${build_relocatable}" == true ]]; then
     CXX=$rocm_path/bin/${compiler} ${cmake_executable} \
         -DCMAKE_INSTALL_PREFIX=${rocm_path} \
-        -DCMAKE_PREFIX_PATH="${rocm_path} ${rocm_path}/hcc ${rocm_path}/hip" \
+        -DCMAKE_PREFIX_PATH="${rocm_path} ${rocm_path}/hip" \
         -DCMAKE_MODULE_PATH="${rocm_path}/hip/cmake" \
         -DROCPRIM_ROOT=${rocm_path}/rocprim ${build_test}\
          ../../. # or cmake-gui ../.
