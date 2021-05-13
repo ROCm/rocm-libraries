@@ -52,7 +52,6 @@ constexpr unsigned int warp_size()
 ROCPRIM_HOST inline
 unsigned int host_warp_size()
 {
-    unsigned int warp_size = -1;
     int default_hip_device;
     hipError_t success = hipGetDevice(&default_hip_device);
     hipDeviceProp_t device_prop;
