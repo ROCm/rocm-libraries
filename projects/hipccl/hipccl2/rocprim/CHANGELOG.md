@@ -3,13 +3,16 @@
 Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwarePlatform/rocPRIM/](https://codedocs.xyz/ROCmSoftwarePlatform/rocPRIM/)
 
 ## [Unreleased rocPRIM-2.10.10 for ROCm 4.3.0]
+### Fixed
+- Bugfix & minor performance improvement for merge_sort when input and output storage are the same.
 ### Added
 - gfx90a support added.
+### Deprecated
+- The warp_size() function is now deprecated; please switch to host_warp_size() and device_warp_size() for host and device references respectively.
 
 ## [rocPRIM-2.10.9 for ROCm 4.2.0]
 ### Fixed
 - Size zero inputs are now properly handled with newer ROCm builds that no longer allow zero-size kernel grid/block dimensions
-- Bugfix & minor performance improvement for merge_sort when input and output storage are the same.
 ### Changed
 - Minimum cmake version required is now 3.10.2
 ### Known issues
