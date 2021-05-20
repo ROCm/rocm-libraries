@@ -121,6 +121,7 @@ void test_event_wait(Event&& e)
 {
   ASSERT_EQ(true, e.valid_stream());
 
+  e.wait();
   while(!e.ready())
   {
       e.wait();
@@ -597,4 +598,3 @@ struct precision_threshold<rocprim::half>
 {
     static constexpr float percentage = 0.075f;
 };
-
