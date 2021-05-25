@@ -121,6 +121,8 @@ void test_event_wait(Event&& e)
 {
   ASSERT_EQ(true, e.valid_stream());
 
+  // Call at least once the hipDeviceSynchronize()
+  // before the stream ready state check
   e.wait();
   while(!e.ready())
   {
