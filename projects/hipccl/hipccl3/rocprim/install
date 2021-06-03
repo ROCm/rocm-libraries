@@ -18,7 +18,7 @@ function display_help()
     echo "    [-g|--debug] -DCMAKE_BUILD_TYPE=Debug (default is =Release)"
     echo "    [-k|--relwithdebinfo] -DCMAKE_BUILD_TYPE=RelWithDebInfo"
     echo "    [-b|--benchmark] builds and runs benchmark"
-    echo "    [--coverage] build with code coverage profiling enabled"
+    echo "    [--codecoverage] build with code coverage profiling enabled"
     echo "    [--hip-clang] build library for amdgpu backend using hip-clang"
 }
 
@@ -31,7 +31,7 @@ build_package=false
 build_clients=false
 build_release=true
 build_release_debug=false
-build_coverage=false
+build_codecoverage=false
 build_type=Release
 build_hip_clang=false
 run_tests=false
@@ -46,7 +46,7 @@ build_relocatable=false
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ $? -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,debug,hip-clang,test,benchmark,package,relocatable,relwithdebinfo,coverage --options hicdtbpgrk -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,debug,hip-clang,test,benchmark,package,relocatable,relwithdebinfo,codecoverage --options hicdtbpgrk -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -95,8 +95,8 @@ while true; do
         -b|--benchmark)
             build_benchmark=true
             shift ;;
-        --coverage)
-            build_coverage=true
+        --codecoverage)
+            build_codecoverage=true
             shift ;;
         -k|--relwithdebinfo)
 	    build_release=false
@@ -153,13 +153,13 @@ if [[ "${build_clients}" == true ]]; then
     clients="ON"
 fi
 
-coverage="OFF"
-if [[ "${build_coverage}" == true ]]; then
+codecoverage="OFF"
+if [[ "${build_codecoverage}" == true ]]; then
     if [[ "${build_release}" == true ]]; then
         echo "Code coverage is chosen to be disabled in Release mode, to enable code coverage select either Debug mode (-g | --debug) or RelWithDebInfo mode (-k | --relwithdebinfo); aborting";
         exit 1
     fi
-    coverage="ON"
+    codecoverage="ON"
 fi
 
 
@@ -169,7 +169,7 @@ if [[ "${build_relocatable}" == true ]]; then
        -DBUILD_BENCHMARK=${benchmark} -DBUILD_TEST=${clients} \
        -DCMAKE_MODULE_PATH="${rocm_path}/hip/cmake" ../../.     # or cmake-gui ../.
 else
-    CXX=${rocm_path}/bin/${compiler} ${cmake_executable} -DBUILD_BENCHMARK=${benchmark} -DBUILD_TEST=${clients} -DCMAKE_BUILD_TYPE=${build_type} -DBUILD_CODE_COVERAGE=${coverage}  ../../. # or cmake-gui ../.
+    CXX=${rocm_path}/bin/${compiler} ${cmake_executable} -DBUILD_BENCHMARK=${benchmark} -DBUILD_TEST=${clients} -DCMAKE_BUILD_TYPE=${build_type} -DBUILD_CODE_COVERAGE=${codecoverage}  ../../. # or cmake-gui ../.
 fi
 
 # Build
