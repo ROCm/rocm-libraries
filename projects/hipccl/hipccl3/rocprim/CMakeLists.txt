@@ -85,6 +85,12 @@ option(BUILD_BENCHMARK "Build benchmarks" OFF)
 option(BUILD_EXAMPLE "Build examples" OFF)
 # Disables building tests, benchmarks, examples
 option(ONLY_INSTALL "Only install" OFF)
+option(BUILD_CODE_COVERAGE "Build with code coverage enabled" OFF)
+
+if(BUILD_CODE_COVERAGE)
+  add_compile_options(-g -fprofile-arcs -ftest-coverage)
+  add_link_options(-g --coverage)
+endif()
 
 # Set CXX flags
 set(CMAKE_CXX_STANDARD 14)
@@ -140,3 +146,46 @@ rocm_create_package(
   DESCRIPTION "Radeon Open Compute Parallel Primitives Library"
   MAINTAINER "rocPRIM Maintainer <rocprim-maintainer@amd.com>"
 )
+
+
+#
+# ADDITIONAL TARGETS FOR CODE COVERAGE
+#
+if(BUILD_CODE_COVERAGE)
+  #
+  # > make coverage_cleanup (clean coverage related files.)
+  # > # run your tests
+  #  > make coverage (generate html documentation)
+  #
+
+  #
+  # Prepare coverage output
+  # This little script is generated because the option '--gcov-tool <program name>' of lcov cannot take arguments.
+  #
+  add_custom_target(coverage
+    COMMAND mkdir -p lcoverage
+    COMMAND echo "\\#!/bin/bash" > llvm-gcov.sh
+    COMMAND echo "\\# THIS FILE HAS BEEN GENERATED" >> llvm-gcov.sh
+    COMMAND printf "exec /opt/rocm/llvm/bin/llvm-cov gcov $$\\@" >> llvm-gcov.sh
+    COMMAND chmod +x llvm-gcov.sh
+    )
+
+  #
+  # Generate coverage output.
+  #
+  add_custom_command(TARGET coverage
+    DEPENDS rocprim
+    COMMAND lcov --directory . --base-directory . --gcov-tool ${CMAKE_BINARY_DIR}/llvm-gcov.sh --capture -o lcoverage/raw_main_coverage.info
+    COMMAND lcov --remove lcoverage/raw_main_coverage.info "'/opt/*'" "'/usr/*'" -o lcoverage/main_coverage.info
+    COMMAND genhtml lcoverage/main_coverage.info --output-directory lcoverage
+    )
+
+  #
+  # Coverage cleanup
+  #
+  add_custom_target(coverage_cleanup
+    COMMAND find ${CMAKE_BINARY_DIR} -name *.gcda -delete
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    )
+endif()
+
