@@ -155,6 +155,10 @@ fi
 
 coverage="OFF"
 if [[ "${build_coverage}" == true ]]; then
+    if [[ "${build_release}" == true ]]; then
+        echo "Code coverage is chosen to be disabled in Release mode, to enable code coverage select either Debug mode (-g | --debug) or RelWithDebInfo mode (-k | --relwithdebinfo); aborting";
+        exit 1
+    fi
     coverage="ON"
 fi
 
