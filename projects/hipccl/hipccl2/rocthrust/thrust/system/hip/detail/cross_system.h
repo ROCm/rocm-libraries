@@ -126,8 +126,8 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
                                          std::declval<ExecutionPolicy1>()))>
   THRUST_CONSTEXPR __host__ __device__
   auto is_device_to_host_copy(
-    ExecutionPolicy0 const& exec0
-  , ExecutionPolicy1 const& exec1
+    ExecutionPolicy0 const&
+  , ExecutionPolicy1 const&
   )
     noexcept ->
       thrust::detail::integral_constant<
@@ -142,7 +142,7 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
             typename Direction =
               decltype(direction_of_copy(std::declval<ExecutionPolicy>()))>
   THRUST_CONSTEXPR __host__ __device__
-  auto is_device_to_host_copy(ExecutionPolicy const& exec)
+  auto is_device_to_host_copy(ExecutionPolicy const& )
     noexcept ->
       thrust::detail::integral_constant<
         bool, hipMemcpyDeviceToHost == Direction::value
@@ -159,8 +159,8 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
                                          std::declval<ExecutionPolicy1>()))>
   THRUST_CONSTEXPR __host__ __device__
   auto is_host_to_device_copy(
-    ExecutionPolicy0 const& exec0
-  , ExecutionPolicy1 const& exec1
+    ExecutionPolicy0 const&
+  , ExecutionPolicy1 const&
   )
     noexcept ->
       thrust::detail::integral_constant<
@@ -175,7 +175,7 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
             typename Direction =
               decltype(direction_of_copy(std::declval<ExecutionPolicy>()))>
   THRUST_CONSTEXPR __host__ __device__
-  auto is_host_to_device_copy(ExecutionPolicy const& exec)
+  auto is_host_to_device_copy(ExecutionPolicy const& )
     noexcept ->
       thrust::detail::integral_constant<
         bool, hipMemcpyHostToDevice == Direction::value
@@ -192,8 +192,8 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
                                          std::declval<ExecutionPolicy1>()))>
   THRUST_CONSTEXPR __host__ __device__
   auto is_device_to_device_copy(
-    ExecutionPolicy0 const& exec0
-  , ExecutionPolicy1 const& exec1
+    ExecutionPolicy0 const&
+  , ExecutionPolicy1 const&
   )
     noexcept ->
       thrust::detail::integral_constant<
@@ -208,7 +208,7 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
             typename Direction =
               decltype(direction_of_copy(std::declval<ExecutionPolicy>()))>
   THRUST_CONSTEXPR __host__ __device__
-  auto is_device_to_device_copy(ExecutionPolicy const& exec)
+  auto is_device_to_device_copy(ExecutionPolicy const& )
     noexcept ->
       thrust::detail::integral_constant<
         bool,   hipMemcpyDeviceToDevice  == Direction::value

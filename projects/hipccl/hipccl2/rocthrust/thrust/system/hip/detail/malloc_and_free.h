@@ -68,7 +68,9 @@ if (THRUST_IS_HOST_CODE) {
 
     if(status != hipSuccess)
     {
-        hipGetLastError(); // Clear global hip error state.
+        // Clear global hip error state.
+        hipError_t clear_error_status = hipGetLastError(); 
+        THRUST_UNUSED_VAR(clear_error_status);
         throw thrust::system::detail::bad_alloc(thrust::hip_category().message(status).c_str());
     }
     #endif

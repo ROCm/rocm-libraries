@@ -26,9 +26,6 @@ import subprocess
 
 read_the_docs_build = os.environ.get('READTHEDOCS', None) == 'True'
 
-if read_the_docs_build:
-    subprocess.call('./run_doc.sh;', shell=True)
-
 # -- General configuration ------------------------------------------------
 
 # If your documentation needs a minimal Sphinx version, state it here.
@@ -56,8 +53,8 @@ master_doc = 'index'
 
 # General information about the project.
 project = u'rocThrust'
-copyright = u'2008-2013, NVIDIA CORPORATION; Modifications Copyright 2019 Advanced Mirco Devices'
-author = u'Advanceyd Mirco Devices'
+copyright = u'2008-2013, NVIDIA CORPORATION; Modifications Copyright 2019 Advanced Micro Devices'
+author = u'Advanced Micro Devices'
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
@@ -156,7 +153,7 @@ latex_elements = {
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
     (master_doc, 'rocThrust.tex', u'rocThrust Documentation',
-     u'Advanced Mirco Devices', 'manual'),
+     u'Advanced Micro Devices', 'manual'),
 ]
 
 
@@ -201,6 +198,8 @@ exhale_args = {
 
 # Tell sphinx what the primary language being documented is.
 primary_domain = 'cpp'
+cpp_id_attributes = ["__global__", "__device__", "__host__"]
+cpp_paren_attributes = ["__declspec"]
 
 # Tell sphinx what the pygments highlight language should be.
 highlight_language = 'cpp'

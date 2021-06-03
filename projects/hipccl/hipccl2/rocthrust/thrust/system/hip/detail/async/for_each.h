@@ -111,6 +111,12 @@ auto async_for_each_n(
     );
   }
 
+  if( n == 0)
+  {
+    e.ready();
+    return e;
+  }
+
   // Run for_each.
 
   async_for_each_fn<ForwardIt, UnaryFunction> wrapped(

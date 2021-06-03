@@ -367,3 +367,52 @@ struct TestTransformScanToDiscardIterator
     }
 };
 VariableUnitTest<TestTransformScanToDiscardIterator, IntegralTypes> TestTransformScanToDiscardIteratorInstance;
+
+template <typename T>
+void TestValueCategoryDeduction()
+{
+    thrust::device_vector<T> vec;
+
+    T a_h[10] = {5, 0, 5, 8, 6, 7, 5, 3, 0, 9};
+    vec.assign((T*)a_h, a_h + 10);
+
+
+    thrust::transform_inclusive_scan(thrust::device,
+                                     vec.cbegin(),
+                                     vec.cend(),
+                                     vec.begin(),
+                                     thrust::identity<>{},
+                                     thrust::maximum<>{});
+
+    ASSERT_EQUAL(T{5}, vec[0]);
+    ASSERT_EQUAL(T{5}, vec[1]);
+    ASSERT_EQUAL(T{5}, vec[2]);
+    ASSERT_EQUAL(T{8}, vec[3]);
+    ASSERT_EQUAL(T{8}, vec[4]);
+    ASSERT_EQUAL(T{8}, vec[5]);
+    ASSERT_EQUAL(T{8}, vec[6]);
+    ASSERT_EQUAL(T{8}, vec[7]);
+    ASSERT_EQUAL(T{8}, vec[8]);
+    ASSERT_EQUAL(T{9}, vec[9]);
+
+    vec.assign((T*)a_h, a_h + 10);
+    thrust::transform_exclusive_scan(thrust::device,
+                                     vec.cbegin(),
+                                     vec.cend(),
+                                     vec.begin(),
+                                     thrust::identity<>{},
+                                     T{},
+                                     thrust::maximum<>{});
+
+    ASSERT_EQUAL(T{0}, vec[0]);
+    ASSERT_EQUAL(T{5}, vec[1]);
+    ASSERT_EQUAL(T{5}, vec[2]);
+    ASSERT_EQUAL(T{5}, vec[3]);
+    ASSERT_EQUAL(T{8}, vec[4]);
+    ASSERT_EQUAL(T{8}, vec[5]);
+    ASSERT_EQUAL(T{8}, vec[6]);
+    ASSERT_EQUAL(T{8}, vec[7]);
+    ASSERT_EQUAL(T{8}, vec[8]);
+    ASSERT_EQUAL(T{8}, vec[9]);
+}
+DECLARE_GENERIC_UNITTEST(TestValueCategoryDeduction);

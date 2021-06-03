@@ -382,3 +382,52 @@ TYPED_TEST(TransformScanVariablesTests, TestTransformScanToDiscardIterator)
         }
     }
 }
+
+TYPED_TEST(TransformScanVariablesTests, TestValueCategoryDeduction)
+{
+    using T = typename TestFixture::input_type;
+
+    thrust::device_vector<T> vec;
+
+    T a_h[10] = {5, 0, 5, 8, 6, 7, 5, 3, 0, 9};
+    vec.assign((T*)a_h, a_h + 10);
+
+
+    thrust::transform_inclusive_scan(thrust::device,
+                                     vec.cbegin(),
+                                     vec.cend(),
+                                     vec.begin(),
+                                     thrust::identity<>{},
+                                     thrust::maximum<>{});
+
+    ASSERT_EQ(T{5}, vec[0]);
+    ASSERT_EQ(T{5}, vec[1]);
+    ASSERT_EQ(T{5}, vec[2]);
+    ASSERT_EQ(T{8}, vec[3]);
+    ASSERT_EQ(T{8}, vec[4]);
+    ASSERT_EQ(T{8}, vec[5]);
+    ASSERT_EQ(T{8}, vec[6]);
+    ASSERT_EQ(T{8}, vec[7]);
+    ASSERT_EQ(T{8}, vec[8]);
+    ASSERT_EQ(T{9}, vec[9]);
+
+    vec.assign((T*)a_h, a_h + 10);
+    thrust::transform_exclusive_scan(thrust::device,
+                                     vec.cbegin(),
+                                     vec.cend(),
+                                     vec.begin(),
+                                     thrust::identity<>{},
+                                     T{},
+                                     thrust::maximum<>{});
+
+    ASSERT_EQ(T{0}, vec[0]);
+    ASSERT_EQ(T{5}, vec[1]);
+    ASSERT_EQ(T{5}, vec[2]);
+    ASSERT_EQ(T{5}, vec[3]);
+    ASSERT_EQ(T{8}, vec[4]);
+    ASSERT_EQ(T{8}, vec[5]);
+    ASSERT_EQ(T{8}, vec[6]);
+    ASSERT_EQ(T{8}, vec[7]);
+    ASSERT_EQ(T{8}, vec[8]);
+    ASSERT_EQ(T{8}, vec[9]);
+}

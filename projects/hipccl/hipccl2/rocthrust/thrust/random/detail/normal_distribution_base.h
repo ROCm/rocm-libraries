@@ -52,15 +52,12 @@ template<typename RealType>
     __host__ __device__
     RealType sample(UniformRandomNumberGenerator &urng, const RealType mean, const RealType stddev)
     {
-      typedef typename UniformRandomNumberGenerator::result_type uint_type;
-      const uint_type urng_range = UniformRandomNumberGenerator::max - UniformRandomNumberGenerator::min;
+      using uint_type = typename UniformRandomNumberGenerator::result_type;
+      constexpr uint_type urng_range = UniformRandomNumberGenerator::max - UniformRandomNumberGenerator::min;
 
       // Constants for conversion
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wimplicit-int-float-conversion"
-      const RealType S1 = static_cast<RealType>(1) / urng_range;
-#pragma GCC diagnostic pop
-      const RealType S2 = S1 / 2;
+      constexpr RealType S1 = static_cast<RealType>(1. / static_cast<double>(urng_range));
+      constexpr RealType S2 = S1 / 2;
 
       RealType S3 = static_cast<RealType>(-1.4142135623730950488016887242097); // -sqrt(2)
 

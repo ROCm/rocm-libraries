@@ -15,6 +15,8 @@ def runCI =
 
     def prj = new rocProject('rocThrust', 'precheckin')
 
+    prj.timeout.compile = 420
+
     // Define test architectures, optional rocm version argument is available
     def nodes = new dockerNodes(nodeDetails, jobName, prj)
 

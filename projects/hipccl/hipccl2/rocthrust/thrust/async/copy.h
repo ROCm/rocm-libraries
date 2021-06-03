@@ -48,9 +48,9 @@ template <
 __host__
 event<FromPolicy>
 async_copy(
-  thrust::execution_policy<FromPolicy>& from_exec
-, thrust::execution_policy<ToPolicy>&   to_exec
-, ForwardIt first, Sentinel last, OutputIt output
+  thrust::execution_policy<FromPolicy>&
+, thrust::execution_policy<ToPolicy>&
+, ForwardIt , Sentinel , OutputIt
 )
 {
   THRUST_STATIC_ASSERT_MSG(
