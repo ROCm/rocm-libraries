@@ -2,7 +2,26 @@
 
 Full documentation for rocThrust is available at [https://rocthrust.readthedocs.io/en/latest/](https://rocthrust.readthedocs.io/en/latest/)
 
-## [Unreleased rocThrust-2.10.7 for ROCm 4.0.0]
+## [rocThrust-2.11.0 for ROCm 4.3.0]
+### Added
+- Updated to match upstream Thrust 1.11
+- gfx90a support added
+- gfx803 support re-enabled
+
+## [rocThrust-2.10.9 for ROCm 4.2.0]
+### Added
+- Updated to match upstream Thrust 1.10
+### Changed
+- Minimum cmake version required for building rocThrust is now 3.10.2
+### Fixed
+- Size zero inputs are now properly handled with newer ROCm builds that no longer allow zero-size kernel grid/block dimensions
+- Warning of unused results fixed.
+
+## [rocThrust-2.10.8 for ROCm 4.1.0]
+### Added
+- No new features
+
+## [rocThrust-2.10.7 for ROCm 4.0.0]
 ### Added
 - Updated to upstream Thrust 1.10.0
 - Implemented runtime error for unsupported algorithms and disabled respective tests.

@@ -186,7 +186,8 @@ inline void __host__ __device__ throw_on_error(hipError_t status, char const* ms
 #if __THRUST_HAS_HIPRT__
   // Clear the global HIP error state which may have been set by the last
   // call. Otherwise, errors may "leak" to unrelated kernel launches.
-  hipGetLastError();
+  hipError_t clear_error_status = hipGetLastError();
+  THRUST_UNUSED_VAR(clear_error_status);
  #endif
 
   if(hipSuccess != status)
@@ -218,7 +219,8 @@ inline void __host__ __device__ throw_on_error(hipError_t status)
 #if __THRUST_HAS_HIPRT__
   // Clear the global HIP error state which may have been set by the last
   // call. Otherwise, errors may "leak" to unrelated kernel launches.
-  hipGetLastError();
+  hipError_t clear_error_status = hipGetLastError();
+  THRUST_UNUSED_VAR(clear_error_status);
  #endif
 
     if(hipSuccess != status)

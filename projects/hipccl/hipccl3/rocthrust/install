@@ -128,11 +128,8 @@ fi
 # Set compiler
 compiler="hipcc"
 
-if [ -e /etc/redhat-release ] ; then
-    cmake_executable="cmake3"
-else
-    cmake_executable="cmake"
-fi
+cmake_executable="cmake"
+
 if [[ "${build_clients}" == true ]]; then
     build_test="-DBUILD_TEST=ON"
 fi
