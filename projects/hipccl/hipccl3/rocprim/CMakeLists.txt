@@ -163,6 +163,7 @@ if(BUILD_CODE_COVERAGE)
   # This little script is generated because the option '--gcov-tool <program name>' of lcov cannot take arguments.
   #
   add_custom_target(coverage
+    DEPENDS rocprim
     COMMAND mkdir -p lcoverage
     COMMAND echo "\\#!/bin/bash" > llvm-gcov.sh
     COMMAND echo "\\# THIS FILE HAS BEEN GENERATED" >> llvm-gcov.sh
@@ -174,7 +175,6 @@ if(BUILD_CODE_COVERAGE)
   # Generate coverage output.
   #
   add_custom_command(TARGET coverage
-    DEPENDS rocprim
     COMMAND lcov --directory . --base-directory . --gcov-tool ${CMAKE_BINARY_DIR}/llvm-gcov.sh --capture -o lcoverage/raw_main_coverage.info
     COMMAND lcov --remove lcoverage/raw_main_coverage.info "'/opt/*'" "'/usr/*'" -o lcoverage/main_coverage.info
     COMMAND genhtml lcoverage/main_coverage.info --output-directory lcoverage
