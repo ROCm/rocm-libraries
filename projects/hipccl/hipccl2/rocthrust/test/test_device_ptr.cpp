@@ -21,7 +21,7 @@
 
 #include "test_header.hpp"
 
-#define HIP_CHECK(condition)         \
+#define HIP_CHECK_HMM(condition)         \
 {                                    \
     hipError_t error = condition;    \
     if(error != hipSuccess){         \
@@ -47,8 +47,8 @@ bool supports_hmm()
 {
     hipDeviceProp_t device_prop;
     int device_id;
-    HIP_CHECK(hipGetDevice(&device_id));
-    HIP_CHECK(hipGetDeviceProperties(&device_prop, device_id));
+    HIP_CHECK_HMM(hipGetDevice(&device_id));
+    HIP_CHECK_HMM(hipGetDeviceProperties(&device_prop, device_id));
     if (device_prop.managedMemory == 1) return true;
 
     return false;
@@ -56,7 +56,16 @@ bool supports_hmm()
 
 bool use_hmm()
 {
-    return std::getenv("ROCTHRUST_USE_HMM");
+    if (getenv("ROCTHRUST_USE_HMM") == nullptr)
+    {
+        return false;
+    }
+
+    if (strcmp(getenv("ROCTHRUST_USE_HMM"), "1") == 0)
+    {
+        return true;
+    }
+    return false;
 }
 
 TEST(DevicePtrTests, TestDevicePointerManipulation)
