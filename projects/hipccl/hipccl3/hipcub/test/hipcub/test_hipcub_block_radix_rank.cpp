@@ -1,24 +1,32 @@
-// MIT License
-//
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+
+/******************************************************************************
+* Copyright (c) 2011, Duane Merrill.  All rights reserved.
+* Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
+* Modifications Copyright (c) 2021, Advanced Micro Devices, Inc.  All rights reserved.
+*
+* Redistribution and use in source and binary forms, with or without
+* modification, are permitted provided that the following conditions are met:
+*     * Redistributions of source code must retain the above copyright
+*       notice, this list of conditions and the following disclaimer.
+*     * Redistributions in binary form must reproduce the above copyright
+*       notice, this list of conditions and the following disclaimer in the
+*       documentation and/or other materials provided with the distribution.
+*     * Neither the name of the NVIDIA CORPORATION nor the
+*       names of its contributors may be used to endorse or promote products
+*       derived from this software without specific prior written permission.
+*
+* THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+* ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+* WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+* DISCLAIMED. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE FOR ANY
+* DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+* (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+* LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+* ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+* (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+* SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*
+******************************************************************************/
 
 #include "common_test_header.hpp"
 
@@ -39,12 +47,12 @@ template <
     int                        ITEMS_PER_THREAD,
     typename                   ValueT                  = hipcub::NullType,
     int                        RADIX_BITS              = 4,
-    bool                       MEMOIZE_OUTER_SCAN      = (HIPCUB_ARCH >= 350) ? true : false,
+    bool                       MEMOIZE_OUTER_SCAN      = false,
     hipcub::BlockScanAlgorithm INNER_SCAN_ALGORITHM    = hipcub::BLOCK_SCAN_WARP_SCANS,
     hipSharedMemConfig         SMEM_CONFIG             = hipSharedMemBankSizeFourByte,
     int                        BLOCK_DIM_Y             = 1,
     int                        BLOCK_DIM_Z             = 1,
-    int                        ARCH                = HIPCUB_ARCH>
+    int                        ARCH                    = HIPCUB_ARCH>
 class BlockRadixSort
 {
 private:
@@ -585,8 +593,10 @@ TYPED_TEST(HipcubBlockRadixSort, SortKeys)
         return;
     }
 
-    const size_t size = items_per_block * 42;
-    const size_t grid_size = size / items_per_block;
+    const size_t grid_size = 42;
+    const size_t size = items_per_block * grid_size;
+
+    SCOPED_TRACE(testing::Message() << "with items_per_block= " << items_per_block << " size=" << size);
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -616,7 +626,7 @@ TYPED_TEST(HipcubBlockRadixSort, SortKeys)
 
         // Calculate expected results on host
         std::vector<key_type> expected(keys_output);
-        for(size_t i = 0; i < size / items_per_block; i++)
+        for(size_t i = 0; i < grid_size; i++)
         {
             std::stable_sort(
                 expected.begin() + (i * items_per_block),
@@ -656,6 +666,7 @@ TYPED_TEST(HipcubBlockRadixSort, SortKeys)
         // Verifying results
         for(size_t i = 0; i < size; i++)
         {
+            SCOPED_TRACE(testing::Message() << "with index= " << i);
             ASSERT_EQ(keys_output[i], expected[i]);
         }
 
@@ -843,6 +854,7 @@ TYPED_TEST(HipcubBlockRadixSort, SortKeysValues)
 
         for(size_t i = 0; i < size; i++)
         {
+            SCOPED_TRACE(testing::Message() << "with index= " << i);
             ASSERT_EQ(keys_output[i], expected[i].first);
             ASSERT_EQ(values_output[i], expected[i].second);
         }

@@ -87,7 +87,7 @@ template <
     int                     BLOCK_DIM_X,
     int                     RADIX_BITS,
     bool                    IS_DESCENDING,
-    bool                    MEMOIZE_OUTER_SCAN   = (HIPCUB_ARCH >= 350) ? true : false,
+    bool                    MEMOIZE_OUTER_SCAN   = false,
     BlockScanAlgorithm      INNER_SCAN_ALGORITHM = BLOCK_SCAN_WARP_SCANS,
     hipSharedMemConfig      SMEM_CONFIG          = hipSharedMemBankSizeFourByte,
     int                     BLOCK_DIM_Y          = 1,
@@ -161,8 +161,8 @@ private:
     {
         union Aliasable
         {
-            DigitCounter            digit_counters[PADDED_COUNTER_LANES][BLOCK_THREADS][PACKING_RATIO];
-            PackedCounter           raking_grid[BLOCK_THREADS][RAKING_SEGMENT];
+            DigitCounter            digit_counters[PADDED_COUNTER_LANES * BLOCK_THREADS * PACKING_RATIO];
+            PackedCounter           raking_grid[BLOCK_THREADS * RAKING_SEGMENT];
 
         } aliasable;
 
@@ -204,7 +204,7 @@ private:
      */
     HIPCUB_DEVICE inline PackedCounter Upsweep()
     {
-        PackedCounter *smem_raking_ptr = temp_storage.aliasable.raking_grid[linear_tid];
+        PackedCounter *smem_raking_ptr = &temp_storage.aliasable.raking_grid[linear_tid * RAKING_SEGMENT];
         PackedCounter *raking_ptr;
 
         if (MEMOIZE_OUTER_SCAN)
@@ -230,7 +230,7 @@ private:
     HIPCUB_DEVICE inline void ExclusiveDownsweep(
         PackedCounter raking_partial)
     {
-        PackedCounter *smem_raking_ptr = temp_storage.aliasable.raking_grid[linear_tid];
+        PackedCounter *smem_raking_ptr = &temp_storage.aliasable.raking_grid[linear_tid * RAKING_SEGMENT];
 
         PackedCounter *raking_ptr = (MEMOIZE_OUTER_SCAN) ?
             cached_segment :
@@ -260,7 +260,11 @@ private:
         #pragma unroll
         for (int LANE = 0; LANE < PADDED_COUNTER_LANES; LANE++)
         {
-            *((PackedCounter*) temp_storage.aliasable.digit_counters[LANE][linear_tid]) = 0;
+            #pragma unroll
+            for (int SUB_COUNTER = 0; SUB_COUNTER < PACKING_RATIO; SUB_COUNTER++)
+            {
+                temp_storage.aliasable.digit_counters[(LANE * BLOCK_THREADS + linear_tid) * PACKING_RATIO + SUB_COUNTER] = 0;
+            }
         }
     }
 
@@ -378,7 +382,7 @@ public:
             }
 
             // Pointer to smem digit counter
-            digit_counters[ITEM] = &temp_storage.aliasable.digit_counters[counter_lane][linear_tid][sub_counter];
+            digit_counters[ITEM] = &temp_storage.aliasable.digit_counters[counter_lane * BLOCK_THREADS * PACKING_RATIO + linear_tid * PACKING_RATIO + sub_counter];
 
             // Load thread-exclusive prefix
             thread_prefixes[ITEM] = *digit_counters[ITEM];
@@ -436,7 +440,7 @@ public:
                 unsigned int counter_lane   = (bin_idx & (COUNTER_LANES - 1));
                 unsigned int sub_counter    = bin_idx >> (LOG_COUNTER_LANES);
 
-                exclusive_digit_prefix[track] = temp_storage.aliasable.digit_counters[counter_lane][0][sub_counter];
+                exclusive_digit_prefix[track] = temp_storage.aliasable.digit_counter[counter_lane * BLOCK_THREADS * PACKING_RATIO + sub_counter];
             }
         }
     }
@@ -518,8 +522,8 @@ private:
 
         union __align__(16) Aliasable
         {
-            volatile DigitCounterT                  warp_digit_counters[RADIX_DIGITS][PADDED_WARPS];
-            DigitCounterT                           raking_grid[BLOCK_THREADS][PADDED_RAKING_SEGMENT];
+            volatile DigitCounterT                  warp_digit_counters[RADIX_DIGITS * PADDED_WARPS];
+            DigitCounterT                           raking_grid[BLOCK_THREADS * PADDED_RAKING_SEGMENT];
 
         } aliasable;
     };
@@ -582,7 +586,7 @@ public:
 
         #pragma unroll
         for (int ITEM = 0; ITEM < PADDED_RAKING_SEGMENT; ++ITEM)
-            temp_storage.aliasable.raking_grid[linear_tid][ITEM] = 0;
+            temp_storage.aliasable.raking_grid[linear_tid * PADDED_RAKING_SEGMENT + ITEM] = 0;
 
         ::rocprim::syncthreads();
 
@@ -605,7 +609,7 @@ public:
             uint32_t peer_mask = rocprim::MatchAny<RADIX_BITS>(digit);
 
             // Pointer to smem digit counter for this key
-            digit_counters[ITEM] = &temp_storage.aliasable.warp_digit_counters[digit][warp_id];
+            digit_counters[ITEM] = &temp_storage.aliasable.warp_digit_counters[digit * PADDED_WARPS + warp_id];
 
             // Number of occurrences in previous strips
             DigitCounterT warp_digit_prefix = *digit_counters[ITEM];
@@ -640,13 +644,13 @@ public:
 
         #pragma unroll
         for (int ITEM = 0; ITEM < PADDED_RAKING_SEGMENT; ++ITEM)
-            scan_counters[ITEM] = temp_storage.aliasable.raking_grid[linear_tid][ITEM];
+            scan_counters[ITEM] = temp_storage.aliasable.raking_grid[linear_tid * PADDED_RAKING_SEGMENT + ITEM];
 
         BlockScanT(temp_storage.block_scan).ExclusiveSum(scan_counters, scan_counters);
 
         #pragma unroll
         for (int ITEM = 0; ITEM < PADDED_RAKING_SEGMENT; ++ITEM)
-            temp_storage.aliasable.raking_grid[linear_tid][ITEM] = scan_counters[ITEM];
+            temp_storage.aliasable.raking_grid[linear_tid * PADDED_RAKING_SEGMENT + ITEM] = scan_counters[ITEM];
 
         ::rocprim::syncthreads();
 
@@ -683,7 +687,7 @@ public:
                 if (IS_DESCENDING)
                     bin_idx = RADIX_DIGITS - bin_idx - 1;
 
-                exclusive_digit_prefix[track] = temp_storage.aliasable.warp_digit_counters[bin_idx][0];
+                exclusive_digit_prefix[track] = temp_storage.aliasable.warp_digit_counters[bin_idx * PADDED_WARPS];
             }
         }
     }
