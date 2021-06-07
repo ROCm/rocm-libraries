@@ -95,7 +95,7 @@ struct radix_sort_config_803
         radix_sort_config<
             6, 4, scan,
             kernel_config<
-                limit_block_size<256U, sizeof(Value)>::value,
+                limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
                 ::rocprim::max(1u, 15u / item_scale)
             >
         >
@@ -139,7 +139,7 @@ struct radix_sort_config_900
         radix_sort_config<
             6, 4, scan,
             kernel_config<
-                limit_block_size<256U, sizeof(Value)>::value,
+                limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
                 ::rocprim::max(1u, 15u / item_scale)
             >
         >
@@ -155,12 +155,104 @@ struct radix_sort_config_900<Key, empty_type>
         select_type_case<sizeof(Key) == 8, radix_sort_config<7, 6, kernel_config<256, 2>, kernel_config<256, 15> > >
     > { };
 
+// TODO: We need to update these parameters
+template<class Key, class Value>
+struct radix_sort_config_90a
+{
+    static constexpr unsigned int item_scale =
+        ::rocprim::detail::ceiling_div<unsigned int>(::rocprim::max(sizeof(Key), sizeof(Value)), sizeof(int));
+
+    using scan = kernel_config<256, 1>;
+
+    using type = select_type<
+        select_type_case<
+            (sizeof(Key) == 1 && sizeof(Value) <= 8),
+            radix_sort_config<4, 4, scan, kernel_config<256, 5> >
+        >,
+        select_type_case<
+            (sizeof(Key) == 2 && sizeof(Value) <= 8),
+            radix_sort_config<6, 5, scan, kernel_config<256, 5> >
+        >,
+        select_type_case<
+            (sizeof(Key) == 4 && sizeof(Value) <= 8),
+            radix_sort_config<7, 6, scan, kernel_config<256, 7> >
+        >,
+        select_type_case<
+            (sizeof(Key) == 8 && sizeof(Value) <= 8),
+            radix_sort_config<7, 6, scan, kernel_config<256, 7> >
+        >,
+        radix_sort_config<
+            6, 4, scan,
+            kernel_config<
+                limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
+                ::rocprim::max(1u, 15u / item_scale)
+            >
+        >
+    >;
+};
+
+template<class Key>
+struct radix_sort_config_90a<Key, empty_type>
+    : select_type<
+        select_type_case<sizeof(Key) == 1, radix_sort_config<4, 3, kernel_config<256, 1>, kernel_config<256, 5> > >,
+        select_type_case<sizeof(Key) == 2, radix_sort_config<6, 5, kernel_config<256, 1>, kernel_config<256, 5> > >,
+        select_type_case<sizeof(Key) == 4, radix_sort_config<7, 6, kernel_config<256, 1>, kernel_config<256, 8> > >,
+        select_type_case<sizeof(Key) == 8, radix_sort_config<7, 6, kernel_config<256, 1>, kernel_config<256, 7> > >
+    > { };
+
+// TODO: We need to update these parameters
+template<class Key, class Value>
+struct radix_sort_config_1030
+{
+    static constexpr unsigned int item_scale =
+        ::rocprim::detail::ceiling_div<unsigned int>(::rocprim::max(sizeof(Key), sizeof(Value)), sizeof(int));
+
+    using scan = kernel_config<256, 2>;
+
+    using type = select_type<
+        select_type_case<
+            (sizeof(Key) == 1 && sizeof(Value) <= 8),
+            radix_sort_config<4, 4, scan, kernel_config<256, 10> >
+        >,
+        select_type_case<
+            (sizeof(Key) == 2 && sizeof(Value) <= 8),
+            radix_sort_config<6, 5, scan, kernel_config<256, 10> >
+        >,
+        select_type_case<
+            (sizeof(Key) == 4 && sizeof(Value) <= 8),
+            radix_sort_config<7, 6, scan, kernel_config<256, 15> >
+        >,
+        select_type_case<
+            (sizeof(Key) == 8 && sizeof(Value) <= 8),
+            radix_sort_config<7, 6, scan, kernel_config<256, 15> >
+        >,
+        radix_sort_config<
+            6, 4, scan,
+            kernel_config<
+                limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_32>::value,
+                ::rocprim::max(1u, 15u / item_scale)
+            >
+        >
+    >;
+};
+
+template<class Key>
+struct radix_sort_config_1030<Key, empty_type>
+    : select_type<
+        select_type_case<sizeof(Key) == 1, radix_sort_config<4, 3, kernel_config<256, 2>, kernel_config<256, 10> > >,
+        select_type_case<sizeof(Key) == 2, radix_sort_config<6, 5, kernel_config<256, 2>, kernel_config<256, 10> > >,
+        select_type_case<sizeof(Key) == 4, radix_sort_config<7, 6, kernel_config<256, 2>, kernel_config<256, 17> > >,
+        select_type_case<sizeof(Key) == 8, radix_sort_config<7, 6, kernel_config<256, 2>, kernel_config<256, 15> > >
+    > { };
+
 template<unsigned int TargetArch, class Key, class Value>
 struct default_radix_sort_config
     : select_arch<
         TargetArch,
         select_arch_case<803, radix_sort_config_803<Key, Value> >,
         select_arch_case<900, radix_sort_config_900<Key, Value> >,
+        select_arch_case<ROCPRIM_ARCH_90a, radix_sort_config_90a<Key, Value> >,
+        select_arch_case<1030, radix_sort_config_1030<Key, Value> >,
         radix_sort_config_900<Key, Value>
     > { };
 

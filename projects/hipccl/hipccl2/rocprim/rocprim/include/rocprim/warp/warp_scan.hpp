@@ -61,12 +61,12 @@ struct select_warp_scan_impl
 ///
 /// \tparam T - the input/output type.
 /// \tparam WarpSize - the size of logical warp size, which can be equal to or less than
-/// the size of hardware warp (see rocprim::warp_size()). Scan operations are performed
+/// the size of hardware warp (see rocprim::device_warp_size()). Scan operations are performed
 /// separately within groups determined by WarpSize.
 ///
 /// \par Overview
 /// * \p WarpSize must be equal to or less than the size of hardware warp (see
-/// rocprim::warp_size()). If it is less, scan is performed separately within groups
+/// rocprim::device_warp_size()). If it is less, scan is performed separately within groups
 /// determined by WarpSize. \n
 /// For example, if \p WarpSize is 4, hardware warp is 64, scan will be performed in logical
 /// warps grouped like this: `{ {0, 1, 2, 3}, {4, 5, 6, 7 }, ..., {60, 61, 62, 63} }`
@@ -106,7 +106,7 @@ struct select_warp_scan_impl
 /// \endparblock
 template<
     class T,
-    unsigned int WarpSize = warp_size()
+    unsigned int WarpSize = device_warp_size()
 >
 class warp_scan
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
@@ -115,8 +115,8 @@ class warp_scan
 {
     using base_type = typename detail::select_warp_scan_impl<T, WarpSize>::type;
 
-    // Check if WarpSize is correct
-    static_assert(WarpSize <= warp_size(), "WarpSize can't be greater than hardware warp size.");
+    // Check if WarpSize is valid for the targets
+    static_assert(WarpSize <= ROCPRIM_MAX_WARP_SIZE, "WarpSize can't be greater than hardware warp size.");
 
 public:
     /// \brief Struct used to allocate a temporary memory that is required for thread
@@ -177,14 +177,30 @@ public:
     /// output values in the first logical warp will be <tt>{1, -2, -2, -4, ..., -32},</tt> in the second:
     /// <tt>{33, -34, -34, -36, ..., -64}</tt> etc.
     /// \endparblock
-    template<class BinaryFunction = ::rocprim::plus<T>>
+    template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
     ROCPRIM_DEVICE inline
-    void inclusive_scan(T input,
+    auto inclusive_scan(T input,
                         T& output,
                         storage_type& storage,
                         BinaryFunction scan_op = BinaryFunction())
+        -> typename std::enable_if<(FunctionWarpSize <= __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         base_type::inclusive_scan(input, output, storage, scan_op);
+    }
+
+    /// \brief Performs inclusive scan across threads in a logical warp.
+    /// Invalid Warp Size
+    template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
+    ROCPRIM_DEVICE inline
+    auto inclusive_scan(T ,
+                        T& ,
+                        storage_type& ,
+                        BinaryFunction scan_op = BinaryFunction())
+        -> typename std::enable_if<(FunctionWarpSize > __AMDGCN_WAVEFRONT_SIZE), void>::type
+    {
+        (void) scan_op;
+        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size . Aborting warp sort.");
+        return;
     }
 
     /// \brief Performs inclusive scan and reduction across threads in a logical warp.
@@ -236,15 +252,32 @@ public:
     /// \p output values in the every logical warp will be <tt>{1, 2, 3, 4, ..., 64}</tt>.
     /// The \p reduction will be equal \p 64.
     /// \endparblock
-    template<class BinaryFunction = ::rocprim::plus<T>>
+    template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
     ROCPRIM_DEVICE inline
-    void inclusive_scan(T input,
+    auto inclusive_scan(T input,
                         T& output,
                         T& reduction,
                         storage_type& storage,
                         BinaryFunction scan_op = BinaryFunction())
+        -> typename std::enable_if<(FunctionWarpSize <= __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         base_type::inclusive_scan(input, output, reduction, storage, scan_op);
+    }
+
+    /// \brief Performs inclusive scan and reduction across threads in a logical warp.
+    /// Invalid Warp Size
+    template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
+    ROCPRIM_DEVICE inline
+    auto inclusive_scan(T ,
+                        T& ,
+                        T& ,
+                        storage_type& ,
+                        BinaryFunction scan_op = BinaryFunction())
+        -> typename std::enable_if<(FunctionWarpSize > __AMDGCN_WAVEFRONT_SIZE), void>::type
+    {
+        (void) scan_op;
+        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size . Aborting warp sort.");
+        return;
     }
 
     /// \brief Performs exclusive scan across threads in a logical warp.
@@ -299,15 +332,32 @@ public:
     /// warp will be <tt>{100, 1, -2, -2, -4, ..., -30},</tt> in the second:
     /// <tt>{100, 33, -34, -34, -36, ..., -62}</tt> etc.
     /// \endparblock
-    template<class BinaryFunction = ::rocprim::plus<T>>
+    template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
     ROCPRIM_DEVICE inline
-    void exclusive_scan(T input,
+    auto exclusive_scan(T input,
                         T& output,
                         T init,
                         storage_type& storage,
                         BinaryFunction scan_op = BinaryFunction())
+        -> typename std::enable_if<(FunctionWarpSize <= __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         base_type::exclusive_scan(input, output, init, storage, scan_op);
+    }
+
+    /// \brief Performs exclusive scan across threads in a logical warp.
+    /// Invalid Warp Size
+    template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
+    ROCPRIM_DEVICE inline
+    auto exclusive_scan(T ,
+                        T& ,
+                        T ,
+                        storage_type& ,
+                        BinaryFunction scan_op = BinaryFunction())
+        -> typename std::enable_if<(FunctionWarpSize > __AMDGCN_WAVEFRONT_SIZE), void>::type
+    {
+        (void) scan_op;
+        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size . Aborting warp sort.");
+        return;
     }
 
     /// \brief Performs exclusive scan and reduction across threads in a logical warp.
@@ -363,16 +413,34 @@ public:
     /// <tt>{1, 1, ..., 1, 1}</tt>, then \p output values in every logical warp will be
     /// <tt>{10, 11, 12, 13, ..., 73}</tt>. The \p reduction will be 64.
     /// \endparblock
-    template<class BinaryFunction = ::rocprim::plus<T>>
+    template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
     ROCPRIM_DEVICE inline
-    void exclusive_scan(T input,
+    auto exclusive_scan(T input,
                         T& output,
                         T init,
                         T& reduction,
                         storage_type& storage,
                         BinaryFunction scan_op = BinaryFunction())
+        -> typename std::enable_if<(FunctionWarpSize <= __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         base_type::exclusive_scan(input, output, init, reduction, storage, scan_op);
+    }
+
+    /// \brief Performs exclusive scan and reduction across threads in a logical warp.
+    /// Invalid Warp Size
+    template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
+    ROCPRIM_DEVICE inline
+    auto exclusive_scan(T ,
+                        T& ,
+                        T ,
+                        T& ,
+                        storage_type& ,
+                        BinaryFunction scan_op = BinaryFunction())
+        -> typename std::enable_if<(FunctionWarpSize > __AMDGCN_WAVEFRONT_SIZE), void>::type
+    {
+        (void) scan_op;
+        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size . Aborting warp sort.");
+        return;
     }
 
     /// \brief Performs inclusive and exclusive scan operations across threads
@@ -433,16 +501,34 @@ public:
     /// logical warp will be <tt>{100, 1, -2, -2, -4, ..., -30},</tt> in the second:
     /// <tt>{100, 33, -34, -34, -36, ..., -62}</tt> etc.
     /// \endparblock
-    template<class BinaryFunction = ::rocprim::plus<T>>
+    template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
     ROCPRIM_DEVICE inline
-    void scan(T input,
+    auto scan(T input,
               T& inclusive_output,
               T& exclusive_output,
               T init,
               storage_type& storage,
               BinaryFunction scan_op = BinaryFunction())
+        -> typename std::enable_if<(FunctionWarpSize <= __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         base_type::scan(input, inclusive_output, exclusive_output, init, storage, scan_op);
+    }
+
+    /// \brief Performs inclusive and exclusive scan operations across threads
+    /// Invalid Warp Size
+    template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
+    ROCPRIM_DEVICE inline
+    auto scan(T ,
+              T& ,
+              T& ,
+              T ,
+              storage_type& ,
+              BinaryFunction scan_op = BinaryFunction())
+        -> typename std::enable_if<(FunctionWarpSize > __AMDGCN_WAVEFRONT_SIZE), void>::type
+    {
+        (void) scan_op;
+        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size . Aborting warp sort.");
+        return;
     }
 
     /// \brief Performs inclusive and exclusive scan operations, and reduction across
@@ -503,20 +589,39 @@ public:
     /// <tt>{1, 2, 3, 4, ..., 63, 64}</tt>, and \p ex_output values in every logical warp will
     /// be <tt>{10, 11, 12, 13, ..., 73}</tt>. The \p reduction will be 64.
     /// \endparblock
-    template<class BinaryFunction = ::rocprim::plus<T>>
+    template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
     ROCPRIM_DEVICE inline
-    void scan(T input,
+    auto scan(T input,
               T& inclusive_output,
               T& exclusive_output,
               T init,
               T& reduction,
               storage_type& storage,
               BinaryFunction scan_op = BinaryFunction())
+        -> typename std::enable_if<(FunctionWarpSize <= __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         base_type::scan(
             input, inclusive_output, exclusive_output, init, reduction,
             storage, scan_op
         );
+    }
+
+    /// \brief Performs inclusive and exclusive scan operations across threads
+    /// Invalid Warp Size
+    template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
+    ROCPRIM_DEVICE inline
+    auto scan(T ,
+              T& ,
+              T& ,
+              T ,
+              T& ,
+              storage_type& ,
+              BinaryFunction scan_op = BinaryFunction())
+        -> typename std::enable_if<(FunctionWarpSize > __AMDGCN_WAVEFRONT_SIZE), void>::type
+    {
+        (void) scan_op;
+        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size . Aborting warp sort.");
+        return;
     }
 
     /// \brief Broadcasts value from one thread to all threads in logical warp.
@@ -528,20 +633,47 @@ public:
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
     /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
+    template<unsigned int FunctionWarpSize = WarpSize>
     ROCPRIM_DEVICE inline
-    T broadcast(T input,
-                const unsigned int src_lane,
-                storage_type& storage)
+    auto broadcast(T input,
+                   const unsigned int src_lane,
+                   storage_type& storage)
+        -> typename std::enable_if<(FunctionWarpSize <= __AMDGCN_WAVEFRONT_SIZE), T>::type
     {
         return base_type::broadcast(input, src_lane, storage);
     }
 
+    /// \brief Broadcasts value from one thread to all threads in logical warp.
+    /// Invalid Warp Size
+    template<unsigned int FunctionWarpSize = WarpSize>
+    ROCPRIM_DEVICE inline
+    auto broadcast(T ,
+                   const unsigned int ,
+                   storage_type& )
+        -> typename std::enable_if<(FunctionWarpSize > __AMDGCN_WAVEFRONT_SIZE), T>::type
+    {
+        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size. Aborting warp sort.");
+        return T();
+    }
+
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 protected:
+
+    template<unsigned int FunctionWarpSize = WarpSize>
     ROCPRIM_DEVICE inline
-    void to_exclusive(T inclusive_input, T& exclusive_output, storage_type& storage)
+    auto to_exclusive(T inclusive_input, T& exclusive_output, storage_type& storage)
+        -> typename std::enable_if<(FunctionWarpSize <= __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
         return base_type::to_exclusive(inclusive_input, exclusive_output, storage);
+    }
+
+    template<unsigned int FunctionWarpSize = WarpSize>
+    ROCPRIM_DEVICE inline
+    auto to_exclusive(T , T& , storage_type&)
+        -> typename std::enable_if<(FunctionWarpSize > __AMDGCN_WAVEFRONT_SIZE), void>::type
+    {
+        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size. Aborting warp sort.");
+        return;
     }
 #endif
 };

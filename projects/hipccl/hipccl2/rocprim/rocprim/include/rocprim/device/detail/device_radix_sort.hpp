@@ -86,6 +86,7 @@ void sort_block(SortType sorter,
 }
 
 template<
+    unsigned int WarpSize,
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
     unsigned int RadixBits,
@@ -95,9 +96,9 @@ struct radix_digit_count_helper
 {
     static constexpr unsigned int radix_size = 1 << RadixBits;
 
-    static constexpr unsigned int warp_size = ::rocprim::warp_size();
+    static constexpr unsigned int warp_size = WarpSize;
     static constexpr unsigned int warps_no = BlockSize / warp_size;
-    static_assert(BlockSize % warp_size == 0, "BlockSize must be divisible by warp size");
+    static_assert(BlockSize % ::rocprim::device_warp_size() == 0, "BlockSize must be divisible by warp size");
     static_assert(radix_size <= BlockSize, "Radix size must not exceed BlockSize");
 
     struct storage_type
@@ -158,11 +159,11 @@ struct radix_digit_count_helper
                 const bit_key_type bit_key = key_codec::encode(keys[i]);
                 const unsigned int digit = (bit_key >> bit) & radix_mask;
                 const unsigned int pos = i * BlockSize + flat_id;
-                unsigned long long same_digit_lanes_mask = ::rocprim::ballot(IsFull || (pos < valid_count));
+                lane_mask_type same_digit_lanes_mask = ::rocprim::ballot(IsFull || (pos < valid_count));
                 for(unsigned int b = 0; b < RadixBits; b++)
                 {
                     const unsigned int bit_set = digit & (1u << b);
-                    const unsigned long long bit_set_mask = ::rocprim::ballot(bit_set);
+                    const lane_mask_type bit_set_mask = ::rocprim::ballot(bit_set);
                     same_digit_lanes_mask &= (bit_set ? bit_set_mask : ~bit_set_mask);
                 }
                 const unsigned int same_digit_count = ::rocprim::bit_count(same_digit_lanes_mask);
@@ -396,7 +397,7 @@ void fill_digit_counts(KeysInputIterator keys_input,
     constexpr unsigned int radix_size = 1 << RadixBits;
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
 
-    using count_helper_type = radix_digit_count_helper<BlockSize, ItemsPerThread, RadixBits, Descending>;
+    using count_helper_type = radix_digit_count_helper<::rocprim::device_warp_size(), BlockSize, ItemsPerThread, RadixBits, Descending>;
 
     ROCPRIM_SHARED_MEMORY typename count_helper_type::storage_type storage;
 

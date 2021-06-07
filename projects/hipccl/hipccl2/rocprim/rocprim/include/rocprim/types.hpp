@@ -112,6 +112,13 @@ struct empty_type
 /// \brief Half-precision floating point type
 using half = ::__half;
 
+// The lane_mask_type only exist at device side
+#if __AMDGCN_WAVEFRONT_SIZE == 32
+using lane_mask_type = unsigned int;
+#elif __AMDGCN_WAVEFRONT_SIZE == 64
+using lane_mask_type = unsigned long long int;
+#endif
+
 END_ROCPRIM_NAMESPACE
 
 /// @}

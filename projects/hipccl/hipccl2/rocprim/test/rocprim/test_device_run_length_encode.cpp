@@ -76,7 +76,7 @@ typedef ::testing::Types<
     params<unsigned long long, custom_double2, 100000, 100000>
 > Params;
 
-TYPED_TEST_CASE(RocprimDeviceRunLengthEncode, Params);
+TYPED_TEST_SUITE(RocprimDeviceRunLengthEncode, Params);
 
 std::vector<size_t> get_sizes(int seed_value)
 {

@@ -101,7 +101,7 @@ typedef ::testing::Types<
     params<unsigned long long, unsigned long long, rocprim::plus<unsigned long long>, 100000, 100000>
 > Params;
 
-TYPED_TEST_CASE(RocprimDeviceReduceByKey, Params);
+TYPED_TEST_SUITE(RocprimDeviceReduceByKey, Params);
 
 std::vector<size_t> get_sizes(int seed_value)
 {

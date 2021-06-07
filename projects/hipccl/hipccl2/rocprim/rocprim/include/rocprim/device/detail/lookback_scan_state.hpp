@@ -81,8 +81,6 @@ private:
             unsigned int
         >::type;
 
-    static constexpr unsigned int padding = ::rocprim::warp_size();
-
     // Helper struct
     struct alignas(sizeof(prefix_underlying_type)) prefix_type
     {
@@ -110,13 +108,15 @@ public:
     ROCPRIM_HOST static inline
     size_t get_storage_size(const unsigned int number_of_blocks)
     {
-        return sizeof(prefix_underlying_type) * (padding + number_of_blocks);
+        return sizeof(prefix_underlying_type) * (::rocprim::host_warp_size() + number_of_blocks);
     }
 
     ROCPRIM_DEVICE inline
     void initialize_prefix(const unsigned int block_id,
                            const unsigned int number_of_blocks)
     {
+        constexpr unsigned int padding = ::rocprim::device_warp_size();
+
         if(block_id < number_of_blocks)
         {
             prefix_type prefix;
@@ -151,6 +151,8 @@ public:
     ROCPRIM_DEVICE inline
     void get(const unsigned int block_id, flag_type& flag, T& value)
     {
+        constexpr unsigned int padding = ::rocprim::device_warp_size();
+
         prefix_type prefix;
 
         const uint SLEEP_MAX = 32;
@@ -181,6 +183,8 @@ private:
     ROCPRIM_DEVICE inline
     void set(const unsigned int block_id, const flag_type flag, const T value)
     {
+        constexpr unsigned int padding = ::rocprim::device_warp_size();
+
         prefix_type prefix = { flag, value };
         prefix_underlying_type p;
         __builtin_memcpy(&p, &prefix, sizeof(prefix_type));
@@ -195,8 +199,6 @@ private:
 template<class T, bool UseSleep>
 struct lookback_scan_state<T, UseSleep, false>
 {
-private:
-    static constexpr unsigned int padding = ::rocprim::warp_size();
 
 public:
     using flag_type = char;
@@ -206,7 +208,7 @@ public:
     ROCPRIM_HOST static inline
     lookback_scan_state create(void* temp_storage, const unsigned int number_of_blocks)
     {
-        const auto n = padding + number_of_blocks;
+        const auto n = ::rocprim::host_warp_size() + number_of_blocks;
         lookback_scan_state state;
 
         auto ptr = reinterpret_cast<char*>(temp_storage);
@@ -224,7 +226,7 @@ public:
     ROCPRIM_HOST static inline
     size_t get_storage_size(const unsigned int number_of_blocks)
     {
-        const auto n = padding + number_of_blocks;
+        const auto n = ::rocprim::host_warp_size() + number_of_blocks;
         size_t size = ::rocprim::detail::align_size(n * sizeof(flag_type));
         size += 2 * ::rocprim::detail::align_size(n * sizeof(T));
         return size;
@@ -234,6 +236,7 @@ public:
     void initialize_prefix(const unsigned int block_id,
                            const unsigned int number_of_blocks)
     {
+        constexpr unsigned int padding = ::rocprim::device_warp_size();
         if(block_id < number_of_blocks)
         {
             prefixes_flags[padding + block_id] = PREFIX_EMPTY;
@@ -247,6 +250,8 @@ public:
     ROCPRIM_DEVICE inline
     void set_partial(const unsigned int block_id, const T value)
     {
+        constexpr unsigned int padding = ::rocprim::device_warp_size();
+
         store_volatile(&prefixes_partial_values[padding + block_id], value);
         ::rocprim::detail::memory_fence_device();
         store_volatile<flag_type>(&prefixes_flags[padding + block_id], PREFIX_PARTIAL);
@@ -255,6 +260,8 @@ public:
     ROCPRIM_DEVICE inline
     void set_complete(const unsigned int block_id, const T value)
     {
+        constexpr unsigned int padding = ::rocprim::device_warp_size();
+
         store_volatile(&prefixes_complete_values[padding + block_id], value);
         ::rocprim::detail::memory_fence_device();
         store_volatile<flag_type>(&prefixes_flags[padding + block_id], PREFIX_COMPLETE);
@@ -264,6 +271,8 @@ public:
     ROCPRIM_DEVICE inline
     void get(const unsigned int block_id, flag_type& flag, T& value)
     {
+        constexpr unsigned int padding = ::rocprim::device_warp_size();
+
         const uint SLEEP_MAX = 32;
         uint times_through = 1;
 
@@ -333,7 +342,7 @@ public:
             BinaryFunction, T, T
         >;
         using warp_reduce_prefix_type = warp_reduce_crosslane<
-            T, ::rocprim::warp_size(), false
+            T, ::rocprim::device_warp_size(), false
         >;
 
         T block_prefix;
@@ -372,7 +381,7 @@ public:
             {
                 prefix = scan_op_(partial_prefix, prefix);
             }
-            previous_block_id -= ::rocprim::warp_size();
+            previous_block_id -= ::rocprim::device_warp_size();
             // while we don't load a complete prefix, reduce partial prefixes
         } while(::rocprim::detail::warp_all(flag != PREFIX_COMPLETE));
         return prefix;

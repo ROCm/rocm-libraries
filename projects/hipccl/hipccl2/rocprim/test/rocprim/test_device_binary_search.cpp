@@ -64,7 +64,7 @@ typedef ::testing::Types<
     params<custom_double2, custom_double2, unsigned int, rocprim::greater<custom_double2> >
 > Params;
 
-TYPED_TEST_CASE(RocprimDeviceBinarySearch, Params);
+TYPED_TEST_SUITE(RocprimDeviceBinarySearch, Params);
 
 std::vector<size_t> get_sizes(int seed_value)
 {

@@ -45,6 +45,34 @@ constexpr unsigned int warp_size()
     return warpSize;
 }
 
+/// \brief Returns a number of threads in a hardware warp for the actual device.
+/// At host side this constant is available at runtime time only.
+///
+/// It is constant for a device.
+ROCPRIM_HOST inline
+unsigned int host_warp_size()
+{
+    int default_hip_device;
+    hipError_t success = hipGetDevice(&default_hip_device);
+    hipDeviceProp_t device_prop;
+    success = hipGetDeviceProperties(&device_prop,default_hip_device);
+
+    if(success != hipSuccess)
+        return -1;
+    else
+        return device_prop.warpSize;
+};
+
+/// \brief Returns a number of threads in a hardware warp for the actual target.
+/// At device side this constant is available at compile time.
+///
+/// It is constant for a device.
+ROCPRIM_DEVICE inline
+constexpr unsigned int device_warp_size()
+{
+    return warpSize;
+}
+
 /// \brief Returns flat size of a multidimensional block (tile).
 ROCPRIM_DEVICE inline
 unsigned int flat_block_size()
@@ -114,13 +142,13 @@ unsigned int flat_tile_thread_id()
 ROCPRIM_DEVICE inline
 unsigned int warp_id()
 {
-    return flat_block_thread_id()/warp_size();
+    return flat_block_thread_id()/device_warp_size();
 }
 
 ROCPRIM_DEVICE inline
 unsigned int warp_id(unsigned int flat_id)
 {
-    return flat_id/warp_size();
+    return flat_id/device_warp_size();
 }
 
 /// \brief Returns warp id in a block (tile). Use template parameters to optimize 1D or 2D kernels.
@@ -128,7 +156,7 @@ template<unsigned int BlockSizeX, unsigned int BlockSizeY, unsigned int BlockSiz
 ROCPRIM_DEVICE inline
 unsigned int warp_id()
 {
-    return flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>()/warp_size();
+    return flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>()/device_warp_size();
 }
 
 /// \brief Returns flat (linear, 1D) block identifier in a multidimensional grid.
@@ -257,7 +285,7 @@ namespace detail
 
     template<>
     ROCPRIM_DEVICE inline
-    unsigned int logical_lane_id<warp_size()>()
+    unsigned int logical_lane_id<device_warp_size()>()
     {
         return lane_id();
     }
@@ -272,7 +300,7 @@ namespace detail
 
     template<>
     ROCPRIM_DEVICE inline
-    unsigned int logical_warp_id<warp_size()>()
+    unsigned int logical_warp_id<device_warp_size()>()
     {
         return warp_id();
     }

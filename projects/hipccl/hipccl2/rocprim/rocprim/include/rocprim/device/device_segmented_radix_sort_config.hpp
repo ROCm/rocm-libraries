@@ -135,12 +135,86 @@ struct segmented_radix_sort_config_900<Key, empty_type>
         select_type_case<sizeof(Key) == 8, segmented_radix_sort_config<7, 6, kernel_config<256, 15> > >
     > { };
 
+template<class Key, class Value>
+struct segmented_radix_sort_config_90a
+{
+    static constexpr unsigned int item_scale =
+        ::rocprim::detail::ceiling_div<unsigned int>(::rocprim::max(sizeof(Key), sizeof(Value)), sizeof(int));
+
+    using type = select_type<
+        select_type_case<
+            (sizeof(Key) == 1 && sizeof(Value) <= 8),
+            segmented_radix_sort_config<4, 4, kernel_config<256, 10> >
+        >,
+        select_type_case<
+            (sizeof(Key) == 2 && sizeof(Value) <= 8),
+            segmented_radix_sort_config<6, 5, kernel_config<256, 10> >
+        >,
+        select_type_case<
+            (sizeof(Key) == 4 && sizeof(Value) <= 8),
+            segmented_radix_sort_config<7, 6, kernel_config<256, 15> >
+        >,
+        select_type_case<
+            (sizeof(Key) == 8 && sizeof(Value) <= 8),
+            segmented_radix_sort_config<7, 6, kernel_config<256, 15> >
+        >,
+        segmented_radix_sort_config<7, 6, kernel_config<256, ::rocprim::max(1u, 15u / item_scale)> >
+    >;
+};
+
+template<class Key>
+struct segmented_radix_sort_config_90a<Key, empty_type>
+    : select_type<
+        select_type_case<sizeof(Key) == 1, segmented_radix_sort_config<4, 3, kernel_config<256, 10> > >,
+        select_type_case<sizeof(Key) == 2, segmented_radix_sort_config<6, 5, kernel_config<256, 10> > >,
+        select_type_case<sizeof(Key) == 4, segmented_radix_sort_config<7, 6, kernel_config<256, 17> > >,
+        select_type_case<sizeof(Key) == 8, segmented_radix_sort_config<7, 6, kernel_config<256, 15> > >
+    > { };
+
+template<class Key, class Value>
+struct segmented_radix_sort_config_1030
+{
+    static constexpr unsigned int item_scale =
+        ::rocprim::detail::ceiling_div<unsigned int>(::rocprim::max(sizeof(Key), sizeof(Value)), sizeof(int));
+
+    using type = select_type<
+        select_type_case<
+            (sizeof(Key) == 1 && sizeof(Value) <= 8),
+            segmented_radix_sort_config<4, 4, kernel_config<256, 10> >
+        >,
+        select_type_case<
+            (sizeof(Key) == 2 && sizeof(Value) <= 8),
+            segmented_radix_sort_config<6, 5, kernel_config<256, 10> >
+        >,
+        select_type_case<
+            (sizeof(Key) == 4 && sizeof(Value) <= 8),
+            segmented_radix_sort_config<7, 6, kernel_config<256, 15> >
+        >,
+        select_type_case<
+            (sizeof(Key) == 8 && sizeof(Value) <= 8),
+            segmented_radix_sort_config<7, 6, kernel_config<256, 15> >
+        >,
+        segmented_radix_sort_config<7, 6, kernel_config<256, ::rocprim::max(1u, 15u / item_scale)> >
+    >;
+};
+
+template<class Key>
+struct segmented_radix_sort_config_1030<Key, empty_type>
+    : select_type<
+        select_type_case<sizeof(Key) == 1, segmented_radix_sort_config<4, 3, kernel_config<256, 10> > >,
+        select_type_case<sizeof(Key) == 2, segmented_radix_sort_config<6, 5, kernel_config<256, 10> > >,
+        select_type_case<sizeof(Key) == 4, segmented_radix_sort_config<7, 6, kernel_config<256, 17> > >,
+        select_type_case<sizeof(Key) == 8, segmented_radix_sort_config<7, 6, kernel_config<256, 15> > >
+    > { };
+
 template<unsigned int TargetArch, class Key, class Value>
 struct default_segmented_radix_sort_config
     : select_arch<
         TargetArch,
         select_arch_case<803, detail::segmented_radix_sort_config_803<Key, Value> >,
         select_arch_case<900, detail::segmented_radix_sort_config_900<Key, Value> >,
+        select_arch_case<ROCPRIM_ARCH_90a, detail::segmented_radix_sort_config_90a<Key, Value> >,
+        select_arch_case<1030, detail::segmented_radix_sort_config_900<Key, Value> >,
         detail::segmented_radix_sort_config_900<Key, Value>
     > { };
 

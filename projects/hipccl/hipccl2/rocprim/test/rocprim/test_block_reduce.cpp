@@ -41,7 +41,7 @@ public:
     static constexpr unsigned int block_size = Params::block_size;
 };
 
-TYPED_TEST_CASE(RocprimBlockReduceSingleValueTests, BlockParams);
+TYPED_TEST_SUITE(RocprimBlockReduceSingleValueTests, BlockParams);
 
 template<
     unsigned int BlockSize,
@@ -50,7 +50,7 @@ template<
     class BinaryOp
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void reduce_kernel(T* device_output, T* device_output_reductions)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
@@ -171,6 +171,10 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, Reduce)
             output, output_reductions, expected_reductions,
             device_output, device_output_reductions, grid_size, false
         );
+        static_run_algo<T, block_size, rocprim::block_reduce_algorithm::raking_reduce_commutative_only, binary_op_type>::run(
+            output, output_reductions, expected_reductions,
+            device_output, device_output_reductions, grid_size, false
+        );
 
         HIP_CHECK(hipFree(device_output));
         HIP_CHECK(hipFree(device_output_reductions));
@@ -240,6 +244,11 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceMultiplies)
             device_output, device_output_reductions, grid_size, true
         );
 
+        static_run_algo<T, block_size, rocprim::block_reduce_algorithm::raking_reduce_commutative_only, binary_op_type>::run(
+            output, output_reductions, expected_reductions,
+            device_output, device_output_reductions, grid_size, true
+        );
+
         HIP_CHECK(hipFree(device_output));
         HIP_CHECK(hipFree(device_output_reductions));
     }
@@ -253,7 +262,7 @@ template<
     class BinaryOp
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void reduce_valid_kernel(T* device_output, T* device_output_reductions, const unsigned int valid_items)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
@@ -368,6 +377,10 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceValid)
             output, output_reductions, expected_reductions,
             device_output, device_output_reductions, valid_items, grid_size
         );
+        static_run_valid<T, block_size, rocprim::block_reduce_algorithm::raking_reduce_commutative_only, binary_op_type>::run(
+            output, output_reductions, expected_reductions,
+            device_output, device_output_reductions, valid_items, grid_size
+        );
 
         HIP_CHECK(hipFree(device_output));
         HIP_CHECK(hipFree(device_output_reductions));
@@ -384,7 +397,7 @@ public:
     static constexpr unsigned int block_size = Params::block_size;
 };
 
-TYPED_TEST_CASE(RocprimBlockReduceInputArrayTests, BlockParams);
+TYPED_TEST_SUITE(RocprimBlockReduceInputArrayTests, BlockParams);
 
 template<
     unsigned int BlockSize,
@@ -394,7 +407,7 @@ template<
     class BinaryOp
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void reduce_array_kernel(T* device_output, T* device_output_reductions)
 {
     const unsigned int index = ((hipBlockIdx_x * BlockSize) + hipThreadIdx_x) * ItemsPerThread;
@@ -552,4 +565,6 @@ TYPED_TEST(RocprimBlockReduceInputArrayTests, Reduce)
 
     static_for_input_array<0, 2, T, block_size, rocprim::block_reduce_algorithm::using_warp_reduce>::run();
     static_for_input_array<0, 2, T, block_size, rocprim::block_reduce_algorithm::raking_reduce>::run();
+    static_for_input_array<0, 2, T, block_size, rocprim::block_reduce_algorithm::raking_reduce_commutative_only>::run();
+
 }

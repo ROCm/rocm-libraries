@@ -53,7 +53,8 @@
       defined(__gfx904__) || \
       defined(__gfx906__) || \
       defined(__gfx908__) || \
-      defined(__gfx909__) ) && \
+      defined(__gfx909__) || \
+      defined(__gfx90a__) ) && \
       !defined(ROCPRIM_DISABLE_DPP)
     #define ROCPRIM_DETAIL_USE_DPP true
 #else
@@ -66,6 +67,15 @@
     #define ROCPRIM_DETAIL_USE_LOOKBACK_SCAN true
 #endif
 
+#ifndef ROCPRIM_THREAD_LOAD_USE_CACHE_MODIFIERS
+    #define ROCPRIM_THREAD_LOAD_USE_CACHE_MODIFIERS 1
+#endif
+
+#ifndef ROCPRIM_THREAD_STORE_USE_CACHE_MODIFIERS
+    #define ROCPRIM_THREAD_STORE_USE_CACHE_MODIFIERS 1
+#endif
+
+
 // Defines targeted AMD architecture. Supported values:
 // * 803 (gfx803)
 // * 900 (gfx900)
@@ -75,5 +85,12 @@
 #ifndef ROCPRIM_TARGET_ARCH
     #define ROCPRIM_TARGET_ARCH 0
 #endif
+
+#define ROCPRIM_ARCH_90a 910
+
+/// Supported warp sizes
+#define ROCPRIM_WARP_SIZE_32 32u
+#define ROCPRIM_WARP_SIZE_64 64u
+#define ROCPRIM_MAX_WARP_SIZE ROCPRIM_WARP_SIZE_64
 
 #endif // ROCPRIM_CONFIG_HPP_
