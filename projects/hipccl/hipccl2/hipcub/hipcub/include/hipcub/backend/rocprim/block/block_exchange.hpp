@@ -86,7 +86,7 @@ public:
 
     template<typename OutputT>
     HIPCUB_DEVICE inline
-    void StripedToBlocked(InputT (&input_items)[ITEMS_PER_THREAD],
+    void StripedToBlocked(InputT  (&input_items)[ITEMS_PER_THREAD],
                           OutputT (&output_items)[ITEMS_PER_THREAD])
     {
         base_type::striped_to_blocked(input_items, output_items, temp_storage_);
@@ -94,7 +94,7 @@ public:
 
     template<typename OutputT>
     HIPCUB_DEVICE inline
-    void BlockedToStriped(InputT (&input_items)[ITEMS_PER_THREAD],
+    void BlockedToStriped(InputT  (&input_items)[ITEMS_PER_THREAD],
                           OutputT (&output_items)[ITEMS_PER_THREAD])
     {
         base_type::blocked_to_striped(input_items, output_items, temp_storage_);
@@ -102,7 +102,7 @@ public:
 
     template<typename OutputT>
     HIPCUB_DEVICE inline
-    void WarpStripedToBlocked(InputT (&input_items)[ITEMS_PER_THREAD],
+    void WarpStripedToBlocked(InputT  (&input_items)[ITEMS_PER_THREAD],
                               OutputT (&output_items)[ITEMS_PER_THREAD])
     {
         base_type::warp_striped_to_blocked(input_items, output_items, temp_storage_);
@@ -110,7 +110,7 @@ public:
 
     template<typename OutputT>
     HIPCUB_DEVICE inline
-    void BlockedToWarpStriped(InputT (&input_items)[ITEMS_PER_THREAD],
+    void BlockedToWarpStriped(InputT  (&input_items)[ITEMS_PER_THREAD],
                               OutputT (&output_items)[ITEMS_PER_THREAD])
     {
         base_type::blocked_to_warp_striped(input_items, output_items, temp_storage_);
@@ -118,7 +118,7 @@ public:
 
     template<typename OutputT, typename OffsetT>
     HIPCUB_DEVICE inline
-    void ScatterToBlocked(InputT (&input_items)[ITEMS_PER_THREAD],
+    void ScatterToBlocked(InputT  (&input_items)[ITEMS_PER_THREAD],
                           OutputT (&output_items)[ITEMS_PER_THREAD],
                           OffsetT (&ranks)[ITEMS_PER_THREAD])
     {
@@ -127,7 +127,7 @@ public:
 
     template<typename OutputT, typename OffsetT>
     HIPCUB_DEVICE inline
-    void ScatterToStriped(InputT (&input_items)[ITEMS_PER_THREAD],
+    void ScatterToStriped(InputT  (&input_items)[ITEMS_PER_THREAD],
                           OutputT (&output_items)[ITEMS_PER_THREAD],
                           OffsetT (&ranks)[ITEMS_PER_THREAD])
     {
@@ -136,7 +136,7 @@ public:
 
     template<typename OutputT, typename OffsetT>
     HIPCUB_DEVICE inline
-    void ScatterToStripedGuarded(InputT (&input_items)[ITEMS_PER_THREAD],
+    void ScatterToStripedGuarded(InputT  (&input_items)[ITEMS_PER_THREAD],
                                  OutputT (&output_items)[ITEMS_PER_THREAD],
                                  OffsetT (&ranks)[ITEMS_PER_THREAD])
     {
@@ -145,13 +145,75 @@ public:
 
     template<typename OutputT, typename OffsetT, typename ValidFlag>
     HIPCUB_DEVICE inline
-    void ScatterToStripedFlagged(InputT (&input_items)[ITEMS_PER_THREAD],
-                                 OutputT (&output_items)[ITEMS_PER_THREAD],
-                                 OffsetT (&ranks)[ITEMS_PER_THREAD],
+    void ScatterToStripedFlagged(InputT    (&input_items)[ITEMS_PER_THREAD],
+                                 OutputT   (&output_items)[ITEMS_PER_THREAD],
+                                 OffsetT   (&ranks)[ITEMS_PER_THREAD],
                                  ValidFlag (&is_valid)[ITEMS_PER_THREAD])
     {
         base_type::scatter_to_striped_flagged(input_items, output_items, ranks, is_valid, temp_storage_);
     }
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS    // Do not document
+
+
+    HIPCUB_DEVICE inline void StripedToBlocked(
+        InputT      (&items)[ITEMS_PER_THREAD])   ///< [in-out] Items to exchange, converting between <em>striped</em> and <em>blocked</em> arrangements.
+    {
+        StripedToBlocked(items, items);
+    }
+
+    HIPCUB_DEVICE inline void BlockedToStriped(
+        InputT      (&items)[ITEMS_PER_THREAD])   ///< [in-out] Items to exchange, converting between <em>striped</em> and <em>blocked</em> arrangements.
+    {
+        BlockedToStriped(items, items);
+    }
+
+    HIPCUB_DEVICE inline void WarpStripedToBlocked(
+        InputT      (&items)[ITEMS_PER_THREAD])    ///< [in-out] Items to exchange, converting between <em>striped</em> and <em>blocked</em> arrangements.
+    {
+        WarpStripedToBlocked(items, items);
+    }
+
+    HIPCUB_DEVICE inline void BlockedToWarpStriped(
+        InputT      (&items)[ITEMS_PER_THREAD])    ///< [in-out] Items to exchange, converting between <em>striped</em> and <em>blocked</em> arrangements.
+    {
+        BlockedToWarpStriped(items, items);
+    }
+
+    template <typename OffsetT>
+    HIPCUB_DEVICE inline void ScatterToBlocked(
+        InputT      (&items)[ITEMS_PER_THREAD],    ///< [in-out] Items to exchange, converting between <em>striped</em> and <em>blocked</em> arrangements.
+        OffsetT     (&ranks)[ITEMS_PER_THREAD])    ///< [in] Corresponding scatter ranks
+    {
+        ScatterToBlocked(items, items, ranks);
+    }
+
+    template <typename OffsetT>
+    HIPCUB_DEVICE inline void ScatterToStriped(
+        InputT      (&items)[ITEMS_PER_THREAD],    ///< [in-out] Items to exchange, converting between <em>striped</em> and <em>blocked</em> arrangements.
+        OffsetT     (&ranks)[ITEMS_PER_THREAD])    ///< [in] Corresponding scatter ranks
+    {
+        ScatterToStriped(items, items, ranks);
+    }
+
+    template <typename OffsetT>
+    HIPCUB_DEVICE inline void ScatterToStripedGuarded(
+        InputT      (&items)[ITEMS_PER_THREAD],    ///< [in-out] Items to exchange, converting between <em>striped</em> and <em>blocked</em> arrangements.
+        OffsetT     (&ranks)[ITEMS_PER_THREAD])    ///< [in] Corresponding scatter ranks
+    {
+        ScatterToStripedGuarded(items, items, ranks);
+    }
+
+    template <typename OffsetT, typename ValidFlag>
+    HIPCUB_DEVICE inline void ScatterToStripedFlagged(
+        InputT      (&items)[ITEMS_PER_THREAD],        ///< [in-out] Items to exchange, converting between <em>striped</em> and <em>blocked</em> arrangements.
+        OffsetT     (&ranks)[ITEMS_PER_THREAD],        ///< [in] Corresponding scatter ranks
+        ValidFlag   (&is_valid)[ITEMS_PER_THREAD])     ///< [in] Corresponding flag denoting item validity
+    {
+        ScatterToStriped(items, items, ranks, is_valid);
+    }
+
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 private:
     HIPCUB_DEVICE inline

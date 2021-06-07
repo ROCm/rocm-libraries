@@ -38,7 +38,10 @@
 #include <rocprim/intrinsics/warp_shuffle.hpp>
 
 #define HIPCUB_WARP_THREADS ::rocprim::warp_size()
+#define HIPCUB_DEVICE_WARP_THREADS ::rocprim::device_warp_size()
+#define HIPCUB_HOST_WARP_THREADS ::rocprim::host_warp_size()
 #define HIPCUB_ARCH 1 // ignored with rocPRIM backend
+
 
 BEGIN_HIPCUB_NAMESPACE
 

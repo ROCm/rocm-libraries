@@ -29,7 +29,7 @@
 
 #ifndef HIPCUB_DEVICE_PARTITION_HPP_
 #define HIPCUB_DEVICE_PARTITION_HPP_
-
+#include <iostream>
 #ifdef __HIP_PLATFORM_HCC__
     #include "../backend/rocprim/device/device_partition.hpp"
 #elif defined(__HIP_PLATFORM_NVCC__)
@@ -37,4 +37,3 @@
 #endif
 
 #endif // HIPCUB_DEVICE_DEVICE_PARTITION_HPP_
-

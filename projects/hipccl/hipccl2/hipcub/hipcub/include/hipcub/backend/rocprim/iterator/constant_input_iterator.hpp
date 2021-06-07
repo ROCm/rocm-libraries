@@ -45,11 +45,15 @@
 
 BEGIN_HIPCUB_NAMESPACE
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS    // Do not document
+
 template<
     typename ValueType,
     typename OffsetT = std::ptrdiff_t
 >
 using ConstantInputIterator = ::rocprim::constant_iterator<ValueType, OffsetT>;
+
+#endif
 
 END_HIPCUB_NAMESPACE
 

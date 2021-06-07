@@ -41,7 +41,7 @@ BEGIN_HIPCUB_NAMESPACE
 
 template<
     typename T,
-    int LOGICAL_WARP_THREADS = HIPCUB_WARP_THREADS,
+    int LOGICAL_WARP_THREADS = HIPCUB_DEVICE_WARP_THREADS,
     int ARCH = HIPCUB_ARCH>
 class WarpScan : private ::rocprim::warp_scan<T, LOGICAL_WARP_THREADS>
 {

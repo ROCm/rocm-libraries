@@ -45,12 +45,16 @@
 
 BEGIN_HIPCUB_NAMESPACE
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS    // Do not document
+
 template<
     typename InputIterator,
     typename Difference = std::ptrdiff_t,
     typename Value = typename std::iterator_traits<InputIterator>::value_type
 >
 using ArgIndexInputIterator = ::rocprim::arg_index_iterator<InputIterator, Difference, Value>;
+
+#endif
 
 END_HIPCUB_NAMESPACE
 

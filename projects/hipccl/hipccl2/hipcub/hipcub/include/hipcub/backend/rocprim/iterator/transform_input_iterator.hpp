@@ -46,6 +46,8 @@
 
 BEGIN_HIPCUB_NAMESPACE
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS    // Do not document
+
 template<
     typename ValueType,
     typename ConversionOp,
@@ -53,6 +55,8 @@ template<
     typename OffsetT = std::ptrdiff_t // ignored
 >
 using TransformInputIterator = ::rocprim::transform_iterator<InputIteratorT, ConversionOp, ValueType>;
+
+#endif
 
 END_HIPCUB_NAMESPACE
 
