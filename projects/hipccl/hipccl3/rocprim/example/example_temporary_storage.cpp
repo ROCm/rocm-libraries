@@ -33,7 +33,7 @@ template<
     class T
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void example_shared_memory(const T *input, T *output)
 {
     // Indexing for  this block
@@ -114,7 +114,7 @@ template<
     class T
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void example_union_storage_types(const T *input, T *output)
 {
     // Specialize primitives
@@ -222,7 +222,7 @@ template<
     class T
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void example_dynamic_shared_memory(const T *input, T *output)
 {
     // Indexing for  this block
@@ -303,7 +303,7 @@ template<
     class T
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void example_global_memory_storage(
         const T *input,
         T *output,

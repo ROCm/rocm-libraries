@@ -26,6 +26,7 @@ stages:
   - build:cmake_latest   # Tests if builds succeed (CMake)
   - build:cmake_minimum  # Tests if builds succeed (CMake)
   - test    # Tests if unit tests are passing (CTest)
+  - benchmark
 
 variables:
   # Tested CMake versions
@@ -40,7 +41,7 @@ variables:
   BUILD_DIR: $CI_PROJECT_DIR/build
   CMAKE_MINIMUM_URL: "https://cmake.org/files/v3.10/cmake-3.10.2-Linux-x86_64.tar.gz"
   CMAKE_MINIMUM_PATH: "$CI_PROJECT_DIR/deps/cmake-3.10.2"
-  CMAKE_LATEST_URL: "https://cmake.org/files/v3.16/cmake-3.16.0-Linux-x86_64.tar.gz"
+  CMAKE_LATEST_URL: "https://cmake.org/files/v3.17/cmake-3.17.0-Linux-x86_64.tar.gz"
   CMAKE_LATEST_PATH: "$CI_PROJECT_DIR/deps/cmake-3.17.0"
   BUILD_MINIMUM_DIR: $CI_PROJECT_DIR/build/cmake-3.10.2
   BUILD_LATEST_DIR: $CI_PROJECT_DIR/build/cmake-3.17.0
@@ -128,7 +129,7 @@ build:cmake-minimum:
       -D CMAKE_BUILD_TYPE=Release
       -D BUILD_TEST=ON
       -D BUILD_EXAMPLE=ON
-      -D BUILD_BENCHMARK=OFF
+      -D BUILD_BENCHMARK=ON
       -D DISABLE_WERROR=OFF
       -D AMDGPU_TEST_TARGETS="gfx803;gfx900;gfx906"
       -B $BUILD_MINIMUM_DIR
@@ -181,7 +182,107 @@ build:package:
       - $PACKAGE_DIR/rocprim*.zip
     expire_in: 2 weeks
 
+build:benchmark:
+  extends:
+    - .deps:cmake-latest
+  tags:
+    - mi25
+    - rocm
+  only:
+    - ci-benchmark-extend
+    - internal_benchmark
+    - develop_stream
+    - develop
+    - master
+  script:
+    - mkdir build
+    - cd build
+    # Build hipCUB benchmark
+    - cmake
+      -G Ninja
+      -D CMAKE_CXX_COMPILER=hipcc
+      -D CMAKE_BUILD_TYPE=Release
+      -D BUILD_TEST=OFF
+      -D BUILD_EXAMPLE=OFF
+      -D BUILD_BENCHMARK=ON
+      -D DISABLE_WERROR=OFF
+      -D AMDGPU_TARGETS="gfx803;gfx900;gfx906"
+      ..
+    - cmake
+      --build .
+  artifacts:
+    paths:
+      - build/benchmark/*
+      - build/googlebenchmark/
+    expire_in: 2 weeks
+
 include: '.gitlab-ci-gputest.yml'
+
+benchmark_view:rocm_mi25:
+  extends:
+    - .deps:cmake-latest
+  stage: benchmark
+  when: manual
+  only:
+    - ci-benchmark-extend
+    - internal_benchmark
+    - develop_stream
+    - develop
+    - master
+  needs:
+    - build:benchmark
+  tags:
+    - mi25
+    - rocm
+  script:
+    - $SUDO_CMD cmake
+      -D BENCHMARK_BINARY_DIR=build/benchmark
+      -D BENCHMARK_OUTPUT_DIR=.
+      -P ${CI_PROJECT_DIR}/.gitlab/RunBenchmarks.cmake
+
+benchmark_view:rocm_s9300:
+  extends:
+    - .deps:cmake-latest
+  stage: benchmark
+  when: manual
+  only:
+    - ci-benchmark-extend
+    - internal_benchmark
+    - develop_stream
+    - develop
+    - master
+  needs:
+    - build:benchmark
+  tags:
+    - s9300
+    - rocm
+  script:
+    - $SUDO_CMD cmake
+      -D BENCHMARK_BINARY_DIR=build/benchmark
+      -D BENCHMARK_OUTPUT_DIR=.
+      -P ${CI_PROJECT_DIR}/.gitlab/RunBenchmarks.cmake
+
+benchmark_view:rocm_vega20:
+  extends:
+    - .deps:cmake-latest
+  stage: benchmark
+  when: manual
+  only:
+    - ci-benchmark-extend
+    - internal_benchmark
+    - develop_stream
+    - develop
+    - master
+  needs:
+    - build:benchmark
+  tags:
+    - vega20
+    - rocm
+  script:
+    - $SUDO_CMD cmake
+      -D BENCHMARK_BINARY_DIR=build/benchmark
+      -D BENCHMARK_OUTPUT_DIR=.
+      -P ${CI_PROJECT_DIR}/.gitlab/RunBenchmarks.cmake
 
 test:deb:
   stage: test
@@ -192,7 +293,7 @@ test:deb:
   extends:
     - .deps:cmake-minimum
   script:
-    - $SUDO_CMD dpkg -i $PACKAGE_DIR/rocprim-*.deb
+    - $SUDO_CMD dpkg -i $PACKAGE_DIR/rocprim*.deb
     - mkdir -p package_test && cd package_test
     - cmake
       -G Ninja

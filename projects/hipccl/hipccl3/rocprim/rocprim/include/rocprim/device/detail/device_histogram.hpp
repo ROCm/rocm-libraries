@@ -526,11 +526,11 @@ void histogram_global(SampleIterator samples,
             if(sample_to_bin_op[channel](values[i].values[channel], bin))
             {
                 const unsigned int pos = flat_id * ItemsPerThread + i;
-                unsigned long long same_bin_lanes_mask = ::rocprim::ballot(pos < valid_count);
+                lane_mask_type same_bin_lanes_mask = ::rocprim::ballot(pos < valid_count);
                 for(unsigned int b = 0; b < bins_bits[channel]; b++)
                 {
                     const unsigned int bit_set = bin & (1u << b);
-                    const unsigned long long bit_set_mask = ::rocprim::ballot(bit_set);
+                    const lane_mask_type bit_set_mask = ::rocprim::ballot(bit_set);
                     same_bin_lanes_mask &= (bit_set ? bit_set_mask : ~bit_set_mask);
                 }
                 const unsigned int same_bin_count = ::rocprim::bit_count(same_bin_lanes_mask);

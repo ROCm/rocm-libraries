@@ -32,6 +32,7 @@
 #include "detail/block_reduce_warp_reduce.hpp"
 #include "detail/block_reduce_raking_reduce.hpp"
 
+
 /// \addtogroup blockmodule
 /// @{
 
@@ -44,6 +45,8 @@ enum class block_reduce_algorithm
     using_warp_reduce,
     /// \brief An algorithm which limits calculations to a single hardware warp.
     raking_reduce,
+    /// \bried raking reduce that supports only commutative operators
+    raking_reduce_commutative_only,
     /// \brief Default block_reduce algorithm.
     default_algorithm = using_warp_reduce,
 };
@@ -70,6 +73,14 @@ struct select_block_reduce_impl<block_reduce_algorithm::raking_reduce>
     using type = block_reduce_raking_reduce<T, BlockSizeX, BlockSizeY, BlockSizeZ>;
 };
 
+template<>
+struct select_block_reduce_impl<block_reduce_algorithm::raking_reduce_commutative_only>
+{
+    template<class T, unsigned int BlockSizeX, unsigned int BlockSizeY, unsigned int BlockSizeZ>
+    using type = block_reduce_raking_reduce<T, BlockSizeX, BlockSizeY, BlockSizeZ, true>;
+};
+
+
 } // end namespace detail
 
 /// \brief The block_reduce class is a block level parallel primitive which provides methods
@@ -87,9 +98,12 @@ struct select_block_reduce_impl<block_reduce_algorithm::raking_reduce>
 ///   * \p ItemsPerThread is greater than one,
 ///   * \p T is an arithmetic type,
 ///   * reduce operation is simple addition operator, and
-///   * the number of threads in the block is a multiple of the hardware warp size (see rocprim::warp_size()).
-/// * block_reduce has two alternative implementations: \p block_reduce_algorithm::using_warp_reduce
-///   and block_reduce_algorithm::raking_reduce.
+///   * the number of threads in the block is a multiple of the hardware warp size (see rocprim::device_warp_size()).
+/// * block_reduce has two alternative implementations: \p block_reduce_algorithm::using_warp_reduce,
+///   block_reduce_algorithm::raking_reduce and block_reduce_algorithm::raking_reduce_commutative_only.
+/// * If the block sizes less than 64 only one warp reduction is used. The block reduction algorithm
+///   stores the result only in the first thread(lane_id = 0 warp_id = 0), when the block size is
+///   larger then the warp size.
 ///
 /// \par Examples
 /// \parblock

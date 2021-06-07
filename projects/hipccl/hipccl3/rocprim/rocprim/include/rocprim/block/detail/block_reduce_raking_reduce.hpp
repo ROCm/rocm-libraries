@@ -40,19 +40,25 @@ template<
     class T,
     unsigned int BlockSizeX,
     unsigned int BlockSizeY,
-    unsigned int BlockSizeZ
+    unsigned int BlockSizeZ,
+    bool CommutativeOnly = false
 >
 class block_reduce_raking_reduce
 {
     static constexpr unsigned int BlockSize = BlockSizeX * BlockSizeY * BlockSizeZ;
     // Number of items to reduce per thread
     static constexpr unsigned int thread_reduction_size_ =
-        (BlockSize + ::rocprim::warp_size() - 1)/ ::rocprim::warp_size();
+        (BlockSize + ::rocprim::device_warp_size() - 1)/ ::rocprim::device_warp_size();
 
     // Warp reduce, warp_reduce_crosslane does not require shared memory (storage), but
     // logical warp size must be a power of two.
     static constexpr unsigned int warp_size_ =
-        detail::get_min_warp_size(BlockSize, ::rocprim::warp_size());
+        detail::get_min_warp_size(BlockSize, ::rocprim::device_warp_size());
+
+    static constexpr bool commutative_only_        = CommutativeOnly && ((BlockSize % warp_size_ == 0) && (BlockSize > warp_size_));
+    static constexpr unsigned int sharing_threads_ = ::rocprim::max<int>(1, BlockSize - warp_size_);
+    static constexpr unsigned int segment_length_  = sharing_threads_ / warp_size_;
+
     // BlockSize is multiple of hardware warp
     static constexpr bool block_size_smaller_than_warp_size_ = (BlockSize < warp_size_);
     using warp_reduce_prefix_type = ::rocprim::detail::warp_reduce_crosslane<T, warp_size_, false>;
@@ -65,6 +71,11 @@ class block_reduce_raking_reduce
 public:
     using storage_type = detail::raw_storage<storage_type_>;
 
+    /// \brief Computes a thread block-wide reduction using addition (+) as the reduction operator. The first num_valid threads each contribute one reduction partial.  The return value is only valid for thread<sub>0</sub>.
+    /// \param input   [in] Calling thread's input to be reduced
+    /// \param output   [out] Variable containing reduction output
+    /// \param storage  [in] Temporary Storage used for the Reduction
+    /// \param reduce_op [in] Binary reduction operator
     template<class BinaryFunction>
     ROCPRIM_DEVICE inline
     void reduce(T input,
@@ -78,6 +89,10 @@ public:
         );
     }
 
+    /// \brief Computes a thread block-wide reduction using addition (+) as the reduction operator. The first num_valid threads each contribute one reduction partial.  The return value is only valid for thread<sub>0</sub>.
+    /// \param input   [in] Calling thread's input to be reduced
+    /// \param output   [out] Variable containing reduction output
+    /// \param reduce_op [in] Binary reduction operator
     template<class BinaryFunction>
     ROCPRIM_DEVICE inline
     void reduce(T input,
@@ -88,6 +103,11 @@ public:
         this->reduce(input, output, storage, reduce_op);
     }
 
+    /// \brief Computes a thread block-wide reduction using addition (+) as the reduction operator. The first num_valid threads each contribute one reduction partial.  The return value is only valid for thread<sub>0</sub>.
+    /// \param input   [in] Calling thread's input array to be reduced
+    /// \param output   [out] Variable containing reduction output
+    /// \param storage  [in] Temporary Storage used for the Reduction
+    /// \param reduce_op [in] Binary reduction operator
     template<unsigned int ItemsPerThread, class BinaryFunction>
     ROCPRIM_DEVICE inline
     void reduce(T (&input)[ItemsPerThread],
@@ -113,6 +133,10 @@ public:
         );
     }
 
+    /// \brief Computes a thread block-wide reduction using addition (+) as the reduction operator. The first num_valid threads each contribute one reduction partial.  The return value is only valid for thread<sub>0</sub>.
+    /// \param input   [in] Calling thread's input array to be reduced
+    /// \param output   [out] Variable containing reduction output
+    /// \param reduce_op [in] Binary reduction operator
     template<unsigned int ItemsPerThread, class BinaryFunction>
     ROCPRIM_DEVICE inline
     void reduce(T (&input)[ItemsPerThread],
@@ -123,6 +147,12 @@ public:
         this->reduce(input, output, storage, reduce_op);
     }
 
+    /// \brief Computes a thread block-wide reduction using addition (+) as the reduction operator. The first num_valid threads each contribute one reduction partial.  The return value is only valid for thread<sub>0</sub>.
+    /// \param input   [in] Calling thread's input partial reductions
+    /// \param output   [out] Variable containing reduction output
+    /// \param valid_items [in] Number of valid elements (may be less than BlockSize)
+    /// \param storage [in] Temporary Storage used for reduction
+    /// \param reduce_op [in] Binary reduction operator
     template<class BinaryFunction>
     ROCPRIM_DEVICE inline
     void reduce(T input,
@@ -137,6 +167,12 @@ public:
         );
     }
 
+
+    /// \brief Computes a thread block-wide reduction using addition (+) as the reduction operator. The first num_valid threads each contribute one reduction partial.  The return value is only valid for thread<sub>0</sub>.
+    /// \param input   [in] Calling thread's input partial reductions
+    /// \param output   [out] Variable containing reduction output
+    /// \param valid_items [in] Number of valid elements (may be less than BlockSize)
+    /// \param reduce_op [in] Binary reduction operator
     template<class BinaryFunction>
     ROCPRIM_DEVICE inline
     void reduce(T input,
@@ -149,13 +185,15 @@ public:
     }
 
 private:
-    template<class BinaryFunction>
+
+    template<class BinaryFunction, bool FunctionCommutativeOnly = commutative_only_>
     ROCPRIM_DEVICE inline
-    void reduce_impl(const unsigned int flat_tid,
+    auto reduce_impl(const unsigned int flat_tid,
                      T input,
                      T& output,
                      storage_type& storage,
                      BinaryFunction reduce_op)
+        -> typename std::enable_if<(!FunctionCommutativeOnly), void>::type
     {
         storage_type_& storage_ = storage.get();
         storage_.threads[flat_tid] = input;
@@ -168,6 +206,39 @@ private:
             {
                 thread_reduction = reduce_op(
                     thread_reduction, storage_.threads[i]
+                );
+            }
+            warp_reduce<block_size_smaller_than_warp_size_, warp_reduce_prefix_type>(
+                thread_reduction, output, BlockSize, reduce_op
+            );
+        }
+    }
+
+    template<class BinaryFunction, bool FunctionCommutativeOnly = commutative_only_>
+    ROCPRIM_DEVICE inline
+    auto reduce_impl(const unsigned int flat_tid,
+                     T input,
+                     T& output,
+                     storage_type& storage,
+                     BinaryFunction reduce_op)
+        -> typename std::enable_if<(FunctionCommutativeOnly), void>::type
+    {
+        storage_type_& storage_ = storage.get();
+
+        if (flat_tid >= warp_size_)
+            storage_.threads[flat_tid - warp_size_] = input;
+
+        ::rocprim::syncthreads();
+
+        if (flat_tid < warp_size_)
+        {
+            T thread_reduction = input;
+            T* storage_pointer = &storage_.threads[flat_tid * segment_length_];
+            #pragma unroll
+            for( unsigned int i = 0; i < segment_length_; i++ )
+            {
+                thread_reduction = reduce_op(
+                    thread_reduction, storage_pointer[i]
                 );
             }
             warp_reduce<block_size_smaller_than_warp_size_, warp_reduce_prefix_type>(

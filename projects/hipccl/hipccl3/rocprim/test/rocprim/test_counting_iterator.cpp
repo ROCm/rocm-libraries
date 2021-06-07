@@ -51,7 +51,7 @@ typedef ::testing::Types<
     RocprimCountingIteratorParams<size_t>
 > RocprimCountingIteratorTestsParams;
 
-TYPED_TEST_CASE(RocprimCountingIteratorTests, RocprimCountingIteratorTestsParams);
+TYPED_TEST_SUITE(RocprimCountingIteratorTests, RocprimCountingIteratorTestsParams);
 
 template<class T>
 struct transform

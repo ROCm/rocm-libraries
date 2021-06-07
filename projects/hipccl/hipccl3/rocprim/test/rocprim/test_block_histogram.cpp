@@ -69,8 +69,8 @@ typedef ::testing::Types<
     block_param_type(unsigned int, rocprim::half)
 > BlockHistSortParams;
 
-TYPED_TEST_CASE(RocprimBlockHistogramAtomicInputArrayTests, BlockHistAtomicParams);
-TYPED_TEST_CASE(RocprimBlockHistogramSortInputArrayTests, BlockHistSortParams);
+TYPED_TEST_SUITE(RocprimBlockHistogramAtomicInputArrayTests, BlockHistAtomicParams);
+TYPED_TEST_SUITE(RocprimBlockHistogramSortInputArrayTests, BlockHistSortParams);
 
 template<
     unsigned int BlockSize,
@@ -81,7 +81,7 @@ template<
     class BinType
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void histogram_kernel(T* device_output, T* device_output_bin)
 {
     const unsigned int index = ((hipBlockIdx_x * BlockSize) + hipThreadIdx_x) * ItemsPerThread;

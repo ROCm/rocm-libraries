@@ -34,22 +34,14 @@ public:
     using params = Params;
 };
 
-#if (defined(__gfx1030__))
-    #define warp_sort_param_type(type) \
-        warp_params<type, 2U>, \
-        warp_params<type, 4U>, \
-        warp_params<type, 8U>, \
-        warp_params<type, 16U>, \
-        warp_params<type, 32U>
-#else
-    #define warp_sort_param_type(type) \
-       warp_params<type, 2U>, \
-       warp_params<type, 4U>, \
-       warp_params<type, 8U>, \
-       warp_params<type, 16U>, \
-       warp_params<type, 32U>, \
-       warp_params<type, 64U>
-#endif
+#define warp_sort_param_type(type) \
+   warp_params<type, 2U>, \
+   warp_params<type, 4U>, \
+   warp_params<type, 8U>, \
+   warp_params<type, 16U>, \
+   warp_params<type, 32U>, \
+   warp_params<type, 64U>
+
 typedef ::testing::Types<
     warp_sort_param_type(int),
     warp_sort_param_type(test_utils::custom_test_type<int>),
@@ -58,14 +50,14 @@ typedef ::testing::Types<
     warp_sort_param_type(rocprim::half)
 > WarpSortParams;
 
-TYPED_TEST_CASE(RocprimWarpSortShuffleBasedTests, WarpSortParams);
+TYPED_TEST_SUITE(RocprimWarpSortShuffleBasedTests, WarpSortParams);
 
 template<
     class T,
     unsigned int LogicalWarpSize
 >
 __global__
-__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void test_hip_warp_sort(T* d_output)
 {
     unsigned int i = hipThreadIdx_x + (hipBlockIdx_x * hipBlockDim_x);
@@ -85,14 +77,25 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, Sort)
     using T = typename TestFixture::params::type;
     using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_less, rocprim::less<T>>::type;
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
-    const size_t block_size = std::max<size_t>(rocprim::warp_size(), 4 * logical_warp_size);
-    constexpr size_t grid_size = 4;
+
+    // The different warp sizes
+    constexpr size_t ws32 = size_t(ROCPRIM_WARP_SIZE_32);
+    constexpr size_t ws64 = size_t(ROCPRIM_WARP_SIZE_64);
+
+    const unsigned int current_device_warp_size = rocprim::host_warp_size();
+    const size_t block_size = std::max<size_t>(current_device_warp_size, logical_warp_size * 4);
+
+    constexpr unsigned int grid_size = 4;
     const size_t size = block_size * grid_size;
 
-    // Given warp size not supported
-    if(logical_warp_size > rocprim::warp_size() || !rocprim::detail::is_power_of_two(logical_warp_size))
+    // Check if warp size is supported
+    if( logical_warp_size > current_device_warp_size ||
+        !rocprim::detail::is_power_of_two(logical_warp_size) ||
+        (current_device_warp_size != ws32 && current_device_warp_size != ws64) ) // Only WarpSize 32 and 64 is supported
     {
-        return;
+        printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: %d.    Skipping test\n",
+            logical_warp_size, block_size, current_device_warp_size);
+        GTEST_SKIP();
     }
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
@@ -157,7 +160,7 @@ template<
     unsigned int LogicalWarpSize
 >
 __global__
-__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void test_hip_sort_key_value_kernel(KeyType* d_output_key, ValueType* d_output_value)
 {
     unsigned int i = hipThreadIdx_x + (hipBlockIdx_x * hipBlockDim_x);
@@ -181,14 +184,25 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
     using value_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_less, rocprim::less<T>>::type;
     using eq_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_equal_to, rocprim::equal_to<T>>::type;
     constexpr size_t logical_warp_size = TestFixture::params::warp_size;
-    const size_t block_size = std::max<size_t>(rocprim::warp_size(), 4 * logical_warp_size);
-    constexpr size_t grid_size = 4;
+
+    // The different warp sizes
+    constexpr size_t ws32 = size_t(ROCPRIM_WARP_SIZE_32);
+    constexpr size_t ws64 = size_t(ROCPRIM_WARP_SIZE_64);
+
+    const unsigned int current_device_warp_size = rocprim::host_warp_size();
+    const size_t block_size = std::max<size_t>(current_device_warp_size, logical_warp_size * 4);
+
+    constexpr unsigned int grid_size = 4;
     const size_t size = block_size * grid_size;
 
-    // Given warp size not supported
-    if(logical_warp_size > rocprim::warp_size() || !rocprim::detail::is_power_of_two(logical_warp_size))
+    // Check if warp size is supported
+    if( logical_warp_size > current_device_warp_size ||
+        !rocprim::detail::is_power_of_two(logical_warp_size) ||
+        (current_device_warp_size != ws32 && current_device_warp_size != ws64) ) // Only WarpSize 32 and 64 is supported
     {
-        return;
+        printf("Unsupported test warp size/computed block size: %zu/%zu. Current device warp size: %d.    Skipping test\n",
+            logical_warp_size, block_size, current_device_warp_size);
+        GTEST_SKIP();
     }
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)

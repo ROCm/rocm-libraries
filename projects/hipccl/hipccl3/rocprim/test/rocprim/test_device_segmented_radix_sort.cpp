@@ -81,7 +81,7 @@ typedef ::testing::Types<
     params<unsigned short, test_utils::custom_test_type<double>, false, 8, 11, 50, 200>
 > Params;
 
-TYPED_TEST_CASE(RocprimDeviceSegmentedRadixSort, Params);
+TYPED_TEST_SUITE(RocprimDeviceSegmentedRadixSort, Params);
 
 template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
 struct key_comparator

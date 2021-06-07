@@ -88,12 +88,64 @@ struct merge_config_900<Key, empty_type>
     >;
 };
 
+// TODO: We need to update these parameters
+template<class Key, class Value>
+struct merge_config_90a
+{
+    static constexpr unsigned int item_scale =
+        ::rocprim::detail::ceiling_div<unsigned int>(::rocprim::max(sizeof(Key), sizeof(Value)), sizeof(int));
+
+    // TODO Tune when merge-by-key is ready
+    using type = merge_config<256, ::rocprim::max(1u, 10u / item_scale)>;
+};
+
+template<class Key>
+struct merge_config_90a<Key, empty_type>
+{
+    static constexpr unsigned int item_scale =
+        ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Key), sizeof(int));
+
+    using type = select_type<
+        select_type_case<sizeof(Key) <= 2, merge_config<256, 11> >,
+        select_type_case<sizeof(Key) <= 4, merge_config<256, 10> >,
+        select_type_case<sizeof(Key) <= 8, merge_config<256, 7> >,
+        merge_config<256, ::rocprim::max(1u, 10u / item_scale)>
+    >;
+};
+
+// TODO: We need to update these parameters
+template<class Key, class Value>
+struct merge_config_1030
+{
+    static constexpr unsigned int item_scale =
+        ::rocprim::detail::ceiling_div<unsigned int>(::rocprim::max(sizeof(Key), sizeof(Value)), sizeof(int));
+
+    // TODO Tune when merge-by-key is ready
+    using type = merge_config<256, ::rocprim::max(1u, 10u / item_scale)>;
+};
+
+template<class Key>
+struct merge_config_1030<Key, empty_type>
+{
+    static constexpr unsigned int item_scale =
+        ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Key), sizeof(int));
+
+    using type = select_type<
+        select_type_case<sizeof(Key) <= 2, merge_config<256, 11> >,
+        select_type_case<sizeof(Key) <= 4, merge_config<256, 10> >,
+        select_type_case<sizeof(Key) <= 8, merge_config<256, 7> >,
+        merge_config<256, ::rocprim::max(1u, 10u / item_scale)>
+    >;
+};
+
 template<unsigned int TargetArch, class Key, class Value>
 struct default_merge_config
     : select_arch<
         TargetArch,
         select_arch_case<803, merge_config_803<Key, Value>>,
         select_arch_case<900, merge_config_900<Key, Value>>,
+        select_arch_case<ROCPRIM_ARCH_90a, merge_config_90a<Key, Value>>,
+        select_arch_case<1030, merge_config_1030<Key, Value>>,
         merge_config_900<Key, Value>
     > { };
 

@@ -203,7 +203,7 @@ private:
         class... KeyValue
     >
     ROCPRIM_DEVICE inline
-    typename std::enable_if<(Size <= ::rocprim::warp_size())>::type
+    typename std::enable_if<(Size <= ::rocprim::device_warp_size())>::type
     sort_power_two(const unsigned int flat_tid,
                    storage_type& storage,
                    BinaryFunction compare_function,
@@ -222,14 +222,14 @@ private:
         class... KeyValue
     >
     ROCPRIM_DEVICE inline
-    typename std::enable_if<(Size > ::rocprim::warp_size())>::type
+    typename std::enable_if<(Size > ::rocprim::device_warp_size())>::type
     sort_power_two(const unsigned int flat_tid,
                    storage_type& storage,
                    BinaryFunction compare_function,
                    KeyValue&... kv)
     {
-        const auto warp_id_is_even = ((flat_tid / ::rocprim::warp_size()) % 2) == 0;
-        ::rocprim::warp_sort<Key, ::rocprim::warp_size(), Value> wsort;
+        const auto warp_id_is_even = ((flat_tid / ::rocprim::device_warp_size()) % 2) == 0;
+        ::rocprim::warp_sort<Key, ::rocprim::device_warp_size(), Value> wsort;
         auto compare_function2 =
             [compare_function, warp_id_is_even](const Key& a, const Key& b) mutable -> bool
             {
@@ -241,7 +241,7 @@ private:
         wsort.sort(kv..., compare_function2);
 
         #pragma unroll
-        for(unsigned int length = ::rocprim::warp_size(); length < Size; length *= 2)
+        for(unsigned int length = ::rocprim::device_warp_size(); length < Size; length *= 2)
         {
             bool dir = (flat_tid & (length * 2)) != 0;
             #pragma unroll

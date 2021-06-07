@@ -217,7 +217,7 @@ template<
     typename std::enable_if<MemOp == block_primitive_direct, int>::type = 0
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void operation_kernel(T* input, T* output, CustomOp op)
 {
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
@@ -256,7 +256,7 @@ template<
     typename std::enable_if<MemOp == vectorized, int>::type = 0
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void operation_kernel(T* input, T* output, CustomOp op)
 {
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
@@ -284,7 +284,7 @@ template<
     typename std::enable_if<MemOp == striped, int>::type = 0
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void operation_kernel(T* input, T* output, CustomOp op)
 {
     const unsigned int lid = hipThreadIdx_x;
@@ -306,7 +306,7 @@ template<
     typename std::enable_if<MemOp == block_primitives_transpose, int>::type = 0
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void operation_kernel(T* input, T* output, CustomOp op)
 {
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;

@@ -79,7 +79,7 @@ typedef ::testing::Types<
     params<rocprim::half, rocprim::half, test_utils::half_minimum, 0, 1000, 30000>
 > Params;
 
-TYPED_TEST_CASE(RocprimDeviceSegmentedReduce, Params);
+TYPED_TEST_SUITE(RocprimDeviceSegmentedReduce, Params);
 
 std::vector<size_t> get_sizes(int seed_value)
 {

@@ -27,6 +27,7 @@
 #include <rocprim/block/block_store.hpp>
 #include <rocprim/block/block_radix_sort.hpp>
 
+
 // required test headers
 #include "test_utils_types.hpp"
 
@@ -53,7 +54,7 @@ static constexpr unsigned int end_radix[n_sizes] = {
     0, 0, 0, 10, 11, 12, 0, 0, 0, 10, 11, 12
 };
 
-TYPED_TEST_CASE(RocprimBlockRadixSort, BlockParams);
+TYPED_TEST_SUITE(RocprimBlockRadixSort, BlockParams);
 
 template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
 struct key_comparator
@@ -103,7 +104,7 @@ template<
     class key_type
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void sort_key_kernel(
     key_type* device_keys_output,
     bool to_striped,
@@ -147,7 +148,7 @@ template<
     class value_type
 >
 __global__
-__launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void sort_key_value_kernel(
     key_type* device_keys_output,
     value_type* device_values_output,

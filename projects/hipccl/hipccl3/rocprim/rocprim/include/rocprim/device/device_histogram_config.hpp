@@ -89,12 +89,32 @@ struct histogram_config_900
     using type = histogram_config<kernel_config<256, ::rocprim::max(8u / Channels / item_scale, 1u)>>;
 };
 
+// TODO: We need to update these parameters
+template<class Sample, unsigned int Channels, unsigned int ActiveChannels>
+struct histogram_config_90a
+{
+    static constexpr unsigned int item_scale = ::rocprim::detail::ceiling_div(sizeof(Sample), sizeof(int));
+
+    using type = histogram_config<kernel_config<256, ::rocprim::max(8u / Channels / item_scale, 1u)>>;
+};
+
+// TODO: We need to update these parameters
+template<class Sample, unsigned int Channels, unsigned int ActiveChannels>
+struct histogram_config_1030
+{
+    static constexpr unsigned int item_scale = ::rocprim::detail::ceiling_div(sizeof(Sample), sizeof(int));
+
+    using type = histogram_config<kernel_config<256, ::rocprim::max(8u / Channels / item_scale, 1u)>>;
+};
+
 template<unsigned int TargetArch, class Sample, unsigned int Channels, unsigned int ActiveChannels>
 struct default_histogram_config
     : select_arch<
         TargetArch,
         select_arch_case<803, histogram_config_803<Sample, Channels, ActiveChannels> >,
         select_arch_case<900, histogram_config_900<Sample, Channels, ActiveChannels> >,
+        select_arch_case<ROCPRIM_ARCH_90a, histogram_config_90a<Sample, Channels, ActiveChannels> >,
+        select_arch_case<1030, histogram_config_1030<Sample, Channels, ActiveChannels> >,
         histogram_config_900<Sample, Channels, ActiveChannels>
     > { };
 
