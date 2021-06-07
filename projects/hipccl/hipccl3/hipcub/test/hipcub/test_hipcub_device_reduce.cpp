@@ -76,7 +76,7 @@ std::vector<size_t> get_sizes()
     return sizes;
 }
 
-TYPED_TEST_CASE(HipcubDeviceReduceTests, HipcubDeviceReduceTestsParams);
+TYPED_TEST_SUITE(HipcubDeviceReduceTests, HipcubDeviceReduceTestsParams);
 
 TYPED_TEST(HipcubDeviceReduceTests, Reduce)
 {

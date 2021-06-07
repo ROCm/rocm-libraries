@@ -65,7 +65,7 @@ typedef ::testing::Types<
     params<unsigned long long, unsigned long long, hipcub::Sum, 100000, 100000>
 > Params;
 
-TYPED_TEST_CASE(HipcubDeviceReduceByKey, Params);
+TYPED_TEST_SUITE(HipcubDeviceReduceByKey, Params);
 
 std::vector<size_t> get_sizes()
 {

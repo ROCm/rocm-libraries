@@ -43,33 +43,6 @@ BEGIN_HIPCUB_NAMESPACE
 
 #define _HipcubLog(format, ...) printf(format, __VA_ARGS__);
 
-/// hipCUB error reporting macro (prints error messages to stderr)
-#if (defined(DEBUG) || defined(_DEBUG)) && !defined(HIPCUB_STDERR)
-    #define HIPCUB_STDERR
-#endif
-
-inline
-hipError_t Debug(
-    hipError_t      error,
-    const char*     filename,
-    int             line)
-{
-    (void)filename;
-    (void)line;
-#ifdef HIPCUB_STDERR
-    if (error)
-    {
-        fprintf(stderr, "HIP error %d [%s, %d]: %s\n", error, filename, line, hipGetErrorString(error));
-        fflush(stderr);
-    }
-#endif
-    return error;
-}
-
-#ifndef HipcubDebug
-    #define HipcubDebug(e) hipcub::Debug((hipError_t) (e), __FILE__, __LINE__)
-#endif
-
 // Hipified version of cub/util_allocator.cuh
 
 struct CachingDeviceAllocator
@@ -418,8 +391,8 @@ struct CachingDeviceAllocator
                 if (debug) _HipcubLog("\tDevice %d failed to allocate %lld bytes for stream %lld, retrying after freeing cached allocations",
                       device, (long long) search_key.bytes, (long long) search_key.associated_stream);
 
+                error = hipGetLastError();     // Reset error
                 error = hipSuccess;    // Reset the error we will return
-                hipGetLastError();     // Reset error
 
                 // Lock
                 mutex.lock();

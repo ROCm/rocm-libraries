@@ -76,7 +76,7 @@ std::vector<size_t> get_sizes(int seed_value)
     return sizes;
 }
 
-TYPED_TEST_CASE(HipcubDevicePartitionTests, HipcubDevicePartitionTestsParams);
+TYPED_TEST_SUITE(HipcubDevicePartitionTests, HipcubDevicePartitionTestsParams);
 
 TYPED_TEST(HipcubDevicePartitionTests, Flagged)
 {

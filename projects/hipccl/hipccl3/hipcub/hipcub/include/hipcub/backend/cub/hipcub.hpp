@@ -85,5 +85,6 @@
 #include "device/device_segmented_reduce.hpp"
 #include "device/device_scan.hpp"
 #include "device/device_select.hpp"
+#include "device/device_spmv.hpp"
 
 #endif // HIPCUB_CUB_HIPCUB_HPP_

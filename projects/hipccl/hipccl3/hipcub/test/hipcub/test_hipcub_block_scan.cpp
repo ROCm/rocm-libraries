@@ -88,7 +88,7 @@ typedef ::testing::Types<
     params<unsigned char, 377U, 1, hipcub::BLOCK_SCAN_RAKING>
 > SingleValueTestParams;
 
-TYPED_TEST_CASE(HipcubBlockScanSingleValueTests, SingleValueTestParams);
+TYPED_TEST_SUITE(HipcubBlockScanSingleValueTests, SingleValueTestParams);
 
 template<
     unsigned int BlockSize,
@@ -96,7 +96,7 @@ template<
     class T
 >
 __global__
-__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void inclusive_scan_kernel(T* device_output)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
@@ -190,7 +190,7 @@ template<
     class T
 >
 __global__
-__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void inclusive_scan_reduce_kernel(T* device_output, T* device_output_reductions)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
@@ -317,7 +317,7 @@ template<
     class T
 >
 __global__
-__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void inclusive_scan_prefix_callback_kernel(T* device_output, T* device_output_bp, T block_prefix)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
@@ -453,7 +453,7 @@ template<
     class T
 >
 __global__
-__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void exclusive_scan_kernel(T* device_output, T init)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
@@ -551,7 +551,7 @@ template<
     class T
 >
 __global__
-__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void exclusive_scan_reduce_kernel(T* device_output, T* device_output_reductions, T init)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
@@ -691,7 +691,7 @@ template<
     class T
 >
 __global__
-__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void exclusive_scan_prefix_callback_kernel(T* device_output, T* device_output_bp, T block_prefix)
 {
     const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
@@ -951,7 +951,7 @@ typedef ::testing::Types<
     params<float, 255,  15, hipcub::BLOCK_SCAN_RAKING>
 > InputArrayTestParams;
 
-TYPED_TEST_CASE(HipcubBlockScanInputArrayTests, InputArrayTestParams);
+TYPED_TEST_SUITE(HipcubBlockScanInputArrayTests, InputArrayTestParams);
 
 template<
     unsigned int BlockSize,
@@ -960,7 +960,7 @@ template<
     class T
 >
 __global__
-__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void inclusive_scan_array_kernel(T* device_output)
 {
     const unsigned int index = ((hipBlockIdx_x * BlockSize ) + hipThreadIdx_x) * ItemsPerThread;
@@ -1071,7 +1071,7 @@ template<
     class T
 >
 __global__
-__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void inclusive_scan_reduce_array_kernel(T* device_output, T* device_output_reductions)
 {
     const unsigned int index = ((hipBlockIdx_x * BlockSize ) + hipThreadIdx_x) * ItemsPerThread;
@@ -1222,7 +1222,7 @@ template<
     class T
 >
 __global__
-__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void inclusive_scan_array_prefix_callback_kernel(T* device_output, T* device_output_bp, T block_prefix)
 {
     const unsigned int index = ((hipBlockIdx_x * BlockSize) + hipThreadIdx_x) * ItemsPerThread;
@@ -1387,7 +1387,7 @@ template<
     class T
 >
 __global__
-__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void exclusive_scan_array_kernel(T* device_output, T init)
 {
     const unsigned int index = ((hipBlockIdx_x * BlockSize) + hipThreadIdx_x) * ItemsPerThread;
@@ -1502,7 +1502,7 @@ template<
     class T
 >
 __global__
-__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void exclusive_scan_reduce_array_kernel(T* device_output, T* device_output_reductions, T init)
 {
     const unsigned int index = ((hipBlockIdx_x * BlockSize) + hipThreadIdx_x) * ItemsPerThread;
@@ -1660,7 +1660,7 @@ template<
     class T
 >
 __global__
-__launch_bounds__(BlockSize, HIPCUB_DEFAULT_MIN_WARPS_PER_EU)
+__launch_bounds__(BlockSize)
 void exclusive_scan_prefix_callback_array_kernel(
     T* device_output,
     T* device_output_bp,

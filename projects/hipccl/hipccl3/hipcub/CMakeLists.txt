@@ -49,6 +49,7 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker searc
 # rocm-cmake contains common cmake code for rocm projects to help
 # setup and install
 include(cmake/RocmCmakeDependence.cmake)
+
 include( ROCMSetupVersion )
 include( ROCMCreatePackage )
 include( ROCMInstallTargets )
@@ -59,7 +60,7 @@ include( ROCMCheckTargetIds OPTIONAL )
 #Set the AMDGPU_TARGETS with backward compatiblity
 if(COMMAND rocm_check_target_ids)
    rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-       TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+"
+       TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx1030"
    )
 else()
   # Use target ID syntax if supported for AMDGPU_TARGETS
@@ -71,11 +72,10 @@ else()
     ERROR_STRIP_TRAILING_WHITESPACE)
   string(REGEX MATCH ".mcode\-object\-version" TARGET_ID_SUPPORT ${CXX_OUTPUT})
   endif()
-  # Use target ID syntax if supported for AMDGPU_TARGETS
   if(TARGET_ID_SUPPORT)
-    set(AMDGPU_TARGETS gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack- CACHE STRING "List of specific machine types for library to target")
+      set(DEFAULT_AMDGPU_TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx1030")
   else()
-    set(AMDGPU_TARGETS gfx803;gfx900;gfx906;gfx908 CACHE STRING "List of specific machine types for library to target")
+      set(DEFAULT_AMDGPU_TARGETS "gfx803;gfx900;gfx906;gfx908")
   endif()
 endif()
 set(AMDGPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "List of specific machine types for library to target")
@@ -94,6 +94,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
 option(BUILD_TEST "Build tests (requires googletest)" OFF)
 option(DOWNLOAD_ROCPRIM "Download rocPRIM and do not search for rocPRIM package" OFF)
 option(BUILD_BENCHMARK "Build benchmarks" OFF)
+option(BUILD_EXAMPLE "Build Examples" OFF)
 
 # Get dependencies
 include(cmake/Dependencies.cmake)
@@ -113,6 +114,11 @@ add_subdirectory(hipcub)
 if(BUILD_TEST)
   enable_testing()
   add_subdirectory(test)
+endif()
+
+# Examples
+if(BUILD_EXAMPLE)
+  add_subdirectory(examples)
 endif()
 
 # Benchmarks

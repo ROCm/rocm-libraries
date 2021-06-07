@@ -88,7 +88,10 @@ public:
         offset(offset)
     {}
 
-    /// Postfix increment
+    /**
+    * @typedef self_type
+    * @brief Postfix increment
+    */
     __host__ __device__ __forceinline__ self_type operator++(int)
     {
         self_type retval = *this;
@@ -96,21 +99,30 @@ public:
         return retval;
     }
 
-    /// Prefix increment
+    /**
+    * @typedef self_type
+    * @brief Postfix increment
+    */
     __host__ __device__ __forceinline__ self_type operator++()
     {
         offset++;
         return *this;
     }
 
-    /// Indirection
+    /**
+    * @typedef self_type
+    * @brief Indirection
+    */
     __host__ __device__ __forceinline__ self_type& operator*()
     {
         // return self reference, which can be assigned to anything
         return *this;
     }
 
-    /// Addition
+    /**
+    * @typedef self_type
+    * @brief Addition
+    */
     template <typename Distance>
     __host__ __device__ __forceinline__ self_type operator+(Distance n) const
     {
@@ -118,7 +130,10 @@ public:
         return retval;
     }
 
-    /// Addition assignment
+    /**
+    * @typedef self_type
+    * @brief Addition assignment
+    */
     template <typename Distance>
     __host__ __device__ __forceinline__ self_type& operator+=(Distance n)
     {
@@ -126,7 +141,10 @@ public:
         return *this;
     }
 
-    /// Subtraction
+    /**
+    * @typedef self_type
+    * @brief Subtraction assignment
+    */
     template <typename Distance>
     __host__ __device__ __forceinline__ self_type operator-(Distance n) const
     {
@@ -134,7 +152,10 @@ public:
         return retval;
     }
 
-    /// Subtraction assignment
+    /**
+    * @typedef self_type
+    * @brief Subtraction assignment
+    */
     template <typename Distance>
     __host__ __device__ __forceinline__ self_type& operator-=(Distance n)
     {
@@ -142,13 +163,19 @@ public:
         return *this;
     }
 
-    /// Distance
+    /**
+    * @typedef self_type
+    * @brief Distance
+    */
     __host__ __device__ __forceinline__ difference_type operator-(self_type other) const
     {
         return offset - other.offset;
     }
 
-    /// Array subscript
+    /**
+    * @typedef self_type
+    * @brief Array subscript
+    */
     template <typename Distance>
     __host__ __device__ __forceinline__ self_type& operator[](Distance)
     {
@@ -170,25 +197,33 @@ public:
     /// Cast to void* operator
     __host__ __device__ __forceinline__ operator void*() const { return NULL; }
 
-    /// Equal to
+    /**
+    * @typedef self_type
+    * @brief Equal to
+    */
     __host__ __device__ __forceinline__ bool operator==(const self_type& rhs)
     {
         return (offset == rhs.offset);
     }
 
-    /// Not equal to
+    /**
+    * @typedef self_type
+    * @brief Not equal to
+    */
     __host__ __device__ __forceinline__ bool operator!=(const self_type& rhs)
     {
         return (offset != rhs.offset);
     }
 
-    /// ostream operator
+    /**
+    * @typedef self_type
+    * @brief ostream operator
+    */
     friend std::ostream& operator<<(std::ostream& os, const self_type& itr)
     {
         os << "[" << itr.offset << "]";
         return os;
     }
-
 };
 
 END_HIPCUB_NAMESPACE

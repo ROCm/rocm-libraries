@@ -70,7 +70,7 @@ typedef ::testing::Types<
     params<unsigned short, double, false, 8, 11, 50, 200>
 > Params;
 
-TYPED_TEST_CASE(HipcubDeviceSegmentedRadixSort, Params);
+TYPED_TEST_SUITE(HipcubDeviceSegmentedRadixSort, Params);
 
 template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
 struct key_comparator

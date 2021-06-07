@@ -35,7 +35,7 @@ variables:
   # Local build options
   LOCAL_CXXFLAGS: ""
   LOCAL_CMAKE_OPTIONS: ""
-  ROCM_LATEST_PATH: "/opt/rocm-4.0.0/"
+  ROCM_LATEST_PATH: "/opt/rocm-4.2.0/"
 
 # hipCUB with rocPRIM backend
 .rocm:
@@ -88,7 +88,7 @@ variables:
       ../.
     - $SUDO_CMD cpack
       -G "DEB"
-    - $SUDO_CMD dpkg -i rocprim-*.deb
+    - $SUDO_CMD dpkg -i rocprim*.deb
     - cd ../..
 
 build:rocm:
@@ -263,7 +263,7 @@ test:rocm_package:
     - cd build
     - CXX=hipcc cmake -DBUILD_TEST=OFF ../.
     - make package
-    - $SUDO_CMD dpkg -i rocprim-*.deb
+    - $SUDO_CMD dpkg -i rocprim*.deb
     - cd ../..
     # hipCUB
     - cd build
@@ -291,7 +291,7 @@ test:rocm_install:
     - cd build
     - CXX=hipcc cmake -DBUILD_TEST=OFF ../.
     - make package
-    - $SUDO_CMD dpkg -i rocprim-*.deb
+    - $SUDO_CMD dpkg -i rocprim*.deb
     - cd ../..
     # hipCUB
     - mkdir build_only_install
