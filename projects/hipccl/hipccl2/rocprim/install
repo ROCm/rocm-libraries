@@ -16,7 +16,9 @@ function display_help()
     #    echo "    [-d|--dependencies] install build dependencies"
     echo "    [-c|--clients] build library clients too (combines with -i & -d)"
     echo "    [-g|--debug] -DCMAKE_BUILD_TYPE=Debug (default is =Release)"
+    echo "    [-k|--relwithdebinfo] -DCMAKE_BUILD_TYPE=RelWithDebInfo"
     echo "    [-b|--benchmark] builds and runs benchmark"
+    echo "    [--codecoverage] build with code coverage profiling enabled"
     echo "    [--hip-clang] build library for amdgpu backend using hip-clang"
 }
 
@@ -28,6 +30,8 @@ install_package=false
 build_package=false
 build_clients=false
 build_release=true
+build_release_debug=false
+build_codecoverage=false
 build_type=Release
 build_hip_clang=false
 run_tests=false
@@ -42,7 +46,7 @@ build_relocatable=false
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ $? -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,debug,hip-clang,test,benchmark,package,relocatable --options hicdtbpgr -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,debug,hip-clang,test,benchmark,package,relocatable,relwithdebinfo,codecoverage --options hicdtbpgrk -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -91,6 +95,14 @@ while true; do
         -b|--benchmark)
             build_benchmark=true
             shift ;;
+        --codecoverage)
+            build_codecoverage=true
+            shift ;;
+        -k|--relwithdebinfo)
+	    build_release=false
+	    build_release_debug=true
+            build_type=RelWithDebInfo
+            shift ;;
         --hip-clang)
             build_hip_clang=true
             shift ;;
@@ -109,9 +121,10 @@ fi
 
 # Go to rocPRIM directory, create and go to the build directory.
 mkdir -p build; cd build
-
-if ($build_release); then
+if [[ "${build_release}" == true ]]; then
     mkdir -p release; cd release
+elif [[ "${build_release_debug}" == true ]]; then
+    mkdir -p release-debug; cd release-debug
 else
     mkdir -p debug; cd debug
 fi
@@ -140,6 +153,15 @@ if [[ "${build_clients}" == true ]]; then
     clients="ON"
 fi
 
+codecoverage="OFF"
+if [[ "${build_codecoverage}" == true ]]; then
+    if [[ "${build_release}" == true ]]; then
+        echo "Code coverage is disabled in Release mode, to enable code coverage select either Debug mode (-g | --debug) or RelWithDebInfo mode (-k | --relwithdebinfo); aborting";
+        exit 1
+    fi
+    codecoverage="ON"
+fi
+
 
 if [[ "${build_relocatable}" == true ]]; then
     CXX=${rocm_path}/bin/${compiler} ${cmake_executable} -DCMAKE_INSTALL_PREFIX=${rocm_path} -DBUILD_BENCHMARK=${benchmark} \
@@ -147,7 +169,7 @@ if [[ "${build_relocatable}" == true ]]; then
        -DBUILD_BENCHMARK=${benchmark} -DBUILD_TEST=${clients} \
        -DCMAKE_MODULE_PATH="${rocm_path}/hip/cmake" ../../.     # or cmake-gui ../.
 else
-    CXX=${rocm_path}/bin/${compiler} ${cmake_executable} -DBUILD_BENCHMARK=${benchmark} -DBUILD_TEST=${clients} -DCMAKE_BUILD_TYPE=${build_type} ../../. # or cmake-gui ../.
+    CXX=${rocm_path}/bin/${compiler} ${cmake_executable} -DBUILD_BENCHMARK=${benchmark} -DBUILD_TEST=${clients} -DCMAKE_BUILD_TYPE=${build_type} -DBUILD_CODE_COVERAGE=${codecoverage}  ../../. # or cmake-gui ../.
 fi
 
 # Build
