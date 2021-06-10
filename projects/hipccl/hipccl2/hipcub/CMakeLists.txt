@@ -95,6 +95,13 @@ option(BUILD_TEST "Build tests (requires googletest)" OFF)
 option(DOWNLOAD_ROCPRIM "Download rocPRIM and do not search for rocPRIM package" OFF)
 option(BUILD_BENCHMARK "Build benchmarks" OFF)
 option(BUILD_EXAMPLE "Build Examples" OFF)
+option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
+
+if(BUILD_ADDRESS_SANITIZER)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -shared-libasan")
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -shared-libasan")
+  add_link_options(-fuse-ld=lld)
+endif()
 
 # Get dependencies
 include(cmake/Dependencies.cmake)
