@@ -17,6 +17,7 @@ function display_help()
     echo "    [-c|--clients] build library clients too (combines with -i & -d)"
     echo "    [-g|--debug] -DCMAKE_BUILD_TYPE=Debug (default is =Release)"
     echo "    [--hip-clang] build library for amdgpu backend using hip-clang"
+    echo "    [--address-sanitizer] build with address sanitizer enabled"
 }
 
 
@@ -32,6 +33,7 @@ build_hip_clang=false
 run_tests=false
 rocm_path=/opt/rocm
 build_relocatable=false
+build_address_sanitizer=false
 
 # #################################################
 # Parameter parsing
@@ -40,7 +42,7 @@ build_relocatable=false
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ $? -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,debug,hip-clang,test,package,relocatable --options hicdtprg -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,debug,hip-clang,test,package,relocatable,address-sanitizer --options hicdtprg -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -89,6 +91,9 @@ while true; do
         --hip-clang)
             build_hip_clang=true
             shift ;;
+        --address-sanitizer)
+            build_address_sanitizer=true
+            shift ;;
         --) shift ; break ;;
         *)  echo "Unexpected command line parameter received; aborting";
             exit 1
@@ -129,20 +134,26 @@ fi
 compiler="hipcc"
 
 cmake_executable="cmake"
+cmake_common_options=""
 
 if [[ "${build_clients}" == true ]]; then
     build_test="-DBUILD_TEST=ON"
 fi
 
+if [[ "${build_address_sanitizer}" == true ]]; then
+    cmake_common_options="$cmake_common_options -DBUILD_ADDRESS_SANITIZER=ON"
+fi
+
 if [[ "${build_relocatable}" == true ]]; then
-    CXX=$rocm_path/bin/${compiler} ${cmake_executable} \
+    CXX=$rocm_path/bin/${compiler} ${cmake_executable} ${cmake_common_options} \
         -DCMAKE_INSTALL_PREFIX=${rocm_path} \
         -DCMAKE_PREFIX_PATH="${rocm_path} ${rocm_path}/hip" \
         -DCMAKE_MODULE_PATH="${rocm_path}/hip/cmake" \
         -DROCPRIM_ROOT=${rocm_path}/rocprim ${build_test}\
          ../../. # or cmake-gui ../.
 else
-    CXX=$rocm_path/bin/${compiler} ${cmake_executable} ${build_test} -DCMAKE_BUILD_TYPE=${build_type} ../../. # or cmake-gui ../.
+    CXX=$rocm_path/bin/${compiler} ${cmake_executable} ${build_test} ${cmake_common_options} \
+        -DCMAKE_BUILD_TYPE=${build_type} ../../. # or cmake-gui ../.
 fi
 check_exit_code "$?"
 
