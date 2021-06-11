@@ -85,6 +85,7 @@ option(BUILD_BENCHMARK "Build benchmarks" OFF)
 option(BUILD_EXAMPLE "Build examples" OFF)
 # Disables building tests, benchmarks, examples
 option(ONLY_INSTALL "Only install" OFF)
+option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
 option(BUILD_CODE_COVERAGE "Build with code coverage enabled" OFF)
 
 if(BUILD_CODE_COVERAGE)
@@ -113,6 +114,13 @@ print_configuration_summary()
 
 # rocPRIM library
 add_subdirectory(rocprim)
+
+# Address Sanitizer
+if(BUILD_ADDRESS_SANITIZER)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -shared-libasan")
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -shared-libasan")
+  add_link_options(-fuse-ld=lld)
+endif()
 
 # Tests
 if(BUILD_TEST AND NOT ONLY_INSTALL)
