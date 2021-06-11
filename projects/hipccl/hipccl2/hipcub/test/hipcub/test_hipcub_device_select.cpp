@@ -100,10 +100,10 @@ TYPED_TEST(HipcubDeviceSelectTests, Flagged)
             F * d_flags;
             U * d_output;
             unsigned int * d_selected_count_output;
-            HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
-            HIP_CHECK(hipMalloc(&d_flags, flags.size() * sizeof(F)));
-            HIP_CHECK(hipMalloc(&d_output, input.size() * sizeof(U)));
-            HIP_CHECK(hipMalloc(&d_selected_count_output, sizeof(unsigned int)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_flags, flags.size() * sizeof(F)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, input.size() * sizeof(U)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_selected_count_output, sizeof(unsigned int)));
             HIP_CHECK(
                 hipMemcpy(
                     d_input, input.data(),
@@ -154,7 +154,7 @@ TYPED_TEST(HipcubDeviceSelectTests, Flagged)
 
             // allocate temporary storage
             void * d_temp_storage = nullptr;
-            HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
             HIP_CHECK(hipDeviceSynchronize());
 
             // Run
@@ -245,9 +245,9 @@ TYPED_TEST(HipcubDeviceSelectTests, SelectOp)
             T * d_input;
             U * d_output;
             unsigned int * d_selected_count_output;
-            HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
-            HIP_CHECK(hipMalloc(&d_output, input.size() * sizeof(U)));
-            HIP_CHECK(hipMalloc(&d_selected_count_output, sizeof(unsigned int)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, input.size() * sizeof(U)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_selected_count_output, sizeof(unsigned int)));
             HIP_CHECK(
                 hipMemcpy(
                     d_input, input.data(),
@@ -291,7 +291,7 @@ TYPED_TEST(HipcubDeviceSelectTests, SelectOp)
 
             // allocate temporary storage
             void * d_temp_storage = nullptr;
-            HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
             HIP_CHECK(hipDeviceSynchronize());
 
             // Run
@@ -387,9 +387,9 @@ TYPED_TEST(HipcubDeviceSelectTests, Unique)
                 T * d_input;
                 U * d_output;
                 unsigned int * d_selected_count_output;
-                HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
-                HIP_CHECK(hipMalloc(&d_output, input.size() * sizeof(U)));
-                HIP_CHECK(hipMalloc(&d_selected_count_output, sizeof(unsigned int)));
+                HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
+                HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, input.size() * sizeof(U)));
+                HIP_CHECK(test_common_utils::hipMallocHelper(&d_selected_count_output, sizeof(unsigned int)));
                 HIP_CHECK(
                     hipMemcpy(
                         d_input, input.data(),
@@ -433,7 +433,7 @@ TYPED_TEST(HipcubDeviceSelectTests, Unique)
 
                 // allocate temporary storage
                 void * d_temp_storage = nullptr;
-                HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+                HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
                 HIP_CHECK(hipDeviceSynchronize());
 
                 // Run

@@ -171,9 +171,9 @@ TYPED_TEST(HipcubWarpScanTests, InclusiveScan)
 
         // Writing to device memory
         T* device_input;
-        HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
         T* device_output;
-        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
 
         HIP_CHECK(
             hipMemcpy(
@@ -336,12 +336,12 @@ TYPED_TEST(HipcubWarpScanTests, InclusiveScanReduce)
 
         // Writing to device memory
         T* device_input;
-        HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
         T* device_output;
-        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
         T* device_output_reductions;
         HIP_CHECK(
-            hipMalloc(
+            test_common_utils::hipMallocHelper(
                 &device_output_reductions,
                 output_reductions.size() * sizeof(typename decltype(output_reductions)::value_type)
             )
@@ -512,9 +512,9 @@ TYPED_TEST(HipcubWarpScanTests, ExclusiveScan)
 
         // Writing to device memory
         T* device_input;
-        HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
         T* device_output;
-        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
 
         HIP_CHECK(
             hipMemcpy(
@@ -679,12 +679,12 @@ TYPED_TEST(HipcubWarpScanTests, ExclusiveReduceScan)
 
         // Writing to device memory
         T* device_input;
-        HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
         T* device_output;
-        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
         T* device_output_reductions;
         HIP_CHECK(
-          hipMalloc(
+          test_common_utils::hipMallocHelper(
             &device_output_reductions,
             output_reductions.size() * sizeof(typename decltype(output_reductions)::value_type)
           )
@@ -868,17 +868,17 @@ TYPED_TEST(HipcubWarpScanTests, Scan)
 
         // Writing to device memory
         T* device_input;
-        HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
         T* device_inclusive_output;
         HIP_CHECK(
-            hipMalloc(
+            test_common_utils::hipMallocHelper(
                 &device_inclusive_output,
                 output_inclusive.size() * sizeof(typename decltype(output_inclusive)::value_type)
             )
         );
         T* device_exclusive_output;
         HIP_CHECK(
-            hipMalloc(
+            test_common_utils::hipMallocHelper(
                 &device_exclusive_output,
                 output_exclusive.size() * sizeof(typename decltype(output_exclusive)::value_type)
             )
@@ -1029,9 +1029,9 @@ TYPED_TEST(HipcubWarpScanTests, InclusiveScanCustomType)
 
         // Writing to device memory
         T* device_input;
-        HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
         T* device_output;
-        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
 
         HIP_CHECK(
             hipMemcpy(

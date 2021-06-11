@@ -241,7 +241,7 @@ TYPED_TEST(HipcubBlockRadixSort, SortKeys)
 
         // Preparing device
         key_type* device_keys_output;
-        HIP_CHECK(hipMalloc(&device_keys_output, keys_output.size() * sizeof(key_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_keys_output, keys_output.size() * sizeof(key_type)));
 
         HIP_CHECK(
             hipMemcpy(
@@ -411,9 +411,9 @@ TYPED_TEST(HipcubBlockRadixSort, SortKeysValues)
         }
 
         key_type* device_keys_output;
-        HIP_CHECK(hipMalloc(&device_keys_output, keys_output.size() * sizeof(key_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_keys_output, keys_output.size() * sizeof(key_type)));
         value_type* device_values_output;
-        HIP_CHECK(hipMalloc(&device_values_output, values_output.size() * sizeof(value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_values_output, values_output.size() * sizeof(value_type)));
 
         HIP_CHECK(
             hipMemcpy(

@@ -173,9 +173,9 @@ TYPED_TEST(HipcubBlockReduceSingleValueTests, Reduce)
 
         // Preparing device
         T* device_output;
-        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(T)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(T)));
         T* device_output_reductions;
-        HIP_CHECK(hipMalloc(&device_output_reductions, output_reductions.size() * sizeof(T)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output_reductions, output_reductions.size() * sizeof(T)));
 
         HIP_CHECK(
             hipMemcpy(
@@ -284,9 +284,9 @@ TYPED_TEST(HipcubBlockReduceSingleValueTests, ReduceValid)
 
         // Preparing device
         T* device_output;
-        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(T)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(T)));
         T* device_output_reductions;
-        HIP_CHECK(hipMalloc(&device_output_reductions, output_reductions.size() * sizeof(T)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output_reductions, output_reductions.size() * sizeof(T)));
 
         HIP_CHECK(
             hipMemcpy(
@@ -436,9 +436,9 @@ TYPED_TEST(HipcubBlockReduceInputArrayTests, Reduce)
 
         // Preparing device
         T* device_output;
-        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(T)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(T)));
         T* device_output_reductions;
-        HIP_CHECK(hipMalloc(&device_output_reductions, output_reductions.size() * sizeof(T)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output_reductions, output_reductions.size() * sizeof(T)));
 
         HIP_CHECK(
             hipMemcpy(
