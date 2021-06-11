@@ -17,8 +17,18 @@
 
 #include <thrust/device_ptr.h>
 #include <thrust/device_vector.h>
+#include <cstdlib>
 
 #include "test_header.hpp"
+
+#define HIP_CHECK_HMM(condition)         \
+{                                    \
+    hipError_t error = condition;    \
+    if(error != hipSuccess){         \
+        std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
+        exit(error); \
+    } \
+}
 
 TESTS_DEFINE(DevicePtrTests, FullTestsParams);
 TESTS_DEFINE(DevicePtrPrimitiveTests, NumericalTestsParams);
@@ -32,6 +42,31 @@ struct mark_processed_functor
         ptr[x] = 1;
     }
 };
+
+bool supports_hmm()
+{
+    hipDeviceProp_t device_prop;
+    int device_id;
+    HIP_CHECK_HMM(hipGetDevice(&device_id));
+    HIP_CHECK_HMM(hipGetDeviceProperties(&device_prop, device_id));
+    if (device_prop.managedMemory == 1) return true;
+
+    return false;
+}
+
+bool use_hmm()
+{
+    if (getenv("ROCTHRUST_USE_HMM") == nullptr)
+    {
+        return false;
+    }
+
+    if (strcmp(getenv("ROCTHRUST_USE_HMM"), "1") == 0)
+    {
+        return true;
+    }
+    return false;
+}
 
 TEST(DevicePtrTests, TestDevicePointerManipulation)
 {
@@ -78,6 +113,58 @@ TEST(DevicePtrTests, TestDevicePointerManipulation)
     begin = begin - (thrust::device_ptr<int>::difference_type)1;
 
     ASSERT_EQ(end - begin, 5);
+}
+
+TEST(DevicePtrTests, TestDevicePointerManipulationHmm)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    if (!(use_hmm())) return;
+
+    int* data;
+    HIP_CHECK(hipMallocManaged((void**)&data, 5 * sizeof(int)));
+
+    thrust::device_ptr<int> begin(&data[0]);
+    thrust::device_ptr<int> end(&data[0] + 5);
+
+    ASSERT_EQ(end - begin, 5);
+
+    begin++;
+    begin--;
+
+    ASSERT_EQ(end - begin, 5);
+
+    begin += 1;
+    begin -= 1;
+
+    ASSERT_EQ(end - begin, 5);
+
+    begin = begin + (int)1;
+    begin = begin - (int)1;
+
+    ASSERT_EQ(end - begin, 5);
+
+    begin = begin + (unsigned int)1;
+    begin = begin - (unsigned int)1;
+
+    ASSERT_EQ(end - begin, 5);
+
+    begin = begin + (size_t)1;
+    begin = begin - (size_t)1;
+
+    ASSERT_EQ(end - begin, 5);
+
+    begin = begin + (ptrdiff_t)1;
+    begin = begin - (ptrdiff_t)1;
+
+    ASSERT_EQ(end - begin, 5);
+
+    begin = begin + (thrust::device_ptr<int>::difference_type)1;
+    begin = begin - (thrust::device_ptr<int>::difference_type)1;
+
+    ASSERT_EQ(end - begin, 5);
+
+    HIP_CHECK(hipFree(data));
 }
 
 TYPED_TEST(DevicePtrPrimitiveTests, MakeDevicePointer)
