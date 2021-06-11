@@ -127,7 +127,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanEmptyInput)
     hipStream_t stream = 0; // default
 
     U * d_output;
-    HIP_CHECK(hipMalloc(&d_output, sizeof(U)));
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, sizeof(U)));
 
     test_utils::out_of_bounds_flag out_of_bounds;
     test_utils::bounds_checking_iterator<U> d_checking_output(
@@ -150,7 +150,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanEmptyInput)
     );
 
     // allocate temporary storage
-    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
 
     // Run
     HIP_CHECK(
@@ -190,6 +190,11 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScan)
         const std::vector<size_t> sizes = get_sizes(seed_value);
         for(auto size : sizes)
         {
+            if (size == 0 && test_common_utils::use_hmm())
+            {
+                // hipMallocManaged() currently doesnt support zero byte allocation
+                continue;
+            }
             hipStream_t stream = 0; // default
 
             SCOPED_TRACE(testing::Message() << "with size = " << size);
@@ -200,8 +205,8 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScan)
 
             T * d_input;
             U * d_output;
-            HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
-            HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(U)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, output.size() * sizeof(U)));
             HIP_CHECK(
                 hipMemcpy(
                     d_input, input.data(),
@@ -238,7 +243,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScan)
             ASSERT_GT(temp_storage_size_bytes, 0);
 
             // allocate temporary storage
-            HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
             HIP_CHECK(hipDeviceSynchronize());
 
             // Run
@@ -294,6 +299,11 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScan)
         const std::vector<size_t> sizes = get_sizes(seed_value);
         for(auto size : sizes)
         {
+            if (size == 0 && test_common_utils::use_hmm())
+            {
+                // hipMallocManaged() currently doesnt support zero byte allocation
+                continue;
+            }
             hipStream_t stream = 0; // default
 
             SCOPED_TRACE(testing::Message() << "with size = " << size);
@@ -304,8 +314,8 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScan)
 
             T * d_input;
             U * d_output;
-            HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
-            HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(U)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, output.size() * sizeof(U)));
             HIP_CHECK(
                 hipMemcpy(
                     d_input, input.data(),
@@ -344,7 +354,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScan)
             ASSERT_GT(temp_storage_size_bytes, 0);
 
             // allocate temporary storage
-            HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
             HIP_CHECK(hipDeviceSynchronize());
 
             // Run
@@ -401,6 +411,11 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanByKey)
         const std::vector<size_t> sizes = get_sizes(seed_value);
         for(auto size : sizes)
         {
+            if (size == 0 && test_common_utils::use_hmm())
+            {
+                // hipMallocManaged() currently doesnt support zero byte allocation
+                continue;
+            }
             hipStream_t stream = 0; // default
 
             SCOPED_TRACE(testing::Message() << "with size = " << size);
@@ -424,9 +439,9 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanByKey)
             T * d_input;
             K * d_keys;
             U * d_output;
-            HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
-            HIP_CHECK(hipMalloc(&d_keys, keys.size() * sizeof(K)));
-            HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(U)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys, keys.size() * sizeof(K)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, output.size() * sizeof(U)));
             HIP_CHECK(
                 hipMemcpy(
                     d_input, input.data(),
@@ -491,7 +506,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanByKey)
             ASSERT_GT(temp_storage_size_bytes, 0);
 
             // allocate temporary storage
-            HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
             HIP_CHECK(hipDeviceSynchronize());
 
             // Run
@@ -548,6 +563,11 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
         const std::vector<size_t> sizes = get_sizes(seed_value);
         for(auto size : sizes)
         {
+            if (size == 0 && test_common_utils::use_hmm())
+            {
+                // hipMallocManaged() currently doesnt support zero byte allocation
+                continue;
+            }
             hipStream_t stream = 0; // default
 
             SCOPED_TRACE(testing::Message() << "with size = " << size);
@@ -572,9 +592,9 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
             T * d_input;
             K * d_keys;
             U * d_output;
-            HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
-            HIP_CHECK(hipMalloc(&d_keys, keys.size() * sizeof(K)));
-            HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(U)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys, keys.size() * sizeof(K)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, output.size() * sizeof(U)));
             HIP_CHECK(
                 hipMemcpy(
                     d_input, input.data(),
@@ -620,7 +640,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
             ASSERT_GT(temp_storage_size_bytes, 0);
 
             // allocate temporary storage
-            HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
             HIP_CHECK(hipDeviceSynchronize());
 
             // Run

@@ -151,6 +151,12 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
 
         for(size_t size : get_sizes(seed_value))
         {
+            if (size == 0 && test_common_utils::use_hmm())
+            {
+                // hipMallocManaged() currently doesnt support zero byte allocation
+                continue;
+            }
+
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             hipStream_t stream = 0; // default
@@ -218,8 +224,8 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
 
             key_type * d_keys_input;
             value_type * d_values_input;
-            HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
-            HIP_CHECK(hipMalloc(&d_values_input, size * sizeof(value_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_input, size * sizeof(key_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_values_input, size * sizeof(value_type)));
             HIP_CHECK(
                 hipMemcpy(
                     d_keys_input, keys_input.data(),
@@ -238,9 +244,9 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
             key_type * d_unique_output;
             aggregate_type * d_aggregates_output;
             unsigned int * d_unique_count_output;
-            HIP_CHECK(hipMalloc(&d_unique_output, unique_count_expected * sizeof(key_type)));
-            HIP_CHECK(hipMalloc(&d_aggregates_output, unique_count_expected * sizeof(aggregate_type)));
-            HIP_CHECK(hipMalloc(&d_unique_count_output, sizeof(unsigned int)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_unique_output, unique_count_expected * sizeof(key_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_aggregates_output, unique_count_expected * sizeof(aggregate_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_unique_count_output, sizeof(unsigned int)));
 
             size_t temporary_storage_bytes;
 
@@ -259,7 +265,7 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
             ASSERT_GT(temporary_storage_bytes, 0);
 
             void * d_temporary_storage;
-            HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
             HIP_CHECK(
                 rocprim::reduce_by_key(

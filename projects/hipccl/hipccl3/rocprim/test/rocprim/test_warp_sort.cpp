@@ -117,7 +117,7 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, Sort)
         // Writing to device memory
         T* d_output;
         HIP_CHECK(
-            hipMalloc(&d_output, output.size() * sizeof(typename decltype(output)::value_type))
+            test_common_utils::hipMallocHelper(&d_output, output.size() * sizeof(typename decltype(output)::value_type))
         );
 
         HIP_CHECK(
@@ -235,10 +235,10 @@ TYPED_TEST(RocprimWarpSortShuffleBasedTests, SortKeyInt)
         T* d_output_key;
         T* d_output_value;
         HIP_CHECK(
-            hipMalloc(&d_output_key, output_key.size() * sizeof(typename decltype(output_key)::value_type))
+            test_common_utils::hipMallocHelper(&d_output_key, output_key.size() * sizeof(typename decltype(output_key)::value_type))
         );
         HIP_CHECK(
-            hipMalloc(&d_output_value, output_value.size() * sizeof(typename decltype(output_value)::value_type))
+            test_common_utils::hipMallocHelper(&d_output_value, output_value.size() * sizeof(typename decltype(output_value)::value_type))
         );
 
         HIP_CHECK(

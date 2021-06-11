@@ -41,6 +41,7 @@
 #include <hip/hip_vector_types.h>
 #include <hip/hip_ext.h>
 
+#ifndef HIP_CHECK
 #define HIP_CHECK(condition)         \
 {                                    \
     hipError_t error = condition;    \
@@ -49,6 +50,7 @@
         exit(error); \
     } \
 }
+#endif
 
 #include <cstdlib>
 #include <string>
@@ -69,6 +71,35 @@ int obtain_device_from_ctest()
     }
     else
         return 0;
+}
+
+bool use_hmm()
+{
+    if (getenv("ROCPRIM_USE_HMM") == nullptr)
+    {
+        return false;
+    }
+
+    if (strcmp(getenv("ROCPRIM_USE_HMM"), "1") == 0)
+    {
+        return true;
+    }
+    return false;
+}
+
+// Helper for HMM allocations: HMM is requested through ROCPRIM_USE_HMM=1 environment variable
+template <class T>
+hipError_t hipMallocHelper(T** devPtr, size_t size)
+{
+    if (use_hmm())
+    {
+        return hipMallocManaged((void**)devPtr, size);
+    }
+    else
+    {
+        return hipMalloc((void**)devPtr, size);
+    }
+    return hipSuccess;
 }
 
 }

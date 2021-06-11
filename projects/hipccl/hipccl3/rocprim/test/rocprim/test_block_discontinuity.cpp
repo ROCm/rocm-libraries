@@ -280,9 +280,9 @@ auto test_block_discontinuity()
 
         // Preparing Device
         type* device_input;
-        HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
         long long* device_heads;
-        HIP_CHECK(hipMalloc(&device_heads, heads.size() * sizeof(typename decltype(heads)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_heads, heads.size() * sizeof(typename decltype(heads)::value_type)));
 
         HIP_CHECK(
             hipMemcpy(
@@ -392,9 +392,9 @@ auto test_block_discontinuity()
 
         // Preparing Device
         type* device_input;
-        HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
         long long* device_tails;
-        HIP_CHECK(hipMalloc(&device_tails, tails.size() * sizeof(typename decltype(tails)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_tails, tails.size() * sizeof(typename decltype(tails)::value_type)));
 
         HIP_CHECK(
             hipMemcpy(
@@ -516,11 +516,11 @@ auto test_block_discontinuity()
 
         // Preparing Device
         type* device_input;
-        HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
         long long* device_heads;
-        HIP_CHECK(hipMalloc(&device_heads, tails.size() * sizeof(typename decltype(heads)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_heads, tails.size() * sizeof(typename decltype(heads)::value_type)));
         long long* device_tails;
-        HIP_CHECK(hipMalloc(&device_tails, tails.size() * sizeof(typename decltype(tails)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_tails, tails.size() * sizeof(typename decltype(tails)::value_type)));
 
         HIP_CHECK(
             hipMemcpy(

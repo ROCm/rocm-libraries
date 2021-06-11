@@ -88,7 +88,7 @@ TYPED_TEST(RocprimConstantIteratorTests, Transform)
 
         std::vector<T> output(size);
         T * d_output;
-        HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(T)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, output.size() * sizeof(T)));
         HIP_CHECK(hipDeviceSynchronize());
 
         // Calculate expected results on host

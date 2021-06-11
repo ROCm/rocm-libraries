@@ -95,8 +95,8 @@ TYPED_TEST(RocprimTextureCacheIteratorTests, Transform)
         std::vector<T> output(size);
         T * d_input;
         T * d_output;
-        HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
-        HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(T)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, output.size() * sizeof(T)));
         HIP_CHECK(
             hipMemcpy(
                 d_input, input.data(),

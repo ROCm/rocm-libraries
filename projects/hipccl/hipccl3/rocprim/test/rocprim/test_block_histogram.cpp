@@ -159,9 +159,9 @@ void test_block_histogram_input_arrays()
 
         // Preparing device
         T* device_output;
-        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(T)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(T)));
         T* device_output_bin;
-        HIP_CHECK(hipMalloc(&device_output_bin, output_bin.size() * sizeof(T)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output_bin, output_bin.size() * sizeof(T)));
 
         HIP_CHECK(
             hipMemcpy(

@@ -300,7 +300,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScan)
 
         // Writing to device memory
         T* device_output;
-        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
 
         static_run_algo<T, block_size, rocprim::block_scan_algorithm::using_warp_scan, 0>::run(
             output, output, expected, expected,
@@ -362,10 +362,10 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanReduce)
 
         // Writing to device memory
         T* device_output;
-        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
         T* device_output_reductions;
         HIP_CHECK(
-            hipMalloc(
+            test_common_utils::hipMallocHelper(
                 &device_output_reductions,
                 output_reductions.size() * sizeof(typename decltype(output_reductions)::value_type)
             )
@@ -434,10 +434,10 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanPrefixCallback)
 
         // Writing to device memory
         T* device_output;
-        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
         T* device_output_bp;
         HIP_CHECK(
-            hipMalloc(
+            test_common_utils::hipMallocHelper(
                 &device_output_bp,
                 output_block_prefixes.size() * sizeof(typename decltype(output_block_prefixes)::value_type)
             )
@@ -503,7 +503,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScan)
 
         // Writing to device memory
         T* device_output;
-        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
 
         static_run_algo<T, block_size, rocprim::block_scan_algorithm::using_warp_scan, 3>::run(
             output, output, expected, expected,
@@ -574,10 +574,10 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanReduce)
 
         // Writing to device memory
         T* device_output;
-        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
         T* device_output_reductions;
         HIP_CHECK(
-            hipMalloc(
+            test_common_utils::hipMallocHelper(
                 &device_output_reductions,
                 output_reductions.size() * sizeof(typename decltype(output_reductions)::value_type)
             )
@@ -652,10 +652,10 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanPrefixCallback)
 
         // Writing to device memory
         T* device_output;
-        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
         T* device_output_bp;
         HIP_CHECK(
-            hipMalloc(
+            test_common_utils::hipMallocHelper(
                 &device_output_bp,
                 output_block_prefixes.size() * sizeof(typename decltype(output_block_prefixes)::value_type)
             )
@@ -959,7 +959,7 @@ auto test_block_scan_input_arrays()
 
         // Writing to device memory
         T* device_output;
-        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
 
         HIP_CHECK(
             hipMemcpy(
@@ -1047,10 +1047,10 @@ auto test_block_scan_input_arrays()
 
         // Writing to device memory
         T* device_output;
-        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
         T* device_output_reductions;
         HIP_CHECK(
-            hipMalloc(
+            test_common_utils::hipMallocHelper(
                 &device_output_reductions,
                 output_reductions.size() * sizeof(typename decltype(output_reductions)::value_type)
             )
@@ -1161,10 +1161,10 @@ auto test_block_scan_input_arrays()
 
         // Writing to device memory
         T* device_output;
-        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
         T* device_output_bp;
         HIP_CHECK(
-            hipMalloc(
+            test_common_utils::hipMallocHelper(
                 &device_output_bp,
                 output_block_prefixes.size() * sizeof(typename decltype(output_block_prefixes)::value_type)
             )
@@ -1274,7 +1274,7 @@ auto test_block_scan_input_arrays()
 
         // Writing to device memory
         T* device_output;
-        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
 
         HIP_CHECK(
             hipMemcpy(
@@ -1369,10 +1369,10 @@ auto test_block_scan_input_arrays()
 
         // Writing to device memory
         T* device_output;
-        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
         T* device_output_reductions;
         HIP_CHECK(
-            hipMalloc(
+            test_common_utils::hipMallocHelper(
                 &device_output_reductions,
                 output_reductions.size() * sizeof(typename decltype(output_reductions)::value_type)
             )
@@ -1479,10 +1479,10 @@ auto test_block_scan_input_arrays()
 
         // Writing to device memory
         T* device_output;
-        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
         T* device_output_bp;
         HIP_CHECK(
-            hipMalloc(
+            test_common_utils::hipMallocHelper(
                 &device_output_bp,
                 output_block_prefixes.size() * sizeof(typename decltype(output_block_prefixes)::value_type)
             )

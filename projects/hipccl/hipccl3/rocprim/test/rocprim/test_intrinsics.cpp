@@ -125,7 +125,7 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleUp)
 
         T* device_data;
         HIP_CHECK(
-            hipMalloc(
+            test_common_utils::hipMallocHelper(
                 &device_data,
                 input.size() * sizeof(typename decltype(input)::value_type)
             )
@@ -228,7 +228,7 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleDown)
 
         T* device_data;
         HIP_CHECK(
-            hipMalloc(
+            test_common_utils::hipMallocHelper(
                 &device_data,
                 input.size() * sizeof(typename decltype(input)::value_type)
             )
@@ -334,13 +334,13 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleIndex)
         T* device_data;
         int * device_src_lanes;
         HIP_CHECK(
-            hipMalloc(
+            test_common_utils::hipMallocHelper(
                 &device_data,
                 input.size() * sizeof(typename decltype(input)::value_type)
             )
         );
         HIP_CHECK(
-            hipMalloc(
+            test_common_utils::hipMallocHelper(
                 &device_src_lanes,
                 hardware_warp_size * sizeof(int)
             )
@@ -444,7 +444,7 @@ TEST(RocprimIntrinsicsTests, ShuffleUpCustomStruct)
 
         T* device_data;
         HIP_CHECK(
-            hipMalloc(
+            test_common_utils::hipMallocHelper(
                 &device_data,
                 input.size() * sizeof(typename decltype(input)::value_type)
             )
@@ -543,7 +543,7 @@ TEST(RocprimIntrinsicsTests, ShuffleUpCustomAlignedStruct)
 
         T* device_data;
         HIP_CHECK(
-            hipMalloc(
+            test_common_utils::hipMallocHelper(
                 &device_data,
                 input.size() * sizeof(typename decltype(input)::value_type)
             )
