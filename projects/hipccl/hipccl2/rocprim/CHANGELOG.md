@@ -2,6 +2,14 @@
 
 Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwarePlatform/rocPRIM/](https://codedocs.xyz/ROCmSoftwarePlatform/rocPRIM/)
 
+## [Unreleased rocPRIM-2.10.11 for ROCm 4.4.0]
+### Added
+- Code coverage tools build option
+- Address sanitizer build option
+- gfx1030 support added.
+### Deprecated
+- The warp_size() function is now deprecated; please switch to host_warp_size() and device_warp_size() for host and device references respectively.
+
 ## [Unreleased rocPRIM-2.10.10 for ROCm 4.3.0]
 ### Fixed
 - Bugfix & minor performance improvement for merge_sort when input and output storage are the same.
