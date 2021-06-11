@@ -2,6 +2,13 @@
 
 See README.md on how to build the hipCUB documentation using Doxygen.
 
+## [Unreleased hipCUB-2.10.11 for ROCm 4.4.0]
+### Added
+- gfx1030 support added.
+- Address Sanitizer build option
+### Fixed
+- BlockRadixRank unit test failure fixed.
+
 ## [Unreleased hipCUB-2.10.10 for ROCm 4.3.0]
 ### Added
 - DiscardOutputIterator to backend header
