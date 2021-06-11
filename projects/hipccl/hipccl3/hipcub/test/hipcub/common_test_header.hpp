@@ -28,7 +28,7 @@
 #include <utility>
 #include <tuple>
 #include <random>
-#include <limits> 
+#include <limits>
 #include <cmath>
 #include <cstdlib>
 
@@ -44,4 +44,45 @@
 #define TEST_UTILS_INCLUDE_GAURD
 #include "test_utils.hpp"
 
-#define HIP_CHECK(error) ASSERT_EQ(error, hipSuccess)
+#define HIP_CHECK(condition)         \
+{                                    \
+    hipError_t error = condition;    \
+    if(error != hipSuccess){         \
+        std::cout << "HIP error: " << hipGetErrorString(error) << " line: " << __LINE__ << std::endl; \
+        exit(error); \
+    } \
+}
+
+namespace test_common_utils
+{
+
+bool use_hmm()
+{
+    if (getenv("HIPCUB_USE_HMM") == nullptr)
+    {
+        return false;
+    }
+
+    if (strcmp(getenv("HIPCUB_USE_HMM"), "1") == 0)
+    {
+        return true;
+    }
+    return false;
+}
+
+// Helper for HMM allocations: HMM is requested through HIPCUB_USE_HMM environment variable
+template <class T>
+hipError_t hipMallocHelper(T** devPtr, size_t size)
+{
+    if (use_hmm())
+    {
+        return hipMallocManaged((void**)devPtr, size);
+    }
+    else
+    {
+        return hipMalloc((void**)devPtr, size);
+    }
+    return hipSuccess;
+}
+
+}

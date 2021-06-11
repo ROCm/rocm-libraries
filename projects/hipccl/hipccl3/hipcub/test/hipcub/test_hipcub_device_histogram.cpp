@@ -184,8 +184,8 @@ TYPED_TEST(HipcubDeviceHistogramEven, Even)
 
             sample_type * d_input;
             counter_type * d_histogram;
-            HIP_CHECK(hipMalloc(&d_input, size * sizeof(sample_type)));
-            HIP_CHECK(hipMalloc(&d_histogram, bins * sizeof(counter_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, size * sizeof(sample_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_histogram, bins * sizeof(counter_type)));
             HIP_CHECK(
                 hipMemcpy(
                     d_input, input.data(),
@@ -240,7 +240,7 @@ TYPED_TEST(HipcubDeviceHistogramEven, Even)
             ASSERT_GT(temporary_storage_bytes, 0U);
 
             void * d_temporary_storage;
-            HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
             if(rows == 1)
             {
@@ -385,9 +385,9 @@ TYPED_TEST(HipcubDeviceHistogramRange, Range)
             sample_type * d_input;
             level_type * d_levels;
             counter_type * d_histogram;
-            HIP_CHECK(hipMalloc(&d_input, size * sizeof(sample_type)));
-            HIP_CHECK(hipMalloc(&d_levels, (bins + 1) * sizeof(level_type)));
-            HIP_CHECK(hipMalloc(&d_histogram, bins * sizeof(counter_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, size * sizeof(sample_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_levels, (bins + 1) * sizeof(level_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_histogram, bins * sizeof(counter_type)));
             HIP_CHECK(
                 hipMemcpy(
                     d_input, input.data(),
@@ -448,7 +448,7 @@ TYPED_TEST(HipcubDeviceHistogramRange, Range)
             ASSERT_GT(temporary_storage_bytes, 0U);
 
             void * d_temporary_storage;
-            HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
             if(rows == 1)
             {
@@ -637,10 +637,10 @@ TYPED_TEST(HipcubDeviceHistogramMultiEven, MultiEven)
 
             sample_type * d_input;
             counter_type * d_histogram[active_channels];
-            HIP_CHECK(hipMalloc(&d_input, size * sizeof(sample_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, size * sizeof(sample_type)));
             for(unsigned int channel = 0; channel < active_channels; channel++)
             {
-                HIP_CHECK(hipMalloc(&d_histogram[channel], bins[channel] * sizeof(counter_type)));
+                HIP_CHECK(test_common_utils::hipMallocHelper(&d_histogram[channel], bins[channel] * sizeof(counter_type)));
             }
             HIP_CHECK(
                 hipMemcpy(
@@ -708,7 +708,7 @@ TYPED_TEST(HipcubDeviceHistogramMultiEven, MultiEven)
             ASSERT_GT(temporary_storage_bytes, 0U);
 
             void * d_temporary_storage;
-            HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
             if(rows == 1)
             {
@@ -920,11 +920,11 @@ TYPED_TEST(HipcubDeviceHistogramMultiRange, MultiRange)
             sample_type * d_input;
             level_type * d_levels[active_channels];
             counter_type * d_histogram[active_channels];
-            HIP_CHECK(hipMalloc(&d_input, size * sizeof(sample_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, size * sizeof(sample_type)));
             for(unsigned int channel = 0; channel < active_channels; channel++)
             {
-                HIP_CHECK(hipMalloc(&d_levels[channel], num_levels[channel] * sizeof(level_type)));
-                HIP_CHECK(hipMalloc(&d_histogram[channel], bins[channel] * sizeof(counter_type)));
+                HIP_CHECK(test_common_utils::hipMallocHelper(&d_levels[channel], num_levels[channel] * sizeof(level_type)));
+                HIP_CHECK(test_common_utils::hipMallocHelper(&d_histogram[channel], bins[channel] * sizeof(counter_type)));
             }
             HIP_CHECK(
                 hipMemcpy(
@@ -1000,7 +1000,7 @@ TYPED_TEST(HipcubDeviceHistogramMultiRange, MultiRange)
             ASSERT_GT(temporary_storage_bytes, 0U);
 
             void * d_temporary_storage;
-            HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
             if(rows == 1)
             {

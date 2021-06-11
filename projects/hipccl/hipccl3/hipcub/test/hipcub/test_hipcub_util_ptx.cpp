@@ -148,7 +148,7 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleUp)
 
         T* device_data;
         HIP_CHECK(
-            hipMalloc(
+            test_common_utils::hipMallocHelper(
                 &device_data,
                 input.size() * sizeof(typename decltype(input)::value_type)
             )
@@ -256,7 +256,7 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleDown)
 
         T * device_data;
         HIP_CHECK(
-            hipMalloc(
+            test_common_utils::hipMallocHelper(
                 &device_data,
                 input.size() * sizeof(typename decltype(input)::value_type)
             )
@@ -377,13 +377,13 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleIndex)
         T* device_data;
         int * device_src_offsets;
         HIP_CHECK(
-            hipMalloc(
+            test_common_utils::hipMallocHelper(
                 &device_data,
                 input.size() * sizeof(typename decltype(input)::value_type)
             )
         );
         HIP_CHECK(
-            hipMalloc(
+            test_common_utils::hipMallocHelper(
                 &device_src_offsets,
                 src_offsets.size() * sizeof(typename decltype(src_offsets)::value_type)
             )
@@ -472,7 +472,7 @@ TEST(HipcubUtilPtxTests, ShuffleUpCustomStruct)
 
         T* device_data;
         HIP_CHECK(
-            hipMalloc(
+            test_common_utils::hipMallocHelper(
                 &device_data,
                 input.size() * sizeof(typename decltype(input)::value_type)
             )
@@ -581,7 +581,7 @@ TEST(HipcubUtilPtxTests, ShuffleUpCustomAlignedStruct)
 
         T* device_data;
         HIP_CHECK(
-            hipMalloc(
+            test_common_utils::hipMallocHelper(
                 &device_data,
                 input.size() * sizeof(typename decltype(input)::value_type)
             )
@@ -667,7 +667,7 @@ TEST(HipcubUtilPtxTests, WarpId)
     std::vector<unsigned int> output(size);
     unsigned int* device_output;
     HIP_CHECK(
-        hipMalloc(
+        test_common_utils::hipMallocHelper(
             &device_output,
             output.size() * sizeof(unsigned int)
         )

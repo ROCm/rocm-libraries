@@ -139,7 +139,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduceOp, Reduce)
             offsets.push_back(size);
 
             input_type * d_values_input;
-            HIP_CHECK(hipMalloc(&d_values_input, size * sizeof(input_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_values_input, size * sizeof(input_type)));
             HIP_CHECK(
                 hipMemcpy(
                     d_values_input, values_input.data(),
@@ -149,7 +149,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduceOp, Reduce)
             );
 
             offset_type * d_offsets;
-            HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
             HIP_CHECK(
                 hipMemcpy(
                     d_offsets, offsets.data(),
@@ -159,7 +159,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduceOp, Reduce)
             );
 
             output_type * d_aggregates_output;
-            HIP_CHECK(hipMalloc(&d_aggregates_output, segments_count * sizeof(output_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_aggregates_output, segments_count * sizeof(output_type)));
 
             size_t temporary_storage_bytes;
 
@@ -177,7 +177,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduceOp, Reduce)
             ASSERT_GT(temporary_storage_bytes, 0U);
 
             void * d_temporary_storage;
-            HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
             HIP_CHECK(
                 hipcub::DeviceSegmentedReduce::Reduce(
@@ -318,7 +318,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Sum)
             offsets.push_back(size);
 
             input_type * d_values_input;
-            HIP_CHECK(hipMalloc(&d_values_input, size * sizeof(input_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_values_input, size * sizeof(input_type)));
             HIP_CHECK(
                 hipMemcpy(
                     d_values_input, values_input.data(),
@@ -328,7 +328,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Sum)
             );
 
             offset_type * d_offsets;
-            HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
             HIP_CHECK(
                 hipMemcpy(
                     d_offsets, offsets.data(),
@@ -338,7 +338,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Sum)
             );
 
             output_type * d_aggregates_output;
-            HIP_CHECK(hipMalloc(&d_aggregates_output, segments_count * sizeof(output_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_aggregates_output, segments_count * sizeof(output_type)));
 
             size_t temporary_storage_bytes;
 
@@ -355,7 +355,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Sum)
             ASSERT_GT(temporary_storage_bytes, 0U);
 
             void * d_temporary_storage;
-            HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
             HIP_CHECK(
                 hipcub::DeviceSegmentedReduce::Sum(
@@ -463,7 +463,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Min)
             offsets.push_back(size);
 
             input_type * d_values_input;
-            HIP_CHECK(hipMalloc(&d_values_input, size * sizeof(input_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_values_input, size * sizeof(input_type)));
             HIP_CHECK(
                 hipMemcpy(
                     d_values_input, values_input.data(),
@@ -473,7 +473,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Min)
             );
 
             offset_type * d_offsets;
-            HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
             HIP_CHECK(
                 hipMemcpy(
                     d_offsets, offsets.data(),
@@ -483,7 +483,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Min)
             );
 
             output_type * d_aggregates_output;
-            HIP_CHECK(hipMalloc(&d_aggregates_output, segments_count * sizeof(output_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_aggregates_output, segments_count * sizeof(output_type)));
 
             size_t temporary_storage_bytes;
 
@@ -500,7 +500,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Min)
             ASSERT_GT(temporary_storage_bytes, 0U);
 
             void * d_temporary_storage;
-            HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
             HIP_CHECK(
                 hipcub::DeviceSegmentedReduce::Min(

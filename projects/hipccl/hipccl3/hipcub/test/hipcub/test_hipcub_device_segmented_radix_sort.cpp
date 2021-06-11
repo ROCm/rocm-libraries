@@ -199,8 +199,8 @@ TYPED_TEST(HipcubDeviceSegmentedRadixSort, SortKeys)
 
             key_type * d_keys_input;
             key_type * d_keys_output;
-            HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
-            HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_input, size * sizeof(key_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_output, size * sizeof(key_type)));
             HIP_CHECK(
                 hipMemcpy(
                     d_keys_input, keys_input.data(),
@@ -210,7 +210,7 @@ TYPED_TEST(HipcubDeviceSegmentedRadixSort, SortKeys)
             );
 
             offset_type * d_offsets;
-            HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
             HIP_CHECK(
                 hipMemcpy(
                     d_offsets, offsets.data(),
@@ -243,7 +243,7 @@ TYPED_TEST(HipcubDeviceSegmentedRadixSort, SortKeys)
             ASSERT_GT(temporary_storage_bytes, 0U);
 
             void * d_temporary_storage;
-            HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
             if(descending)
             {
@@ -361,8 +361,8 @@ TYPED_TEST(HipcubDeviceSegmentedRadixSort, SortPairs)
 
             key_type * d_keys_input;
             key_type * d_keys_output;
-            HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
-            HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_input, size * sizeof(key_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_output, size * sizeof(key_type)));
             HIP_CHECK(
                 hipMemcpy(
                     d_keys_input, keys_input.data(),
@@ -373,8 +373,8 @@ TYPED_TEST(HipcubDeviceSegmentedRadixSort, SortPairs)
 
             value_type * d_values_input;
             value_type * d_values_output;
-            HIP_CHECK(hipMalloc(&d_values_input, size * sizeof(value_type)));
-            HIP_CHECK(hipMalloc(&d_values_output, size * sizeof(value_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_values_input, size * sizeof(value_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_values_output, size * sizeof(value_type)));
             HIP_CHECK(
                 hipMemcpy(
                     d_values_input, values_input.data(),
@@ -384,7 +384,7 @@ TYPED_TEST(HipcubDeviceSegmentedRadixSort, SortPairs)
             );
 
             offset_type * d_offsets;
-            HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
             HIP_CHECK(
                 hipMemcpy(
                     d_offsets, offsets.data(),
@@ -423,7 +423,7 @@ TYPED_TEST(HipcubDeviceSegmentedRadixSort, SortPairs)
 
             ASSERT_GT(temporary_storage_bytes, 0U);
 
-            HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
             if(descending)
             {
@@ -549,8 +549,8 @@ TYPED_TEST(HipcubDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
 
             key_type * d_keys_input;
             key_type * d_keys_output;
-            HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
-            HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_input, size * sizeof(key_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_output, size * sizeof(key_type)));
             HIP_CHECK(
                 hipMemcpy(
                     d_keys_input, keys_input.data(),
@@ -560,7 +560,7 @@ TYPED_TEST(HipcubDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
             );
 
             offset_type * d_offsets;
-            HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
             HIP_CHECK(
                 hipMemcpy(
                     d_offsets, offsets.data(),
@@ -595,7 +595,7 @@ TYPED_TEST(HipcubDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
             ASSERT_GT(temporary_storage_bytes, 0U);
 
             void * d_temporary_storage;
-            HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
             if(descending)
             {
@@ -713,8 +713,8 @@ TYPED_TEST(HipcubDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
 
             key_type * d_keys_input;
             key_type * d_keys_output;
-            HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
-            HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_input, size * sizeof(key_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_output, size * sizeof(key_type)));
             HIP_CHECK(
                 hipMemcpy(
                     d_keys_input, keys_input.data(),
@@ -725,8 +725,8 @@ TYPED_TEST(HipcubDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
 
             value_type * d_values_input;
             value_type * d_values_output;
-            HIP_CHECK(hipMalloc(&d_values_input, size * sizeof(value_type)));
-            HIP_CHECK(hipMalloc(&d_values_output, size * sizeof(value_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_values_input, size * sizeof(value_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_values_output, size * sizeof(value_type)));
             HIP_CHECK(
                 hipMemcpy(
                     d_values_input, values_input.data(),
@@ -736,7 +736,7 @@ TYPED_TEST(HipcubDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
             );
 
             offset_type * d_offsets;
-            HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
             HIP_CHECK(
                 hipMemcpy(
                     d_offsets, offsets.data(),
@@ -778,7 +778,7 @@ TYPED_TEST(HipcubDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
 
             ASSERT_GT(temporary_storage_bytes, 0U);
 
-            HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
             if(descending)
             {

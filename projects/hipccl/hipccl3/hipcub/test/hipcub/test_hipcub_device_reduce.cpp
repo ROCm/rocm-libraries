@@ -106,8 +106,8 @@ TYPED_TEST(HipcubDeviceReduceTests, Reduce)
 
             T * d_input;
             U * d_output;
-            HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
-            HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(U)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, output.size() * sizeof(U)));
             HIP_CHECK(
                 hipMemcpy(
                     d_input, input.data(),
@@ -140,7 +140,7 @@ TYPED_TEST(HipcubDeviceReduceTests, Reduce)
             ASSERT_GT(temp_storage_size_bytes, 0U);
 
             // allocate temporary storage
-            HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
             HIP_CHECK(hipDeviceSynchronize());
 
             // Run
@@ -197,8 +197,8 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceMinimum)
 
             T * d_input;
             U * d_output;
-            HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
-            HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(U)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, output.size() * sizeof(U)));
             HIP_CHECK(
                 hipMemcpy(
                     d_input, input.data(),
@@ -232,7 +232,7 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceMinimum)
             ASSERT_GT(temp_storage_size_bytes, 0U);
 
             // allocate temporary storage
-            HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
             HIP_CHECK(hipDeviceSynchronize());
 
             // Run
@@ -290,8 +290,8 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceArgMinimum)
 
             T * d_input;
             key_value * d_output;
-            HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
-            HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(key_value)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, output.size() * sizeof(key_value)));
             HIP_CHECK(
                 hipMemcpy(
                     d_input, input.data(),
@@ -322,7 +322,7 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceArgMinimum)
             ASSERT_GT(temp_storage_size_bytes, 0U);
 
             // allocate temporary storage
-            HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
             HIP_CHECK(hipDeviceSynchronize());
 
             // Run
@@ -381,8 +381,8 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceArgMaximum)
 
             T * d_input;
             key_value * d_output;
-            HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
-            HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(key_value)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, output.size() * sizeof(key_value)));
             HIP_CHECK(
                 hipMemcpy(
                     d_input, input.data(),
@@ -413,7 +413,7 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceArgMaximum)
             ASSERT_GT(temp_storage_size_bytes, 0U);
 
             // allocate temporary storage
-            HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
             HIP_CHECK(hipDeviceSynchronize());
 
             // Run

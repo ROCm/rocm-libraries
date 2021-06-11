@@ -226,9 +226,9 @@ TYPED_TEST(HipcubBlockLoadStoreClassTests, LoadStoreClass)
 
         // Preparing device
         Type* device_input;
-        HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
         Type* device_output;
-        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
 
         HIP_CHECK(
             hipMemcpy(
@@ -331,9 +331,9 @@ TYPED_TEST(HipcubBlockLoadStoreClassTests, LoadStoreClassValid)
 
         // Preparing device
         Type* device_input;
-        HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
         Type* device_output;
-        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
 
         HIP_CHECK(
             hipMemcpy(
@@ -446,9 +446,9 @@ TYPED_TEST(HipcubBlockLoadStoreClassTests, LoadStoreClassDefault)
 
         // Preparing device
         Type* device_input;
-        HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
         Type* device_output;
-        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
 
         HIP_CHECK(
             hipMemcpy(
@@ -611,11 +611,11 @@ TYPED_TEST(HipcubBlockLoadStoreClassTests, LoadStoreDiscardIterator)
 
         // Preparing device
         Type* device_input;
-        HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
         Type* device_guarded_elements;
-        HIP_CHECK(hipMalloc(&device_guarded_elements, guarded_expected.size() * sizeof(typename decltype(unguarded)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_guarded_elements, guarded_expected.size() * sizeof(typename decltype(unguarded)::value_type)));
         Type* device_unguarded_elements;
-        HIP_CHECK(hipMalloc(&device_unguarded_elements, unguarded_expected.size() * sizeof(typename decltype(guarded)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_unguarded_elements, unguarded_expected.size() * sizeof(typename decltype(guarded)::value_type)));
 
         HIP_CHECK(
             hipMemcpy(

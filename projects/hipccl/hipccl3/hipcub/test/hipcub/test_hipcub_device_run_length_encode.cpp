@@ -147,7 +147,7 @@ TYPED_TEST(HipcubDeviceRunLengthEncode, Encode)
             }
 
             key_type * d_input;
-            HIP_CHECK(hipMalloc(&d_input, size * sizeof(key_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, size * sizeof(key_type)));
             HIP_CHECK(
                 hipMemcpy(
                     d_input, input.data(),
@@ -159,9 +159,9 @@ TYPED_TEST(HipcubDeviceRunLengthEncode, Encode)
             key_type * d_unique_output;
             count_type * d_counts_output;
             count_type * d_runs_count_output;
-            HIP_CHECK(hipMalloc(&d_unique_output, runs_count_expected * sizeof(key_type)));
-            HIP_CHECK(hipMalloc(&d_counts_output, runs_count_expected * sizeof(count_type)));
-            HIP_CHECK(hipMalloc(&d_runs_count_output, sizeof(count_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_unique_output, runs_count_expected * sizeof(key_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_counts_output, runs_count_expected * sizeof(count_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_runs_count_output, sizeof(count_type)));
 
             size_t temporary_storage_bytes = 0;
 
@@ -178,7 +178,7 @@ TYPED_TEST(HipcubDeviceRunLengthEncode, Encode)
             ASSERT_GT(temporary_storage_bytes, 0U);
 
             void * d_temporary_storage;
-            HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
             HIP_CHECK(
                 hipcub::DeviceRunLengthEncode::Encode(
@@ -314,7 +314,7 @@ TYPED_TEST(HipcubDeviceRunLengthEncode, NonTrivialRuns)
             }
 
             key_type * d_input;
-            HIP_CHECK(hipMalloc(&d_input, size * sizeof(key_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, size * sizeof(key_type)));
             HIP_CHECK(
                 hipMemcpy(
                     d_input, input.data(),
@@ -326,9 +326,9 @@ TYPED_TEST(HipcubDeviceRunLengthEncode, NonTrivialRuns)
             offset_type * d_offsets_output;
             count_type * d_counts_output;
             count_type * d_runs_count_output;
-            HIP_CHECK(hipMalloc(&d_offsets_output, std::max<size_t>(1, runs_count_expected) * sizeof(offset_type)));
-            HIP_CHECK(hipMalloc(&d_counts_output, std::max<size_t>(1, runs_count_expected) * sizeof(count_type)));
-            HIP_CHECK(hipMalloc(&d_runs_count_output, sizeof(count_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_offsets_output, std::max<size_t>(1, runs_count_expected) * sizeof(offset_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_counts_output, std::max<size_t>(1, runs_count_expected) * sizeof(count_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_runs_count_output, sizeof(count_type)));
 
             size_t temporary_storage_bytes = 0;
 
@@ -345,7 +345,7 @@ TYPED_TEST(HipcubDeviceRunLengthEncode, NonTrivialRuns)
             ASSERT_GT(temporary_storage_bytes, 0U);
 
             void * d_temporary_storage;
-            HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
             HIP_CHECK(
                 hipcub::DeviceRunLengthEncode::NonTrivialRuns(

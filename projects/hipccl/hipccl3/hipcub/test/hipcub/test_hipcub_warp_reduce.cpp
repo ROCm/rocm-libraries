@@ -170,9 +170,9 @@ TYPED_TEST(HipcubWarpReduceTests, Reduce)
 
         // Writing to device memory
         T* device_input;
-        HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
         T* device_output;
-        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
 
         HIP_CHECK(
             hipMemcpy(
@@ -312,9 +312,9 @@ TYPED_TEST(HipcubWarpReduceTests, ReduceValid)
 
         // Writing to device memory
         T* device_input;
-        HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
         T* device_output;
-        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
 
         HIP_CHECK(
             hipMemcpy(
@@ -465,9 +465,9 @@ TYPED_TEST(HipcubWarpReduceTests, HeadSegmentedReduceSum)
         T* device_input;
         flag_type* device_flags;
         T* device_output;
-        HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
-        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
-        HIP_CHECK(hipMalloc(&device_flags, flags.size() * sizeof(typename decltype(flags)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_flags, flags.size() * sizeof(typename decltype(flags)::value_type)));
         HIP_CHECK(
             hipMemcpy(
                 device_input, input.data(),
@@ -653,9 +653,9 @@ TYPED_TEST(HipcubWarpReduceTests, TailSegmentedReduceSum)
         T* device_input;
         flag_type* device_flags;
         T* device_output;
-        HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
-        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
-        HIP_CHECK(hipMalloc(&device_flags, flags.size() * sizeof(typename decltype(flags)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_flags, flags.size() * sizeof(typename decltype(flags)::value_type)));
         HIP_CHECK(
             hipMemcpy(
                 device_input, input.data(),
