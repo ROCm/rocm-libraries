@@ -97,7 +97,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceEmptyInput)
     hipStream_t stream = 0; // default stream
 
     U * d_output;
-    HIP_CHECK(hipMalloc(&d_output, sizeof(U)));
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, sizeof(U)));
 
     const U initial_value = U(1234);
 
@@ -114,7 +114,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceEmptyInput)
     );
 
     void * d_temp_storage = nullptr;
-    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
 
     // Run
     HIP_CHECK(
@@ -181,8 +181,8 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
 
             T * d_input;
             U * d_output;
-            HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
-            HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(U)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, output.size() * sizeof(U)));
             HIP_CHECK(
                 hipMemcpy(
                     d_input, input.data(),
@@ -216,7 +216,7 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
             ASSERT_GT(temp_storage_size_bytes, 0);
 
             // allocate temporary storage
-            HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
             HIP_CHECK(hipDeviceSynchronize());
 
             // Run
@@ -282,8 +282,8 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
 
             T * d_input;
             U * d_output;
-            HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
-            HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(U)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, output.size() * sizeof(U)));
             HIP_CHECK(
                 hipMemcpy(
                     d_input, input.data(),
@@ -320,7 +320,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
             ASSERT_GT(temp_storage_size_bytes, 0);
 
             // allocate temporary storage
-            HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
             HIP_CHECK(hipDeviceSynchronize());
 
             // Run
@@ -422,8 +422,8 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
 
             key_value * d_input;
             key_value * d_output;
-            HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(key_value)));
-            HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(key_value)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(key_value)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, output.size() * sizeof(key_value)));
             HIP_CHECK(
                 hipMemcpy(
                     d_input, input.data(),
@@ -460,7 +460,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
             ASSERT_GT(temp_storage_size_bytes, 0);
 
             // allocate temporary storage
-            HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
             HIP_CHECK(hipDeviceSynchronize());
 
             // Run

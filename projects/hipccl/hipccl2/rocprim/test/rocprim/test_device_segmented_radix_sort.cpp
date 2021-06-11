@@ -172,6 +172,12 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeys)
         const std::vector<size_t> sizes = get_sizes(seed_value);
         for(size_t size : sizes)
         {
+            if (size == 0 && test_common_utils::use_hmm())
+            {
+                // hipMallocManaged() currently doesnt support zero byte allocation
+                continue;
+            }
+
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             // Generate data
@@ -204,8 +210,8 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeys)
 
             key_type * d_keys_input;
             key_type * d_keys_output;
-            HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
-            HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_input, size * sizeof(key_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_output, size * sizeof(key_type)));
             HIP_CHECK(
                 hipMemcpy(
                     d_keys_input, keys_input.data(),
@@ -215,7 +221,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeys)
             );
 
             offset_type * d_offsets;
-            HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
             HIP_CHECK(
                 hipMemcpy(
                     d_offsets, offsets.data(),
@@ -248,7 +254,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeys)
             ASSERT_GT(temporary_storage_bytes, 0U);
 
             void * d_temporary_storage;
-            HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
             if(descending)
             {
@@ -329,6 +335,12 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairs)
         const std::vector<size_t> sizes = get_sizes(seed_value);
         for(size_t size : sizes)
         {
+            if (size == 0 && test_common_utils::use_hmm())
+            {
+                // hipMallocManaged() currently doesnt support zero byte allocation
+                continue;
+            }
+
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             // Generate data
@@ -364,8 +376,8 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairs)
 
             key_type * d_keys_input;
             key_type * d_keys_output;
-            HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
-            HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_input, size * sizeof(key_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_output, size * sizeof(key_type)));
             HIP_CHECK(
                 hipMemcpy(
                     d_keys_input, keys_input.data(),
@@ -376,8 +388,8 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairs)
 
             value_type * d_values_input;
             value_type * d_values_output;
-            HIP_CHECK(hipMalloc(&d_values_input, size * sizeof(value_type)));
-            HIP_CHECK(hipMalloc(&d_values_output, size * sizeof(value_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_values_input, size * sizeof(value_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_values_output, size * sizeof(value_type)));
             HIP_CHECK(
                 hipMemcpy(
                     d_values_input, values_input.data(),
@@ -387,7 +399,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairs)
             );
 
             offset_type * d_offsets;
-            HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
             HIP_CHECK(
                 hipMemcpy(
                     d_offsets, offsets.data(),
@@ -433,7 +445,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairs)
 
             ASSERT_GT(temporary_storage_bytes, 0U);
 
-            HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
             if(descending)
             {
@@ -525,6 +537,12 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
         const std::vector<size_t> sizes = get_sizes(seed_value);
         for(size_t size : sizes)
         {
+            if (size == 0 && test_common_utils::use_hmm())
+            {
+                // hipMallocManaged() currently doesnt support zero byte allocation
+                continue;
+            }
+
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             // Generate data
@@ -557,8 +575,8 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
 
             key_type * d_keys_input;
             key_type * d_keys_output;
-            HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
-            HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_input, size * sizeof(key_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_output, size * sizeof(key_type)));
             HIP_CHECK(
                 hipMemcpy(
                     d_keys_input, keys_input.data(),
@@ -568,7 +586,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
             );
 
             offset_type * d_offsets;
-            HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
             HIP_CHECK(
                 hipMemcpy(
                     d_offsets, offsets.data(),
@@ -606,7 +624,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
             ASSERT_GT(temporary_storage_bytes, 0U);
 
             void * d_temporary_storage;
-            HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
             if(descending)
             {
@@ -687,6 +705,12 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
         const std::vector<size_t> sizes = get_sizes(seed_value);
         for(size_t size : sizes)
         {
+            if (size == 0 && test_common_utils::use_hmm())
+            {
+                // hipMallocManaged() currently doesnt support zero byte allocation
+                continue;
+            }
+
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             // Generate data
@@ -722,8 +746,8 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
 
             key_type * d_keys_input;
             key_type * d_keys_output;
-            HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
-            HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_input, size * sizeof(key_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_output, size * sizeof(key_type)));
             HIP_CHECK(
                 hipMemcpy(
                     d_keys_input, keys_input.data(),
@@ -734,8 +758,8 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
 
             value_type * d_values_input;
             value_type * d_values_output;
-            HIP_CHECK(hipMalloc(&d_values_input, size * sizeof(value_type)));
-            HIP_CHECK(hipMalloc(&d_values_output, size * sizeof(value_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_values_input, size * sizeof(value_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_values_output, size * sizeof(value_type)));
             HIP_CHECK(
                 hipMemcpy(
                     d_values_input, values_input.data(),
@@ -745,7 +769,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
             );
 
             offset_type * d_offsets;
-            HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
             HIP_CHECK(
                 hipMemcpy(
                     d_offsets, offsets.data(),
@@ -794,7 +818,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
 
             ASSERT_GT(temporary_storage_bytes, 0U);
 
-            HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
             if(descending)
             {

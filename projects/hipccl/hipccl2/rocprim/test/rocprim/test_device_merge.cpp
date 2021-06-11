@@ -104,6 +104,11 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
 
     for(auto sizes : get_sizes())
     {
+        if ((std::get<0>(sizes) == 0 || std::get<1>(sizes) == 0) && test_common_utils::use_hmm())
+        {
+            // hipMallocManaged() currently doesnt support zero byte allocation
+            continue;
+        }
         SCOPED_TRACE(
             testing::Message() << "with sizes = {" <<
             std::get<0>(sizes) << ", " << std::get<1>(sizes) << "}"
@@ -143,9 +148,9 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
             key_type * d_keys_input1;
             key_type * d_keys_input2;
             key_type * d_keys_output;
-            HIP_CHECK(hipMalloc(&d_keys_input1, keys_input1.size() * sizeof(key_type)));
-            HIP_CHECK(hipMalloc(&d_keys_input2, keys_input2.size() * sizeof(key_type)));
-            HIP_CHECK(hipMalloc(&d_keys_output, keys_output.size() * sizeof(key_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_input1, keys_input1.size() * sizeof(key_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_input2, keys_input2.size() * sizeof(key_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_output, keys_output.size() * sizeof(key_type)));
             HIP_CHECK(
                 hipMemcpy(
                     d_keys_input1, keys_input1.data(),
@@ -185,7 +190,7 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
             ASSERT_GT(temp_storage_size_bytes, 0);
 
             // allocate temporary storage
-            HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
 
             // Run
             HIP_CHECK(
@@ -241,6 +246,11 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKeyValue)
 
     for(auto sizes : get_sizes())
     {
+        if ((std::get<0>(sizes) == 0 || std::get<1>(sizes) == 0) && test_common_utils::use_hmm())
+        {
+            // hipMallocManaged() currently doesnt support zero byte allocation
+            continue;
+        }
         SCOPED_TRACE(
             testing::Message() << "with sizes = {" <<
             std::get<0>(sizes) << ", " << std::get<1>(sizes) << "}"
@@ -300,12 +310,12 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKeyValue)
             value_type * d_values_input1;
             value_type * d_values_input2;
             value_type * d_values_output;
-            HIP_CHECK(hipMalloc(&d_keys_input1, keys_input1.size() * sizeof(key_type)));
-            HIP_CHECK(hipMalloc(&d_keys_input2, keys_input2.size() * sizeof(key_type)));
-            HIP_CHECK(hipMalloc(&d_keys_output, keys_output.size() * sizeof(key_type)));
-            HIP_CHECK(hipMalloc(&d_values_input1, values_input1.size() * sizeof(value_type)));
-            HIP_CHECK(hipMalloc(&d_values_input2, values_input2.size() * sizeof(value_type)));
-            HIP_CHECK(hipMalloc(&d_values_output, values_output.size() * sizeof(value_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_input1, keys_input1.size() * sizeof(key_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_input2, keys_input2.size() * sizeof(key_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_output, keys_output.size() * sizeof(key_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_values_input1, values_input1.size() * sizeof(value_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_values_input2, values_input2.size() * sizeof(value_type)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_values_output, values_output.size() * sizeof(value_type)));
             HIP_CHECK(
                 hipMemcpy(
                     d_keys_input1, keys_input1.data(),
@@ -366,7 +376,7 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKeyValue)
             ASSERT_GT(temp_storage_size_bytes, 0);
 
             // allocate temporary storage
-            HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
 
             // Run
             HIP_CHECK(

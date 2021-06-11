@@ -41,15 +41,6 @@
 // rocPRIM
 #include <rocprim/rocprim.hpp>
 
-#define HIP_CHECK(condition)         \
-  {                                  \
-    hipError_t error = condition;    \
-    if(error != hipSuccess){         \
-        std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
-        exit(error); \
-    } \
-  }
-
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 32;
 #endif
@@ -89,8 +80,10 @@ void run_sort_keys_benchmark(benchmark::State& state,
 
     key_type * d_keys_input;
     key_type * d_keys_output;
+
     HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
     HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
+
     HIP_CHECK(
         hipMemcpy(
             d_keys_input, keys_input->data(),
@@ -174,8 +167,10 @@ void run_sort_pairs_benchmark(benchmark::State& state,
 
     key_type * d_keys_input;
     key_type * d_keys_output;
+
     HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
     HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
+
     HIP_CHECK(
         hipMemcpy(
             d_keys_input, keys_input->data(),
@@ -186,8 +181,10 @@ void run_sort_pairs_benchmark(benchmark::State& state,
 
     value_type * d_values_input;
     value_type * d_values_output;
+
     HIP_CHECK(hipMalloc(&d_values_input, size * sizeof(value_type)));
     HIP_CHECK(hipMalloc(&d_values_output, size * sizeof(value_type)));
+
     HIP_CHECK(
         hipMemcpy(
             d_values_input, values_input.data(),
@@ -206,6 +203,8 @@ void run_sort_pairs_benchmark(benchmark::State& state,
             stream, false
         )
     );
+
+    HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
     HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
     HIP_CHECK(hipDeviceSynchronize());

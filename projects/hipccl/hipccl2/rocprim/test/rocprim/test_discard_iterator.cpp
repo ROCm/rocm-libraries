@@ -108,8 +108,8 @@ TEST(RocprimDiscardIteratorTests, ReduceByKey)
     // device input/output
     int * d_keys_input;
     int * d_values_input;
-    HIP_CHECK(hipMalloc(&d_keys_input, keys_input.size() * sizeof(int)));
-    HIP_CHECK(hipMalloc(&d_values_input, values_input.size() * sizeof(int)));
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_input, keys_input.size() * sizeof(int)));
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_values_input, values_input.size() * sizeof(int)));
     HIP_CHECK(
         hipMemcpy(
             d_keys_input, keys_input.data(),
@@ -125,7 +125,7 @@ TEST(RocprimDiscardIteratorTests, ReduceByKey)
         )
     );
     int * d_aggregates_output;
-    HIP_CHECK(hipMalloc(&d_aggregates_output, aggregates_expected.size() * sizeof(int)));
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_aggregates_output, aggregates_expected.size() * sizeof(int)));
     HIP_CHECK(hipDeviceSynchronize());
 
     // Get temporary storage size
@@ -147,7 +147,7 @@ TEST(RocprimDiscardIteratorTests, ReduceByKey)
     ASSERT_GT(temporary_storage_bytes, 0);
 
     void * d_temporary_storage;
-    HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
     HIP_CHECK(
         rocprim::reduce_by_key(

@@ -113,7 +113,7 @@ TYPED_TEST(RocprimThreadTests, FlatBlockThreadID)
 
         // Preparing device
         Type* device_output;
-        HIP_CHECK(hipMalloc(&device_output, block_size * sizeof(typename decltype(output)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, block_size * sizeof(typename decltype(output)::value_type)));
 
         // Running kernel
         hipLaunchKernelGGL(
@@ -190,7 +190,7 @@ TYPED_TEST(RocprimThreadTests, FlatBlockID)
 
         // Preparing device
         Type* device_output;
-        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
 
         // Running kernel
         hipLaunchKernelGGL(

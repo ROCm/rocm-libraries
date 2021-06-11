@@ -178,10 +178,10 @@ TEST(RocprimZipIteratorTests, Transform)
         T2 * d_input2;
         T3 * d_input3;
         U * d_output;
-        HIP_CHECK(hipMalloc(&d_input1, input1.size() * sizeof(T1)));
-        HIP_CHECK(hipMalloc(&d_input2, input2.size() * sizeof(T2)));
-        HIP_CHECK(hipMalloc(&d_input3, input3.size() * sizeof(T3)));
-        HIP_CHECK(hipMalloc(&d_output, output.size() * sizeof(U)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&d_input1, input1.size() * sizeof(T1)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&d_input2, input2.size() * sizeof(T2)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&d_input3, input3.size() * sizeof(T3)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, output.size() * sizeof(U)));
         HIP_CHECK(
             hipMemcpy(
                 d_input1, input1.data(),
@@ -321,11 +321,11 @@ TEST(RocprimZipIteratorTests, TransformReduce)
         T3* d_input3;
         U1* d_output1;
         U2* d_output2;
-        HIP_CHECK(hipMalloc(&d_input1, input1.size() * sizeof(T1)));
-        HIP_CHECK(hipMalloc(&d_input2, input2.size() * sizeof(T2)));
-        HIP_CHECK(hipMalloc(&d_input3, input3.size() * sizeof(T3)));
-        HIP_CHECK(hipMalloc(&d_output1, output1.size() * sizeof(U1)));
-        HIP_CHECK(hipMalloc(&d_output2, output2.size() * sizeof(U2)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&d_input1, input1.size() * sizeof(T1)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&d_input2, input2.size() * sizeof(T2)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&d_input3, input3.size() * sizeof(T3)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&d_output1, output1.size() * sizeof(U1)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&d_output2, output2.size() * sizeof(U2)));
 
         // Copy input data to device
         HIP_CHECK(
@@ -385,7 +385,7 @@ TEST(RocprimZipIteratorTests, TransformReduce)
 
         // allocate temporary storage
         void * d_temp_storage = nullptr;
-        HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
         HIP_CHECK(hipDeviceSynchronize());
         ASSERT_NE(d_temp_storage, nullptr);
 

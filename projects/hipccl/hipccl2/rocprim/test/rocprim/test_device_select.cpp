@@ -114,10 +114,10 @@ TYPED_TEST(RocprimDeviceSelectTests, Flagged)
             F * d_flags;
             U * d_output;
             unsigned int * d_selected_count_output;
-            HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
-            HIP_CHECK(hipMalloc(&d_flags, flags.size() * sizeof(F)));
-            HIP_CHECK(hipMalloc(&d_output, input.size() * sizeof(U)));
-            HIP_CHECK(hipMalloc(&d_selected_count_output, sizeof(unsigned int)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_flags, flags.size() * sizeof(F)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, input.size() * sizeof(U)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_selected_count_output, sizeof(unsigned int)));
             HIP_CHECK(
                 hipMemcpy(
                     d_input, input.data(),
@@ -168,7 +168,7 @@ TYPED_TEST(RocprimDeviceSelectTests, Flagged)
 
             // allocate temporary storage
             void * d_temp_storage = nullptr;
-            HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
             HIP_CHECK(hipDeviceSynchronize());
 
             // Run
@@ -277,9 +277,9 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
             T * d_input;
             U * d_output;
             unsigned int * d_selected_count_output;
-            HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
-            HIP_CHECK(hipMalloc(&d_output, input.size() * sizeof(U)));
-            HIP_CHECK(hipMalloc(&d_selected_count_output, sizeof(unsigned int)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, input.size() * sizeof(U)));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_selected_count_output, sizeof(unsigned int)));
             HIP_CHECK(
                 hipMemcpy(
                     d_input, input.data(),
@@ -323,7 +323,7 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
 
             // allocate temporary storage
             void * d_temp_storage = nullptr;
-            HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
             HIP_CHECK(hipDeviceSynchronize());
 
             // Run
@@ -397,7 +397,7 @@ TYPED_TEST(RocprimDeviceSelectTests, UniqueEmptyInput)
 
     // Allocate and copy to device
     unsigned int * d_selected_count_output;
-    HIP_CHECK(hipMalloc(&d_selected_count_output, sizeof(unsigned int)));
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_selected_count_output, sizeof(unsigned int)));
 
     size_t temp_storage_size_bytes;
     // Get size of d_temp_storage
@@ -416,7 +416,7 @@ TYPED_TEST(RocprimDeviceSelectTests, UniqueEmptyInput)
     );
 
     void * d_temp_storage = nullptr;
-    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
 
     // Run
     HIP_CHECK(
@@ -491,9 +491,9 @@ TYPED_TEST(RocprimDeviceSelectTests, Unique)
                 T * d_input;
                 U * d_output;
                 unsigned int * d_selected_count_output;
-                HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
-                HIP_CHECK(hipMalloc(&d_output, input.size() * sizeof(U)));
-                HIP_CHECK(hipMalloc(&d_selected_count_output, sizeof(unsigned int)));
+                HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
+                HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, input.size() * sizeof(U)));
+                HIP_CHECK(test_common_utils::hipMallocHelper(&d_selected_count_output, sizeof(unsigned int)));
                 HIP_CHECK(
                     hipMemcpy(
                         d_input, input.data(),
@@ -538,7 +538,7 @@ TYPED_TEST(RocprimDeviceSelectTests, Unique)
 
                 // allocate temporary storage
                 void * d_temp_storage = nullptr;
-                HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+                HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
                 HIP_CHECK(hipDeviceSynchronize());
 
                 // Run

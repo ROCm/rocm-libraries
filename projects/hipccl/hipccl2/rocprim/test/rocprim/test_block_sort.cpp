@@ -89,7 +89,7 @@ TYPED_TEST(RocprimBlockSortTests, SortKey)
 
         // Preparing device
         key_type * device_key_output;
-        HIP_CHECK(hipMalloc(&device_key_output, output.size() * sizeof(key_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_key_output, output.size() * sizeof(key_type)));
 
         HIP_CHECK(
             hipMemcpy(
@@ -195,9 +195,9 @@ TYPED_TEST(RocprimBlockSortTests, SortKeyValue)
 
         // Preparing device
         key_type * device_key_output;
-        HIP_CHECK(hipMalloc(&device_key_output, output_key.size() * sizeof(key_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_key_output, output_key.size() * sizeof(key_type)));
         value_type * device_value_output;
-        HIP_CHECK(hipMalloc(&device_value_output, output_value.size() * sizeof(value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_value_output, output_value.size() * sizeof(value_type)));
 
         HIP_CHECK(
             hipMemcpy(
@@ -339,9 +339,9 @@ TYPED_TEST(RocprimBlockSortTests, CustomSortKeyValue)
 
         // Preparing device
         key_type * device_key_output;
-        HIP_CHECK(hipMalloc(&device_key_output, output_key.size() * sizeof(key_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_key_output, output_key.size() * sizeof(key_type)));
         value_type * device_value_output;
-        HIP_CHECK(hipMalloc(&device_value_output, output_value.size() * sizeof(value_type)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_value_output, output_value.size() * sizeof(value_type)));
 
         HIP_CHECK(
             hipMemcpy(

@@ -53,8 +53,8 @@ TEST(HIPTests, Saxpy)
 
     float * d_x;
     float * d_y;
-    HIP_CHECK(hipMalloc(&d_x, N * sizeof(float)));
-    HIP_CHECK(hipMalloc(&d_y, N * sizeof(float)));
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_x, N * sizeof(float)));
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_y, N * sizeof(float)));
     HIP_CHECK(
         hipMemcpy(
             d_x, x.data(),

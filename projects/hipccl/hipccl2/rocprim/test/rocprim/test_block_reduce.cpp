@@ -159,9 +159,9 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, Reduce)
 
         // Preparing device
         T* device_output;
-        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(T)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(T)));
         T* device_output_reductions;
-        HIP_CHECK(hipMalloc(&device_output_reductions, output_reductions.size() * sizeof(T)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output_reductions, output_reductions.size() * sizeof(T)));
 
         static_run_algo<T, block_size, rocprim::block_reduce_algorithm::using_warp_reduce, binary_op_type>::run(
             output, output_reductions, expected_reductions,
@@ -231,9 +231,9 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceMultiplies)
 
         // Preparing device
         T* device_output;
-        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(T)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(T)));
         T* device_output_reductions;
-        HIP_CHECK(hipMalloc(&device_output_reductions, output_reductions.size() * sizeof(T)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output_reductions, output_reductions.size() * sizeof(T)));
 
         static_run_algo<T, block_size, rocprim::block_reduce_algorithm::using_warp_reduce, binary_op_type>::run(
             output, output_reductions, expected_reductions,
@@ -365,9 +365,9 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceValid)
 
         // Preparing device
         T* device_output;
-        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(T)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(T)));
         T* device_output_reductions;
-        HIP_CHECK(hipMalloc(&device_output_reductions, output_reductions.size() * sizeof(T)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output_reductions, output_reductions.size() * sizeof(T)));
 
         static_run_valid<T, block_size, rocprim::block_reduce_algorithm::using_warp_reduce, binary_op_type>::run(
             output, output_reductions, expected_reductions,
@@ -479,9 +479,9 @@ void test_block_reduce_input_arrays()
 
         // Preparing device
         T* device_output;
-        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(T)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(T)));
         T* device_output_reductions;
-        HIP_CHECK(hipMalloc(&device_output_reductions, output_reductions.size() * sizeof(T)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output_reductions, output_reductions.size() * sizeof(T)));
 
         HIP_CHECK(
             hipMemcpy(
