@@ -101,7 +101,7 @@ void run_sort_keys_benchmark(benchmark::State& state,
     }
 
     offset_type * d_offsets;
-    HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_offsets), (segments_count + 1) * sizeof(offset_type)));
     HIP_CHECK(
         hipMemcpy(
             d_offsets, offsets.data(),
@@ -112,8 +112,8 @@ void run_sort_keys_benchmark(benchmark::State& state,
 
     key_type * d_keys_input;
     key_type * d_keys_output;
-    HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
-    HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_input), size * sizeof(key_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_output), size * sizeof(key_type)));
     HIP_CHECK(
         hipMemcpy(
             d_keys_input, keys_input.data(),
@@ -232,7 +232,7 @@ void run_sort_pairs_benchmark(benchmark::State& state,
     std::iota(values_input.begin(), values_input.end(), 0);
 
     offset_type * d_offsets;
-    HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_offsets), (segments_count + 1) * sizeof(offset_type)));
     HIP_CHECK(
         hipMemcpy(
             d_offsets, offsets.data(),
@@ -243,8 +243,8 @@ void run_sort_pairs_benchmark(benchmark::State& state,
 
     key_type * d_keys_input;
     key_type * d_keys_output;
-    HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
-    HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_input), size * sizeof(key_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_output), size * sizeof(key_type)));
     HIP_CHECK(
         hipMemcpy(
             d_keys_input, keys_input.data(),
@@ -255,8 +255,8 @@ void run_sort_pairs_benchmark(benchmark::State& state,
 
     value_type * d_values_input;
     value_type * d_values_output;
-    HIP_CHECK(hipMalloc(&d_values_input, size * sizeof(value_type)));
-    HIP_CHECK(hipMalloc(&d_values_output, size * sizeof(value_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_values_input), size * sizeof(value_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_values_output), size * sizeof(value_type)));
     HIP_CHECK(
         hipMemcpy(
             d_values_input, values_input.data(),

@@ -53,21 +53,24 @@ auto last_in_warp_segment(Flag flag)
     // Make sure last item in logical warp is marked as a tail
     warp_flags |= lane_mask_type(1) << (WarpSize - 1U);
     // Calculate logical lane id of the last valid value in the segment
+#ifndef __HIP_CPU_RT__
     #if __AMDGCN_WAVEFRONT_SIZE == 32
     return ::__ffs(warp_flags) - 1;
     #else
     return ::__ffsll(warp_flags) - 1;
     #endif
-}
-
-// Returns logical warp id of the last thread in thread's segment
-template<bool HeadSegmented, unsigned int WarpSize, class Flag>
-ROCPRIM_DEVICE inline
-auto last_in_warp_segment(Flag)
-    -> typename std::enable_if<(WarpSize > __AMDGCN_WAVEFRONT_SIZE), unsigned int>::type
-{
-    ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size . Aborting warp sort.");
-    return 0;
+#else
+#if _MSC_VER
+    // TODO: verify correctness
+    unsigned long tmp = 0;
+    _BitScanReverse64(&tmp, warp_flags);
+    return 1u << tmp;
+#elif __GNUC__
+    return __builtin_ctzl(warp_flags);
+#else
+    static_assert(false, "Look for GCC/Clang implementation");
+#endif
+#endif
 }
 
 } // end namespace detail

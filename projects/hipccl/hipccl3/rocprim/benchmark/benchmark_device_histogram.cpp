@@ -62,7 +62,7 @@ std::vector<T> generate(size_t size, int entropy_reduction, int lower_level, int
 {
     if(entropy_reduction >= 5)
     {
-        return std::vector<T>(size, (lower_level + upper_level) / 2);
+        return std::vector<T>(size, (T)((lower_level + upper_level) / 2));
     }
 
     const size_t max_random_size = 1024 * 1024;
@@ -125,8 +125,8 @@ void run_even_benchmark(benchmark::State& state,
 
     T * d_input;
     counter_type * d_histogram;
-    HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
-    HIP_CHECK(hipMalloc(&d_histogram, size * sizeof(counter_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_histogram), size * sizeof(counter_type)));
     HIP_CHECK(
         hipMemcpy(
             d_input, input.data(),
@@ -221,10 +221,10 @@ void run_multi_even_benchmark(benchmark::State& state,
 
     T * d_input;
     counter_type * d_histogram[ActiveChannels];
-    HIP_CHECK(hipMalloc(&d_input, size * Channels * sizeof(T)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * Channels * sizeof(T)));
     for(unsigned int channel = 0; channel < ActiveChannels; channel++)
     {
-        HIP_CHECK(hipMalloc(&d_histogram[channel], bins * sizeof(counter_type)));
+        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_histogram[channel]), bins * sizeof(counter_type)));
     }
     HIP_CHECK(
         hipMemcpy(
@@ -312,9 +312,9 @@ void run_range_benchmark(benchmark::State& state, size_t bins, hipStream_t strea
     T * d_input;
     T * d_levels;
     counter_type * d_histogram;
-    HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
-    HIP_CHECK(hipMalloc(&d_levels, (bins + 1) * sizeof(T)));
-    HIP_CHECK(hipMalloc(&d_histogram, size * sizeof(counter_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_levels), (bins + 1) * sizeof(T)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_histogram), size * sizeof(counter_type)));
     HIP_CHECK(
         hipMemcpy(
             d_input, input.data(),

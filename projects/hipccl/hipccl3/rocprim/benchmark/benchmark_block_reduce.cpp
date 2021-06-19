@@ -81,7 +81,7 @@ struct reduce
     __device__
     static void run(const T* input, T* output)
     {
-        const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+        const unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
 
         T values[ItemsPerThread];
         T reduced_value;
@@ -93,16 +93,16 @@ struct reduce
         using breduce_t = rp::block_reduce<T, BlockSize, algorithm>;
         __shared__ typename breduce_t::storage_type storage;
 
-        #pragma nounroll
+        ROCPRIM_NO_UNROLL
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             breduce_t().reduce(values, reduced_value, storage);
             values[0] = reduced_value;
         }
 
-        if(hipThreadIdx_x == 0)
+        if(threadIdx.x == 0)
         {
-            output[hipBlockIdx_x] = reduced_value;
+            output[blockIdx.x] = reduced_value;
         }
     }
 };
@@ -123,8 +123,8 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     std::vector<T> input(size, T(1));
     T * d_input;
     T * d_output;
-    HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
-    HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), size * sizeof(T)));
     HIP_CHECK(
         hipMemcpy(
             d_input, input.data(),

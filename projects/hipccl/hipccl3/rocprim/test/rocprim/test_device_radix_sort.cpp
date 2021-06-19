@@ -27,6 +27,7 @@
 
 // required test headers
 #include "test_utils_types.hpp"
+#include "test_sort_comparator.hpp"
 
 template<
     class Key,
@@ -83,48 +84,6 @@ typedef ::testing::Types<
 > Params;
 
 TYPED_TEST_SUITE(RocprimDeviceRadixSort, Params);
-
-template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
-struct key_comparator
-{
-    static_assert(rocprim::is_unsigned<Key>::value, "Test supports start and end bits only for unsigned integers");
-
-    bool operator()(const Key& lhs, const Key& rhs)
-    {
-        auto mask = (1ull << (EndBit - StartBit)) - 1;
-        auto l = (static_cast<unsigned long long>(lhs) >> StartBit) & mask;
-        auto r = (static_cast<unsigned long long>(rhs) >> StartBit) & mask;
-        return Descending ? (r < l) : (l < r);
-    }
-};
-
-template<class Key, bool Descending>
-struct key_comparator<Key, Descending, 0, sizeof(Key) * 8>
-{
-    bool operator()(const Key& lhs, const Key& rhs)
-    {
-        return Descending ? (rhs < lhs) : (lhs < rhs);
-    }
-};
-
-template<bool Descending>
-struct key_comparator<rocprim::half, Descending, 0, sizeof(rocprim::half) * 8>
-{
-    bool operator()(const rocprim::half& lhs, const rocprim::half& rhs)
-    {
-        // HIP's half doesn't have __host__ comparison operators, use floats instead
-        return key_comparator<float, Descending, 0, sizeof(float) * 8>()(lhs, rhs);
-    }
-};
-
-template<class Key, class Value, bool Descending, unsigned int StartBit, unsigned int EndBit>
-struct key_value_comparator
-{
-    bool operator()(const std::pair<Key, Value>& lhs, const std::pair<Key, Value>& rhs)
-    {
-        return key_comparator<Key, Descending, StartBit, EndBit>()(lhs.first, rhs.first);
-    }
-};
 
 std::vector<size_t> get_sizes(int seed_value)
 {

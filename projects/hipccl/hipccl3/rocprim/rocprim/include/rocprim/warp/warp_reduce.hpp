@@ -94,7 +94,7 @@ struct select_warp_reduce_impl
 ///     // allocate storage in shared memory
 ///     __shared__ warp_reduce_int::storage_type temp[4];
 ///
-///     int logical_warp_id = hipThreadIdx_x/16;
+///     int logical_warp_id = threadIdx.x/16;
 ///     int value = ...;
 ///     // execute reduce
 ///     warp_reduce_int().reduce(
@@ -163,7 +163,7 @@ public:
     ///     // allocate storage in shared memory
     ///     __shared__ warp_reduce_int::storage_type temp[4];
     ///
-    ///     int logical_warp_id = hipThreadIdx_x/16;
+    ///     int logical_warp_id = threadIdx.x/16;
     ///     int value = ...;
     ///     // execute reduction
     ///     warp_reduce_int().reduce(
@@ -234,7 +234,7 @@ public:
     ///     // allocate storage in shared memory
     ///     __shared__ warp_reduce_int::storage_type temp[4];
     ///
-    ///     int logical_warp_id = hipThreadIdx_x/16;
+    ///     int logical_warp_id = threadIdx.x/16;
     ///     int value = ...;
     ///     int valid_items = 4;
     ///     // execute reduction

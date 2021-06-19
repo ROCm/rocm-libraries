@@ -89,7 +89,7 @@ TYPED_TEST(RocprimTextureCacheIteratorTests, Transform)
 
         for(size_t i = 0; i < size; i++)
         {
-            input[i] = T(test_utils::get_random_value(1, 200, seed_value));
+            input[i] = test_utils::get_random_value<T>(1, 200, seed_value);
         }
 
         std::vector<T> output(size);

@@ -110,16 +110,16 @@ void histogram_global_kernel(SampleIterator samples,
 
 #define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start) \
     { \
-        auto error = hipPeekAtLastError(); \
-        if(error != hipSuccess) return error; \
+        auto _error = hipPeekAtLastError(); \
+        if(_error != hipSuccess) return _error; \
         if(debug_synchronous) \
         { \
             std::cout << name << "(" << size << ")"; \
-            auto error = hipStreamSynchronize(stream); \
-            if(error != hipSuccess) return error; \
-            auto end = std::chrono::high_resolution_clock::now(); \
-            auto d = std::chrono::duration_cast<std::chrono::duration<double>>(end - start); \
-            std::cout << " " << d.count() * 1000 << " ms" << '\n'; \
+            auto __error = hipStreamSynchronize(stream); \
+            if(__error != hipSuccess) return __error; \
+            auto _end = std::chrono::high_resolution_clock::now(); \
+            auto _d = std::chrono::duration_cast<std::chrono::duration<double>>(_end - start); \
+            std::cout << " " << _d.count() * 1000 << " ms" << '\n'; \
         } \
     }
 
@@ -151,9 +151,9 @@ hipError_t histogram_impl(void * temporary_storage,
         default_histogram_config<ROCPRIM_TARGET_ARCH, sample_type, Channels, ActiveChannels>
     >;
 
-    constexpr unsigned int block_size = config::histogram::block_size;
-    constexpr unsigned int items_per_thread = config::histogram::items_per_thread;
-    constexpr unsigned int items_per_block = block_size * items_per_thread;
+    static constexpr unsigned int block_size = config::histogram::block_size;
+    static constexpr unsigned int items_per_thread = config::histogram::items_per_thread;
+    static constexpr unsigned int items_per_block = block_size * items_per_thread;
 
     if(row_stride_bytes % sizeof(sample_type) != 0)
     {

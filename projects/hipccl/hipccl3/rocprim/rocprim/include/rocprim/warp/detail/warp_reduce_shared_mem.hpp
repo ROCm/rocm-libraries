@@ -60,7 +60,7 @@ public:
 
         output = input;
         store_volatile(&storage_.values[lid], output);
-        #pragma unroll
+        ROCPRIM_UNROLL
         for(unsigned int i = ceiling >> 1; i > 0; i >>= 1)
         {
             if (lid + i < WarpSize && lid < i)
@@ -85,7 +85,7 @@ public:
 
         output = input;
         store_volatile(&storage_.values[lid], output);
-        #pragma unroll
+        ROCPRIM_UNROLL
         for(unsigned int i = ceiling >> 1; i > 0; i >>= 1)
         {
             if((lid + i) < WarpSize && lid < i && (lid + i) < valid_items)
@@ -128,7 +128,7 @@ private:
         auto last = last_in_warp_segment<HeadSegmented, WarpSize>(flag);
 
         output = input;
-        #pragma unroll
+        ROCPRIM_UNROLL
         for(unsigned int i = 1; i < ceiling; i *= 2)
         {
             store_volatile(&storage_.values[lid], output);

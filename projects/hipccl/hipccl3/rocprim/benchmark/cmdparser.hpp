@@ -186,6 +186,13 @@ namespace cli {
             return std::stoul(elements[0]);
         }
 
+        static unsigned long long parse(const std::vector<std::string>& elements, const unsigned long long&) {
+            if (elements.size() != 1)
+                throw std::bad_cast();
+
+            return std::stoull(elements[0]);
+        }
+
         static long parse(const std::vector<std::string>& elements, const long&) {
             if (elements.size() != 1)
                 throw std::bad_cast();

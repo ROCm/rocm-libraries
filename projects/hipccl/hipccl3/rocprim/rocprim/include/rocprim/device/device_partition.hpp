@@ -96,16 +96,16 @@ void init_offset_scan_state_kernel(OffsetLookBackScanState offset_scan_state,
 
 #define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start) \
     { \
-        auto error = hipPeekAtLastError(); \
-        if(error != hipSuccess) return error; \
+        auto _error = hipPeekAtLastError(); \
+        if(_error != hipSuccess) return _error; \
         if(debug_synchronous) \
         { \
             std::cout << name << "(" << size << ")"; \
-            auto error = hipStreamSynchronize(stream); \
-            if(error != hipSuccess) return error; \
-            auto end = std::chrono::high_resolution_clock::now(); \
-            auto d = std::chrono::duration_cast<std::chrono::duration<double>>(end - start); \
-            std::cout << " " << d.count() * 1000 << " ms" << '\n'; \
+            auto __error = hipStreamSynchronize(stream); \
+            if(__error != hipSuccess) return __error; \
+            auto _end = std::chrono::high_resolution_clock::now(); \
+            auto _d = std::chrono::duration_cast<std::chrono::duration<double>>(_end - start); \
+            std::cout << " " << _d.count() * 1000 << " ms" << '\n'; \
         } \
     }
 
@@ -149,9 +149,9 @@ hipError_t partition_impl(void * temporary_storage,
     using ordered_block_id_type = detail::ordered_block_id<unsigned int>;
 
 
-    constexpr unsigned int block_size = config::block_size;
-    constexpr unsigned int items_per_thread = config::items_per_thread;
-    constexpr auto items_per_block = block_size * items_per_thread;
+    static constexpr unsigned int block_size = config::block_size;
+    static constexpr unsigned int items_per_thread = config::items_per_thread;
+    static constexpr auto items_per_block = block_size * items_per_thread;
     const unsigned int number_of_blocks =
         std::max(1u, static_cast<unsigned int>((size + items_per_block - 1)/items_per_block));
 
@@ -232,7 +232,7 @@ hipError_t partition_impl(void * temporary_storage,
             HIP_KERNEL_NAME(partition_kernel<
                 SelectMethod, OnlySelected, config,
                 InputIterator, FlagIterator, OutputIterator, SelectedCountOutputIterator,
-                UnaryPredicate, decltype(inequality_op), offset_scan_state_with_sleep_type
+                UnaryPredicate, InequalityOp, offset_scan_state_with_sleep_type
             >),
             dim3(grid_size), dim3(block_size), 0, stream,
             input, flags, output, selected_count_output, size, predicate,
@@ -244,7 +244,7 @@ hipError_t partition_impl(void * temporary_storage,
             HIP_KERNEL_NAME(partition_kernel<
                 SelectMethod, OnlySelected, config,
                 InputIterator, FlagIterator, OutputIterator, SelectedCountOutputIterator,
-                UnaryPredicate, decltype(inequality_op), offset_scan_state_type
+                UnaryPredicate, InequalityOp, offset_scan_state_type
             >),
             dim3(grid_size), dim3(block_size), 0, stream,
             input, flags, output, selected_count_output, size, predicate,

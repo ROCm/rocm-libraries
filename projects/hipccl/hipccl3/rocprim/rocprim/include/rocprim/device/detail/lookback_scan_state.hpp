@@ -122,7 +122,11 @@ public:
             prefix_type prefix;
             prefix.flag = PREFIX_EMPTY;
             prefix_underlying_type p;
+#ifndef __HIP_CPU_RT__
             __builtin_memcpy(&p, &prefix, sizeof(prefix_type));
+#else
+            std::memcpy(&p, &prefix, sizeof(prefix_type));
+#endif
             prefixes[padding + block_id] = p;
         }
         if(block_id < padding)
@@ -130,7 +134,11 @@ public:
             prefix_type prefix;
             prefix.flag = PREFIX_INVALID;
             prefix_underlying_type p;
+#ifndef __HIP_CPU_RT__
             __builtin_memcpy(&p, &prefix, sizeof(prefix_type));
+#else
+            std::memcpy(&p, &prefix, sizeof(prefix_type));
+#endif
             prefixes[block_id] = p;
         }
     }
@@ -155,23 +163,35 @@ public:
 
         prefix_type prefix;
 
-        const uint SLEEP_MAX = 32;
-        uint times_through = 1;
+        const unsigned int SLEEP_MAX = 32;
+        unsigned int times_through = 1;
 
         prefix_underlying_type p = ::rocprim::detail::atomic_add(&prefixes[padding + block_id], 0);
+#ifndef __HIP_CPU_RT__
         __builtin_memcpy(&prefix, &p, sizeof(prefix_type));
+#else
+        std::memcpy(&prefix, &p, sizeof(prefix_type));
+#endif
         while(prefix.flag == PREFIX_EMPTY)
         {
             if (UseSleep)
             {
-                for (uint j = 0; j < times_through; j++)
+                for (unsigned int j = 0; j < times_through; j++)
+#ifndef __HIP_CPU_RT__
                     __builtin_amdgcn_s_sleep(1);
+#else
+                    std::this_thread::sleep_for(std::chrono::microseconds{1});
+#endif
                 if (times_through < SLEEP_MAX)
                     times_through++;
             }
             // atomic_add(..., 0) is used to load values atomically
             prefix_underlying_type p = ::rocprim::detail::atomic_add(&prefixes[padding + block_id], 0);
+#ifndef __HIP_CPU_RT__
             __builtin_memcpy(&prefix, &p, sizeof(prefix_type));
+#else
+            std::memcpy(&prefix, &p, sizeof(prefix_type));
+#endif
         }
 
         // return
@@ -187,7 +207,11 @@ private:
 
         prefix_type prefix = { flag, value };
         prefix_underlying_type p;
+#ifndef __HIP_CPU_RT__
         __builtin_memcpy(&p, &prefix, sizeof(prefix_type));
+#else
+        std::memcpy(&p, &prefix, sizeof(prefix_type));
+#endif
         ::rocprim::detail::atomic_exch(&prefixes[padding + block_id], p);
     }
 
@@ -273,8 +297,8 @@ public:
     {
         constexpr unsigned int padding = ::rocprim::device_warp_size();
 
-        const uint SLEEP_MAX = 32;
-        uint times_through = 1;
+        const unsigned int SLEEP_MAX = 32;
+        unsigned int times_through = 1;
 
         flag = load_volatile(&prefixes_flags[padding + block_id]);
         ::rocprim::detail::memory_fence_device();
@@ -282,8 +306,12 @@ public:
         {
             if (UseSleep)
             {
-                for (uint j = 0; j < times_through; j++)
+                for (unsigned int j = 0; j < times_through; j++)
+#ifndef __HIP_CPU_RT__
                     __builtin_amdgcn_s_sleep(1);
+#else
+                    std::this_thread::sleep_for(std::chrono::microseconds{1});
+#endif
                 if (times_through < SLEEP_MAX)
                     times_through++;
             }

@@ -158,7 +158,7 @@ class out_of_bounds_flag
 public:
     out_of_bounds_flag()
     {
-        hipMalloc(&device_pointer_, sizeof(bool));
+        hipMalloc(reinterpret_cast<void**>(&device_pointer_), sizeof(bool));
         hipMemset(device_pointer_, 0, sizeof(bool));
     }
 

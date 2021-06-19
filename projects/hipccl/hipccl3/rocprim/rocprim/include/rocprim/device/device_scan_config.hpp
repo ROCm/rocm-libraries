@@ -62,11 +62,11 @@ struct scan_config
     /// \brief Whether to use lookback scan or reduce-then-scan algorithm.
     static constexpr bool use_lookback = UseLookback;
     /// \brief Method for loading input values.
-    static constexpr block_load_method block_load_method = BlockLoadMethod;
+    static constexpr ::rocprim::block_load_method block_load_method = BlockLoadMethod;
     /// \brief Method for storing values.
-    static constexpr block_store_method block_store_method = BlockStoreMethod;
+    static constexpr ::rocprim::block_store_method block_store_method = BlockStoreMethod;
     /// \brief Algorithm for block scan.
-    static constexpr block_scan_algorithm block_scan_method = BlockScanMethod;
+    static constexpr ::rocprim::block_scan_algorithm block_scan_method = BlockScanMethod;
 };
 
 namespace detail
@@ -130,7 +130,7 @@ struct scan_config_1030
 
     using type = scan_config<
         limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_32>::value,
-        ::rocprim::max(1u, 16u / item_scale),
+        ::rocprim::max(1u, 15u / item_scale),
         ROCPRIM_DETAIL_USE_LOOKBACK_SCAN,
         ::rocprim::block_load_method::block_load_transpose,
         ::rocprim::block_store_method::block_store_transpose,

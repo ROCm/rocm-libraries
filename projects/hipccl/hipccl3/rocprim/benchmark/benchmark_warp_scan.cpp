@@ -59,12 +59,12 @@ __global__
 __launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void warp_inclusive_scan_kernel(const T* input, T* output)
 {
-    const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+    const unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
     auto value = input[i];
 
     using wscan_t = rp::warp_scan<T, WarpSize>;
     __shared__ typename wscan_t::storage_type storage;
-    #pragma nounroll
+    ROCPRIM_NO_UNROLL
     for(unsigned int trial = 0; trial < Trials; trial++)
     {
         wscan_t().inclusive_scan(value, value, storage);
@@ -78,12 +78,12 @@ __global__
 __launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void warp_exclusive_scan_kernel(const T* input, T* output, const T init)
 {
-    const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+    const unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
     auto value = input[i];
 
     using wscan_t = rp::warp_scan<T, WarpSize>;
     __shared__ typename wscan_t::storage_type storage;
-    #pragma nounroll
+    ROCPRIM_NO_UNROLL
     for(unsigned int trial = 0; trial < Trials; trial++)
     {
         wscan_t().exclusive_scan(value, value, init, storage);
@@ -104,11 +104,11 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
     // Make sure size is a multiple of BlockSize
     size = BlockSize * ((size + BlockSize - 1)/BlockSize);
     // Allocate and fill memory
-    std::vector<T> input(size, 1.0f);
+    std::vector<T> input(size, (T)1);
     T * d_input;
     T * d_output;
-    HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
-    HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), size * sizeof(T)));
     HIP_CHECK(
         hipMemcpy(
             d_input, input.data(),

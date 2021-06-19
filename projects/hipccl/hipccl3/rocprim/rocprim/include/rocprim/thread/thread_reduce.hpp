@@ -60,7 +60,7 @@ ROCPRIM_DEVICE inline T thread_reduce(
     else
         retval = prefix;
 
-    #pragma unroll
+    ROCPRIM_UNROLL
     for (int i = 0 + NoPrefix; i < LENGTH; ++i)
         retval = reduction_op(retval, input[i]);
 

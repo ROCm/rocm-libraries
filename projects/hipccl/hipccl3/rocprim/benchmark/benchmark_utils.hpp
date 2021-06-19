@@ -40,13 +40,13 @@
 // Support half operators on host side
 
 ROCPRIM_HOST inline
-_Float16 half_to_native(const rocprim::half& x)
+rocprim::native_half half_to_native(const rocprim::half& x)
 {
-    return *reinterpret_cast<const _Float16 *>(&x);
+    return *reinterpret_cast<const rocprim::native_half *>(&x);
 }
 
 ROCPRIM_HOST inline
-rocprim::half native_to_half(const _Float16& x)
+rocprim::half native_to_half(const rocprim::native_half& x)
 {
     return *reinterpret_cast<const rocprim::half *>(&x);
 }
@@ -90,15 +90,38 @@ struct half_equal_to
     }
 };
 
+// std::uniform_int_distribution is undefined for anything other than listed
+// https://en.cppreference.com/w/cpp/numeric/random/uniform_int_distribution
+template <typename T>
+struct is_valid_for_int_distribution :
+    std::integral_constant<bool,
+        std::is_same<short, T>::value ||
+        std::is_same<unsigned short, T>::value ||
+        std::is_same<int, T>::value ||
+        std::is_same<unsigned int, T>::value ||
+        std::is_same<long, T>::value ||
+        std::is_same<unsigned long, T>::value ||
+        std::is_same<long long, T>::value ||
+        std::is_same<unsigned long long, T>::value
+    > {};
+
+using engine_type = std::default_random_engine;
+
 // get_random_data() generates only part of sequence and replicates it,
 // because benchmarks usually do not need "true" random sequence.
-template<class T>
-inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 1024 * 1024)
+template<class T, class U, class V>
+inline auto get_random_data(size_t size, U min, V max, size_t max_random_size = 1024 * 1024)
     -> typename std::enable_if<rocprim::is_integral<T>::value, std::vector<T>>::type
 {
-    std::random_device rd;
-    std::default_random_engine gen(rd());
-    std::uniform_int_distribution<T> distribution(min, max);
+    engine_type gen{std::random_device{}()};
+    using dis_type = typename std::conditional<
+        is_valid_for_int_distribution<T>::value,
+        T,
+        typename std::conditional<std::is_signed<T>::value,
+            int,
+            unsigned int>::type
+        >::type;
+    std::uniform_int_distribution<dis_type> distribution((T)min, (T)max);
     std::vector<T> data(size);
     std::generate(
         data.begin(), data.begin() + std::min(size, max_random_size),
@@ -111,14 +134,14 @@ inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 
     return data;
 }
 
-template<class T>
-inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 1024 * 1024)
+template<class T, class U, class V>
+inline auto get_random_data(size_t size, U min, V max, size_t max_random_size = 1024 * 1024)
     -> typename std::enable_if<rocprim::is_floating_point<T>::value, std::vector<T>>::type
 {
-    std::random_device rd;
-    std::default_random_engine gen(rd());
+    engine_type gen{std::random_device{}()};
+    // Generate floats when T is half
     using dis_type = typename std::conditional<std::is_same<rocprim::half, T>::value, float, T>::type;
-    std::uniform_real_distribution<dis_type> distribution(min, max);
+    std::uniform_real_distribution<dis_type> distribution((dis_type)min, (dis_type)max);
     std::vector<T> data(size);
     std::generate(
         data.begin(), data.begin() + std::min(size, max_random_size),
@@ -134,8 +157,7 @@ inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 
 template<class T>
 inline std::vector<T> get_random_data01(size_t size, float p, size_t max_random_size = 1024 * 1024)
 {
-    std::random_device rd;
-    std::default_random_engine gen(rd());
+    engine_type gen{std::random_device{}()};
     std::bernoulli_distribution distribution(p);
     std::vector<T> data(size);
     std::generate(

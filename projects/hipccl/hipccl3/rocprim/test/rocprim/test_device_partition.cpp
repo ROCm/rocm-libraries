@@ -396,11 +396,11 @@ TYPED_TEST(RocprimDevicePartitionTests, Predicate)
             {
                 if(select_op(input[i]))
                 {
-                    expected_selected.push_back(input[i]);
+                    expected_selected.push_back((U)input[i]);
                 }
                 else
                 {
-                    expected_rejected.push_back(input[i]);
+                    expected_rejected.push_back((U)input[i]);
                 }
             }
             std::reverse(expected_rejected.begin(), expected_rejected.end());

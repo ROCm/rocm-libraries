@@ -68,8 +68,8 @@ public:
 
     union storage_type
     {
-        typename count_helper_type::storage_type count_helper;
-        typename sort_and_scatter_helper::storage_type sort_and_scatter_helper;
+        typename segmented_radix_sort_helper<Key, Value, WarpSize, BlockSize, ItemsPerThread, RadixBits, Descending>::count_helper_type::storage_type count_helper;
+        typename segmented_radix_sort_helper<Key, Value, WarpSize, BlockSize, ItemsPerThread, RadixBits, Descending>::sort_and_scatter_helper::storage_type sort_and_scatter_helper;
     };
 
     template<
@@ -517,9 +517,9 @@ void segmented_sort(KeysInputIterator keys_input,
 
     ROCPRIM_SHARED_MEMORY union
     {
-        typename single_block_helper::storage_type single_block_helper;
-        typename long_radix_helper_type::storage_type long_radix_helper;
-        typename short_radix_helper_type::storage_type short_radix_helper;
+        typename rocprim::detail::segmented_radix_sort_single_block_helper<key_type, value_type, block_size, items_per_thread, Descending>::storage_type single_block_helper;
+        typename rocprim::detail::segmented_radix_sort_helper<key_type, value_type, ::rocprim::device_warp_size(), block_size, items_per_thread, long_radix_bits, Descending>::storage_type long_radix_helper;
+        typename rocprim::detail::segmented_radix_sort_helper<key_type, value_type, ::rocprim::device_warp_size(), block_size, items_per_thread, short_radix_bits, Descending>::storage_type short_radix_helper;
     } storage;
 
     const unsigned int segment_id = ::rocprim::detail::block_id<0>();

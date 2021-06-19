@@ -48,7 +48,7 @@ __global__
 __launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void shuffle_offset_kernel(T* device_input, T* device_output, int distance)
 {
-    const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
+    const unsigned int index = (blockIdx.x * BlockSize) + threadIdx.x;
     rocprim::block_shuffle<T,BlockSize> b_shuffle;
     b_shuffle.offset(device_input[index],device_output[index],distance);
 }
@@ -60,13 +60,13 @@ TYPED_TEST(RocprimBlockShuffleTests, BlockOffset)
     HIP_CHECK(hipSetDevice(device_id));
 
     using type = typename TestFixture::type;
-    const size_t block_size = TestFixture::block_size;
-    const size_t size = block_size * 11;
-    const size_t grid_size = size / block_size;
+    static constexpr size_t block_size = TestFixture::block_size;
+    static constexpr size_t size = block_size * 11;
+    static constexpr size_t grid_size = size / block_size;
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        int distance = (rand()%min(10,block_size/2))-min(10,block_size/2);
+        int distance = (rand()%std::min<size_t>(10,block_size/2))-std::min<size_t>(10,block_size/2);
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value <<" & distance = "<<distance);
         // Generate data
         std::vector<type> input_data = test_utils::get_random_data<type>(size, -100, 100, seed_value);
@@ -76,8 +76,8 @@ TYPED_TEST(RocprimBlockShuffleTests, BlockOffset)
         type * device_input;
         type * device_output;
 
-        HIP_CHECK(hipMalloc(&device_input, input_data.size() * sizeof(type)));
-        HIP_CHECK(hipMalloc(&device_output, input_data.size() * sizeof(type)));
+        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&device_input), input_data.size() * sizeof(type)));
+        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&device_output), input_data.size() * sizeof(type)));
 
         HIP_CHECK(
             hipMemcpy(
@@ -132,7 +132,7 @@ __global__
 __launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void shuffle_rotate_kernel(T* device_input, T* device_output, int distance)
 {
-    const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
+    const unsigned int index = (blockIdx.x * BlockSize) + threadIdx.x;
     rocprim::block_shuffle<T,BlockSize> b_shuffle;
     b_shuffle.rotate(device_input[index],device_output[index],distance);
 }
@@ -144,13 +144,13 @@ TYPED_TEST(RocprimBlockShuffleTests, BlockRotate)
     HIP_CHECK(hipSetDevice(device_id));
 
     using type = typename TestFixture::type;
-    const size_t block_size = TestFixture::block_size;
-    const size_t size = block_size * 11;
-    const size_t grid_size = size / block_size;
+    static constexpr size_t block_size = TestFixture::block_size;
+    static constexpr size_t size = block_size * 11;
+    static constexpr size_t grid_size = size / block_size;
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        int distance = (rand()%min(5,block_size/2));
+        int distance = (rand()%std::min<size_t>(5,block_size/2));
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value <<" & distance = "<<distance);
         // Generate data
         std::vector<type> input_data = test_utils::get_random_data<type>(size, -100, 100, seed_value);
@@ -160,8 +160,8 @@ TYPED_TEST(RocprimBlockShuffleTests, BlockRotate)
         type * device_input;
         type * device_output;
 
-        HIP_CHECK(hipMalloc(&device_input, input_data.size() * sizeof(type)));
-        HIP_CHECK(hipMalloc(&device_output, input_data.size() * sizeof(type)));
+        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&device_input), input_data.size() * sizeof(type)));
+        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&device_output), input_data.size() * sizeof(type)));
 
         HIP_CHECK(
             hipMemcpy(
@@ -216,7 +216,7 @@ __global__
 __launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void shuffle_up_kernel(T (*device_input), T (*device_output))
 {
-    const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
+    const unsigned int index = (blockIdx.x * BlockSize) + threadIdx.x;
     rocprim::block_shuffle<T,BlockSize> b_shuffle;
     b_shuffle.template up<ItemsPerThread>(reinterpret_cast<T(&)[ItemsPerThread]>(device_input[index*ItemsPerThread]),reinterpret_cast<T(&)[ItemsPerThread]>(device_output[index*ItemsPerThread]));
 }
@@ -228,10 +228,10 @@ TYPED_TEST(RocprimBlockShuffleTests, BlockUp)
     HIP_CHECK(hipSetDevice(device_id));
 
     using type = typename TestFixture::type;
-    const size_t block_size = TestFixture::block_size;
-    const size_t size = block_size * 11;
-    const size_t grid_size = size / block_size;
-    constexpr unsigned int ItemsPerThread = 128;
+    static constexpr size_t block_size = TestFixture::block_size;
+    static constexpr size_t size = block_size * 11;
+    static constexpr size_t grid_size = size / block_size;
+    static constexpr unsigned int ItemsPerThread = 128;
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
@@ -248,8 +248,8 @@ TYPED_TEST(RocprimBlockShuffleTests, BlockUp)
         type * device_output;
 
 
-        HIP_CHECK(hipMalloc(&device_input, input_data.size() * sizeof(type)));
-        HIP_CHECK(hipMalloc(&device_output, input_data.size() * sizeof(type)));
+        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&device_input), input_data.size() * sizeof(type)));
+        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&device_output), input_data.size() * sizeof(type)));
 
 
 
@@ -310,7 +310,7 @@ __global__
 __launch_bounds__(BlockSize, ROCPRIM_DEFAULT_MIN_WARPS_PER_EU)
 void shuffle_down_kernel(T (*device_input), T (*device_output))
 {
-    const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
+    const unsigned int index = (blockIdx.x * BlockSize) + threadIdx.x;
     rocprim::block_shuffle<T,BlockSize> b_shuffle;
     b_shuffle.template down<ItemsPerThread>(reinterpret_cast<T(&)[ItemsPerThread]>(device_input[index*ItemsPerThread]),reinterpret_cast<T(&)[ItemsPerThread]>(device_output[index*ItemsPerThread]));
 }
@@ -322,10 +322,10 @@ TYPED_TEST(RocprimBlockShuffleTests, BlockDown)
     HIP_CHECK(hipSetDevice(device_id));
 
     using type = typename TestFixture::type;
-    const size_t block_size = TestFixture::block_size;
-    const size_t size = block_size * 11;
-    const size_t grid_size = size / block_size;
-    constexpr unsigned int ItemsPerThread = 128;
+    static constexpr size_t block_size = TestFixture::block_size;
+    static constexpr size_t size = block_size * 11;
+    static constexpr size_t grid_size = size / block_size;
+    static constexpr unsigned int ItemsPerThread = 128;
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
@@ -343,8 +343,8 @@ TYPED_TEST(RocprimBlockShuffleTests, BlockDown)
         type * device_output;
 
 
-        HIP_CHECK(hipMalloc(&device_input, input_data.size() * sizeof(type)));
-        HIP_CHECK(hipMalloc(&device_output, input_data.size() * sizeof(type)));
+        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&device_input), input_data.size() * sizeof(type)));
+        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&device_output), input_data.size() * sizeof(type)));
 
 
 

@@ -39,7 +39,9 @@
 // HIP API
 #include <hip/hip_runtime.h>
 #include <hip/hip_vector_types.h>
+#ifndef __HIP_CPU_RT__
 #include <hip/hip_ext.h>
+#endif
 
 #ifndef HIP_CHECK
 #define HIP_CHECK(condition)         \
@@ -61,16 +63,30 @@ namespace test_common_utils
 
 int obtain_device_from_ctest()
 {
+#ifdef _MSC_VER
+#pragma warning( push )
+#pragma warning( disable : 4996 ) // This function or variable may be unsafe. Consider using _dupenv_s instead.
+#endif
     static const std::string rg0 = "CTEST_RESOURCE_GROUP_0";
     if (std::getenv(rg0.c_str()) != nullptr)
     {
         std::string amdgpu_target = std::getenv(rg0.c_str());
-        std::transform(amdgpu_target.cbegin(), amdgpu_target.cend(), amdgpu_target.begin(), ::toupper);
+        std::transform(
+            amdgpu_target.cbegin(),
+            amdgpu_target.cend(),
+            amdgpu_target.begin(),
+            // Feeding std::toupper plainly results in implicitly truncating conversions between int and char triggering warnings.
+            // See: https://en.cppreference.com/mwiki/index.php?title=cpp/string/byte/toupper&oldid=94327
+            [](unsigned char c){ return static_cast<char>(std::toupper(c)); }
+        );
         std::string reqs = std::getenv((rg0 + "_" + amdgpu_target).c_str());
         return std::atoi(reqs.substr(reqs.find(':') + 1, reqs.find(',') - (reqs.find(':') + 1)).c_str());
     }
     else
         return 0;
+#ifdef _MSC_VER
+#pragma warning( pop )
+#endif
 }
 
 bool use_hmm()
@@ -93,11 +109,11 @@ hipError_t hipMallocHelper(T** devPtr, size_t size)
 {
     if (use_hmm())
     {
-        return hipMallocManaged((void**)devPtr, size);
+        return hipMallocManaged(reinterpret_cast<void**>(devPtr), size);
     }
     else
     {
-        return hipMalloc((void**)devPtr, size);
+        return hipMalloc(reinterpret_cast<void**>(devPtr), size);
     }
     return hipSuccess;
 }

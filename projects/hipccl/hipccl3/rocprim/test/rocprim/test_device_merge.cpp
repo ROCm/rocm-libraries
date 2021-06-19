@@ -130,7 +130,7 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
             std::vector<key_type> keys_input2 = test_utils::get_random_data<key_type>(size2, 0, size2, seed_value);
             std::sort(keys_input1.begin(), keys_input1.end(), compare_op);
             std::sort(keys_input2.begin(), keys_input2.end(), compare_op);
-            std::vector<key_type> keys_output(size1 + size2, 0);
+            std::vector<key_type> keys_output(size1 + size2, (key_type)0);
 
             // Calculate expected results on host
             std::vector<key_type> expected(keys_output.size());
@@ -276,8 +276,8 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKeyValue)
             std::vector<value_type> values_input2(size2);
             std::iota(values_input1.begin(), values_input1.end(), 0);
             std::iota(values_input2.begin(), values_input2.end(), size1);
-            std::vector<key_type> keys_output(size1 + size2, 0);
-            std::vector<value_type> values_output(size1 + size2, 0);
+            std::vector<key_type> keys_output(size1 + size2, (key_type)0);
+            std::vector<value_type> values_output(size1 + size2, (value_type)0);
 
             // Calculate expected results on host
             std::vector<key_value> vector1(size1);

@@ -127,12 +127,7 @@ struct match_vector_type
 
 // Checks if Items is odd and ensures that size of T is smaller than vector_type.
 template<class T, unsigned int Items>
-ROCPRIM_HOST_DEVICE
-constexpr bool is_vectorizable()
-{
-    return (Items % 2 == 0) &&
-           (sizeof(T) < sizeof(typename match_vector_type<T, Items>::type));
-}
+struct is_vectorizable : std::integral_constant<bool, (Items % 2 == 0) &&(sizeof(T) < sizeof(typename match_vector_type<T, Items>::type))> {};
 
 // Returns the number of LDS (local data share) banks.
 ROCPRIM_HOST_DEVICE
@@ -168,7 +163,13 @@ ROCPRIM_DEVICE inline
 auto store_volatile(T * output, T value)
     -> typename std::enable_if<std::is_fundamental<T>::value>::type
 {
+    // TODO: check GCC
+    // error: binding reference of type ‘const half_float::half&’ to ‘volatile half_float::half’ discards qualifiers
+#if !(defined(__HIP_CPU_RT__ ) && defined(__GNUC__))
     *const_cast<volatile T*>(output) = value;
+#else
+    *output = value;
+#endif
 }
 
 template<class T>
@@ -182,7 +183,7 @@ auto store_volatile(T * output, T value)
     auto input_ptr = reinterpret_cast<volatile fundamental_type*>(&value);
     auto output_ptr = reinterpret_cast<volatile fundamental_type*>(output);
 
-    #pragma unroll
+    ROCPRIM_UNROLL
     for(unsigned int i = 0; i < n; i++)
     {
         output_ptr[i] = input_ptr[i];
@@ -194,8 +195,14 @@ ROCPRIM_DEVICE inline
 auto load_volatile(T * input)
     -> typename std::enable_if<std::is_fundamental<T>::value, T>::type
 {
+    // TODO: check GCC
+    // error: binding reference of type ‘const half_float::half&’ to ‘volatile half_float::half’ discards qualifiers
+#if !(defined(__HIP_CPU_RT__ ) && defined(__GNUC__))
     T retval = *const_cast<volatile T*>(input);
     return retval;
+#else
+    return *input;
+#endif
 }
 
 template<class T>
@@ -210,7 +217,7 @@ auto load_volatile(T * input)
     auto output_ptr = reinterpret_cast<volatile fundamental_type*>(&retval);
     auto input_ptr = reinterpret_cast<volatile fundamental_type*>(input);
 
-    #pragma unroll
+    ROCPRIM_UNROLL
     for(unsigned int i = 0; i < n; i++)
     {
         output_ptr[i] = input_ptr[i];

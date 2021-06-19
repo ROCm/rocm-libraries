@@ -58,7 +58,7 @@ void scan_kernel(T* device_output, T* device_output_b, T init)
 {
     (void)init;
     (void)device_output_b;
-    const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
+    const unsigned int index = (blockIdx.x * BlockSize) + threadIdx.x;
     T value = device_output[index];
     rocprim::block_scan<T, BlockSize, Algorithm> bscan;
     bscan.inclusive_scan(value, value);
@@ -77,15 +77,15 @@ __launch_bounds__(BlockSize)
 void scan_kernel(T* device_output, T* device_output_b, T init)
 {
     (void)init;
-    const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
+    const unsigned int index = (blockIdx.x * BlockSize) + threadIdx.x;
     T value = device_output[index];
     T reduction;
     rocprim::block_scan<T, BlockSize, Algorithm> bscan;
     bscan.inclusive_scan(value, value, reduction);
     device_output[index] = value;
-    if(hipThreadIdx_x == 0)
+    if(threadIdx.x == 0)
     {
-        device_output_b[hipBlockIdx_x] = reduction;
+        device_output_b[blockIdx.x] = reduction;
     }
 }
 
@@ -100,7 +100,7 @@ __global__
 __launch_bounds__(BlockSize)
 void scan_kernel(T* device_output, T* device_output_b, T init)
 {
-    const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
+    const unsigned int index = (blockIdx.x * BlockSize) + threadIdx.x;
     T prefix_value = init;
     auto prefix_callback = [&prefix_value](T reduction)
     {
@@ -116,9 +116,9 @@ void scan_kernel(T* device_output, T* device_output_b, T init)
     bscan_t().inclusive_scan(value, value, storage, prefix_callback, rocprim::plus<T>());
 
     device_output[index] = value;
-    if(hipThreadIdx_x == 0)
+    if(threadIdx.x == 0)
     {
-        device_output_b[hipBlockIdx_x] = prefix_value;
+        device_output_b[blockIdx.x] = prefix_value;
     }
 }
 
@@ -134,7 +134,7 @@ __launch_bounds__(BlockSize)
 void scan_kernel(T* device_output, T* device_output_b, T init)
 {
     (void)device_output_b;
-    const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
+    const unsigned int index = (blockIdx.x * BlockSize) + threadIdx.x;
     T value = device_output[index];
     rocprim::block_scan<T, BlockSize, Algorithm> bscan;
     bscan.exclusive_scan(value, value, init);
@@ -152,15 +152,15 @@ __global__
 __launch_bounds__(BlockSize)
 void scan_kernel(T* device_output, T* device_output_b, T init)
 {
-    const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
+    const unsigned int index = (blockIdx.x * BlockSize) + threadIdx.x;
     T value = device_output[index];
     T reduction;
     rocprim::block_scan<T, BlockSize, Algorithm> bscan;
     bscan.exclusive_scan(value, value, init, reduction);
     device_output[index] = value;
-    if(hipThreadIdx_x == 0)
+    if(threadIdx.x == 0)
     {
-        device_output_b[hipBlockIdx_x] = reduction;
+        device_output_b[blockIdx.x] = reduction;
     }
 }
 
@@ -175,7 +175,7 @@ __global__
 __launch_bounds__(BlockSize)
 void scan_kernel(T* device_output, T* device_output_b, T init)
 {
-    const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
+    const unsigned int index = (blockIdx.x * BlockSize) + threadIdx.x;
     T prefix_value = init;
     auto prefix_callback = [&prefix_value](T reduction)
     {
@@ -191,9 +191,9 @@ void scan_kernel(T* device_output, T* device_output_b, T init)
     bscan_t().exclusive_scan(value, value, storage, prefix_callback, rocprim::plus<T>());
 
     device_output[index] = value;
-    if(hipThreadIdx_x == 0)
+    if(threadIdx.x == 0)
     {
-        device_output_b[hipBlockIdx_x] = prefix_value;
+        device_output_b[blockIdx.x] = prefix_value;
     }
 }
 
@@ -287,7 +287,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScan)
         std::vector<T> output2 = output;
 
         // Calculate expected results on host
-        std::vector<T> expected(output.size(), 0);
+        std::vector<T> expected(output.size(), (T)0);
         binary_op_type binary_op;
         for(size_t i = 0; i < output.size() / block_size; i++)
         {
@@ -347,8 +347,8 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanReduce)
         std::vector<T> output_reductions(size / block_size);
 
         // Calculate expected results on host
-        std::vector<T> expected(output.size(), 0);
-        std::vector<T> expected_reductions(output_reductions.size(), 0);
+        std::vector<T> expected(output.size(), (T)0);
+        std::vector<T> expected_reductions(output_reductions.size(), (T)0);
         binary_op_type binary_op;
         for(size_t i = 0; i < output.size() / block_size; i++)
         {
@@ -418,8 +418,8 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, InclusiveScanPrefixCallback)
         T block_prefix = test_utils::get_random_value<T>(0, 5, seed_value);
 
         // Calculate expected results on host
-        std::vector<T> expected(output.size(), 0);
-        std::vector<T> expected_block_prefixes(output_block_prefixes.size(), 0);
+        std::vector<T> expected(output.size(), (T)0);
+        std::vector<T> expected_block_prefixes(output_block_prefixes.size(), (T)0);
         binary_op_type binary_op;
         for(size_t i = 0; i < output.size() / block_size; i++)
         {
@@ -489,7 +489,7 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScan)
         const T init = test_utils::get_random_value<T>(0, 5, seed_value);
 
         // Calculate expected results on host
-        std::vector<T> expected(output.size(), 0);
+        std::vector<T> expected(output.size(), (T)0);
         binary_op_type binary_op;
         for(size_t i = 0; i < output.size() / block_size; i++)
         {
@@ -552,8 +552,8 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanReduce)
         std::vector<T> output_reductions(size / block_size);
 
         // Calculate expected results on host
-        std::vector<T> expected(output.size(), 0);
-        std::vector<T> expected_reductions(output_reductions.size(), 0);
+        std::vector<T> expected(output.size(), (T)0);
+        std::vector<T> expected_reductions(output_reductions.size(), (T)0);
         binary_op_type binary_op;
         for(size_t i = 0; i < output.size() / block_size; i++)
         {
@@ -630,8 +630,8 @@ TYPED_TEST(RocprimBlockScanSingleValueTests, ExclusiveScanPrefixCallback)
         T block_prefix = test_utils::get_random_value<T>(0, 5, seed_value);
 
         // Calculate expected results on host
-        std::vector<T> expected(output.size(), 0);
-        std::vector<T> expected_block_prefixes(output_block_prefixes.size(), 0);
+        std::vector<T> expected(output.size(), (T)0);
+        std::vector<T> expected_block_prefixes(output_block_prefixes.size(), (T)0);
         binary_op_type binary_op;
         for(size_t i = 0; i < output.size() / block_size; i++)
         {
@@ -702,7 +702,7 @@ __global__
 __launch_bounds__(BlockSize)
 void inclusive_scan_array_kernel(T* device_output)
 {
-    const unsigned int index = ((hipBlockIdx_x * BlockSize ) + hipThreadIdx_x) * ItemsPerThread;
+    const unsigned int index = ((blockIdx.x * BlockSize ) + threadIdx.x) * ItemsPerThread;
 
     // load
     T in_out[ItemsPerThread];
@@ -732,7 +732,7 @@ __global__
 __launch_bounds__(BlockSize)
 void inclusive_scan_reduce_array_kernel(T* device_output, T* device_output_reductions)
 {
-    const unsigned int index = ((hipBlockIdx_x * BlockSize ) + hipThreadIdx_x) * ItemsPerThread;
+    const unsigned int index = ((blockIdx.x * BlockSize ) + threadIdx.x) * ItemsPerThread;
 
     // load
     T in_out[ItemsPerThread];
@@ -751,9 +751,9 @@ void inclusive_scan_reduce_array_kernel(T* device_output, T* device_output_reduc
         device_output[index + j] = in_out[j];
     }
 
-    if(hipThreadIdx_x == 0)
+    if(threadIdx.x == 0)
     {
-        device_output_reductions[hipBlockIdx_x] = reduction;
+        device_output_reductions[blockIdx.x] = reduction;
     }
 }
 
@@ -768,7 +768,7 @@ __global__
 __launch_bounds__(BlockSize)
 void inclusive_scan_array_prefix_callback_kernel(T* device_output, T* device_output_bp, T block_prefix)
 {
-    const unsigned int index = ((hipBlockIdx_x * BlockSize) + hipThreadIdx_x) * ItemsPerThread;
+    const unsigned int index = ((blockIdx.x * BlockSize) + threadIdx.x) * ItemsPerThread;
     T prefix_value = block_prefix;
     auto prefix_callback = [&prefix_value](T reduction)
     {
@@ -794,9 +794,9 @@ void inclusive_scan_array_prefix_callback_kernel(T* device_output, T* device_out
         device_output[index + j] = in_out[j];
     }
 
-    if(hipThreadIdx_x == 0)
+    if(threadIdx.x == 0)
     {
-        device_output_bp[hipBlockIdx_x] = prefix_value;
+        device_output_bp[blockIdx.x] = prefix_value;
     }
 }
 
@@ -811,7 +811,7 @@ __global__
 __launch_bounds__(BlockSize)
 void exclusive_scan_array_kernel(T* device_output, T init)
 {
-    const unsigned int index = ((hipBlockIdx_x * BlockSize) + hipThreadIdx_x) * ItemsPerThread;
+    const unsigned int index = ((blockIdx.x * BlockSize) + threadIdx.x) * ItemsPerThread;
     // load
     T in_out[ItemsPerThread];
     for(unsigned int j = 0; j < ItemsPerThread; j++)
@@ -840,7 +840,7 @@ __global__
 __launch_bounds__(BlockSize)
 void exclusive_scan_reduce_array_kernel(T* device_output, T* device_output_reductions, T init)
 {
-    const unsigned int index = ((hipBlockIdx_x * BlockSize) + hipThreadIdx_x) * ItemsPerThread;
+    const unsigned int index = ((blockIdx.x * BlockSize) + threadIdx.x) * ItemsPerThread;
     // load
     T in_out[ItemsPerThread];
     for(unsigned int j = 0; j < ItemsPerThread; j++)
@@ -858,9 +858,9 @@ void exclusive_scan_reduce_array_kernel(T* device_output, T* device_output_reduc
         device_output[index + j] = in_out[j];
     }
 
-    if(hipThreadIdx_x == 0)
+    if(threadIdx.x == 0)
     {
-        device_output_reductions[hipBlockIdx_x] = reduction;
+        device_output_reductions[blockIdx.x] = reduction;
     }
 }
 
@@ -879,7 +879,7 @@ void exclusive_scan_prefix_callback_array_kernel(
     T block_prefix
 )
 {
-    const unsigned int index = ((hipBlockIdx_x * BlockSize) + hipThreadIdx_x) * ItemsPerThread;
+    const unsigned int index = ((blockIdx.x * BlockSize) + threadIdx.x) * ItemsPerThread;
     T prefix_value = block_prefix;
     auto prefix_callback = [&prefix_value](T reduction)
     {
@@ -905,9 +905,9 @@ void exclusive_scan_prefix_callback_array_kernel(
         device_output[index + j] = in_out[j];
     }
 
-    if(hipThreadIdx_x == 0)
+    if(threadIdx.x == 0)
     {
-        device_output_bp[hipBlockIdx_x] = prefix_value;
+        device_output_bp[blockIdx.x] = prefix_value;
     }
 }
 
@@ -923,9 +923,9 @@ auto test_block_scan_input_arrays()
 -> typename std::enable_if<Method == 0>::type
 {
     using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_maximum, rocprim::maximum<T>>::type;
-    constexpr auto algorithm = Algorithm;
-    constexpr size_t block_size = BlockSize;
-    constexpr size_t items_per_thread = ItemsPerThread;
+    static constexpr auto algorithm = Algorithm;
+    static constexpr size_t block_size = BlockSize;
+    static constexpr size_t items_per_thread = ItemsPerThread;
 
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
@@ -946,7 +946,7 @@ auto test_block_scan_input_arrays()
         std::vector<T> output = test_utils::get_random_data<T>(size, 2, 100, seed_value);
 
         // Calculate expected results on host
-        std::vector<T> expected(output.size(), 0);
+        std::vector<T> expected(output.size(), (T)0);
         binary_op_type binary_op;
         for(size_t i = 0; i < output.size() / items_per_block; i++)
         {
@@ -1006,9 +1006,9 @@ auto test_block_scan_input_arrays()
 -> typename std::enable_if<Method == 1>::type
 {
     using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_maximum, rocprim::maximum<T>>::type;
-    constexpr auto algorithm = Algorithm;
-    constexpr size_t block_size = BlockSize;
-    constexpr size_t items_per_thread = ItemsPerThread;
+    static constexpr auto algorithm = Algorithm;
+    static constexpr size_t block_size = BlockSize;
+    static constexpr size_t items_per_thread = ItemsPerThread;
 
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
@@ -1029,11 +1029,11 @@ auto test_block_scan_input_arrays()
         std::vector<T> output = test_utils::get_random_data<T>(size, 2, 100, seed_value);
 
         // Output reduce results
-        std::vector<T> output_reductions(size / block_size, 0);
+        std::vector<T> output_reductions(size / block_size, (T)0);
 
         // Calculate expected results on host
-        std::vector<T> expected(output.size(), 0);
-        std::vector<T> expected_reductions(output_reductions.size(), 0);
+        std::vector<T> expected(output.size(), (T)0);
+        std::vector<T> expected_reductions(output_reductions.size(), (T)0);
         binary_op_type binary_op;
         for(size_t i = 0; i < output.size() / items_per_block; i++)
         {
@@ -1120,9 +1120,9 @@ auto test_block_scan_input_arrays()
 -> typename std::enable_if<Method == 2>::type
 {
     using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_maximum, rocprim::maximum<T>>::type;
-    constexpr auto algorithm = Algorithm;
-    constexpr size_t block_size = BlockSize;
-    constexpr size_t items_per_thread = ItemsPerThread;
+    static constexpr auto algorithm = Algorithm;
+    static constexpr size_t block_size = BlockSize;
+    static constexpr size_t items_per_thread = ItemsPerThread;
 
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
@@ -1141,12 +1141,12 @@ auto test_block_scan_input_arrays()
 
         // Generate data
         std::vector<T> output = test_utils::get_random_data<T>(size, 2, 100, seed_value);
-        std::vector<T> output_block_prefixes(size / items_per_block, 0);
+        std::vector<T> output_block_prefixes(size / items_per_block, (T)0);
         T block_prefix = test_utils::get_random_value<T>(0, 100, seed_value);
 
         // Calculate expected results on host
-        std::vector<T> expected(output.size(), 0);
-        std::vector<T> expected_block_prefixes(output_block_prefixes.size(), 0);
+        std::vector<T> expected(output.size(), (T)0);
+        std::vector<T> expected_block_prefixes(output_block_prefixes.size(), (T)0);
         binary_op_type binary_op;
         for(size_t i = 0; i < output.size() / items_per_block; i++)
         {
@@ -1236,9 +1236,9 @@ auto test_block_scan_input_arrays()
 -> typename std::enable_if<Method == 3>::type
 {
     using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_maximum, rocprim::maximum<T>>::type;
-    constexpr auto algorithm = Algorithm;
-    constexpr size_t block_size = BlockSize;
-    constexpr size_t items_per_thread = ItemsPerThread;
+    static constexpr auto algorithm = Algorithm;
+    static constexpr size_t block_size = BlockSize;
+    static constexpr size_t items_per_thread = ItemsPerThread;
 
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
@@ -1260,7 +1260,7 @@ auto test_block_scan_input_arrays()
         const T init = test_utils::get_random_value<T>(0, 100, seed_value);
 
         // Calculate expected results on host
-        std::vector<T> expected(output.size(), 0);
+        std::vector<T> expected(output.size(), (T)0);
         binary_op_type binary_op;
         for(size_t i = 0; i < output.size() / items_per_block; i++)
         {
@@ -1322,9 +1322,9 @@ auto test_block_scan_input_arrays()
 -> typename std::enable_if<Method == 4>::type
 {
     using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_maximum, rocprim::maximum<T>>::type;
-    constexpr auto algorithm = Algorithm;
-    constexpr size_t block_size = BlockSize;
-    constexpr size_t items_per_thread = ItemsPerThread;
+    static constexpr auto algorithm = Algorithm;
+    static constexpr size_t block_size = BlockSize;
+    static constexpr size_t items_per_thread = ItemsPerThread;
 
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
@@ -1349,8 +1349,8 @@ auto test_block_scan_input_arrays()
         const T init = test_utils::get_random_value<T>(0, 100, seed_value);
 
         // Calculate expected results on host
-        std::vector<T> expected(output.size(), 0);
-        std::vector<T> expected_reductions(output_reductions.size(), 0);
+        std::vector<T> expected(output.size(), (T)0);
+        std::vector<T> expected_reductions(output_reductions.size(), (T)0);
         binary_op_type binary_op;
         for(size_t i = 0; i < output.size() / items_per_block; i++)
         {
@@ -1433,9 +1433,9 @@ auto test_block_scan_input_arrays()
 -> typename std::enable_if<Method == 5>::type
 {
     using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_maximum, rocprim::maximum<T>>::type;
-    constexpr auto algorithm = Algorithm;
-    constexpr size_t block_size = BlockSize;
-    constexpr size_t items_per_thread = ItemsPerThread;
+    static constexpr auto algorithm = Algorithm;
+    static constexpr size_t block_size = BlockSize;
+    static constexpr size_t items_per_thread = ItemsPerThread;
 
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
@@ -1458,8 +1458,8 @@ auto test_block_scan_input_arrays()
         T block_prefix = test_utils::get_random_value<T>(0, 100, seed_value);
 
         // Calculate expected results on host
-        std::vector<T> expected(output.size(), 0);
-        std::vector<T> expected_block_prefixes(output_block_prefixes.size(), 0);
+        std::vector<T> expected(output.size(), (T)0);
+        std::vector<T> expected_block_prefixes(output_block_prefixes.size(), (T)0);
         binary_op_type binary_op;
         for(size_t i = 0; i < output.size() / items_per_block; i++)
         {

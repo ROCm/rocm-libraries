@@ -109,6 +109,14 @@ public:
             warp_scan_prefix_type().inclusive_scan(prefix, prefix, ::rocprim::plus<unsigned int>());
             storage_.warp_prefixes[flat_id] = prefix;
         }
+#ifdef __HIP_CPU_RT__
+        else
+        {
+            // HIP-CPU doesn't implement lockstep behavior. Need to invoke the same number sync ops in divergent branch.
+            empty_type empty;
+            ::rocprim::detail::warp_scan_crosslane<empty_type, detail::next_power_of_two(warps_no)>().inclusive_scan(empty, empty, empty_binary_op{});
+        }
+#endif
         ::rocprim::syncthreads();
 
         // Perform exclusive warp scan of bit values
@@ -207,7 +215,7 @@ class block_radix_sort
             typename bit_keys_exchange_type::storage_type bit_keys_exchange;
             typename values_exchange_type::storage_type values_exchange;
         };
-        typename bit_block_scan::storage_type bit_block_scan;
+        typename block_radix_sort<Key,BlockSizeX,ItemsPerThread,Value,BlockSizeY,BlockSizeZ>::bit_block_scan::storage_type bit_block_scan;
     };
 
 public:
@@ -893,6 +901,11 @@ private:
             }
 
             unsigned int ranks[ItemsPerThread];
+#ifdef __HIP_CPU_RT__
+            // TODO: Check if really necessary
+            // Initialize contents, as non-hipcc compilers don't unconditionally zero out allocated memory
+            std::memset(ranks, 0, ItemsPerThread * sizeof(decltype(ranks[0])));
+#endif
             unsigned int count;
             bit_block_scan().exclusive_scan(bits, ranks, count, storage_.bit_block_scan);
 

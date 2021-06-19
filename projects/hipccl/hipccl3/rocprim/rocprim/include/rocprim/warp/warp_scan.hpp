@@ -92,7 +92,7 @@ struct select_warp_scan_impl
 ///     // allocate storage in shared memory
 ///     __shared__ warp_scan_int::storage_type temp[4];
 ///
-///     int logical_warp_id = hipThreadIdx_x/16;
+///     int logical_warp_id = threadIdx.x/16;
 ///     int value = ...;
 ///     // execute inclusive scan
 ///     warp_scan_int().inclusive_scan(
@@ -153,14 +153,14 @@ public:
     /// Hardware warp size is 64. Block (tile) size is 256.
     ///
     /// \code{.cpp}
-    /// __global__ void example_kernel(...) // hipBlockDim_x = 256
+    /// __global__ void example_kernel(...) // blockDim.x = 256
     /// {
     ///     // specialize warp_scan for float and logical warp of 32 threads
     ///     using warp_scan_f = rocprim::warp_scan<float, 32>;
     ///     // allocate storage in shared memory
     ///     __shared__ warp_scan_float::storage_type temp[8]; // 256/32 = 8
     ///
-    ///     int logical_warp_id = hipThreadIdx_x/32;
+    ///     int logical_warp_id = threadIdx.x/32;
     ///     float value = ...;
     ///     // execute inclusive min scan
     ///     warp_scan_float().inclusive_scan(
@@ -227,14 +227,14 @@ public:
     /// each thread provides one \p int value. Hardware warp size is 64. Block (tile) size is 256.
     ///
     /// \code{.cpp}
-    /// __global__ void example_kernel(...) // hipBlockDim_x = 256
+    /// __global__ void example_kernel(...) // blockDim.x = 256
     /// {
     ///     // specialize warp_scan for int and logical warp of 64 threads
     ///     using warp_scan_int = rocprim::warp_scan<int, 64>;
     ///     // allocate storage in shared memory
     ///     __shared__ warp_scan_int::storage_type temp[4]; // 256/64 = 4
     ///
-    ///     int logical_warp_id = hipThreadIdx_x/64;
+    ///     int logical_warp_id = threadIdx.x/64;
     ///     int input = ...;
     ///     int output, reduction;
     ///     // inclusive prefix sum
@@ -306,14 +306,14 @@ public:
     /// Hardware warp size is 64. Block (tile) size is 256.
     ///
     /// \code{.cpp}
-    /// __global__ void example_kernel(...) // hipBlockDim_x = 256
+    /// __global__ void example_kernel(...) // blockDim.x = 256
     /// {
     ///     // specialize warp_scan for float and logical warp of 32 threads
     ///     using warp_scan_f = rocprim::warp_scan<float, 32>;
     ///     // allocate storage in shared memory
     ///     __shared__ warp_scan_float::storage_type temp[8]; // 256/32 = 8
     ///
-    ///     int logical_warp_id = hipThreadIdx_x/32;
+    ///     int logical_warp_id = threadIdx.x/32;
     ///     float value = ...;
     ///     // execute exclusive min scan
     ///     warp_scan_float().exclusive_scan(
@@ -387,14 +387,14 @@ public:
     /// each thread provides one \p int value. Hardware warp size is 64. Block (tile) size is 256.
     ///
     /// \code{.cpp}
-    /// __global__ void example_kernel(...) // hipBlockDim_x = 256
+    /// __global__ void example_kernel(...) // blockDim.x = 256
     /// {
     ///     // specialize warp_scan for int and logical warp of 64 threads
     ///     using warp_scan_int = rocprim::warp_scan<int, 64>;
     ///     // allocate storage in shared memory
     ///     __shared__ warp_scan_int::storage_type temp[4]; // 256/64 = 4
     ///
-    ///     int logical_warp_id = hipThreadIdx_x/64;
+    ///     int logical_warp_id = threadIdx.x/64;
     ///     int input = ...;
     ///     int output, reduction;
     ///     // exclusive prefix sum
@@ -471,14 +471,14 @@ public:
     /// Hardware warp size is 64. Block (tile) size is 256.
     ///
     /// \code{.cpp}
-    /// __global__ void example_kernel(...) // hipBlockDim_x = 256
+    /// __global__ void example_kernel(...) // blockDim.x = 256
     /// {
     ///     // specialize warp_scan for float and logical warp of 32 threads
     ///     using warp_scan_f = rocprim::warp_scan<float, 32>;
     ///     // allocate storage in shared memory
     ///     __shared__ warp_scan_float::storage_type temp[8]; // 256/32 = 8
     ///
-    ///     int logical_warp_id = hipThreadIdx_x/32;
+    ///     int logical_warp_id = threadIdx.x/32;
     ///     float input = ...;
     ///     float ex_output, in_output;
     ///     // execute exclusive min scan
@@ -561,14 +561,14 @@ public:
     /// Block (tile) size is 256.
     ///
     /// \code{.cpp}
-    /// __global__ void example_kernel(...) // hipBlockDim_x = 256
+    /// __global__ void example_kernel(...) // blockDim.x = 256
     /// {
     ///     // specialize warp_scan for int and logical warp of 64 threads
     ///     using warp_scan_int = rocprim::warp_scan<int, 64>;
     ///     // allocate storage in shared memory
     ///     __shared__ warp_scan_int::storage_type temp[4]; // 256/64 = 4
     ///
-    ///     int logical_warp_id = hipThreadIdx_x/64;
+    ///     int logical_warp_id = threadIdx.x/64;
     ///     int input = ...;
     ///     int in_output, ex_output, reduction;
     ///     // inclusive and exclusive prefix sum

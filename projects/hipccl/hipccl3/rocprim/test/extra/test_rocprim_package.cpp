@@ -47,8 +47,8 @@ int main(int, char**)
     // device input/output
     T * d_input;
     T * d_output;
-    HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
-    HIP_CHECK(hipMalloc(&d_output, sizeof(T)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), input.size() * sizeof(T)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), sizeof(T)));
     HIP_CHECK(
         hipMemcpy(
             d_input, input.data(),

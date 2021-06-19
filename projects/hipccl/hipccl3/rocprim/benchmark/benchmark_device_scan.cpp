@@ -117,8 +117,8 @@ void run_benchmark(benchmark::State& state,
     T initial_value = T(123);
     T * d_input;
     T * d_output;
-    HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
-    HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), size * sizeof(T)));
     HIP_CHECK(
         hipMemcpy(
             d_input, input.data(),
@@ -186,43 +186,87 @@ void run_benchmark(benchmark::State& state,
 
 #ifdef BENCHMARK_CONFIG_TUNING
 
-#define CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, IPT) \
-benchmark::RegisterBenchmark( \
-    (std::string(EXCL ? "exclusive_scan" : "inclusive_scan") + \
-    ("<" #T ", " #SCAN_OP ", scan_config<" #BS ", " #IPT ", " #BSA "> >")).c_str(), \
-    run_benchmark<EXCL, T, SCAN_OP, typename rocprim::scan_config<BS, IPT, true, rocprim::block_load_method::block_load_transpose, rocprim::block_store_method::block_store_transpose, BSA> >, size, stream, SCAN_OP() \
-),
+template<
+    bool EXCL,
+    typename T, typename SCAN_OP,
+    rocprim::block_scan_algorithm BSA,
+    unsigned int BS, unsigned int IPT
+>
+void scan_add_benchmark(
+    std::vector<benchmark::internal::Benchmark*>& benchmarks,
+    hipStream_t stream,
+    size_t size)
+{
+    benchmarks.push_back(
+        benchmark::RegisterBenchmark(
+            (std::string(EXCL ? "exclusive_scan" : "inclusive_scan") + "<" + typeid(T).name() +
+             ", " + typeid(SCAN_OP).name() + ", scan_config<" + std::to_string(BS) + ", " +
+             std::to_string(IPT) + ", " + std::string(BSA == rocprim::block_scan_algorithm::using_warp_scan
+             ? "using_warp_scan" : "using_reduce_scan")  + "> >").c_str(),
+            run_benchmark<
+                EXCL, T, SCAN_OP,
+                typename rocprim::scan_config<
+                    BS, IPT, true,
+                    rocprim::block_load_method::block_load_transpose,
+                    rocprim::block_store_method::block_store_transpose, BSA
+                >
+            >, size, stream, SCAN_OP()
+        )
+    );
+}
 
-#define CREATE_BENCHMARK1(EXCL, T, SCAN_OP, BSA, BS) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 1) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 2) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 3) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 4) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 5) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 6) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 7) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 8) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 9) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 10) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 11) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 12) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 13) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 14) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 15) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 16) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 17) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 18) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 19) \
-    CREATE_BENCHMARK2(EXCL, T, SCAN_OP, BSA, BS, 20)
+template<
+    bool EXCL,
+    typename T, typename SCAN_OP,
+    rocprim::block_scan_algorithm BSA,
+    unsigned int BS, unsigned int IPT,
+    unsigned int MaxItemsPerThread
+>
+auto scan_benchmark_generate_ipt_grid(
+    std::vector<benchmark::internal::Benchmark*>& benchmarks,
+    hipStream_t stream,
+    size_t size)
+    -> typename std::enable_if< IPT == MaxItemsPerThread, void>::type
+{
+    scan_add_benchmark<
+        EXCL, T, SCAN_OP,
+        BSA, BS, IPT
+    >(benchmarks, stream, size);
+}
+
+template<
+    bool EXCL,
+    typename T, typename SCAN_OP,
+    rocprim::block_scan_algorithm BSA,
+    unsigned int BS, unsigned int IPT,
+    unsigned int MaxItemsPerThread
+>
+auto scan_benchmark_generate_ipt_grid(
+    std::vector<benchmark::internal::Benchmark*>& benchmarks,
+    hipStream_t stream,
+    size_t size)
+    -> typename std::enable_if< IPT < MaxItemsPerThread, void>::type
+{
+    scan_add_benchmark<
+        EXCL, T, SCAN_OP,
+        BSA, BS, IPT
+    >(benchmarks, stream, size);
+
+    scan_benchmark_generate_ipt_grid<
+        EXCL, T, SCAN_OP,
+        BSA, BS, IPT + 1,
+        MaxItemsPerThread
+    >(benchmarks, stream, size);
+}
 
 constexpr rocprim::block_scan_algorithm using_warp_scan = rocprim::block_scan_algorithm::using_warp_scan;
 constexpr rocprim::block_scan_algorithm reduce_then_scan = rocprim::block_scan_algorithm::reduce_then_scan;
 
-#define CREATE_BENCHMARK(EXCL, T, SCAN_OP) \
-    CREATE_BENCHMARK1(EXCL, T, SCAN_OP, using_warp_scan, 64) \
-    CREATE_BENCHMARK1(EXCL, T, SCAN_OP, using_warp_scan, 128) \
-    CREATE_BENCHMARK1(EXCL, T, SCAN_OP, using_warp_scan, 256) \
-    CREATE_BENCHMARK1(EXCL, T, SCAN_OP, reduce_then_scan, 256)
+#define CREATE_BENCHMARK(EXCL, T, SCAN_OP, MIPT) \
+    scan_benchmark_generate_ipt_grid<EXCL, T, SCAN_OP, using_warp_scan, 64, 1, MIPT>(benchmarks, stream, size); \
+    scan_benchmark_generate_ipt_grid<EXCL, T, SCAN_OP, using_warp_scan, 128, 1, MIPT>(benchmarks, stream, size); \
+    scan_benchmark_generate_ipt_grid<EXCL, T, SCAN_OP, using_warp_scan, 256, 1, MIPT>(benchmarks, stream, size); \
+    scan_benchmark_generate_ipt_grid<EXCL, T, SCAN_OP, reduce_then_scan, 256, 1, MIPT>(benchmarks, stream, size);
 
 #else // BENCHMARK_CONFIG_TUNING
 
@@ -256,48 +300,77 @@ int main(int argc, char *argv[])
     std::cout << "[HIP] Device name: " << devProp.name << std::endl;
 
     using custom_double2 = custom_type<double, double>;
-    using custom_float2 = custom_type<float, float>;
 
-    // Compilation may never finish, if the compiler needs to compile too many kernels,
-    // it is recommended to compile benchmarks only for 1-2 types when BENCHMARK_CONFIG_TUNING is used
-    // (all other CREATE_*_BENCHMARK should be commented/removed).
+#ifndef BENCHMARK_CONFIG_TUNING
+    using custom_float2 = custom_type<float, float>;
+#endif
 
     // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks =
-    {
-        CREATE_BENCHMARK(false, int, rocprim::plus<int>)
-        CREATE_BENCHMARK(true, int, rocprim::plus<int>)
+    #ifdef BENCHMARK_CONFIG_TUNING
+        // Compilation may never finish, if the compiler needs to compile too many kernels,
+        // it is recommended to compile benchmarks only for 1-2 types when BENCHMARK_CONFIG_TUNING is used
+        // (all other CREATE_BENCHMARK should be commented/removed).
 
-        CREATE_BENCHMARK(false, float, rocprim::plus<float>)
-        CREATE_BENCHMARK(true, float, rocprim::plus<float>)
+        std::vector<benchmark::internal::Benchmark*> benchmarks;
 
-        CREATE_BENCHMARK(false, double, rocprim::plus<double>)
-        CREATE_BENCHMARK(true, double, rocprim::plus<double>)
+        CREATE_BENCHMARK(false, int, rocprim::plus<int>, 20)
+        CREATE_BENCHMARK(true, int, rocprim::plus<int>, 20)
 
-        CREATE_BENCHMARK(false, long long, rocprim::plus<long long>)
-        CREATE_BENCHMARK(true, long long, rocprim::plus<long long>)
+        CREATE_BENCHMARK(false, float, rocprim::plus<float>, 20)
+        CREATE_BENCHMARK(true, float, rocprim::plus<float>, 20)
 
-        CREATE_BENCHMARK(false, float2, rocprim::plus<float2>)
-        CREATE_BENCHMARK(true, float2, rocprim::plus<float2>)
+        CREATE_BENCHMARK(false, double, rocprim::plus<double>, 15)
+        CREATE_BENCHMARK(true, double, rocprim::plus<double>, 15)
 
-        CREATE_BENCHMARK(false, custom_float2, rocprim::plus<custom_float2>)
-        CREATE_BENCHMARK(true, custom_float2, rocprim::plus<custom_float2>)
+        CREATE_BENCHMARK(false, long long, rocprim::plus<long long>, 15)
+        CREATE_BENCHMARK(true, long long, rocprim::plus<long long>, 15)
 
-        CREATE_BENCHMARK(false, double2, rocprim::plus<double2>)
-        CREATE_BENCHMARK(true, double2, rocprim::plus<double2>)
+        CREATE_BENCHMARK(false, custom_double2, rocprim::plus<custom_double2>, 15)
+        CREATE_BENCHMARK(true, custom_double2, rocprim::plus<custom_double2>, 15)
 
-        CREATE_BENCHMARK(false, custom_double2, rocprim::plus<custom_double2>)
-        CREATE_BENCHMARK(true, custom_double2, rocprim::plus<custom_double2>)
+        CREATE_BENCHMARK(false, int8_t, rocprim::plus<int8_t>, 20)
+        CREATE_BENCHMARK(true, int8_t, rocprim::plus<int8_t>, 20)
 
-        CREATE_BENCHMARK(false, int8_t, rocprim::plus<int8_t>)
-        CREATE_BENCHMARK(true, int8_t, rocprim::plus<int8_t>)
+        CREATE_BENCHMARK(false, rocprim::half, rocprim::plus<rocprim::half>, 30)
+        CREATE_BENCHMARK(true, rocprim::half, rocprim::plus<rocprim::half>, 30)
+    #else
+        std::vector<benchmark::internal::Benchmark*> benchmarks =
+        {
+            CREATE_BENCHMARK(false, int, rocprim::plus<int>)
+            CREATE_BENCHMARK(true, int, rocprim::plus<int>)
 
-        CREATE_BENCHMARK(false, uint8_t, rocprim::plus<uint8_t>)
-        CREATE_BENCHMARK(true, uint8_t, rocprim::plus<uint8_t>)
+            CREATE_BENCHMARK(false, float, rocprim::plus<float>)
+            CREATE_BENCHMARK(true, float, rocprim::plus<float>)
 
-        CREATE_BENCHMARK(false, rocprim::half, rocprim::plus<rocprim::half>)
-        CREATE_BENCHMARK(true, rocprim::half, rocprim::plus<rocprim::half>)
-    };
+            CREATE_BENCHMARK(false, double, rocprim::plus<double>)
+            CREATE_BENCHMARK(true, double, rocprim::plus<double>)
+
+            CREATE_BENCHMARK(false, long long, rocprim::plus<long long>)
+            CREATE_BENCHMARK(true, long long, rocprim::plus<long long>)
+
+            CREATE_BENCHMARK(false, float2, rocprim::plus<float2>)
+            CREATE_BENCHMARK(true, float2, rocprim::plus<float2>)
+
+            CREATE_BENCHMARK(false, custom_float2, rocprim::plus<custom_float2>)
+            CREATE_BENCHMARK(true, custom_float2, rocprim::plus<custom_float2>)
+
+            CREATE_BENCHMARK(false, double2, rocprim::plus<double2>)
+            CREATE_BENCHMARK(true, double2, rocprim::plus<double2>)
+
+            CREATE_BENCHMARK(false, custom_double2, rocprim::plus<custom_double2>)
+            CREATE_BENCHMARK(true, custom_double2, rocprim::plus<custom_double2>)
+
+            CREATE_BENCHMARK(false, int8_t, rocprim::plus<int8_t>)
+            CREATE_BENCHMARK(true, int8_t, rocprim::plus<int8_t>)
+
+            CREATE_BENCHMARK(false, uint8_t, rocprim::plus<uint8_t>)
+            CREATE_BENCHMARK(true, uint8_t, rocprim::plus<uint8_t>)
+
+            CREATE_BENCHMARK(false, rocprim::half, rocprim::plus<rocprim::half>)
+            CREATE_BENCHMARK(true, rocprim::half, rocprim::plus<rocprim::half>)
+        };
+    #endif
+
 
     // Use manual timing
     for(auto& b : benchmarks)

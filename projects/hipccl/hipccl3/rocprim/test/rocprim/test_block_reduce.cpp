@@ -53,13 +53,13 @@ __global__
 __launch_bounds__(BlockSize)
 void reduce_kernel(T* device_output, T* device_output_reductions)
 {
-    const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
+    const unsigned int index = (blockIdx.x * BlockSize) + threadIdx.x;
     T value = device_output[index];
     rocprim::block_reduce<T, BlockSize, Algorithm> breduce;
     breduce.reduce(value, value, BinaryOp());
-    if(hipThreadIdx_x == 0)
+    if(threadIdx.x == 0)
     {
-        device_output_reductions[hipBlockIdx_x] = value;
+        device_output_reductions[blockIdx.x] = value;
     }
 }
 
@@ -140,15 +140,15 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, Reduce)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
-        std::vector<T> output = test_utils::get_random_data<T>(size, 2, 50, seed_value);
+        std::vector<T> output = test_utils::get_random_data<T>(size, (T)2, (T)50, seed_value);
         std::vector<T> output_reductions(size / block_size);
 
         // Calculate expected results on host
-        std::vector<T> expected_reductions(output_reductions.size(), 0);
+        std::vector<T> expected_reductions(output_reductions.size(), (T)0);
         binary_op_type binary_op;
         for(size_t i = 0; i < output.size() / block_size; i++)
         {
-            T value = 0;
+            T value = (T)0;
             for(size_t j = 0; j < block_size; j++)
             {
                 auto idx = i * block_size + j;
@@ -207,7 +207,7 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceMultiplies)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
-        std::vector<T> output(size, 1);
+        std::vector<T> output(size, (T)1);
         auto two_places = test_utils::get_random_data<unsigned int>(size/32, 0, size-1, seed_value);
         for(auto i : two_places)
         {
@@ -216,11 +216,11 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceMultiplies)
         std::vector<T> output_reductions(size / block_size);
 
         // Calculate expected results on host
-        std::vector<T> expected_reductions(output_reductions.size(), 0);
+        std::vector<T> expected_reductions(output_reductions.size(), (T)0);
         binary_op_type binary_op;
         for(size_t i = 0; i < output.size() / block_size; i++)
         {
-            T value = 1;
+            T value = (T)1;
             for(size_t j = 0; j < block_size; j++)
             {
                 auto idx = i * block_size + j;
@@ -265,13 +265,13 @@ __global__
 __launch_bounds__(BlockSize)
 void reduce_valid_kernel(T* device_output, T* device_output_reductions, const unsigned int valid_items)
 {
-    const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
+    const unsigned int index = (blockIdx.x * BlockSize) + threadIdx.x;
     T value = device_output[index];
     rocprim::block_reduce<T, BlockSize, Algorithm> breduce;
     breduce.reduce(value, value, valid_items, BinaryOp());
-    if(hipThreadIdx_x == 0)
+    if(threadIdx.x == 0)
     {
-        device_output_reductions[hipBlockIdx_x] = value;
+        device_output_reductions[blockIdx.x] = value;
     }
 }
 
@@ -335,7 +335,7 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceValid)
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        const unsigned int valid_items = test_utils::get_random_value(block_size - 10, block_size, seed_value);
+        const size_t valid_items = test_utils::get_random_value<size_t>(block_size - 10, block_size, seed_value);
 
         // Given block size not supported
         if(block_size > test_utils::get_max_block_size())
@@ -350,11 +350,11 @@ TYPED_TEST(RocprimBlockReduceSingleValueTests, ReduceValid)
         std::vector<T> output_reductions(size / block_size);
 
         // Calculate expected results on host
-        std::vector<T> expected_reductions(output_reductions.size(), 0);
+        std::vector<T> expected_reductions(output_reductions.size(), (T)0);
         binary_op_type binary_op;
         for(size_t i = 0; i < output.size() / block_size; i++)
         {
-            T value = 0;
+            T value = static_cast<T>(0);
             for(size_t j = 0; j < valid_items; j++)
             {
                 auto idx = i * block_size + j;
@@ -410,7 +410,7 @@ __global__
 __launch_bounds__(BlockSize)
 void reduce_array_kernel(T* device_output, T* device_output_reductions)
 {
-    const unsigned int index = ((hipBlockIdx_x * BlockSize) + hipThreadIdx_x) * ItemsPerThread;
+    const unsigned int index = ((blockIdx.x * BlockSize) + threadIdx.x) * ItemsPerThread;
     // load
     T in_out[ItemsPerThread];
     for(unsigned int j = 0; j < ItemsPerThread; j++)
@@ -422,9 +422,9 @@ void reduce_array_kernel(T* device_output, T* device_output_reductions)
     T reduction;
     breduce.reduce(in_out, reduction, BinaryOp());
 
-    if(hipThreadIdx_x == 0)
+    if(threadIdx.x == 0)
     {
-        device_output_reductions[hipBlockIdx_x] = reduction;
+        device_output_reductions[blockIdx.x] = reduction;
     }
 }
 
@@ -438,9 +438,9 @@ template<
 void test_block_reduce_input_arrays()
 {
     using binary_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_maximum, rocprim::maximum<T>>::type;
-    constexpr auto algorithm = Algorithm;
-    constexpr size_t block_size = BlockSize;
-    constexpr size_t items_per_thread = ItemsPerThread;
+    static constexpr auto algorithm = Algorithm;
+    static constexpr size_t block_size = BlockSize;
+    static constexpr size_t items_per_thread = ItemsPerThread;
 
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
@@ -461,14 +461,14 @@ void test_block_reduce_input_arrays()
         std::vector<T> output = test_utils::get_random_data<T>(size, 0, 100, seed_value);
 
         // Output reduce results
-        std::vector<T> output_reductions(size / block_size, 0);
+        std::vector<T> output_reductions(size / block_size, (T)0);
 
         // Calculate expected results on host
-        std::vector<T> expected_reductions(output_reductions.size(), 0);
+        std::vector<T> expected_reductions(output_reductions.size(), (T)0);
         binary_op_type binary_op;
         for(size_t i = 0; i < output.size() / items_per_block; i++)
         {
-            T value = 0;
+            T value = (T)0;
             for(size_t j = 0; j < items_per_block; j++)
             {
                 auto idx = i * items_per_block + j;

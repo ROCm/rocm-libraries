@@ -161,7 +161,7 @@ void load(unsigned int flat_id,
           const size_t input1_size,
           const size_t input2_size)
 {
-    #pragma unroll
+    ROCPRIM_UNROLL
     for(unsigned int i = 0; i < ItemsPerThread; ++i)
     {
         unsigned int index = BlockSize * i + flat_id;
@@ -193,7 +193,7 @@ void serial_merge(KeyType * keys_shared,
     KeyType a = keys_shared[range.begin1];
     KeyType b = keys_shared[range.begin2];
 
-    #pragma unroll
+    ROCPRIM_UNROLL
     for(unsigned int i = 0; i < ItemsPerThread; ++i)
     {
         bool compare = (range.begin2 >= range.end2) ||
@@ -298,7 +298,7 @@ merge_values(unsigned int flat_id,
 
     if(count >= ItemsPerThread * BlockSize)
     {
-        #pragma unroll
+        ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; ++i)
         {
             values[i] = (index[i] < input1_size) ? values_input1[index[i]] :
@@ -307,7 +307,7 @@ merge_values(unsigned int flat_id,
     }
     else
     {
-        #pragma unroll
+        ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; ++i)
         {
             if(flat_id * ItemsPerThread + i < count)

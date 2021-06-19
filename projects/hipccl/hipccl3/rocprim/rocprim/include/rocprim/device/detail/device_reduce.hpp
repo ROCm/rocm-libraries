@@ -116,7 +116,7 @@ void block_reduce_kernel_impl(InputIterator input,
         );
 
         output_value = values[0];
-        #pragma unroll
+        ROCPRIM_UNROLL
         for(unsigned int i = 1; i < items_per_thread; i++)
         {
             unsigned int offset = i * block_size;

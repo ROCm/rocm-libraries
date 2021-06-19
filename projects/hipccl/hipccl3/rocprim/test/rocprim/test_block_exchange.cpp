@@ -49,8 +49,8 @@ __launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void blocked_to_striped_kernel(Type* device_input, OutputType* device_output)
 {
     constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
-    const unsigned int lid = hipThreadIdx_x;
-    const unsigned int block_offset = hipBlockIdx_x * ItemsPerBlock;
+    const unsigned int lid = threadIdx.x;
+    const unsigned int block_offset = blockIdx.x * ItemsPerBlock;
 
     Type input[ItemsPerThread];
     OutputType output[ItemsPerThread];
@@ -73,8 +73,8 @@ __launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void striped_to_blocked_kernel(Type* device_input, OutputType* device_output)
 {
     constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
-    const unsigned int lid = hipThreadIdx_x;
-    const unsigned int block_offset = hipBlockIdx_x * ItemsPerBlock;
+    const unsigned int lid = threadIdx.x;
+    const unsigned int block_offset = blockIdx.x * ItemsPerBlock;
 
     Type input[ItemsPerThread];
     OutputType output[ItemsPerThread];
@@ -97,8 +97,8 @@ __launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void blocked_to_warp_striped_kernel(Type* device_input, OutputType* device_output)
 {
     constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
-    const unsigned int lid = hipThreadIdx_x;
-    const unsigned int block_offset = hipBlockIdx_x * ItemsPerBlock;
+    const unsigned int lid = threadIdx.x;
+    const unsigned int block_offset = blockIdx.x * ItemsPerBlock;
 
     Type input[ItemsPerThread];
     OutputType output[ItemsPerThread];
@@ -121,8 +121,8 @@ __launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void warp_striped_to_blocked_kernel(Type* device_input, OutputType* device_output)
 {
     constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
-    const unsigned int lid = hipThreadIdx_x;
-    const unsigned int block_offset = hipBlockIdx_x * ItemsPerBlock;
+    const unsigned int lid = threadIdx.x;
+    const unsigned int block_offset = blockIdx.x * ItemsPerBlock;
 
     Type input[ItemsPerThread];
     OutputType output[ItemsPerThread];
@@ -145,8 +145,8 @@ __launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void scatter_to_blocked_kernel(Type* device_input, OutputType* device_output, unsigned int* device_ranks)
 {
     constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
-    const unsigned int lid = hipThreadIdx_x;
-    const unsigned int block_offset = hipBlockIdx_x * ItemsPerBlock;
+    const unsigned int lid = threadIdx.x;
+    const unsigned int block_offset = blockIdx.x * ItemsPerBlock;
 
     Type input[ItemsPerThread];
     OutputType output[ItemsPerThread];
@@ -171,8 +171,8 @@ __launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void scatter_to_striped_kernel(Type* device_input, OutputType* device_output, unsigned int* device_ranks)
 {
     constexpr unsigned int block_size = (ItemsPerBlock / ItemsPerThread);
-    const unsigned int lid = hipThreadIdx_x;
-    const unsigned int block_offset = hipBlockIdx_x * ItemsPerBlock;
+    const unsigned int lid = threadIdx.x;
+    const unsigned int block_offset = blockIdx.x * ItemsPerBlock;
 
     Type input[ItemsPerThread];
     OutputType output[ItemsPerThread];
@@ -199,9 +199,9 @@ auto test_block_exchange()
 {
     using type = T;
     using output_type = U;
-    constexpr size_t block_size = BlockSize;
-    constexpr size_t items_per_thread = ItemsPerThread;
-    constexpr size_t items_per_block = block_size * items_per_thread;
+    static constexpr size_t block_size = BlockSize;
+    static constexpr size_t items_per_thread = ItemsPerThread;
+    static constexpr size_t items_per_block = block_size * items_per_thread;
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
     {
@@ -212,7 +212,7 @@ auto test_block_exchange()
     // Generate data
     std::vector<type> input(size);
     std::vector<output_type> expected(size);
-    std::vector<output_type> output(size, 0);
+    std::vector<output_type> output(size, (output_type)0);
 
     // Calculate input and expected results on host
     std::vector<type> values(size);
@@ -227,7 +227,7 @@ auto test_block_exchange()
                 const size_t i0 = offset + ti * items_per_thread + ii;
                 const size_t i1 = offset + ii * block_size + ti;
                 input[i1] = values[i1];
-                expected[i0] = values[i1];
+                expected[i0] = static_cast<output_type>(values[i1]);
             }
         }
     }
@@ -283,9 +283,9 @@ auto test_block_exchange()
 {
     using type = T;
     using output_type = U;
-    constexpr size_t block_size = BlockSize;
-    constexpr size_t items_per_thread = ItemsPerThread;
-    constexpr size_t items_per_block = block_size * items_per_thread;
+    static constexpr size_t block_size = BlockSize;
+    static constexpr size_t items_per_thread = ItemsPerThread;
+    static constexpr size_t items_per_block = block_size * items_per_thread;
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
     {
@@ -367,9 +367,9 @@ auto test_block_exchange()
 {
     using type = T;
     using output_type = U;
-    constexpr size_t block_size = BlockSize;
-    constexpr size_t items_per_thread = ItemsPerThread;
-    constexpr size_t items_per_block = block_size * items_per_thread;
+    static constexpr size_t block_size = BlockSize;
+    static constexpr size_t items_per_thread = ItemsPerThread;
+    static constexpr size_t items_per_block = block_size * items_per_thread;
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
     {
@@ -463,9 +463,9 @@ auto test_block_exchange()
 {
     using type = T;
     using output_type = U;
-    constexpr size_t block_size = BlockSize;
-    constexpr size_t items_per_thread = ItemsPerThread;
-    constexpr size_t items_per_block = block_size * items_per_thread;
+    static constexpr size_t block_size = BlockSize;
+    static constexpr size_t items_per_thread = ItemsPerThread;
+    static constexpr size_t items_per_block = block_size * items_per_thread;
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
     {
@@ -557,9 +557,9 @@ auto test_block_exchange()
 {
     using type = T;
     using output_type = U;
-    constexpr size_t block_size = BlockSize;
-    constexpr size_t items_per_thread = ItemsPerThread;
-    constexpr size_t items_per_block = block_size * items_per_thread;
+    static constexpr size_t block_size = BlockSize;
+    static constexpr size_t items_per_thread = ItemsPerThread;
+    static constexpr size_t items_per_block = block_size * items_per_thread;
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
     {
@@ -659,9 +659,9 @@ auto test_block_exchange()
 {
     using type = T;
     using output_type = U;
-    constexpr size_t block_size = BlockSize;
-    constexpr size_t items_per_thread = ItemsPerThread;
-    constexpr size_t items_per_block = block_size * items_per_thread;
+    static constexpr size_t block_size = BlockSize;
+    static constexpr size_t items_per_thread = ItemsPerThread;
+    static constexpr size_t items_per_block = block_size * items_per_thread;
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
     {

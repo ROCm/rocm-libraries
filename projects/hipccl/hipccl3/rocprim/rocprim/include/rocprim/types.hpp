@@ -38,35 +38,62 @@ BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
 {
-
 // Define vector types that will be used by rocPRIM internally.
 // We don't use HIP vector types because they don't generate correct
 // load/store operations, see https://github.com/RadeonOpenCompute/ROCm/issues/341
+#ifndef _MSC_VER
 #define DEFINE_VECTOR_TYPE(name, base) \
 \
-struct name##2 \
+struct alignas(sizeof(base) * 2) name##2 \
 { \
     typedef base vector_value_type __attribute__((ext_vector_type(2))); \
     union { \
         vector_value_type data; \
         struct { base x, y; }; \
     }; \
-} __attribute__((aligned(sizeof(base) * 2))); \
+}; \
 \
-struct name##4 \
+struct alignas(sizeof(base) * 4) name##4 \
 { \
     typedef base vector_value_type __attribute__((ext_vector_type(4))); \
     union { \
         vector_value_type data; \
         struct { base x, y, w, z; }; \
     }; \
-} __attribute__((aligned(sizeof(base) * 4)));
+};
+#else
+#define DEFINE_VECTOR_TYPE(name, base) \
+\
+struct alignas(sizeof(base) * 2) name##2 \
+{ \
+    typedef base vector_value_type; \
+    union { \
+        vector_value_type data; \
+        struct { base x, y; }; \
+    }; \
+}; \
+\
+struct alignas(sizeof(base) * 4) name##4 \
+{ \
+    typedef base vector_value_type; \
+    union { \
+        vector_value_type data; \
+        struct { base x, y, w, z; }; \
+    }; \
+};
+#endif
 
+#ifdef _MSC_VER
+#pragma warning( push )
+#pragma warning( disable : 4201 ) // nonstandard extension used: nameless struct/union
+#endif
 DEFINE_VECTOR_TYPE(char, char);
 DEFINE_VECTOR_TYPE(short, short);
 DEFINE_VECTOR_TYPE(int, int);
 DEFINE_VECTOR_TYPE(longlong, long long);
-
+#ifdef _MSC_VER
+#pragma warning( pop )
+#endif
 // Takes a scalar type T and matches to a vector type based on NumElements.
 template <class T, unsigned int NumElements>
 struct make_vector_type
@@ -104,19 +131,34 @@ DEFINE_MAKE_VECTOR_TYPE(longlong, long long);
 
 /// \brief Empty type used as a placeholder, usually used to flag that given
 /// template parameter should not be used.
-struct empty_type
-{
+struct empty_type {};
 
+/// \brief Binary operator that takes two instances of empty_type, usually used
+/// as nop replacement for the HIP-CPU back-end
+struct empty_binary_op
+{
+    constexpr empty_type operator()(const empty_type&, const empty_type&) const { return empty_type{}; }
 };
 
 /// \brief Half-precision floating point type
 using half = ::__half;
 
 // The lane_mask_type only exist at device side
+#ifndef __AMDGCN_WAVEFRONT_SIZE
+// When not compiling with hipcc, we're compiling with HIP-CPU
+// TODO: introduce a ROCPRIM-specific macro to query this
+#define __AMDGCN_WAVEFRONT_SIZE 64
+#endif
 #if __AMDGCN_WAVEFRONT_SIZE == 32
 using lane_mask_type = unsigned int;
 #elif __AMDGCN_WAVEFRONT_SIZE == 64
 using lane_mask_type = unsigned long long int;
+#endif
+
+#ifdef __HIP_CPU_RT__
+using native_half = half;
+#else
+using native_half = _Float16;
 #endif
 
 END_ROCPRIM_NAMESPACE

@@ -109,7 +109,7 @@ void transform_kernel_impl(InputIterator input,
             valid_in_last_block
         );
 
-        #pragma unroll
+        ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             if(BlockSize * i + flat_id < valid_in_last_block)
@@ -133,7 +133,7 @@ void transform_kernel_impl(InputIterator input,
             input_values
         );
 
-        #pragma unroll
+        ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             output_values[i] = transform_op(input_values[i]);

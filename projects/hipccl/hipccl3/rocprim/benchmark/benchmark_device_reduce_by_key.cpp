@@ -86,7 +86,7 @@ void run_benchmark(benchmark::State& state, size_t max_length, hipStream_t strea
     std::iota(values_input.begin(), values_input.end(), 0);
 
     key_type * d_keys_input;
-    HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_input), size * sizeof(key_type)));
     HIP_CHECK(
         hipMemcpy(
             d_keys_input, keys_input.data(),
@@ -96,7 +96,7 @@ void run_benchmark(benchmark::State& state, size_t max_length, hipStream_t strea
     );
 
     value_type * d_values_input;
-    HIP_CHECK(hipMalloc(&d_values_input, size * sizeof(value_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_values_input), size * sizeof(value_type)));
     HIP_CHECK(
         hipMemcpy(
             d_values_input, values_input.data(),
@@ -108,9 +108,9 @@ void run_benchmark(benchmark::State& state, size_t max_length, hipStream_t strea
     key_type * d_unique_output;
     value_type * d_aggregates_output;
     unsigned int * d_unique_count_output;
-    HIP_CHECK(hipMalloc(&d_unique_output, unique_count * sizeof(key_type)));
-    HIP_CHECK(hipMalloc(&d_aggregates_output, unique_count * sizeof(value_type)));
-    HIP_CHECK(hipMalloc(&d_unique_count_output, sizeof(unsigned int)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_unique_output), unique_count * sizeof(key_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_aggregates_output), unique_count * sizeof(value_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_unique_count_output), sizeof(unsigned int)));
 
     void * d_temporary_storage = nullptr;
     size_t temporary_storage_bytes = 0;
