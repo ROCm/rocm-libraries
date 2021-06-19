@@ -80,13 +80,13 @@ struct blocked_to_striped
     __device__
     static void run(const T * d_input, const unsigned int *, T * d_output)
     {
-        const unsigned int lid = hipThreadIdx_x;
-        const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
+        const unsigned int lid = threadIdx.x;
+        const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
 
         T input[ItemsPerThread];
         rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
 
-        #pragma nounroll
+        ROCPRIM_NO_UNROLL
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
@@ -109,13 +109,13 @@ struct striped_to_blocked
     __device__
     static void run(const T * d_input, const unsigned int *, T * d_output)
     {
-        const unsigned int lid = hipThreadIdx_x;
-        const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
+        const unsigned int lid = threadIdx.x;
+        const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
 
         T input[ItemsPerThread];
         rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
 
-        #pragma nounroll
+        ROCPRIM_NO_UNROLL
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
@@ -138,13 +138,13 @@ struct blocked_to_warp_striped
     __device__
     static void run(const T * d_input, const unsigned int *, T * d_output)
     {
-        const unsigned int lid = hipThreadIdx_x;
-        const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
+        const unsigned int lid = threadIdx.x;
+        const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
 
         T input[ItemsPerThread];
         rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
 
-        #pragma nounroll
+        ROCPRIM_NO_UNROLL
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
@@ -167,13 +167,13 @@ struct warp_striped_to_blocked
     __device__
     static void run(const T * d_input, const unsigned int *, T * d_output)
     {
-        const unsigned int lid = hipThreadIdx_x;
-        const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
+        const unsigned int lid = threadIdx.x;
+        const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
 
         T input[ItemsPerThread];
         rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
 
-        #pragma nounroll
+        ROCPRIM_NO_UNROLL
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
@@ -196,15 +196,15 @@ struct scatter_to_blocked
     __device__
     static void run(const T * d_input, const unsigned int * d_ranks, T * d_output)
     {
-        const unsigned int lid = hipThreadIdx_x;
-        const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
+        const unsigned int lid = threadIdx.x;
+        const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
 
         T input[ItemsPerThread];
         unsigned int ranks[ItemsPerThread];
         rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
         rp::block_load_direct_striped<BlockSize>(lid, d_ranks + block_offset, ranks);
 
-        #pragma nounroll
+        ROCPRIM_NO_UNROLL
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
@@ -227,15 +227,15 @@ struct scatter_to_striped
     __device__
     static void run(const T * d_input, const unsigned int * d_ranks, T * d_output)
     {
-        const unsigned int lid = hipThreadIdx_x;
-        const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
+        const unsigned int lid = threadIdx.x;
+        const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
 
         T input[ItemsPerThread];
         unsigned int ranks[ItemsPerThread];
         rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
         rp::block_load_direct_striped<BlockSize>(lid, d_ranks + block_offset, ranks);
 
-        #pragma nounroll
+        ROCPRIM_NO_UNROLL
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             rp::block_exchange<T, BlockSize, ItemsPerThread> exchange;
@@ -277,9 +277,9 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     T * d_input;
     unsigned int * d_ranks;
     T * d_output;
-    HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
-    HIP_CHECK(hipMalloc(&d_ranks, size * sizeof(unsigned int)));
-    HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_ranks), size * sizeof(unsigned int)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), size * sizeof(T)));
     HIP_CHECK(
         hipMemcpy(
             d_input, input.data(),

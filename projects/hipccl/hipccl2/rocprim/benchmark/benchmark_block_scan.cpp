@@ -81,7 +81,7 @@ struct inclusive_scan
     __device__
     static void run(const T* input, T* output)
     {
-        const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+        const unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
 
         T values[ItemsPerThread];
         for(unsigned int k = 0; k < ItemsPerThread; k++)
@@ -92,7 +92,7 @@ struct inclusive_scan
         using bscan_t = rp::block_scan<T, BlockSize, algorithm>;
         __shared__ typename bscan_t::storage_type storage;
 
-        #pragma nounroll
+        ROCPRIM_NO_UNROLL
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             bscan_t().inclusive_scan(values, values, storage);
@@ -118,7 +118,7 @@ struct exclusive_scan
     __device__
     static void run(const T* input, T* output)
     {
-        const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+        const unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
         using U = typename std::remove_reference<T>::type;
 
         T values[ItemsPerThread];
@@ -132,7 +132,7 @@ struct exclusive_scan
         using bscan_t = rp::block_scan<T, BlockSize, algorithm>;
         __shared__ typename bscan_t::storage_type storage;
 
-        #pragma nounroll
+        ROCPRIM_NO_UNROLL
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             bscan_t().exclusive_scan(values, values, init, storage);
@@ -162,8 +162,8 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     std::vector<T> input(size, T(1));
     T * d_input;
     T * d_output;
-    HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
-    HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), size * sizeof(T)));
     HIP_CHECK(
         hipMemcpy(
             d_input, input.data(),

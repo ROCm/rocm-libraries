@@ -54,7 +54,7 @@ public:
         output = input;
 
         T value;
-        #pragma unroll
+        ROCPRIM_UNROLL
         for(unsigned int offset = 1; offset < WarpSize; offset *= 2)
         {
             value = warp_shuffle_down(output, offset, WarpSize);
@@ -78,7 +78,7 @@ public:
         output = input;
 
         T value;
-        #pragma unroll
+        ROCPRIM_UNROLL
         for(unsigned int offset = 1; offset < WarpSize; offset *= 2)
         {
             value = warp_shuffle_down(output, offset, WarpSize);

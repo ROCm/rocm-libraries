@@ -37,7 +37,7 @@ __launch_bounds__(BlockSize)
 void example_shared_memory(const T *input, T *output)
 {
     // Indexing for  this block
-    unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
+    unsigned int index = (blockIdx.x * BlockSize) + threadIdx.x;
 
     // Allocating storage in shared memory for the block
     using block_scan_type = rocprim::block_scan<T, BlockSize>;
@@ -137,7 +137,7 @@ void example_union_storage_types(const T *input, T *output)
     } storage;
 
     constexpr int items_per_block = BlockSize * ItemsPerThread;
-    int block_offset = (hipBlockIdx_x * items_per_block);
+    int block_offset = (blockIdx.x * items_per_block);
 
     // Input/output array for block scan primitive
     T values[ItemsPerThread];
@@ -226,7 +226,7 @@ __launch_bounds__(BlockSize)
 void example_dynamic_shared_memory(const T *input, T *output)
 {
     // Indexing for  this block
-    unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
+    unsigned int index = (blockIdx.x * BlockSize) + threadIdx.x;
 
     // Initialize primitives
     using block_scan_type = rocprim::block_scan<T, BlockSize>;
@@ -310,7 +310,7 @@ void example_global_memory_storage(
         typename rocprim::block_scan<T, BlockSize>::storage_type *global_storage)
 {
     // Indexing for  this block
-    unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
+    unsigned int index = (blockIdx.x * BlockSize) + threadIdx.x;
     // specialize block_scan for type T and block of 256 threads
     using block_scan_type = rocprim::block_scan<T, BlockSize>;
     // Variables required for performing a scan
@@ -322,7 +322,7 @@ void example_global_memory_storage(
     block_scan_type()
         .inclusive_scan(
             input_value, output_value,
-            global_storage[hipBlockIdx_x],
+            global_storage[blockIdx.x],
             rocprim::plus<T>()
         );
 

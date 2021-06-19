@@ -63,7 +63,7 @@ public:
             std::is_same<Counter, float>::value || std::is_same<Counter, unsigned long long>::value,
             "Counter must be type that is supported by atomics (float, int, unsigned int, unsigned long long)"
         );
-        #pragma unroll
+        ROCPRIM_UNROLL
         for (unsigned int i = 0; i < ItemsPerThread; ++i)
         {
               ::rocprim::detail::atomic_add(&hist[static_cast<unsigned int>(input[i])], Counter(1));

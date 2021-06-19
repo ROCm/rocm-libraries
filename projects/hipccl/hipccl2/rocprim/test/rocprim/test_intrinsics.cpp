@@ -52,7 +52,7 @@ inline bool operator==(const custom_notaligned& lhs,
 }
 
 // Custom structure aligned to 16 bytes
-struct custom_16aligned
+struct alignas(16) custom_16aligned
 {
     int i;
     unsigned int u;
@@ -62,7 +62,7 @@ struct custom_16aligned
     custom_16aligned() {};
     ROCPRIM_HOST_DEVICE
     ~custom_16aligned() {};
-} __attribute__((aligned(16)));
+};
 
 inline ROCPRIM_HOST_DEVICE
 bool operator==(const custom_16aligned& lhs, const custom_16aligned& rhs)
@@ -98,7 +98,7 @@ __global__
 __launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void shuffle_up_kernel(T* data, unsigned int delta, unsigned int width)
 {
-    const unsigned int index = (hipBlockIdx_x * hipBlockDim_x) + hipThreadIdx_x;
+    const unsigned int index = (blockIdx.x * blockDim.x) + threadIdx.x;
     T value = data[index];
     value = rocprim::warp_shuffle_up(value, delta, width);
     data[index] = value;
@@ -201,7 +201,7 @@ __global__
 __launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void shuffle_down_kernel(T* data, unsigned int delta, unsigned int width)
 {
-    const unsigned int index = (hipBlockIdx_x * hipBlockDim_x) + hipThreadIdx_x;
+    const unsigned int index = (blockIdx.x * blockDim.x) + threadIdx.x;
     T value = data[index];
     value = rocprim::warp_shuffle_down(value, delta, width);
     data[index] = value;
@@ -304,10 +304,10 @@ __global__
 __launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void shuffle_index_kernel(T* data, int* src_lanes, unsigned int width)
 {
-    const unsigned int index = (hipBlockIdx_x * hipBlockDim_x) + hipThreadIdx_x;
+    const unsigned int index = (blockIdx.x * blockDim.x) + threadIdx.x;
     T value = data[index];
     value = rocprim::warp_shuffle(
-        value, src_lanes[hipThreadIdx_x/width], width
+        value, src_lanes[threadIdx.x/width], width
     );
     data[index] = value;
 }
@@ -436,10 +436,10 @@ TEST(RocprimIntrinsicsTests, ShuffleUpCustomStruct)
         std::vector<T> output(input.size());
         for(size_t i = 0; i < 4 * input.size(); i+=4)
         {
-            input[i/4].i = random_data[i];
+            input[i/4].i = (short)random_data[i];
             input[i/4].d = random_data[i+1];
-            input[i/4].f = random_data[i+2];
-            input[i/4].u = random_data[i+3];
+            input[i/4].f = (float)random_data[i+2];
+            input[i/4].u = (unsigned int)random_data[i+3];
         }
 
         T* device_data;
@@ -536,9 +536,9 @@ TEST(RocprimIntrinsicsTests, ShuffleUpCustomAlignedStruct)
         std::vector<T> output(input.size());
         for(size_t i = 0; i < 3 * input.size(); i+=3)
         {
-            input[i/3].i = random_data[i];
-            input[i/3].u = random_data[i+1];
-            input[i/3].f = random_data[i+2];
+            input[i/3].i = (int)random_data[i];
+            input[i/3].u = (unsigned int)random_data[i+1];
+            input[i/3].f = (float)random_data[i+2];
         }
 
         T* device_data;

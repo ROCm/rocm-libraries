@@ -109,7 +109,7 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
     using result_type = output_type;
     using offset_type = unsigned int;
 
-    const input_type init = TestFixture::params::init;
+    const input_type init = (input_type)TestFixture::params::init;
     const bool debug_synchronous = false;
     reduce_op_type reduce_op;
 

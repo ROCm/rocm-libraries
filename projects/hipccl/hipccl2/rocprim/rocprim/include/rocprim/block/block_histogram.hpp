@@ -161,7 +161,7 @@ public:
     {
         const auto flat_tid = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
 
-        #pragma unroll
+        ROCPRIM_UNROLL
         for(unsigned int offset = 0; offset < Bins; offset += BlockSize)
         {
             const unsigned int offset_tid = offset + flat_tid;

@@ -111,9 +111,9 @@ __global__
 __launch_bounds__(BlockSize)
 void flag_heads_kernel(Type* device_input, long long* device_heads)
 {
-    const unsigned int lid = hipThreadIdx_x;
+    const unsigned int lid = threadIdx.x;
     const unsigned int items_per_block = BlockSize * ItemsPerThread;
-    const unsigned int block_offset = hipBlockIdx_x * items_per_block;
+    const unsigned int block_offset = blockIdx.x * items_per_block;
 
     Type input[ItemsPerThread];
     rocprim::block_load_direct_blocked(lid, device_input + block_offset, input);
@@ -121,7 +121,7 @@ void flag_heads_kernel(Type* device_input, long long* device_heads)
     rocprim::block_discontinuity<Type, BlockSize> bdiscontinuity;
 
     FlagType head_flags[ItemsPerThread];
-    if(hipBlockIdx_x % 2 == 1)
+    if(blockIdx.x % 2 == 1)
     {
         const Type tile_predecessor_item = device_input[block_offset - 1];
         bdiscontinuity.flag_heads(head_flags, tile_predecessor_item, input, FlagOpType());
@@ -145,9 +145,9 @@ __global__
 __launch_bounds__(BlockSize)
 void flag_tails_kernel(Type* device_input, long long* device_tails)
 {
-    const unsigned int lid = hipThreadIdx_x;
+    const unsigned int lid = threadIdx.x;
     const unsigned int items_per_block = BlockSize * ItemsPerThread;
-    const unsigned int block_offset = hipBlockIdx_x * items_per_block;
+    const unsigned int block_offset = blockIdx.x * items_per_block;
 
     Type input[ItemsPerThread];
     rocprim::block_load_direct_blocked(lid, device_input + block_offset, input);
@@ -155,7 +155,7 @@ void flag_tails_kernel(Type* device_input, long long* device_tails)
     rocprim::block_discontinuity<Type, BlockSize> bdiscontinuity;
 
     FlagType tail_flags[ItemsPerThread];
-    if(hipBlockIdx_x % 2 == 0)
+    if(blockIdx.x % 2 == 0)
     {
         const Type tile_successor_item = device_input[block_offset + items_per_block];
         bdiscontinuity.flag_tails(tail_flags, tile_successor_item, input, FlagOpType());
@@ -179,9 +179,9 @@ __global__
 __launch_bounds__(BlockSize)
 void flag_heads_and_tails_kernel(Type* device_input, long long* device_heads, long long* device_tails)
 {
-    const unsigned int lid = hipThreadIdx_x;
+    const unsigned int lid = threadIdx.x;
     const unsigned int items_per_block = BlockSize * ItemsPerThread;
-    const unsigned int block_offset = hipBlockIdx_x * items_per_block;
+    const unsigned int block_offset = blockIdx.x * items_per_block;
 
     Type input[ItemsPerThread];
     rocprim::block_load_direct_blocked(lid, device_input + block_offset, input);
@@ -190,23 +190,23 @@ void flag_heads_and_tails_kernel(Type* device_input, long long* device_heads, lo
 
     FlagType head_flags[ItemsPerThread];
     FlagType tail_flags[ItemsPerThread];
-    if(hipBlockIdx_x % 4 == 0)
+    if(blockIdx.x % 4 == 0)
     {
         const Type tile_successor_item = device_input[block_offset + items_per_block];
         bdiscontinuity.flag_heads_and_tails(head_flags, tail_flags, tile_successor_item, input, FlagOpType());
     }
-    else if(hipBlockIdx_x % 4 == 1)
+    else if(blockIdx.x % 4 == 1)
     {
         const Type tile_predecessor_item = device_input[block_offset - 1];
         const Type tile_successor_item = device_input[block_offset + items_per_block];
         bdiscontinuity.flag_heads_and_tails(head_flags, tile_predecessor_item, tail_flags, tile_successor_item, input, FlagOpType());
     }
-    else if(hipBlockIdx_x % 4 == 2)
+    else if(blockIdx.x % 4 == 2)
     {
         const Type tile_predecessor_item = device_input[block_offset - 1];
         bdiscontinuity.flag_heads_and_tails(head_flags, tile_predecessor_item, tail_flags, input, FlagOpType());
     }
-    else if(hipBlockIdx_x % 4 == 3)
+    else if(blockIdx.x % 4 == 3)
     {
         bdiscontinuity.flag_heads_and_tails(head_flags, tail_flags, input, FlagOpType());
     }
@@ -236,11 +236,11 @@ auto test_block_discontinuity()
                            >::type;
     using flag_type = FlagType;
     using flag_op_type = FlagOpType;
-    constexpr size_t block_size = BlockSize;
-    constexpr size_t items_per_thread = ItemsPerThread;
-    constexpr size_t items_per_block = block_size * items_per_thread;
+    static constexpr size_t block_size = BlockSize;
+    static constexpr size_t items_per_thread = ItemsPerThread;
+    static constexpr size_t items_per_block = block_size * items_per_thread;
     const size_t size = items_per_block * 20;
-    constexpr size_t grid_size = size / items_per_block;
+    static constexpr size_t grid_size = size / items_per_block;
 
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
@@ -348,11 +348,11 @@ auto test_block_discontinuity()
                            >::type;
     using flag_type = FlagType;
     using flag_op_type = FlagOpType;
-    constexpr size_t block_size = BlockSize;
-    constexpr size_t items_per_thread = ItemsPerThread;
-    constexpr size_t items_per_block = block_size * items_per_thread;
+    static constexpr size_t block_size = BlockSize;
+    static constexpr size_t items_per_thread = ItemsPerThread;
+    static constexpr size_t items_per_block = block_size * items_per_thread;
     const size_t size = items_per_block * 20;
-    constexpr size_t grid_size = size / items_per_block;
+    static constexpr size_t grid_size = size / items_per_block;
 
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
@@ -460,11 +460,11 @@ auto test_block_discontinuity()
                            >::type;
     using flag_type = FlagType;
     using flag_op_type = FlagOpType;
-    constexpr size_t block_size = BlockSize;
-    constexpr size_t items_per_thread = ItemsPerThread;
-    constexpr size_t items_per_block = block_size * items_per_thread;
+    static constexpr size_t block_size = BlockSize;
+    static constexpr size_t items_per_thread = ItemsPerThread;
+    static constexpr size_t items_per_block = block_size * items_per_thread;
     const size_t size = items_per_block * 20;
-    constexpr size_t grid_size = size / items_per_block;
+    static constexpr size_t grid_size = size / items_per_block;
 
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())

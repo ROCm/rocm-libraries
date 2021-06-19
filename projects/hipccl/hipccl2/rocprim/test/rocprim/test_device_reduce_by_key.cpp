@@ -132,7 +132,14 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
     using key_distribution_type = typename std::conditional<
         std::is_floating_point<key_inner_type>::value,
         std::uniform_real_distribution<key_inner_type>,
-        std::uniform_int_distribution<key_inner_type>
+        typename std::conditional<
+            test_utils::is_valid_for_int_distribution<key_inner_type>::value,
+            std::uniform_int_distribution<key_inner_type>,
+            typename std::conditional<std::is_signed<key_inner_type>::value,
+                std::uniform_int_distribution<int>,
+                std::uniform_int_distribution<unsigned int>
+            >::type
+        >::type
     >::type;
 
     constexpr bool use_identity_iterator = TestFixture::params::use_identity_iterator;

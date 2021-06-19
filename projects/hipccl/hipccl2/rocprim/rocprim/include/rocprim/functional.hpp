@@ -33,9 +33,9 @@ BEGIN_ROCPRIM_NAMESPACE
 
 #define ROCPRIM_PRINT_ERROR_ONCE(message) \
 {                                          \
-    unsigned int idx = hipThreadIdx_x + (hipBlockIdx_x * hipBlockDim_x); \
-    idx += hipThreadIdx_y + (hipBlockIdx_y * hipBlockDim_y);             \
-    idx += hipThreadIdx_z + (hipBlockIdx_z * hipBlockDim_z);             \
+    unsigned int idx = threadIdx.x + (blockIdx.x * blockDim.x); \
+    idx += threadIdx.y + (blockIdx.y * blockDim.y);             \
+    idx += threadIdx.z + (blockIdx.z * blockDim.z);             \
     if (idx == 0)                                                        \
         printf("%s\n", #message);                                        \
 }

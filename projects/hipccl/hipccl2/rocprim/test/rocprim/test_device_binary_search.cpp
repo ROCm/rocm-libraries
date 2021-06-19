@@ -106,7 +106,7 @@ TYPED_TEST(RocprimDeviceBinarySearch, LowerBound)
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             const size_t haystack_size = size;
-            const size_t needles_size = std::sqrt(size);
+            const size_t needles_size = (size_t)std::sqrt(size); // cast promises no data loss, silences warning
             const size_t d = haystack_size / 100;
 
             // Generate data
@@ -216,7 +216,7 @@ TYPED_TEST(RocprimDeviceBinarySearch, UpperBound)
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        seed_type seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         for(size_t size : get_sizes(seed_value))
@@ -228,7 +228,7 @@ TYPED_TEST(RocprimDeviceBinarySearch, UpperBound)
             }
             SCOPED_TRACE(testing::Message() << "with size = " << size);
             const size_t haystack_size = size;
-            const size_t needles_size = std::sqrt(size);
+            const size_t needles_size = (size_t)std::sqrt(size); // cast promises no data loss, silences warning
             const size_t d = haystack_size / 100;
 
             // Generate data
@@ -351,7 +351,7 @@ TYPED_TEST(RocprimDeviceBinarySearch, BinarySearch)
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             const size_t haystack_size = size;
-            const size_t needles_size = std::sqrt(size);
+            const size_t needles_size = (size_t)std::sqrt(size); // cast promises no data loss, silences warning
             const size_t d = haystack_size / 100;
 
             // Generate data

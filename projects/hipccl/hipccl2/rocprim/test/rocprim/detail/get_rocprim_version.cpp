@@ -34,7 +34,7 @@ unsigned int get_rocprim_version_on_device()
     unsigned int version = 0;
 
     unsigned int * d_version;
-    HIP_CHECK(hipMalloc(&d_version, sizeof(unsigned int)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_version), sizeof(unsigned int)));
     HIP_CHECK(hipDeviceSynchronize());
 
     hipLaunchKernelGGL(

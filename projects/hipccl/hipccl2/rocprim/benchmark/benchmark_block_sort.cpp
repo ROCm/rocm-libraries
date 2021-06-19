@@ -70,11 +70,11 @@ __global__
 __launch_bounds__(BlockSize)
 void sort_keys_kernel(const T * input, T * output)
 {
-    const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
+    const unsigned int index = (blockIdx.x * BlockSize) + threadIdx.x;
 
     T key = input[index];
 
-    #pragma nounroll
+    ROCPRIM_NO_UNROLL
     for(unsigned int trial = 0; trial < Trials; trial++)
     {
         rp::block_sort<T, BlockSize> bsort;
@@ -93,12 +93,12 @@ __global__
 __launch_bounds__(BlockSize)
 void sort_pairs_kernel(const T * input, T * output)
 {
-    const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
+    const unsigned int index = (blockIdx.x * BlockSize) + threadIdx.x;
 
     T key = input[index];
     T value = key + T(1);
 
-    #pragma nounroll
+    ROCPRIM_NO_UNROLL
     for(unsigned int trial = 0; trial < Trials; trial++)
     {
         rp::block_sort<T, BlockSize, T> bsort;
@@ -115,7 +115,7 @@ template<
 >
 void run_benchmark(benchmark::State& state, benchmark_kinds benchmark_kind, hipStream_t stream, size_t N)
 {
-    constexpr auto block_size = BlockSize;
+    static constexpr auto block_size = BlockSize;
     const auto size = block_size * ((N + block_size - 1)/block_size);
 
     std::vector<T> input;
@@ -133,8 +133,8 @@ void run_benchmark(benchmark::State& state, benchmark_kinds benchmark_kind, hipS
     }
     T * d_input;
     T * d_output;
-    HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
-    HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), size * sizeof(T)));
     HIP_CHECK(
         hipMemcpy(
             d_input, input.data(),
@@ -151,16 +151,16 @@ void run_benchmark(benchmark::State& state, benchmark_kinds benchmark_kind, hipS
         if(benchmark_kind == benchmark_kinds::sort_keys)
         {
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(sort_keys_kernel<T, BlockSize, Trials>),
-                dim3(size/block_size), dim3(BlockSize), 0, stream,
+                HIP_KERNEL_NAME(sort_keys_kernel<T, block_size, Trials>),
+                dim3(size/block_size), dim3(block_size), 0, stream,
                 d_input, d_output
             );
         }
         else if(benchmark_kind == benchmark_kinds::sort_pairs)
         {
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(sort_pairs_kernel<T, BlockSize, Trials>),
-                dim3(size/block_size), dim3(BlockSize), 0, stream,
+                HIP_KERNEL_NAME(sort_pairs_kernel<T, block_size, Trials>),
+                dim3(size/block_size), dim3(block_size), 0, stream,
                 d_input, d_output
             );
         }

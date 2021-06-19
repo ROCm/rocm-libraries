@@ -24,18 +24,40 @@ option(BENCHMARK_CONFIG_TUNING "Benchmark device-level functions using various c
 
 function(add_rocprim_benchmark BENCHMARK_SOURCE)
   get_filename_component(BENCHMARK_TARGET ${BENCHMARK_SOURCE} NAME_WE)
+
   add_executable(${BENCHMARK_TARGET} ${BENCHMARK_SOURCE})
+
   target_link_libraries(${BENCHMARK_TARGET}
     PRIVATE
-      rocprim_hip
+      rocprim
       benchmark::benchmark
   )
-  foreach(amdgpu_target ${AMDGPU_TARGETS})
+  if(NOT USE_HIP_CPU)
     target_link_libraries(${BENCHMARK_TARGET}
       PRIVATE
-        --amdgpu-target=${amdgpu_target}
+        rocprim_hip
     )
-  endforeach()
+  else()
+    target_link_libraries(${BENCHMARK_TARGET}
+      PRIVATE
+        Threads::Threads
+        hip_cpu_rt::hip_cpu_rt
+    )
+    if(STL_DEPENDS_ON_TBB)
+      target_link_libraries(${BENCHMARK_TARGET}
+        PRIVATE
+          TBB::tbb
+      )
+    endif()
+  endif()
+
+  target_compile_options(${BENCHMARK_TARGET}
+    PRIVATE
+      $<$<CXX_COMPILER_ID:MSVC>:
+        /bigobj # number of sections exceeded object file format limit: compile with /bigobj
+      >
+  )
+
   set_target_properties(${BENCHMARK_TARGET}
     PROPERTIES
       RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmark"

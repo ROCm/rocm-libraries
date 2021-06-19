@@ -405,7 +405,7 @@ TYPED_TEST(RocprimDeviceSelectTests, UniqueEmptyInput)
         rocprim::unique(
             nullptr,
             temp_storage_size_bytes,
-            rocprim::make_constant_iterator<T>(123),
+            rocprim::make_constant_iterator<T>((T)123),
             rocprim::make_discard_iterator(),
             d_selected_count_output,
             0,
@@ -423,7 +423,7 @@ TYPED_TEST(RocprimDeviceSelectTests, UniqueEmptyInput)
         rocprim::unique(
             d_temp_storage,
             temp_storage_size_bytes,
-            rocprim::make_constant_iterator<T>(123),
+            rocprim::make_constant_iterator<T>((T)123),
             rocprim::make_discard_iterator(),
             d_selected_count_output,
             0,
@@ -658,10 +658,10 @@ TEST(RocprimDeviceSelectTests, UniqueGuardedOperator)
                 F * d_flag;
                 U * d_output;
                 unsigned int * d_selected_count_output;
-                HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
-                HIP_CHECK(hipMalloc(&d_flag, input_flag.size() * sizeof(F)));
-                HIP_CHECK(hipMalloc(&d_output, input.size() * sizeof(U)));
-                HIP_CHECK(hipMalloc(&d_selected_count_output, sizeof(unsigned int)));
+                HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), input.size() * sizeof(T)));
+                HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_flag), input_flag.size() * sizeof(F)));
+                HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), input.size() * sizeof(U)));
+                HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_selected_count_output), sizeof(unsigned int)));
                 HIP_CHECK(
                     hipMemcpy(
                         d_input, input.data(),

@@ -82,13 +82,13 @@ struct flag_heads
     __device__
     static void run(const T * d_input, T * d_output)
     {
-        const unsigned int lid = hipThreadIdx_x;
-        const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
+        const unsigned int lid = threadIdx.x;
+        const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
 
         T input[ItemsPerThread];
         rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
 
-        #pragma nounroll
+        ROCPRIM_NO_UNROLL
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             rp::block_discontinuity<T, BlockSize> bdiscontinuity;
@@ -125,13 +125,13 @@ struct flag_tails
     __device__
     static void run(const T * d_input, T * d_output)
     {
-        const unsigned int lid = hipThreadIdx_x;
-        const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
+        const unsigned int lid = threadIdx.x;
+        const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
 
         T input[ItemsPerThread];
         rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
 
-        #pragma nounroll
+        ROCPRIM_NO_UNROLL
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             rp::block_discontinuity<T, BlockSize> bdiscontinuity;
@@ -168,13 +168,13 @@ struct flag_heads_and_tails
     __device__
     static void run(const T * d_input, T * d_output)
     {
-        const unsigned int lid = hipThreadIdx_x;
-        const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
+        const unsigned int lid = threadIdx.x;
+        const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
 
         T input[ItemsPerThread];
         rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
 
-        #pragma nounroll
+        ROCPRIM_NO_UNROLL
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             rp::block_discontinuity<T, BlockSize> bdiscontinuity;
@@ -217,8 +217,8 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     std::vector<T> input = get_random_data<T>(size, T(0), T(10));
     T * d_input;
     T * d_output;
-    HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
-    HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), size * sizeof(T)));
     HIP_CHECK(
         hipMemcpy(
             d_input, input.data(),

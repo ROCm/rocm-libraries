@@ -46,7 +46,6 @@
 
 enum memory_operation_method
 {
-    memcpy,
     block_primitives_transpose,
     striped,
     vectorized,
@@ -96,11 +95,11 @@ struct operation<custom_operation, T, ItemsPerThread, BlockSize>
         (void) shared_storage;
         (void) shared_storage_size;
         (void) global_mem_output;
-        #pragma unroll
+        ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             input[i] = input[i] + 666;
-            #pragma unroll
+            ROCPRIM_UNROLL
             for(unsigned int j = 0; j < repeats; j++)
             {
                 input[i] = input[i] * (input[j % ItemsPerThread]);
@@ -153,9 +152,9 @@ struct operation<atomics_no_collision, T, ItemsPerThread, BlockSize>
         (void) shared_storage;
         (void) shared_storage_size;
         (void) input;
-        unsigned int index = hipThreadIdx_x * ItemsPerThread +
-                             hipBlockIdx_x * hipBlockDim_x * ItemsPerThread;
-        #pragma unroll
+        unsigned int index = threadIdx.x * ItemsPerThread +
+                             blockIdx.x * blockDim.x * ItemsPerThread;
+        ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             atomicAdd(&global_mem_output[index + i], T(666));
@@ -175,9 +174,9 @@ struct operation<atomics_inter_warp_collision, T, ItemsPerThread, BlockSize>
         (void) shared_storage;
         (void) shared_storage_size;
         (void) input;
-        unsigned int index = (hipThreadIdx_x % warpSize) * ItemsPerThread +
-                             hipBlockIdx_x * hipBlockDim_x * ItemsPerThread;
-        #pragma unroll
+        unsigned int index = (threadIdx.x % warpSize) * ItemsPerThread +
+                             blockIdx.x * blockDim.x * ItemsPerThread;
+        ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             atomicAdd(&global_mem_output[index + i], T(666));
@@ -197,8 +196,8 @@ struct operation<atomics_inter_block_collision, T, ItemsPerThread, BlockSize>
         (void) shared_storage;
         (void) shared_storage_size;
         (void) input;
-        unsigned int index = hipThreadIdx_x * ItemsPerThread;
-        #pragma unroll
+        unsigned int index = threadIdx.x * ItemsPerThread;
+        ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             atomicAdd(&global_mem_output[index + i], T(666));
@@ -236,7 +235,7 @@ void operation_kernel(T* input, T* output, CustomOp op)
         typename block_store_type::storage_type store;
     } storage;
 
-    int offset = hipBlockIdx_x * items_per_block;
+    int offset = blockIdx.x * items_per_block;
 
     T items[ItemsPerThread];
     load.load(input + offset, items, storage.load);
@@ -260,17 +259,17 @@ __launch_bounds__(BlockSize)
 void operation_kernel(T* input, T* output, CustomOp op)
 {
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
-    int offset = hipBlockIdx_x * items_per_block;
+    int offset = blockIdx.x * items_per_block;
     T items[ItemsPerThread];
 
     rocprim::block_load_direct_blocked_vectorized<T, T, ItemsPerThread>
-        (hipThreadIdx_x, input + offset, items);
+        (threadIdx.x, input + offset, items);
     __syncthreads();
 
     op(items, nullptr, 0, output);
 
     rocprim::block_store_direct_blocked_vectorized<T, T, ItemsPerThread>
-        (hipThreadIdx_x, output + offset, items);
+        (threadIdx.x, output + offset, items);
 }
 
 // striped method base kernel
@@ -287,8 +286,8 @@ __global__
 __launch_bounds__(BlockSize)
 void operation_kernel(T* input, T* output, CustomOp op)
 {
-    const unsigned int lid = hipThreadIdx_x;
-    const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
+    const unsigned int lid = threadIdx.x;
+    const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
     T items[ItemsPerThread];
     rocprim::block_load_direct_striped<BlockSize>(lid, input + block_offset, items);
     op(items, nullptr, 0, output);
@@ -325,7 +324,7 @@ void operation_kernel(T* input, T* output, CustomOp op)
         typename block_store_type::storage_type store;
     } storage;
 
-    int offset = hipBlockIdx_x * items_per_block;
+    int offset = blockIdx.x * items_per_block;
 
     T items[ItemsPerThread];
     load.load(input + offset, items, storage.load);
@@ -361,8 +360,8 @@ void run_benchmark(benchmark::State& state,
     }
     T * d_input;
     T * d_output;
-    HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
-    HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), size * sizeof(T)));
     HIP_CHECK(
         hipMemcpy(
             d_input, input.data(),
@@ -432,8 +431,8 @@ void run_benchmark_memcpy(benchmark::State& state,
     }
     T * d_input;
     T * d_output;
-    HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
-    HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), size * sizeof(T)));
     // Warm-up
     for(size_t i = 0; i < 10; i++)
     {

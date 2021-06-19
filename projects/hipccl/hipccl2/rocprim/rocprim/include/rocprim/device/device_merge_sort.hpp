@@ -98,16 +98,16 @@ void block_merge_kernel(KeysInputIterator keys_input,
 
 #define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start) \
     { \
-        auto error = hipPeekAtLastError(); \
-        if(error != hipSuccess) return error; \
+        auto _error = hipPeekAtLastError(); \
+        if(_error != hipSuccess) return _error; \
         if(debug_synchronous) \
         { \
             std::cout << name << "(" << size << ")"; \
-            auto error = hipStreamSynchronize(stream); \
-            if(error != hipSuccess) return error; \
-            auto end = std::chrono::high_resolution_clock::now(); \
-            auto d = std::chrono::duration_cast<std::chrono::duration<double>>(end - start); \
-            std::cout << " " << d.count() * 1000 << " ms" << '\n'; \
+            auto __error = hipStreamSynchronize(stream); \
+            if(__error != hipSuccess) return __error; \
+            auto _end = std::chrono::high_resolution_clock::now(); \
+            auto _d = std::chrono::duration_cast<std::chrono::duration<double>>(_end - start); \
+            std::cout << " " << _d.count() * 1000 << " ms" << '\n'; \
         } \
     }
 
@@ -142,7 +142,7 @@ hipError_t merge_sort_impl(void * temporary_storage,
     >;
 
     // Block size
-    constexpr unsigned int block_size = config::block_size;
+    static constexpr unsigned int block_size = config::block_size;
 
     const size_t keys_bytes = ::rocprim::detail::align_size(size * sizeof(key_type));
     const size_t values_bytes =

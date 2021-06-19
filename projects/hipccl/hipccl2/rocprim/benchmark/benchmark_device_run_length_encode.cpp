@@ -80,7 +80,7 @@ void run_encode_benchmark(benchmark::State& state, size_t max_length, hipStream_
     }
 
     key_type * d_input;
-    HIP_CHECK(hipMalloc(&d_input, size * sizeof(key_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(key_type)));
     HIP_CHECK(
         hipMemcpy(
             d_input, input.data(),
@@ -92,9 +92,9 @@ void run_encode_benchmark(benchmark::State& state, size_t max_length, hipStream_
     key_type * d_unique_output;
     count_type * d_counts_output;
     count_type * d_runs_count_output;
-    HIP_CHECK(hipMalloc(&d_unique_output, runs_count * sizeof(key_type)));
-    HIP_CHECK(hipMalloc(&d_counts_output, runs_count * sizeof(count_type)));
-    HIP_CHECK(hipMalloc(&d_runs_count_output, sizeof(count_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_unique_output), runs_count * sizeof(key_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_counts_output), runs_count * sizeof(count_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_runs_count_output), sizeof(count_type)));
 
     void * d_temporary_storage = nullptr;
     size_t temporary_storage_bytes = 0;
@@ -183,7 +183,7 @@ void run_non_trivial_runs_benchmark(benchmark::State& state, size_t max_length, 
     }
 
     key_type * d_input;
-    HIP_CHECK(hipMalloc(&d_input, size * sizeof(key_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(key_type)));
     HIP_CHECK(
         hipMemcpy(
             d_input, input.data(),
@@ -195,9 +195,9 @@ void run_non_trivial_runs_benchmark(benchmark::State& state, size_t max_length, 
     offset_type * d_offsets_output;
     count_type * d_counts_output;
     count_type * d_runs_count_output;
-    HIP_CHECK(hipMalloc(&d_offsets_output, runs_count * sizeof(offset_type)));
-    HIP_CHECK(hipMalloc(&d_counts_output, runs_count * sizeof(count_type)));
-    HIP_CHECK(hipMalloc(&d_runs_count_output, sizeof(count_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_offsets_output), runs_count * sizeof(offset_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_counts_output), runs_count * sizeof(count_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_runs_count_output), sizeof(count_type)));
 
     void * d_temporary_storage = nullptr;
     size_t temporary_storage_bytes = 0;

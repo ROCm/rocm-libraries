@@ -157,7 +157,7 @@ public:
     {
         // Reduce thread items
         T thread_input = input[0];
-        #pragma unroll
+        ROCPRIM_UNROLL
         for(unsigned int i = 1; i < ItemsPerThread; i++)
         {
             thread_input = scan_op(thread_input, input[i]);
@@ -179,7 +179,7 @@ public:
             output[0] = scan_op(thread_input, input[0]);
         }
         // Final thread-local scan
-        #pragma unroll
+        ROCPRIM_UNROLL
         for(unsigned int i = 1; i < ItemsPerThread; i++)
         {
             output[i] = scan_op(output[i-1], input[i]);
@@ -236,7 +236,7 @@ public:
         storage_type_& storage_ = storage.get();
         // Reduce thread items
         T thread_input = input[0];
-        #pragma unroll
+        ROCPRIM_UNROLL
         for(unsigned int i = 1; i < ItemsPerThread; i++)
         {
             thread_input = scan_op(thread_input, input[i]);
@@ -267,7 +267,7 @@ public:
         // Include block prefix
         output[0] = scan_op(block_prefix, output[0]);
         // Final thread-local scan
-        #pragma unroll
+        ROCPRIM_UNROLL
         for(unsigned int i = 1; i < ItemsPerThread; i++)
         {
             output[i] = scan_op(output[i-1], input[i]);
@@ -366,7 +366,7 @@ public:
     {
         // Reduce thread items
         T thread_input = input[0];
-        #pragma unroll
+        ROCPRIM_UNROLL
         for(unsigned int i = 1; i < ItemsPerThread; i++)
         {
             thread_input = scan_op(thread_input, input[i]);
@@ -391,7 +391,7 @@ public:
         }
         output[0] = exclusive;
 
-        #pragma unroll
+        ROCPRIM_UNROLL
         for(unsigned int i = 1; i < ItemsPerThread; i++)
         {
             exclusive = scan_op(exclusive, prev);
@@ -453,7 +453,7 @@ public:
         storage_type_& storage_ = storage.get();
         // Reduce thread items
         T thread_input = input[0];
-        #pragma unroll
+        ROCPRIM_UNROLL
         for(unsigned int i = 1; i < ItemsPerThread; i++)
         {
             thread_input = scan_op(thread_input, input[i]);
@@ -484,7 +484,7 @@ public:
         }
         output[0] = exclusive;
 
-        #pragma unroll
+        ROCPRIM_UNROLL
         for(unsigned int i = 1; i < ItemsPerThread; i++)
         {
             exclusive = scan_op(exclusive, prev);

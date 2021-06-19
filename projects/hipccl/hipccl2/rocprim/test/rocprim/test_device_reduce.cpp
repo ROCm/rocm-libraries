@@ -174,7 +174,7 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
 
             // Generate data
             std::vector<T> input = test_utils::get_random_data<T>(size, 1, 100, seed_value);
-            std::vector<U> output(1, 0);
+            std::vector<U> output(1, (U)0);
 
             // reduce function
             binary_op_type plus_op;
@@ -278,7 +278,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
 
             // Generate data
             std::vector<T> input = test_utils::get_random_data<T>(size, 1, 100, seed_value);
-            std::vector<U> output(1, 0);
+            std::vector<U> output(1, (U)0);
 
             T * d_input;
             U * d_output;
@@ -415,8 +415,8 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
             std::vector<key_value> input(size);
             for (size_t i = 0; i < size; i++)
             {
-                input[i].key = i;
-                input[i].value = test_utils::get_random_value<T>(1, 100, seed_value);
+                input[i].key = (int)i;
+                input[i].value = test_utils::get_random_data<T>(1, 1, 100, seed_value)[0];
             }
             std::vector<key_value> output(1);
 

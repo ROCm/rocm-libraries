@@ -86,7 +86,7 @@ void run_benchmark(benchmark::State& state, size_t desired_segments, hipStream_t
     std::iota(values_input.begin(), values_input.end(), 0);
 
     offset_type * d_offsets;
-    HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_offsets), (segments_count + 1) * sizeof(offset_type)));
     HIP_CHECK(
         hipMemcpy(
             d_offsets, offsets.data(),
@@ -96,7 +96,7 @@ void run_benchmark(benchmark::State& state, size_t desired_segments, hipStream_t
     );
 
     value_type * d_values_input;
-    HIP_CHECK(hipMalloc(&d_values_input, size * sizeof(value_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_values_input), size * sizeof(value_type)));
     HIP_CHECK(
         hipMemcpy(
             d_values_input, values_input.data(),
@@ -106,7 +106,7 @@ void run_benchmark(benchmark::State& state, size_t desired_segments, hipStream_t
     );
 
     value_type * d_aggregates_output;
-    HIP_CHECK(hipMalloc(&d_aggregates_output, segments_count * sizeof(value_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_aggregates_output), segments_count * sizeof(value_type)));
 
     rocprim::plus<value_type> reduce_op;
     value_type init(0);

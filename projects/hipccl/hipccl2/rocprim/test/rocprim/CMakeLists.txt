@@ -23,23 +23,54 @@
 function(add_rocprim_test TEST_NAME TEST_SOURCES)
   list(GET TEST_SOURCES 0 TEST_MAIN_SOURCE)
   get_filename_component(TEST_TARGET ${TEST_MAIN_SOURCE} NAME_WE)
+
   add_executable(${TEST_TARGET} ${TEST_SOURCES})
+
   target_include_directories(${TEST_TARGET} SYSTEM BEFORE
     PUBLIC
-      ${GTEST_INCLUDE_DIRS}
       ${COMMON_TEST_HEADER_DIRECTORY}
   )
-  target_link_libraries(${TEST_TARGET}
-    PRIVATE
-      rocprim_hip
-      ${GTEST_BOTH_LIBRARIES}
-  )
-  foreach(amdgpu_target ${AMDGPU_TARGETS})
+
+  if(TARGET GTest::GTest)
     target_link_libraries(${TEST_TARGET}
       PRIVATE
-        --amdgpu-target=${amdgpu_target}
+        GTest::GTest
+        GTest::Main
     )
-  endforeach()
+  else()
+    target_link_libraries(${TEST_TARGET}
+      PRIVATE
+        GTest::gtest
+        GTest::gtest_main
+    )
+  endif()
+  if(NOT USE_HIP_CPU)
+    target_link_libraries(${TEST_TARGET}
+      PRIVATE
+        rocprim_hip
+    )
+  else()
+    target_link_libraries(${TEST_TARGET}
+      PRIVATE
+        rocprim
+        Threads::Threads
+        hip_cpu_rt::hip_cpu_rt
+    )
+    if(STL_DEPENDS_ON_TBB)
+      target_link_libraries(${TEST_TARGET}
+        PRIVATE
+          TBB::tbb
+      )
+    endif()
+  endif()
+
+  target_compile_options(${TEST_TARGET}
+    PRIVATE
+      $<$<CXX_COMPILER_ID:MSVC>:
+        /bigobj # number of sections exceeded object file format limit: compile with /bigobj
+      >
+  )
+
   set_target_properties(${TEST_TARGET}
     PROPERTIES
       RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test/rocprim"
@@ -98,7 +129,9 @@ add_rocprim_test("rocprim.device_segmented_scan" test_device_segmented_scan.cpp)
 add_rocprim_test("rocprim.device_select" test_device_select.cpp)
 add_rocprim_test("rocprim.device_transform" test_device_transform.cpp)
 add_rocprim_test("rocprim.discard_iterator" test_discard_iterator.cpp)
-add_rocprim_test("rocprim.texture_cache_iterator" test_texture_cache_iterator.cpp)
+if(NOT USE_HIP_CPU)
+  add_rocprim_test("rocprim.texture_cache_iterator" test_texture_cache_iterator.cpp)
+endif()
 add_rocprim_test("rocprim.thread" test_thread.cpp)
 add_rocprim_test("rocprim.thread_algos" test_thread_algos.cpp)
 add_rocprim_test("rocprim.transform_iterator" test_transform_iterator.cpp)

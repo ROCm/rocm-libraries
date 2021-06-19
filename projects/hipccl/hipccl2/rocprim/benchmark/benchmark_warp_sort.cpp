@@ -59,11 +59,11 @@ __global__
 __launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void warp_sort_kernel(K* input_key)
 {
-    const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+    const unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
 
     auto key = input_key[i];
     rp::warp_sort<K, WarpSize> wsort;
-    #pragma nounroll
+    ROCPRIM_NO_UNROLL
     for(unsigned int trial = 0; trial < Trials; trial++)
     {
         wsort.sort(key);
@@ -76,12 +76,12 @@ __global__
 __launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void warp_sort_by_key_kernel(K* input_key, V* input_value)
 {
-    const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+    const unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
 
     auto key = input_key[i];
     auto value = input_value[i];
     rp::warp_sort<K, WarpSize, V> wsort;
-     #pragma nounroll
+     ROCPRIM_NO_UNROLL
     for(unsigned int trial = 0; trial < Trials; trial++)
     {
         wsort.sort(key, value);
@@ -121,13 +121,13 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
     // Make sure size is a multiple of BlockSize
     size = BlockSize * ((size + BlockSize - 1)/BlockSize);
     // Allocate and fill memory
-    std::vector<Key> input_key = get_random_data(size, Key(0), get_max_value<Key>());
+    std::vector<Key> input_key = get_random_data<Key>(size, 0, get_max_value<Key>());
     std::vector<Value> input_value(size_t(1));
-    if(SortByKey) input_value = get_random_data(size, Value(0), get_max_value<Value>());
+    if(SortByKey) input_value = get_random_data<Value>(size, 0, get_max_value<Value>());
     Key * d_input_key = nullptr;
     Value * d_input_value = nullptr;
-    HIP_CHECK(hipMalloc(&d_input_key, size * sizeof(Key)));
-    if(SortByKey) HIP_CHECK(hipMalloc(&d_input_value, size * sizeof(Value)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input_key), size * sizeof(Key)));
+    if(SortByKey) HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input_value), size * sizeof(Value)));
     HIP_CHECK(
         hipMemcpy(
             d_input_key, input_key.data(),

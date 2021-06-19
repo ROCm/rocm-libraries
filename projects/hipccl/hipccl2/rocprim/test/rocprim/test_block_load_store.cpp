@@ -248,12 +248,12 @@ __global__
 __launch_bounds__(BlockSize)
 void load_store_kernel(Type* device_input, Type* device_output)
 {
-    Type items[ItemsPerThread];
-    unsigned int offset = hipBlockIdx_x * BlockSize * ItemsPerThread;
+    Type _items[ItemsPerThread];
+    auto offset = blockIdx.x * BlockSize * ItemsPerThread;
     rocprim::block_load<Type, BlockSize, ItemsPerThread, LoadMethod> load;
     rocprim::block_store<Type, BlockSize, ItemsPerThread, StoreMethod> store;
-    load.load(device_input + offset, items);
-    store.store(device_output + offset, items);
+    load.load(device_input + offset, _items);
+    store.store(device_output + offset, _items);
 }
 
 TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClass)
@@ -263,11 +263,11 @@ TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClass)
     HIP_CHECK(hipSetDevice(device_id));
 
     using Type = typename TestFixture::params::type;
-    constexpr size_t block_size = TestFixture::params::block_size;
-    constexpr rocprim::block_load_method load_method = TestFixture::params::load_method;
-    constexpr rocprim::block_store_method store_method = TestFixture::params::store_method;
-    const size_t items_per_thread = TestFixture::params::items_per_thread;
-    constexpr auto items_per_block = block_size * items_per_thread;
+    static constexpr size_t block_size = TestFixture::params::block_size;
+    static constexpr rocprim::block_load_method load_method = TestFixture::params::load_method;
+    static constexpr rocprim::block_store_method store_method = TestFixture::params::store_method;
+    static constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
+    static constexpr auto items_per_block = block_size * items_per_thread;
     const size_t size = items_per_block * 113;
     const auto grid_size = size / items_per_block;
     // Given block size not supported
@@ -283,10 +283,10 @@ TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClass)
 
         // Generate data
         std::vector<Type> input = test_utils::get_random_data<Type>(size, -100, 100, seed_value);
-        std::vector<Type> output(input.size(), 0);
+        std::vector<Type> output(input.size(), (Type)0);
 
         // Calculate expected results on host
-        std::vector<Type> expected(input.size(), 0);
+        std::vector<Type> expected(input.size(), (Type)0);
         for (size_t i = 0; i < 113; i++)
         {
             size_t block_offset = i * items_per_block;
@@ -351,12 +351,12 @@ __global__
 __launch_bounds__(BlockSize)
 void load_store_valid_kernel(Type* device_input, Type* device_output, size_t valid)
 {
-    Type items[ItemsPerThread];
-    unsigned int offset = hipBlockIdx_x * BlockSize * ItemsPerThread;
+    Type _items[ItemsPerThread];
+    auto offset = blockIdx.x * BlockSize * ItemsPerThread;
     rocprim::block_load<Type, BlockSize, ItemsPerThread, LoadMethod> load;
     rocprim::block_store<Type, BlockSize, ItemsPerThread, StoreMethod> store;
-    load.load(device_input + offset, items, valid);
-    store.store(device_output + offset, items, valid);
+    load.load(device_input + offset, _items, (unsigned int)valid);
+    store.store(device_output + offset, _items, (unsigned int)valid);
 }
 
 TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClassValid)
@@ -366,11 +366,11 @@ TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClassValid)
     HIP_CHECK(hipSetDevice(device_id));
 
     using Type = typename TestFixture::params::type;
-    constexpr size_t block_size = TestFixture::params::block_size;
-    constexpr rocprim::block_load_method load_method = TestFixture::params::load_method;
-    constexpr rocprim::block_store_method store_method = TestFixture::params::store_method;
-    const size_t items_per_thread = TestFixture::params::items_per_thread;
-    constexpr auto items_per_block = block_size * items_per_thread;
+    static constexpr size_t block_size = TestFixture::params::block_size;
+    static constexpr rocprim::block_load_method load_method = TestFixture::params::load_method;
+    static constexpr rocprim::block_store_method store_method = TestFixture::params::store_method;
+    static constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
+    static constexpr auto items_per_block = block_size * items_per_thread;
     const size_t size = items_per_block * 113;
     const auto grid_size = size / items_per_block;
     // Given block size not supported
@@ -388,10 +388,10 @@ TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClassValid)
 
         // Generate data
         std::vector<Type> input = test_utils::get_random_data<Type>(size, -100, 100, seed_value);
-        std::vector<Type> output(input.size(), 0);
+        std::vector<Type> output(input.size(), (Type)0);
 
         // Calculate expected results on host
-        std::vector<Type> expected(input.size(), 0);
+        std::vector<Type> expected(input.size(), (Type)0);
         for (size_t i = 0; i < 113; i++)
         {
             size_t block_offset = i * items_per_block;
@@ -462,18 +462,19 @@ template<
     rocprim::block_load_method LoadMethod,
     rocprim::block_store_method StoreMethod,
     unsigned int BlockSize,
-    unsigned int ItemsPerThread
+    unsigned int ItemsPerThread,
+    class Def
 >
 __global__
 __launch_bounds__(BlockSize)
-void load_store_valid_default_kernel(Type* device_input, Type* device_output, size_t valid, int _default)
+void load_store_valid_default_kernel(Type* device_input, Type* device_output, size_t valid, Def _default)
 {
-    Type items[ItemsPerThread];
-    unsigned int offset = hipBlockIdx_x * BlockSize * ItemsPerThread;
+    Type _items[ItemsPerThread];
+    auto offset = blockIdx.x * BlockSize * ItemsPerThread;
     rocprim::block_load<Type, BlockSize, ItemsPerThread, LoadMethod> load;
     rocprim::block_store<Type, BlockSize, ItemsPerThread, StoreMethod> store;
-    load.load(device_input + offset, items, valid, _default);
-    store.store(device_output + offset, items);
+    load.load(device_input + offset, _items, (unsigned int)valid, _default);
+    store.store(device_output + offset, _items);
 }
 
 TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClassDefault)
@@ -483,11 +484,11 @@ TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClassDefault)
     HIP_CHECK(hipSetDevice(device_id));
 
     using Type = typename TestFixture::params::type;
-    constexpr size_t block_size = TestFixture::params::block_size;
-    constexpr rocprim::block_load_method load_method = TestFixture::params::load_method;
-    constexpr rocprim::block_store_method store_method = TestFixture::params::store_method;
-    const size_t items_per_thread = TestFixture::params::items_per_thread;
-    constexpr auto items_per_block = block_size * items_per_thread;
+    static constexpr size_t block_size = TestFixture::params::block_size;
+    static constexpr rocprim::block_load_method load_method = TestFixture::params::load_method;
+    static constexpr rocprim::block_store_method store_method = TestFixture::params::store_method;
+    static constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
+    static constexpr auto items_per_block = block_size * items_per_thread;
     const size_t size = items_per_block * 113;
     const auto grid_size = size / items_per_block;
     // Given block size not supported
@@ -497,7 +498,7 @@ TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClassDefault)
     }
 
     const size_t valid = items_per_thread + 1;
-    int _default = -1;
+    Type _default = (Type)-1;
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -506,7 +507,7 @@ TYPED_TEST(RocprimBlockLoadStoreClassTests, LoadStoreClassDefault)
 
         // Generate data
         std::vector<Type> input = test_utils::get_random_data<Type>(size, -100, 100, seed_value);
-        std::vector<Type> output(input.size(), 0);
+        std::vector<Type> output(input.size(), (Type)0);
 
         // Calculate expected results on host
         std::vector<Type> expected(input.size(), _default);

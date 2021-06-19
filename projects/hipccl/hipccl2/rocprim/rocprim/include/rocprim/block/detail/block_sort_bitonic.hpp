@@ -240,11 +240,11 @@ private:
             };
         wsort.sort(kv..., compare_function2);
 
-        #pragma unroll
+        ROCPRIM_UNROLL
         for(unsigned int length = ::rocprim::device_warp_size(); length < Size; length *= 2)
         {
             bool dir = (flat_tid & (length * 2)) != 0;
-            #pragma unroll
+            ROCPRIM_UNROLL
             for(unsigned int k = length; k > 0; k /= 2)
             {
                 copy_to_shared(kv..., flat_tid, storage);
@@ -301,7 +301,7 @@ private:
         unsigned int odd_id = (is_even) ? ::rocprim::max(flat_tid, 1u) - 1 : ::rocprim::min(flat_tid + 1, Size - 1);
         unsigned int even_id = (is_even) ? ::rocprim::min(flat_tid + 1, Size - 1) : ::rocprim::max(flat_tid, 1u) - 1;
 
-        #pragma unroll
+        ROCPRIM_UNROLL
         for(unsigned int length = 0; length < Size; length++)
         {
             unsigned int next_id = (length % 2) == 0 ? even_id : odd_id;

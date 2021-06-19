@@ -31,6 +31,14 @@ list( APPEND CMAKE_PREFIX_PATH /opt/rocm/llvm /opt/rocm )
 # rocPRIM project
 project(rocprim LANGUAGES CXX)
 
+# Build options
+option(BUILD_TEST "Build tests (requires googletest)" OFF)
+option(BUILD_BENCHMARK "Build benchmarks" OFF)
+option(BUILD_EXAMPLE "Build examples" OFF)
+option(USE_HIP_CPU "Prefer HIP-CPU runtime instead of HW acceleration" OFF)
+# Disables building tests, benchmarks, examples
+option(ONLY_INSTALL "Only install" OFF)
+
 # CMake modules
 list(APPEND CMAKE_MODULE_PATH
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake
@@ -46,36 +54,35 @@ endif()
 
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker search and installed rpath")
 
-# Get dependencies
-include(cmake/Dependencies.cmake)
-
-# Set the AMDGPU_TARGETS with backward compatiblity
-# Use target ID syntax if supported for AMDGPU_TARGETS
-if(COMMAND rocm_check_target_ids)
-  rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-    TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx1030"
-  )
-else()
-  # Detect compiler support for target ID
-  # This section is deprecated. Please use rocm_check_target_ids for future use.
-  if( CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" )
-    execute_process(COMMAND ${CMAKE_CXX_COMPILER} "--help"
-      OUTPUT_VARIABLE CXX_OUTPUT
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-      ERROR_STRIP_TRAILING_WHITESPACE)
-    string(REGEX MATCH ".mcode\-object\-version" TARGET_ID_SUPPORT ${CXX_OUTPUT})
-  endif()
-  if(TARGET_ID_SUPPORT)
-    set(DEFAULT_AMDGPU_TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-")
+if(NOT USE_HIP_CPU)
+  # Set the AMDGPU_TARGETS with backward compatiblity
+  # Use target ID syntax if supported for AMDGPU_TARGETS
+  if(COMMAND rocm_check_target_ids)
+    rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
+      TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx1030"
+    )
   else()
-    set(DEFAULT_AMDGPU_TARGETS "gfx803;gfx900;gfx906;gfx908")
+    # Detect compiler support for target ID
+    # This section is deprecated. Please use rocm_check_target_ids for future use.
+    if( CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" )
+      execute_process(COMMAND ${CMAKE_CXX_COMPILER} "--help"
+        OUTPUT_VARIABLE CXX_OUTPUT
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_STRIP_TRAILING_WHITESPACE)
+      string(REGEX MATCH ".mcode\-object\-version" TARGET_ID_SUPPORT ${CXX_OUTPUT})
+    endif()
+    if(TARGET_ID_SUPPORT)
+      set(DEFAULT_AMDGPU_TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx1030")
+    else()
+      set(DEFAULT_AMDGPU_TARGETS "gfx803;gfx900;gfx906;gfx908;gfx1030")
+    endif()
   endif()
-endif()
-set(AMDGPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "List of specific machine types for library to target")
-set(AMDGPU_TEST_TARGETS "" CACHE STRING "List of specific device types to test for") # Leave empty for default system device
+  set(AMDGPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "List of specific machine types for library to target")
+  set(AMDGPU_TEST_TARGETS "" CACHE STRING "List of specific device types to test for") # Leave empty for default system device
 
-# Verify that hcc compiler is used on ROCM platform
-include(cmake/VerifyCompiler.cmake)
+  # Verify that hcc compiler is used on ROCM platform
+  include(cmake/VerifyCompiler.cmake)
+endif()
 
 # Build options
 # Disable -Werror
@@ -98,11 +105,8 @@ set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-if(DISABLE_WERROR)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
-else()
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror")
-endif()
+# Get dependencies
+include(cmake/Dependencies.cmake)
 
 # Setup VERSION
 set(VERSION_STRING "2.10.9")

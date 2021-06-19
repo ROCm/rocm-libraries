@@ -182,7 +182,7 @@ auto partition_block_load_flags(InputIterator /* block_predecessor */,
     if(is_last_block) // last block
     {
         const auto offset = block_thread_id * ItemsPerThread;
-        #pragma unroll
+        ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             if((offset + i) < valid_in_last_block)
@@ -197,7 +197,7 @@ auto partition_block_load_flags(InputIterator /* block_predecessor */,
     }
     else
     {
-        #pragma unroll
+        ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             is_selected[i] = predicate(values[i]);
@@ -314,7 +314,7 @@ auto partition_block_load_flags(InputIterator block_predecessor,
     if(is_last_block)
     {
         const auto offset = block_thread_id * ItemsPerThread;
-        #pragma unroll
+        ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             if((offset + i) >= valid_in_last_block)
@@ -354,7 +354,7 @@ auto partition_scatter(ValueType (&values)[ItemsPerThread],
 
     // Scatter selected/rejected values to shared memory
     auto scatter_storage = storage.get();
-    #pragma unroll
+    ROCPRIM_UNROLL
     for(unsigned int i = 0; i < ItemsPerThread; i++)
     {
         unsigned int item_index = (flat_block_thread_id * ItemsPerThread) + i;
@@ -366,7 +366,7 @@ auto partition_scatter(ValueType (&values)[ItemsPerThread],
     }
     ::rocprim::syncthreads(); // sync threads to reuse shared memory
 
-    #pragma unroll
+    ROCPRIM_UNROLL
     for(unsigned int i = 0; i < ItemsPerThread; i++)
     {
         unsigned int item_index = (i * BlockSize) + flat_block_thread_id;
@@ -421,7 +421,7 @@ auto partition_scatter(ValueType (&values)[ItemsPerThread],
     {
         // Scatter selected values to shared memory
         auto scatter_storage = storage.get();
-        #pragma unroll
+        ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             unsigned int scatter_index = output_indices[i] - selected_prefix;
@@ -440,7 +440,7 @@ auto partition_scatter(ValueType (&values)[ItemsPerThread],
     }
     else
     {
-        #pragma unroll
+        ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             if(!is_last_block || output_indices[i] < (selected_prefix + selected_in_block))
@@ -578,7 +578,7 @@ void partition_kernel_impl(InputIterator input,
     );
 
     // Convert true/false is_selected flags to 0s and 1s
-    #pragma unroll
+    ROCPRIM_UNROLL
     for(unsigned int i = 0; i < items_per_thread; i++)
     {
         output_indices[i] = is_selected[i] ? 1 : 0;

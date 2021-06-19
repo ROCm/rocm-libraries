@@ -76,7 +76,7 @@ constexpr unsigned int device_warp_size()
 ROCPRIM_DEVICE inline
 unsigned int flat_block_size()
 {
-    return hipBlockDim_z * hipBlockDim_y * hipBlockDim_x;
+    return blockDim.z * blockDim.y * blockDim.x;
 }
 
 /// \brief Returns flat size of a multidimensional tile (block).
@@ -92,16 +92,21 @@ unsigned int flat_tile_size()
 ROCPRIM_DEVICE inline
 unsigned int lane_id()
 {
+#ifndef __HIP_CPU_RT__
     return ::__lane_id();
+#else
+    using namespace hip::detail;
+    return id(Fiber::this_fiber()) % warpSize;
+#endif
 }
 
 /// \brief Returns flat (linear, 1D) thread identifier in a multidimensional block (tile).
 ROCPRIM_DEVICE inline
 unsigned int flat_block_thread_id()
 {
-    return (hipThreadIdx_z * hipBlockDim_y * hipBlockDim_x)
-        + (hipThreadIdx_y * hipBlockDim_x)
-        + hipThreadIdx_x;
+    return (threadIdx.z * blockDim.y * blockDim.x)
+        + (threadIdx.y * blockDim.x)
+        + threadIdx.x;
 }
 
 /// \brief Returns flat (linear, 1D) thread identifier in a multidimensional block (tile). Use template parameters to optimize 1D or 2D kernels.
@@ -110,7 +115,7 @@ ROCPRIM_DEVICE inline
 auto flat_block_thread_id()
     -> typename std::enable_if<(BlockSizeY == 1 && BlockSizeZ == 1), unsigned int>::type
 {
-    return hipThreadIdx_x;
+    return threadIdx.x;
 }
 
 template<unsigned int BlockSizeX, unsigned int BlockSizeY, unsigned int BlockSizeZ>
@@ -118,7 +123,7 @@ ROCPRIM_DEVICE inline
 auto flat_block_thread_id()
     -> typename std::enable_if<(BlockSizeY > 1 && BlockSizeZ == 1), unsigned int>::type
 {
-    return hipThreadIdx_x + (hipThreadIdx_y * hipBlockDim_x);
+    return threadIdx.x + (threadIdx.y * blockDim.x);
 }
 
 template<unsigned int BlockSizeX, unsigned int BlockSizeY, unsigned int BlockSizeZ>
@@ -126,8 +131,8 @@ ROCPRIM_DEVICE inline
 auto flat_block_thread_id()
     -> typename std::enable_if<(BlockSizeY > 1 && BlockSizeZ > 1), unsigned int>::type
 {
-    return hipThreadIdx_x + (hipThreadIdx_y * hipBlockDim_x) +
-           (hipThreadIdx_z * hipBlockDim_y * hipBlockDim_x);
+    return threadIdx.x + (threadIdx.y * blockDim.x) +
+           (threadIdx.z * blockDim.y * blockDim.x);
 }
 
 /// \brief Returns flat (linear, 1D) thread identifier in a multidimensional tile (block).
@@ -162,9 +167,9 @@ unsigned int warp_id()
 ROCPRIM_DEVICE inline
 unsigned int flat_block_id()
 {
-    return (hipBlockIdx_z * hipGridDim_y * hipGridDim_x)
-        + (hipBlockIdx_y * hipGridDim_x)
-        + hipBlockIdx_x;
+    return (blockIdx.z * gridDim.y * gridDim.x)
+        + (blockIdx.y * gridDim.x)
+        + blockIdx.x;
 }
 
 template<unsigned int BlockSizeX, unsigned int BlockSizeY, unsigned int BlockSizeZ>
@@ -172,7 +177,7 @@ ROCPRIM_DEVICE inline
 auto flat_block_id()
     -> typename std::enable_if<(BlockSizeY == 1 && BlockSizeZ == 1), unsigned int>::type
 {
-    return hipBlockIdx_x;
+    return blockIdx.x;
 }
 
 template<unsigned int BlockSizeX, unsigned int BlockSizeY, unsigned int BlockSizeZ>
@@ -180,7 +185,7 @@ ROCPRIM_DEVICE inline
 auto flat_block_id()
     -> typename std::enable_if<(BlockSizeY > 1 && BlockSizeZ == 1), unsigned int>::type
 {
-    return hipBlockIdx_x + (hipBlockIdx_y * hipGridDim_x);
+    return blockIdx.x + (blockIdx.y * gridDim.x);
 }
 
 template<unsigned int BlockSizeX, unsigned int BlockSizeY, unsigned int BlockSizeZ>
@@ -188,8 +193,8 @@ ROCPRIM_DEVICE inline
 auto flat_block_id()
     -> typename std::enable_if<(BlockSizeY > 1 && BlockSizeZ > 1), unsigned int>::type
 {
-    return hipBlockIdx_x + (hipBlockIdx_y * hipGridDim_x) +
-           (hipBlockIdx_z * hipGridDim_y * hipGridDim_x);
+    return blockIdx.x + (blockIdx.y * gridDim.x) +
+           (blockIdx.z * gridDim.y * gridDim.x);
 }
 
 // Sync
@@ -243,7 +248,7 @@ namespace detail
         return 0;
     }
 
-    #define ROCPRIM_DETAIL_CONCAT(A, B) A ## B
+    #define ROCPRIM_DETAIL_CONCAT(A, B) A B
     #define ROCPRIM_DETAIL_DEFINE_HIP_API_ID_FUNC(name, prefix, dim, suffix) \
         template<> \
         ROCPRIM_DEVICE inline \
@@ -256,10 +261,10 @@ namespace detail
         ROCPRIM_DETAIL_DEFINE_HIP_API_ID_FUNC(name, prefix, 1, y) \
         ROCPRIM_DETAIL_DEFINE_HIP_API_ID_FUNC(name, prefix, 2, z)
 
-    ROCPRIM_DETAIL_DEFINE_HIP_API_ID_FUNCS(block_thread_id, hipThreadIdx_)
-    ROCPRIM_DETAIL_DEFINE_HIP_API_ID_FUNCS(block_id, hipBlockIdx_)
-    ROCPRIM_DETAIL_DEFINE_HIP_API_ID_FUNCS(block_size, hipBlockDim_)
-    ROCPRIM_DETAIL_DEFINE_HIP_API_ID_FUNCS(grid_size, hipGridDim_)
+    ROCPRIM_DETAIL_DEFINE_HIP_API_ID_FUNCS(block_thread_id, threadIdx.)
+    ROCPRIM_DETAIL_DEFINE_HIP_API_ID_FUNCS(block_id, blockIdx.)
+    ROCPRIM_DETAIL_DEFINE_HIP_API_ID_FUNCS(block_size, blockDim.)
+    ROCPRIM_DETAIL_DEFINE_HIP_API_ID_FUNCS(grid_size, gridDim.)
 
     #undef ROCPRIM_DETAIL_DEFINE_HIP_API_ID_FUNCS
     #undef ROCPRIM_DETAIL_DEFINE_HIP_API_ID_FUNC

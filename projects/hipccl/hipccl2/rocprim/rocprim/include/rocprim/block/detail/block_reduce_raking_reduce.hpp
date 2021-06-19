@@ -117,7 +117,7 @@ public:
     {
         // Reduce thread items
         T thread_input = input[0];
-        #pragma unroll
+        ROCPRIM_UNROLL
         for(unsigned int i = 1; i < ItemsPerThread; i++)
         {
             thread_input = reduce_op(thread_input, input[i]);

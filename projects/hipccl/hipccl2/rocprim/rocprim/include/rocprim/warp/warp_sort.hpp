@@ -64,7 +64,7 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \code{.cpp}
 /// __global__ void example_kernel(...)
 /// {
-///     const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+///     const unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
 ///
 ///     int value = input[i];
 ///     rocprim::warp_sort<int, 64> wsort;
@@ -82,7 +82,7 @@ BEGIN_ROCPRIM_NAMESPACE
 /// ...
 /// __global__ void example_kernel(...)
 /// {
-///     const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+///     const unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
 ///
 ///     int value = input[i];
 ///     rocprim::warp_sort<int, 64> wsort;

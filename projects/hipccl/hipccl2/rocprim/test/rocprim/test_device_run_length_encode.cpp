@@ -104,7 +104,14 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, Encode)
     using key_distribution_type = typename std::conditional<
         std::is_floating_point<key_inner_type>::value,
         std::uniform_real_distribution<key_inner_type>,
-        std::uniform_int_distribution<key_inner_type>
+        typename std::conditional<
+            test_utils::is_valid_for_int_distribution<key_inner_type>::value,
+            std::uniform_int_distribution<key_inner_type>,
+            typename std::conditional<std::is_signed<key_inner_type>::value,
+                std::uniform_int_distribution<int>,
+                std::uniform_int_distribution<unsigned int>
+            >::type
+        >::type
     >::type;
 
     constexpr bool use_identity_iterator = TestFixture::params::use_identity_iterator;
@@ -159,7 +166,7 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, Encode)
 
                 unique_expected.push_back(current_key);
                 runs_count_expected++;
-                counts_expected.push_back(key_count);
+                counts_expected.push_back(static_cast<count_type>(key_count));
 
                 offset += key_count;
             }
@@ -268,7 +275,14 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, NonTrivialRuns)
     using key_distribution_type = typename std::conditional<
         std::is_floating_point<key_inner_type>::value,
         std::uniform_real_distribution<key_inner_type>,
-        std::uniform_int_distribution<key_inner_type>
+        typename std::conditional<
+            test_utils::is_valid_for_int_distribution<key_inner_type>::value,
+            std::uniform_int_distribution<key_inner_type>,
+            typename std::conditional<std::is_signed<key_inner_type>::value,
+                std::uniform_int_distribution<int>,
+                std::uniform_int_distribution<unsigned int>
+            >::type
+        >::type
     >::type;
 
     constexpr bool use_identity_iterator = TestFixture::params::use_identity_iterator;
@@ -333,9 +347,9 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, NonTrivialRuns)
 
                 if(key_count > 1)
                 {
-                    offsets_expected.push_back(offset);
+                    offsets_expected.push_back(static_cast<offset_type>(offset));
                     runs_count_expected++;
-                    counts_expected.push_back(key_count);
+                    counts_expected.push_back(static_cast<count_type>(key_count));
                 }
 
                 offset += key_count;

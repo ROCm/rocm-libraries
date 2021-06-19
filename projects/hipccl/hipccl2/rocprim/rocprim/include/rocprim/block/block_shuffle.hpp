@@ -309,7 +309,7 @@ public:
 
         ::rocprim::syncthreads();
 
-        #pragma unroll
+        ROCPRIM_UNROLL
         for (unsigned int i = ItemsPerThread - 1; i > 0; --i)
         {
             prev[i] = input[i - 1];
@@ -424,7 +424,7 @@ public:
 
         ::rocprim::syncthreads();
 
-        #pragma unroll
+        ROCPRIM_UNROLL
         for (unsigned int i = 0; i < (ItemsPerThread - 1); ++i)
         {
           next[i] = input[i + 1];

@@ -82,9 +82,9 @@ void run_lower_bound_benchmark(benchmark::State& state, hipStream_t stream,
     haystack_type * d_haystack;
     needle_type * d_needles;
     output_type * d_output;
-    HIP_CHECK(hipMalloc(&d_haystack, haystack_size * sizeof(haystack_type)));
-    HIP_CHECK(hipMalloc(&d_needles, needles_size * sizeof(needle_type)));
-    HIP_CHECK(hipMalloc(&d_output, needles_size * sizeof(output_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_haystack), haystack_size * sizeof(haystack_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_needles), needles_size * sizeof(needle_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), needles_size * sizeof(output_type)));
     HIP_CHECK(
         hipMemcpy(
             d_haystack, haystack.data(),

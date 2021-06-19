@@ -78,9 +78,9 @@ void run_merge_keys_benchmark(benchmark::State& state, hipStream_t stream, size_
     key_type * d_keys_input1;
     key_type * d_keys_input2;
     key_type * d_keys_output;
-    HIP_CHECK(hipMalloc(&d_keys_input1, size1 * sizeof(key_type)));
-    HIP_CHECK(hipMalloc(&d_keys_input2, size2 * sizeof(key_type)));
-    HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_input1), size1 * sizeof(key_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_input2), size2 * sizeof(key_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_output), size * sizeof(key_type)));
     HIP_CHECK(
         hipMemcpy(
             d_keys_input1, keys_input1.data(),
@@ -179,12 +179,12 @@ void run_merge_pairs_benchmark(benchmark::State& state, hipStream_t stream, size
     value_type * d_values_input1;
     value_type * d_values_input2;
     value_type * d_values_output;
-    HIP_CHECK(hipMalloc(&d_keys_input1, size1 * sizeof(key_type)));
-    HIP_CHECK(hipMalloc(&d_keys_input2, size2 * sizeof(key_type)));
-    HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
-    HIP_CHECK(hipMalloc(&d_values_input1, size1 * sizeof(value_type)));
-    HIP_CHECK(hipMalloc(&d_values_input2, size2 * sizeof(value_type)));
-    HIP_CHECK(hipMalloc(&d_values_output, size * sizeof(value_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_input1), size1 * sizeof(key_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_input2), size2 * sizeof(key_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_output), size * sizeof(key_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_values_input1), size1 * sizeof(value_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_values_input2), size2 * sizeof(value_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_values_output), size * sizeof(value_type)));
     HIP_CHECK(
         hipMemcpy(
             d_keys_input1, keys_input1.data(),

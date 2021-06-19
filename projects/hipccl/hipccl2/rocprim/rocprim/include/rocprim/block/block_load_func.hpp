@@ -61,7 +61,7 @@ void block_load_direct_blocked(unsigned int flat_id,
 {
     unsigned int offset = flat_id * ItemsPerThread;
     InputIterator thread_iter = block_input + offset;
-    #pragma unroll
+    ROCPRIM_UNROLL
     for (unsigned int item = 0; item < ItemsPerThread; item++)
     {
         items[item] = thread_iter[item];
@@ -98,7 +98,7 @@ void block_load_direct_blocked(unsigned int flat_id,
 {
     unsigned int offset = flat_id * ItemsPerThread;
     InputIterator thread_iter = block_input + offset;
-    #pragma unroll
+    ROCPRIM_UNROLL
     for (unsigned int item = 0; item < ItemsPerThread; item++)
     {
         if (item + offset < valid)
@@ -141,11 +141,12 @@ void block_load_direct_blocked(unsigned int flat_id,
                                unsigned int valid,
                                Default out_of_bounds)
 {
-    #pragma unroll
+    ROCPRIM_UNROLL
     for (unsigned int item = 0; item < ItemsPerThread; item++)
     {
-        items[item] = out_of_bounds;
+        items[item] = static_cast<T>(out_of_bounds);
     }
+    // TODO: Consider using std::fill for HIP-CPU, as uses memset() where appropriate
 
     block_load_direct_blocked(flat_id, block_input, items, valid);
 }
@@ -181,10 +182,10 @@ template<
     unsigned int ItemsPerThread
 >
 ROCPRIM_DEVICE inline
-typename std::enable_if<detail::is_vectorizable<T, ItemsPerThread>()>::type
+auto
 block_load_direct_blocked_vectorized(unsigned int flat_id,
                                      T* block_input,
-                                     U (&items)[ItemsPerThread])
+                                     U (&items)[ItemsPerThread]) -> typename std::enable_if<detail::is_vectorizable<T, ItemsPerThread>::value>::type
 {
     typedef typename detail::match_vector_type<T, ItemsPerThread>::type vector_type;
     constexpr unsigned int vectors_per_thread = (sizeof(T) * ItemsPerThread) / sizeof(vector_type);
@@ -193,13 +194,13 @@ block_load_direct_blocked_vectorized(unsigned int flat_id,
     const vector_type* vector_ptr = reinterpret_cast<const vector_type*>(block_input) +
         (flat_id * vectors_per_thread);
 
-    #pragma unroll
+    ROCPRIM_UNROLL
     for (unsigned int item = 0; item < vectors_per_thread; item++)
     {
         vector_items[item] = *(vector_ptr + item);
     }
 
-    #pragma unroll
+    ROCPRIM_UNROLL
     for (unsigned int item = 0; item < ItemsPerThread; item++)
     {
         items[item] = *(reinterpret_cast<T*>(vector_items) + item);
@@ -212,10 +213,10 @@ template<
     unsigned int ItemsPerThread
 >
 ROCPRIM_DEVICE inline
-typename std::enable_if<!detail::is_vectorizable<T, ItemsPerThread>()>::type
+auto
 block_load_direct_blocked_vectorized(unsigned int flat_id,
                                      T* block_input,
-                                     U (&items)[ItemsPerThread])
+                                     U (&items)[ItemsPerThread]) -> typename std::enable_if<!detail::is_vectorizable<T, ItemsPerThread>::value>::type
 {
     block_load_direct_blocked(flat_id, block_input, items);
 }
@@ -249,7 +250,7 @@ void block_load_direct_striped(unsigned int flat_id,
                                T (&items)[ItemsPerThread])
 {
     InputIterator thread_iter = block_input + flat_id;
-    #pragma unroll
+    ROCPRIM_UNROLL
     for (unsigned int item = 0; item < ItemsPerThread; item++)
     {
         items[item] = thread_iter[item * BlockSize];
@@ -287,7 +288,7 @@ void block_load_direct_striped(unsigned int flat_id,
                                unsigned int valid)
 {
     InputIterator thread_iter = block_input + flat_id;
-    #pragma unroll
+    ROCPRIM_UNROLL
     for (unsigned int item = 0; item < ItemsPerThread; item++)
     {
         unsigned int offset = item * BlockSize;
@@ -333,7 +334,7 @@ void block_load_direct_striped(unsigned int flat_id,
                                unsigned int valid,
                                Default out_of_bounds)
 {
-    #pragma unroll
+    ROCPRIM_UNROLL
     for (unsigned int item = 0; item < ItemsPerThread; item++)
     {
         items[item] = out_of_bounds;
@@ -385,7 +386,7 @@ void block_load_direct_warp_striped(unsigned int flat_id,
     unsigned int warp_offset = warp_id * WarpSize * ItemsPerThread;
 
     InputIterator thread_iter = block_input + thread_id + warp_offset;
-    #pragma unroll
+    ROCPRIM_UNROLL
     for (unsigned int item = 0; item < ItemsPerThread; item++)
     {
         items[item] = thread_iter[item * WarpSize];
@@ -437,7 +438,7 @@ void block_load_direct_warp_striped(unsigned int flat_id,
     unsigned int warp_offset = warp_id * WarpSize * ItemsPerThread;
 
     InputIterator thread_iter = block_input + thread_id + warp_offset;
-    #pragma unroll
+    ROCPRIM_UNROLL
     for (unsigned int item = 0; item < ItemsPerThread; item++)
     {
         unsigned int offset = item * WarpSize;
@@ -493,7 +494,7 @@ void block_load_direct_warp_striped(unsigned int flat_id,
     static_assert(detail::is_power_of_two(WarpSize) && WarpSize <= device_warp_size(),
                  "WarpSize must be a power of two and equal or less"
                  "than the size of hardware warp.");
-    #pragma unroll
+    ROCPRIM_UNROLL
     for (unsigned int item = 0; item < ItemsPerThread; item++)
     {
         items[item] = out_of_bounds;

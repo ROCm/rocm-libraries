@@ -110,7 +110,7 @@ enum class block_load_method
 /// \code{.cpp}
 /// __global__ void example_kernel(int * input, ...)
 /// {
-///     const int offset = hipBlockIdx_x * 128 * 8;
+///     const int offset = blockIdx.x * 128 * 8;
 ///     int items[8];
 ///     rocprim::block_load<int, 128, 8, load_method> blockload;
 ///     blockload.load(input + offset, items);
@@ -403,10 +403,10 @@ public:
 
     ROCPRIM_DEVICE inline
     void load(T* block_input,
-              T (&items)[ItemsPerThread])
+              T (&_items)[ItemsPerThread])
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
-        block_load_direct_blocked_vectorized(flat_id, block_input, items);
+        block_load_direct_blocked_vectorized(flat_id, block_input, _items);
     }
 
     template<class InputIterator, class U>

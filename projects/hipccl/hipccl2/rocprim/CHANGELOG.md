@@ -2,6 +2,10 @@
 
 Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwarePlatform/rocPRIM/](https://codedocs.xyz/ROCmSoftwarePlatform/rocPRIM/)
 
+## [Unreleased rocPRIM-Next]
+### Added
+- Experimental [HIP-CPU](https://github.com/ROCm-Developer-Tools/HIP-CPU) support; build using GCC/Clang/MSVC on Win/Linux. It is work in progress, many algorithms still known to fail.
+
 ## [Unreleased rocPRIM-2.10.11 for ROCm 4.4.0]
 ### Added
 - Code coverage tools build option

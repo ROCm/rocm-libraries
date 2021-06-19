@@ -176,7 +176,7 @@ public:
     /// each provides one \p float value.
     ///
     /// \code{.cpp}
-    /// __global__ void example_kernel(...) // hipBlockDim_x = 256
+    /// __global__ void example_kernel(...) // blockDim.x = 256
     /// {
     ///     // specialize block_reduce for float and block of 256 threads
     ///     using block_reduce_f = rocprim::block_reduce<float, 256>;
@@ -257,7 +257,7 @@ public:
     /// each provides two \p long value.
     ///
     /// \code{.cpp}
-    /// __global__ void example_kernel(...) // hipBlockDim_x = 128
+    /// __global__ void example_kernel(...) // blockDim.x = 128
     /// {
     ///     // specialize block_reduce for long and block of 128 threads
     ///     using block_reduce_f = rocprim::block_reduce<long, 128>;
@@ -345,7 +345,7 @@ public:
     /// each provides one \p float value.
     ///
     /// \code{.cpp}
-    /// __global__ void example_kernel(...) // hipBlockDim_x = 256
+    /// __global__ void example_kernel(...) // blockDim.x = 256
     /// {
     ///     // specialize block_reduce for float and block of 256 threads
     ///     using block_reduce_f = rocprim::block_reduce<float, 256>;

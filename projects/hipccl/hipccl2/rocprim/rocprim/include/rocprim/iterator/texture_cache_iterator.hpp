@@ -208,7 +208,7 @@ public:
         #else
         texture_type words[multiple];
 
-        #pragma unroll
+        ROCPRIM_UNROLL
         for(unsigned int i = 0; i < multiple; i++)
         {
             tex1Dfetch(

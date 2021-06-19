@@ -63,13 +63,13 @@ __global__
 __launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void warp_reduce_kernel(const T * d_input, T * d_output)
 {
-    const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+    const unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
 
     auto value = d_input[i];
 
     using wreduce_t = rocprim::warp_reduce<T, WarpSize, AllReduce>;
     __shared__ typename wreduce_t::storage_type storage;
-    #pragma nounroll
+    ROCPRIM_NO_UNROLL
     for(unsigned int trial = 0; trial < Trials; trial++)
     {
         wreduce_t().reduce(value, value, storage);
@@ -88,14 +88,14 @@ __global__
 __launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void segmented_warp_reduce_kernel(const T* d_input, Flag* d_flags, T* d_output)
 {
-    const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+    const unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
 
     auto value = d_input[i];
     auto flag = d_flags[i];
 
     using wreduce_t = rocprim::warp_reduce<T, WarpSize>;
     __shared__ typename wreduce_t::storage_type storage;
-    #pragma nounroll
+    ROCPRIM_NO_UNROLL
     for(unsigned int trial = 0; trial < Trials; trial++)
     {
         wreduce_t().head_segmented_reduce(value, value, flag, storage);
@@ -167,9 +167,9 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     T * d_input;
     flag_type * d_flags;
     T * d_output;
-    HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
-    HIP_CHECK(hipMalloc(&d_flags, size * sizeof(flag_type)));
-    HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_flags), size * sizeof(flag_type)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), size * sizeof(T)));
     HIP_CHECK(
         hipMemcpy(
             d_input, input.data(),

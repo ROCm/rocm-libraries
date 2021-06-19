@@ -86,10 +86,10 @@ void flat_id_kernel(unsigned int* device_output)
 TYPED_TEST(RocprimThreadTests, FlatBlockThreadID)
 {
     using Type = unsigned int;
-    constexpr size_t block_size_x = TestFixture::params::block_size_x;
-    constexpr size_t block_size_y = TestFixture::params::block_size_y;
-    constexpr size_t block_size_z = TestFixture::params::block_size_z;
-    constexpr size_t block_size = block_size_x * block_size_y * block_size_z;
+    static constexpr size_t block_size_x = TestFixture::params::block_size_x;
+    static constexpr size_t block_size_y = TestFixture::params::block_size_y;
+    static constexpr size_t block_size_z = TestFixture::params::block_size_z;
+    static constexpr size_t block_size = block_size_x * block_size_y * block_size_z;
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size() || (block_size & (block_size - 1)) != 0)
     {
@@ -151,7 +151,7 @@ __launch_bounds__(1024)
 void block_id_kernel(unsigned int* device_output)
 {
     unsigned int block_id = rocprim::flat_block_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
-    if(hipThreadIdx_x)
+    if(threadIdx.x)
     {
         device_output[block_id] = block_id;
     }
@@ -160,10 +160,10 @@ void block_id_kernel(unsigned int* device_output)
 TYPED_TEST(RocprimThreadTests, FlatBlockID)
 {
     using Type = unsigned int;
-    constexpr size_t block_size_x = TestFixture::params::block_size_x;
-    constexpr size_t block_size_y = TestFixture::params::block_size_y;
-    constexpr size_t block_size_z = TestFixture::params::block_size_z;
-    constexpr size_t block_size = block_size_x * block_size_y * block_size_z;
+    static constexpr size_t block_size_x = TestFixture::params::block_size_x;
+    static constexpr size_t block_size_y = TestFixture::params::block_size_y;
+    static constexpr size_t block_size_z = TestFixture::params::block_size_z;
+    static constexpr size_t block_size = block_size_x * block_size_y * block_size_z;
     const size_t size = block_size * block_size;
     const auto grid_size = size / block_size;
 

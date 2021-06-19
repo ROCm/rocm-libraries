@@ -110,7 +110,7 @@ enum class block_store_method
 /// \code{.cpp}
 /// __global__ void kernel(int * output)
 /// {
-///     const int offset = hipBlockIdx_x * 128 * 8;
+///     const int offset = blockIdx.x * 128 * 8;
 ///     int items[8];
 ///     rocprim::block_store<int, 128, 8, store_method> blockstore;
 ///     blockstore.store(output + offset, items);
@@ -300,10 +300,10 @@ public:
 
     ROCPRIM_DEVICE inline
     void store(T* block_output,
-               T (&items)[ItemsPerThread])
+               T (&_items)[ItemsPerThread])
     {
         const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
-        block_store_direct_blocked_vectorized(flat_id, block_output, items);
+        block_store_direct_blocked_vectorized(flat_id, block_output, _items);
     }
 
     template<class OutputIterator, class U>

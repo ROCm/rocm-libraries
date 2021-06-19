@@ -221,7 +221,7 @@ TYPED_TEST(RocprimDeviceHistogramEven, Even)
                     const level_type s = static_cast<level_type>(sample);
                     if(s >= lower_level && s < upper_level)
                     {
-                        const int bin = (s - lower_level) / scale;
+                        const level_type bin = (s - lower_level) / scale;
                         histogram_expected[bin]++;
                     }
                 }
@@ -235,7 +235,7 @@ TYPED_TEST(RocprimDeviceHistogramEven, Even)
                 HIP_CHECK(
                     rocprim::histogram_even<config>(
                         nullptr, temporary_storage_bytes,
-                        d_input, columns,
+                        d_input, static_cast<unsigned int>(columns),
                         d_histogram,
                         bins + 1, lower_level, upper_level,
                         stream, debug_synchronous

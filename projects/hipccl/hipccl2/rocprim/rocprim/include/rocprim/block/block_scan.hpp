@@ -171,7 +171,7 @@ public:
     /// each provides one \p float value.
     ///
     /// \code{.cpp}
-    /// __global__ void example_kernel(...) // hipBlockDim_x = 256
+    /// __global__ void example_kernel(...) // blockDim.x = 256
     /// {
     ///     // specialize block_scan for float and block of 256 threads
     ///     using block_scan_f = rocprim::block_scan<float, 256>;
@@ -252,7 +252,7 @@ public:
     /// each provides one \p float value.
     ///
     /// \code{.cpp}
-    /// __global__ void example_kernel(...) // hipBlockDim_x = 256
+    /// __global__ void example_kernel(...) // blockDim.x = 256
     /// {
     ///     // specialize block_scan for float and block of 256 threads
     ///     using block_scan_f = rocprim::block_scan<float, 256>;
@@ -363,7 +363,7 @@ public:
     ///     }
     /// };
     ///
-    /// __global__ void example_kernel(...) // hipBlockDim_x = 256
+    /// __global__ void example_kernel(...) // blockDim.x = 256
     /// {
     ///     // specialize block_scan for int and block of 256 threads
     ///     using block_scan_f = rocprim::block_scan<int, 256>;
@@ -429,7 +429,7 @@ public:
     /// each provides two \p long value.
     ///
     /// \code{.cpp}
-    /// __global__ void example_kernel(...) // hipBlockDim_x = 128
+    /// __global__ void example_kernel(...) // blockDim.x = 128
     /// {
     ///     // specialize block_scan for long and block of 128 threads
     ///     using block_scan_f = rocprim::block_scan<long, 128>;
@@ -532,7 +532,7 @@ public:
     /// each provides two \p long value.
     ///
     /// \code{.cpp}
-    /// __global__ void example_kernel(...) // hipBlockDim_x = 128
+    /// __global__ void example_kernel(...) // blockDim.x = 128
     /// {
     ///     // specialize block_scan for long and block of 128 threads
     ///     using block_scan_f = rocprim::block_scan<long, 128>;
@@ -664,7 +664,7 @@ public:
     ///     }
     /// };
     ///
-    /// __global__ void example_kernel(...) // hipBlockDim_x = 128
+    /// __global__ void example_kernel(...) // blockDim.x = 128
     /// {
     ///     // specialize block_scan for int and block of 128 threads
     ///     using block_scan_f = rocprim::block_scan<int, 128>;
@@ -739,7 +739,7 @@ public:
     /// each provides one \p float value.
     ///
     /// \code{.cpp}
-    /// __global__ void example_kernel(...) // hipBlockDim_x = 256
+    /// __global__ void example_kernel(...) // blockDim.x = 256
     /// {
     ///     // specialize block_scan for float and block of 256 threads
     ///     using block_scan_f = rocprim::block_scan<float, 256>;
@@ -828,7 +828,7 @@ public:
     /// each provides one \p float value.
     ///
     /// \code{.cpp}
-    /// __global__ void example_kernel(...) // hipBlockDim_x = 256
+    /// __global__ void example_kernel(...) // blockDim.x = 256
     /// {
     ///     // specialize block_scan for float and block of 256 threads
     ///     using block_scan_f = rocprim::block_scan<float, 256>;
@@ -945,7 +945,7 @@ public:
     ///     }
     /// };
     ///
-    /// __global__ void example_kernel(...) // hipBlockDim_x = 256
+    /// __global__ void example_kernel(...) // blockDim.x = 256
     /// {
     ///     // specialize block_scan for int and block of 256 threads
     ///     using block_scan_f = rocprim::block_scan<int, 256>;
@@ -1013,7 +1013,7 @@ public:
     /// each provides two \p long value.
     ///
     /// \code{.cpp}
-    /// __global__ void example_kernel(...) // hipBlockDim_x = 128
+    /// __global__ void example_kernel(...) // blockDim.x = 128
     /// {
     ///     // specialize block_scan for long and block of 128 threads
     ///     using block_scan_f = rocprim::block_scan<long, 128>;
@@ -1124,7 +1124,7 @@ public:
     /// each provides two \p long value.
     ///
     /// \code{.cpp}
-    /// __global__ void example_kernel(...) // hipBlockDim_x = 128
+    /// __global__ void example_kernel(...) // blockDim.x = 128
     /// {
     ///     // specialize block_scan for long and block of 128 threads
     ///     using block_scan_f = rocprim::block_scan<long, 128>;
@@ -1263,7 +1263,7 @@ public:
     ///     }
     /// };
     ///
-    /// __global__ void example_kernel(...) // hipBlockDim_x = 128
+    /// __global__ void example_kernel(...) // blockDim.x = 128
     /// {
     ///     // specialize block_scan for int and block of 128 threads
     ///     using block_scan_f = rocprim::block_scan<int, 128>;

@@ -48,7 +48,7 @@ __global__
 __launch_bounds__(BlockSize)
 void sort_key_kernel(key_type * device_key_output)
 {
-    const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
+    const unsigned int index = (blockIdx.x * BlockSize) + threadIdx.x;
     key_type key = device_key_output[index];
     rocprim::block_sort<key_type, BlockSize> bsort;
     bsort.sort(key);
@@ -63,7 +63,7 @@ TYPED_TEST(RocprimBlockSortTests, SortKey)
 
     using key_type = typename TestFixture::key_type;
     using binary_op_type = typename std::conditional<std::is_same<key_type, rocprim::half>::value, test_utils::half_less, rocprim::less<key_type>>::type;
-    const size_t block_size = TestFixture::block_size;
+    static constexpr size_t block_size = TestFixture::block_size;
     const size_t size = block_size * 1134;
     const size_t grid_size = size / block_size;
 
@@ -144,7 +144,7 @@ __global__
 __launch_bounds__(BlockSize)
 void sort_key_value_kernel(key_type * device_key_output, value_type * device_value_output)
 {
-    const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
+    const unsigned int index = (blockIdx.x * BlockSize) + threadIdx.x;
     key_type key = device_key_output[index];
     value_type value = device_value_output[index];
     rocprim::block_sort<key_type, BlockSize, value_type> bsort;
@@ -163,9 +163,9 @@ TYPED_TEST(RocprimBlockSortTests, SortKeyValue)
     using value_type = typename TestFixture::value_type;
     using value_op_type = typename std::conditional<std::is_same<value_type, rocprim::half>::value, test_utils::half_less, rocprim::less<value_type>>::type;
     using eq_op_type = typename std::conditional<std::is_same<key_type, rocprim::half>::value, test_utils::half_equal_to, rocprim::equal_to<key_type>>::type;
-    const size_t block_size = TestFixture::block_size;
-    const size_t size = block_size * 1134;
-    const size_t grid_size = size / block_size;
+    static constexpr size_t block_size = TestFixture::block_size;
+    static constexpr size_t size = block_size * 1134;
+    static constexpr size_t grid_size = size / block_size;
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -288,7 +288,7 @@ __global__
 __launch_bounds__(BlockSize)
 void custom_sort_key_value_kernel(key_type * device_key_output, value_type * device_value_output)
 {
-    const unsigned int index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
+    const unsigned int index = (blockIdx.x * BlockSize) + threadIdx.x;
     key_type key = device_key_output[index];
     value_type value = device_value_output[index];
     rocprim::block_sort<key_type, BlockSize, value_type> bsort;
@@ -307,9 +307,9 @@ TYPED_TEST(RocprimBlockSortTests, CustomSortKeyValue)
     using value_type = typename TestFixture::value_type;
     using value_op_type = typename std::conditional<std::is_same<value_type, rocprim::half>::value, test_utils::half_less, rocprim::less<value_type>>::type;
     using eq_op_type = typename std::conditional<std::is_same<key_type, rocprim::half>::value, test_utils::half_equal_to, rocprim::equal_to<key_type>>::type;
-    const size_t block_size = TestFixture::block_size;
-    const size_t size = block_size * 1134;
-    const size_t grid_size = size / block_size;
+    static constexpr size_t block_size = TestFixture::block_size;
+    static constexpr size_t size = block_size * 1134;
+    static constexpr size_t grid_size = size / block_size;
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
