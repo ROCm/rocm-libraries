@@ -55,6 +55,8 @@ endif()
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker search and installed rpath")
 
 if(NOT USE_HIP_CPU)
+  # Get dependencies (required here to get rocm-cmake)
+  include(cmake/Dependencies.cmake)
   # Set the AMDGPU_TARGETS with backward compatiblity
   # Use target ID syntax if supported for AMDGPU_TARGETS
   if(COMMAND rocm_check_target_ids)
@@ -105,8 +107,10 @@ set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Get dependencies
-include(cmake/Dependencies.cmake)
+if(USE_HIP_CPU)
+  # Get dependencies
+  include(cmake/Dependencies.cmake)
+endif()
 
 # Setup VERSION
 set(VERSION_STRING "2.10.9")
