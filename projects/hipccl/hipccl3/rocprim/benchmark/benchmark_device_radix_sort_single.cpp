@@ -23,16 +23,14 @@
 #include "benchmark_device_radix_sort.hpp"
 
 #ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 32;
+const size_t DEFAULT_N = 1024;
 #endif
 
 #ifdef BENCHMARK_CONFIG_TUNING
 
 template<
     typename Key, typename Value,
-    unsigned int LRB, unsigned int SRB,
-    unsigned int BlockSize1, unsigned int ItemsPerThread1,
-    unsigned int BlockSize2, unsigned int ItemsPerThread2
+    unsigned int BlockSize, unsigned int ItemsPerThread
 >
 auto sort_keys_add_benchmark(
     std::vector<benchmark::internal::Benchmark*>& benchmarks,
@@ -44,18 +42,18 @@ auto sort_keys_add_benchmark(
 {
     benchmarks.push_back(
         benchmark::RegisterBenchmark(
-            (std::string("sort_keys") + "<" + typeid(Key).name() + "radix_sort_config<" +
-             std::to_string(LRB) + ", " + std::to_string(SRB) + ", kernel_config<" +
-             std::to_string(BlockSize1) + ", " + std::to_string(ItemsPerThread1) + ">, kernel_config<" +
-             std::to_string(BlockSize2) + ", " + std::to_string(ItemsPerThread2) + "> >").c_str(),
+            (std::string("sort_keys") + "<" + Traits<Key>::TYPE_NAME + ", radix_sort_single_config<" +
+             ", kernel_config<" + std::to_string(BlockSize) + ", " + std::to_string(ItemsPerThread) + ">").c_str(),
             [=](benchmark::State& state) {
                 run_sort_keys_benchmark<
                     Key,
                     rocprim::radix_sort_config<
-                        LRB,
-                        SRB,
-                        rocprim::kernel_config<BlockSize1, ItemsPerThread1>,
-                        rocprim::kernel_config<BlockSize2, ItemsPerThread2>
+                        8,
+                        7,
+                        rocprim::kernel_config<256U, 2>,
+                        rocprim::kernel_config<256U, 10>,
+                        rocprim::kernel_config<BlockSize, ItemsPerThread>,
+                        true
                     >
                 >(state, stream, size);
             }
@@ -65,9 +63,7 @@ auto sort_keys_add_benchmark(
 
 template<
     typename Key, typename Value,
-    unsigned int LRB, unsigned int SRB,
-    unsigned int BlockSize1, unsigned int ItemsPerThread1,
-    unsigned int BlockSize2, unsigned int ItemsPerThread2
+    unsigned int BlockSize, unsigned int ItemsPerThread
 >
 auto sort_keys_add_benchmark(
     std::vector<benchmark::internal::Benchmark*>& benchmarks,
@@ -80,17 +76,17 @@ auto sort_keys_add_benchmark(
     benchmarks.push_back(
         benchmark::RegisterBenchmark(
             (std::string("sort_pairs") + "<" + Traits<Key>::TYPE_NAME + "," + Traits<Value>::TYPE_NAME +
-             "radix_sort_config<" + std::to_string(LRB) + ", " + std::to_string(SRB) + ", kernel_config<" +
-             std::to_string(BlockSize1) + ", " + std::to_string(ItemsPerThread1) + ">, kernel_config<" +
-             std::to_string(BlockSize2) + ", " + std::to_string(ItemsPerThread2) + "> >").c_str(),
+             ", kernel_config<" + std::to_string(BlockSize) + ", " + std::to_string(ItemsPerThread) + ">").c_str(),
             [=](benchmark::State& state) {
                 run_sort_pairs_benchmark<
                     Key, Value,
                     rocprim::radix_sort_config<
-                        LRB,
-                        SRB,
-                        rocprim::kernel_config<BlockSize1, ItemsPerThread1>,
-                        rocprim::kernel_config<BlockSize2, ItemsPerThread2>
+                        8,
+                        7,
+                        rocprim::kernel_config<256U, 2>,
+                        rocprim::kernel_config<256U, 10>,
+                        rocprim::kernel_config<BlockSize, ItemsPerThread>,
+                        true
                     >
                 >(state, stream, size);
             }
@@ -100,135 +96,86 @@ auto sort_keys_add_benchmark(
 
 template<
     typename Key, typename Value,
-    unsigned int LRB, unsigned int SRB,
-    unsigned int BlockSize1, unsigned int ItemsPerThread1,
-    unsigned int BlockSize2, unsigned int ItemsPerThread2,
-    unsigned int MaxItemsPerThread1
+    unsigned int BlockSize, unsigned int ItemsPerThread,
+    unsigned int MaxItemsPerThread
 >
-auto sort_keys_benchmark_generate_ipt1_grid(
+auto sort_keys_benchmark_generate_ipt_grid(
     std::vector<benchmark::internal::Benchmark*>& benchmarks,
     hipStream_t stream,
     size_t size)
-    -> typename std::enable_if< ItemsPerThread1 == MaxItemsPerThread1, void>::type
+    -> typename std::enable_if< ItemsPerThread == MaxItemsPerThread, void>::type
 {
     sort_keys_add_benchmark<
-        Key, Value, LRB, SRB,
-        BlockSize1, ItemsPerThread1,
-        BlockSize2, ItemsPerThread2
+        Key, Value,
+        BlockSize, ItemsPerThread
     >(benchmarks, stream, size);
 }
 
 template<
     typename Key, typename Value,
-    unsigned int LRB, unsigned int SRB,
-    unsigned int BlockSize1, unsigned int ItemsPerThread1,
-    unsigned int BlockSize2, unsigned int ItemsPerThread2,
-    unsigned int MaxItemsPerThread1
+    unsigned int BlockSize, unsigned int ItemsPerThread,
+    unsigned int MaxItemsPerThread
 >
-auto sort_keys_benchmark_generate_ipt1_grid(
+auto sort_keys_benchmark_generate_ipt_grid(
     std::vector<benchmark::internal::Benchmark*>& benchmarks,
     hipStream_t stream,
     size_t size)
-    -> typename std::enable_if< ItemsPerThread1 < MaxItemsPerThread1, void>::type
+    -> typename std::enable_if< ItemsPerThread < MaxItemsPerThread, void>::type
 {
     sort_keys_add_benchmark<
-        Key, Value, LRB, SRB,
-        BlockSize1, ItemsPerThread1,
-        BlockSize2, ItemsPerThread2
+        Key, Value,
+        BlockSize, ItemsPerThread
     >(benchmarks, stream, size);
 
-    sort_keys_benchmark_generate_ipt1_grid<
-        Key, Value, LRB, SRB,
-        BlockSize1, ItemsPerThread1 + 1,
-        BlockSize2, ItemsPerThread2,
-        MaxItemsPerThread1
-    >(benchmarks, stream, size);
-}
-
-template<
-    typename Key, typename Value,
-    unsigned int BlockSize1,
-    unsigned int BlockSize2, unsigned int ItemsPerThread2,
-    unsigned int MaxItemsPerThread1
->
-void sort_keys_benchmark_generate_radix_grid(
-    std::vector<benchmark::internal::Benchmark*>& benchmarks,
-    hipStream_t stream,
-    size_t size)
-{
-    sort_keys_benchmark_generate_ipt1_grid<
-        Key, Value, 4, 3,
-        BlockSize1, 1,
-        BlockSize2, ItemsPerThread2,
-        MaxItemsPerThread1
-    >(benchmarks, stream, size);
-
-    sort_keys_benchmark_generate_ipt1_grid<
-        Key, Value, 5, 4,
-        BlockSize1, 1,
-        BlockSize2, ItemsPerThread2,
-        MaxItemsPerThread1
-    >(benchmarks, stream, size);
-
-    sort_keys_benchmark_generate_ipt1_grid<
-        Key, Value, 6, 4,
-        BlockSize1, 1,
-        BlockSize2, ItemsPerThread2,
-        MaxItemsPerThread1
-    >(benchmarks, stream, size);
-
-    sort_keys_benchmark_generate_ipt1_grid<
-        Key, Value, 7, 6,
-        BlockSize1, 1,
-        BlockSize2, ItemsPerThread2,
-        MaxItemsPerThread1
-    >(benchmarks, stream, size);
-
-    sort_keys_benchmark_generate_ipt1_grid<
-        Key, Value, 8, 7,
-        BlockSize1, 1,
-        BlockSize2, ItemsPerThread2,
-        MaxItemsPerThread1
+    sort_keys_benchmark_generate_ipt_grid<
+        Key, Value,
+        BlockSize, ItemsPerThread + 1,
+        MaxItemsPerThread
     >(benchmarks, stream, size);
 }
 
 template<
     typename Key, typename Value = ::rocprim::empty_type,
-    unsigned int BlockSize1 = 256U,
-    unsigned int BlockSize2 = 256U,
-    unsigned int MaxItemsPerThread1 = 20U
+    unsigned int MaxItemsPerThread = 10U
 >
 void sort_keys_benchmark_generate(
     std::vector<benchmark::internal::Benchmark*>& benchmarks,
     hipStream_t stream,
     size_t size)
 {
-    sort_keys_benchmark_generate_radix_grid<
+    sort_keys_benchmark_generate_ipt_grid<
         Key, Value,
-        BlockSize1,
-        BlockSize2, 1,
-        MaxItemsPerThread1
+        64U, // BlockSize
+        1U,  // ItemsPerThread start value
+        MaxItemsPerThread
     >(benchmarks, stream, size);
 
-    sort_keys_benchmark_generate_radix_grid<
+    sort_keys_benchmark_generate_ipt_grid<
         Key, Value,
-        BlockSize1,
-        BlockSize2, 2,
-        MaxItemsPerThread1
+        128U, // BlockSize
+        1U,   // ItemsPerThread start value
+        MaxItemsPerThread
     >(benchmarks, stream, size);
 
-    sort_keys_benchmark_generate_radix_grid<
+    sort_keys_benchmark_generate_ipt_grid<
         Key, Value,
-        BlockSize1,
-        BlockSize2, 4,
-        MaxItemsPerThread1
+        256U, // BlockSize
+        1U,   // ItemsPerThread start value
+        MaxItemsPerThread
     >(benchmarks, stream, size);
 
-    sort_keys_benchmark_generate_radix_grid<
+    sort_keys_benchmark_generate_ipt_grid<
         Key, Value,
-        BlockSize1,
-        BlockSize2, 8,
-        MaxItemsPerThread1
+        512U, // BlockSize
+        1U,   // ItemsPerThread start value
+        7U    // MaxItemsPerThread
+    >(benchmarks, stream, size);
+
+    sort_keys_benchmark_generate_ipt_grid<
+        Key, Value,
+        1024U, // BlockSize
+        1U,    // ItemsPerThread start value
+        1U     // MaxItemsPerThread
     >(benchmarks, stream, size);
 }
 
@@ -243,7 +190,7 @@ void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark*>& benc
     sort_keys_benchmark_generate<long long>(benchmarks, stream, size);
     sort_keys_benchmark_generate<int8_t>(benchmarks, stream, size);
     //sort_keys_benchmark_generate<uint8_t>(benchmarks, stream, size);
-    sort_keys_benchmark_generate<rocprim::half, ::rocprim::empty_type, 256U, 256U, 30>(benchmarks, stream, size);
+    sort_keys_benchmark_generate<rocprim::half, ::rocprim::empty_type, 30>(benchmarks, stream, size);
     sort_keys_benchmark_generate<short>(benchmarks, stream, size);
 }
 
@@ -256,24 +203,23 @@ void add_sort_pairs_benchmarks(std::vector<benchmark::internal::Benchmark*>& ben
 
     sort_keys_benchmark_generate<int, float>(benchmarks, stream, size);
     sort_keys_benchmark_generate<int, double>(benchmarks, stream, size);
-    //sort_keys_benchmark_generate<int, float2, 256U, 256U, 15>(benchmarks, stream, size);
-    //sort_keys_benchmark_generate<int, custom_float2, 256U, 256U, 15>(benchmarks, stream, size);
-    //sort_keys_benchmark_generate<int, double2, 256U, 256U, 15>(benchmarks, stream, size);
-    sort_keys_benchmark_generate<int, custom_double2, 256U, 256U, 15>(benchmarks, stream, size);
+    //sort_keys_benchmark_generate<int, float2, 15>(benchmarks, stream, size);
+    //sort_keys_benchmark_generate<int, custom_float2, 15>(benchmarks, stream, size);
+    //sort_keys_benchmark_generate<int, double2, 15>(benchmarks, stream, size);
+    sort_keys_benchmark_generate<int, custom_double2, 15>(benchmarks, stream, size);
 
     sort_keys_benchmark_generate<long long, float>(benchmarks, stream, size);
     sort_keys_benchmark_generate<long long, double>(benchmarks, stream, size);
-    //sort_keys_benchmark_generate<long long, float2, 256U, 256U, 15>(benchmarks, stream, size);
-    //sort_keys_benchmark_generate<long long, custom_float2, 256U, 256U, 15>(benchmarks, stream, size);
-    //sort_keys_benchmark_generate<long long, double2, 256U, 256U, 15>(benchmarks, stream, size);
-    sort_keys_benchmark_generate<long long, custom_double2, 256U, 256U, 15>(benchmarks, stream, size);
+    //sort_keys_benchmark_generate<long long, float2, 15>(benchmarks, stream, size);
+    //sort_keys_benchmark_generate<long long, custom_float2, 15>(benchmarks, stream, size);
+    //sort_keys_benchmark_generate<long long, double2, 15>(benchmarks, stream, size);
+    sort_keys_benchmark_generate<long long, custom_double2, 15>(benchmarks, stream, size);
     sort_keys_benchmark_generate<int8_t, int8_t>(benchmarks, stream, size);
     sort_keys_benchmark_generate<uint8_t, uint8_t>(benchmarks, stream, size);
-    sort_keys_benchmark_generate<rocprim::half, rocprim::half, 256U, 256U, 30>(benchmarks, stream, size);
+    sort_keys_benchmark_generate<rocprim::half, rocprim::half, 30>(benchmarks, stream, size);
 }
 
 #endif // BENCHMARK_CONFIG_TUNING
-
 
 int main(int argc, char *argv[])
 {
