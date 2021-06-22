@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2019 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2021 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -35,7 +35,8 @@ BEGIN_ROCPRIM_NAMESPACE
 
 /// \brief Configuration of device-level radix sort operation.
 ///
-/// Radix sort is excecuted in a few iterations (passes) depending on total number of bits to be sorted
+/// Radix sort is excecuted in a single tile (at size < BlocksPerItem) or
+/// few iterations (passes) depending on total number of bits to be sorted
 /// (\p begin_bit and \p end_bit), each iteration sorts either \p LongRadixBits or \p ShortRadixBits bits
 /// choosen to cover whole bit range in optimal way.
 ///
@@ -50,7 +51,9 @@ template<
     unsigned int LongRadixBits,
     unsigned int ShortRadixBits,
     class ScanConfig,
-    class SortConfig
+    class SortConfig,
+    class SortSingleConfig = SortConfig,
+    bool ForceSingleKernelConfig = false
 >
 struct radix_sort_config
 {
@@ -58,10 +61,15 @@ struct radix_sort_config
     static constexpr unsigned int long_radix_bits = LongRadixBits;
     /// \brief Number of bits in short iterations.
     static constexpr unsigned int short_radix_bits = ShortRadixBits;
+
     /// \brief Configuration of digits scan kernel.
     using scan = ScanConfig;
     /// \brief Configuration of radix sort kernel.
     using sort = SortConfig;
+    /// \brief Configuration of radix sort single kernel.
+    using sort_single = kernel_config<256, 10>;
+    /// \brief Configuration of radix sort single kernel.
+    static constexpr bool force_single_kernel_config = ForceSingleKernelConfig;
 };
 
 namespace detail
@@ -78,19 +86,31 @@ struct radix_sort_config_803
     using type = select_type<
         select_type_case<
             (sizeof(Key) == 1 && sizeof(Value) <= 8),
-            radix_sort_config<8, 7, scan, kernel_config<256, 10> >
+            radix_sort_config<
+                8, 7, scan,
+                kernel_config<256, 10>, kernel_config<256, 19>
+            >
         >,
         select_type_case<
             (sizeof(Key) == 2 && sizeof(Value) <= 8),
-            radix_sort_config<8, 7, scan, kernel_config<256, 10> >
+            radix_sort_config<
+                8, 7, scan,
+                kernel_config<256, 10>, kernel_config<256, 17>
+            >
         >,
         select_type_case<
             (sizeof(Key) == 4 && sizeof(Value) <= 8),
-            radix_sort_config<7, 6, scan, kernel_config<256, 15> >
+            radix_sort_config<
+                7, 6, scan,
+                kernel_config<256, 15>, kernel_config<256, 15>
+            >
         >,
         select_type_case<
             (sizeof(Key) == 8 && sizeof(Value) <= 8),
-            radix_sort_config<7, 6, scan, kernel_config<256, 13> >
+            radix_sort_config<
+                7, 6, scan,
+                kernel_config<256, 13>, kernel_config<256, 13>
+            >
         >,
         radix_sort_config<
             6, 4, scan,
@@ -105,10 +125,10 @@ struct radix_sort_config_803
 template<class Key>
 struct radix_sort_config_803<Key, empty_type>
     : select_type<
-        select_type_case<sizeof(Key) == 1, radix_sort_config<8, 7, kernel_config<256, 2>, kernel_config<256, 10> > >,
-        select_type_case<sizeof(Key) == 2, radix_sort_config<8, 7, kernel_config<256, 2>, kernel_config<256, 10> > >,
-        select_type_case<sizeof(Key) == 4, radix_sort_config<7, 6, kernel_config<256, 2>, kernel_config<256, 9> > >,
-        select_type_case<sizeof(Key) == 8, radix_sort_config<7, 6, kernel_config<256, 2>, kernel_config<256, 7> > >
+        select_type_case<sizeof(Key) == 1, radix_sort_config<8, 7, kernel_config<256, 2>, kernel_config<256, 10>, kernel_config<256, 19> > >,
+        select_type_case<sizeof(Key) == 2, radix_sort_config<8, 7, kernel_config<256, 2>, kernel_config<256, 10>, kernel_config<256, 16> > >,
+        select_type_case<sizeof(Key) == 4, radix_sort_config<7, 6, kernel_config<256, 2>, kernel_config<256, 9>, kernel_config<256, 15> > >,
+        select_type_case<sizeof(Key) == 8, radix_sort_config<7, 6, kernel_config<256, 2>, kernel_config<256, 7>, kernel_config<256, 15> > >
     > { };
 
 template<class Key, class Value>
@@ -122,19 +142,23 @@ struct radix_sort_config_900
     using type = select_type<
         select_type_case<
             (sizeof(Key) == 1 && sizeof(Value) <= 8),
-            radix_sort_config<4, 4, scan, kernel_config<256, 10> >
+            radix_sort_config<4, 4, scan,
+            kernel_config<256, 10>, kernel_config<256, 19> >
         >,
         select_type_case<
             (sizeof(Key) == 2 && sizeof(Value) <= 8),
-            radix_sort_config<6, 5, scan, kernel_config<256, 10> >
+            radix_sort_config<6, 5, scan,
+            kernel_config<256, 10>, kernel_config<256, 17> >
         >,
         select_type_case<
             (sizeof(Key) == 4 && sizeof(Value) <= 8),
-            radix_sort_config<7, 6, scan, kernel_config<256, 15> >
+            radix_sort_config<7, 6, scan,
+            kernel_config<256, 15>, kernel_config<256, 15> >
         >,
         select_type_case<
             (sizeof(Key) == 8 && sizeof(Value) <= 8),
-            radix_sort_config<7, 6, scan, kernel_config<256, 15> >
+            radix_sort_config<7, 6, scan,
+            kernel_config<256, 15>, kernel_config<256, 15> >
         >,
         radix_sort_config<
             6, 4, scan,
@@ -149,10 +173,10 @@ struct radix_sort_config_900
 template<class Key>
 struct radix_sort_config_900<Key, empty_type>
     : select_type<
-        select_type_case<sizeof(Key) == 1, radix_sort_config<4, 3, kernel_config<256, 2>, kernel_config<256, 10> > >,
-        select_type_case<sizeof(Key) == 2, radix_sort_config<6, 5, kernel_config<256, 2>, kernel_config<256, 10> > >,
-        select_type_case<sizeof(Key) == 4, radix_sort_config<7, 6, kernel_config<256, 2>, kernel_config<256, 17> > >,
-        select_type_case<sizeof(Key) == 8, radix_sort_config<7, 6, kernel_config<256, 2>, kernel_config<256, 15> > >
+        select_type_case<sizeof(Key) == 1, radix_sort_config<4, 3, kernel_config<256, 2>, kernel_config<256, 10>, kernel_config<256, 19> > >,
+        select_type_case<sizeof(Key) == 2, radix_sort_config<6, 5, kernel_config<256, 2>, kernel_config<256, 10>, kernel_config<256, 16> > >,
+        select_type_case<sizeof(Key) == 4, radix_sort_config<7, 6, kernel_config<256, 2>, kernel_config<256, 17>, kernel_config<256, 15> > >,
+        select_type_case<sizeof(Key) == 8, radix_sort_config<7, 6, kernel_config<256, 2>, kernel_config<256, 15>, kernel_config<256, 15> > >
     > { };
 
 

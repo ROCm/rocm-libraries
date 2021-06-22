@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -184,6 +184,105 @@ struct radix_digit_count_helper
             for(unsigned int w = 0; w < warps_no; w++)
             {
                 digit_count += storage.digit_counts[w][flat_id];
+            }
+        }
+    }
+};
+
+template<
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    bool Descending,
+    class Key,
+    class Value
+>
+struct radix_sort_single_helper
+{
+    static constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
+
+    using key_type = Key;
+    using value_type = Value;
+
+    using key_codec = radix_key_codec<key_type, Descending>;
+    using bit_key_type = typename key_codec::bit_key_type;
+    using keys_load_type = ::rocprim::block_load<
+        key_type, BlockSize, ItemsPerThread,
+        ::rocprim::block_load_method::block_load_transpose>;
+    using values_load_type = ::rocprim::block_load<
+        value_type, BlockSize, ItemsPerThread,
+        ::rocprim::block_load_method::block_load_transpose>;
+    using sort_type = ::rocprim::block_radix_sort<key_type, BlockSize, ItemsPerThread, value_type>;
+
+    static constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
+
+    struct storage_type
+    {
+        union
+        {
+            typename keys_load_type::storage_type keys_load;
+            typename values_load_type::storage_type values_load;
+            typename sort_type::storage_type sort;
+        };
+    };
+
+    template<
+        bool IsFull = false,
+        class KeysInputIterator,
+        class KeysOutputIterator,
+        class ValuesInputIterator,
+        class ValuesOutputIterator
+    >
+    ROCPRIM_DEVICE inline
+    void sort_single(KeysInputIterator keys_input,
+                     KeysOutputIterator keys_output,
+                     ValuesInputIterator values_input,
+                     ValuesOutputIterator values_output,
+                     unsigned int size,
+                     unsigned int bit,
+                     unsigned int current_radix_bits,
+                     storage_type& storage)
+    {
+        using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
+
+        using key_codec = radix_key_codec<key_type, Descending>;
+        using bit_key_type = typename key_codec::bit_key_type;
+
+        key_type keys[ItemsPerThread];
+        value_type values[ItemsPerThread];
+        if(IsFull)
+        {
+            keys_load_type().load(keys_input, keys, storage.keys_load);
+            if(with_values)
+            {
+                ::rocprim::syncthreads();
+                values_load_type().load(values_input, values, storage.values_load);
+            }
+        }
+        else
+        {
+            const key_type out_of_bounds = key_codec::decode(bit_key_type(-1));
+            keys_load_type().load(keys_input, keys, size, out_of_bounds, storage.keys_load);
+            if(with_values)
+            {
+                ::rocprim::syncthreads();
+                values_load_type().load(values_input, values, size, storage.values_load);
+            }
+        }
+
+        ::rocprim::syncthreads();
+
+        sort_block<Descending>(sort_type(), keys, values, storage.sort, bit, bit + current_radix_bits);
+
+        // Store keys and values
+        #pragma unroll
+        for (unsigned int i = 0; i < ItemsPerThread; ++i)
+        {
+            unsigned int item_offset = i + ItemsPerThread * threadIdx.x;
+            if (item_offset < size)
+            {
+                keys_output[item_offset] = keys[i];
+                if (with_values)
+                    values_output[item_offset] = values[i];
             }
         }
     }
@@ -501,6 +600,54 @@ void scan_digits(unsigned int * digit_counts)
     unsigned int value = digit_counts[flat_id];
     scan_type().exclusive_scan(value, value, 0);
     digit_counts[flat_id] = value;
+}
+
+template<
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    bool Descending,
+    class KeysInputIterator,
+    class KeysOutputIterator,
+    class ValuesInputIterator,
+    class ValuesOutputIterator
+>
+ROCPRIM_DEVICE inline
+void sort_single(KeysInputIterator keys_input,
+                 KeysOutputIterator keys_output,
+                 ValuesInputIterator values_input,
+                 ValuesOutputIterator values_output,
+                 unsigned int size,
+                 unsigned int bit,
+                 unsigned int current_radix_bits)
+{
+    constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
+
+    using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
+    using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
+
+    using sort_single_helper = radix_sort_single_helper<
+        BlockSize, ItemsPerThread, Descending,
+        key_type, value_type
+    >;
+
+    ROCPRIM_SHARED_MEMORY typename sort_single_helper::storage_type storage;
+
+    if(size == items_per_block)
+    {
+        sort_single_helper().template sort_single<true>(
+            keys_input, keys_output, values_input, values_output,
+            size, bit, current_radix_bits,
+            storage
+        );
+    }
+    else
+    {
+        sort_single_helper().template sort_single<false>(
+            keys_input, keys_output, values_input, values_output,
+            size, bit, current_radix_bits,
+            storage
+        );
+    }
 }
 
 template<

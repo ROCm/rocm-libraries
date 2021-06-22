@@ -707,5 +707,4 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairsDoubleBuffer)
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, values_expected));
         }
     }
-
 }
