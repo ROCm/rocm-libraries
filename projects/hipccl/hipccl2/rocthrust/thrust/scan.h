@@ -349,7 +349,7 @@ __host__ __device__
  *  output sequences are the same, the scan is performed in-place.
  *
  *  Note that currently mixing scan input and output types can cause undefined behaviour.
- *  This issue can be avoided by supplying an initial value type argument to exclusive_scan.
+ *  This issue can be avoided by supplying an initial value type argument to \p exclusive_scan.
  *
  *  \param first The beginning of the input sequence.
  *  \param last The end of the input sequence.
@@ -398,7 +398,7 @@ template<typename InputIterator,
  *  output sequences are the same, the scan is performed in-place.
  *
  *  Note that currently mixing scan input and output types can cause undefined behaviour.
- *  This issue can be avoided by supplying an initial value type argument to exclusive_scan.
+ *  This issue can be avoided by supplying an initial value type argument to \p exclusive_scan.
  *
  *  The algorithm's execution is parallelized as determined by \p exec.
  *
@@ -458,7 +458,7 @@ __host__ __device__
  *  output sequences are the same, the scan is performed in-place.
  *
  *  Note that currently mixing scan input and output types can cause undefined behaviour.
- *  This issue can be avoided by supplying an initial value type argument to exclusive_scan.
+ *  This issue can be avoided by supplying an initial value type argument to \p exclusive_scan.
  *
  *  \param first The beginning of the input sequence.
  *  \param last The end of the input sequence.
@@ -509,7 +509,7 @@ template<typename InputIterator,
  *  sequences are the same, the scan is performed in-place.
  *
  *  Note that currently mixing scan input and output types can cause undefined behaviour.
- *  This issue can be avoided by supplying an initial value type argument to exclusive_scan.
+ *  This issue can be avoided by supplying an initial value type argument to \p exclusive_scan.
  *
  *  The algorithm's execution is parallelized as determined by \p exec.
  *
@@ -580,7 +580,7 @@ __host__ __device__
  *  sequences are the same, the scan is performed in-place.
  *
  *  Note that currently mixing scan input and output types can cause undefined behaviour.
- *  This issue can be avoided by supplying an initial value type argument to exclusive_scan.
+ *  This issue can be avoided by supplying an initial value type argument to \p exclusive_scan.
  *
  *  \param first The beginning of the input sequence.
  *  \param last The end of the input sequence.
