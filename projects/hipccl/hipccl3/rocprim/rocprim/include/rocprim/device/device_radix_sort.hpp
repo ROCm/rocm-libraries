@@ -37,6 +37,7 @@
 #include "device_radix_sort_config.hpp"
 #include "device_transform.hpp"
 #include "detail/device_radix_sort.hpp"
+#include "specialization/device_radix_sort.hpp"
 
 /// \addtogroup devicemodule
 /// @{
@@ -93,32 +94,6 @@ void scan_digits_kernel(unsigned int * digit_counts)
     scan_digits<RadixBits>(digit_counts);
 }
 
- template<
-     unsigned int BlockSize,
-     unsigned int ItemsPerThread,
-     bool Descending,
-     class KeysInputIterator,
-     class KeysOutputIterator,
-     class ValuesInputIterator,
-     class ValuesOutputIterator
- >
- __global__
-__launch_bounds__(BlockSize)
-void sort_single_kernel(KeysInputIterator    keys_input,
-                        KeysOutputIterator   keys_output,
-                        ValuesInputIterator  values_input,
-                        ValuesOutputIterator values_output,
-                        unsigned int         size,
-                        unsigned int         bit,
-                        unsigned int         current_radix_bits)
-{
-    sort_single<BlockSize, ItemsPerThread, Descending>(
-        keys_input, keys_output,
-        values_input, values_output,
-        size, bit, current_radix_bits
-    );
-}
-
 template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
@@ -151,6 +126,8 @@ void sort_and_scatter_kernel(KeysInputIterator keys_input,
     );
 }
 
+#ifndef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
+
 #define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start) \
     { \
         auto _error = hipPeekAtLastError(); \
@@ -166,216 +143,7 @@ void sort_and_scatter_kernel(KeysInputIterator keys_input,
         } \
     }
 
-template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    bool Descending,
-    class KeysInputIterator,
-    class KeysOutputIterator,
-    class ValuesInputIterator,
-    class ValuesOutputIterator
->
-inline
-hipError_t radix_sort_single(KeysInputIterator keys_input,
-                            KeysOutputIterator keys_output,
-                            ValuesInputIterator values_input,
-                            ValuesOutputIterator values_output,
-                            unsigned int size,
-                            unsigned int bit,
-                            unsigned int end_bit,
-                            hipStream_t stream,
-                            bool debug_synchronous)
-{
-    const unsigned int current_radix_bits = end_bit - bit;
-
-    std::chrono::high_resolution_clock::time_point start;
-    if(debug_synchronous)
-    {
-        std::cout << "BlockSize " << BlockSize << '\n';
-        std::cout << "ItemsPerThread " << ItemsPerThread << '\n';
-        std::cout << "bit " << bit << '\n';
-        std::cout << "current_radix_bits " << current_radix_bits << '\n';
-    }
-
-    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(sort_single_kernel<
-            BlockSize, ItemsPerThread, Descending
-        >),
-        dim3(1), dim3(BlockSize), 0, stream,
-        keys_input, keys_output, values_input, values_output,
-        size, bit, current_radix_bits
-    );
-    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("radix_sort_single", size, start)
-
-    return hipSuccess;
-}
-
-template<
-    class Config,
-    bool Descending,
-    class KeysInputIterator,
-    class KeysOutputIterator,
-    class ValuesInputIterator,
-    class ValuesOutputIterator
->
-inline
-hipError_t radix_sort_single(KeysInputIterator keys_input,
-                            KeysOutputIterator keys_output,
-                            ValuesInputIterator values_input,
-                            ValuesOutputIterator values_output,
-                            unsigned int size,
-                            unsigned int bit,
-                            unsigned int end_bit,
-                            hipStream_t stream,
-                            bool debug_synchronous)
-{
-    if( Config::force_single_kernel_config || size > 1536U )
-    {
-        return radix_sort_single<
-            Config::sort_single::block_size,
-            Config::sort_single::items_per_thread,
-            Descending
-        >(
-            keys_input,
-            keys_output,
-            values_input,
-            values_output,
-            size,
-            bit,
-            end_bit,
-            stream,
-            debug_synchronous
-        );
-    }
-    else if( size <= 64U )
-    {
-        return radix_sort_single<64U, 1U, Descending>(
-            keys_input,
-            keys_output,
-            values_input,
-            values_output,
-            size,
-            bit,
-            end_bit,
-            stream,
-            debug_synchronous
-        );
-    }
-    else if( size <= 128U )
-    {
-        return radix_sort_single<64U, 2U, Descending>(
-            keys_input,
-            keys_output,
-            values_input,
-            values_output,
-            size,
-            bit,
-            end_bit,
-            stream,
-            debug_synchronous
-        );
-    }
-    else if( size <= 192U )
-    {
-        return radix_sort_single<64U, 3U, Descending>(
-            keys_input,
-            keys_output,
-            values_input,
-            values_output,
-            size,
-            bit,
-            end_bit,
-            stream,
-            debug_synchronous
-        );
-    }
-    else if( size <= 256U )
-    {
-        return radix_sort_single<64U, 4U, Descending>(
-            keys_input,
-            keys_output,
-            values_input,
-            values_output,
-            size,
-            bit,
-            end_bit,
-            stream,
-            debug_synchronous
-        );
-    }
-    else if( size <= 320U )
-    {
-        return radix_sort_single<64U, 5U, Descending>(
-            keys_input,
-            keys_output,
-            values_input,
-            values_output,
-            size,
-            bit,
-            end_bit,
-            stream,
-            debug_synchronous
-        );
-    }
-    else if( size <= 512U )
-    {
-        return radix_sort_single<256U, 2U, Descending>(
-            keys_input,
-            keys_output,
-            values_input,
-            values_output,
-            size,
-            bit,
-            end_bit,
-            stream,
-            debug_synchronous
-        );
-    }
-    else if( size <= 768U )
-    {
-        return radix_sort_single<256U, 3U, Descending>(
-            keys_input,
-            keys_output,
-            values_input,
-            values_output,
-            size,
-            bit,
-            end_bit,
-            stream,
-            debug_synchronous
-        );
-    }
-    else if( size <= 1024U )
-    {
-        return radix_sort_single<512U, 2U, Descending>(
-            keys_input,
-            keys_output,
-            values_input,
-            values_output,
-            size,
-            bit,
-            end_bit,
-            stream,
-            debug_synchronous
-        );
-    }
-    else // Size <= 1024
-    {
-        return radix_sort_single<256U, 6U, Descending>(
-            keys_input,
-            keys_output,
-            values_input,
-            values_output,
-            size,
-            bit,
-            end_bit,
-            stream,
-            debug_synchronous
-        );
-    }
-}
+#endif
 
 template<
     class Config,
