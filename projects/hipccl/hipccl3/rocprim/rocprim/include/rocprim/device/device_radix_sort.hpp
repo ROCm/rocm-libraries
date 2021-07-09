@@ -37,7 +37,8 @@
 #include "device_radix_sort_config.hpp"
 #include "device_transform.hpp"
 #include "detail/device_radix_sort.hpp"
-#include "specialization/device_radix_sort.hpp"
+#include "specialization/device_radix_single_sort.hpp"
+#include "specialization/device_radix_merge_sort.hpp"
 
 /// \addtogroup devicemodule
 /// @{
@@ -376,6 +377,80 @@ hipError_t radix_sort_single_impl(void * temporary_storage,
     return hipSuccess;
 }
 
+template<
+    class Config,
+    bool Descending,
+    class KeysInputIterator,
+    class KeysOutputIterator,
+    class ValuesInputIterator,
+    class ValuesOutputIterator
+>
+inline
+hipError_t radix_sort_merge_impl(void * temporary_storage,
+                                 size_t& storage_size,
+                                 KeysInputIterator keys_input,
+                                 typename std::iterator_traits<KeysInputIterator>::value_type * keys_tmp,
+                                 KeysOutputIterator keys_output,
+                                 ValuesInputIterator values_input,
+                                 typename std::iterator_traits<ValuesInputIterator>::value_type * values_tmp,
+                                 ValuesOutputIterator values_output,
+                                 unsigned int size,
+                                 bool& is_result_in_output,
+                                 unsigned int begin_bit,
+                                 unsigned int end_bit,
+                                 hipStream_t stream,
+                                 bool debug_synchronous)
+{
+    using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
+    using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
+
+    using config = default_or_custom_config<
+        Config,
+        default_radix_sort_config<ROCPRIM_TARGET_ARCH, key_type, value_type>
+    >;
+
+    constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
+
+    const bool with_double_buffer = keys_tmp != nullptr;
+    const size_t keys_bytes = ::rocprim::detail::align_size(size * sizeof(key_type));
+    const size_t values_bytes = with_values ? ::rocprim::detail::align_size(size * sizeof(value_type)) : 0;
+
+    const size_t minimum_bytes = ::rocprim::detail::align_size(1);
+    if(temporary_storage == nullptr)
+    {
+        if(!with_double_buffer)
+            storage_size = keys_bytes + values_bytes;
+        else
+            storage_size = minimum_bytes;
+        return hipSuccess;
+    }
+
+    if(debug_synchronous)
+    {
+        std::cout << "temporary_storage " << temporary_storage << '\n';
+        hipError_t error = hipStreamSynchronize(stream);
+        if(error != hipSuccess) return error;
+    }
+
+    if(!with_double_buffer)
+    {
+        char * ptr = reinterpret_cast<char *>(temporary_storage);
+        keys_tmp = reinterpret_cast<key_type *>(ptr);
+        ptr += keys_bytes;
+        values_tmp = with_values ? reinterpret_cast<value_type *>(ptr) : nullptr;
+    }
+
+    hipError_t error = radix_sort_merge<config, Descending>(
+        keys_input, keys_tmp, keys_output, values_input, values_tmp, values_output, size,
+        begin_bit, end_bit,
+        stream, debug_synchronous
+    );
+    if(error != hipSuccess) return error;
+
+    is_result_in_output = true;
+    return hipSuccess;
+}
+
 
 template<
     class Config,
@@ -468,7 +543,7 @@ hipError_t radix_sort_iterations_impl(void * temporary_storage,
     ptr += batch_digit_counts_bytes;
     unsigned int * digit_counts = reinterpret_cast<unsigned int *>(ptr);
     ptr += digit_counts_bytes;
-   if(!with_double_buffer)
+    if(!with_double_buffer)
     {
         keys_tmp = reinterpret_cast<key_type *>(ptr);
         ptr += keys_bytes;
@@ -583,9 +658,10 @@ hipError_t radix_sort_impl(void * temporary_storage,
         default_radix_sort_config<ROCPRIM_TARGET_ARCH, key_type, value_type>
     >;
 
-    constexpr unsigned int sort_size = config::sort_single::block_size * config::sort_single::items_per_thread;
+    constexpr unsigned int single_sort_limit = config::sort_single::block_size * config::sort_single::items_per_thread;
+    constexpr unsigned int merge_sort_limit = config::sort_merge::block_size * config::sort_merge::items_per_thread * config::merge_size_limit_blocks;
 
-    if( size <= sort_size )
+    if( size <= single_sort_limit )
     {
         return radix_sort_single_impl<Config, Descending>(
             temporary_storage,
@@ -593,6 +669,25 @@ hipError_t radix_sort_impl(void * temporary_storage,
             keys_input,
             keys_output,
             values_input,
+            values_output,
+            size,
+            is_result_in_output,
+            begin_bit,
+            end_bit,
+            stream,
+            debug_synchronous
+        );
+    }
+    else if( size <= merge_sort_limit )
+    {
+        return radix_sort_merge_impl<Config, Descending>(
+            temporary_storage,
+            storage_size,
+            keys_input,
+            keys_tmp,
+            keys_output,
+            values_input,
+            values_tmp,
             values_output,
             size,
             is_result_in_output,
