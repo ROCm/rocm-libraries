@@ -313,6 +313,8 @@ public:
             storage_.buffer[index(offset + lane_id * ItemsPerThread + i)] = input[i];
         }
 
+        ::rocprim::wave_barrier();
+
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             output[i] = storage_.buffer[index(offset + i * current_warp_size + lane_id)];
@@ -381,6 +383,8 @@ public:
         {
             storage_.buffer[index(offset + i * current_warp_size + lane_id)] = input[i];
         }
+
+        ::rocprim::wave_barrier();
 
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
