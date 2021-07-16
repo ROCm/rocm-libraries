@@ -206,6 +206,14 @@ void syncthreads()
     __syncthreads();
 }
 
+/// \brief All lanes in a wave come to convergence point simultaneously
+/// with SIMT, thus no special instruction is needed in the ISA
+ROCPRIM_DEVICE inline
+void wave_barrier()
+{
+    __builtin_amdgcn_wave_barrier();
+}
+
 namespace detail
 {
     /// \brief Returns thread identifier in a multidimensional block (tile) by dimension.
