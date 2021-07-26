@@ -56,7 +56,7 @@ rocm_install_targets(
   PREFIX rocprim
 )
 
-install(
+rocm_install(
   DIRECTORY
     "include/"
     "${PROJECT_BINARY_DIR}/rocprim/include/"
