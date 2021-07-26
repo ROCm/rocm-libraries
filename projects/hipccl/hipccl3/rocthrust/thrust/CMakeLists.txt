@@ -42,7 +42,7 @@ if(CMAKE_VERSION VERSION_LESS 3.7)
   # if there are long file names.
   set(EXCLUDE_PATTERNS PATTERN "./system/cuda/detail/cub/*" EXCLUDE)
 endif()
-install(
+rocm_install(
   DIRECTORY
     "./"
     "${PROJECT_BINARY_DIR}/thrust/include/"
