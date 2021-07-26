@@ -71,7 +71,7 @@ rocm_install_targets(
   TARGETS hipcub
   PREFIX hipcub
 )
-install(
+rocm_install(
   DIRECTORY
     "include/"
     "${PROJECT_BINARY_DIR}/hipcub/include/"
