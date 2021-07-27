@@ -2,6 +2,11 @@
 
 See README.md on how to build the hipCUB documentation using Doxygen.
 
+## (Unreleased) hipCUB-2.10.12
+### Changed
+- Packaging split into a runtime package called hipcub and a development package called hipcub-devel. The development package depends on runtime. The runtime package suggests the development package for all supported OSes except CentOS 7 to aid in the transition. The suggests feature in packaging is introduced as a deprecated feature and will be removed in a future rocm release.
+    - As hipCUB is a header-only library, the runtime package is an empty placeholder used to aid in the transition. This package is also a deprecated feature and will be removed in a future rocm release.
+
 ## [Unreleased hipCUB-2.10.11 for ROCm 4.4.0]
 ### Added
 - gfx1030 support added.
