@@ -45,9 +45,14 @@
 
 // figure out which host compiler we're using
 #if defined(_MSC_VER)
-    #define THRUST_HOST_COMPILER THRUST_HOST_COMPILER_MSVC
-    #define THRUST_MSVC_VERSION _MSC_VER
-    #define THRUST_MSVC_VERSION_FULL _MSC_FULL_VER
+  #if defined(__clang__)
+    #define THRUST_HOST_COMPILER THRUST_HOST_COMPILER_CLANG
+    #define THRUST_CLANG_VERSION (__clang_major__ * 10000 + __clang_minor__ * 100 + __clang_patchlevel__)
+  #else
+      #define THRUST_HOST_COMPILER THRUST_HOST_COMPILER_MSVC
+      #define THRUST_MSVC_VERSION _MSC_VER
+      #define THRUST_MSVC_VERSION_FULL _MSC_FULL_VER
+  #endif
 #elif defined(__clang__)
     #define THRUST_HOST_COMPILER THRUST_HOST_COMPILER_CLANG
     #define THRUST_CLANG_VERSION (__clang_major__ * 10000 + __clang_minor__ * 100 + __clang_patchlevel__)
