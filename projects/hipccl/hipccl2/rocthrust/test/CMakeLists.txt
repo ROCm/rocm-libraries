@@ -72,7 +72,6 @@ function(add_rocthrust_test TEST)
     if (WIN32 AND NOT DEFINED DLLS_COPIED)
       set(DLLS_COPIED "YES")
       set(DLLS_COPIED ${DLLS_COPIED} PARENT_SCOPE)
-      message(STATUS "copying dlls")
       # for now adding in all .dll as dependency chain is not cmake based on win32
       file( GLOB third_party_dlls
       LIST_DIRECTORIES ON
