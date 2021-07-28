@@ -26,10 +26,6 @@ configure_file(
     ${CMAKE_CURRENT_BINARY_DIR}/test_seed.hpp
 )
 
-if (WIN32)
-  set(DLLS_COPIED OFF)
-endif()
-
 function(add_rocthrust_test TEST)
     set(TEST_SOURCE "test_${TEST}.cpp")
     set(TEST_TARGET "${TEST}.hip")
@@ -73,7 +69,9 @@ function(add_rocthrust_test TEST)
                 LABELS "hip"
         )
     endif()
-    if (WIN32 AND NOT DLLS_COPIED)
+    if (WIN32 AND NOT DEFINED DLLS_COPIED)
+      set(DLLS_COPIED "YES")
+      
       # for now adding in all .dll as dependency chain is not cmake based on win32
       file( GLOB third_party_dlls
       LIST_DIRECTORIES ON
@@ -82,10 +80,9 @@ function(add_rocthrust_test TEST)
       ${CMAKE_SOURCE_DIR}/rtest.*
       )
       foreach( file_i ${third_party_dlls})
-      add_custom_command( TARGET ${TEST_TARGET} POST_BUILD COMMAND ${CMAKE_COMMAND} ARGS -E copy ${file_i} ${PROJECT_BINARY_DIR}/test )
+        add_custom_command( TARGET ${TEST_TARGET} POST_BUILD COMMAND ${CMAKE_COMMAND} ARGS -E copy_if_different ${file_i} ${PROJECT_BINARY_DIR}/test )
       endforeach( file_i )
-      set(DLLS_COPIED ON)
-    endif()    
+    endif()        
 endfunction()
 
 # ****************************************************************************

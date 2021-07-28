@@ -32,7 +32,9 @@ function(add_thrust_example EXAMPLE)
         PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/examples/"
     )
-    if (WIN32 AND NOT DLLS_COPIED)
+    if (WIN32 AND NOT DEFINED DLLS_COPIED)
+      set(DLLS_COPIED "YES")
+
       # for now adding in all .dll as dependency chain is not cmake based on win32
       file( GLOB third_party_dlls
       LIST_DIRECTORIES ON
@@ -41,10 +43,9 @@ function(add_thrust_example EXAMPLE)
       ${CMAKE_SOURCE_DIR}/rtest.*
       )
       foreach( file_i ${third_party_dlls})
-      add_custom_command( TARGET ${EXAMPLE_TARGET} POST_BUILD COMMAND ${CMAKE_COMMAND} ARGS -E copy ${file_i} ${PROJECT_BINARY_DIR}/examples )
+        add_custom_command( TARGET ${EXAMPLE_TARGET} POST_BUILD COMMAND ${CMAKE_COMMAND} ARGS -E copy_if_different ${file_i} ${PROJECT_BINARY_DIR}/examples )
       endforeach( file_i )
-      set(DLLS_COPIED ON)
-    endif()      
+    endif()         
 endfunction()
 
 
