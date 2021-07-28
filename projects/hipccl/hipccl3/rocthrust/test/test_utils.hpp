@@ -191,6 +191,32 @@ inline auto get_random_data(size_t size, T min, T max, int seed) ->
     return data;
 }
 
+#if defined(WIN32) && defined(__clang__)
+template <>
+inline thrust::host_vector<unsigned char> get_random_data(size_t size, unsigned char min, unsigned char max, int seed_value)
+{
+    std::random_device                 rd;
+    std::default_random_engine         gen(rd());
+    gen.seed(seed_value);
+    std::uniform_int_distribution<int> distribution(static_cast<int>(min), static_cast<int>(max));
+    thrust::host_vector<unsigned char> data(size);
+    std::generate(data.begin(), data.end(), [&]() { return static_cast<unsigned char>(distribution(gen)); });
+    return data;
+}
+
+template <>
+inline thrust::host_vector<signed char> get_random_data(size_t size, signed char min, signed char max, int seed_value)
+{
+    std::random_device                 rd;
+    std::default_random_engine         gen(rd());
+    gen.seed(seed_value);
+    std::uniform_int_distribution<int> distribution(static_cast<int>(min), static_cast<int>(max));
+    thrust::host_vector<signed char> data(size);
+    std::generate(data.begin(), data.end(), [&]() { return static_cast<signed char>(distribution(gen)); });
+    return data;
+}
+#endif
+
 template <class T>
 struct custom_compare_less
 {

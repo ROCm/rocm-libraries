@@ -1,0 +1,9 @@
+<testset>
+<var name="CTEST_FILTER" value="ctest --output-on-failure --exclude-regex "></var>
+<test sets="psdb">
+  <run name="all_tests">{CTEST_FILTER} async_copy.hip partition.hip stable_sort_by_key_large.hip</run>
+</test>
+<test sets="osdb">
+  <run name="all_tests">{CTEST_FILTER} async_copy.hip partition.hip stable_sort_by_key_large.hip</run>
+</test>
+</testset>

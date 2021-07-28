@@ -173,9 +173,9 @@ __host__ __device__ inline float copysignf(float x, float y){
 
 
 #ifndef __CUDACC__
-
+#ifndef __HIP__
 // Simple approximation to log1p as Visual Studio is lacking one
-inline double log1p(double x){
+__host__ __device__ inline double log1p(double x){
   double u = 1.0+x;
   if(u == 1.0){
     return x;
@@ -189,7 +189,7 @@ inline double log1p(double x){
   }
 }
 
-inline float log1pf(float x){
+__host__ __device__ inline float log1pf(float x){
   float u = 1.0f+x;
   if(u == 1.0f){
     return x;
@@ -203,7 +203,9 @@ inline float log1pf(float x){
   }
 }
 
-#if _MSV_VER <= 1500
+#endif // __HIP__
+
+#if _MSC_VER <= 1500 && !defined(__clang__)
 #include <complex>
 
 inline float hypotf(float x, float y){

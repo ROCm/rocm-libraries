@@ -26,6 +26,10 @@ configure_file(
     ${CMAKE_CURRENT_BINARY_DIR}/test_seed.hpp
 )
 
+if (WIN32)
+  set(DLLS_COPIED OFF)
+endif()
+
 function(add_rocthrust_test TEST)
     set(TEST_SOURCE "test_${TEST}.cpp")
     set(TEST_TARGET "${TEST}.hip")
@@ -41,12 +45,14 @@ function(add_rocthrust_test TEST)
             roc::rocprim_hip
             ${GTEST_BOTH_LIBRARIES}
     )
-    foreach(amdgpu_target ${AMDGPU_TARGETS})
-        target_link_libraries(${TEST_TARGET}
-            PRIVATE
-                --amdgpu-target=${amdgpu_target}
-        )
-    endforeach()
+    if (NOT WIN32)
+      foreach(amdgpu_target ${AMDGPU_TARGETS})
+          target_link_libraries(${TEST_TARGET}
+              PRIVATE
+                  --amdgpu-target=${amdgpu_target}
+          )
+      endforeach()
+    endif()
     set_target_properties(${TEST_TARGET}
         PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test/"
@@ -67,6 +73,19 @@ function(add_rocthrust_test TEST)
                 LABELS "hip"
         )
     endif()
+    if (WIN32 AND NOT DLLS_COPIED)
+      # for now adding in all .dll as dependency chain is not cmake based on win32
+      file( GLOB third_party_dlls
+      LIST_DIRECTORIES ON
+      CONFIGURE_DEPENDS
+      ${HIP_DIR}/bin/*.dll
+      ${CMAKE_SOURCE_DIR}/rtest.*
+      )
+      foreach( file_i ${third_party_dlls})
+      add_custom_command( TARGET ${TEST_TARGET} POST_BUILD COMMAND ${CMAKE_COMMAND} ARGS -E copy ${file_i} ${PROJECT_BINARY_DIR}/test )
+      endforeach( file_i )
+      set(DLLS_COPIED ON)
+    endif()    
 endfunction()
 
 # ****************************************************************************

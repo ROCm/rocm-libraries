@@ -48,7 +48,7 @@ typedef ::testing::Types<ParamsSort<unsigned short, int, thrust::less<unsigned s
                          ParamsSort<int, long long>>
     SortTestsParams;
 
-TYPED_TEST_CASE(SortTests, SortTestsParams);
+TYPED_TEST_SUITE(SortTests, SortTestsParams);
 
 TESTS_DEFINE(SortVector, FullTestsParams);
 TESTS_DEFINE(SortVectorPrimitives, NumericalTestsParams);
