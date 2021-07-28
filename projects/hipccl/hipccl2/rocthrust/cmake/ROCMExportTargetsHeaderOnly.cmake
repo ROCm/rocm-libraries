@@ -98,7 +98,7 @@ function(rocm_export_targets_header_only)
     endif()
 
     foreach(INCLUDE ${PARSE_INCLUDE})
-        install(FILES ${INCLUDE} DESTINATION ${CONFIG_PACKAGE_INSTALL_DIR})
+        rocm_install(FILES ${INCLUDE} DESTINATION ${CONFIG_PACKAGE_INSTALL_DIR})
         get_filename_component(INCLUDE_BASE ${INCLUDE} NAME)
         rocm_write_package_template_function(${CONFIG_TEMPLATE} include "\${CMAKE_CURRENT_LIST_DIR}/${INCLUDE_BASE}")
     endforeach()
@@ -132,13 +132,13 @@ function(rocm_export_targets_header_only)
     if(PARSE_NAMESPACE)
         set(NAMESPACE_ARG "NAMESPACE;${PARSE_NAMESPACE}")
     endif()
-    install( EXPORT ${TARGET_FILE}
+    rocm_install( EXPORT ${TARGET_FILE}
         DESTINATION
         ${CONFIG_PACKAGE_INSTALL_DIR}
         ${NAMESPACE_ARG}
     )
 
-    install( FILES
+    rocm_install( FILES
         ${CMAKE_CURRENT_BINARY_DIR}/${CONFIG_NAME}.cmake
         ${CMAKE_CURRENT_BINARY_DIR}/${CONFIG_NAME}-version.cmake
         DESTINATION

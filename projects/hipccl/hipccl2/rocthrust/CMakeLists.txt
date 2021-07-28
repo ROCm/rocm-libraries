@@ -32,6 +32,8 @@ endif()
 
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker search and installed rpath")
 
+# Get dependencies
+include(cmake/Dependencies.cmake)
 
 # Detect compiler support for target ID
 # This section is deprecated. Please use rocm_check_target_ids for future use.
@@ -113,9 +115,6 @@ if(BUILD_ADDRESS_SANITIZER)
   add_link_options(-fuse-ld=lld)
 endif()
 
-# Get dependencies
-include(cmake/Dependencies.cmake)
-
 # Setup VERSION
 rocm_setup_version(VERSION "2.10.9")
 
@@ -132,6 +131,7 @@ if(BUILD_TEST)
   #TODO: Get testing folder working with HIP on Windows
   if (NOT WIN32)
     add_subdirectory(testing)
+  endif()
   enable_testing()
   add_subdirectory(test)
 endif()
@@ -159,9 +159,9 @@ set(CPACK_RPM_PACKAGE_REQUIRES "rocprim >= 2.10.1")
 
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 
-if(NOT CPACK_PACKAGING_INSTALL_PREFIX)
-  set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
-endif()
+# if(NOT CPACK_PACKAGING_INSTALL_PREFIX)
+#   set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
+# endif()
 
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" "\${CPACK_PACKAGING_INSTALL_PREFIX}/include")
 
