@@ -2,9 +2,10 @@
 
 Full documentation for rocThrust is available at [https://rocthrust.readthedocs.io/en/latest/](https://rocthrust.readthedocs.io/en/latest/)
 
-## (Unreleased) rocThrust-2.11.2
+## (Unreleased) rocThrust-2.11.2 for ROCm 4.5.0
+### Addded
+- Initial HIP on Windows support. See README for instructions on how to build and install.
 ### Changed
-
 - Packaging split into a runtime package called rocthrust and a development package called rocthrust-devel. The development package depends on runtime. The runtime package suggests the development package for all supported OSes except CentOS 7 to aid in the transition. The suggests feature in packaging is introduced as a deprecated feature and will be removed in a future rocm release.
 
 ## [Unreleased rocThrust-2.11.1 for ROCm 4.4.0]
