@@ -9,6 +9,9 @@ performant GPU-accelerated code on AMD ROCm platform.
 * CMake (3.5.1 or later)
 * AMD [ROCm](https://rocm.github.io/install.html) platform (1.8.2 or later)
   * Including [HIP-clang](https://github.com/ROCm-Developer-Tools/HIP/blob/master/INSTALL.md#hip-clang) compiler
+* Python 3.6 or higher (HIP on Windows only, required only for install script)
+* Visual Studio 2019 with clang support (HIP on Windows only)
+* Strawberry Perl (HIP on Windows only)
 
 Optional:
 
@@ -20,7 +23,7 @@ Optional:
   * It will be automatically downloaded and built by cmake script.
 
 ## Build and Install
-
+### Linux
 ```shell
 git clone https://github.com/ROCmSoftwarePlatform/rocPRIM.git
 
@@ -63,6 +66,19 @@ ctest --output-on-failure
 
 # Install
 [sudo] make install
+```
+### Windows
+
+Initial support for HIP on Windows has been added.  To install, use the provided rmake.py python script:
+```shell
+git clone https://github.com/ROCmSoftwarePlatform/rocPRIM.git
+cd rocPRIM
+
+# the -i option will install rocPRIM to C:\hipSDK by default
+python rmake.py -i
+
+# the -c option will build all clients including unit tests
+python rmake.py -c
 ```
 
 ### Using rocPRIM

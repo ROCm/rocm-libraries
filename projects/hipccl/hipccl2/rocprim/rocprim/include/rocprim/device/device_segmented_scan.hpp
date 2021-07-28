@@ -56,7 +56,7 @@ template<
     class InitValueType,
     class BinaryFunction
 >
-__global__
+ROCPRIM_KERNEL
 __launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void segmented_scan_kernel(InputIterator input,
                            OutputIterator output,

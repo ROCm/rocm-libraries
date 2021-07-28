@@ -35,6 +35,11 @@
     #define ROCPRIM_HOST __host__
     #define ROCPRIM_HOST_DEVICE __host__ __device__
     #define ROCPRIM_SHARED_MEMORY __shared__
+    #ifdef WIN32
+    #define ROCPRIM_KERNEL __global__ static
+    #else
+    #define ROCPRIM_KERNEL __global__
+    #endif
     // TODO: These paremeters should be tuned for NAVI in the close future.
     #ifndef ROCPRIM_DEFAULT_MAX_BLOCK_SIZE
         #define ROCPRIM_DEFAULT_MAX_BLOCK_SIZE 256

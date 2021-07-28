@@ -59,6 +59,7 @@ if(NOT USE_HIP_CPU)
   include(cmake/Dependencies.cmake)
   # Set the AMDGPU_TARGETS with backward compatiblity
   # Use target ID syntax if supported for AMDGPU_TARGETS
+  set(AMDGPU_TARGETS "all" CACHE STRING "Compile for which gpu architectures?")
   if(COMMAND rocm_check_target_ids)
     rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
       TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx1030"
@@ -79,13 +80,25 @@ if(NOT USE_HIP_CPU)
       set(DEFAULT_AMDGPU_TARGETS "gfx803;gfx900;gfx906;gfx908;gfx1030")
     endif()
   endif()
-  set(AMDGPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "List of specific machine types for library to target")
-  set(AMDGPU_TEST_TARGETS "" CACHE STRING "List of specific device types to test for") # Leave empty for default system device
+  if (AMDGPU_TARGETS)
+    if( AMDGPU_TARGETS STREQUAL "all" )
+      set( gpus "${DEFAULT_AMDGPU_TARGETS}")
+    else()
+      set( gpus "${AMDGPU_TARGETS}")
+    endif()
+    # must FORCE set this AMDGPU_TARGETS before any find_package( hip ...), in this file
+    # to override CACHE var and set --offload-arch flags via hip-config.cmake hip::device dependency
+    set( AMDGPU_TARGETS "${gpus}" CACHE STRING "AMD GPU targets to compile for" FORCE )
+  endif()
 
   # Verify that hcc compiler is used on ROCM platform
-  include(cmake/VerifyCompiler.cmake)
+  # TODO: Fix VerifyCompiler for HIP on Windows
+  if (NOT WIN32)
+    include(cmake/VerifyCompiler.cmake)
+  endif()
+  list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH} ${ROCM_PATH}/hip ${ROCM_PATH}/llvm /opt/rocm/llvm /opt/rocm/hip)
+  find_package(hip REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)
 endif()
-
 # Build options
 # Disable -Werror
 option(DISABLE_WERROR "Disable building with Werror" ON)

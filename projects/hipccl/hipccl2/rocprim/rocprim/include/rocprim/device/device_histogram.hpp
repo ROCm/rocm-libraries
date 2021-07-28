@@ -45,7 +45,7 @@ template<
     unsigned int ActiveChannels,
     class Counter
 >
-__global__
+ROCPRIM_KERNEL
 __launch_bounds__(BlockSize)
 void init_histogram_kernel(fixed_array<Counter *, ActiveChannels> histogram,
                            fixed_array<unsigned int, ActiveChannels> bins)
@@ -62,7 +62,7 @@ template<
     class Counter,
     class SampleToBinOp
 >
-__global__
+ROCPRIM_KERNEL
 __launch_bounds__(BlockSize)
 void histogram_shared_kernel(SampleIterator samples,
                              unsigned int columns,
@@ -92,7 +92,7 @@ template<
     class Counter,
     class SampleToBinOp
 >
-__global__
+ROCPRIM_KERNEL
 __launch_bounds__(BlockSize)
 void histogram_global_kernel(SampleIterator samples,
                              unsigned int columns,

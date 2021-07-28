@@ -47,7 +47,7 @@ template<
     class ValuesOutputIterator,
     class BinaryFunction
 >
-__global__
+ROCPRIM_KERNEL
 __launch_bounds__(BlockSize)
 void block_sort_kernel(KeysInputIterator keys_input,
                        KeysOutputIterator keys_output,
@@ -70,7 +70,7 @@ template<
     class ValuesOutputIterator,
     class BinaryFunction
 >
-__global__
+ROCPRIM_KERNEL
 __launch_bounds__(BlockSize)
 void block_merge_kernel(KeysInputIterator keys_input,
                         KeysOutputIterator keys_output,

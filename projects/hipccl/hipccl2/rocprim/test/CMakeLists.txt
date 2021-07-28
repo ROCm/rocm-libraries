@@ -81,6 +81,20 @@ function(add_hip_test TEST_NAME TEST_SOURCES)
   )
 
   add_test(${TEST_NAME} ${TEST_TARGET})
+  if (WIN32 AND NOT DEFINED DLLS_COPIED)
+    set(DLLS_COPIED "YES")
+    set(DLLS_COPIED ${DLLS_COPIED} PARENT_SCOPE)
+    # for now adding in all .dll as dependency chain is not cmake based on win32
+    file( GLOB third_party_dlls
+    LIST_DIRECTORIES ON
+    CONFIGURE_DEPENDS
+    ${HIP_DIR}/bin/*.dll
+    ${CMAKE_SOURCE_DIR}/rtest.*
+    )
+    foreach( file_i ${third_party_dlls})
+      add_custom_command( TARGET ${TEST_TARGET} POST_BUILD COMMAND ${CMAKE_COMMAND} ARGS -E copy_if_different ${file_i} ${PROJECT_BINARY_DIR}/test )
+    endforeach( file_i )
+  endif()   
 endfunction()
 
 # ****************************************************************************

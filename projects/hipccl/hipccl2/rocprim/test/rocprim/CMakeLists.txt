@@ -20,6 +20,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+set(AMDGPU_TEST_TARGETS "" CACHE STRING "List of specific device types to test for") # Leave empty for default system device
+
 function(add_rocprim_test TEST_NAME TEST_SOURCES)
   list(GET TEST_SOURCES 0 TEST_MAIN_SOURCE)
   get_filename_component(TEST_TARGET ${TEST_MAIN_SOURCE} NAME_WE)
@@ -91,6 +93,20 @@ function(add_rocprim_test TEST_NAME TEST_SOURCES)
               LABELS "hip"
       )
   endif()
+  if (WIN32 AND NOT DEFINED DLLS_COPIED_2)
+    set(DLLS_COPIED_2 "YES")
+    set(DLLS_COPIED_2 ${DLLS_COPIED_2} PARENT_SCOPE)
+    # for now adding in all .dll as dependency chain is not cmake based on win32
+    file( GLOB third_party_dlls
+    LIST_DIRECTORIES ON
+    CONFIGURE_DEPENDS
+    ${HIP_DIR}/bin/*.dll
+    ${CMAKE_SOURCE_DIR}/rtest.*
+    )
+    foreach( file_i ${third_party_dlls})
+      add_custom_command( TARGET ${TEST_TARGET} POST_BUILD COMMAND ${CMAKE_COMMAND} ARGS -E copy_if_different ${file_i} ${PROJECT_BINARY_DIR}/test/rocprim )
+    endforeach( file_i )
+  endif()   
 endfunction()
 
 # ****************************************************************************
@@ -140,3 +156,4 @@ add_rocprim_test("rocprim.warp_reduce" test_warp_reduce.cpp)
 add_rocprim_test("rocprim.warp_scan" test_warp_scan.cpp)
 add_rocprim_test("rocprim.warp_sort" test_warp_sort.cpp)
 add_rocprim_test("rocprim.zip_iterator" test_zip_iterator.cpp)
+

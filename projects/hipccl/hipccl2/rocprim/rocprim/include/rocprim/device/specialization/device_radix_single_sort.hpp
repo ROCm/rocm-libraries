@@ -52,7 +52,7 @@ namespace detail
         class ValuesInputIterator,
         class ValuesOutputIterator
     >
-    __global__
+    ROCPRIM_KERNEL
    __launch_bounds__(BlockSize)
    void sort_single_kernel(KeysInputIterator    keys_input,
                            KeysOutputIterator   keys_output,
