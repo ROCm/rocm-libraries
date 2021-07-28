@@ -1,9 +1,10 @@
-<testset>
-<var name="CTEST_FILTER" value="ctest --output-on-failure --exclude-regex "></var>
+<?xml version="1.0" encoding="UTF-8"?>
+<testset failure-regex="[1-9]\d* tests failed">
+<var name="CTEST_FILTER" value="ctest --output-on-failure"></var>
 <test sets="psdb">
-  <run name="all_tests">{CTEST_FILTER} async_copy.hip partition.hip stable_sort_by_key_large.hip</run>
+  <run name="all_tests">{CTEST_FILTER}</run>
 </test>
 <test sets="osdb">
-  <run name="all_tests">{CTEST_FILTER} async_copy.hip partition.hip stable_sort_by_key_large.hip</run>
+  <run name="all_tests">{CTEST_FILTER}</run>
 </test>
 </testset>
