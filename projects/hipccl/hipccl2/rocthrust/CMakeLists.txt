@@ -129,7 +129,9 @@ add_subdirectory(thrust)
 # Tests
 if(BUILD_TEST)
   # We still want the testing to be compiled to catch some errors
-  #add_subdirectory(testing)
+  #TODO: Get testing folder working with HIP on Windows
+  if (NOT WIN32)
+    add_subdirectory(testing)
   enable_testing()
   add_subdirectory(test)
 endif()
