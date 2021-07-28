@@ -44,7 +44,7 @@ template<
     class KeysInputIterator2,
     class BinaryFunction
 >
-__global__
+ROCPRIM_KERNEL
 __launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void partition_kernel(IndexIterator index,
                       KeysInputIterator1 keys_input1,
@@ -72,7 +72,7 @@ template<
     class ValuesOutputIterator,
     class BinaryFunction
 >
-__global__
+ROCPRIM_KERNEL
 __launch_bounds__(BlockSize)
 void merge_kernel(IndexIterator index,
                   KeysInputIterator1 keys_input1,

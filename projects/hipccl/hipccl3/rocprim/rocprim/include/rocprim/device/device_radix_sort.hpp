@@ -55,7 +55,7 @@ template<
     bool Descending,
     class KeysInputIterator
 >
-__global__
+ROCPRIM_KERNEL
 __launch_bounds__(BlockSize)
 void fill_digit_counts_kernel(KeysInputIterator keys_input,
                               unsigned int size,
@@ -78,7 +78,7 @@ template<
     unsigned int ItemsPerThread,
     unsigned int RadixBits
 >
-__global__
+ROCPRIM_KERNEL
 __launch_bounds__(BlockSize)
 void scan_batches_kernel(unsigned int * batch_digit_counts,
                          unsigned int * digit_counts,
@@ -88,7 +88,7 @@ void scan_batches_kernel(unsigned int * batch_digit_counts,
 }
 
 template<unsigned int RadixBits>
-__global__
+ROCPRIM_KERNEL
 __launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void scan_digits_kernel(unsigned int * digit_counts)
 {
@@ -105,7 +105,7 @@ template<
     class ValuesInputIterator,
     class ValuesOutputIterator
 >
-__global__
+ROCPRIM_KERNEL
 __launch_bounds__(BlockSize)
 void sort_and_scatter_kernel(KeysInputIterator keys_input,
                              KeysOutputIterator keys_output,

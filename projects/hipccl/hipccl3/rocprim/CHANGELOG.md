@@ -2,10 +2,16 @@
 
 Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwarePlatform/rocPRIM/](https://codedocs.xyz/ROCmSoftwarePlatform/rocPRIM/)
 
-## (Unreleased) rocPRIM-2.10.12
+## [Unreleased rocPRIM-2.10.11 for ROCm 4.5.0]
+### Addded
+- Initial HIP on Windows support. See README for instructions on how to build and install.
 ### Changed
 - Packaging split into a runtime package called rocprim and a development package called rocprim-devel. The development package depends on runtime. The runtime package suggests the development package for all supported OSes except CentOS 7 to aid in the transition. The suggests feature in packaging is introduced as a deprecated feature and will be removed in a future rocm release.
     - As rocPRIM is a header-only library, the runtime package is an empty placeholder used to aid in the transition. This package is also a deprecated feature and will be removed in a future rocm release.
+### Known issues
+- Unit tests may soft hang on MI200 when running in hipMallocManaged mode.
+### Deprecated
+- The warp_size() function is now deprecated; please switch to host_warp_size() and device_warp_size() for host and device references respectively.
 
 ## [Unreleased rocPRIM-2.10.11 for ROCm 4.4.0]
 ### Added

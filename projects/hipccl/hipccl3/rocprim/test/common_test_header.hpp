@@ -33,6 +33,10 @@
 #include <random>
 #include <cmath>
 
+#ifdef WIN32
+#include <numeric>
+#endif
+
 // Google Test
 #include <gtest/gtest.h>
 

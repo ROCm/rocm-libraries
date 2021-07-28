@@ -37,7 +37,7 @@ namespace detail
         class ValuesInputIterator,
         class ValuesOutputIterator
     >
-    __global__
+    ROCPRIM_KERNEL
    __launch_bounds__(BlockSize)
    void radix_block_merge_kernel(KeysInputIterator   keys_input,
                                 KeysOutputIterator   keys_output,

@@ -56,7 +56,7 @@ template<
     class ValuesOutputIterator,
     class OffsetIterator
 >
-__global__
+ROCPRIM_KERNEL
 __launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void segmented_sort_kernel(KeysInputIterator keys_input,
                            typename std::iterator_traits<KeysInputIterator>::value_type * keys_tmp,

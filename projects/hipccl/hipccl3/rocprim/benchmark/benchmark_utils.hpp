@@ -26,6 +26,10 @@
 #include <random>
 #include <type_traits>
 
+#ifdef WIN32
+#include <numeric>
+#endif
+
 #include <rocprim/rocprim.hpp>
 
 #define HIP_CHECK(condition)         \
