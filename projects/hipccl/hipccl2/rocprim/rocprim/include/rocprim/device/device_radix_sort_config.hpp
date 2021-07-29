@@ -53,8 +53,6 @@ template<
     class ScanConfig,
     class SortConfig,
     class SortSingleConfig = kernel_config<256, 10>,
-    class SortMergeConfig = kernel_config<1024, 1>,
-    unsigned int MergeSizeLimitBlocks = 1024U,
     bool ForceSingleKernelConfig = false
 >
 struct radix_sort_config
@@ -63,8 +61,6 @@ struct radix_sort_config
     static constexpr unsigned int long_radix_bits = LongRadixBits;
     /// \brief Number of bits in short iterations.
     static constexpr unsigned int short_radix_bits = ShortRadixBits;
-    /// \brief Limit number of blocks to use merge kernel.
-    static constexpr unsigned int merge_size_limit_blocks = MergeSizeLimitBlocks;
 
     /// \brief Configuration of digits scan kernel.
     using scan = ScanConfig;
@@ -72,9 +68,7 @@ struct radix_sort_config
     using sort = SortConfig;
     /// \brief Configuration of radix sort single kernel.
     using sort_single = SortSingleConfig;
-    /// \brief Configuration of radix sort merge kernel.
-    using sort_merge = SortMergeConfig;
-    /// \brief Force use radix sort single kernel configuration.
+    /// \brief Configuration of radix sort single kernel.
     static constexpr bool force_single_kernel_config = ForceSingleKernelConfig;
 };
 
