@@ -54,6 +54,12 @@
 //                float r = static_cast<float>(rhs);
 //                return Descending ? (r < l) : (l < r);
 //            }
+//            else constexpr (std::is_same_v<Key, rocprim::bfloat16>)
+//            {
+//                float l = static_cast<float>(lhs);
+//                float r = static_cast<float>(rhs);
+//                return Descending ? (r < l) : (l < r);
+//            }
 //            else
 //            {
 //                return Descending ? (rhs < lhs) : (lhs < rhs);
@@ -97,6 +103,19 @@
 //    return generic_key_compare<Key, Descending>(lhs, rhs);
 //}
 //
+//template<class Key, bool Descending>
+//auto discriminate_bfloat16(const Key& lhs, const Key& rhs) -> typename std::enable_if<std::is_same<Key, rocprim::bfloat16>::value, bool>::type
+//{
+//    // HIP's bfloat16 doesn't have __host__ comparison operators, use floats instead
+//    return generic_key_compare<float, Descending>((float)lhs, (float)rhs);
+//}
+//
+//template<class Key, bool Descending>
+//auto discriminate_bfloat16(const Key& lhs, const Key& rhs) -> typename std::enable_if<!std::is_same<Key, rocprim::bfloat16>::value, bool>::type
+//{
+//    return generic_key_compare<Key, Descending>(lhs, rhs);
+//}
+//
 //template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
 //auto discriminate_unsigned(const Key& lhs, const Key& rhs) -> typename std::enable_if<rocprim::is_unsigned<Key>::value, bool>::type
 //{
@@ -107,6 +126,12 @@
 //auto discriminate_unsigned(const Key& lhs, const Key& rhs) -> typename std::enable_if<!rocprim::is_unsigned<Key>::value, bool>::type
 //{
 //    return discriminate_half<Key, Descending>(lhs, rhs);
+//}
+//
+//template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
+//auto discriminate_unsigned(const Key& lhs, const Key& rhs) -> typename std::enable_if<!rocprim::is_unsigned<Key>::value, bool>::type
+//{
+//    return discriminate_bfloat16<Key, Descending>(lhs, rhs);
 //}
 //
 //template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
@@ -161,6 +186,16 @@ struct key_comparator<rocprim::half, Descending, 0, sizeof(rocprim::half) * 8>
     bool operator()(const rocprim::half& lhs, const rocprim::half& rhs)
     {
         // HIP's half doesn't have __host__ comparison operators, use floats instead
+        return key_comparator<float, Descending, 0, sizeof(float) * 8>()(lhs, rhs);
+    }
+};
+
+template<bool Descending>
+struct key_comparator<rocprim::bfloat16, Descending, 0, sizeof(rocprim::bfloat16) * 8>
+{
+    bool operator()(const rocprim::bfloat16& lhs, const rocprim::bfloat16& rhs)
+    {
+        // HIP's bfloat16 doesn't have __host__ comparison operators, use floats instead
         return key_comparator<float, Descending, 0, sizeof(float) * 8>()(lhs, rhs);
     }
 };
