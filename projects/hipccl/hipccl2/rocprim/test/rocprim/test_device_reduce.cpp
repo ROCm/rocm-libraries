@@ -65,6 +65,8 @@ typedef ::testing::Types<
     DeviceReduceParams<int8_t, int8_t>,
     DeviceReduceParams<uint8_t, uint8_t>,
     DeviceReduceParams<rocprim::half, rocprim::half>,
+    //TODO: Disable bfloat16 test until we get a better bfloat16 implemetation for host side
+    //DeviceReduceParams<rocprim::bfloat16, rocprim::bfloat16>,
     DeviceReduceParams<test_utils::custom_test_type<float>, test_utils::custom_test_type<float>>,
     DeviceReduceParams<test_utils::custom_test_type<int>, test_utils::custom_test_type<float>>
 > RocprimDeviceReduceTestsParams;
@@ -150,7 +152,7 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
 
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
-    using binary_op_type = typename std::conditional<std::is_same<U, rocprim::half>::value, test_utils::half_plus, rocprim::plus<U>>::type;
+    using binary_op_type = typename test_utils::select_plus_operator<U>::type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
 
@@ -168,6 +170,12 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
 
             // precision of half differs between host and device with large plus reductions
             if(std::is_same<U, rocprim::half>::value && size >= 1024)
+            {
+                break;
+            }
+
+            // precision of bfloat16 differs between host and device with large plus reductions
+            if(std::is_same<U, rocprim::bfloat16>::value && size >= 1024)
             {
                 break;
             }
@@ -260,7 +268,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
 
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
-    using binary_op_type = typename std::conditional<std::is_same<U, rocprim::half>::value, test_utils::half_minimum, rocprim::minimum<U>>::type;
+    using binary_op_type = typename test_utils::select_minimum_operator<U>::type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
 
