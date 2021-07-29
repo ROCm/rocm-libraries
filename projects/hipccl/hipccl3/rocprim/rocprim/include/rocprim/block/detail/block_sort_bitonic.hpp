@@ -216,31 +216,6 @@ private:
         wsort.sort(kv..., compare_function);
     }
 
-    template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
-    void warp_swap(Key& k, Value& v, int mask, bool dir, BinaryFunction compare_function)
-    {
-        Key k1    = warp_shuffle_xor(k, mask);
-        bool swap = compare_function(dir ? k : k1, dir ? k1 : k);
-        if (swap)
-        {
-            k = k1;
-            v = warp_shuffle_xor(v, mask);
-        }
-    }
-
-    template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
-    void warp_swap(Key& k, int mask, bool dir, BinaryFunction compare_function)
-    {
-        Key k1    = warp_shuffle_xor(k, mask);
-        bool swap = compare_function(dir ? k : k1, dir ? k1 : k);
-        if (swap)
-        {
-            k = k1;
-        }
-    }
-
     template<
         unsigned int Size,
         class BinaryFunction,
@@ -268,21 +243,13 @@ private:
         ROCPRIM_UNROLL
         for(unsigned int length = ::rocprim::device_warp_size(); length < Size; length *= 2)
         {
-            const bool dir = (flat_tid & (length * 2)) != 0;
+            bool dir = (flat_tid & (length * 2)) != 0;
             ROCPRIM_UNROLL
-            for(unsigned int k = length; k > ::rocprim::device_warp_size() / 2; k /= 2)
+            for(unsigned int k = length; k > 0; k /= 2)
             {
                 copy_to_shared(kv..., flat_tid, storage);
                 swap(kv..., flat_tid, flat_tid ^ k, dir, storage, compare_function);
                 ::rocprim::syncthreads();
-            }
-
-            ROCPRIM_UNROLL
-            for(unsigned int k = ::rocprim::device_warp_size() / 2; k > 0;  k /= 2)
-            {
-                const bool length_even = ((detail::logical_lane_id<::rocprim::device_warp_size()>() / k ) % 2 ) == 0;
-                const bool local_dir = length_even ? dir : !dir;
-                warp_swap(kv..., k, local_dir, compare_function);
             }
         }
     }

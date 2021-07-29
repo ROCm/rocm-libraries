@@ -60,12 +60,12 @@ private:
     swap(Key& k, V& v, int mask, bool dir, BinaryFunction compare_function)
     {
         Key k1 = warp_shuffle_xor(k, mask, WarpSize);
-        //V v1 = warp_shuffle_xor(v, mask, WarpSize);
+        V v1 = warp_shuffle_xor(v, mask, WarpSize);
         bool swap = compare_function(dir ? k : k1, dir ? k1 : k);
         if (swap)
         {
             k = k1;
-            v = warp_shuffle_xor(v, mask, WarpSize);
+            v = v1;
         }
     }
 
