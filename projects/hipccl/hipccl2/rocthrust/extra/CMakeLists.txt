@@ -74,11 +74,13 @@ function(add_rocthrust_test TEST_NAME TEST_SOURCES)
     PRIVATE
       ${rocthrust_LIBRARIES} # rocthrust
   )
-  foreach(amdgpu_target ${AMDGPU_TARGETS})
-    target_link_libraries(${TEST_TARGET}
-      PRIVATE
-        --amdgpu-target=${amdgpu_target}
-    )
+  if (NOT WIN32)
+    foreach(amdgpu_target ${AMDGPU_TARGETS})
+      target_link_libraries(${TEST_TARGET}
+        PRIVATE
+          --amdgpu-target=${amdgpu_target}
+      )
+  endif()
   endforeach()
   add_test(${TEST_NAME} ${TEST_TARGET})
 endfunction()

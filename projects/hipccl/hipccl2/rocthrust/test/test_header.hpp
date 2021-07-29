@@ -79,7 +79,7 @@ struct Params
         using input_type = typename Params::input_type; \
     };                                                  \
                                                         \
-    TYPED_TEST_CASE(x, y);
+    TYPED_TEST_SUITE(x, y);
 
 // Set of test parameter types
 
@@ -182,6 +182,24 @@ typedef ::testing::Types<Params<short>,
 // Scalar signed interger types
 typedef ::testing::Types<Params<short>, Params<int>, Params<long long>> SignedIntegerTestsParams;
 
+#if defined(WIN32) && defined(__HIP__)
+// Scalar unsigned interger types of all lengths
+typedef ::testing::Types<Params<thrust::detail::uint16_t>,
+                         Params<thrust::detail::uint32_t>,
+                         Params<thrust::detail::uint64_t>>
+    UnsignedIntegerTestsParams;
+
+typedef ::testing::Types<Params<short>,
+                         Params<int>,
+                         Params<long long>,
+                         Params<unsigned short>,
+                         Params<unsigned int>,
+                         Params<unsigned long long>,
+                         Params<thrust::detail::uint16_t>,
+                         Params<thrust::detail::uint32_t>,
+                         Params<thrust::detail::uint64_t>>
+    AllIntegerTestsParams;
+#else
 // Scalar unsigned interger types of all lengths
 typedef ::testing::Types<Params<thrust::detail::uint8_t>,
                          Params<thrust::detail::uint16_t>,
@@ -201,6 +219,8 @@ typedef ::testing::Types<Params<short>,
                          Params<thrust::detail::uint32_t>,
                          Params<thrust::detail::uint64_t>>
     AllIntegerTestsParams;
+#endif
+
 
 // Scalar float types
 typedef ::testing::Types<Params<float>, Params<double>> FloatTestsParams;
@@ -223,7 +243,7 @@ struct ParamsInOut
         using output_type = typename ParamsInOut::output_type; \
     };                                                         \
                                                                \
-    TYPED_TEST_CASE(x, y);
+    TYPED_TEST_SUITE(x, y);
 
 typedef ::testing::Types<ParamsInOut<short>,
                          ParamsInOut<int>,
