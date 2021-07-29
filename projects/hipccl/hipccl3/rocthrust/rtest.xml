@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <testset failure-regex="[1-9]\d* tests failed">
-    <var name="TEST_COMMAND">ctest --output-on-failure </var>
-    <test sets="psdb">
-        <run name="all-psdb">{TEST_COMMAND}</run>
-    </test>
-    <test sets="osdb">
-        <run name="all-osdb">{TEST_COMMAND}</run>
-    </test>
+<var name="CTEST_FILTER" value="ctest --output-on-failure"></var>
+<test sets="psdb">
+  <run name="all_tests">{CTEST_FILTER}</run>
+</test>
+<test sets="osdb">
+  <run name="all_tests">{CTEST_FILTER}</run>
+</test>
 </testset>

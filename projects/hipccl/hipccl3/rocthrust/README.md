@@ -17,6 +17,9 @@ Thrust is a parallel algorithm library. This library has been ported to [HIP](ht
     set as C++ compiler on ROCm platform.
 * [rocPRIM](https://github.com/ROCmSoftwarePlatform/rocPRIM) library
   * It will be automatically downloaded and built by CMake script.
+* Python 3.6 or higher (HIP on Windows only, only required for install scripts)
+* Visual Studio 2019 with clang support (HIP on Windows only)
+* Strawberry Perl (HIP on Windows only)
 
 Optional:
 
@@ -64,6 +67,20 @@ make package
 
 # Install
 [sudo] make install
+```
+
+### HIP on Windows
+
+Initial support for HIP on Windows has been added.  To install, use the provided rmake.py python script:
+```shell
+git clone https://github.com/ROCmSoftwarePlatform/rocThrust.git
+cd rocThrust
+
+# the -i option will install rocPRIM to C:\hipSDK by default
+python rmake.py -i
+
+# the -c option will build all clients including unit tests
+python rmake.py -c
 ```
 
 ### Macro options

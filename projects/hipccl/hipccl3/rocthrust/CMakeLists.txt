@@ -61,8 +61,9 @@ endif()
 set(AMDGPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "List of specific machine types for library to target")
 
 # Verify that hcc or hipcc compiler is used on ROCM platform
-include(cmake/VerifyCompiler.cmake)
-
+if (NOT WIN32)
+  include(cmake/VerifyCompiler.cmake)
+endif()
 # Build options
 # Disable -Werror
 option(DISABLE_WERROR "Disable building with Werror" ON)
@@ -95,12 +96,17 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 if(DISABLE_WERROR)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra ")
 else()
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror")
 endif()
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --save-temps")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --save-temps -std=c++14")
+
+if (WIN32)
+  add_compile_options(-xhip)
+  add_compile_definitions(THRUST_IGNORE_DEPRECATED_CPP_DIALECT)
+endif()
 
 # Address Sanitizer
 if(BUILD_ADDRESS_SANITIZER)
@@ -122,7 +128,10 @@ add_subdirectory(thrust)
 # Tests
 if(BUILD_TEST)
   # We still want the testing to be compiled to catch some errors
-  add_subdirectory(testing)
+  #TODO: Get testing folder working with HIP on Windows
+  if (NOT WIN32)
+    add_subdirectory(testing)
+  endif()
   enable_testing()
   add_subdirectory(test)
 endif()

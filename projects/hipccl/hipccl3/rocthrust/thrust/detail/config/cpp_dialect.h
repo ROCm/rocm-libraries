@@ -57,7 +57,7 @@
 
 // MSVC does not define __cplusplus correctly. _MSVC_LANG is used instead.
 // This macro is only defined in MSVC 2015U3+.
-#  ifdef _MSVC_LANG // Do not replace with THRUST_HOST_COMPILER test (see above)
+#if defined(_MSVC_LANG) && !defined(__HIP__) // Do not replace with THRUST_HOST_COMPILER test (see above)
 // MSVC2015 reports C++14 but lacks extended constexpr support. Treat as C++11.
 #    if THRUST_MSVC_VERSION < 1910 && _MSVC_LANG > 201103L /* MSVC < 2017 && CPP > 2011 */
 #      define THRUST_CPLUSPLUS 201103L /* Fix to 2011 */
