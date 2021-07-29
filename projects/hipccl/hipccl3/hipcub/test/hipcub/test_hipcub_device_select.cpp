@@ -61,7 +61,7 @@ std::vector<size_t> get_sizes()
         3072, 4096,
         27845, (1 << 18) + 1111
     };
-    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(2, 1, 16384, rand());
+    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(2, static_cast<size_t>(1), static_cast<size_t>(16384), rand());
     sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
     std::sort(sizes.begin(), sizes.end());
     return sizes;
@@ -88,11 +88,11 @@ TYPED_TEST(HipcubDeviceSelectTests, Flagged)
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             // Generate data
-            std::vector<T> input = test_utils::get_random_data<T>(size, 1, 100, seed_value);
+            std::vector<T> input = test_utils::get_random_data<T>(size, static_cast<T>(1), static_cast<T>(100), seed_value);
             std::vector<F> flags = test_utils::get_random_data<F>(
                 size,
-                0,
-                1,
+                static_cast<F>(0),
+                static_cast<F>(1),
                 seed_value + seed_value_addition
             );
 
@@ -240,7 +240,7 @@ TYPED_TEST(HipcubDeviceSelectTests, SelectOp)
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             // Generate data
-            std::vector<T> input = test_utils::get_random_data<T>(size, 0, 100, seed_value);
+            std::vector<T> input = test_utils::get_random_data<T>(size, static_cast<T>(0), static_cast<T>(100), seed_value);
 
             T * d_input;
             U * d_output;

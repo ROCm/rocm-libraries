@@ -65,6 +65,45 @@ inline auto get_random_data(size_t size, T min, T max, int seed_value)
     return data;
 }
 
+#if defined(_WIN32) && defined(__clang__)
+template<>
+inline std::vector<unsigned char> get_random_data(size_t size, unsigned char min, unsigned char max, int seed_value)
+{
+    std::random_device rd;
+    std::default_random_engine gen(rd());
+    gen.seed(seed_value);
+    std::uniform_int_distribution<int> distribution(static_cast<int>(min), static_cast<int>(max));
+    std::vector<unsigned char> data(size);
+    std::generate(data.begin(), data.end(), [&]() { return static_cast<unsigned char>(distribution(gen)); });
+    return data;
+}
+
+template<>
+inline std::vector<signed char> get_random_data(size_t size, signed char min, signed char max, int seed_value)
+{
+    std::random_device rd;
+    std::default_random_engine gen(rd());
+    gen.seed(seed_value);
+    std::uniform_int_distribution<int> distribution(static_cast<int>(min), static_cast<int>(max));
+    std::vector<signed char> data(size);
+    std::generate(data.begin(), data.end(), [&]() { return static_cast<signed char>(distribution(gen)); });
+    return data;
+}
+
+template<>
+inline std::vector<char> get_random_data(size_t size, char min, char max, int seed_value)
+{
+    std::random_device rd;
+    std::default_random_engine gen(rd());
+    gen.seed(seed_value);
+    std::uniform_int_distribution<int> distribution(static_cast<int>(min), static_cast<int>(max));
+    std::vector<char> data(size);
+    std::generate(data.begin(), data.end(), [&]() { return static_cast<char>(distribution(gen)); });
+    return data;
+}
+#endif
+
+
 template<class T>
 inline std::vector<T> get_random_data01(size_t size, float p, int seed_value)
 {
