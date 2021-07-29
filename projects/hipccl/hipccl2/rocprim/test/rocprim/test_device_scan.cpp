@@ -77,6 +77,8 @@ typedef ::testing::Types<
     // hip-clang does not allow to convert half to float
     DeviceScanParams<rocprim::half, float>,
 #endif
+    DeviceScanParams<rocprim::bfloat16, rocprim::bfloat16, test_utils::bfloat16_maximum>,
+    DeviceScanParams<rocprim::bfloat16, float>,
     // Large
     DeviceScanParams<int, double, rocprim::plus<int> >,
     DeviceScanParams<int, double, rocprim::plus<double> >,
@@ -201,7 +203,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScan)
 
             // Generate data
             std::vector<T> input = test_utils::get_random_data<T>(size, 1, 10, seed_value);
-            std::vector<U> output(input.size(), 0);
+            std::vector<U> output(input.size(), U{0});
 
             T * d_input;
             U * d_output;
@@ -434,7 +436,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanByKey)
             {
                 keys = test_utils::get_random_data<K>(size, 0, 3, seed_value);
             }
-            std::vector<U> output(input.size(), 0);
+            std::vector<U> output(input.size(), U{0});
 
             T * d_input;
             K * d_keys;
@@ -587,7 +589,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
             {
                 keys = test_utils::get_random_data<K>(size, 0, 3, seed_value);
             }
-            std::vector<U> output(input.size(), 0);
+            std::vector<U> output(input.size(), U{0});
 
             T * d_input;
             K * d_keys;

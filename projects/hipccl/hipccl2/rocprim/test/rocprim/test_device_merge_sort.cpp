@@ -1,4 +1,4 @@
-// MIT License
+/// MIT License
 //
 // Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
 //
@@ -66,6 +66,8 @@ typedef ::testing::Types<
     DeviceSortParams<int8_t, int8_t>,
     DeviceSortParams<uint8_t, uint8_t>,
     DeviceSortParams<rocprim::half, rocprim::half, test_utils::half_less>,
+    //TODO: Disable bfloat16 test until we get a better bfloat16 implemetation for host side
+    //DeviceSortParams<rocprim::bfloat16, rocprim::bfloat16, test_utils::bfloat16_less>,
     DeviceSortParams<int, float, ::rocprim::greater<int>>,
     DeviceSortParams<short, test_utils::custom_test_type<int>>,
     DeviceSortParams<double, test_utils::custom_test_type<double>>,

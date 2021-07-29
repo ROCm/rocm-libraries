@@ -62,6 +62,8 @@ typedef ::testing::Types<
     DevicePartitionParams<int8_t, int8_t>,
     DevicePartitionParams<uint8_t, uint8_t>,
     DevicePartitionParams<rocprim::half, rocprim::half>,
+    //TODO: Disable bfloat16 test until we get a better bfloat16 implemetation for host side
+    //DevicePartitionParams<rocprim::bfloat16, rocprim::bfloat16>,
     DevicePartitionParams<test_utils::custom_test_type<long long>>
 > RocprimDevicePartitionTestsParams;
 
@@ -341,7 +343,7 @@ TYPED_TEST(RocprimDevicePartitionTests, Predicate)
     HIP_CHECK(hipSetDevice(device_id));
 
     using O = typename TestFixture::input_type;
-    using T = typename std::conditional<std::is_same<O, rocprim::half>::value, int, O>::type;//typename TestFixture::input_type;
+    using T = typename std::conditional<std::is_same<O, rocprim::half>::value || std::is_same<O, rocprim::bfloat16>::value, int, O>::type;//typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
     const bool debug_synchronous = TestFixture::debug_synchronous;

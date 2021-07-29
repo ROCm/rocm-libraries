@@ -32,15 +32,10 @@
 
 
 #include "../config.hpp"
-// #include "../../../thread/thread_operators.cuh"
+#include "../functional.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
-template <int A>
-struct Int2Type
-{
-    enum {VALUE = A};
-};
  /**
   * \addtogroup UtilModule
   * @{

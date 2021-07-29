@@ -27,13 +27,24 @@ function(add_rocprim_example EXAMPLE_SOURCE)
     PRIVATE
     rocprim_hip
   )
-  if (NOT WIN32)
-    foreach(amdgpu_target ${AMDGPU_TARGETS})
+  if(NOT USE_HIP_CPU)
+    target_link_libraries(${EXAMPLE_TARGET}
+      PRIVATE
+        rocprim_hip
+    )
+  else()
+    target_link_libraries(${TEST_EXAMPLE_TARGETTARGET}
+      PRIVATE
+        rocprim
+        Threads::Threads
+        hip_cpu_rt::hip_cpu_rt
+    )
+    if(STL_DEPENDS_ON_TBB)
       target_link_libraries(${EXAMPLE_TARGET}
         PRIVATE
-          --amdgpu-target=${amdgpu_target}
+          TBB::tbb
       )
-    endforeach()
+    endif()
   endif()
   set_target_properties(${EXAMPLE_TARGET}
     PROPERTIES

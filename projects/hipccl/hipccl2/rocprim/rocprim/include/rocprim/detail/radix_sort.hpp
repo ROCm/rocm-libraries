@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2019 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -132,6 +132,9 @@ struct radix_key_codec_base<bool>
 
 template<>
 struct radix_key_codec_base<::rocprim::half> : radix_key_codec_floating<::rocprim::half, unsigned short> { };
+
+template<>
+struct radix_key_codec_base<::rocprim::bfloat16> : radix_key_codec_floating<::rocprim::bfloat16, unsigned short> { };
 
 template<>
 struct radix_key_codec_base<float> : radix_key_codec_floating<float, unsigned int> { };

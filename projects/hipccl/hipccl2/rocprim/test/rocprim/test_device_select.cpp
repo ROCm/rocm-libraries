@@ -61,6 +61,8 @@ typedef ::testing::Types<
     DeviceSelectParams<int8_t, int8_t>,
     DeviceSelectParams<uint8_t, uint8_t>,
     DeviceSelectParams<rocprim::half, rocprim::half>,
+    //TODO: Disable bfloat16 test until we get a better bfloat16 implemetation for host side
+    //DeviceSelectParams<rocprim::bfloat16, rocprim::bfloat16>,
     DeviceSelectParams<unsigned char, float, int, true>,
     DeviceSelectParams<double, double, int, true>,
     DeviceSelectParams<test_utils::custom_test_type<double>, test_utils::custom_test_type<double>, int, true>
@@ -247,6 +249,20 @@ struct select_op<rocprim::half>
     }
 };
 
+template<>
+struct select_op<rocprim::bfloat16>
+{
+    __device__ __host__ inline
+    bool operator()(const rocprim::bfloat16& value) const
+    {
+        #if __HIP_DEVICE_COMPILE__
+        if(value < rocprim::bfloat16(50)) return true;
+        #else
+        if(test_utils::bfloat16_less()(value, rocprim::bfloat16(50))) return true;
+        #endif
+        return false;
+    }
+};
 
 TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
 {
@@ -390,7 +406,7 @@ TYPED_TEST(RocprimDeviceSelectTests, UniqueEmptyInput)
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = typename TestFixture::input_type;
-    using op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_equal_to, rocprim::equal_to<T>>::type;
+    using op_type = typename test_utils::select_equal_to_operator<T>::type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
     hipStream_t stream = 0; // default stream
@@ -457,8 +473,8 @@ TYPED_TEST(RocprimDeviceSelectTests, Unique)
 
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
-    using op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_equal_to, rocprim::equal_to<T>>::type;
-    using scan_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
+    using op_type = typename test_utils::select_equal_to_operator<T>::type;
+    using scan_op_type = typename test_utils::select_plus_operator<T>::type;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
@@ -621,7 +637,7 @@ TEST(RocprimDeviceSelectTests, UniqueGuardedOperator)
     using T = int64_t;
     using F = int64_t;
     using U = int64_t;
-    using scan_op_type = typename std::conditional<std::is_same<T, rocprim::half>::value, test_utils::half_plus, rocprim::plus<T>>::type;
+    using scan_op_type = typename test_utils::select_plus_operator<T>::type;
     static constexpr bool use_identity_iterator = false;
     const bool debug_synchronous = false;
 

@@ -68,9 +68,13 @@ typedef ::testing::Types<
     params<int8_t, int8_t, 100, 2000>,
     params<uint8_t, uint8_t, 100, 2000>,
     params<int, rocprim::half, 100, 2000>,
+    //TODO: Disable bfloat16 test until we get a better bfloat16 implemetation for host side
+    //params<int, rocprim::bfloat16, 100, 2000>,
     params<int8_t, int8_t, 1000, 5000>,
     params<uint8_t, uint8_t, 1000, 5000>,
     params<int, rocprim::half, 1000, 5000>,
+    //TODO: Disable bfloat16 test until we get a better bfloat16 implemetation for host side
+    //params<int, rocprim::bfloat16, 1000, 5000>,
     params<unsigned int, size_t, 2048, 2048>,
     params<unsigned int, unsigned int, 1000, 50000>,
     params<unsigned long long, custom_double2, 100000, 100000>
