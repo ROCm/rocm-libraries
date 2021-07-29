@@ -20,36 +20,32 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "common_test_header.hpp"
+test_suite_type_def(suite_name, name_suffix)
 
-// required rocprim headers
-#include <rocprim/block/block_load.hpp>
-#include <rocprim/block/block_store.hpp>
-#include <rocprim/block/block_sort.hpp>
+typed_test_suite_def(suite_name, name_suffix, warp_params);
 
-// required test headers
-#include "test_utils_types.hpp"
+typed_test_def(suite_name, name_suffix, SortKeys)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
 
-// kernel definitions
-#include "test_block_sort.kernels.hpp"
+    using key_type = typename TestFixture::params::input_type;
+    using value_type = typename TestFixture::params::output_type;
+    constexpr size_t block_size = TestFixture::params::block_size;
 
-// Start stamping out tests
-struct RocprimBlockSortTests;
+    static_for<0, n_sizes, key_type, value_type, 0, block_size>::run();
+}
 
-struct Integral;
-#define suite_name RocprimBlockSortTests
-#define block_params BlockParamsIntegral
-#define name_suffix Integral
+typed_test_def(suite_name, name_suffix, SortKeysValues)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
 
-#include "test_block_sort.hpp"
+    using key_type = typename TestFixture::params::input_type;
+    using value_type = typename TestFixture::params::output_type;
+    constexpr size_t block_size = TestFixture::params::block_size;
 
-#undef suite_name
-#undef block_params
-#undef name_suffix
-
-struct Floating;
-#define suite_name RocprimBlockSortTests
-#define block_params BlockParamsFloating
-#define name_suffix Floating
-
-#include "test_block_sort.hpp"
+    static_for<0, n_sizes, key_type, value_type, 1, block_size>::run();
+}

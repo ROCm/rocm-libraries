@@ -25,6 +25,8 @@
 
 // required rocprim headers
 #include <rocprim/config.hpp>
+#include <rocprim/block/block_load.hpp>
+#include <rocprim/block/block_store.hpp>
 
 template<
     class T,
@@ -46,6 +48,36 @@ struct block_params
     using input_type = T;
     using output_type = U;
     static constexpr unsigned int block_size = BlockSize;
+};
+
+template<
+    class T,
+    class U,
+    unsigned int ItemsPerThread,
+    bool ShouldBeVectorized
+>
+struct vector_params
+{
+    using type = T;
+    using vector_type = U;
+    static constexpr unsigned int items_per_thread = ItemsPerThread;
+    static constexpr bool should_be_vectorized = ShouldBeVectorized;
+};
+
+template<
+    class Type,
+    rocprim::block_load_method Load,
+    rocprim::block_store_method Store,
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread
+>
+struct class_params
+{
+    using type = Type;
+    static constexpr rocprim::block_load_method load_method = Load;
+    static constexpr rocprim::block_store_method store_method = Store;
+    static constexpr unsigned int block_size = BlockSize;
+    static constexpr unsigned int items_per_thread = ItemsPerThread;
 };
 
 #if (defined(__gfx1030__))
@@ -81,20 +113,96 @@ struct block_params
 
 typedef ::testing::Types<
     warp_param_type(int),
-    warp_param_type(float),
-    warp_param_type(uint8_t),
     warp_param_type(int8_t),
-    warp_param_type(rocprim::half)
-> WarpParams;
+    warp_param_type(uint8_t)
+> WarpParamsIntegral;
+
+typedef ::testing::Types<
+    warp_param_type(float),
+    warp_param_type(rocprim::half)//,
+    //TODO: Disable bfloat16 test until we get a better bfloat16 implemetation for host side
+    //warp_param_type(rocprim::bfloat16)
+> WarpParamsFloating;
+
+// Separate sort params (only power of two warp sizes)
+#define warp_sort_param_type(type) \
+   warp_params<type, 2U>, \
+   warp_params<type, 4U>, \
+   warp_params<type, 8U>, \
+   warp_params<type, 16U>, \
+   warp_params<type, 32U>, \
+   warp_params<type, 64U>
+
+typedef ::testing::Types<
+    warp_sort_param_type(int),
+    warp_sort_param_type(test_utils::custom_test_type<int>),
+    warp_sort_param_type(uint8_t),
+    warp_sort_param_type(int8_t)
+> WarpSortParamsIntegral;
+
+typedef ::testing::Types<
+    warp_sort_param_type(rocprim::half),
+    warp_sort_param_type(rocprim::bfloat16)
+> WarpSortParamsFloating;
 
 typedef ::testing::Types<
     block_param_type(int, test_utils::custom_test_type<int>),
+    block_param_type(uint8_t, short),
+    block_param_type(int8_t, float)
+> BlockParamsIntegral;
+
+typedef ::testing::Types<
     block_param_type(float, long),
     block_param_type(double, test_utils::custom_test_type<double>),
-    block_param_type(uint8_t, short),
-    block_param_type(int8_t, float),
+    block_param_type(rocprim::half, rocprim::half),
+    block_param_type(rocprim::bfloat16, rocprim::bfloat16)
+> BlockParamsFloating;
+
+typedef ::testing::Types<
+    block_param_type(test_utils::custom_test_type<int>, int),
+    block_param_type(uint8_t, bool),
+    block_param_type(int8_t, bool)
+> BlockDiscParamsIntegral;
+
+typedef ::testing::Types<
+    block_param_type(float, char),
+    block_param_type(double, unsigned int),
+    block_param_type(rocprim::half, int),
+    block_param_type(rocprim::bfloat16, int)
+> BlockDiscParamsFloating;
+
+typedef ::testing::Types<
+    block_param_type(unsigned int, unsigned int)
+> BlockHistAtomicParamsIntegral;
+
+typedef ::testing::Types<
+    block_param_type(float, long),
+    block_param_type(double, test_utils::custom_test_type<double>),
     block_param_type(rocprim::half, rocprim::half)
-> BlockParams;
+> BlockExchParamsFloating;
+
+typedef ::testing::Types<
+    block_param_type(float, float),
+    block_param_type(float, unsigned int),
+    block_param_type(float, unsigned long long),
+    block_param_type(double, float),
+    block_param_type(double, unsigned long long)
+> BlockHistAtomicParamsFloating;
+
+typedef ::testing::Types<
+    block_param_type(uint8_t, int),
+    block_param_type(uint8_t, uint8_t),
+    block_param_type(uint8_t, short),
+    block_param_type(uint8_t, int8_t)
+> BlockHistSortParamsIntegral;
+
+typedef ::testing::Types<
+    block_param_type(unsigned short, rocprim::half),
+    block_param_type(unsigned int, rocprim::half)//,
+    //TODO: Disable bfloat16 test until we get a better bfloat16 implemetation for host side
+    //block_param_type(unsigned short, rocprim::bfloat16),
+    //block_param_type(unsigned int, rocprim::bfloat16)
+> BlockHistSortParamsFloating;
 
 static constexpr size_t n_items = 7;
 static constexpr unsigned int items[n_items] = {
@@ -106,5 +214,56 @@ T apply(BinaryOp binary_op, const T& a, const T& b)
 {
     return binary_op(a, b);
 }
+
+// Global utility defines
+#define test_suite_type_def_helper(name, suffix) \
+    template<class Params> \
+    class name ## suffix : public ::testing::Test { \
+    public: \
+        using params = Params; \
+    };
+
+#define test_suite_type_def(name, suffix) test_suite_type_def_helper(name, suffix)
+
+#define block_histo_test_suite_type_def_helper(name, suffix) \
+    template<class Params> \
+    class name ## suffix : public ::testing::Test { \
+    public: \
+        using type = typename Params::input_type; \
+        using bin_type = typename Params::output_type; \
+        static constexpr unsigned int block_size = Params::block_size; \
+        static constexpr unsigned int bin_size = Params::block_size; \
+    };
+
+#define block_histo_test_suite_type_def(name, suffix) block_histo_test_suite_type_def_helper(name, suffix)
+
+#define block_reduce_test_suite_type_def_helper(name, suffix) \
+    template<class Params> \
+    class name ## suffix : public ::testing::Test { \
+    public: \
+        using input_type = typename Params::input_type; \
+        static constexpr unsigned int block_size = Params::block_size; \
+    };
+
+#define block_reduce_test_suite_type_def(name, suffix) block_reduce_test_suite_type_def_helper(name, suffix)
+
+#define block_sort_test_suite_type_def_helper(name, suffix) \
+    template<class Params> \
+    class name ## suffix : public ::testing::Test { \
+    public: \
+        using key_type = typename Params::input_type; \
+        using value_type = typename Params::output_type; \
+        static constexpr unsigned int block_size = Params::block_size; \
+    };
+
+#define block_sort_test_suite_type_def(name, suffix) block_sort_test_suite_type_def_helper(name, suffix)
+
+#define typed_test_suite_def_helper(name, suffix, params) TYPED_TEST_SUITE(name ## suffix, params)
+
+#define typed_test_suite_def(name, suffix, params) typed_test_suite_def_helper(name, suffix, params)
+
+#define typed_test_def_helper(suite, suffix, name) TYPED_TEST(suite ## suffix, name)
+
+#define typed_test_def(suite, suffix, name) typed_test_def_helper(suite, suffix, name)
 
 #endif // TEST_TEST_UTILS_TYPES_HPP_

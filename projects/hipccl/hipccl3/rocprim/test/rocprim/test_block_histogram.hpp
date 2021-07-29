@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,37 +20,26 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "common_test_header.hpp"
+block_histo_test_suite_type_def(suite_name_atomic, name_suffix)
+block_histo_test_suite_type_def(suite_name_sort, name_suffix)
 
-// required rocprim headers
-#include <rocprim/block/block_load.hpp>
-#include <rocprim/block/block_store.hpp>
-#include <rocprim/block/block_shuffle.hpp>
-#include <rocprim/block/block_sort.hpp>
+typed_test_suite_def(suite_name_atomic, name_suffix, block_params_atomic);
+typed_test_suite_def(suite_name_sort, name_suffix, block_params_sort);
 
-// required test headers
-#include "test_utils_types.hpp"
+typed_test_def(suite_name_atomic, name_suffix, Histogram)
+{
+    using T = typename TestFixture::type;
+    using BinType = typename TestFixture::bin_type;
+    constexpr size_t block_size = TestFixture::block_size;
 
-// kernel definitions
-#include "test_block_shuffle.kernels.hpp"
+    static_for_input_array<0, 4, T, BinType, block_size, rocprim::block_histogram_algorithm::using_atomic>::run();
+}
 
-// Start stamping out tests
-struct RocprimBlockShuffleTests;
+typed_test_def(suite_name_sort, name_suffix, Histogram)
+{
+    using T = typename TestFixture::type;
+    using BinType = typename TestFixture::bin_type;
+    constexpr size_t block_size = TestFixture::block_size;
 
-struct Integral;
-#define suite_name RocprimBlockShuffleTests
-#define warp_params BlockParamsIntegral
-#define name_suffix Integral
-
-#include "test_block_shuffle.hpp"
-
-#undef suite_name
-#undef warp_params
-#undef name_suffix
-
-struct Floating;
-#define suite_name RocprimBlockShuffleTests
-#define warp_params BlockParamsFloating
-#define name_suffix Floating
-
-#include "test_block_shuffle.hpp"
+    static_for_input_array<0, 4, T, BinType, block_size, rocprim::block_histogram_algorithm::using_sort>::run();
+}

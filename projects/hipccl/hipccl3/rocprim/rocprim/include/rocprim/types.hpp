@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2019 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -142,6 +142,8 @@ struct empty_binary_op
 
 /// \brief Half-precision floating point type
 using half = ::__half;
+/// \brief bfloat16 floating point type
+using bfloat16 = ::hip_bfloat16;
 
 // The lane_mask_type only exist at device side
 #ifndef __AMDGCN_WAVEFRONT_SIZE
@@ -159,6 +161,13 @@ using lane_mask_type = unsigned long long int;
 using native_half = half;
 #else
 using native_half = _Float16;
+#endif
+
+#ifdef __HIP_CPU_RT__
+// TODO: Find a better type
+using native_bfloat16 = bfloat16;
+#else
+using native_bfloat16 = bfloat16;
 #endif
 
 END_ROCPRIM_NAMESPACE

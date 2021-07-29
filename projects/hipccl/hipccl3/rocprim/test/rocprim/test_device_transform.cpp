@@ -64,6 +64,7 @@ typedef ::testing::Types<
     DeviceTransformParams<int8_t, int8_t>,
     DeviceTransformParams<uint8_t, uint8_t>,
     DeviceTransformParams<rocprim::half, rocprim::half>,
+    DeviceTransformParams<rocprim::bfloat16, rocprim::bfloat16>,
     DeviceTransformParams<unsigned long>,
     DeviceTransformParams<short, int, true>,
     DeviceTransformParams<custom_short2, custom_int2, true>,
@@ -106,6 +107,20 @@ struct transform<rocprim::half>
         return a + rocprim::half(5);
         #else
         return test_utils::half_plus()(a, rocprim::half(5));
+        #endif
+    }
+};
+
+template<>
+struct transform<rocprim::bfloat16>
+{
+    __device__ __host__ inline
+    rocprim::bfloat16 operator()(const rocprim::bfloat16& a) const
+    {
+        #if __HIP_DEVICE_COMPILE__
+        return a + rocprim::bfloat16(5);
+        #else
+        return test_utils::bfloat16_plus()(a, rocprim::bfloat16(5));
         #endif
     }
 };
@@ -214,6 +229,21 @@ struct binary_transform<rocprim::half, rocprim::half, rocprim::half>
         #endif
     }
 };
+
+template<>
+struct binary_transform<rocprim::bfloat16, rocprim::bfloat16, rocprim::bfloat16>
+{
+    __device__ __host__ inline
+    rocprim::bfloat16 operator()(const rocprim::bfloat16& a, const rocprim::bfloat16& b) const
+    {
+        #if __HIP_DEVICE_COMPILE__
+        return a + b;
+        #else
+        return test_utils::bfloat16_plus()(a, b);
+        #endif
+    }
+};
+
 
 TYPED_TEST(RocprimDeviceTransformTests, BinaryTransform)
 {

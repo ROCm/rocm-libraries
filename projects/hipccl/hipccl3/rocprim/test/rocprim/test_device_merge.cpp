@@ -63,6 +63,8 @@ typedef ::testing::Types<
     DeviceMergeParams<int8_t, int8_t>,
     DeviceMergeParams<uint8_t, uint8_t>,
     DeviceMergeParams<rocprim::half, rocprim::half, test_utils::half_less>,
+    //TODO: Disable bfloat16 test until we get a better bfloat16 implemetation for host side
+    //DeviceMergeParams<rocprim::bfloat16, rocprim::bfloat16, test_utils::bfloat16_less>,
     DeviceMergeParams<custom_double2, custom_int2, ::rocprim::greater<custom_double2> >,
     DeviceMergeParams<custom_int2, char>
 > RocprimDeviceMergeTestsParams;

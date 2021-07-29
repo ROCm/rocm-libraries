@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,6 +22,7 @@
 #define TEST_TEST_UTILS_HPP_
 
 #include <rocprim/types.hpp>
+#include <rocprim/functional.hpp>
 #include <rocprim/type_traits.hpp>
 #include <rocprim/detail/match_result_type.hpp>
 
@@ -56,6 +57,12 @@ template<>
 struct precision_threshold<rocprim::half>
 {
     static constexpr float percentage = 0.075f;
+};
+
+template<>
+struct precision_threshold<rocprim::bfloat16>
+{
+    static constexpr float percentage = 0.6f;
 };
 
 // Support half operators on host side
@@ -215,6 +222,296 @@ struct half_minimum
     }
 };
 
+// Support bfloat16 operators on host side
+
+ROCPRIM_HOST inline
+rocprim::native_bfloat16 bfloat16_to_native(const rocprim::bfloat16& x)
+{
+    return rocprim::native_bfloat16(x);
+}
+
+ROCPRIM_HOST inline
+rocprim::bfloat16 native_to_bfloat16(const rocprim::native_bfloat16& x)
+{
+    return rocprim::bfloat16(x);
+}
+
+struct bfloat16_less
+{
+    ROCPRIM_HOST_DEVICE inline
+    bool operator()(const rocprim::bfloat16& a, const rocprim::bfloat16& b) const
+    {
+        #if __HIP_DEVICE_COMPILE__
+        return a < b;
+        #else
+        return bfloat16_to_native(a) < bfloat16_to_native(b);
+        #endif
+    }
+};
+
+struct bfloat16_less_equal
+{
+    ROCPRIM_HOST_DEVICE inline
+    bool operator()(const rocprim::bfloat16& a, const rocprim::bfloat16& b) const
+    {
+        #if __HIP_DEVICE_COMPILE__
+        return a <= b;
+        #else
+        return bfloat16_to_native(a) <= bfloat16_to_native(b);
+        #endif
+    }
+};
+
+struct bfloat16_greater
+{
+    ROCPRIM_HOST_DEVICE inline
+    bool operator()(const rocprim::bfloat16& a, const rocprim::bfloat16& b) const
+    {
+        #if __HIP_DEVICE_COMPILE__
+        return a > b;
+        #else
+        return bfloat16_to_native(a) > bfloat16_to_native(b);
+        #endif
+    }
+};
+
+struct bfloat16_greater_equal
+{
+    ROCPRIM_HOST_DEVICE inline
+    bool operator()(const rocprim::bfloat16& a, const rocprim::bfloat16& b) const
+    {
+        #if __HIP_DEVICE_COMPILE__
+        return a >= b;
+        #else
+        return bfloat16_to_native(a) >= bfloat16_to_native(b);
+        #endif
+    }
+};
+
+struct bfloat16_equal_to
+{
+    ROCPRIM_HOST_DEVICE inline
+    bool operator()(const rocprim::bfloat16& a, const rocprim::bfloat16& b) const
+    {
+        #if __HIP_DEVICE_COMPILE__
+        return a == b;
+        #else
+        return bfloat16_to_native(a) == bfloat16_to_native(b);
+        #endif
+    }
+};
+
+struct bfloat16_not_equal_to
+{
+    ROCPRIM_HOST_DEVICE inline
+    bool operator()(const rocprim::bfloat16& a, const rocprim::bfloat16& b) const
+    {
+        #if __HIP_DEVICE_COMPILE__
+        return a != b;
+        #else
+        return bfloat16_to_native(a) != bfloat16_to_native(b);
+        #endif
+    }
+};
+
+struct bfloat16_plus
+{
+    ROCPRIM_HOST_DEVICE inline
+    rocprim::bfloat16 operator()(const rocprim::bfloat16& a, const rocprim::bfloat16& b) const
+    {
+        #if __HIP_DEVICE_COMPILE__
+        return a + b;
+        #else
+        return native_to_bfloat16(bfloat16_to_native(a) + bfloat16_to_native(b));
+        #endif
+    }
+};
+
+struct bfloat16_minus
+{
+    ROCPRIM_HOST_DEVICE inline
+    rocprim::bfloat16 operator()(const rocprim::bfloat16& a, const rocprim::bfloat16& b) const
+    {
+        #if __HIP_DEVICE_COMPILE__
+        return a - b;
+        #else
+        return native_to_bfloat16(bfloat16_to_native(a) - bfloat16_to_native(b));
+        #endif
+    }
+};
+
+struct bfloat16_multiplies
+{
+    ROCPRIM_HOST_DEVICE inline
+    rocprim::bfloat16 operator()(const rocprim::bfloat16& a, const rocprim::bfloat16& b) const
+    {
+        #if __HIP_DEVICE_COMPILE__
+        return a * b;
+        #else
+        return native_to_bfloat16(bfloat16_to_native(a) * bfloat16_to_native(b));
+        #endif
+    }
+};
+
+struct bfloat16_maximum
+{
+    ROCPRIM_HOST_DEVICE inline
+    rocprim::bfloat16 operator()(const rocprim::bfloat16& a, const rocprim::bfloat16& b) const
+    {
+        #if __HIP_DEVICE_COMPILE__
+        return a < b ? b : a;
+        #else
+        return bfloat16_to_native(a) < bfloat16_to_native(b) ? b : a;
+        #endif
+    }
+};
+
+struct bfloat16_minimum
+{
+    ROCPRIM_HOST_DEVICE inline
+    rocprim::bfloat16 operator()(const rocprim::bfloat16& a, const rocprim::bfloat16& b) const
+    {
+        #if __HIP_DEVICE_COMPILE__
+        return a < b ? a : b;
+        #else
+        return bfloat16_to_native(a) < bfloat16_to_native(b) ? a : b;
+        #endif
+    }
+};
+
+// Less operator selector
+template<typename T>
+struct select_less_operator
+{
+    typedef ::rocprim::less<T> type;
+};
+
+template<>
+struct select_less_operator<::rocprim::half>
+{
+    typedef half_less type;
+};
+
+template<>
+struct select_less_operator<::rocprim::bfloat16>
+{
+    typedef bfloat16_less type;
+};
+
+// Equal to operator selector
+template<typename T>
+struct select_equal_to_operator
+{
+    typedef ::rocprim::equal_to<T> type;
+};
+
+template<>
+struct select_equal_to_operator<::rocprim::half>
+{
+    typedef half_equal_to type;
+};
+
+template<>
+struct select_equal_to_operator<::rocprim::bfloat16>
+{
+    typedef bfloat16_equal_to type;
+};
+
+// Greator to operator selector
+template<typename T>
+struct select_greater_operator
+{
+    typedef ::rocprim::greater<T> type;
+};
+
+template<>
+struct select_greater_operator<::rocprim::half>
+{
+    typedef half_greater type;
+};
+
+template<>
+struct select_greater_operator<::rocprim::bfloat16>
+{
+    typedef bfloat16_greater type;
+};
+
+// Not equeal to operator selector
+template<typename T>
+struct select_not_equal_to_operator
+{
+    typedef ::rocprim::not_equal_to<T> type;
+};
+
+template<>
+struct select_not_equal_to_operator<::rocprim::half>
+{
+    typedef half_not_equal_to type;
+};
+
+template<>
+struct select_not_equal_to_operator<::rocprim::bfloat16>
+{
+    typedef bfloat16_not_equal_to type;
+};
+
+// Plus to operator selector
+template<typename T>
+struct select_plus_operator
+{
+    typedef ::rocprim::plus<T> type;
+};
+
+template<>
+struct select_plus_operator<::rocprim::half>
+{
+    typedef half_plus type;
+};
+
+template<>
+struct select_plus_operator<::rocprim::bfloat16>
+{
+    typedef bfloat16_plus type;
+};
+
+// Minimum to operator selector
+template<typename T>
+struct select_minimum_operator
+{
+    typedef ::rocprim::minimum<T> type;
+};
+
+template<>
+struct select_minimum_operator<::rocprim::half>
+{
+    typedef half_minimum type;
+};
+
+template<>
+struct select_minimum_operator<::rocprim::bfloat16>
+{
+    typedef bfloat16_minimum type;
+};
+
+// Maximum to operator selector
+template<typename T>
+struct select_maximum_operator
+{
+    typedef ::rocprim::maximum<T> type;
+};
+
+template<>
+struct select_maximum_operator<::rocprim::half>
+{
+    typedef half_maximum type;
+};
+
+template<>
+struct select_maximum_operator<::rocprim::bfloat16>
+{
+    typedef bfloat16_maximum type;
+};
+
 // std::uniform_int_distribution is undefined for anything other than listed
 // https://en.cppreference.com/w/cpp/numeric/random/uniform_int_distribution
 template <typename T>
@@ -279,8 +576,8 @@ inline auto get_random_data(size_t size, U min, V max, seed_type seed_value)
     -> typename std::enable_if<rocprim::is_floating_point<T>::value, std::vector<T>>::type
 {
     engine_type gen{seed_value};
-    // Generate floats when T is half
-    using dis_type = typename std::conditional<std::is_same<rocprim::half, T>::value, float, T>::type;
+    // Generate floats when T is half or bfloat16
+    using dis_type = typename std::conditional<std::is_same<rocprim::half, T>::value || std::is_same<rocprim::bfloat16, T>::value, float, T>::type;
     std::uniform_real_distribution<dis_type> distribution((dis_type)min, (dis_type)max);
     std::vector<T> data(size);
     size_t segment_size = size / random_data_generation_segments;
@@ -594,6 +891,82 @@ struct custom_test_type<rocprim::half>
     bool operator==(const custom_test_type& other) const
     {
         return (half_equal_to()(x, other.x) && half_equal_to()(y, other.y));
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    bool operator!=(const custom_test_type& other) const
+    {
+        return !(*this == other);
+    }
+};
+
+//Overload for rocprim::bfloat16
+template<>
+struct custom_test_type<rocprim::bfloat16>
+{
+    using value_type = rocprim::bfloat16;
+
+    rocprim::bfloat16 x;
+    rocprim::bfloat16 y;
+
+    // Non-zero values in default constructor for checking reduce and scan:
+    // ensure that scan_op(custom_test_type(), value) != value
+    ROCPRIM_HOST_DEVICE inline
+    custom_test_type() : x(12), y(34) {}
+
+    ROCPRIM_HOST_DEVICE inline
+    custom_test_type(rocprim::bfloat16 x, rocprim::bfloat16 y) : x(x), y(y) {}
+
+    ROCPRIM_HOST_DEVICE inline
+    custom_test_type(rocprim::bfloat16 xy) : x(xy), y(xy) {}
+
+    template<class U>
+    ROCPRIM_HOST_DEVICE inline
+    custom_test_type(const custom_test_type<U>& other)
+    {
+        x = other.x;
+        y = other.y;
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    ~custom_test_type() {}
+
+    ROCPRIM_HOST_DEVICE inline
+    custom_test_type& operator=(const custom_test_type& other)
+    {
+        x = other.x;
+        y = other.y;
+        return *this;
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    custom_test_type operator+(const custom_test_type& other) const
+    {
+        return custom_test_type(bfloat16_plus()(x, other.x), bfloat16_plus()(y, other.y));
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    custom_test_type operator-(const custom_test_type& other) const
+    {
+        return custom_test_type(bfloat16_minus()(x, other.x), bfloat16_minus()(y, other.y));
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    bool operator<(const custom_test_type& other) const
+    {
+        return (bfloat16_less()(x, other.x) || (bfloat16_equal_to()(x, other.x) && bfloat16_less()(y, other.y)));
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    bool operator>(const custom_test_type& other) const
+    {
+        return (bfloat16_greater()(x, other.x) || (bfloat16_equal_to()(x, other.x) && bfloat16_greater()(y, other.y)));
+    }
+
+    ROCPRIM_HOST_DEVICE inline
+    bool operator==(const custom_test_type& other) const
+    {
+        return (bfloat16_equal_to()(x, other.x) && bfloat16_equal_to()(y, other.y));
     }
 
     ROCPRIM_HOST_DEVICE inline
@@ -933,6 +1306,16 @@ void assert_near(const std::vector<rocprim::half>& result, const std::vector<roc
     }
 }
 
+void assert_near(const std::vector<rocprim::bfloat16>& result, const std::vector<rocprim::bfloat16>& expected, float percent)
+{
+    ASSERT_EQ(result.size(), expected.size());
+    for(size_t i = 0; i < result.size(); i++)
+    {
+        auto diff = std::max<float>(std::abs(percent * static_cast<float>(expected[i])), percent);
+        ASSERT_NEAR(static_cast<float>(result[i]), static_cast<float>(expected[i]), diff) << "where index = " << i;
+    }
+}
+
 void assert_near(const std::vector<custom_test_type<rocprim::half>>& result, const std::vector<custom_test_type<rocprim::half>>& expected, const float percent)
 {
     ASSERT_EQ(result.size(), expected.size());
@@ -944,6 +1327,19 @@ void assert_near(const std::vector<custom_test_type<rocprim::half>>& result, con
         ASSERT_NEAR(static_cast<float>(result[i].y), static_cast<float>(expected[i].y), diff2) << "where index = " << i;
     }
 }
+
+void assert_near(const std::vector<custom_test_type<rocprim::bfloat16>>& result, const std::vector<custom_test_type<rocprim::bfloat16>>& expected, const float percent)
+{
+    ASSERT_EQ(result.size(), expected.size());
+    for(size_t i = 0; i < result.size(); i++)
+    {
+        auto diff1 = std::max<float>(std::abs(percent * static_cast<float>(expected[i].x)), percent);
+        auto diff2 = std::max<float>(std::abs(percent * static_cast<float>(expected[i].y)), percent);
+        ASSERT_NEAR(static_cast<float>(result[i].x), static_cast<float>(expected[i].x), diff1) << "where index = " << i;
+        ASSERT_NEAR(static_cast<float>(result[i].y), static_cast<float>(expected[i].y), diff2) << "where index = " << i;
+    }
+}
+
 
 template<class T>
 auto assert_near(const std::vector<custom_test_type<T>>& result, const std::vector<custom_test_type<T>>& expected, const float percent)
@@ -981,6 +1377,12 @@ void assert_near(const rocprim::half& result, const rocprim::half& expected, flo
     ASSERT_NEAR(static_cast<float>(result), static_cast<float>(expected), diff);
 }
 
+void assert_near(const rocprim::bfloat16& result, const rocprim::bfloat16& expected, float percent)
+{
+    auto diff = std::max<float>(std::abs(percent * static_cast<float>(expected)), percent);
+    ASSERT_NEAR(static_cast<float>(result), static_cast<float>(expected), diff);
+}
+
 template<class T>
 auto assert_near(const custom_test_type<T>& result, const custom_test_type<T>& expected, const float percent)
     -> typename std::enable_if<std::is_floating_point<T>::value>::type
@@ -1010,6 +1412,15 @@ void assert_eq(const std::vector<rocprim::half>& result, const std::vector<rocpr
     }
 }
 
+void assert_eq(const std::vector<rocprim::bfloat16>& result, const std::vector<rocprim::bfloat16>& expected)
+{
+    ASSERT_EQ(result.size(), expected.size());
+    for(size_t i = 0; i < result.size(); i++)
+    {
+        ASSERT_EQ(bfloat16_to_native(result[i]), bfloat16_to_native(expected[i])) << "where index = " << i;
+    }
+}
+
 template<class T>
 void custom_assert_eq(const std::vector<T>& result, const std::vector<T>& expected, size_t size)
 {
@@ -1027,6 +1438,14 @@ void custom_assert_eq(const std::vector<rocprim::half>& result, const std::vecto
     }
 }
 
+void custom_assert_eq(const std::vector<rocprim::bfloat16>& result, const std::vector<rocprim::bfloat16>& expected, size_t size)
+{
+    for(size_t i = 0; i < size; i++)
+    {
+        ASSERT_EQ(bfloat16_to_native(result[i]), bfloat16_to_native(expected[i])) << "where index = " << i;
+    }
+}
+
 template<class T>
 void assert_eq(const T& result, const T& expected)
 {
@@ -1037,6 +1456,12 @@ void assert_eq(const rocprim::half& result, const rocprim::half& expected)
 {
     ASSERT_EQ(half_to_native(result), half_to_native(expected));
 }
+
+void assert_eq(const rocprim::bfloat16& result, const rocprim::bfloat16& expected)
+{
+    ASSERT_EQ(bfloat16_to_native(result), bfloat16_to_native(expected));
+}
+
 
 } // end test_utils namespace
 
