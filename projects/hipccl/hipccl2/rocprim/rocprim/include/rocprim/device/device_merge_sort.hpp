@@ -71,7 +71,7 @@ template<
 >
 
 ROCPRIM_KERNEL
-__launch_bounds__(BlockSize)
+__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void block_merge_kernel(KeysInputIterator keys_input,
                         KeysOutputIterator keys_output,
                         ValuesInputIterator values_input,
