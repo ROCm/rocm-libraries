@@ -52,7 +52,6 @@ template<class Key>
 struct merge_sort_config_803<Key, empty_type>
 {
     using type = merge_sort_config<limit_block_size<256U, sizeof(Key), ROCPRIM_WARP_SIZE_64>::value>;
-
 };
 
 template<class Key, class Value>
