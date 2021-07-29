@@ -136,7 +136,7 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleUp)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate input
-        auto input = test_utils::get_random_data<T>(size, T(-100), T(100), seed_value);
+        auto input = test_utils::get_random_data<T>(size, static_cast<T>(-100), static_cast<T>(100), seed_value);
         std::vector<T> output(input.size());
 
         auto src_offsets = test_utils::get_random_data<unsigned int>(
@@ -244,7 +244,7 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleDown)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate input
-        auto input = test_utils::get_random_data<T>(size, T(-100), T(100), seed_value);
+        auto input = test_utils::get_random_data<T>(size, static_cast<T>(-100), static_cast<T>(100), seed_value);
         std::vector<T> output(input.size());
 
         auto src_offsets = test_utils::get_random_data<unsigned int>(
@@ -350,7 +350,7 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleIndex)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate input
-        auto input = test_utils::get_random_data<T>(size, T(-100), T(100), seed_value);
+        auto input = test_utils::get_random_data<T>(size, static_cast<T>(-100), static_cast<T>(100), seed_value);
         std::vector<T> output(input.size());
 
         auto src_offsets = test_utils::get_random_data<int>(
@@ -449,8 +449,8 @@ TEST(HipcubUtilPtxTests, ShuffleUpCustomStruct)
         // Generate data
         std::vector<double> random_data = test_utils::get_random_data<double>(
             4 * size,
-            -100,
-            100,
+            static_cast<double>(-100),
+            static_cast<double>(100),
             seed_value
         );
         std::vector<T> input(size);
@@ -559,8 +559,8 @@ TEST(HipcubUtilPtxTests, ShuffleUpCustomAlignedStruct)
         // Generate data
         std::vector<double> random_data = test_utils::get_random_data<double>(
             3 * size,
-            -100,
-            100,
+            static_cast<double>(-100),
+            static_cast<double>(100),
             seed_value
         );
         std::vector<T> input(size);

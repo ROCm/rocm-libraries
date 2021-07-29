@@ -2,7 +2,9 @@
 
 See README.md on how to build the hipCUB documentation using Doxygen.
 
-## (Unreleased) hipCUB-2.10.12
+## (Unreleased) hipCUB-2.10.12 for ROCm 4.5.0
+### Addded
+- Initial HIP on Windows support. See README for instructions on how to build and install.
 ### Changed
 - Packaging split into a runtime package called hipcub and a development package called hipcub-devel. The development package depends on runtime. The runtime package suggests the development package for all supported OSes except CentOS 7 to aid in the transition. The suggests feature in packaging is introduced as a deprecated feature and will be removed in a future rocm release.
     - As hipCUB is a header-only library, the runtime package is an empty placeholder used to aid in the transition. This package is also a deprecated feature and will be removed in a future rocm release.

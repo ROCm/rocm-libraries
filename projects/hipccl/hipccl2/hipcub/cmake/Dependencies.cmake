@@ -63,10 +63,8 @@ if(HIP_COMPILER STREQUAL "nvcc")
     endif()
     set(CUB_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/cub-1.11.0/ CACHE PATH "")
   endif()
-endif()
-
-# rocPRIM (only for ROCm platform)
-if(HIP_COMPILER STREQUAL "hcc" OR HIP_COMPILER STREQUAL "clang")
+else()
+  # rocPRIM (only for ROCm platform)
   if(NOT DOWNLOAD_ROCPRIM)
     find_package(rocprim)
   endif()
@@ -91,27 +89,34 @@ endif()
 
 # Test dependencies
 if(BUILD_TEST)
-  # Google Test (https://github.com/google/googletest)
-  message(STATUS "Downloading and building GTest.")
-  if(CMAKE_CXX_COMPILER MATCHES ".*/hipcc$|.*/nvcc$")
-    # hip-clang cannot compile googletest for some reason
-    set(COMPILER_OVERRIDE "-DCMAKE_CXX_COMPILER=g++")
+  if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
+    # Google Test (https://github.com/google/googletest)
+    find_package(GTest QUIET)
   endif()
-  set(GTEST_ROOT ${CMAKE_CURRENT_BINARY_DIR}/gtest CACHE PATH "")
-  download_project(
-    PROJ                googletest
-    GIT_REPOSITORY      https://github.com/google/googletest.git
-    GIT_TAG             release-1.10.0
-    INSTALL_DIR         ${GTEST_ROOT}
-    CMAKE_ARGS          -DBUILD_GTEST=ON -DINSTALL_GTEST=ON -Dgtest_force_shared_crt=ON -DBUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> ${COMPILER_OVERRIDE}
-    LOG_DOWNLOAD        TRUE
-    LOG_CONFIGURE       TRUE
-    LOG_BUILD           TRUE
-    LOG_INSTALL         TRUE
-    BUILD_PROJECT       TRUE
-    UPDATE_DISCONNECTED TRUE # Never update automatically from the remote repository
-  )
-  find_package(GTest REQUIRED)
+  
+  if(NOT TARGET GTest::GTest AND NOT TARGET GTest::gtest)
+    message(STATUS "GTest not found or force download GTest on. Downloading and building GTest.")  
+    # Google Test (https://github.com/google/googletest)
+    if(CMAKE_CXX_COMPILER MATCHES ".*/hipcc$|.*/nvcc$")
+      # hip-clang cannot compile googletest for some reason
+      set(COMPILER_OVERRIDE "-DCMAKE_CXX_COMPILER=g++")
+    endif()
+    set(GTEST_ROOT ${CMAKE_CURRENT_BINARY_DIR}/gtest CACHE PATH "")
+    download_project(
+      PROJ                googletest
+      GIT_REPOSITORY      https://github.com/google/googletest.git
+      GIT_TAG             release-1.10.0
+      INSTALL_DIR         ${GTEST_ROOT}
+      CMAKE_ARGS          -DBUILD_GTEST=ON -DINSTALL_GTEST=ON -Dgtest_force_shared_crt=ON -DBUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> ${COMPILER_OVERRIDE}
+      LOG_DOWNLOAD        TRUE
+      LOG_CONFIGURE       TRUE
+      LOG_BUILD           TRUE
+      LOG_INSTALL         TRUE
+      BUILD_PROJECT       TRUE
+      UPDATE_DISCONNECTED TRUE # Never update automatically from the remote repository
+    )
+    find_package(GTest REQUIRED)
+  endif()
 endif()
 
 # Benchmark dependencies

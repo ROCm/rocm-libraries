@@ -32,6 +32,10 @@
 #include <cmath>
 #include <cstdlib>
 
+#ifdef WIN32
+#include <numeric>
+#endif
+
 // Google Test
 #include <gtest/gtest.h>
 
