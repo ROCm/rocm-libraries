@@ -169,4 +169,5 @@ rocm_create_package(
   NAME rocthrust
   DESCRIPTION "Radeon Open Compute Thrust library"
   MAINTAINER "rocthrust-maintainer@amd.com"
+  HEADER_ONLY
 )
