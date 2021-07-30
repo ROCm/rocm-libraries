@@ -171,6 +171,7 @@ rocm_create_package(
   NAME rocprim
   DESCRIPTION "Radeon Open Compute Parallel Primitives Library"
   MAINTAINER "rocPRIM Maintainer <rocprim-maintainer@amd.com>"
+  HEADER_ONLY
 )
 
 
