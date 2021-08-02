@@ -32,8 +32,15 @@ endif()
 
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker search and installed rpath")
 
-# Get dependencies
-include(cmake/Dependencies.cmake)
+# rocm-cmake contains common cmake code for rocm projects to help
+# setup and install
+find_package(ROCM 0.6 REQUIRED CONFIG PATHS /opt/rocm)
+include( ROCMSetupVersion )
+include( ROCMCreatePackage )
+include( ROCMInstallTargets )
+include( ROCMPackageConfigHelpers )
+include( ROCMInstallSymlinks )
+include( ROCMCheckTargetIds OPTIONAL )
 
 # Detect compiler support for target ID
 # This section is deprecated. Please use rocm_check_target_ids for future use.
@@ -59,6 +66,9 @@ else()
     endif()
 endif()
 set(AMDGPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "List of specific machine types for library to target")
+
+# Get dependencies
+include(cmake/Dependencies.cmake)
 
 # Verify that hcc or hipcc compiler is used on ROCM platform
 if (NOT WIN32)
