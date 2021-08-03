@@ -6,7 +6,7 @@ Full documentation for rocThrust is available at [https://rocthrust.readthedocs.
 ### Addded
 - Initial HIP on Windows support. See README for instructions on how to build and install.
 ### Changed
-- Packaging split into a runtime package called rocthrust and a development package called rocthrust-devel. The development package depends on runtime. The runtime package suggests the development package for all supported OSes except CentOS 7 to aid in the transition. The suggests feature in packaging is introduced as a deprecated feature and will be removed in a future rocm release.
+- Packaging changed to a development package (called rocthrust-dev for `.deb` packages, and rocthrust-devel for `.rpm` packages). As rocThrust is a header-only library, there is no runtime package. To aid in the transition, the development package sets the "provides" field to provide the package rocthrust, so that existing packages depending on rocthrust can continue to work. This provides feature is introduced as a deprecated feature and will be removed in a future ROCm release.
 ### Known issues
 - async_copy, partition, and stable_sort_by_key unit tests are failing on HIP on Windows.
 
