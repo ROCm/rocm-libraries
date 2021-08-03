@@ -162,7 +162,7 @@ set(THRUST_OPTIONS_RELEASE ${THRUST_OPTIONS_WARNINGS})
 # Package
 set(CPACK_DEBIAN_ARCHIVE_TYPE "gnutar")
 
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "rocprim-devel (>= 2.10.1)") # 1.5.18263 is HIP version in ROCm 1.8.2
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "rocprim-dev (>= 2.10.1)") # 1.5.18263 is HIP version in ROCm 1.8.2
 set(CPACK_DEBIAN_PACKAGE_CONFLICTS "hip-thrust, thrust")
 set(CPACK_RPM_PACKAGE_CONFLICTS "hip-thrust, thrust")
 set(CPACK_RPM_PACKAGE_REQUIRES "rocprim-devel >= 2.10.1")
