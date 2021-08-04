@@ -42,10 +42,12 @@ struct Foo
 };
 
 // KNOWN_FAILURE
-/*TEST(DeviceDelete, TestDeviceDeleteDestructorInvocation)
+// GTest may throw a link error if there is not at least 1 test case per executable
+TEST(DeviceDelete, TestDeviceDeleteDestructorInvocation)
 {
+    /*
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-    
+
     thrust::device_vector<bool> destructor_flag(1, false);
 
     thrust::device_ptr<Foo> foo_ptr = thrust::device_new<Foo>();
@@ -58,5 +60,5 @@ struct Foo
 
     thrust::device_delete(foo_ptr);
 
-    ASSERT_EQ(true, destructor_flag[0]);
-}*/
+    ASSERT_EQ(true, destructor_flag[0]);*/
+}
