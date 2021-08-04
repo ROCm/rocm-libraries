@@ -42,7 +42,12 @@ endif()
 
 # Test dependencies
 if(BUILD_TEST)
-  find_package(GTest QUIET)
+  if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
+    # Google Test (https://github.com/google/googletest)
+    find_package(GTest QUIET)
+  else()
+    message(STATUS "Force installing GTest.")
+  endif()
 
   if(NOT TARGET GTest::GTest AND NOT TARGET GTest::gtest)
     message(STATUS "GTest not found or force download GTest on. Downloading and building GTest.")
