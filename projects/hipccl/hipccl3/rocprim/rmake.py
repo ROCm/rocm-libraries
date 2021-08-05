@@ -138,6 +138,10 @@ def config_cmd():
     create_dir( os.path.join(build_path, "clients") )
     os.chdir( build_path )
 
+    # packaging options
+    cmake_pack_options = f"-DCPACK_SET_DESTDIR=OFF -DCPACK_INCLUDE_TOPLEVEL_DIRECTORY=OFF"
+    cmake_options.append( cmake_pack_options )
+
     if args.static_lib:
         cmake_options.append( f"-DBUILD_SHARED_LIBS=OFF" )
 
