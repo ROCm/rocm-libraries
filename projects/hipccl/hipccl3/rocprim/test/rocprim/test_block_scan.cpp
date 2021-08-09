@@ -53,7 +53,7 @@ struct Integral;
 struct Floating;
 #define suite_name_single RocprimBlockScanSingleValueTests
 #define suite_name_array RocprimBlockScanInputArrayTests
-#define block_params BlockParamsFloating
+#define block_params BlockExchParamsFloating
 #define name_suffix Floating
 
 #include "test_block_scan.hpp"
