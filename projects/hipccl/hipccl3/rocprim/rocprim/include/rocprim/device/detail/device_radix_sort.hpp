@@ -819,30 +819,187 @@ block_load_radix_impl(const unsigned int flat_id,
 }
 
 template<
+    bool Descending,
+    bool UseRadixMask,
+    class T
+>
+struct radix_merge_compare;
+
+template<class T>
+struct radix_merge_compare<false, false, T>
+{
+    ROCPRIM_DEVICE inline
+    bool operator()(const T& a, const T& b) const
+    {
+        return b > a;
+    }
+};
+
+template<class T>
+struct radix_merge_compare<true, false, T>
+{
+    ROCPRIM_DEVICE inline
+    bool operator()(const T& a, const T& b) const
+    {
+        return a > b;
+    }
+};
+
+template<class T>
+struct radix_merge_compare<false, true, T>
+{
+    using key_codec = radix_key_codec<T, true>;
+    using bit_key_type = typename key_codec::bit_key_type;
+
+    bit_key_type radix_mask;
+
+    radix_merge_compare(const unsigned int bit, const unsigned int current_radix_bits)
+    {
+        bit_key_type radix_mask_upper  = (bit_key_type(1) << (current_radix_bits + bit)) - 1;
+        bit_key_type radix_mask_bottom = bit == 0 ? 0 : ((bit_key_type(1) << bit) - 1);
+        radix_mask = radix_mask_upper ^ radix_mask_bottom;
+    }
+
+    ROCPRIM_DEVICE inline
+    bool operator()(const T& a, const T& b) const
+    {
+        const bit_key_type encoded_key_a = key_codec::encode(a);
+        const bit_key_type masked_key_a  = encoded_key_a & radix_mask;
+
+        const bit_key_type encoded_key_b = key_codec::encode(b);
+        const bit_key_type masked_key_b  = encoded_key_b & radix_mask;
+
+        return key_codec::decode(masked_key_b) > key_codec::decode(masked_key_a);
+    }
+};
+
+template<class T>
+struct radix_merge_compare<true, true, T>
+{
+    using key_codec = radix_key_codec<T, true>;
+    using bit_key_type = typename key_codec::bit_key_type;
+
+    bit_key_type radix_mask;
+
+    radix_merge_compare(const unsigned int bit, const unsigned int current_radix_bits)
+    {
+        bit_key_type radix_mask_upper  = (bit_key_type(1) << (current_radix_bits + bit)) - 1;
+        bit_key_type radix_mask_bottom = bit == 0 ? 0 : ((bit_key_type(1) << bit) - 1);
+        radix_mask = radix_mask_upper ^ radix_mask_bottom;
+    }
+
+
+    ROCPRIM_DEVICE inline
+    bool operator()(const T& a, const T& b) const
+    {
+        const bit_key_type encoded_key_a = key_codec::encode(a);
+        const bit_key_type masked_key_a  = encoded_key_a & radix_mask;
+
+        const bit_key_type encoded_key_b = key_codec::encode(b);
+        const bit_key_type masked_key_b  = encoded_key_b & radix_mask;
+
+        return key_codec::decode(masked_key_a) > key_codec::decode(masked_key_b);
+    }
+};
+
+template<>
+struct radix_merge_compare<false, false, rocprim::half>
+{
+    ROCPRIM_DEVICE inline
+    bool operator()(const rocprim::half& a, const rocprim::half& b) const
+    {
+        return __hgt(b, a);
+    }
+};
+
+template<>
+struct radix_merge_compare<true, false, rocprim::half>
+{
+    ROCPRIM_DEVICE inline
+    bool operator()(const rocprim::half& a, const rocprim::half& b) const
+    {
+        return __hgt(a, b);
+    }
+};
+
+template<>
+struct radix_merge_compare<false, true, rocprim::half>
+{
+    using key_codec = radix_key_codec<rocprim::half, true>;
+    using bit_key_type = typename key_codec::bit_key_type;
+
+    bit_key_type radix_mask;
+
+    radix_merge_compare(const unsigned int bit, const unsigned int current_radix_bits)
+    {
+        bit_key_type radix_mask_upper  = (bit_key_type(1) << (current_radix_bits + bit)) - 1;
+        bit_key_type radix_mask_bottom = bit == 0 ? 0 : ((bit_key_type(1) << bit) - 1);
+        radix_mask = radix_mask_upper ^ radix_mask_bottom;
+    }
+
+    ROCPRIM_DEVICE inline
+    bool operator()(const rocprim::half& a, const rocprim::half& b) const
+    {
+        const bit_key_type encoded_key_a = key_codec::encode(a);
+        const bit_key_type masked_key_a  = encoded_key_a & radix_mask;
+
+        const bit_key_type encoded_key_b = key_codec::encode(b);
+        const bit_key_type masked_key_b  = encoded_key_b & radix_mask;
+
+        return __hgt(key_codec::decode(masked_key_b), key_codec::decode(masked_key_a));
+    }
+};
+
+template<>
+struct radix_merge_compare<true, true, rocprim::half>
+{
+    using key_codec = radix_key_codec<rocprim::half, true>;
+    using bit_key_type = typename key_codec::bit_key_type;
+
+    bit_key_type radix_mask;
+
+    radix_merge_compare(const unsigned int bit, const unsigned int current_radix_bits)
+    {
+        bit_key_type radix_mask_upper  = (bit_key_type(1) << (current_radix_bits + bit)) - 1;
+        bit_key_type radix_mask_bottom = bit == 0 ? 0 : ((bit_key_type(1) << bit) - 1);
+        radix_mask = radix_mask_upper ^ radix_mask_bottom;
+    }
+
+
+    ROCPRIM_DEVICE inline
+    bool operator()(const rocprim::half& a, const rocprim::half& b) const
+    {
+        const bit_key_type encoded_key_a = key_codec::encode(a);
+        const bit_key_type masked_key_a  = encoded_key_a & radix_mask;
+
+        const bit_key_type encoded_key_b = key_codec::encode(b);
+        const bit_key_type masked_key_b  = encoded_key_b & radix_mask;
+
+        return __hgt(key_codec::decode(masked_key_a), key_codec::decode(masked_key_b));
+    }
+};
+
+template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
-    bool Descending,
     class KeysInputIterator,
     class KeysOutputIterator,
     class ValuesInputIterator,
-    class ValuesOutputIterator
+    class ValuesOutputIterator,
+    class BinaryFunction
 >
 ROCPRIM_DEVICE inline
 void radix_block_merge_impl(KeysInputIterator keys_input,
                             KeysOutputIterator keys_output,
                             ValuesInputIterator values_input,
                             ValuesOutputIterator values_output,
-                            const unsigned int bit,
-                            const unsigned int current_radix_bits,
                             const size_t input_size,
-                            const unsigned int merge_items_per_block_size)
+                            const unsigned int merge_items_per_block_size,
+                            BinaryFunction compare_function)
 {
     using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
     using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
     constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
-
-    using key_codec = radix_key_codec<key_type, Descending>;
-    using bit_key_type = typename key_codec::bit_key_type;
 
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
     const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
@@ -852,40 +1009,12 @@ void radix_block_merge_impl(KeysInputIterator keys_input,
     const bool last_block = flat_block_id == (number_of_blocks - 1);
     auto valid_in_last_block = last_block ? input_size - items_per_block * (number_of_blocks - 1) : items_per_block;
 
-    const bool use_mask = sizeof(key_type) * 8 != current_radix_bits;
-    bit_key_type radix_mask_upper  = (bit_key_type(1) << (current_radix_bits + bit)) - 1;
-    bit_key_type radix_mask_bottom = bit == 0 ? 0 : ((bit_key_type(1) << bit) - 1);
-    bit_key_type radix_mask = radix_mask_upper ^ radix_mask_bottom;
-
     unsigned int start_id = (flat_block_id * items_per_block) + flat_id * ItemsPerThread;
     if (start_id >= input_size)
     {
         return;
     }
 
-    auto compare_function = [use_mask, radix_mask](const key_type& a, const key_type& b) mutable -> bool
-    {
-        if(!use_mask)
-        {
-            if(Descending)
-                return a > b;
-            else
-                return a < b;
-        }
-        else
-        {
-            const bit_key_type encoded_key_a = key_codec::encode(a);
-            const bit_key_type masked_key_a  = encoded_key_a & radix_mask;
-
-            const bit_key_type encoded_key_b = key_codec::encode(b);
-            const bit_key_type masked_key_b  = encoded_key_b & radix_mask;
-
-            if(Descending)
-                return key_codec::decode(masked_key_a) > key_codec::decode(masked_key_b);
-            else
-                return key_codec::decode(masked_key_a) < key_codec::decode(masked_key_b);
-        }
-    };
 
     key_type keys[ItemsPerThread];
     value_type values[ItemsPerThread];
