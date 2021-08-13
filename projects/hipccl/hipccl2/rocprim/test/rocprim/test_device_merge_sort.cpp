@@ -362,6 +362,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
                 expected_key[i] = expected[i].first;
                 expected_value[i] = expected[i].second;
             }
+
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected_key));
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, expected_value));
 
