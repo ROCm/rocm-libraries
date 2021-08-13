@@ -127,6 +127,10 @@ struct radix_sort_config_803
             kernel_config<
                 limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
                 ::rocprim::max(1u, 10u / item_scale)
+            >,
+            kernel_config<
+                limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
+                ::rocprim::max(1u, 10u / item_scale)
             >
         >
     >;
@@ -175,6 +179,10 @@ struct radix_sort_config_900
             kernel_config<
                 limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
                 ::rocprim::max(1u, 15u / item_scale)
+            >,
+            kernel_config<
+                limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
+                ::rocprim::max(1u, 10u / item_scale)
             >,
             kernel_config<
                 limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
@@ -228,6 +236,10 @@ struct radix_sort_config_908
             kernel_config<
                 limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
                 ::rocprim::max(1u, 15u / item_scale)
+            >,
+            kernel_config<
+                limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
+                ::rocprim::max(1u, 10u / item_scale)
             >,
             kernel_config<
                 limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
@@ -334,6 +346,10 @@ struct radix_sort_config_1030
             kernel_config<
                 limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_32>::value,
                 ::rocprim::max(1u, 15u / item_scale)
+            >,
+            kernel_config<
+                limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
+                ::rocprim::max(1u, 10u / item_scale)
             >,
             kernel_config<
                 limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
