@@ -31,11 +31,11 @@ namespace detail
     template<
         unsigned int BlockSize,
         unsigned int ItemsPerThread,
-        bool Descending,
         class KeysInputIterator,
         class KeysOutputIterator,
         class ValuesInputIterator,
-        class ValuesOutputIterator
+        class ValuesOutputIterator,
+        class BinaryFunction
     >
     ROCPRIM_KERNEL
    __launch_bounds__(BlockSize)
@@ -43,15 +43,15 @@ namespace detail
                                 KeysOutputIterator   keys_output,
                                 ValuesInputIterator  values_input,
                                 ValuesOutputIterator values_output,
-                                const unsigned int   bit,
-                                const unsigned int   current_radix_bits,
                                 const size_t         input_size,
-                                const unsigned int   merge_items_per_block_size)
+                                const unsigned int   merge_items_per_block_size,
+                                BinaryFunction       compare_function)
    {
-       radix_block_merge_impl<BlockSize, ItemsPerThread, Descending>(
+       radix_block_merge_impl<BlockSize, ItemsPerThread>(
            keys_input, keys_output,
            values_input, values_output,
-           bit, current_radix_bits, input_size, merge_items_per_block_size
+           input_size, merge_items_per_block_size,
+           compare_function
        );
    }
 
@@ -117,23 +117,47 @@ namespace detail
             if(temporary_store)
             {
                 if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-                hipLaunchKernelGGL(
-                    HIP_KERNEL_NAME(radix_block_merge_kernel<block_size, items_per_thread, Descending>),
-                    dim3(number_of_blocks), dim3(block_size), 0, stream,
-                    keys_output, keys_buffer, values_output, values_buffer,
-                    bit, current_radix_bits, size, block
-                );
+                if( current_radix_bits == sizeof(key_type) * 8 )
+                {
+                    hipLaunchKernelGGL(
+                        HIP_KERNEL_NAME(radix_block_merge_kernel<block_size, items_per_thread>),
+                        dim3(number_of_blocks), dim3(block_size), 0, stream,
+                        keys_output, keys_buffer, values_output, values_buffer,
+                        size, block, radix_merge_compare<Descending, false, key_type>()
+                    );
+                }
+                else
+                {
+                    hipLaunchKernelGGL(
+                        HIP_KERNEL_NAME(radix_block_merge_kernel<block_size, items_per_thread>),
+                        dim3(number_of_blocks), dim3(block_size), 0, stream,
+                        keys_output, keys_buffer, values_output, values_buffer,
+                        size, block, radix_merge_compare<Descending, true, key_type>(bit, current_radix_bits)
+                    );
+                }
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("radix_block_merge_kernel", size, start);
             }
             else
             {
                 if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-                hipLaunchKernelGGL(
-                    HIP_KERNEL_NAME(radix_block_merge_kernel<block_size, items_per_thread, Descending>),
-                    dim3(number_of_blocks), dim3(block_size), 0, stream,
-                    keys_buffer, keys_output, values_buffer, values_output,
-                    bit, current_radix_bits, size, block
-                );
+                if( current_radix_bits == sizeof(key_type) * 8 )
+                {
+                    hipLaunchKernelGGL(
+                        HIP_KERNEL_NAME(radix_block_merge_kernel<block_size, items_per_thread>),
+                        dim3(number_of_blocks), dim3(block_size), 0, stream,
+                        keys_buffer, keys_output, values_buffer, values_output,
+                        size, block, radix_merge_compare<Descending, false, key_type>()
+                    );
+                }
+                else
+                {
+                    hipLaunchKernelGGL(
+                        HIP_KERNEL_NAME(radix_block_merge_kernel<block_size, items_per_thread>),
+                        dim3(number_of_blocks), dim3(block_size), 0, stream,
+                        keys_buffer, keys_output, values_buffer, values_output,
+                        size, block, radix_merge_compare<Descending, true, key_type>(bit, current_radix_bits)
+                    );
+                }
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("radix_block_merge_kernel", size, start);
             }
         }
