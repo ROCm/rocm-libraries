@@ -63,13 +63,13 @@ void block_sort_kernel(KeysInputIterator keys_input,
 }
 
 template<
+    unsigned int BlockSize,
     class KeysInputIterator,
     class KeysOutputIterator,
     class ValuesInputIterator,
     class ValuesOutputIterator,
     class BinaryFunction
 >
-
 ROCPRIM_KERNEL
 __launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void block_merge_kernel(KeysInputIterator keys_input,
@@ -80,7 +80,7 @@ void block_merge_kernel(KeysInputIterator keys_input,
                         unsigned int block_size,
                         BinaryFunction compare_function)
 {
-    block_merge_kernel_impl(
+    block_merge_kernel_impl<BlockSize>(
         keys_input, keys_output, values_input, values_output,
         size, block_size, compare_function
     );
@@ -197,7 +197,7 @@ hipError_t merge_sort_impl(void * temporary_storage,
         {
             if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(block_merge_kernel),
+                HIP_KERNEL_NAME(block_merge_kernel<block_size>),
                 dim3(grid_size), dim3(block_size), 0, stream,
                 keys_output, keys_buffer, values_output, values_buffer,
                 size, block, compare_function
@@ -208,7 +208,7 @@ hipError_t merge_sort_impl(void * temporary_storage,
         {
             if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(block_merge_kernel),
+                HIP_KERNEL_NAME(block_merge_kernel<block_size>),
                 dim3(grid_size), dim3(block_size), 0, stream,
                 keys_buffer, keys_output, values_buffer, values_output,
                 size, block, compare_function

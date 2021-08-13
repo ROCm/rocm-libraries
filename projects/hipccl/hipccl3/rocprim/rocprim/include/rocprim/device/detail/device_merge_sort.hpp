@@ -41,28 +41,19 @@ namespace detail
 {
 
 template<
-    bool WithValues,
     unsigned int BlockSize,
     class KeysInputIterator,
-    class ValuesInputIterator,
     class Key,
-    class Value,
     unsigned int ItemsPerThread
 >
 ROCPRIM_DEVICE inline
-typename std::enable_if<!WithValues>::type
-block_load_impl(const unsigned int flat_id,
-                const unsigned int block_offset,
-                const unsigned int valid_in_last_block,
-                const bool last_block,
-                KeysInputIterator keys_input,
-                ValuesInputIterator values_input,
-                Key (&keys)[ItemsPerThread],
-                Value (&values)[ItemsPerThread])
+void block_load_keys_impl(const unsigned int flat_id,
+                          const unsigned int block_offset,
+                          const unsigned int valid_in_last_block,
+                          const bool last_block,
+                          KeysInputIterator keys_input,
+                          Key (&keys)[ItemsPerThread])
 {
-    (void) values_input;
-    (void) values;
-
     if(last_block)
     {
         block_load_direct_striped<BlockSize>(
@@ -86,32 +77,45 @@ block_load_impl(const unsigned int flat_id,
 template<
     bool WithValues,
     unsigned int BlockSize,
-    class KeysInputIterator,
     class ValuesInputIterator,
-    class Key,
+    class Value,
+    unsigned int ItemsPerThread
+>
+ROCPRIM_DEVICE inline
+typename std::enable_if<!WithValues>::type
+block_load_values_impl(const unsigned int flat_id,
+                       const unsigned int block_offset,
+                       const unsigned int valid_in_last_block,
+                       const bool last_block,
+                       ValuesInputIterator values_input,
+                       Value (&values)[ItemsPerThread])
+{
+    (void) flat_id;
+    (void) block_offset;
+    (void) valid_in_last_block;
+    (void) last_block;
+    (void) values_input;
+    (void) values;
+}
+
+template<
+    bool WithValues,
+    unsigned int BlockSize,
+    class ValuesInputIterator,
     class Value,
     unsigned int ItemsPerThread
 >
 ROCPRIM_DEVICE inline
 typename std::enable_if<WithValues>::type
-block_load_impl(const unsigned int flat_id,
-                const unsigned int block_offset,
-                const unsigned int valid_in_last_block,
-                const bool last_block,
-                KeysInputIterator keys_input,
-                ValuesInputIterator values_input,
-                Key (&keys)[ItemsPerThread],
-                Value (&values)[ItemsPerThread])
+block_load_values_impl(const unsigned int flat_id,
+                       const unsigned int block_offset,
+                       const unsigned int valid_in_last_block,
+                       const bool last_block,
+                       ValuesInputIterator values_input,
+                       Value (&values)[ItemsPerThread])
 {
     if(last_block)
     {
-        block_load_direct_striped<BlockSize>(
-            flat_id,
-            keys_input + block_offset,
-            keys,
-            valid_in_last_block
-        );
-
         block_load_direct_striped<BlockSize>(
             flat_id,
             values_input + block_offset,
@@ -123,17 +127,12 @@ block_load_impl(const unsigned int flat_id,
     {
         block_load_direct_striped<BlockSize>(
             flat_id,
-            keys_input + block_offset,
-            keys
-        );
-
-        block_load_direct_striped<BlockSize>(
-            flat_id,
             values_input + block_offset,
             values
         );
     }
 }
+
 
 template<
     bool WithValues,
@@ -230,19 +229,15 @@ block_store_impl(const unsigned int flat_id,
 }
 
 template<
-    bool WithValues,
     unsigned int BlockSize,
     class Key,
-    class Value,
     class BinaryFunction
 >
 ROCPRIM_DEVICE inline
-typename std::enable_if<!WithValues>::type
-block_sort_impl(Key& key,
-                Value& value,
-                const unsigned int valid_in_last_block,
-                const bool last_block,
-                BinaryFunction compare_function)
+void block_sort_impl(Key& key,
+                     const unsigned int valid_in_last_block,
+                     const bool last_block,
+                     BinaryFunction compare_function)
 {
     using block_sort_type = ::rocprim::block_sort<
         Key, BlockSize
@@ -250,8 +245,6 @@ block_sort_impl(Key& key,
 
     ROCPRIM_SHARED_MEMORY typename block_sort_type::storage_type storage;
 
-    (void) value;
-
     if(last_block)
     {
         block_sort_type()
@@ -267,50 +260,6 @@ block_sort_impl(Key& key,
         block_sort_type()
             .sort(
                 key, // keys_input
-                storage,
-                compare_function
-            );
-    }
-}
-
-template<
-    bool WithValues,
-    unsigned int BlockSize,
-    class Key,
-    class Value,
-    class BinaryFunction
->
-ROCPRIM_DEVICE inline
-typename std::enable_if<WithValues>::type
-block_sort_impl(Key& key,
-                Value& value,
-                const unsigned int valid_in_last_block,
-                const bool last_block,
-                BinaryFunction compare_function)
-{
-    using block_sort_type = ::rocprim::block_sort<
-        Key, BlockSize, Value
-    >;
-
-    ROCPRIM_SHARED_MEMORY typename block_sort_type::storage_type storage;
-
-    if(last_block)
-    {
-        block_sort_type()
-            .sort(
-                key, // keys_input
-                value, // values_input
-                storage,
-                valid_in_last_block,
-                compare_function
-            );
-    }
-    else
-    {
-        block_sort_type()
-            .sort(
-                key, // keys_input
-                value, // values_input
                 storage,
                 compare_function
             );
@@ -348,15 +297,13 @@ void block_sort_kernel_impl(KeysInputIterator keys_input,
     key_type key[1];
     value_type value[1];
 
-    block_load_impl<with_values, BlockSize>(
+    block_load_keys_impl<BlockSize>(
         flat_id,
         block_offset,
         valid_in_last_block,
         last_block,
         keys_input,
-        values_input,
-        key,
-        value
+        key
     );
 
     // Special comparison that preserves relative order of equal keys
@@ -368,14 +315,23 @@ void block_sort_kernel_impl(KeysInputIterator keys_input,
     };
 
     stable_key_type stable_key = rocprim::make_tuple(key[0], flat_id);
-    block_sort_impl<with_values, BlockSize>(
+    block_sort_impl<BlockSize>(
         stable_key,
-        value[0],
         valid_in_last_block,
         last_block,
         stable_compare_function
     );
     key[0] = rocprim::get<0>(stable_key);
+
+    // Load the values with the already sorted indices
+    block_load_values_impl<with_values, BlockSize>(
+        rocprim::get<1>(stable_key),
+        block_offset,
+        valid_in_last_block,
+        last_block,
+        values_input,
+        value
+    );
 
     block_store_impl<with_values, BlockSize>(
         flat_id,
@@ -390,6 +346,7 @@ void block_sort_kernel_impl(KeysInputIterator keys_input,
 }
 
 template<
+    unsigned int BlockSize,
     class KeysInputIterator,
     class KeysOutputIterator,
     class ValuesInputIterator,
@@ -411,8 +368,7 @@ void block_merge_kernel_impl(KeysInputIterator keys_input,
 
     const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
     const unsigned int flat_block_id = ::rocprim::detail::block_id<0>();
-    const unsigned int flat_block_size = ::rocprim::detail::block_size<0>();
-    unsigned int id = (flat_block_id * flat_block_size) + flat_id;
+    unsigned int id = (flat_block_id * BlockSize) + flat_id;
 
     if (id >= input_size)
     {
