@@ -2,6 +2,11 @@
 
 Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwarePlatform/rocPRIM/](https://codedocs.xyz/ROCmSoftwarePlatform/rocPRIM/)
 
+## [Unreleased rocPRIM-2.10.12 for ROCm 5.0.0]
+### Known issues
+- Unit tests may soft hang on MI200 when running in hipMallocManaged mode.
+- block_histogram, device_scan unit tests failing for HIP on Windows
+
 ## [Unreleased rocPRIM-2.10.11 for ROCm 4.5.0]
 ### Addded
 - Initial HIP on Windows support. See README for instructions on how to build and install.
