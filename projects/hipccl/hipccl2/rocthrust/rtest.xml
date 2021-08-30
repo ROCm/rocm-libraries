@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <testset failure-regex="[1-9]\d* tests failed">
-<var name="CTEST_FILTER" value="ctest --output-on-failure"></var>
+<var name="CTEST_FILTER" value="ctest --output-on-failure --exclude-regex"></var>
+<var name="CTEST_REGEX" value="&quot;(async_copy|partition|stable_sort_by_key_large|reduce|transform)&quot;"></var>
 <test sets="psdb">
-  <run name="all_tests">{CTEST_FILTER}</run>
+  <run name="all_tests">{CTEST_FILTER} {CTEST_REGEX}</run>
 </test>
 <test sets="osdb">
-  <run name="all_tests">{CTEST_FILTER}</run>
+  <run name="all_tests">{CTEST_FILTER} {CTEST_REGEX}</run>
 </test>
 </testset>

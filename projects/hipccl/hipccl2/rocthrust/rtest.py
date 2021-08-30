@@ -16,26 +16,45 @@ from xml.dom import minidom
 import multiprocessing
 import time
 
+SCRIPT_VERSION = 0.1
+
 args = {}
 OS_info = {}
 
 timeout = False
 test_proc = None
 stop = 0
+fail_regex = r'error|fail'
 
 test_script = [ 'cd %IDIR%', '%XML%' ]
+
+class ArgAction(argparse.Action):
+    def __init__(self, option_strings, dest, nargs=None, **kwargs):
+        if nargs != 2:
+            raise ValueError("nargs must be 2")
+        super().__init__(option_strings, dest, nargs, **kwargs)
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        old = getattr(namespace, self.dest, {})
+        if old is None:
+            new = {values[0]: values[1]}
+        else:
+            new = {**old, values[0]: values[1]}
+        setattr(namespace, self.dest, new)
 
 def parse_args():
     """Parse command-line arguments"""
     parser = argparse.ArgumentParser(description="""
     Checks build arguments
     """)
-    parser.add_argument('-t', '--test', required=True, 
+    parser.add_argument('-t', '--test', required=True, type=str, action='append',
                         help='Test set to run from rtest.xml (required, e.g. osdb)')
     parser.add_argument('-g', '--debug', required=False, default=False,  action='store_true',
                         help='Test Debug build (optional, default: false)')
     parser.add_argument('-o', '--output', type=str, required=False, default="xml", 
                         help='Test output file (optional, default: test_detail.xml)')
+    parser.add_argument('-a', '--argument', action=ArgAction, nargs=2, metavar=('NAME', 'VALUE'), default={},
+                        help='Arguments to substitute into the xml file (optional, multiple)')
     parser.add_argument(      '--install_dir', type=str, required=False, default="build", 
                         help='Installation directory where build or release folders are (optional, default: build)')
     parser.add_argument(      '--fail_test', default=False, required=False, action='store_true',
@@ -149,6 +168,27 @@ def time_stop(start, pid):
             stop = 0
         time.sleep(0)
 
+
+def find_cmd(cmd):
+    if os.name == "nt":
+        status, _ = subprocess.getstatusoutput(f"where {cmd}")
+        if status != 0:
+            raise RuntimeError(f"Cannot find the command or executable {cmd}")
+        return cmd
+    else:
+        status, _ = subprocess.getstatusoutput(f"which {cmd}")
+        if status == 0:
+            return cmd
+        search_paths = [
+            "."
+        ]
+        for path_option in search_paths:
+            cmd_opt = f"{path_option}/{cmd}"
+            if os.path.isfile(cmd_opt) and os.access(cmd_opt, os.X_OK):
+               return cmd_opt
+        raise RuntimeError(f"Cannot find the command or executable {cmd}")
+
+
 def run_cmd(cmd, test = False, time_limit = 0):
     global args
     global test_proc, timer_thread
@@ -162,11 +202,13 @@ def run_cmd(cmd, test = False, time_limit = 0):
     try:
         if not test:
             proc = subprocess.run(cmdline, check=True, stderr=subprocess.STDOUT, shell=True)
-            status = proc.returncode
+            status = proc.returncode    
         else:
             error = False
             timeout = False
-            test_proc = subprocess.Popen(shlex.split(cmdline), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True)
+            cmd_parts = shlex.split(cmdline)
+            cmdline = find_cmd(cmd_parts[0]) + " " + cmd[len(cmd_parts[0]):]
+            test_proc = subprocess.Popen(cmdline, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True)
             if time_limit > 0:
                 start = time.monotonic()
                 #p = multiprocessing.Process(target=time_stop, args=(start, test_proc.pid))
@@ -179,7 +221,7 @@ def run_cmd(cmd, test = False, time_limit = 0):
                 elif output:
                     outstring = output.strip()
                     print (outstring)
-                    error = error or re.search(r'FAILED', outstring)
+                    error = error or re.search(fail_regex, outstring, re.IGNORECASE)
             status = test_proc.poll()
             if time_limit > 0:
                 p.stop()
@@ -202,6 +244,7 @@ def run_cmd(cmd, test = False, time_limit = 0):
 def batch(script, xml):
     global OS_info
     global args
+    global fail_regex
     # 
     cwd = pathlib.os.curdir
     rtest_cwd_path = os.path.abspath( os.path.join( cwd, 'rtest.xml') )
@@ -209,9 +252,20 @@ def batch(script, xml):
         # if in a staging directory then test locally
         test_dir = cwd 
     else:
-        if args.debug: build_type = "debug"
-        else: build_type = "release"
-        test_dir = f"{args.install_dir}//{build_type}//test"
+        build_type = "debug" if args.debug else "release"
+        search_paths = [
+            f"{args.install_dir}//{build_type}//clients//staging",
+            f"{args.install_dir}//{build_type}//test",
+            f"{args.install_dir}"
+        ]
+        test_dir = ""
+        for path_option in search_paths:
+            if os.path.exists(path_option):
+                test_dir = path_option
+                break
+        if test_dir == "":
+            print(f"ERROR: Could not determine a valid test directory. Checked {', '.join(search_paths)}.")
+            return 2
     fail = False
     for i in range(len(script)):
         cmdline = script[i]
@@ -224,16 +278,35 @@ def batch(script, xml):
                 continue
         error = False
         if cmd.startswith('%XML%'):
+            fileversion = xml.getElementsByTagName('fileversion')
+            if len(fileversion) == 0:
+                print("INFO: Could not find the version of this xml configuration file. Version 0.1 assumed.")
+            elif len(fileversion) > 1:
+                print("WARNING: Multiple version tags found.")
+            else:
+                version = float(fileversion[0].firstChild.data)
+                if version > SCRIPT_VERSION:
+                    print(f"ERROR: This file requires script version >= {version}, have version {SCRIPT_VERSION}")
+                    exit(1)
+            if xml.documentElement.hasAttribute('failure-regex'):
+                fail_regex = xml.documentElement.getAttribute('failure-regex')
             # run the matching tests listed in the xml test file
             var_subs = {}
             for var in xml.getElementsByTagName('var'):
                 name = var.getAttribute('name')
-                val = var.getAttribute('value')
+                if var.hasAttribute('value'):
+                    val = var.getAttribute('value')
+                elif var.firstChild is not None:
+                    val = var.firstChild.data
+                else:
+                    val = ""
+                var_subs[name] = val
+            for name, val in args.argument.items():
                 var_subs[name] = val
             for test in xml.getElementsByTagName('test'):
                 sets = test.getAttribute('sets')
                 runset = sets.split(',')
-                if args.test in runset:
+                if len([x for x in args.test if x in runset]):
                     for run in test.getElementsByTagName('run'):
                         name = run.getAttribute('name')
                         vram_limit = run.getAttribute('vram_min')
@@ -254,13 +327,14 @@ def batch(script, xml):
                         error = run_cmd(var_cmd, True, timeout)
                         if (error == 2):
                             print( f'***\n*** Timed out when running: {name}\n***')
+                    continue
         else:
             error = run_cmd(cmd)
         fail = fail or error
 
     if (fail):
         if (cmd == "%XML%"):
-            print(f"FAILED xml test suite!")
+            print("FAILED xml test suite!")
         else:
             print(f"ERROR running: {cmd}")
         if (os.curdir != cwd):
