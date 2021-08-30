@@ -90,7 +90,7 @@ def config_cmd():
         toolchain = os.path.join( src_path, "toolchain-windows.cmake" )
         #set CPACK_PACKAGING_INSTALL_PREFIX= defined as blank as it is appended to end of path for archive creation
         cmake_platform_opts.append( f"-DWIN32=ON -DCPACK_PACKAGING_INSTALL_PREFIX=""") #" -DCPACK_PACKAGING_INSTALL_PREFIX={rocm_path}"
-        cmake_platform_opts.append( f"-DCMAKE_INSTALL_PREFIX=\"C:/hipSDK\" -DCPACK_PACKAGE_INSTALL_DIRECTORY=\"rocrand\"")        
+        cmake_platform_opts.append( f"-DCMAKE_INSTALL_PREFIX=\"C:/hipSDK\" -DCPACK_PACKAGE_INSTALL_DIRECTORY=\"rocthrust\"")        
         generator = f"-G Ninja"
         # "-G \"Visual Studio 16 2019\" -A x64"  #  -G NMake ")  #
         cmake_options.append( generator )
@@ -136,6 +136,10 @@ def config_cmd():
     create_dir( os.path.join(build_path, "clients") )
     os.chdir( build_path )
 
+    # packaging options
+    cmake_pack_options = f"-DCPACK_SET_DESTDIR=OFF -DCPACK_INCLUDE_TOPLEVEL_DIRECTORY=OFF"
+    cmake_options.append( cmake_pack_options )
+    
     if args.static_lib:
         cmake_options.append( f"-DBUILD_SHARED_LIBS=OFF" )
 
