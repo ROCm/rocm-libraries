@@ -180,11 +180,15 @@ ROCPRIM_DEVICE inline
 void lookback_scan_kernel_impl(InputIterator input,
                                OutputIterator output,
                                const size_t size,
-                               const ResultType initial_value,
+                               ResultType initial_value,
                                BinaryFunction scan_op,
                                LookbackScanState scan_state,
                                const unsigned int number_of_blocks,
-                               ordered_block_id<unsigned int> ordered_bid)
+                               ordered_block_id<unsigned int> ordered_bid,
+                               ResultType * previous_last_element = nullptr,
+                               ResultType * new_last_element = nullptr,
+                               bool override_first_value = false,
+                               bool save_last_value = false)
 {
     using result_type = ResultType;
     static_assert(
@@ -258,6 +262,16 @@ void lookback_scan_kernel_impl(InputIterator input,
 
     if(flat_block_id == 0)
     {
+        // override_first_value only true when the first chunk already processed
+        // and input iterator starts from an offset.
+        if(override_first_value)
+        {
+            if(Exclusive)
+                initial_value = scan_op(previous_last_element[0], *(input-1));
+            else if(flat_block_thread_id == 0)
+                values[0] = scan_op(previous_last_element[0], values[0]);
+        }
+
         result_type reduction;
         lookback_block_scan<Exclusive, block_scan_type>(
             values, // input/output
@@ -266,17 +280,13 @@ void lookback_scan_kernel_impl(InputIterator input,
             storage.scan,
             scan_op
         );
+
         if(flat_block_thread_id == 0)
         {
             scan_state.set_complete(flat_block_id, reduction);
         }
     }
-    // Workaround: Fiji (gfx803) crashes with "Memory access fault by GPU node" on HCC 1.3.18482 (ROCm 2.0)
-    // Instead of just `} else {` we use `} syncthreads(); if() {`, because the else-branch can be executed
-    // for some unknown reason and 0-th block reads incorrect addresses in lookback_scan_prefix_op::get_prefix.
-    ::rocprim::syncthreads();
-    if(flat_block_id > 0)
-    // original code: else
+    else
     {
         // Scan of block values
         auto prefix_op = lookback_scan_prefix_op_type(
@@ -301,6 +311,19 @@ void lookback_scan_kernel_impl(InputIterator input,
                 valid_in_last_block,
                 storage.store
             );
+
+        if(save_last_value &&
+           (::rocprim::detail::block_thread_id<0>() ==
+           (valid_in_last_block - 1) / items_per_thread))
+        {
+            for(unsigned int i = 0; i < items_per_thread; i++)
+            {
+                if(i == (valid_in_last_block - 1) % items_per_thread)
+                {
+                    new_last_element[0] = values[i];
+                }
+            }
+        }
     }
     else
     {
