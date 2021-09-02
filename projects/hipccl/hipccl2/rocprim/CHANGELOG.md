@@ -8,6 +8,7 @@ Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwar
 ### Changed
 - Added scan size limit feature
 - Revert old Fiji workaround, because they solved the issue at compiler side
+- Update README cmake minimum version number
 ### Known issues
 - Unit tests may soft hang on MI200 when running in hipMallocManaged mode.
 - block_histogram, device_scan unit tests failing for HIP on Windows

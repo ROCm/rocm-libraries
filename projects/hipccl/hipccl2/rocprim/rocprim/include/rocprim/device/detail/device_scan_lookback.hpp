@@ -267,7 +267,7 @@ void lookback_scan_kernel_impl(InputIterator input,
         if(override_first_value)
         {
             if(Exclusive)
-                initial_value = scan_op(previous_last_element[0], *(input-1));
+                initial_value = scan_op(previous_last_element[0], static_cast<result_type>(*(input-1)));
             else if(flat_block_thread_id == 0)
                 values[0] = scan_op(previous_last_element[0], values[0]);
         }
