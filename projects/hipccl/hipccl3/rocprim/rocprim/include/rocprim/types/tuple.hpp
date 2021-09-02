@@ -178,6 +178,23 @@ tuple_element_t<I, tuple<UTypes...>>&& get(tuple<UTypes...>&&) noexcept;
 namespace detail
 {
 
+    template <class T>
+    ROCPRIM_HOST_DEVICE
+    inline T&& custom_forward(typename std::remove_reference<T>::type& t) noexcept
+    {
+        return static_cast<T&&>(t);
+    }
+
+    template <class T>
+    ROCPRIM_HOST_DEVICE
+    inline T&& custom_forward(typename std::remove_reference<T>::type&& t) noexcept
+    {
+        static_assert(!std::is_lvalue_reference<T>::value,
+                      "Can not forward an rvalue as an lvalue.");
+        return static_cast<T&&>(t);
+    }
+
+
 #ifdef __cpp_lib_is_final
     template<class T>
     using is_final = std::is_final<T>;
@@ -250,7 +267,7 @@ struct tuple_value
         >::type
     >
     ROCPRIM_HOST_DEVICE inline
-    explicit tuple_value(U&& v) noexcept : value(std::forward<U>(v))
+    explicit tuple_value(U&& v) noexcept : value(::rocprim::detail::custom_forward<U>(v))
     {
     }
 
@@ -261,7 +278,7 @@ struct tuple_value
     ROCPRIM_HOST_DEVICE inline
     tuple_value& operator=(U&& v) noexcept
     {
-        value = std::forward<U>(v);
+        value = ::rocprim::detail::custom_forward<U>(v);
         return *this;
     }
 
@@ -339,7 +356,7 @@ struct tuple_value<I, T, true> : private T
         >::type
     >
     ROCPRIM_HOST_DEVICE inline
-    explicit tuple_value(U&& v) noexcept : T(std::forward<U>(v))
+    explicit tuple_value(U&& v) noexcept : T(::rocprim::detail::custom_forward<U>(v))
     {
     }
 
@@ -350,7 +367,7 @@ struct tuple_value<I, T, true> : private T
     ROCPRIM_HOST_DEVICE inline
     tuple_value& operator=(U&& v) noexcept
     {
-        T::operator=(std::forward<U>(v));
+        T::operator=(::rocprim::detail::custom_forward<U>(v));
         return *this;
     }
 
@@ -420,7 +437,7 @@ struct tuple_impl<::rocprim::index_sequence<Indices...>, Types...>
     >
     ROCPRIM_HOST_DEVICE inline
     explicit tuple_impl(UTypes&&... values)
-        : tuple_value<Indices, Types>(std::forward<UTypes>(values))...
+        : tuple_value<Indices, Types>(::rocprim::detail::custom_forward<UTypes>(values))...
     {
     }
 
@@ -435,7 +452,7 @@ struct tuple_impl<::rocprim::index_sequence<Indices...>, Types...>
     >
     ROCPRIM_HOST_DEVICE inline
     tuple_impl(::rocprim::tuple<UTypes...>&& other)
-        : tuple_value<Indices, Types>(std::forward<UTypes>(::rocprim::get<Indices>(other)))...
+        : tuple_value<Indices, Types>(::rocprim::detail::custom_forward<UTypes>(::rocprim::get<Indices>(other)))...
     {
     }
 
@@ -623,7 +640,7 @@ public:
     }
 
     /// \brief Converting constructor. Initializes each element of the tuple
-    /// with the corresponding value in \p std::forward<UTypes>(values).
+    /// with the corresponding value in \p ::rocprim::detail::custom_forward<UTypes>(values).
     ///
     /// This overload only participates in overload resolution if:
     /// * <tt>sizeof...(Types) == sizeof...(UTypes)</tt>,
@@ -645,7 +662,7 @@ public:
     >
     ROCPRIM_HOST_DEVICE inline
     explicit tuple(UTypes&&... values) noexcept
-        : base(std::forward<UTypes>(values)...)
+        : base(::rocprim::detail::custom_forward<UTypes>(values)...)
     {
     }
 
@@ -699,7 +716,7 @@ public:
     >
     ROCPRIM_HOST_DEVICE inline
     tuple(tuple<UTypes...>&& other) noexcept
-        : base(std::forward<tuple<UTypes...>>(other))
+        : base(::rocprim::detail::custom_forward<tuple<UTypes...>>(other))
     {
     }
 
@@ -717,10 +734,11 @@ public:
     ROCPRIM_HOST_DEVICE inline
     tuple& operator=(T&& v) noexcept
     {
-        base = std::forward<T>(v);
+        base = ::rocprim::detail::custom_forward<T>(v);
         return *this;
     }
 
+    ROCPRIM_HOST_DEVICE inline
     tuple& operator=(const tuple& other) noexcept
     {
         base = other.base;
@@ -737,7 +755,7 @@ public:
     /// \param other tuple to replace the contents of this tuple
     template<class... UTypes>
     tuple& operator=(const tuple<UTypes...>& other) noexcept;
-    /// \brief For all \p i, assigns \p std::forward<Ui>(get<i>(other)) to \p rocprim::get<i>(*this).
+    /// \brief For all \p i, assigns \p ::rocprim::detail::custom_forward<Ui>(get<i>(other)) to \p rocprim::get<i>(*this).
     /// \param other tuple to replace the contents of this tuple
     template<class... UTypes>
     tuple& operator=(tuple<UTypes...>&& other) noexcept;
@@ -1030,7 +1048,7 @@ template<class... Types>
 ROCPRIM_HOST_DEVICE inline
 tuple<detail::make_tuple_return_t<Types>...> make_tuple(Types&&... args) noexcept
 {
-    return tuple<detail::make_tuple_return_t<Types>...>(std::forward<Types>(args)...);
+    return tuple<detail::make_tuple_return_t<Types>...>(::rocprim::detail::custom_forward<Types>(args)...);
 }
 #else
 /// \brief Creates a tuple, returned tuple type is deduced from the types of arguments.

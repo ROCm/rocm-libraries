@@ -90,6 +90,7 @@ BEGIN_ROCPRIM_NAMESPACE
 /// Default is KeyCompareFunction().
 /// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
 /// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] size_limit - [optional] Set the maximum size which handled at the same time
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful scan; otherwise a HIP runtime error of
@@ -150,7 +151,8 @@ hipError_t inclusive_scan_by_key(void * temporary_storage,
                                  BinaryFunction scan_op = BinaryFunction(),
                                  KeyCompareFunction key_compare_op = KeyCompareFunction(),
                                  const hipStream_t stream = 0,
-                                 bool debug_synchronous = false)
+                                 bool debug_synchronous = false,
+                                 size_t size_limit = size_t(std::numeric_limits<int>::max()) + 1)
 {
     using input_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
     using result_type = typename ::rocprim::detail::match_result_type<
@@ -184,7 +186,8 @@ hipError_t inclusive_scan_by_key(void * temporary_storage,
         size,
         headflag_scan_op_wrapper_type(scan_op),
         stream,
-        debug_synchronous
+        debug_synchronous,
+        size_limit
     );
 }
 
@@ -238,6 +241,7 @@ hipError_t inclusive_scan_by_key(void * temporary_storage,
 /// Default is KeyCompareFunction().
 /// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
 /// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] size_limit - [optional] Set the maximum size which handled at the same time
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful scan; otherwise a HIP runtime error of
@@ -301,7 +305,8 @@ hipError_t exclusive_scan_by_key(void * temporary_storage,
                                  BinaryFunction scan_op = BinaryFunction(),
                                  KeyCompareFunction key_compare_op = KeyCompareFunction(),
                                  const hipStream_t stream = 0,
-                                 bool debug_synchronous = false)
+                                 bool debug_synchronous = false,
+                                 size_t size_limit = size_t(std::numeric_limits<int>::max()) + 1)
 {
     using input_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
     using result_type = typename ::rocprim::detail::match_result_type<
@@ -342,7 +347,8 @@ hipError_t exclusive_scan_by_key(void * temporary_storage,
         size,
         headflag_scan_op_wrapper_type(scan_op),
         stream,
-        debug_synchronous
+        debug_synchronous,
+        size_limit
     );
 }
 
