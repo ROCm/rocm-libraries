@@ -461,7 +461,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ExclusiveReduceScan)
                 expected[idx] = apply(binary_op, input[idx-1], expected[idx-1]);
             }
 
-            expected_reductions[i] = 0;
+            expected_reductions[i] = (T)0;
             for(size_t j = 0; j < logical_warp_size; j++)
             {
                 auto idx = i * logical_warp_size + j;
@@ -968,7 +968,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScanCustomType)
         );
 
         // Validating results
-        test_utils::assert_near(output, expected, test_utils::precision_threshold<T>::percentage);
+        test_utils::assert_near(output, expected, test_utils::precision_threshold<base_type>::percentage);
 
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_output));

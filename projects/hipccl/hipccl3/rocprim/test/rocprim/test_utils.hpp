@@ -62,7 +62,7 @@ struct precision_threshold<rocprim::half>
 template<>
 struct precision_threshold<rocprim::bfloat16>
 {
-    static constexpr float percentage = 0.6f;
+    static constexpr float percentage = 0.075f;
 };
 
 // Support half operators on host side

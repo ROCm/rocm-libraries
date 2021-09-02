@@ -119,9 +119,8 @@ typedef ::testing::Types<
 
 typedef ::testing::Types<
     warp_param_type(float),
-    warp_param_type(rocprim::half)//,
-    //TODO: Disable bfloat16 test until we get a better bfloat16 implemetation for host side
-    //warp_param_type(rocprim::bfloat16)
+    warp_param_type(rocprim::half),
+    warp_param_type(rocprim::bfloat16)
 > WarpParamsFloating;
 
 // Separate sort params (only power of two warp sizes)
@@ -198,10 +197,9 @@ typedef ::testing::Types<
 
 typedef ::testing::Types<
     block_param_type(unsigned short, rocprim::half),
-    block_param_type(unsigned int, rocprim::half)//,
-    //TODO: Disable bfloat16 test until we get a better bfloat16 implemetation for host side
-    //block_param_type(unsigned short, rocprim::bfloat16),
-    //block_param_type(unsigned int, rocprim::bfloat16)
+    block_param_type(unsigned int, rocprim::half),
+    block_param_type(unsigned short, rocprim::bfloat16),
+    block_param_type(unsigned int, rocprim::bfloat16)
 > BlockHistSortParamsFloating;
 
 static constexpr size_t n_items = 7;
