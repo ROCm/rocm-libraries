@@ -34,7 +34,7 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, ReduceSum)
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
-    
+
     // The different warp sizes
     static constexpr size_t ws32 = size_t(ROCPRIM_WARP_SIZE_32);
     static constexpr size_t ws64 = size_t(ROCPRIM_WARP_SIZE_64);
@@ -613,7 +613,7 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, ReduceCustomStruct)
             )
         );
 
-        test_utils::assert_near(output, expected, test_utils::precision_threshold<T>::percentage);
+        test_utils::assert_near(output, expected, test_utils::precision_threshold<base_type>::percentage);
 
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_output));
