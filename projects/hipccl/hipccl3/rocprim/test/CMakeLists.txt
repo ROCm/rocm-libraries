@@ -23,6 +23,23 @@
 # This variable is defined here to be accessible to other test sub-modules
 set(COMMON_TEST_HEADER_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
+function(add_relative_test test_name test_target)
+    get_target_property(EXE_PATH ${test_target} RUNTIME_OUTPUT_DIRECTORY)
+    if(EXE_PATH STREQUAL "EXE_PATH-NOTFOUND")
+        set(EXE_PATH ".")
+    endif()
+    get_filename_component(EXE_PATH "${EXE_PATH}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+    get_target_property(EXE_NAME ${test_target} RUNTIME_OUTPUT_NAME)
+    if(EXE_NAME STREQUAL "EXE_NAME-NOTFOUND")
+        get_target_property(EXE_NAME ${test_target} OUTPUT_NAME)
+        if(EXE_NAME STREQUAL "EXE_NAME-NOTFOUND")
+            set(EXE_NAME "${test_target}")
+        endif()
+    endif()
+    file(RELATIVE_PATH rel_path "${CMAKE_CURRENT_BINARY_DIR}" "${EXE_PATH}/${EXE_NAME}")
+    add_test(NAME "${test_name}" COMMAND "./${rel_path}")
+endfunction()
+
 function(add_hip_test TEST_NAME TEST_SOURCES)
   list(GET TEST_SOURCES 0 TEST_MAIN_SOURCE)
 
@@ -80,7 +97,7 @@ function(add_hip_test TEST_NAME TEST_SOURCES)
       RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test"
   )
 
-  add_test(${TEST_NAME} ${TEST_TARGET})
+  add_relative_test(${TEST_NAME} ${TEST_TARGET})
   if (WIN32 AND NOT DEFINED DLLS_COPIED)
     set(DLLS_COPIED "YES")
     set(DLLS_COPIED ${DLLS_COPIED} PARENT_SCOPE)
