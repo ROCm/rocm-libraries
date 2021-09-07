@@ -145,7 +145,7 @@ public:
     ///     ...
     /// }
     /// \endcode
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void offset(T input,
                 T& output,
                 int distance = 1)
@@ -156,7 +156,7 @@ public:
         );
     }
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void offset(const size_t& flat_id,
                 T input,
                 T& output,
@@ -166,7 +166,7 @@ public:
         offset(flat_id, input, output, distance, storage);
     }
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void offset(const size_t& flat_id,
                 T input,
                 T& output,
@@ -211,7 +211,7 @@ public:
     ///     ...
     /// }
     /// \endcode
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void rotate(T input,
                 T& output,
                 unsigned int distance = 1)
@@ -222,7 +222,7 @@ public:
         );
     }
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void rotate(const size_t& flat_id,
                 T input,
                 T& output,
@@ -232,7 +232,7 @@ public:
         rotate(flat_id, input, output, distance, storage);
     }
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void rotate(const size_t& flat_id,
                 T input,
                 T& output,
@@ -276,7 +276,7 @@ public:
     /// }
     /// \endcode
     template <unsigned int ItemsPerThread>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void up(T (&input)[ItemsPerThread],
             T (&prev)[ItemsPerThread])
     {
@@ -287,7 +287,7 @@ public:
     }
 
     template <unsigned int ItemsPerThread>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void up(const size_t& flat_id,
             T (&input)[ItemsPerThread],
             T (&prev)[ItemsPerThread])
@@ -298,7 +298,7 @@ public:
 
 
     template <unsigned int ItemsPerThread>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void up(const size_t& flat_id,
             T (&input)[ItemsPerThread],
             T (&prev)[ItemsPerThread],
@@ -332,7 +332,7 @@ public:
     /// \param [out] block_suffix - The item \p input[ItemsPerThread-1] from
     /// <em>thread</em><sub><tt>BlockSize-1</tt></sub>, provided to all threads
     template <unsigned int ItemsPerThread>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void up(T (&input)[ItemsPerThread],
             T (&prev)[ItemsPerThread],
             T &block_suffix)
@@ -344,7 +344,7 @@ public:
     }
 
     template <unsigned int ItemsPerThread>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void up(const size_t& flat_id,
             T (&input)[ItemsPerThread],
             T (&prev)[ItemsPerThread],
@@ -355,7 +355,7 @@ public:
     }
 
     template <int ItemsPerThread>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void up(const size_t& flat_id,
             T (&input)[ItemsPerThread],
             T (&prev)[ItemsPerThread],
@@ -392,7 +392,7 @@ public:
     /// }
     /// \endcode
     template <unsigned int ItemsPerThread>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void down(T (&input)[ItemsPerThread],
               T (&next)[ItemsPerThread])
     {
@@ -403,7 +403,7 @@ public:
     }
 
     template <unsigned int ItemsPerThread>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void down(const size_t& flat_id,
               T (&input)[ItemsPerThread],
               T (&next)[ItemsPerThread])
@@ -413,7 +413,7 @@ public:
     }
 
     template <unsigned int ItemsPerThread>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void down(const size_t& flat_id,
               T (&input)[ItemsPerThread],
               T (&next)[ItemsPerThread],
@@ -444,7 +444,7 @@ public:
     /// The item \p prev[0] is not updated for <em>thread</em><sub>BlockSize - 1</sub>.
     /// \param [out] block_prefix -  The item \p input[0] from <em>thread</em><sub><tt>0</tt></sub>, provided to all threads
     template <unsigned int ItemsPerThread>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void down(T (&input)[ItemsPerThread],
               T (&next)[ItemsPerThread],
               T &block_prefix)
@@ -456,7 +456,7 @@ public:
     }
 
     template <unsigned int ItemsPerThread>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void down(const size_t& flat_id,
               T (&input)[ItemsPerThread],
               T (&next)[ItemsPerThread],
@@ -467,7 +467,7 @@ public:
     }
 
     template <unsigned int ItemsPerThread>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void down(const size_t& flat_id,
               T (&input)[ItemsPerThread],
               T (&next)[ItemsPerThread],

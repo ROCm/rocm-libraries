@@ -60,7 +60,7 @@ struct with_b_index_arg<
 // Wrapping function that allows to call FlagOp of any of these signatures:
 // with b_index (a, b, b_index) or without it (a, b).
 template<class T, class FlagOp>
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 typename std::enable_if<with_b_index_arg<T, FlagOp>::value, bool>::type
 apply(FlagOp flag_op, const T& a, const T& b, unsigned int b_index)
 {
@@ -68,7 +68,7 @@ apply(FlagOp flag_op, const T& a, const T& b, unsigned int b_index)
 }
 
 template<class T, class FlagOp>
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 typename std::enable_if<!with_b_index_arg<T, FlagOp>::value, bool>::type
 apply(FlagOp flag_op, const T& a, const T& b, unsigned int)
 {
@@ -190,7 +190,7 @@ public:
     /// }
     /// \endcode
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void flag_heads(Flag (&head_flags)[ItemsPerThread],
                     const T (&input)[ItemsPerThread],
                     FlagOp flag_op,
@@ -219,7 +219,7 @@ public:
     /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void flag_heads(Flag (&head_flags)[ItemsPerThread],
                     const T (&input)[ItemsPerThread],
                     FlagOp flag_op)
@@ -278,7 +278,7 @@ public:
     /// }
     /// \endcode
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void flag_heads(Flag (&head_flags)[ItemsPerThread],
                     T tile_predecessor_item,
                     const T (&input)[ItemsPerThread],
@@ -310,7 +310,7 @@ public:
     /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void flag_heads(Flag (&head_flags)[ItemsPerThread],
                     T tile_predecessor_item,
                     const T (&input)[ItemsPerThread],
@@ -362,7 +362,7 @@ public:
     /// }
     /// \endcode
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void flag_tails(Flag (&tail_flags)[ItemsPerThread],
                     const T (&input)[ItemsPerThread],
                     FlagOp flag_op,
@@ -391,7 +391,7 @@ public:
     /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void flag_tails(Flag (&tail_flags)[ItemsPerThread],
                     const T (&input)[ItemsPerThread],
                     FlagOp flag_op)
@@ -450,7 +450,7 @@ public:
     /// }
     /// \endcode
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void flag_tails(Flag (&tail_flags)[ItemsPerThread],
                     T tile_successor_item,
                     const T (&input)[ItemsPerThread],
@@ -482,7 +482,7 @@ public:
     /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void flag_tails(Flag (&tail_flags)[ItemsPerThread],
                     T tile_successor_item,
                     const T (&input)[ItemsPerThread],
@@ -536,7 +536,7 @@ public:
     /// }
     /// \endcode
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void flag_heads_and_tails(Flag (&head_flags)[ItemsPerThread],
                               Flag (&tail_flags)[ItemsPerThread],
                               const T (&input)[ItemsPerThread],
@@ -566,7 +566,7 @@ public:
     /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void flag_heads_and_tails(Flag (&head_flags)[ItemsPerThread],
                               Flag (&tail_flags)[ItemsPerThread],
                               const T (&input)[ItemsPerThread],
@@ -629,7 +629,7 @@ public:
     /// }
     /// \endcode
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void flag_heads_and_tails(Flag (&head_flags)[ItemsPerThread],
                               Flag (&tail_flags)[ItemsPerThread],
                               T tile_successor_item,
@@ -663,7 +663,7 @@ public:
     /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void flag_heads_and_tails(Flag (&head_flags)[ItemsPerThread],
                               Flag (&tail_flags)[ItemsPerThread],
                               T tile_successor_item,
@@ -727,7 +727,7 @@ public:
     /// }
     /// \endcode
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void flag_heads_and_tails(Flag (&head_flags)[ItemsPerThread],
                               T tile_predecessor_item,
                               Flag (&tail_flags)[ItemsPerThread],
@@ -761,7 +761,7 @@ public:
     /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void flag_heads_and_tails(Flag (&head_flags)[ItemsPerThread],
                               T tile_predecessor_item,
                               Flag (&tail_flags)[ItemsPerThread],
@@ -831,7 +831,7 @@ public:
     /// }
     /// \endcode
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void flag_heads_and_tails(Flag (&head_flags)[ItemsPerThread],
                               T tile_predecessor_item,
                               Flag (&tail_flags)[ItemsPerThread],
@@ -869,7 +869,7 @@ public:
     /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
     template<unsigned int ItemsPerThread, class Flag, class FlagOp>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void flag_heads_and_tails(Flag (&head_flags)[ItemsPerThread],
                               T tile_predecessor_item,
                               Flag (&tail_flags)[ItemsPerThread],
@@ -895,7 +895,7 @@ private:
         class Flag,
         class FlagOp
     >
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void flag_impl(Flag (&head_flags)[ItemsPerThread],
                    T tile_predecessor_item,
                    Flag (&tail_flags)[ItemsPerThread],

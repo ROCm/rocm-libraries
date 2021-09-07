@@ -56,7 +56,7 @@ public:
         T exclusive_prefix;
     };
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     offset_lookback_scan_prefix_op(unsigned int block_id,
                                    LookbackScanState &state,
                                    storage_type& storage)
@@ -64,10 +64,10 @@ public:
     {
     }
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     ~offset_lookback_scan_prefix_op() = default;
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     T operator()(T reduction)
     {
         auto prefix = base_type::operator()(reduction);
@@ -79,13 +79,13 @@ public:
         return prefix;
     }
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     T get_reduction() const
     {
         return storage_.block_reduction;
     }
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     T get_exclusive_prefix() const
     {
         return storage_.exclusive_prefix;
@@ -115,7 +115,7 @@ template<
     class InequalityOp,
     class StorageType
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 auto partition_block_load_flags(InputIterator /* block_predecessor */,
                                 FlagIterator block_flags,
                                 ValueType (&/* values */)[ItemsPerThread],
@@ -165,7 +165,7 @@ template<
     class InequalityOp,
     class StorageType
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 auto partition_block_load_flags(InputIterator /* block_predecessor */,
                                 FlagIterator /* block_flags */,
                                 ValueType (&values)[ItemsPerThread],
@@ -213,13 +213,13 @@ struct guarded_inequality_op
     InequalityOp inequality_op;
     unsigned int valid_count;
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     guarded_inequality_op(InequalityOp inequality_op, unsigned int valid_count)
         : inequality_op(inequality_op), valid_count(valid_count)
     {}
 
     template<class T, class U>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     bool operator()(const T& a, const U& b, unsigned int b_index)
     {
         return (b_index < valid_count && inequality_op(a, b));
@@ -239,7 +239,7 @@ template<
     class InequalityOp,
     class StorageType
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 auto partition_block_load_flags(InputIterator block_predecessor,
                                 FlagIterator /* block_flags */,
                                 ValueType (&values)[ItemsPerThread],
@@ -335,7 +335,7 @@ template<
     class OutputIterator,
     class ScatterStorageType
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 auto partition_scatter(ValueType (&values)[ItemsPerThread],
                        bool (&is_selected)[ItemsPerThread],
                        OffsetType (&output_indices)[ItemsPerThread],
@@ -396,7 +396,7 @@ template<
     class OutputIterator,
     class ScatterStorageType
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 auto partition_scatter(ValueType (&values)[ItemsPerThread],
                        bool (&is_selected)[ItemsPerThread],
                        OffsetType (&output_indices)[ItemsPerThread],
@@ -466,7 +466,7 @@ template<
     class InequalityOp,
     class OffsetLookbackScanState
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void partition_kernel_impl(InputIterator input,
                            FlagIterator flags,
                            OutputIterator output,

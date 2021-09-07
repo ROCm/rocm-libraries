@@ -120,7 +120,7 @@ struct inequality_wrapper
     {}
 
     template<class T, class U>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     bool operator()(const T &a, const U &b)
     {
         return !equality_op(a, b);

@@ -77,7 +77,7 @@ public:
     /// \param storage  [in] Temporary Storage used for the Reduction
     /// \param reduce_op [in] Binary reduction operator
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void reduce(T input,
                 T& output,
                 storage_type& storage,
@@ -94,7 +94,7 @@ public:
     /// \param output   [out] Variable containing reduction output
     /// \param reduce_op [in] Binary reduction operator
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void reduce(T input,
                 T& output,
                 BinaryFunction reduce_op)
@@ -109,7 +109,7 @@ public:
     /// \param storage  [in] Temporary Storage used for the Reduction
     /// \param reduce_op [in] Binary reduction operator
     template<unsigned int ItemsPerThread, class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void reduce(T (&input)[ItemsPerThread],
                 T& output,
                 storage_type& storage,
@@ -138,7 +138,7 @@ public:
     /// \param output   [out] Variable containing reduction output
     /// \param reduce_op [in] Binary reduction operator
     template<unsigned int ItemsPerThread, class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void reduce(T (&input)[ItemsPerThread],
                 T& output,
                 BinaryFunction reduce_op)
@@ -154,7 +154,7 @@ public:
     /// \param storage [in] Temporary Storage used for reduction
     /// \param reduce_op [in] Binary reduction operator
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void reduce(T input,
                 T& output,
                 unsigned int valid_items,
@@ -174,7 +174,7 @@ public:
     /// \param valid_items [in] Number of valid elements (may be less than BlockSize)
     /// \param reduce_op [in] Binary reduction operator
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void reduce(T input,
                 T& output,
                 unsigned int valid_items,
@@ -187,7 +187,7 @@ public:
 private:
 
     template<class BinaryFunction, bool FunctionCommutativeOnly = commutative_only_>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto reduce_impl(const unsigned int flat_tid,
                      T input,
                      T& output,
@@ -215,7 +215,7 @@ private:
     }
 
     template<class BinaryFunction, bool FunctionCommutativeOnly = commutative_only_>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto reduce_impl(const unsigned int flat_tid,
                      T input,
                      T& output,
@@ -248,7 +248,7 @@ private:
     }
 
     template<bool UseValid, class WarpReduce, class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto warp_reduce(T input,
                      T& output,
                      const unsigned int valid_items,
@@ -261,7 +261,7 @@ private:
     }
 
     template<bool UseValid, class WarpReduce, class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto warp_reduce(T input,
                      T& output,
                      const unsigned int valid_items,
@@ -275,7 +275,7 @@ private:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void reduce_impl(const unsigned int flat_tid,
                      T input,
                      T& output,

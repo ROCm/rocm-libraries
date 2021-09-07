@@ -54,7 +54,7 @@ template<
     class T,
     unsigned int ItemsPerThread
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void block_store_direct_blocked(unsigned int flat_id,
                                 OutputIterator block_output,
                                 T (&items)[ItemsPerThread])
@@ -94,7 +94,7 @@ template<
     class T,
     unsigned int ItemsPerThread
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void block_store_direct_blocked(unsigned int flat_id,
                                 OutputIterator block_output,
                                 T (&items)[ItemsPerThread],
@@ -146,7 +146,7 @@ template<
     class U,
     unsigned int ItemsPerThread
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 auto
 block_store_direct_blocked_vectorized(unsigned int flat_id,
                                       T* block_output,
@@ -176,7 +176,7 @@ template<
     class U,
     unsigned int ItemsPerThread
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 auto
 block_store_direct_blocked_vectorized(unsigned int flat_id,
                                       T* block_output,
@@ -208,7 +208,7 @@ template<
     class T,
     unsigned int ItemsPerThread
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void block_store_direct_striped(unsigned int flat_id,
                                 OutputIterator block_output,
                                 T (&items)[ItemsPerThread])
@@ -249,7 +249,7 @@ template<
     class T,
     unsigned int ItemsPerThread
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void block_store_direct_striped(unsigned int flat_id,
                                 OutputIterator block_output,
                                 T (&items)[ItemsPerThread],
@@ -301,7 +301,7 @@ template<
     class T,
     unsigned int ItemsPerThread
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void block_store_direct_warp_striped(unsigned int flat_id,
                                      OutputIterator block_output,
                                      T (&items)[ItemsPerThread])
@@ -356,7 +356,7 @@ template<
     class T,
     unsigned int ItemsPerThread
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void block_store_direct_warp_striped(unsigned int flat_id,
                                      OutputIterator block_output,
                                      T (&items)[ItemsPerThread],

@@ -125,7 +125,7 @@ public:
     /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
     template<class BinaryFunction = ::rocprim::less<Key>, unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto sort(Key& thread_key,
               BinaryFunction compare_function = BinaryFunction())
         -> typename std::enable_if<(FunctionWarpSize <= __AMDGCN_WAVEFRONT_SIZE), void>::type
@@ -136,7 +136,7 @@ public:
     /// \brief Warp sort for any data type.
     /// Invalid Warp Size
     template<class BinaryFunction = ::rocprim::less<Key>, unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto sort(Key& ,
               BinaryFunction compare_function = BinaryFunction())
         -> typename std::enable_if<(FunctionWarpSize > __AMDGCN_WAVEFRONT_SIZE), void>::type
@@ -175,7 +175,7 @@ public:
     /// }
     /// \endcode
     template<class BinaryFunction = ::rocprim::less<Key>, unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto sort(Key& thread_key,
               storage_type& storage,
               BinaryFunction compare_function = BinaryFunction())
@@ -189,7 +189,7 @@ public:
     /// \brief Warp sort for any data type using temporary storage.
     /// Invalid Warp Size
     template<class BinaryFunction = ::rocprim::less<Key>, unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto sort(Key& ,
               storage_type& ,
               BinaryFunction compare_function = BinaryFunction())
@@ -212,7 +212,7 @@ public:
     /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
     template<class BinaryFunction = ::rocprim::less<Key>, unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto sort(Key& thread_key,
               Value& thread_value,
               BinaryFunction compare_function = BinaryFunction())
@@ -226,7 +226,7 @@ public:
     /// \brief Warp sort by key for any data type.
     /// Invalid Warp Size
     template<class BinaryFunction = ::rocprim::less<Key>, unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto sort(Key& ,
               Value& ,
               BinaryFunction compare_function = BinaryFunction())
@@ -267,7 +267,7 @@ public:
     /// }
     /// \endcode
     template<class BinaryFunction = ::rocprim::less<Key>, unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto sort(Key& thread_key,
               Value& thread_value,
               storage_type& storage,
@@ -282,7 +282,7 @@ public:
     /// \brief Warp sort by key for any data type using temporary storage.
     /// Invalid Warp Size
     template<class BinaryFunction = ::rocprim::less<Key>, unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto sort(Key& ,
               Value& ,
               storage_type& ,

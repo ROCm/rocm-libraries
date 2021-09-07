@@ -60,13 +60,13 @@ struct ordered_block_id
         return sizeof(id_type);
     }
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void reset()
     {
         *id = static_cast<id_type>(0);
     }
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     id_type get(unsigned int tid, storage_type& storage)
     {
         if(tid == 0)

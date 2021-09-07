@@ -54,7 +54,7 @@ public:
     using storage_type = typename ::rocprim::detail::empty_storage_type;
 
     template<class Counter>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void composite(T (&input)[ItemsPerThread],
                    Counter hist[Bins])
     {
@@ -72,7 +72,7 @@ public:
     }
 
     template<class Counter>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void composite(T (&input)[ItemsPerThread],
                    Counter hist[Bins],
                    storage_type& storage)

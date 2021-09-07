@@ -33,7 +33,7 @@ namespace detail
 
 // Returns logical warp id of the last thread in thread's segment
 template<bool HeadSegmented, unsigned int WarpSize, class Flag>
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 auto last_in_warp_segment(Flag flag)
     -> typename std::enable_if<(WarpSize <= __AMDGCN_WAVEFRONT_SIZE), unsigned int>::type
 {

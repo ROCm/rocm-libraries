@@ -111,7 +111,7 @@ public:
         return sizeof(prefix_underlying_type) * (::rocprim::host_warp_size() + number_of_blocks);
     }
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void initialize_prefix(const unsigned int block_id,
                            const unsigned int number_of_blocks)
     {
@@ -143,20 +143,20 @@ public:
         }
     }
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void set_partial(const unsigned int block_id, const T value)
     {
         this->set(block_id, PREFIX_PARTIAL, value);
     }
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void set_complete(const unsigned int block_id, const T value)
     {
         this->set(block_id, PREFIX_COMPLETE, value);
     }
 
     // block_id must be > 0
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void get(const unsigned int block_id, flag_type& flag, T& value)
     {
         constexpr unsigned int padding = ::rocprim::device_warp_size();
@@ -200,7 +200,7 @@ public:
     }
 
 private:
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void set(const unsigned int block_id, const flag_type flag, const T value)
     {
         constexpr unsigned int padding = ::rocprim::device_warp_size();
@@ -256,7 +256,7 @@ public:
         return size;
     }
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void initialize_prefix(const unsigned int block_id,
                            const unsigned int number_of_blocks)
     {
@@ -271,7 +271,7 @@ public:
         }
     }
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void set_partial(const unsigned int block_id, const T value)
     {
         constexpr unsigned int padding = ::rocprim::device_warp_size();
@@ -281,7 +281,7 @@ public:
         store_volatile<flag_type>(&prefixes_flags[padding + block_id], PREFIX_PARTIAL);
     }
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void set_complete(const unsigned int block_id, const T value)
     {
         constexpr unsigned int padding = ::rocprim::device_warp_size();
@@ -292,7 +292,7 @@ public:
     }
 
     // block_id must be > 0
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void get(const unsigned int block_id, flag_type& flag, T& value)
     {
         constexpr unsigned int padding = ::rocprim::device_warp_size();
@@ -345,7 +345,7 @@ class lookback_scan_prefix_op
     );
 
 public:
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     lookback_scan_prefix_op(unsigned int block_id,
                             BinaryFunction scan_op,
                             LookbackScanState &scan_state)
@@ -355,10 +355,10 @@ public:
     {
     }
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     ~lookback_scan_prefix_op() = default;
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void reduce_partial_prefixes(unsigned int block_id,
                                  flag_type& flag,
                                  T& partial_prefix)
@@ -386,7 +386,7 @@ public:
             );
     }
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     T get_prefix()
     {
         flag_type flag;
@@ -408,7 +408,7 @@ public:
         return prefix;
     }
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     T operator()(T reduction)
     {
         // Set partial prefix for next block

@@ -114,7 +114,7 @@ template <
     typename OutputIteratorT,
     typename T
 >
-ROCPRIM_DEVICE inline void thread_store(
+ROCPRIM_DEVICE ROCPRIM_INLINE void thread_store(
     OutputIteratorT itr,
     T               val)
 {
@@ -130,7 +130,7 @@ template <
     cache_store_modifier MODIFIER = store_default,
     typename T
 >
-ROCPRIM_DEVICE inline void thread_store(
+ROCPRIM_DEVICE ROCPRIM_INLINE void thread_store(
     T *ptr,
     T val)
 {

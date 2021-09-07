@@ -178,7 +178,7 @@ public:
     /// <tt>{33, -34, -34, -36, ..., -64}</tt> etc.
     /// \endparblock
     template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto inclusive_scan(T input,
                         T& output,
                         storage_type& storage,
@@ -191,7 +191,7 @@ public:
     /// \brief Performs inclusive scan across threads in a logical warp.
     /// Invalid Warp Size
     template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto inclusive_scan(T ,
                         T& ,
                         storage_type& ,
@@ -253,7 +253,7 @@ public:
     /// The \p reduction will be equal \p 64.
     /// \endparblock
     template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto inclusive_scan(T input,
                         T& output,
                         T& reduction,
@@ -267,7 +267,7 @@ public:
     /// \brief Performs inclusive scan and reduction across threads in a logical warp.
     /// Invalid Warp Size
     template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto inclusive_scan(T ,
                         T& ,
                         T& ,
@@ -333,7 +333,7 @@ public:
     /// <tt>{100, 33, -34, -34, -36, ..., -62}</tt> etc.
     /// \endparblock
     template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto exclusive_scan(T input,
                         T& output,
                         T init,
@@ -347,7 +347,7 @@ public:
     /// \brief Performs exclusive scan across threads in a logical warp.
     /// Invalid Warp Size
     template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto exclusive_scan(T ,
                         T& ,
                         T ,
@@ -414,7 +414,7 @@ public:
     /// <tt>{10, 11, 12, 13, ..., 73}</tt>. The \p reduction will be 64.
     /// \endparblock
     template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto exclusive_scan(T input,
                         T& output,
                         T init,
@@ -429,7 +429,7 @@ public:
     /// \brief Performs exclusive scan and reduction across threads in a logical warp.
     /// Invalid Warp Size
     template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto exclusive_scan(T ,
                         T& ,
                         T ,
@@ -502,7 +502,7 @@ public:
     /// <tt>{100, 33, -34, -34, -36, ..., -62}</tt> etc.
     /// \endparblock
     template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto scan(T input,
               T& inclusive_output,
               T& exclusive_output,
@@ -517,7 +517,7 @@ public:
     /// \brief Performs inclusive and exclusive scan operations across threads
     /// Invalid Warp Size
     template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto scan(T ,
               T& ,
               T& ,
@@ -590,7 +590,7 @@ public:
     /// be <tt>{10, 11, 12, 13, ..., 73}</tt>. The \p reduction will be 64.
     /// \endparblock
     template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto scan(T input,
               T& inclusive_output,
               T& exclusive_output,
@@ -609,7 +609,7 @@ public:
     /// \brief Performs inclusive and exclusive scan operations across threads
     /// Invalid Warp Size
     template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto scan(T ,
               T& ,
               T& ,
@@ -634,7 +634,7 @@ public:
     /// Synchronization barrier should be placed before \p storage is reused
     /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     template<unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto broadcast(T input,
                    const unsigned int src_lane,
                    storage_type& storage)
@@ -646,7 +646,7 @@ public:
     /// \brief Broadcasts value from one thread to all threads in logical warp.
     /// Invalid Warp Size
     template<unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto broadcast(T ,
                    const unsigned int ,
                    storage_type& )
@@ -660,7 +660,7 @@ public:
 protected:
 
     template<unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto to_exclusive(T inclusive_input, T& exclusive_output, storage_type& storage)
         -> typename std::enable_if<(FunctionWarpSize <= __AMDGCN_WAVEFRONT_SIZE), void>::type
     {
@@ -668,7 +668,7 @@ protected:
     }
 
     template<unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto to_exclusive(T , T& , storage_type&)
         -> typename std::enable_if<(FunctionWarpSize > __AMDGCN_WAVEFRONT_SIZE), void>::type
     {

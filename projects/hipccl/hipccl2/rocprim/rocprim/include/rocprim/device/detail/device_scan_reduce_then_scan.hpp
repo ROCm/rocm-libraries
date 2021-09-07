@@ -51,7 +51,7 @@ template<
     unsigned int ItemsPerThread,
     class BinaryFunction
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 auto single_scan_block_scan(T (&input)[ItemsPerThread],
                             T (&output)[ItemsPerThread],
                             T initial_value,
@@ -76,7 +76,7 @@ template<
     unsigned int ItemsPerThread,
     class BinaryFunction
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 auto single_scan_block_scan(T (&input)[ItemsPerThread],
                             T (&output)[ItemsPerThread],
                             T initial_value,
@@ -102,7 +102,7 @@ template<
     class BinaryFunction,
     class ResultType
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void single_scan_kernel_impl(InputIterator input,
                              const size_t input_size,
                              ResultType initial_value,
@@ -173,7 +173,7 @@ template<
     class BinaryFunction,
     class ResultType
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void block_reduce_kernel_impl(InputIterator input,
                               BinaryFunction scan_op,
                               ResultType * block_prefixes)
@@ -238,7 +238,7 @@ template<
     class ResultType,
     class BinaryFunction
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 auto final_scan_block_scan(const unsigned int flat_block_id,
                            T (&input)[ItemsPerThread],
                            T (&output)[ItemsPerThread],
@@ -273,7 +273,7 @@ template<
     class ResultType,
     class BinaryFunction
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 auto final_scan_block_scan(const unsigned int flat_block_id,
                            T (&input)[ItemsPerThread],
                            T (&output)[ItemsPerThread],
@@ -320,7 +320,7 @@ template<
     class BinaryFunction,
     class ResultType
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void final_scan_kernel_impl(InputIterator input,
                             const size_t input_size,
                             OutputIterator output,

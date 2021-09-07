@@ -49,7 +49,7 @@ template <
     typename    T,
     typename    ReductionOp,
     bool        NoPrefix = false>
-ROCPRIM_DEVICE inline T thread_reduce(
+ROCPRIM_DEVICE ROCPRIM_INLINE T thread_reduce(
     T*           input,
     ReductionOp reduction_op,
     T           prefix = T(0))
@@ -79,7 +79,7 @@ template <
     int         LENGTH,
     typename    T,
     typename    ReductionOp>
-ROCPRIM_DEVICE inline T thread_reduce(
+ROCPRIM_DEVICE ROCPRIM_INLINE T thread_reduce(
     T           (&input)[LENGTH],
     ReductionOp reduction_op,
     T           prefix)
@@ -98,7 +98,7 @@ template <
     int         LENGTH,
     typename    T,
     typename    ReductionOp>
-ROCPRIM_DEVICE inline T thread_reduce(
+ROCPRIM_DEVICE ROCPRIM_INLINE T thread_reduce(
     T           (&input)[LENGTH],
     ReductionOp reduction_op)
 {

@@ -45,20 +45,20 @@ struct range_t
     unsigned int begin2;
     unsigned int end2;
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     unsigned int count1()
     {
         return end1 - begin1;
     }
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     unsigned int count2()
     {
         return end2 - begin2;
     }
 };
 
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 range_t compute_range(const unsigned int id,
                       const unsigned int size1,
                       const unsigned int size2,
@@ -77,7 +77,7 @@ template<
     class KeysInputIterator2,
     class BinaryFunction
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 unsigned int merge_path(KeysInputIterator1 keys_input1,
                         KeysInputIterator2 keys_input2,
                         const size_t input1_size,
@@ -115,7 +115,7 @@ template<
     class KeysInputIterator2,
     class BinaryFunction
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void partition_kernel_impl(IndexIterator indices,
                            KeysInputIterator1 keys_input1,
                            KeysInputIterator2 keys_input2,
@@ -153,7 +153,7 @@ template<
     class KeysInputIterator2,
     class KeyType
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void load(unsigned int flat_id,
           KeysInputIterator1 keys_input1,
           KeysInputIterator2 keys_input2,
@@ -183,7 +183,7 @@ template<
     unsigned int ItemsPerThread,
     class BinaryFunction
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void serial_merge(KeyType * keys_shared,
                   KeyType (&inputs)[ItemsPerThread],
                   unsigned int (&index)[ItemsPerThread],
@@ -226,7 +226,7 @@ template<
     unsigned int ItemsPerThread,
     class BinaryFunction
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void merge_keys(unsigned int flat_id,
                 KeysInputIterator1 keys_input1,
                 KeysInputIterator2 keys_input2,
@@ -280,7 +280,7 @@ template<
     class ValuesOutputIterator,
     unsigned int ItemsPerThread
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 typename std::enable_if<WithValues>::type
 merge_values(unsigned int flat_id,
              ValuesInputIterator1 values_input1,
@@ -336,7 +336,7 @@ template<
     class ValuesOutputIterator,
     unsigned int ItemsPerThread
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 typename std::enable_if<!WithValues>::type
 merge_values(unsigned int flat_id,
              ValuesInputIterator1 values_input1,
@@ -367,7 +367,7 @@ template<
     class ValuesOutputIterator,
     class BinaryFunction
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void merge_kernel_impl(IndexIterator indices,
                        KeysInputIterator1 keys_input1,
                        KeysInputIterator2 keys_input2,

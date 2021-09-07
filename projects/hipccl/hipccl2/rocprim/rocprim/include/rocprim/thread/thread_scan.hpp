@@ -60,7 +60,7 @@ BEGIN_ROCPRIM_NAMESPACE
      int         LENGTH,
      typename    T,
      typename    ScanOp>
- ROCPRIM_DEVICE inline
+ ROCPRIM_DEVICE ROCPRIM_INLINE
  T thread_scan_exclusive(
      T                   inclusive,
      T                   exclusive,
@@ -96,7 +96,7 @@ BEGIN_ROCPRIM_NAMESPACE
      int         LENGTH,
      typename    T,
      typename    ScanOp>
- ROCPRIM_DEVICE inline
+ ROCPRIM_DEVICE ROCPRIM_INLINE
  T thread_scan_exclusive(
      T           *input,                 ///< [in] Input array
      T           *output,                ///< [out] Output array (may be aliased to \p input)
@@ -129,7 +129,7 @@ BEGIN_ROCPRIM_NAMESPACE
      int         LENGTH,
      typename    T,
      typename    ScanOp>
- ROCPRIM_DEVICE inline
+ ROCPRIM_DEVICE ROCPRIM_INLINE
  T thread_scan_exclusive(
      T           (&input)[LENGTH],       ///< [in] Input array
      T           (&output)[LENGTH],      ///< [out] Output array (may be aliased to \p input)
@@ -153,7 +153,7 @@ BEGIN_ROCPRIM_NAMESPACE
      int         LENGTH,
      typename    T,
      typename    ScanOp>
- ROCPRIM_DEVICE inline
+ ROCPRIM_DEVICE ROCPRIM_INLINE
  T thread_scan_inclusive(
      T                   inclusive,
      T                   *input,                 ///< [in] Input array
@@ -184,7 +184,7 @@ BEGIN_ROCPRIM_NAMESPACE
      int         LENGTH,
      typename    T,
      typename    ScanOp>
- ROCPRIM_DEVICE inline
+ ROCPRIM_DEVICE ROCPRIM_INLINE
  T thread_scan_inclusive(
      T           *input,
      T           *output,
@@ -210,7 +210,7 @@ BEGIN_ROCPRIM_NAMESPACE
      int         LENGTH,
      typename    T,
      typename    ScanOp>
- ROCPRIM_DEVICE inline
+ ROCPRIM_DEVICE ROCPRIM_INLINE
  T thread_scan_inclusive(
      T           (&input)[LENGTH],       ///< [in] Input array
      T           (&output)[LENGTH],      ///< [out] Output array (may be aliased to \p input)
@@ -234,7 +234,7 @@ BEGIN_ROCPRIM_NAMESPACE
      int         LENGTH,
      typename    T,
      typename    ScanOp>
- ROCPRIM_DEVICE inline
+ ROCPRIM_DEVICE ROCPRIM_INLINE
  T thread_scan_inclusive(
      T           *input,                 ///< [in] Input array
      T           *output,                ///< [out] Output array (may be aliased to \p input)
@@ -268,7 +268,7 @@ BEGIN_ROCPRIM_NAMESPACE
      int         LENGTH,
      typename    T,
      typename    ScanOp>
- ROCPRIM_DEVICE inline
+ ROCPRIM_DEVICE ROCPRIM_INLINE
  T thread_scan_inclusive(
      T           (&input)[LENGTH],
      T           (&output)[LENGTH],

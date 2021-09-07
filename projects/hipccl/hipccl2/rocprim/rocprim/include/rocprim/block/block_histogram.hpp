@@ -156,7 +156,7 @@ public:
     ///
     /// \param [out] hist - histogram bin count.
     template<class Counter>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void init_histogram(Counter hist[Bins])
     {
         const auto flat_tid = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
@@ -220,7 +220,7 @@ public:
     /// \endcode
     /// \endparblock
     template<class Counter>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void composite(T (&input)[ItemsPerThread],
                    Counter hist[Bins],
                    storage_type& storage)
@@ -240,7 +240,7 @@ public:
     /// \param [in] input - reference to an array containing thread input values.
     /// \param [out] hist - histogram bin count.
     template<class Counter>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void composite(T (&input)[ItemsPerThread],
                    Counter hist[Bins])
     {
@@ -288,7 +288,7 @@ public:
     /// \endcode
     /// \endparblock
     template<class Counter>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void histogram(T (&input)[ItemsPerThread],
                    Counter hist[Bins],
                    storage_type& storage)
@@ -310,7 +310,7 @@ public:
     /// \param [in] input - reference to an array containing thread input values.
     /// \param [out] hist - histogram bin count.
     template<class Counter>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void histogram(T (&input)[ItemsPerThread],
                    Counter hist[Bins])
     {

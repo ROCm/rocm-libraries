@@ -46,7 +46,7 @@ template<
     class Key,
     unsigned int ItemsPerThread
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void block_load_keys_impl(const unsigned int flat_id,
                           const unsigned int block_offset,
                           const unsigned int valid_in_last_block,
@@ -81,7 +81,7 @@ template<
     class Value,
     unsigned int ItemsPerThread
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 typename std::enable_if<!WithValues>::type
 block_load_values_impl(const unsigned int flat_id,
                        const unsigned int block_offset,
@@ -105,7 +105,7 @@ template<
     class Value,
     unsigned int ItemsPerThread
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 typename std::enable_if<WithValues>::type
 block_load_values_impl(const unsigned int flat_id,
                        const unsigned int block_offset,
@@ -143,7 +143,7 @@ template<
     class Value,
     unsigned int ItemsPerThread
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 typename std::enable_if<!WithValues>::type
 block_store_impl(const unsigned int flat_id,
                  const unsigned int block_offset,
@@ -185,7 +185,7 @@ template<
     class Value,
     unsigned int ItemsPerThread
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 typename std::enable_if<WithValues>::type
 block_store_impl(const unsigned int flat_id,
                  const unsigned int block_offset,
@@ -233,7 +233,7 @@ template<
     class Key,
     class BinaryFunction
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void block_sort_impl(Key& key,
                      const unsigned int valid_in_last_block,
                      const bool last_block,
@@ -274,7 +274,7 @@ template<
     class ValuesOutputIterator,
     class BinaryFunction
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void block_sort_kernel_impl(KeysInputIterator keys_input,
                             KeysOutputIterator keys_output,
                             ValuesInputIterator values_input,
@@ -353,7 +353,7 @@ template<
     class ValuesOutputIterator,
     class BinaryFunction
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void block_merge_kernel_impl(KeysInputIterator keys_input,
                              KeysOutputIterator keys_output,
                              ValuesInputIterator values_input,

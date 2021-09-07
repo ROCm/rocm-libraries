@@ -46,7 +46,7 @@ template<
     class T,
     class BinaryFunction
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 auto reduce_with_initial(T output,
                          T initial_value,
                          BinaryFunction reduce_op)
@@ -60,7 +60,7 @@ template<
     class T,
     class BinaryFunction
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 auto reduce_with_initial(T output,
                          T initial_value,
                          BinaryFunction reduce_op)
@@ -80,7 +80,7 @@ template<
     class InitValueType,
     class BinaryFunction
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void block_reduce_kernel_impl(InputIterator input,
                               const size_t input_size,
                               OutputIterator output,

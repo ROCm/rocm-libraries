@@ -140,7 +140,7 @@ public:
     /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
     template<class BinaryFunction = ::rocprim::less<Key>>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key& thread_key,
               BinaryFunction compare_function = BinaryFunction())
     {
@@ -189,7 +189,7 @@ public:
     /// \endcode
     /// \endparblock
     template<class BinaryFunction = ::rocprim::less<Key>>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key& thread_key,
               storage_type& storage,
               BinaryFunction compare_function = BinaryFunction())
@@ -210,7 +210,7 @@ public:
     /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
     template<class BinaryFunction = ::rocprim::less<Key>>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key& thread_key,
               Value& thread_value,
               BinaryFunction compare_function = BinaryFunction())
@@ -261,7 +261,7 @@ public:
     /// \endcode
     /// \endparblock
     template<class BinaryFunction = ::rocprim::less<Key>>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key& thread_key,
               Value& thread_value,
               storage_type& storage,
@@ -285,7 +285,7 @@ public:
     /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
     template<class BinaryFunction = ::rocprim::less<Key>>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key& thread_key,
               storage_type& storage,
               const unsigned int size,
@@ -310,7 +310,7 @@ public:
     /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
     template<class BinaryFunction = ::rocprim::less<Key>>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key& thread_key,
               Value& thread_value,
               storage_type& storage,

@@ -44,13 +44,13 @@ namespace detail
 template<class Value>
 struct carry_out
 {
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     carry_out() = default;
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     carry_out(const carry_out& rhs) = default;
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     carry_out& operator=(const carry_out& rhs)
     {
         value = rhs.value;
@@ -67,13 +67,13 @@ struct carry_out
 template<class Value>
 struct scan_by_key_pair
 {
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     scan_by_key_pair() = default;
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     scan_by_key_pair(const scan_by_key_pair& rhs) = default;
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     scan_by_key_pair& operator=(const scan_by_key_pair& rhs)
     {
         key = rhs.key;
@@ -94,12 +94,12 @@ struct scan_by_key_op
 {
     BinaryFunction reduce_op;
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     scan_by_key_op(BinaryFunction reduce_op)
         : reduce_op(reduce_op)
     {}
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     Pair operator()(const Pair& a, const Pair& b)
     {
         Pair c;
@@ -118,12 +118,12 @@ struct key_flag_op
 {
     KeyCompareFunction key_compare_op;
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     key_flag_op(KeyCompareFunction key_compare_op)
         : key_compare_op(key_compare_op)
     {}
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     bool operator()(const Key& a, const Key& b)
     {
         return !key_compare_op(a, b);
@@ -138,12 +138,12 @@ struct guarded_key_flag_op
     KeyCompareFunction key_compare_op;
     unsigned int valid_count;
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     guarded_key_flag_op(KeyCompareFunction key_compare_op, unsigned int valid_count)
         : key_compare_op(key_compare_op), valid_count(valid_count)
     {}
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     bool operator()(const Key& a, const Key& b, unsigned int b_index)
     {
         return (b_index < valid_count && !key_compare_op(a, b)) || b_index == valid_count;
@@ -156,7 +156,7 @@ template<
     class KeysInputIterator,
     class KeyCompareFunction
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void fill_unique_counts(KeysInputIterator keys_input,
                         unsigned int size,
                         unsigned int * unique_counts,
@@ -278,7 +278,7 @@ template<
     unsigned int ItemsPerThread,
     class UniqueCountOutputIterator
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void scan_unique_counts(unsigned int * unique_counts,
                         UniqueCountOutputIterator unique_count_output,
                         unsigned int batches)
@@ -327,7 +327,7 @@ template<
     class KeyCompareFunction,
     class BinaryFunction
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void reduce_by_key(KeysInputIterator keys_input,
                    ValuesInputIterator values_input,
                    unsigned int size,
@@ -561,7 +561,7 @@ template<
     class AggregatesOutputIterator,
     class BinaryFunction
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void scan_and_scatter_carry_outs(const carry_out<Result> * carry_outs,
                                  const Result * leading_aggregates,
                                  AggregatesOutputIterator aggregates_output,
