@@ -46,9 +46,9 @@ function(add_hipcub_test TEST_NAME TEST_SOURCES)
     PROPERTIES
       RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test/hipcub"
   )
-  add_test(
-    NAME ${TEST_NAME}
-    COMMAND ${TEST_TARGET}
+  add_relative_test(
+    ${TEST_NAME}
+    ${TEST_TARGET}
   )
   if (WIN32 AND NOT DEFINED DLLS_COPIED)
     set(DLLS_COPIED "YES")
