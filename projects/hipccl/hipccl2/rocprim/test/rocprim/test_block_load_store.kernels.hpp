@@ -146,6 +146,50 @@ typedef ::testing::Types<
 
 > ClassParamsSecondPart;
 
+
+typedef ::testing::Types<
+    // block_load_striped
+    class_params<int, rocprim::block_load_method::block_load_striped,
+                 rocprim::block_store_method::block_store_striped, 64U, 1>,
+    class_params<rocprim::half, rocprim::block_load_method::block_load_striped,
+                 rocprim::block_store_method::block_store_striped, 64U, 7>,
+    class_params<rocprim::bfloat16, rocprim::block_load_method::block_load_striped,
+                 rocprim::block_store_method::block_store_striped, 64U, 7>,
+    class_params<int, rocprim::block_load_method::block_load_striped,
+                 rocprim::block_store_method::block_store_striped, 256U, 1>,
+    class_params<char, rocprim::block_load_method::block_load_striped,
+                 rocprim::block_store_method::block_store_striped, 256U, 4>,
+    class_params<int, rocprim::block_load_method::block_load_striped,
+                 rocprim::block_store_method::block_store_striped, 512U, 1>,
+    class_params<int, rocprim::block_load_method::block_load_striped,
+                 rocprim::block_store_method::block_store_striped, 512U, 3>,
+    
+    class_params<double, rocprim::block_load_method::block_load_striped,
+                 rocprim::block_store_method::block_store_striped, 64U, 1>,
+    class_params<long long, rocprim::block_load_method::block_load_striped,
+                 rocprim::block_store_method::block_store_striped, 64U, 6>,
+    class_params<double, rocprim::block_load_method::block_load_striped,
+                 rocprim::block_store_method::block_store_striped, 256U, 1>,
+    class_params<rocprim::half, rocprim::block_load_method::block_load_striped,
+                 rocprim::block_store_method::block_store_striped, 256U, 3>,
+    class_params<rocprim::bfloat16, rocprim::block_load_method::block_load_striped,
+                 rocprim::block_store_method::block_store_striped, 256U, 3>,
+    class_params<double, rocprim::block_load_method::block_load_striped,
+                 rocprim::block_store_method::block_store_striped, 512U, 1>,
+    class_params<double, rocprim::block_load_method::block_load_striped,
+                 rocprim::block_store_method::block_store_striped, 512U, 2>,
+
+    class_params<test_utils::custom_test_type<int>, rocprim::block_load_method::block_load_striped,
+                 rocprim::block_store_method::block_store_striped, 64U, 1>,
+    class_params<test_utils::custom_test_type<int>, rocprim::block_load_method::block_load_striped,
+                 rocprim::block_store_method::block_store_striped, 64U, 5>,
+    class_params<test_utils::custom_test_type<double>, rocprim::block_load_method::block_load_striped,
+                 rocprim::block_store_method::block_store_striped, 256U, 1>,
+    class_params<test_utils::custom_test_type<double>, rocprim::block_load_method::block_load_striped,
+                 rocprim::block_store_method::block_store_striped, 256U, 4>
+    
+    > ClassParamsThirdPart;
+
 typedef ::testing::Types<
     vector_params<int, int, 3, false>,
     vector_params<int, rocprim::detail::int4, 4, true>,
