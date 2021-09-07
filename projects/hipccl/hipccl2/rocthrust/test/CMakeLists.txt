@@ -26,6 +26,23 @@ configure_file(
     ${CMAKE_CURRENT_BINARY_DIR}/test_seed.hpp
 )
 
+function(add_relative_test test_name test_target)
+    get_target_property(EXE_PATH ${test_target} RUNTIME_OUTPUT_DIRECTORY)
+    if(EXE_PATH STREQUAL "EXE_PATH-NOTFOUND")
+        set(EXE_PATH ".")
+    endif()
+    get_filename_component(EXE_PATH "${EXE_PATH}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+    get_target_property(EXE_NAME ${test_target} RUNTIME_OUTPUT_NAME)
+    if(EXE_NAME STREQUAL "EXE_NAME-NOTFOUND")
+        get_target_property(EXE_NAME ${test_target} OUTPUT_NAME)
+        if(EXE_NAME STREQUAL "EXE_NAME-NOTFOUND")
+            set(EXE_NAME "${test_target}")
+        endif()
+    endif()
+    file(RELATIVE_PATH rel_path "${CMAKE_CURRENT_BINARY_DIR}" "${EXE_PATH}/${EXE_NAME}")
+    add_test(NAME "${test_name}" COMMAND "./${rel_path}")
+endfunction()
+
 function(add_rocthrust_test TEST)
     set(TEST_SOURCE "test_${TEST}.cpp")
     set(TEST_TARGET "${TEST}.hip")
@@ -63,7 +80,7 @@ function(add_rocthrust_test TEST)
         )
     endforeach()
     else()
-        add_test(${TEST_TARGET} ${TEST_TARGET})
+        add_relative_test(${TEST_TARGET} ${TEST_TARGET})
         set_tests_properties(${TEST_TARGET}
             PROPERTIES
                 LABELS "hip"
